@@ -25,7 +25,19 @@ if TYPE_CHECKING:
     from ..mcp._workspace_intents import WorkspaceIntentRecord
 
 _REPORT_PATH_PARTS = (".cache", "codeclone", "report.json")
-_MAX_ALLOWED_FILES_SHOWN = 5
+_MAX_ALLOWED_FILES_SHOWN = 2
+_MAX_TOP_WORKFLOWS_SHOWN = 3
+_PLAIN_LABEL_WIDTH = 25
+
+
+@dataclass(frozen=True, slots=True)
+class _WorkflowFootprintSnapshot:
+    workflow_kind: str
+    workflow_id: str
+    call_count: int
+    total_tokens: int
+    max_tokens: int
+    agent_label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +81,7 @@ class _SessionSnapshot:
     mcp_token_footprint: int | None = None
     mcp_token_encoding: str | None = None
     mcp_token_event_count: int = 0
+    top_workflows: tuple[_WorkflowFootprintSnapshot, ...] = ()
 
 
 def render_session_stats(
@@ -183,7 +196,9 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
         expired_count=expired_count,
     )
 
-    mcp_tokens, mcp_enc, mcp_count = _read_audit_token_footprint(root_path)
+    mcp_tokens, mcp_enc, mcp_count, top_workflows = _read_audit_token_footprint(
+        root_path
+    )
     audit_enabled, audit_storage = _read_audit_config(root_path)
     from ...config.intent_registry import intent_registry_summary
 
@@ -209,17 +224,17 @@ def _collect_session_snapshot(root_path: Path) -> _SessionSnapshot:
         mcp_token_footprint=mcp_tokens,
         mcp_token_encoding=mcp_enc,
         mcp_token_event_count=mcp_count,
+        top_workflows=top_workflows,
     )
 
 
 def _render_quiet(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
-    live_agents = [a for a in snapshot.agents if a.alive]
-    total_intents = sum(len(a.intents) for a in snapshot.agents)
     line = ui.SESSION_STATS_QUIET_TEMPLATE.format(
         prefix=ui.SESSION_STATS_QUIET_PREFIX,
         workspace_health=snapshot.workspace_health,
-        agents=len(live_agents),
-        intents=total_intents,
+        live_agents=_live_agent_count(snapshot),
+        active_intents=_active_intent_count(snapshot),
+        visible_intents=_visible_intent_count(snapshot),
         stale=snapshot.stale_count,
         latest_run=snapshot.latest_run_id or ui.SESSION_STATS_LATEST_RUN_NONE,
     )
@@ -236,14 +251,16 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
         return _render_verbose_rich(console, snapshot)
     console.print(f"[bold]╍╍╍ {ui.SESSION_STATS_TITLE} ╍╍╍[/bold]")
     console.print()
-    console.print(f"  {ui.SESSION_STATS_WORKSPACE:<17}{snapshot.root}")
     console.print(
-        f"  {ui.SESSION_STATS_INTENT_REGISTRY:<17}"
+        f"  {ui.SESSION_STATS_WORKSPACE:<{_PLAIN_LABEL_WIDTH}}{snapshot.root}"
+    )
+    console.print(
+        f"  {ui.SESSION_STATS_INTENT_REGISTRY:<{_PLAIN_LABEL_WIDTH}}"
         f"{snapshot.intent_registry_backend} ({snapshot.intent_registry_storage})"
     )
     if snapshot.audit_enabled and snapshot.audit_storage:
         console.print(
-            f"  {ui.SESSION_STATS_AUDIT:<17}"
+            f"  {ui.SESSION_STATS_AUDIT:<{_PLAIN_LABEL_WIDTH}}"
             f"{ui.SESSION_STATS_AUDIT_ENABLED} ({snapshot.audit_storage})"
         )
 
@@ -260,22 +277,34 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             else ""
         )
         console.print(
-            f"  {ui.SESSION_STATS_LATEST_RUN:<17}{snapshot.latest_run_id}"
+            f"  {ui.SESSION_STATS_LATEST_RUN:<{_PLAIN_LABEL_WIDTH}}"
+            f"{snapshot.latest_run_id}"
             f" ({age_str}{health_part}{findings_part})"
         )
         if snapshot.latest_run_files is not None:
             console.print(
-                f"  {ui.SESSION_STATS_CACHE:<17}"
+                f"  {ui.SESSION_STATS_CACHE:<{_PLAIN_LABEL_WIDTH}}"
                 f"{ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files)}"
             )
     else:
         console.print(
-            f"  {ui.SESSION_STATS_LATEST_RUN:<17}{ui.SESSION_STATS_LATEST_RUN_NONE}"
+            f"  {ui.SESSION_STATS_LATEST_RUN:<{_PLAIN_LABEL_WIDTH}}"
+            f"{ui.SESSION_STATS_LATEST_RUN_NONE}"
         )
 
     console.print()
     live_agents = [a for a in snapshot.agents if a.alive]
-    console.print(f"  {ui.SESSION_STATS_ACTIVE_AGENTS:<17}{len(live_agents)}")
+    console.print(
+        f"  {ui.SESSION_STATS_LIVE_AGENTS:<{_PLAIN_LABEL_WIDTH}}{len(live_agents)}"
+    )
+    console.print(
+        f"  {ui.SESSION_STATS_ACTIVE_INTENTS:<{_PLAIN_LABEL_WIDTH}}"
+        f"{_active_intent_count(snapshot)}"
+    )
+    console.print(
+        f"  {ui.SESSION_STATS_VISIBLE_INTENTS:<{_PLAIN_LABEL_WIDTH}}"
+        f"{_visible_intent_count(snapshot)}"
+    )
 
     for agent in live_agents:
         label = agent.label or "unknown"
@@ -299,19 +328,27 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             console.print(f"        lease: {lease_str} remaining")
 
     console.print()
-    console.print(f"  {ui.SESSION_STATS_STALE:<17}{snapshot.stale_count}")
-    console.print(f"  {ui.SESSION_STATS_EXPIRED:<15}{snapshot.expired_count}")
-    console.print(f"  {ui.SESSION_STATS_RECOVERABLE:<17}{snapshot.recoverable_count}")
+    console.print(
+        f"  {ui.SESSION_STATS_STALE:<{_PLAIN_LABEL_WIDTH}}{snapshot.stale_count}"
+    )
+    console.print(
+        f"  {ui.SESSION_STATS_EXPIRED:<{_PLAIN_LABEL_WIDTH}}{snapshot.expired_count}"
+    )
+    console.print(
+        f"  {ui.SESSION_STATS_RECOVERABLE:<{_PLAIN_LABEL_WIDTH}}"
+        f"{snapshot.recoverable_count}"
+    )
     if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
         enc = snapshot.mcp_token_encoding or "unknown"
         console.print(
             "  "
-            + ui.SESSION_STATS_MCP_FOOTPRINT_VERBOSE.format(
+            + ui.SESSION_STATS_RETENTION_FOOTPRINT_VERBOSE.format(
                 tokens=snapshot.mcp_token_footprint,
                 encoding=enc,
                 calls=snapshot.mcp_token_event_count,
             )
         )
+        _render_plain_top_workflows(console, snapshot.top_workflows)
     console.print()
     console.print(f"  {ui.SESSION_STATS_WORKSPACE_HEALTH} {snapshot.workspace_health}")
     return int(ExitCode.SUCCESS)
@@ -349,8 +386,16 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
             ui.SESSION_STATS_LATEST_RUN_NONE,
         )
     summary.add_row(
-        ui.SESSION_STATS_ACTIVE_AGENTS.rstrip(":"),
-        str(len([a for a in snapshot.agents if a.alive])),
+        ui.SESSION_STATS_LIVE_AGENTS.rstrip(":"),
+        str(_live_agent_count(snapshot)),
+    )
+    summary.add_row(
+        ui.SESSION_STATS_ACTIVE_INTENTS.rstrip(":"),
+        str(_active_intent_count(snapshot)),
+    )
+    summary.add_row(
+        ui.SESSION_STATS_VISIBLE_INTENTS.rstrip(":"),
+        str(_visible_intent_count(snapshot)),
     )
     summary.add_row(
         ui.SESSION_STATS_STALE.rstrip(":"),
@@ -367,8 +412,8 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
     if snapshot.mcp_token_footprint is not None and snapshot.mcp_token_event_count > 0:
         enc = snapshot.mcp_token_encoding or "unknown"
         summary.add_row(
-            ui.SESSION_STATS_MCP_FOOTPRINT,
-            f"~{snapshot.mcp_token_footprint:,} tokens "
+            ui.SESSION_STATS_RETENTION_FOOTPRINT,
+            f"~{snapshot.mcp_token_footprint:,} tokens in retention window "
             f"({enc}, {snapshot.mcp_token_event_count} tool calls)",
         )
     health_text = text_cls(
@@ -386,10 +431,11 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
     live_agents = [agent for agent in snapshot.agents if agent.alive]
     if not live_agents:
         console.print(f"[dim]{ui.SESSION_STATS_NO_AGENTS}[/dim]")
+        _render_rich_top_workflows(console, snapshot.top_workflows)
         return int(ExitCode.SUCCESS)
 
     table = table_cls(
-        title=ui.SESSION_STATS_WORKSPACE_INTENTS_TITLE,
+        title=ui.SESSION_STATS_WORKSPACE_INTENT_RECORDS_TITLE,
         box=box.SIMPLE_HEAVY,
         show_lines=False,
         expand=True,
@@ -400,7 +446,7 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
     table.add_column(ui.SESSION_STATS_COL_STATUS, no_wrap=True)
     table.add_column(ui.SESSION_STATS_COL_SCOPE, justify="right", no_wrap=True)
     table.add_column(ui.SESSION_STATS_COL_LEASE, no_wrap=True)
-    table.add_column(ui.SESSION_STATS_COL_FILES, overflow="fold")
+    table.add_column(ui.SESSION_STATS_COL_FILES, overflow="ellipsis", max_width=42)
 
     for agent in live_agents:
         label = agent.label or ui.SESSION_STATS_AGENT_UNKNOWN
@@ -415,7 +461,46 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
                 _allowed_files_label(intent.allowed_files),
             )
     console.print(table)
+    _render_rich_top_workflows(console, snapshot.top_workflows)
     return int(ExitCode.SUCCESS)
+
+
+def _render_plain_top_workflows(
+    console: PrinterLike,
+    workflows: tuple[_WorkflowFootprintSnapshot, ...],
+) -> None:
+    if not workflows:
+        return
+    console.print(f"  {ui.SESSION_STATS_TOP_WORKFLOWS}:")
+    for workflow in workflows[:_MAX_TOP_WORKFLOWS_SHOWN]:
+        console.print(f"    {_workflow_label(workflow)}")
+
+
+def _render_rich_top_workflows(
+    console: PrinterLike,
+    workflows: tuple[_WorkflowFootprintSnapshot, ...],
+) -> None:
+    if not workflows or not cli_console.supports_rich_console(console):
+        return
+    box, _panel_cls, _rule_cls, table_cls, text_cls = cli_console.rich_panel_symbols()
+    table = table_cls(
+        title=ui.SESSION_STATS_TOP_WORKFLOWS,
+        box=box.SIMPLE_HEAVY,
+        show_lines=False,
+        expand=True,
+    )
+    table.add_column(ui.SESSION_STATS_COL_WORKFLOW, overflow="ellipsis")
+    table.add_column(ui.SESSION_STATS_COL_TOKENS, justify="right", no_wrap=True)
+    table.add_column(ui.SESSION_STATS_COL_CALLS, justify="right", no_wrap=True)
+    table.add_column(ui.SESSION_STATS_COL_AGENT, overflow="ellipsis")
+    for workflow in workflows[:_MAX_TOP_WORKFLOWS_SHOWN]:
+        table.add_row(
+            _workflow_name(workflow),
+            f"~{workflow.total_tokens:,}",
+            str(workflow.call_count),
+            text_cls(workflow.agent_label or "-", style="dim"),
+        )
+    console.print(table)
 
 
 def _latest_run_text(snapshot: _SessionSnapshot) -> str:
@@ -429,6 +514,23 @@ def _latest_run_text(snapshot: _SessionSnapshot) -> str:
     return "".join(parts)
 
 
+def _live_agent_count(snapshot: _SessionSnapshot) -> int:
+    return sum(1 for agent in snapshot.agents if agent.alive)
+
+
+def _active_intent_count(snapshot: _SessionSnapshot) -> int:
+    return sum(
+        1
+        for agent in snapshot.agents
+        for intent in agent.intents
+        if agent.alive and intent.status == "active"
+    )
+
+
+def _visible_intent_count(snapshot: _SessionSnapshot) -> int:
+    return sum(len(agent.intents) for agent in snapshot.agents)
+
+
 def _allowed_files_label(files: tuple[str, ...]) -> str:
     if not files:
         return "-"
@@ -438,6 +540,22 @@ def _allowed_files_label(files: tuple[str, ...]) -> str:
         extra = ui.BLAST_RADIUS_MORE.format(count=len(files) - _MAX_ALLOWED_FILES_SHOWN)
         label += f" {extra}"
     return label
+
+
+def _workflow_name(workflow: _WorkflowFootprintSnapshot) -> str:
+    prefix = workflow.workflow_kind or "workflow"
+    workflow_id = workflow.workflow_id or "-"
+    return f"{prefix}:{workflow_id}"
+
+
+def _workflow_label(workflow: _WorkflowFootprintSnapshot) -> str:
+    agent = workflow.agent_label or "-"
+    return (
+        f"{_workflow_name(workflow)}  "
+        f"~{workflow.total_tokens:,} tokens / "
+        f"{workflow.call_count} calls  "
+        f"agent={agent}"
+    )
 
 
 def _health_style(value: str) -> str:
@@ -643,7 +761,7 @@ def _read_audit_config(root_path: Path) -> tuple[bool, str | None]:
 
 def _read_audit_token_footprint(
     root_path: Path,
-) -> tuple[int | None, str | None, int]:
+) -> tuple[int | None, str | None, int, tuple[_WorkflowFootprintSnapshot, ...]]:
     """Read aggregate token estimation from audit trail, if available."""
     try:
         from ...audit.reader import read_audit_summary
@@ -654,21 +772,41 @@ def _read_audit_token_footprint(
 
         config = load_pyproject_config(root_path)
         if not bool(config.get("audit_enabled", False)):
-            return None, None, 0
+            return None, None, 0, ()
         db_path = resolve_audit_path(
             root_path=root_path,
             value=config.get("audit_path", DEFAULT_AUDIT_PATH),
         )
         if not db_path.is_file():
-            return None, None, 0
+            return None, None, 0, ()
         summary = read_audit_summary(db_path=db_path, limit=1)
+        footprint = summary.payload_footprint
+        if footprint is not None:
+            workflows = tuple(
+                _WorkflowFootprintSnapshot(
+                    workflow_kind=workflow.workflow_kind,
+                    workflow_id=workflow.workflow_id,
+                    call_count=workflow.call_count,
+                    total_tokens=workflow.total_tokens,
+                    max_tokens=workflow.max_tokens,
+                    agent_label=workflow.agent_label,
+                )
+                for workflow in footprint.top_workflows[:_MAX_TOP_WORKFLOWS_SHOWN]
+            )
+            return (
+                footprint.total_tokens,
+                footprint.encoding,
+                footprint.tool_calls,
+                workflows,
+            )
         return (
             summary.total_estimated_tokens,
             summary.token_encoding,
             summary.token_event_count,
+            (),
         )
     except Exception:
-        return None, None, 0
+        return None, None, 0, ()
 
 
 def _format_age(seconds: int | None) -> str:

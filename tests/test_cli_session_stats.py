@@ -30,6 +30,7 @@ from codeclone.surfaces.cli.session_stats import (
     _is_pid_alive,
     _lease_remaining_seconds,
     _read_cached_report,
+    _WorkflowFootprintSnapshot,
     render_session_stats,
 )
 from codeclone.surfaces.cli.types import PrinterLike
@@ -135,6 +136,33 @@ def _render_session_stats_text(root: Path, *, quiet: bool) -> str:
     return printer.text
 
 
+def _render_rich_session_stats(root: Path, *, width: int = 120) -> str:
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=width)
+    exit_code = render_session_stats(
+        console=cast(PrinterLike, console),
+        root_path=root,
+        quiet=False,
+    )
+    assert exit_code == int(ExitCode.SUCCESS)
+    return output.getvalue()
+
+
+def _render_rich_snapshot(
+    snapshot: session_stats_mod._SessionSnapshot,
+    *,
+    width: int = 120,
+) -> str:
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=width)
+    exit_code = session_stats_mod._render_verbose_rich(
+        cast(PrinterLike, console),
+        snapshot,
+    )
+    assert exit_code == int(ExitCode.SUCCESS)
+    return output.getvalue()
+
+
 def _snapshot(
     *,
     agents: tuple[_AgentSnapshot, ...] = (),
@@ -148,6 +176,7 @@ def _snapshot(
     mcp_token_footprint: int | None = None,
     mcp_token_encoding: str | None = None,
     mcp_token_event_count: int = 0,
+    top_workflows: tuple[_WorkflowFootprintSnapshot, ...] = (),
 ) -> session_stats_mod._SessionSnapshot:
     return session_stats_mod._SessionSnapshot(
         root=Path("/tmp/test"),
@@ -167,6 +196,25 @@ def _snapshot(
         mcp_token_footprint=mcp_token_footprint,
         mcp_token_encoding=mcp_token_encoding,
         mcp_token_event_count=mcp_token_event_count,
+        top_workflows=top_workflows,
+    )
+
+
+def _workflow_snapshot(
+    *,
+    workflow_kind: str = "intent",
+    workflow_id: str = "intent-test-001",
+    calls: int = 5,
+    tokens: int = 4200,
+    agent: str = "test-agent",
+) -> _WorkflowFootprintSnapshot:
+    return _WorkflowFootprintSnapshot(
+        workflow_kind=workflow_kind,
+        workflow_id=workflow_id,
+        call_count=calls,
+        total_tokens=tokens,
+        max_tokens=tokens,
+        agent_label=agent,
     )
 
 
@@ -219,8 +267,9 @@ def test_session_stats_idle_quiet(tmp_path: Path) -> None:
 
     assert exit_code == int(ExitCode.SUCCESS)
     assert "session-stats: idle" in printer.text
-    assert "agents=0" in printer.text
-    assert "intents=0" in printer.text
+    assert "live_agents=0" in printer.text
+    assert "active_intents=0" in printer.text
+    assert "visible_intents=0" in printer.text
     assert "latest_run=none" in printer.text
 
 
@@ -237,8 +286,9 @@ def test_session_stats_active_quiet(tmp_path: Path) -> None:
     text = _render_session_stats_text(tmp_path, quiet=True)
 
     assert "session-stats: active" in text
-    assert "agents=1" in text
-    assert "intents=1" in text
+    assert "live_agents=1" in text
+    assert "active_intents=1" in text
+    assert "visible_intents=1" in text
 
 
 def test_session_stats_with_cached_report(tmp_path: Path) -> None:
@@ -294,7 +344,9 @@ def test_session_stats_idle_verbose(tmp_path: Path) -> None:
     assert exit_code == int(ExitCode.SUCCESS)
     text = printer.text
     assert "Session Stats" in text
-    assert "Active agents:   0" in text
+    assert "Live agents:" in text
+    assert "Active edit intents:" in text
+    assert "Visible intent records:" in text
     assert "Workspace health: idle" in text
 
 
@@ -319,7 +371,9 @@ def test_session_stats_active_verbose(tmp_path: Path) -> None:
 
     assert exit_code == int(ExitCode.SUCCESS)
     text = printer.text
-    assert "Active agents:   1" in text
+    assert "Live agents:" in text
+    assert "Active edit intents:" in text
+    assert "Visible intent records:" in text
     assert f"PID {current_pid}" in text
     assert "src/a.py" in text
     assert "Workspace health: active" in text
@@ -351,19 +405,9 @@ def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
         start_epoch=int(time.time()),
         allowed_files=["src/a.py"],
     )
-    output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=100)
-
-    exit_code = render_session_stats(
-        console=cast(PrinterLike, console),
-        root_path=tmp_path,
-        quiet=False,
-    )
-
-    assert exit_code == int(ExitCode.SUCCESS)
-    text = output.getvalue()
+    text = _render_rich_session_stats(tmp_path, width=100)
     assert "Session Stats" in text
-    assert "Workspace intents" in text
+    assert "Workspace intent records" in text
     assert "src/a.py" in text
 
 
@@ -407,7 +451,7 @@ def test_session_stats_verbose_truncates_allowed_files(tmp_path: Path) -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "and 2 more" in printer.text
+    assert "and 5 more" in printer.text
 
 
 def test_session_stats_verbose_handles_empty_allowed_files(tmp_path: Path) -> None:
@@ -996,14 +1040,17 @@ def test_session_stats_verbose_plain_with_token_footprint() -> None:
         mcp_token_footprint=5000,
         mcp_token_encoding="o200k_base",
         mcp_token_event_count=10,
+        top_workflows=(_workflow_snapshot(),),
     )
 
     exit_code = session_stats_mod._render_verbose(printer, snapshot)
 
     assert exit_code == int(ExitCode.SUCCESS)
-    assert "MCP payload footprint" in printer.text
+    assert "Retention payload footprint" in printer.text
     assert "5,000" in printer.text
     assert "o200k_base" in printer.text
+    assert "Top payload workflows" in printer.text
+    assert "intent:intent-test-001" in printer.text
 
 
 # ── Rich verbose with cached report + file count ──
@@ -1012,17 +1059,7 @@ def test_session_stats_verbose_plain_with_token_footprint() -> None:
 def test_session_stats_rich_with_cached_report_and_files(tmp_path: Path) -> None:
     """Exercise Rich path with latest_run_files (lines 298-301)."""
     _write_report(tmp_path, health=92, files=100)
-    output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
-
-    exit_code = render_session_stats(
-        console=cast(PrinterLike, console),
-        root_path=tmp_path,
-        quiet=False,
-    )
-
-    assert exit_code == int(ExitCode.SUCCESS)
-    text = output.getvalue()
+    text = _render_rich_session_stats(tmp_path)
     assert "report.json present" in text
     assert "100 files" in text
 
@@ -1032,22 +1069,18 @@ def test_session_stats_rich_with_cached_report_and_files(tmp_path: Path) -> None
 
 def test_session_stats_rich_with_token_footprint() -> None:
     """Exercise Rich path with mcp_token_footprint (lines 312-313)."""
-    output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
     snapshot = _snapshot(
         mcp_token_footprint=3000,
         mcp_token_encoding="o200k_base",
         mcp_token_event_count=7,
+        top_workflows=(_workflow_snapshot(tokens=3000),),
     )
 
-    exit_code = session_stats_mod._render_verbose_rich(
-        cast(PrinterLike, console), snapshot
-    )
-
-    assert exit_code == int(ExitCode.SUCCESS)
-    text = output.getvalue()
-    assert "MCP payload footprint" in text
+    text = _render_rich_snapshot(snapshot)
+    assert "Retention payload footprint" in text
     assert "3,000" in text
+    assert "Top payload workflows" in text
+    assert "intent-test-001" in text
 
 
 # ── Rich verbose with no live agents ──
@@ -1055,8 +1088,6 @@ def test_session_stats_rich_with_token_footprint() -> None:
 
 def test_session_stats_rich_no_live_agents() -> None:
     """Exercise Rich path with dead agent only (lines 329-330)."""
-    output = io.StringIO()
-    console = Console(file=output, force_terminal=True, color_system=None, width=120)
     snapshot = _snapshot(
         agents=(
             _AgentSnapshot(
@@ -1069,12 +1100,7 @@ def test_session_stats_rich_no_live_agents() -> None:
         ),
     )
 
-    exit_code = session_stats_mod._render_verbose_rich(
-        cast(PrinterLike, console), snapshot
-    )
-
-    assert exit_code == int(ExitCode.SUCCESS)
-    text = output.getvalue()
+    text = _render_rich_snapshot(snapshot)
     assert "No live workspace agents found" in text
 
 
@@ -1112,7 +1138,7 @@ def test_allowed_files_label_many() -> None:
     """Exercise _allowed_files_label truncation (line 393)."""
     files = tuple(f"src/{i}.py" for i in range(7))
     result = session_stats_mod._allowed_files_label(files)
-    assert "and 2 more" in result
+    assert "and 5 more" in result
 
 
 # ── _ownership_style ──
@@ -1257,18 +1283,24 @@ def test_read_audit_token_footprint_handles_config_error(
         "codeclone.config.pyproject_loader.load_pyproject_config",
         lambda _root: (_ for _ in ()).throw(OSError("boom")),
     )
-    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
+        tmp_path
+    )
     assert tokens is None
     assert encoding is None
     assert count == 0
+    assert workflows == ()
 
 
 def test_read_audit_token_footprint_when_db_missing(tmp_path: Path) -> None:
     _write_audit_pyproject(tmp_path)
-    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
+        tmp_path
+    )
     assert tokens is None
     assert encoding is None
     assert count == 0
+    assert workflows == ()
 
 
 def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
@@ -1292,6 +1324,7 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
                 agent_pid=123,
                 agent_label="agent",
                 run_id="run123",
+                intent_id="intent-run123-001",
                 status="accepted",
                 payload={"data": "value"},
             )
@@ -1299,21 +1332,29 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     finally:
         writer.close()
 
-    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
+        tmp_path
+    )
 
     assert tokens is not None
     assert tokens > 0
     assert encoding is not None
     assert count == 1
+    assert workflows
+    assert workflows[0].workflow_kind == "intent"
+    assert workflows[0].workflow_id == "intent-run123-001"
 
 
 def test_resolve_mcp_tokens_no_db(tmp_path: Path) -> None:
     """_read_audit_token_footprint returns (None, None, 0) when no DB exists."""
-    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
+        tmp_path
+    )
 
     assert tokens is None
     assert encoding is None
     assert count == 0
+    assert workflows == ()
 
 
 def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
@@ -1322,8 +1363,11 @@ def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
     db_path.parent.mkdir(parents=True)
     db_path.write_text("NOT A DATABASE")
 
-    tokens, encoding, count = session_stats_mod._read_audit_token_footprint(tmp_path)
+    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
+        tmp_path
+    )
 
     assert tokens is None
     assert encoding is None
     assert count == 0
+    assert workflows == ()
