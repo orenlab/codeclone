@@ -48,6 +48,23 @@ class TopPayload:
     event_id: str
     estimated_tokens: int
     created_at_utc: str
+    intent_id: str | None = None
+    run_id: str | None = None
+    agent_label: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class WorkflowTokenProfile:
+    """Token stats for one audit workflow group."""
+
+    workflow_kind: str
+    workflow_id: str
+    call_count: int
+    total_tokens: int
+    max_tokens: int
+    first_event_utc: str
+    latest_event_utc: str
+    agent_label: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +79,7 @@ class PayloadFootprint:
     max_tokens: int
     by_type: tuple[TypeTokenProfile, ...]
     top_payloads: tuple[TopPayload, ...]
+    top_workflows: tuple[WorkflowTokenProfile, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -233,10 +251,27 @@ def payload_footprint_to_dict(fp: PayloadFootprint) -> dict[str, object]:
         "top_payloads": [
             {
                 "event_type": tp.event_type,
+                "event_id": tp.event_id,
                 "tokens": tp.estimated_tokens,
                 "created_at_utc": tp.created_at_utc,
+                "intent_id": tp.intent_id,
+                "run_id": tp.run_id,
+                "agent_label": tp.agent_label,
             }
             for tp in fp.top_payloads
+        ],
+        "top_workflows": [
+            {
+                "workflow_kind": wf.workflow_kind,
+                "workflow_id": wf.workflow_id,
+                "calls": wf.call_count,
+                "tokens": wf.total_tokens,
+                "max": wf.max_tokens,
+                "first_event_utc": wf.first_event_utc,
+                "latest_event_utc": wf.latest_event_utc,
+                "agent_label": wf.agent_label,
+            }
+            for wf in fp.top_workflows
         ],
     }
 
@@ -281,9 +316,12 @@ def _read_payload_footprint(conn: sqlite3.Connection) -> PayloadFootprint | None
         for r in type_rows
     )
 
+    top_workflows = _read_top_workflows(conn)
+
     # Top 5 most expensive payloads
     top_rows = conn.execute(
-        "SELECT event_type, event_id, estimated_tokens, created_at_utc "
+        "SELECT event_type, event_id, estimated_tokens, created_at_utc, "
+        "intent_id, run_id, agent_label "
         "FROM controller_events WHERE estimated_tokens IS NOT NULL "
         "ORDER BY estimated_tokens DESC LIMIT 5"
     ).fetchall()
@@ -293,6 +331,9 @@ def _read_payload_footprint(conn: sqlite3.Connection) -> PayloadFootprint | None
             event_id=_str_or_empty(r[1]),
             estimated_tokens=r[2] if isinstance(r[2], int) else 0,
             created_at_utc=_str_or_empty(r[3]),
+            intent_id=_str_or_none(r[4]),
+            run_id=_str_or_none(r[5]),
+            agent_label=_str_or_empty(r[6]),
         )
         for r in top_rows
     )
@@ -313,6 +354,51 @@ def _read_payload_footprint(conn: sqlite3.Connection) -> PayloadFootprint | None
         max_tokens=max_tokens,
         by_type=by_type,
         top_payloads=top_payloads,
+        top_workflows=top_workflows,
+    )
+
+
+def _read_top_workflows(
+    conn: sqlite3.Connection,
+) -> tuple[WorkflowTokenProfile, ...]:
+    rows = conn.execute(
+        """
+        SELECT
+            CASE
+                WHEN intent_id IS NOT NULL AND intent_id != '' THEN 'intent'
+                WHEN run_id IS NOT NULL AND run_id != '' THEN 'run'
+                ELSE 'event'
+            END AS workflow_kind,
+            CASE
+                WHEN intent_id IS NOT NULL AND intent_id != '' THEN intent_id
+                WHEN run_id IS NOT NULL AND run_id != '' THEN run_id
+                ELSE event_id
+            END AS workflow_id,
+            COUNT(*) AS call_count,
+            SUM(estimated_tokens) AS total_tokens,
+            MAX(estimated_tokens) AS max_tokens,
+            MIN(created_at_utc) AS first_event_utc,
+            MAX(created_at_utc) AS latest_event_utc,
+            MIN(agent_label) AS agent_label
+        FROM controller_events
+        WHERE estimated_tokens IS NOT NULL
+        GROUP BY workflow_kind, workflow_id
+        ORDER BY total_tokens DESC, max_tokens DESC, workflow_id ASC
+        LIMIT 5
+        """
+    ).fetchall()
+    return tuple(
+        WorkflowTokenProfile(
+            workflow_kind=_str_or_empty(row[0]),
+            workflow_id=_str_or_empty(row[1]),
+            call_count=row[2] if isinstance(row[2], int) else 0,
+            total_tokens=row[3] if isinstance(row[3], int) else 0,
+            max_tokens=row[4] if isinstance(row[4], int) else 0,
+            first_event_utc=_str_or_empty(row[5]),
+            latest_event_utc=_str_or_empty(row[6]),
+            agent_label=_str_or_empty(row[7]),
+        )
+        for row in rows
     )
 
 
@@ -366,6 +452,7 @@ __all__ = [
     "PayloadFootprint",
     "TopPayload",
     "TypeTokenProfile",
+    "WorkflowTokenProfile",
     "payload_footprint_to_dict",
     "read_audit_summary",
 ]

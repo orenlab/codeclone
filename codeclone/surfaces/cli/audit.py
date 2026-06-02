@@ -164,7 +164,10 @@ def _render_verbose_rich(*, console: PrinterLike, summary: AuditSummary) -> int:
     if fp is not None:
         meta.add_row(
             ui.AUDIT_MCP_PAYLOAD_FOOTPRINT_ROW,
-            f"~{fp.total_tokens:,} tokens ({fp.encoding}, {fp.tool_calls} tool calls)",
+            (
+                f"~{fp.total_tokens:,} tokens in retention window "
+                f"({fp.encoding}, {fp.tool_calls} tool calls)"
+            ),
         )
     console.print(Panel(meta, border_style="cyan"))
 
@@ -238,12 +241,42 @@ def _render_payload_analytics(
             str(tp.max_tokens),
         )
 
+    # ── Top workflows ──
+    workflows = Table(box=box.SIMPLE, show_edge=False)
+    workflows.add_column(
+        ui.AUDIT_TOP_COL_RANK,
+        justify="right",
+        no_wrap=True,
+        style="dim",
+    )
+    workflows.add_column(ui.AUDIT_COL_WORKFLOW, no_wrap=True)
+    workflows.add_column(ui.AUDIT_BREAKDOWN_COL_CALLS, justify="right", no_wrap=True)
+    workflows.add_column(ui.AUDIT_BREAKDOWN_COL_TOTAL, justify="right", no_wrap=True)
+    workflows.add_column(ui.AUDIT_BREAKDOWN_COL_MAX, justify="right", no_wrap=True)
+    workflows.add_column(ui.AUDIT_COL_FIRST, no_wrap=True)
+    workflows.add_column(ui.AUDIT_COL_LAST, no_wrap=True)
+    workflows.add_column(ui.AUDIT_COL_AGENT, no_wrap=True)
+    for i, workflow in enumerate(fp.top_workflows, 1):
+        workflows.add_row(
+            str(i),
+            _short_workflow(workflow.workflow_kind, workflow.workflow_id),
+            str(workflow.call_count),
+            f"{workflow.total_tokens:,}",
+            str(workflow.max_tokens),
+            _short_time(workflow.first_event_utc),
+            _short_time(workflow.latest_event_utc),
+            _short_agent(workflow.agent_label),
+        )
+
     # ── Top payloads ──
     top = Table(box=box.SIMPLE, show_edge=False)
     top.add_column(ui.AUDIT_TOP_COL_RANK, justify="right", no_wrap=True, style="dim")
     top.add_column(ui.AUDIT_COL_TYPE, no_wrap=True)
     top.add_column(ui.AUDIT_COL_TOKENS, justify="right", no_wrap=True)
     top.add_column(ui.AUDIT_COL_TIME, no_wrap=True)
+    top.add_column(ui.AUDIT_COL_INTENT, no_wrap=True)
+    top.add_column(ui.AUDIT_COL_RUN, no_wrap=True)
+    top.add_column(ui.AUDIT_COL_AGENT, no_wrap=True)
     for i, payload in enumerate(fp.top_payloads, 1):
         style = (
             "bold red"
@@ -257,24 +290,31 @@ def _render_payload_analytics(
             _short_type(payload.event_type),
             Text(f"{payload.estimated_tokens:,}", style=style),
             _short_time(payload.created_at_utc),
+            _short_intent(payload.intent_id),
+            _short_run(payload.run_id),
+            _short_agent(payload.agent_label),
         )
 
     # ── Budget warnings ──
     warnings: list[str] = []
-    if fp.total_tokens > _WORKFLOW_WATCH:
-        warnings.append(
-            ui.AUDIT_BUDGET_WORKFLOW_HEAVY.format(
-                total_tokens=fp.total_tokens,
-                threshold=_WORKFLOW_WATCH,
+    for workflow in fp.top_workflows:
+        workflow_label = _short_workflow(workflow.workflow_kind, workflow.workflow_id)
+        if workflow.total_tokens > _WORKFLOW_WATCH:
+            warnings.append(
+                ui.AUDIT_BUDGET_WORKFLOW_HEAVY.format(
+                    workflow=workflow_label,
+                    total_tokens=workflow.total_tokens,
+                    threshold=_WORKFLOW_WATCH,
+                )
             )
-        )
-    elif fp.total_tokens > _WORKFLOW_OK:
-        warnings.append(
-            ui.AUDIT_BUDGET_WORKFLOW_WATCH.format(
-                total_tokens=fp.total_tokens,
-                threshold=_WORKFLOW_OK,
+        elif workflow.total_tokens > _WORKFLOW_OK:
+            warnings.append(
+                ui.AUDIT_BUDGET_WORKFLOW_WATCH.format(
+                    workflow=workflow_label,
+                    total_tokens=workflow.total_tokens,
+                    threshold=_WORKFLOW_OK,
+                )
             )
-        )
     warnings.extend(
         ui.AUDIT_BUDGET_PAYLOAD_HEAVY.format(
             event_type=_short_type(payload.event_type),
@@ -288,6 +328,10 @@ def _render_payload_analytics(
     console.print()
     console.print(Panel(stats, title=ui.AUDIT_MCP_FOOTPRINT_PANEL, border_style="cyan"))
     console.print(Panel(breakdown, title=ui.AUDIT_TOKENS_BY_TYPE, border_style="dim"))
+    if fp.top_workflows:
+        console.print(
+            Panel(workflows, title=ui.AUDIT_TOP_WORKFLOWS, border_style="dim")
+        )
     if fp.top_payloads:
         console.print(Panel(top, title=ui.AUDIT_TOP_PAYLOADS, border_style="dim"))
     if warnings:
@@ -328,6 +372,16 @@ def _short_agent(agent_label: str | None) -> str:
 
 def _short_run(run_id: str | None) -> str:
     return run_id[:8] if run_id else "-"
+
+
+def _short_workflow(kind: str, value: str) -> str:
+    if kind == "intent":
+        return _short_intent(value)
+    if kind == "run":
+        return f"run:{_short_run(value)}"
+    if kind == "event":
+        return value[:16] if value else "-"
+    return value or "-"
 
 
 def _short_time(value: str) -> str:

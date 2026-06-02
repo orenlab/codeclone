@@ -30,6 +30,7 @@ from codeclone.audit.reader import (
     PayloadFootprint,
     TopPayload,
     TypeTokenProfile,
+    WorkflowTokenProfile,
     payload_footprint_to_dict,
     read_audit_summary,
 )
@@ -152,6 +153,18 @@ def _payload_footprint(
             ),
         )
     )
+    top_workflows = (
+        WorkflowTokenProfile(
+            workflow_kind="intent",
+            workflow_id="intent-abcdef12-001",
+            call_count=tool_calls,
+            total_tokens=total_tokens,
+            max_tokens=max_tokens,
+            first_event_utc="2026-05-26T09:59:00Z",
+            latest_event_utc="2026-05-26T10:00:00Z",
+            agent_label="test-agent",
+        ),
+    )
     return PayloadFootprint(
         encoding="o200k_base",
         tool_calls=tool_calls,
@@ -168,6 +181,7 @@ def _payload_footprint(
             ),
         ),
         top_payloads=top_payloads,
+        top_workflows=top_workflows,
     )
 
 
@@ -315,10 +329,14 @@ def test_audit_rich_with_payload_footprint(tmp_path: Path) -> None:
     )
 
     assert exit_code == int(ExitCode.SUCCESS)
-    text = output.getvalue()
-    assert "MCP Payload Footprint" in text
-    assert "Tokens by Type" in text
-    assert "Top Payloads" in text
+    rendered = output.getvalue()
+    expected_sections = {
+        "MCP Payload Footprint",
+        "Tokens by Type",
+        "Top Workflows",
+        "Top Payloads",
+    }
+    assert all(section in rendered for section in expected_sections)
 
 
 @pytest.mark.parametrize(
@@ -505,6 +523,21 @@ def test_payload_footprint_to_dict_roundtrip() -> None:
                 event_id="evt_1",
                 estimated_tokens=1000,
                 created_at_utc="2026-05-26T10:00:00Z",
+                intent_id="intent-abcdef12-001",
+                run_id="abcdef123456",
+                agent_label="test-agent",
+            ),
+        ),
+        top_workflows=(
+            WorkflowTokenProfile(
+                workflow_kind="intent",
+                workflow_id="intent-abcdef12-001",
+                call_count=5,
+                total_tokens=2500,
+                max_tokens=1000,
+                first_event_utc="2026-05-26T09:55:00Z",
+                latest_event_utc="2026-05-26T10:00:00Z",
+                agent_label="test-agent",
             ),
         ),
     )
@@ -519,6 +552,10 @@ def test_payload_footprint_to_dict_roundtrip() -> None:
     assert isinstance(result["top_payloads"], list)
     assert len(result["top_payloads"]) == 1
     assert result["top_payloads"][0]["tokens"] == 1000
+    assert result["top_payloads"][0]["intent_id"] == "intent-abcdef12-001"
+    assert isinstance(result["top_workflows"], list)
+    assert result["top_workflows"][0]["workflow_kind"] == "intent"
+    assert result["top_workflows"][0]["tokens"] == 2500
     # Verify JSON-serializable
     json.dumps(result)
 
@@ -540,6 +577,8 @@ def test_read_audit_summary_includes_payload_footprint(tmp_path: Path) -> None:
     assert fp.p95_tokens > 0
     assert len(fp.by_type) > 0
     assert len(fp.top_payloads) > 0
+    assert len(fp.top_workflows) > 0
+    assert fp.top_workflows[0].workflow_kind == "intent"
     assert fp.encoding != "unknown"
 
 

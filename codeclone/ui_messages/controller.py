@@ -91,10 +91,12 @@ AUDIT_SUMMARY: Final = "Summary:"
 AUDIT_VIOLATIONS: Final = "Violations:"
 AUDIT_MCP_FOOTPRINT_PANEL: Final = "MCP Payload Footprint"
 AUDIT_TOKENS_BY_TYPE: Final = "Tokens by Type"
+AUDIT_TOP_WORKFLOWS: Final = "Top Workflows"
 AUDIT_TOP_PAYLOADS: Final = "Top Payloads"
 AUDIT_PAYLOAD_BUDGET_WARNINGS: Final = "Payload Budget Warnings"
 AUDIT_MCP_PAYLOAD_FOOTPRINT_ROW: Final = "MCP payload footprint"
 AUDIT_NONE: Final = "none"
+AUDIT_COL_WORKFLOW: Final = "Workflow"
 AUDIT_COL_TOKENS: Final = "Tokens"
 AUDIT_COL_TIME: Final = "Time"
 AUDIT_COL_TYPE: Final = "Type"
@@ -103,8 +105,10 @@ AUDIT_COL_INTENT: Final = "Intent"
 AUDIT_COL_STATUS: Final = "Status"
 AUDIT_COL_RUN: Final = "Run"
 AUDIT_COL_AGENT: Final = "Agent"
-AUDIT_STAT_TOTAL_TOKENS: Final = "Total tokens"
-AUDIT_STAT_TOOL_CALLS: Final = "Tool calls"
+AUDIT_COL_FIRST: Final = "First"
+AUDIT_COL_LAST: Final = "Last"
+AUDIT_STAT_TOTAL_TOKENS: Final = "Retention window total"
+AUDIT_STAT_TOOL_CALLS: Final = "Retention window calls"
 AUDIT_STAT_AVG_TOKENS: Final = "Avg tokens/call"
 AUDIT_STAT_P95_TOKENS: Final = "p95 tokens"
 AUDIT_STAT_MAX_TOKENS: Final = "Max tokens"
@@ -142,10 +146,12 @@ AUDIT_EVENT_TYPE_ALIASES: Final[dict[str, str]] = {
     "workspace.gc_completed": "gc",
 }
 AUDIT_BUDGET_WORKFLOW_HEAVY: Final = (
-    "Workflow total {total_tokens:,} tokens exceeds {threshold:,} threshold (heavy)"
+    "Workflow {workflow} totals {total_tokens:,} tokens, above "
+    "{threshold:,} threshold (heavy)"
 )
 AUDIT_BUDGET_WORKFLOW_WATCH: Final = (
-    "Workflow total {total_tokens:,} tokens exceeds {threshold:,} threshold (watch)"
+    "Workflow {workflow} totals {total_tokens:,} tokens, above "
+    "{threshold:,} threshold (watch)"
 )
 AUDIT_BUDGET_PAYLOAD_HEAVY: Final = (
     "{event_type} payload {estimated_tokens:,} tokens (heavy)"
