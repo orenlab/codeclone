@@ -24,6 +24,7 @@ class AuditRecord:
     intent_id: str | None
     status: str | None
     agent_label: str
+    summary: str | None = None
     estimated_tokens: int | None = None
     token_encoding: str | None = None
     payload_characters: int | None = None
@@ -123,7 +124,7 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
         if token_cols:
             rows = conn.execute(
                 "SELECT event_id, event_type, severity, created_at_utc, run_id, "
-                "intent_id, status, agent_label, "
+                "intent_id, status, agent_label, summary, "
                 "estimated_tokens, token_encoding, payload_characters "
                 "FROM controller_events "
                 "ORDER BY created_at_utc DESC, id DESC "
@@ -176,9 +177,10 @@ def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
         intent_id=_str_or_none(row[5]),
         status=_str_or_none(row[6]),
         agent_label=_str_or_empty(row[7]),
-        estimated_tokens=_int_or_none(row[8]) if len(row) > 8 else None,
-        token_encoding=_str_or_none(row[9]) if len(row) > 9 else None,
-        payload_characters=_int_or_none(row[10]) if len(row) > 10 else None,
+        summary=_str_or_none(row[8]) if len(row) > 8 else None,
+        estimated_tokens=_int_or_none(row[9]) if len(row) > 9 else None,
+        token_encoding=_str_or_none(row[10]) if len(row) > 10 else None,
+        payload_characters=_int_or_none(row[11]) if len(row) > 11 else None,
     )
 
 

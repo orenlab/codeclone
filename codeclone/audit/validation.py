@@ -9,9 +9,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from .events import KNOWN_EVENT_TYPES, PAYLOAD_MODES, AuditPayloadMode, AuditSeverity
+from .events import (
+    KNOWN_EVENT_TYPES,
+    PAYLOAD_MODES,
+    SUMMARY_TEXT_LIMIT,
+    AuditPayloadMode,
+    AuditSeverity,
+)
 
-AUDIT_SCHEMA_VERSION = "1"
+AUDIT_SCHEMA_VERSION = "2"
 DEFAULT_AUDIT_PATH = ".cache/codeclone/db/audit.sqlite3"
 DEFAULT_AUDIT_PAYLOADS: AuditPayloadMode = "compact"
 DEFAULT_AUDIT_RETENTION_DAYS = 30
@@ -64,6 +70,7 @@ class EventRow:
     estimated_tokens: int | None = None
     token_encoding: str | None = None
     payload_characters: int | None = None
+    summary: str | None = None
 
     def as_tuple(self) -> tuple[object, ...]:
         return (
@@ -82,6 +89,7 @@ class EventRow:
             self.estimated_tokens,
             self.token_encoding,
             self.payload_characters,
+            self.summary,
         )
 
 
@@ -143,6 +151,7 @@ def validate_event_row(row: EventRow) -> None:
         raise AuditValidationError("agent_pid must be positive")
     _validate_optional_text(row.status, "status", max_len=_MAX_STATUS_LEN)
     _validate_text(row.payload_json, "payload_json", max_len=MAX_PAYLOAD_JSON_LEN)
+    _validate_optional_text(row.summary, "summary", max_len=SUMMARY_TEXT_LIMIT)
 
 
 def _validate_optional_text(value: str | None, field: str, *, max_len: int) -> None:

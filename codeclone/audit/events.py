@@ -67,6 +67,26 @@ KNOWN_EVENT_TYPES = frozenset(
 
 PAYLOAD_MODES = frozenset({"off", "compact", "full"})
 
+# Compact mode keeps the intent description as a bounded forensic field.
+_COMPACT_TEXT_LIMIT = 500
+
+# The summary column stores the human-authored essence of an event,
+# independent of audit_payloads mode. Bounded to keep the column lean.
+SUMMARY_TEXT_LIMIT = 2000
+
+# Intent lifecycle events whose payload may carry the human intent
+# description. Shared by compact payloads and the summary projection so the
+# two stay in lockstep.
+_INTENT_PAYLOAD_EVENTS = frozenset(
+    {
+        EVENT_INTENT_DECLARED,
+        EVENT_INTENT_QUEUED,
+        EVENT_INTENT_PROMOTED,
+        EVENT_INTENT_RENEWED,
+        EVENT_INTENT_EXPIRED,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class AuditEvent:
@@ -98,13 +118,7 @@ def compact_payload_for_event(
 ) -> dict[str, object]:
     if payload is None:
         return {}
-    if event_type in {
-        EVENT_INTENT_DECLARED,
-        EVENT_INTENT_QUEUED,
-        EVENT_INTENT_PROMOTED,
-        EVENT_INTENT_RENEWED,
-        EVENT_INTENT_EXPIRED,
-    }:
+    if event_type in _INTENT_PAYLOAD_EVENTS:
         return _compact_intent_payload(payload)
     if event_type == EVENT_INTENT_QUEUE_BLOCKED:
         return {
@@ -169,12 +183,36 @@ def _compact_intent_payload(payload: Mapping[str, object]) -> dict[str, object]:
     scope = _mapping(payload.get("scope"))
     allowed = _sequence(scope.get("allowed_files"))
     return {
+        # Compaction drops volume, not substance: the intent description is
+        # the key forensic field and survives (bounded) even in compact mode.
+        "intent_description": _bounded_text(
+            payload.get("intent_description"), _COMPACT_TEXT_LIMIT
+        ),
         "scope_file_count": len(allowed),
         "concurrent_intents": len(_sequence(payload.get("concurrent_intents"))),
         "workspace_registered": bool(payload.get("workspace_registered")),
         "ttl_seconds": _int_value(payload.get("ttl_seconds")),
         "lease_seconds": _int_value(payload.get("lease_seconds")),
     }
+
+
+def event_summary(
+    event_type: str,
+    payload: Mapping[str, object] | None,
+) -> str | None:
+    """Human-readable essence of an event for the summary column.
+
+    Independent of audit_payloads mode: the summary is lightweight structured
+    metadata (like status or intent_id), not bulk payload, so it is captured
+    even when payloads are 'off' or 'compact'. Returns None when the event
+    carries no human-authored text. Bounded to ``SUMMARY_TEXT_LIMIT``.
+    """
+    if payload is None:
+        return None
+    if event_type in _INTENT_PAYLOAD_EVENTS:
+        text = _bounded_text(payload.get("intent_description"), SUMMARY_TEXT_LIMIT)
+        return text or None
+    return None
 
 
 def _compact_check_payload(payload: Mapping[str, object]) -> dict[str, object]:
@@ -251,6 +289,11 @@ def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _bounded_text(value: object, limit: int) -> str:
+    text = str(value or "").strip()
+    return text[:limit]
+
+
 __all__ = [
     "EVENT_BASELINE_ABUSE",
     "EVENT_BLAST_RADIUS",
@@ -275,10 +318,12 @@ __all__ = [
     "EVENT_WORKSPACE_GC",
     "KNOWN_EVENT_TYPES",
     "PAYLOAD_MODES",
+    "SUMMARY_TEXT_LIMIT",
     "AuditEvent",
     "AuditPayloadMode",
     "AuditSeverity",
     "compact_payload_for_event",
+    "event_summary",
     "generate_event_id",
     "repo_root_digest",
 ]

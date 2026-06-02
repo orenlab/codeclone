@@ -353,7 +353,10 @@ class _MCPSessionIntentMixin:
             intent_id=record_payload.intent_id,
             report_digest=record_payload.report_digest,
             status=record_payload.status.value,
-            payload=payload,
+            # The human-authored intent description is the single most useful
+            # forensic field; capture it in audit (the response payload itself
+            # is unchanged). Compact mode preserves a bounded copy.
+            payload={**payload, "intent_description": description},
         )
         if concurrent_intents:
             self._audit_emit(

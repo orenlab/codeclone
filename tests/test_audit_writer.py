@@ -11,7 +11,13 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.audit.events import EVENT_INTENT_DECLARED, AuditEvent, repo_root_digest
+from codeclone.audit.events import (
+    EVENT_INTENT_DECLARED,
+    EVENT_PATCH_VERIFIED,
+    AuditEvent,
+    AuditPayloadMode,
+    repo_root_digest,
+)
 from codeclone.audit.reader import read_audit_summary
 from codeclone.audit.validation import (
     AuditValidationError,
@@ -50,6 +56,15 @@ def _payloads(db_path: Path) -> list[dict[str, object]]:
     return [json.loads(row[0]) for row in rows]
 
 
+def _summaries(db_path: Path) -> list[object]:
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute("SELECT summary FROM controller_events").fetchall()
+    finally:
+        conn.close()
+    return [row[0] for row in rows]
+
+
 def test_sqlite_writer_creates_db_and_emits_compact_event(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
@@ -83,6 +98,125 @@ def test_sqlite_writer_payload_modes(tmp_path: Path) -> None:
 
     assert _payloads(off_path) == [{}]
     assert "scope" in _payloads(full_path)[0]
+
+
+def _declared_with_description(root: Path, description: str) -> AuditEvent:
+    return AuditEvent(
+        event_type=EVENT_INTENT_DECLARED,
+        severity="info",
+        repo_root_digest=repo_root_digest(root),
+        agent_pid=123,
+        agent_label="test-agent",
+        run_id="run12345",
+        intent_id="intent-run12345-001",
+        report_digest="a" * 64,
+        status="active",
+        payload={
+            "scope": {"allowed_files": ["pkg/a.py"]},
+            "intent_description": description,
+        },
+    )
+
+
+def test_intent_description_survives_compact_and_full(tmp_path: Path) -> None:
+    # Regression: the human-authored intent description was dropped in every
+    # audit payload mode. It is the key forensic field and must survive.
+    description = "Author Phase 20 spec: semantic retrieval index."
+    compact_path = tmp_path / "compact.sqlite3"
+    full_path = tmp_path / "full.sqlite3"
+    compact_writer = SqliteAuditWriter(
+        db_path=compact_path, payloads="compact", retention_days=30
+    )
+    full_writer = SqliteAuditWriter(
+        db_path=full_path, payloads="full", retention_days=30
+    )
+    try:
+        compact_writer.emit(_declared_with_description(tmp_path, description))
+        full_writer.emit(_declared_with_description(tmp_path, description))
+    finally:
+        compact_writer.close()
+        full_writer.close()
+
+    assert _payloads(compact_path)[0]["intent_description"] == description
+    assert _payloads(full_path)[0]["intent_description"] == description
+
+
+def test_compact_intent_description_is_bounded(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
+    try:
+        writer.emit(_declared_with_description(tmp_path, "x" * 900))
+    finally:
+        writer.close()
+
+    intent = _payloads(db_path)[0]["intent_description"]
+    assert isinstance(intent, str)
+    assert len(intent) == 500
+
+
+def test_summary_column_captured_in_every_payload_mode(tmp_path: Path) -> None:
+    # Bug B: the human intent description lives in a dedicated, queryable
+    # column, independent of audit_payloads mode — even 'off' keeps it,
+    # because the summary is structured metadata, not bulk payload.
+    description = "Promote intent description to a controller_events column."
+    modes: tuple[AuditPayloadMode, ...] = ("off", "compact", "full")
+    for mode in modes:
+        path = tmp_path / f"{mode}.sqlite3"
+        writer = SqliteAuditWriter(db_path=path, payloads=mode, retention_days=30)
+        try:
+            writer.emit(_declared_with_description(tmp_path, description))
+        finally:
+            writer.close()
+        assert _summaries(path) == [description]
+
+
+def test_summary_column_is_bounded(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="off", retention_days=30)
+    try:
+        writer.emit(_declared_with_description(tmp_path, "x" * 2500))
+    finally:
+        writer.close()
+
+    summary = _summaries(db_path)[0]
+    assert isinstance(summary, str)
+    assert len(summary) == 2000
+
+
+def test_summary_column_null_without_human_text(tmp_path: Path) -> None:
+    # The column never invents text: an intent event lacking a description,
+    # and a non-intent event carrying one, both leave summary NULL (the
+    # event_type gate ignores intent_description outside intent events).
+    db_path = tmp_path / "audit.sqlite3"
+    patch_event = AuditEvent(
+        event_type=EVENT_PATCH_VERIFIED,
+        severity="info",
+        repo_root_digest=repo_root_digest(tmp_path),
+        agent_pid=123,
+        agent_label="test-agent",
+        payload={"intent_description": "ignored for non-intent events"},
+    )
+    writer = SqliteAuditWriter(db_path=db_path, payloads="full", retention_days=30)
+    try:
+        writer.emit(_event(tmp_path))  # intent.declared, no intent_description
+        writer.emit(patch_event)
+    finally:
+        writer.close()
+
+    assert _summaries(db_path) == [None, None]
+
+
+def test_reader_surfaces_summary(tmp_path: Path) -> None:
+    description = "Author Phase 20 spec: semantic retrieval index."
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
+    try:
+        writer.emit(_declared_with_description(tmp_path, description))
+    finally:
+        writer.close()
+
+    summary = read_audit_summary(db_path=db_path)
+    assert summary.events[0].summary == description
 
 
 def test_sqlite_writer_emit_never_raises_for_invalid_event(tmp_path: Path) -> None:

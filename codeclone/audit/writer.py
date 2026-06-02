@@ -18,6 +18,7 @@ from .events import (
     AuditEvent,
     AuditPayloadMode,
     compact_payload_for_event,
+    event_summary,
     generate_event_id,
 )
 from .schema import open_audit_db
@@ -42,8 +43,9 @@ INSERT INTO controller_events(
     payload_json,
     estimated_tokens,
     token_encoding,
-    payload_characters
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    payload_characters,
+    summary
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -139,6 +141,7 @@ def event_to_row(*, event: AuditEvent, payloads: AuditPayloadMode) -> EventRow:
         estimated_tokens=token_estimate.tokens if token_estimate else None,
         token_encoding=token_estimate.encoding if token_estimate else None,
         payload_characters=token_estimate.characters if token_estimate else None,
+        summary=event_summary(event.event_type, event.payload),
     )
 
 

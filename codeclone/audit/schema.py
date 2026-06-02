@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS controller_events (
 
     estimated_tokens    INTEGER,
     token_encoding      TEXT,
-    payload_characters  INTEGER
+    payload_characters  INTEGER,
+    summary             TEXT
 )
 """
 
@@ -60,6 +61,21 @@ _INDEX_SQL = (
     "ON controller_events(created_at_utc)",
 )
 
+# Schema versions this build can open: the current version plus any older
+# version reachable by an idempotent in-place migration.
+_MIGRATABLE_VERSIONS = frozenset({"1", "2"})
+
+# Additive, nullable columns expected on controller_events. Declarative so a
+# single idempotent pass upgrades any older database (pre-token, token-only)
+# to the current shape. Order matches the CREATE TABLE tail and the ALTER
+# append order, so fresh and migrated databases converge on the same layout.
+_ADDITIVE_EVENT_COLUMNS = (
+    ("estimated_tokens", "INTEGER"),
+    ("token_encoding", "TEXT"),
+    ("payload_characters", "INTEGER"),
+    ("summary", "TEXT"),
+)
+
 
 def open_audit_db(path: Path) -> sqlite3.Connection:
     return open_sqlite_db(path, ensure_schema=ensure_schema)
@@ -68,14 +84,18 @@ def open_audit_db(path: Path) -> sqlite3.Connection:
 def ensure_schema(conn: sqlite3.Connection) -> None:
     current = get_meta(conn, "schema_version")
     if current is None:
-        create_schema_v1(conn)
+        create_schema_v2(conn)
         return
-    if current != AUDIT_SCHEMA_VERSION:
+    if current not in _MIGRATABLE_VERSIONS:
         raise AuditSchemaError(f"Unsupported audit schema version: {current}")
-    _migrate_v1_add_token_columns(conn)
+    # Idempotent self-heal: bring any migratable database up to the current
+    # column shape, then advance the recorded version. Safe on every open.
+    _ensure_event_columns(conn)
+    if current != AUDIT_SCHEMA_VERSION:
+        _set_meta(conn, "schema_version", AUDIT_SCHEMA_VERSION)
 
 
-def create_schema_v1(conn: sqlite3.Connection) -> None:
+def create_schema_v2(conn: sqlite3.Connection) -> None:
     initialize_schema_v1(
         conn,
         ddl_statements=(_CREATE_EVENTS_SQL, _CREATE_META_SQL),
@@ -90,22 +110,27 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
     )
 
 
-def _migrate_v1_add_token_columns(conn: sqlite3.Connection) -> None:
-    """Add nullable token estimation columns to an existing v1 schema.
+def _ensure_event_columns(conn: sqlite3.Connection) -> None:
+    """Idempotently add any missing additive columns to controller_events.
 
-    Idempotent: checks which columns already exist before altering.
+    Backward-compatible: an older database (pre-token, or token-only) gains
+    exactly the columns it lacks and nothing else. Safe to call on every open.
     """
     existing = {
         row[1]
         for row in conn.execute("PRAGMA table_info(controller_events)").fetchall()
     }
-    for col, col_type in (
-        ("estimated_tokens", "INTEGER"),
-        ("token_encoding", "TEXT"),
-        ("payload_characters", "INTEGER"),
-    ):
+    for col, col_type in _ADDITIVE_EVENT_COLUMNS:
         if col not in existing:
             conn.execute(f"ALTER TABLE controller_events ADD COLUMN {col} {col_type}")
+    conn.commit()
+
+
+def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
+    conn.execute(
+        f"INSERT OR REPLACE INTO {_AUDIT_META_TABLE}(key, value) VALUES (?, ?)",
+        (key, value),
+    )
     conn.commit()
 
 
@@ -114,7 +139,7 @@ def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
 
 
 __all__ = [
-    "create_schema_v1",
+    "create_schema_v2",
     "ensure_schema",
     "get_meta",
     "open_audit_db",
