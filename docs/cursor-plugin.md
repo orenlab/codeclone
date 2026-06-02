@@ -145,9 +145,11 @@ The Hooks panel counts **project** and **user** hook files only:
 | User            | `~/.cursor/hooks.json`               | yes                                                                           |
 | Plugin manifest | `hooks/hooks.json` in the plugin dir | **no** (may still run when the plugin is enabled; do not rely on the counter) |
 
-For the CodeClone repository, commit `.cursor/hooks.json` (see
-`plugins/cursor-codeclone/scripts/install-project-hooks.py`). For other
-projects, run that script once per repo (`python`, not bash — Windows-safe).
+Generate `.cursor/hooks.json` per workspace with
+`plugins/cursor-codeclone/scripts/install-project-hooks.py` (uses the current
+interpreter; paths are machine-specific — **do not commit**). This monorepo
+ignores `/.cursor/` in `.gitignore`; CI tests the plugin manifest and installer
+instead of a checked-in project hook file.
 
 ### Hook events
 

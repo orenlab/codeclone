@@ -122,10 +122,12 @@ Cursor’s **Hooks** settings page lists hooks from `.cursor/hooks.json` (projec
 and `~/.cursor/hooks.json` (user) only. Hooks declared in the plugin manifest
 (`hooks/hooks.json` via `plugin.json`) are not included in that count.
 
-Ship or install a **project** `.cursor/hooks.json` that invokes the plugin
-scripts (see `plugins/cursor-codeclone/scripts/install-project-hooks.py`). The
-CodeClone monorepo commits `.cursor/hooks.json` invoking
-`python …/hooks/run_hook.py` (cross-platform; no shell scripts).
+Install a **project** `.cursor/hooks.json` with
+`plugins/cursor-codeclone/scripts/install-project-hooks.py` (writes
+`.cursor/hooks.json` and `codeclone-hooks.json` under the target root). Do not
+commit generated hook files — they embed machine-local interpreter paths. This
+monorepo ignores `/.cursor/`; tests cover the plugin manifest `hooks/hooks.json`
+and the installer output.
 
 Hooks follow these invariants:
 

@@ -523,6 +523,19 @@ def test_compact_payload_intent_checked() -> None:
     assert result["unexpected_files"] == 1
 
 
+def test_compact_payload_intent_queue_blocked() -> None:
+    from codeclone.audit.events import (
+        EVENT_INTENT_QUEUE_BLOCKED,
+        compact_payload_for_event,
+    )
+
+    result = compact_payload_for_event(
+        event_type=EVENT_INTENT_QUEUE_BLOCKED,
+        payload={"intent_id": "intent-abc", "blocking_count": 2},
+    )
+    assert result == {"intent_id": "intent-abc", "blocking_count": 2}
+
+
 def test_compact_payload_intent_cleared() -> None:
     """Exercise intent cleared branch (lines 107-108)."""
     from codeclone.audit.events import EVENT_INTENT_CLEARED, compact_payload_for_event

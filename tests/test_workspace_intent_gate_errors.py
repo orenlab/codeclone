@@ -68,6 +68,7 @@ def test_gate_unsupported_backend_and_payload_type_edges() -> None:
         )
 
     assert gate_mod._record_from_payload(123) is None
+    assert gate_mod._record_from_payload('{"version": 99}') is None
 
 
 def test_gate_decision_ignores_terminal_and_non_active_records() -> None:
