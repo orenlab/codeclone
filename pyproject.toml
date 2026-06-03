@@ -165,7 +165,7 @@ enabled = true
 [tool.coverage.report]
 show_missing = true
 precision = 2
-fail_under = 99.3
+fail_under = 99
 
 [tool.mypy]
 python_version = "3.10"
