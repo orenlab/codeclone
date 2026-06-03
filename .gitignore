@@ -48,3 +48,4 @@ extensions/vscode-codeclone/node_modules
 /smoke_cli.sh
 /codeclone-v2.1-roadmap.md
 /specs/
+/coverage.json
