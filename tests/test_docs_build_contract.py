@@ -36,17 +36,16 @@ def test_docs_admonition_indentation_is_valid() -> None:
     assert violations == []
 
 
-def test_mkdocs_build_strict() -> None:
+def test_docs_build_strict() -> None:
     result = subprocess.run(
         [
             "uv",
             "run",
             "--with",
-            "mkdocs",
-            "--with",
-            "mkdocs-material",
-            "mkdocs",
+            "zensical==0.0.43",
+            "zensical",
             "build",
+            "--clean",
             "--strict",
         ],
         cwd=_REPO_ROOT,
