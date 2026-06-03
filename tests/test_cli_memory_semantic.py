@@ -7,18 +7,75 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
+import codeclone.surfaces.cli.memory as cli_memory
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
 from codeclone.memory.models import MemorySubject, generate_memory_id
 from codeclone.memory.project import resolve_memory_db_path, resolve_project_identity
+from codeclone.memory.semantic.models import (
+    SemanticHit,
+    SemanticIndexStatus,
+    SemanticRow,
+)
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.surfaces.cli.memory import _render_semantic_text, memory_main
 from codeclone.surfaces.cli.memory_render import memory_console
 from tests.memory_fixtures import make_module_record
+
+
+class _FakeSemanticIndex:
+    def __init__(self) -> None:
+        self.rows: list[SemanticRow] = []
+
+    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+        return [
+            SemanticHit(source_id=row.id, source=row.source, score=1.0 - index * 0.01)
+            for index, row in enumerate(self.rows[:k])
+        ]
+
+    def status(self) -> SemanticIndexStatus:
+        return SemanticIndexStatus(
+            available=True,
+            backend="fake",
+            provider="diagnostic",
+            embedding_model="diagnostic-hash-v1",
+            dimension=64,
+            indexed_count=len(self.rows),
+        )
+
+    def upsert(self, rows: Sequence[SemanticRow]) -> None:
+        incoming = {row.id for row in rows}
+        self.rows = [row for row in self.rows if row.id not in incoming]
+        self.rows.extend(rows)
+
+    def delete(self, ids: Sequence[str]) -> None:
+        stale = set(ids)
+        self.rows = [row for row in self.rows if row.id not in stale]
+
+    def known_ids(self) -> set[str]:
+        return {row.id for row in self.rows}
+
+
+def _install_fake_semantic_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> _FakeSemanticIndex:
+    index = _FakeSemanticIndex()
+    monkeypatch.setattr(
+        cli_memory,
+        "resolve_semantic_index_writer",
+        lambda config: index if config.enabled else None,
+    )
+    monkeypatch.setattr(
+        cli_memory,
+        "resolve_semantic_index",
+        lambda config: index,
+    )
+    return index
 
 
 def test_semantic_status_reports_unavailable_by_default(
@@ -53,7 +110,13 @@ def test_semantic_search_fails_clear_without_backend(
     assert "unavailable" in out
 
 
-def _seed_semantic_repo(tmp_path: Path, *, statement: str) -> None:
+def _seed_semantic_repo(
+    tmp_path: Path,
+    *,
+    statement: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_semantic_index(monkeypatch)
     (tmp_path / "pyproject.toml").write_text(
         "[tool.codeclone.memory.semantic]\nenabled = true\ndimension = 64\n",
         encoding="utf-8",
@@ -152,11 +215,14 @@ def test_semantic_status_reports_provider_unavailable(
 
 
 def test_semantic_search_hydrates_and_renders_json(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("lancedb")
     _seed_semantic_repo(
-        tmp_path, statement="recover after MCP restart uses the checkpoint workflow"
+        tmp_path,
+        statement="recover after MCP restart uses the checkpoint workflow",
+        monkeypatch=monkeypatch,
     )
     capsys.readouterr()
     code = memory_main(
@@ -174,11 +240,14 @@ def test_semantic_search_hydrates_and_renders_json(
 
 
 def test_memory_search_semantic_flag_blends_ranking(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("lancedb")
     _seed_semantic_repo(
-        tmp_path, statement="recover after MCP restart uses the checkpoint workflow"
+        tmp_path,
+        statement="recover after MCP restart uses the checkpoint workflow",
+        monkeypatch=monkeypatch,
     )
     capsys.readouterr()
     code = memory_main(["search", "recover", "--root", str(tmp_path), "--semantic"])
@@ -189,11 +258,14 @@ def test_memory_search_semantic_flag_blends_ranking(
 
 
 def test_semantic_search_text_renders_ranked_hits(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("lancedb")
     _seed_semantic_repo(
-        tmp_path, statement="recover after MCP restart uses the checkpoint workflow"
+        tmp_path,
+        statement="recover after MCP restart uses the checkpoint workflow",
+        monkeypatch=monkeypatch,
     )
     capsys.readouterr()
     code = memory_main(
@@ -208,10 +280,15 @@ def test_semantic_search_text_renders_ranked_hits(
 
 
 def test_semantic_status_shows_provider_when_index_built(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("lancedb")
-    _seed_semantic_repo(tmp_path, statement="recover checkpoint workflow")
+    _seed_semantic_repo(
+        tmp_path,
+        statement="recover checkpoint workflow",
+        monkeypatch=monkeypatch,
+    )
     capsys.readouterr()
     code = memory_main(["semantic", "status", "--root", str(tmp_path)])
     out = capsys.readouterr().out
@@ -221,9 +298,11 @@ def test_semantic_status_shows_provider_when_index_built(
 
 
 def test_semantic_rebuild_requires_memory_database(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    pytest.importorskip("lancedb")
+    _install_fake_semantic_index(monkeypatch)
     (tmp_path / "pyproject.toml").write_text(
         "[tool.codeclone.memory.semantic]\nenabled = true\ndimension = 64\n",
         encoding="utf-8",
