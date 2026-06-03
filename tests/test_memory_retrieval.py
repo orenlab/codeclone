@@ -74,6 +74,49 @@ def test_relevance_score_prefers_scope_path_match() -> None:
     assert score > 1.0
 
 
+def test_relevance_score_boosts_agent_drafts() -> None:
+    now = current_report_timestamp_utc()
+    record = MemoryRecord(
+        id="mem-draft",
+        project_id="proj-1",
+        identity_key="draft-1",
+        type="change_rationale",
+        status="draft",
+        confidence="inferred",
+        origin="agent",
+        ingest_source="agent",
+        statement="draft note",
+        summary=None,
+        payload=None,
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by="agent",
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=None,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+    score = relevance_score(
+        record=record,
+        subjects=[],
+        context=RankingContext(
+            scope_paths=frozenset(),
+            symbols=frozenset(),
+            blast_dependents=frozenset(),
+        ),
+        evidence_count=0,
+    )
+    assert score >= 0.35
+
+
 def test_relevance_score_filters_global_contract_notes_for_scope() -> None:
     now = current_report_timestamp_utc()
     record = MemoryRecord(

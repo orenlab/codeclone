@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from codeclone.metrics._base import MetricFamily
+from codeclone.metrics.overloaded_modules import _score_quantile
 from codeclone.metrics.registry import (
     METRIC_FAMILIES,
     _group_item_sort_key,
@@ -32,3 +33,10 @@ def test_registry_sort_helpers_handle_non_mapping_units() -> None:
     assert _module_names_from_units(
         ("skip-me", {"qualname": "pkg.mod:fn"})
     ) == frozenset(["pkg.mod"])
+    assert _module_names_from_units(({"qualname": "standalone"},)) == frozenset(
+        ["standalone"]
+    )
+
+
+def test_score_quantile_q_one_returns_last_value() -> None:
+    assert _score_quantile([1.0, 2.0, 3.0], 1.0) == 3.0

@@ -259,6 +259,12 @@ def test_api_surface_helpers_cover_constant_symbols_and_break_variants() -> None
         visibility=visibility,
     )
     assert constant_rows == (("CONST", 1, 1),)
+    assign_tree = ast.parse("Public = 2")
+    assign_rows = api_surface_mod._public_constant_rows(
+        tree=assign_tree,
+        visibility=visibility,
+    )
+    assert assign_rows == (("Public", 1, 1),)
     assert (
         api_surface_mod._build_public_symbol(
             module_name="pkg.mod",
@@ -385,3 +391,24 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
         )
         == "Changed return annotation."
     )
+    fewer_params = _public_symbol("pkg.mod:run", "function", params=())
+    more_params = _public_symbol(
+        "pkg.mod:run",
+        "function",
+        params=(
+            ApiParamSpec(name="a", kind="pos_or_kw", has_default=False),
+            ApiParamSpec(name="b", kind="pos_or_kw", has_default=False),
+        ),
+    )
+    assert (
+        api_surface_mod._signature_break_detail(
+            baseline_symbol=fewer_params,
+            current_symbol=more_params,
+            strict_types=False,
+        )
+        == "Changed callable parameter count."
+    )
+
+
+def test_symbol_index_none_snapshot_returns_empty() -> None:
+    assert api_surface_mod._symbol_index(None) == {}

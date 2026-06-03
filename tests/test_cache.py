@@ -19,6 +19,7 @@ from codeclone.cache._canonicalize import (
     _as_module_api_surface_dict,
     _as_module_docstring_coverage_dict,
     _as_module_typing_coverage_dict,
+    _attach_optional_cache_sections,
     _canonicalize_cache_entry,
     _has_cache_entry_container_shape,
 )
@@ -58,6 +59,8 @@ from codeclone.cache._wire_helpers import (
 )
 from codeclone.cache.entries import (
     CacheEntry,
+    ModuleApiSurfaceDict,
+    SourceStatsDict,
     _as_runtime_reachability_confidence,
     _as_runtime_reachability_edge_kind,
     _as_runtime_reachability_framework,
@@ -331,6 +334,87 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
     ]
 
 
+def test_attach_optional_cache_sections_sets_all_optional_blocks() -> None:
+    base = cast(
+        CacheEntry,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": [],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "referenced_qualnames": [],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    attached = _attach_optional_cache_sections(
+        base,
+        typing_coverage={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "callable_count": 1,
+            "params_total": 1,
+            "params_annotated": 1,
+            "returns_total": 1,
+            "returns_annotated": 1,
+            "any_annotation_count": 0,
+        },
+        docstring_coverage={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "public_symbol_total": 1,
+            "public_symbol_documented": 1,
+        },
+        api_surface={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "all_declared": [],
+            "symbols": [],
+        },
+        runtime_reachability=[
+            {
+                "target_qualname": "pkg.mod:fn",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "target_kind": "function",
+                "framework": "fastapi",
+                "edge_kind": "registers_handler",
+                "confidence": "high",
+                "evidence": "route",
+                "evidence_symbol": "get",
+                "source_qualname": "pkg.mod:router",
+            }
+        ],
+        security_surfaces=[
+            {
+                "category": "process_boundary",
+                "capability": "subprocess_run",
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "start_line": 1,
+                "end_line": 1,
+                "location_scope": "callable",
+                "classification_mode": "exact_call",
+                "evidence_kind": "call",
+                "evidence_symbol": "subprocess.run",
+            }
+        ],
+        source_stats=SourceStatsDict(lines=10, functions=1, methods=0, classes=0),
+        structural_findings=[],
+    )
+    assert attached["typing_coverage"]["module"] == "pkg.mod"
+    assert attached["runtime_reachability"][0]["framework"] == "fastapi"
+    assert attached["security_surfaces"][0]["category"] == "process_boundary"
+    assert attached["source_stats"]["lines"] == 10
+    assert attached["structural_findings"] == []
+
+
 def test_cache_roundtrip_preserves_runtime_reachability(tmp_path: Path) -> None:
     entry = _roundtrip_cache_entry_with_metrics(
         tmp_path,
@@ -396,6 +480,36 @@ def test_security_surface_cache_helpers_reject_invalid_values() -> None:
         is False
     )
     assert _is_security_surface_dict(object()) is False
+    assert _is_security_surface_dict(
+        {
+            "category": "process_boundary",
+            "capability": "subprocess_run",
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:run",
+            "start_line": 1,
+            "end_line": 1,
+            "location_scope": "callable",
+            "classification_mode": "exact_call",
+            "evidence_kind": "call",
+            "evidence_symbol": "subprocess.run",
+        }
+    )
+    assert _is_runtime_reachability_fact_dict(
+        {
+            "target_qualname": "pkg.mod:fn",
+            "filepath": "pkg/mod.py",
+            "start_line": 1,
+            "end_line": 2,
+            "target_kind": "function",
+            "framework": "fastapi",
+            "edge_kind": "registers_handler",
+            "confidence": "high",
+            "evidence": "route",
+            "evidence_symbol": "get",
+            "source_qualname": "pkg.mod:router",
+        }
+    )
 
 
 def test_runtime_reachability_cache_helpers_reject_invalid_values() -> None:
@@ -705,10 +819,50 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
     assert cache._dirty is True
 
 
+def test_cache_helper_type_guards_accept_valid_optional_metric_dicts() -> None:
+    typing = {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "callable_count": 1,
+        "params_total": 2,
+        "params_annotated": 1,
+        "returns_total": 1,
+        "returns_annotated": 1,
+        "any_annotation_count": 0,
+    }
+    docstrings = {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "public_symbol_total": 2,
+        "public_symbol_documented": 1,
+    }
+    api_surface: ModuleApiSurfaceDict = {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "all_declared": [],
+        "symbols": [],
+    }
+    assert _as_module_typing_coverage_dict(typing) == typing
+    assert _as_module_docstring_coverage_dict(docstrings) == docstrings
+    assert _as_module_api_surface_dict(api_surface) == api_surface
+
+
 def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -> None:
     assert _as_module_typing_coverage_dict({"module": "pkg"}) is None
     assert _as_module_docstring_coverage_dict({"module": "pkg"}) is None
     assert _as_module_api_surface_dict({"module": "pkg"}) is None
+    assert (
+        _has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": "not-a-list",
+            }
+        )
+        is False
+    )
     assert (
         _has_cache_entry_container_shape(
             {
@@ -764,13 +918,51 @@ def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -
     assert _decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
     assert (
         _decode_wire_api_surface_symbol(
+            ["pkg.mod:run", "function", 1, 2, "name", "", "bad-params"]
+        )
+        is None
+    )
+    assert _decode_wire_api_param_spec(["name", "pos_or_kw", "not-int", ""]) is None
+    assert (
+        _decode_wire_api_surface_symbol(
             ["pkg.mod:run", "function", 1, 2, "name", "", [None]]
         )
         is None
     )
     assert _decode_wire_api_param_spec(["value"]) is None
     assert _is_api_param_spec_dict([]) is False
+    assert _is_api_param_spec_dict(
+        {
+            "name": "value",
+            "kind": "pos_or_kw",
+            "has_default": False,
+            "annotation_hash": "",
+        }
+    )
     assert _is_public_symbol_dict([]) is False
+    assert (
+        _is_public_symbol_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "function",
+                "exported_via": "name",
+                "start_line": "bad",
+                "end_line": 2,
+            }
+        )
+        is False
+    )
+    assert _is_public_symbol_dict(
+        {
+            "qualname": "pkg.mod:run",
+            "kind": "function",
+            "exported_via": "name",
+            "start_line": 1,
+            "end_line": 2,
+            "returns_hash": "",
+            "params": [],
+        }
+    )
     assert (
         _is_public_symbol_dict(
             {
@@ -1213,6 +1405,23 @@ def test_cache_load_corrupted_json(tmp_path: Path) -> None:
     assert "corrupted" in cache.load_warning
     assert cache.load_status == CacheStatus.INVALID_JSON
     assert cache.cache_schema_version is None
+
+
+def test_cache_load_exists_oserror_graceful_ignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    original_exists = Path.exists
+
+    def _raise_exists(self: Path) -> bool:
+        if self == cache_path:
+            raise OSError("no exists")
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", _raise_exists)
+    cache = Cache(cache_path)
+    cache.load()
+    _assert_unreadable_cache_contract(cache)
 
 
 def test_cache_load_unreadable_stat_graceful_ignore(
@@ -1764,6 +1973,27 @@ def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> No
     )
 
 
+def test_decode_wire_file_entry_returns_none_when_optional_sections_invalid() -> None:
+    assert (
+        _decode_wire_file_entry(
+            {
+                "st": [1, 2],
+                "cc": [],
+                "rr": "not-a-list",
+            },
+            "x.py",
+        )
+        is None
+    )
+    assert (
+        _decode_optional_wire_api_surface(
+            obj={"as": [None, [], []]},
+            filepath="pkg/mod.py",
+        )
+        is None
+    )
+
+
 def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
     decoded = _decode_wire_file_entry(
         {
@@ -2163,6 +2393,16 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
             }
         )
         is False
+    )
+    assert _is_dead_candidate_dict(
+        {
+            "qualname": "pkg.mod:unused",
+            "local_name": "unused",
+            "filepath": "pkg/mod.py",
+            "start_line": 1,
+            "end_line": 2,
+            "kind": "function",
+        }
     )
     assert (
         _is_dead_candidate_dict(

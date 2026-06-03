@@ -1216,6 +1216,35 @@ def test_discovery_cache_runtime_reachability_helpers_accept_and_reject(
     assert helper("broken") is None
 
 
+def test_discovery_cache_runtime_row_parser_rejects_invalid_enums() -> None:
+    from codeclone.core.discovery_cache import (
+        _runtime_reachability_confidence,
+        _runtime_reachability_from_cache_row,
+        _runtime_reachability_target_kind,
+    )
+
+    assert _runtime_reachability_confidence("bogus") is None
+    assert _runtime_reachability_target_kind("bogus") is None
+    assert (
+        _runtime_reachability_from_cache_row(
+            {
+                "target_qualname": "pkg.mod:fn",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "target_kind": "bogus",
+                "framework": "fastapi",
+                "edge_kind": "registers_handler",
+                "confidence": "high",
+                "evidence": "route",
+                "evidence_symbol": "get",
+                "source_qualname": "pkg.mod:router",
+            }
+        )
+        is None
+    )
+
+
 def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() -> None:
     assert _api_param_spec_from_cache_dict([]) is None
     assert (

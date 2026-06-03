@@ -92,6 +92,32 @@ def _make_fake_git_run(
     return _run
 
 
+def test_cached_report_untrusted_when_report_mtime_older_than_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, report_path, report_doc = _git_root_and_report_doc(
+        tmp_path,
+        items=["pkg/a.py"],
+        old_ts=100,
+    )
+    fake_run = _make_fake_git_run(
+        tracked_out="pkg/a.py\n",
+        head_stdout="deadbeef\n",
+        git_log_stdout="9999999999\n",
+        fail_cmd=None,
+    )
+    monkeypatch.setattr("codeclone.memory.report_trust.subprocess.run", fake_run)
+
+    reason = cached_report_untrusted_reason(
+        root_path=root,
+        report_path=report_path,
+        report_document=report_doc,
+    )
+    assert reason is not None
+    assert "older than current git HEAD" in reason
+
+
 def test_cached_report_untrusted_reason_scan_root_mismatch(tmp_path: Path) -> None:
     root = tmp_path / "root"
     other = tmp_path / "other"

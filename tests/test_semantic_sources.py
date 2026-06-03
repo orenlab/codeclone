@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import dataclasses
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -118,3 +119,65 @@ def test_audit_index_source_projects_summary_column(tmp_path: Path) -> None:
     assert projections[0].source == "audit"
     assert projections[0].kind == "intent.declared"
     assert "recover after MCP restart" in projections[0].text
+
+
+def test_audit_index_source_skips_whitespace_only_summary(tmp_path: Path) -> None:
+    from codeclone.audit.schema import ensure_schema
+
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO controller_events "
+            "(event_id, event_type, severity, created_at_utc, "
+            "repo_root_digest, agent_label, agent_pid, status, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "evt-ws",
+                EVENT_INTENT_DECLARED,
+                "info",
+                "2026-06-02T10:00:00Z",
+                "digest",
+                "agent",
+                1,
+                "active",
+                "   ",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    source = AuditIndexSource(enabled=True, db_path=db_path)
+    assert list(source.iter_projections()) == []
+
+
+def test_audit_index_source_tolerates_sqlite_errors(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    db_path.write_text("not sqlite", encoding="utf-8")
+    source = AuditIndexSource(enabled=True, db_path=db_path)
+    assert source.available() is True
+    assert list(source.iter_projections()) == []
+
+
+def test_memory_index_source_paginates_records() -> None:
+    project_id = "proj-page"
+    records = [
+        _prose(project_id, statement=f"recover note {index}") for index in range(250)
+    ]
+    subjects = {
+        record.id: [
+            MemorySubject(
+                id=f"s-{record.id}",
+                memory_id=record.id,
+                subject_kind="path",
+                subject_key=f"codeclone/p{record.id}.py",
+            )
+        ]
+        for record in records
+    }
+    store = _FakeStore(records, subjects)
+    projections = list(
+        MemoryIndexSource(store, project_id=project_id).iter_projections()
+    )
+    assert len(projections) == 250

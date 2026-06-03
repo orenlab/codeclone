@@ -57,6 +57,7 @@ def _sample_record() -> MemoryRecord:
 def test_tokenize_and_fts_match_modes() -> None:
     assert tokenize_query("  ") == ()
     assert tokenize_query("a") == ()
+    assert tokenize_query("foo foo bar") == ("foo", "bar")
     any_expr = fts_match_expression("MCP change", match_mode="any")
     all_expr = fts_match_expression("MCP change", match_mode="all")
     assert any_expr is not None

@@ -520,6 +520,23 @@ def test_workspace_intent_private_edge_helpers(
     monkeypatch.setattr(os, "kill", raise_process_lookup)
     assert workspace_intents._is_pid_alive(123) is False
 
+    from codeclone.surfaces.mcp._workspace_intent_lifecycle import is_orphaned
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intent_lifecycle.is_pid_alive",
+        lambda _pid: False,
+    )
+    assert is_orphaned(_record()) is True
+
+    from codeclone.surfaces.mcp._workspace_intent_lifecycle import (
+        is_lease_expired,
+        lease_expiry,
+    )
+
+    broken_lease = replace(_record(), lease_renewed_at_utc="not-a-timestamp")
+    assert lease_expiry(broken_lease) is None
+    assert is_lease_expired(broken_lease) is True
+
     path = tmp_path / "intent.json"
     path.write_text("{}", "utf-8")
 

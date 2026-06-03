@@ -63,3 +63,14 @@ def test_subject_matches_scope_accepts_module_subject_for_path_scope() -> None:
         subject_matches_scope("codeclone.memory.ingest.mcp_sync", scope_paths=scope)
         == 1.0
     )
+
+
+def test_subject_matches_scope_partial_for_nested_paths() -> None:
+    scope = expand_scope_paths(frozenset({"codeclone/memory"}))
+    assert (
+        subject_matches_scope("codeclone/memory/ingest/mcp_sync.py", scope_paths=scope)
+        == 0.8
+    )
+    assert (
+        subject_matches_scope("codeclone.memory.ingest.child", scope_paths=scope) == 0.8
+    )

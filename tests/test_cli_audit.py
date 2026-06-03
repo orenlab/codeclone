@@ -626,6 +626,47 @@ def test_short_agent(value: str | None, expected: str) -> None:
 
 
 @pytest.mark.parametrize(
+    ("kind", "value", "expected"),
+    [
+        ("intent", "intent-abcdef12-001", "abcdef12-001"),
+        ("run", "abcdef1234567890", "run:abcdef12"),
+        ("event", "evt-long-id-here", "evt-long-id-here"),
+        ("event", "", "-"),
+        ("other", "custom", "custom"),
+        ("other", "", "-"),
+    ],
+)
+def test_short_workflow(kind: str, value: str, expected: str) -> None:
+    from codeclone.surfaces.cli.audit import _short_workflow
+
+    assert _short_workflow(kind, value) == expected
+
+
+def test_audit_plain_output_includes_retention_days(tmp_path: Path) -> None:
+    _write_audit_event(tmp_path)
+    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO audit_meta (key, value) "
+            "VALUES ('retention_days', '14')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    printer = _RecordingPrinter()
+    exit_code = render_audit(
+        console=printer,
+        root_path=tmp_path,
+        audit_enabled=True,
+        audit_path=".cache/codeclone/db/audit.sqlite3",
+        quiet=False,
+    )
+    assert exit_code == int(ExitCode.SUCCESS)
+    assert "14 days" in printer.text
+
+
+@pytest.mark.parametrize(
     ("delta", "suffix"),
     [
         (timedelta(seconds=30), "s ago"),

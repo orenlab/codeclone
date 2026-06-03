@@ -10,7 +10,11 @@ from dataclasses import replace
 from pathlib import Path
 
 from codeclone.memory.models import MemorySubject, RecordBatch, generate_memory_id
-from codeclone.memory.staleness import apply_refresh_staleness, apply_scope_staleness
+from codeclone.memory.staleness import (
+    apply_refresh_staleness,
+    apply_scope_staleness,
+    inventory_paths_from_report,
+)
 from tests.memory_fixtures import make_module_record, memory_store
 
 
@@ -123,3 +127,68 @@ def test_scope_staleness_skips_already_stale_records(tmp_path: Path) -> None:
             changed_paths=("pkg/mod.py",),
         )
         assert result.records_marked_stale == 0
+
+
+def test_inventory_paths_from_report_normalizes_and_skips_blanks() -> None:
+    paths = inventory_paths_from_report(
+        {
+            "inventory": {
+                "file_registry": {
+                    "items": ["", "pkg\\a.py", "pkg/b.py"],
+                }
+            }
+        }
+    )
+    assert paths == frozenset({"pkg/a.py", "pkg/b.py"})
+
+
+def test_refresh_marks_linked_path_missing(tmp_path: Path) -> None:
+    report = {"inventory": {"file_registry": {"items": ["pkg/kept.py"]}}}
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        record = make_module_record(project.id, "pkg.orphan")
+        store.upsert_record(record)
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=record.id,
+                subject_kind="path",
+                subject_key="pkg/missing.py",
+                relation="about",
+            )
+        )
+        report_result = apply_refresh_staleness(
+            store,
+            project_id=project.id,
+            batch=RecordBatch(records=[record]),
+            report_document=report,
+        )
+        loaded = store.find_record(record.id)
+        assert report_result.records_marked_stale == 1
+        assert loaded is not None
+        assert loaded.stale_reason == "linked_path_missing"
+
+
+def test_refresh_marks_linked_test_missing(tmp_path: Path) -> None:
+    report: dict[str, object] = {"inventory": {"file_registry": {"items": []}}}
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        record = make_module_record(project.id, "tests.anchor")
+        store.upsert_record(record)
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=record.id,
+                subject_kind="test",
+                subject_key="tests/test_missing.py",
+                relation="about",
+            )
+        )
+        report_result = apply_refresh_staleness(
+            store,
+            project_id=project.id,
+            batch=RecordBatch(records=[record]),
+            report_document=report,
+        )
+        loaded = store.find_record(record.id)
+        assert report_result.records_marked_stale == 1
+        assert loaded is not None
+        assert loaded.stale_reason == "linked_test_missing"

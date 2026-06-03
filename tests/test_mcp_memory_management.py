@@ -383,3 +383,44 @@ def test_mcp_resolve_memory_scope_paths_and_blast_dependents_edges(
             ),
         )
         assert service._memory_blast_dependents(root, ("pkg/mod.py",)) == frozenset()
+
+
+def test_mcp_get_relevant_memory_requires_scope_intent_or_symbols(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    with pytest.raises(
+        MCPServiceContractError, match="requires scope, intent_id, or symbols"
+    ):
+        service.get_relevant_memory(root=str(tmp_path.resolve()))
+
+
+def test_mcp_get_relevant_memory_symbols_only(tmp_path: Path) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            symbols=["codeclone.memory"],
+            max_records=5,
+        )
+        assert payload["scope_resolved_from"] == "symbols"
+        assert payload["project_id"] == project.id
+
+
+def test_mcp_get_relevant_memory_wraps_memory_contract_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        monkeypatch.setattr(
+            "codeclone.surfaces.mcp._session_memory_mixin.get_relevant_memory",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                MemoryContractError("scope path invalid")
+            ),
+        )
+        with pytest.raises(MCPServiceContractError, match="scope path invalid"):
+            service.get_relevant_memory(
+                root=str(root.resolve()),
+                scope=("pkg/mod.py",),
+            )

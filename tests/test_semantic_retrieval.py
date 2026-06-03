@@ -11,7 +11,7 @@ from pathlib import Path
 
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
 from codeclone.memory.models import MemoryRecord, MemorySubject
-from codeclone.memory.retrieval.semantic import semantic_search
+from codeclone.memory.retrieval.semantic import audit_event_row, semantic_search
 from codeclone.memory.semantic.models import (
     SemanticHit,
     SemanticIndexStatus,
@@ -140,3 +140,26 @@ def test_hydrates_audit_hit_from_summary(tmp_path: Path) -> None:
     assert result.status == "active"
     assert result.subject_path is None
     assert "recover after MCP restart" in result.preview
+
+
+def test_audit_event_row_missing_db_returns_none(tmp_path: Path) -> None:
+    assert audit_event_row(tmp_path / "missing.sqlite3", "evt-1") is None
+
+
+def test_audit_event_row_skips_blank_summary(tmp_path: Path) -> None:
+    audit_db = tmp_path / "audit.sqlite3"
+    insert_audit_event(
+        audit_db,
+        event_id="evt-blank",
+        event_type="intent.declared",
+        status="active",
+        summary="   ",
+    )
+    assert audit_event_row(audit_db, "evt-blank") is None
+
+
+def test_stale_audit_hit_is_skipped(tmp_path: Path) -> None:
+    index = _FakeIndex(
+        [SemanticHit(source_id="missing-evt", source="audit", score=0.7)]
+    )
+    assert _search(index, None, audit=tmp_path / "audit.sqlite3") == []

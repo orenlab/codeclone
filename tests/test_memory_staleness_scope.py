@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from codeclone.memory.models import MemorySubject, generate_memory_id
 from codeclone.memory.staleness import apply_scope_staleness
@@ -36,3 +38,26 @@ def test_apply_scope_staleness_marks_touched_paths(tmp_path: Path) -> None:
         assert reloaded is not None
         assert reloaded.status == "stale"
         assert reloaded.stale_reason == "scope_files_changed"
+
+
+def test_apply_scope_staleness_skips_records_already_marked_stale(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        stale = replace(
+            make_module_record(project.id, "pkg.stale"),
+            status="stale",
+            stale_reason="seed",
+        )
+        store.upsert_record(stale)
+        with patch.object(
+            store,
+            "list_records_for_project",
+            return_value=[stale],
+        ):
+            report = apply_scope_staleness(
+                store,
+                project_id=project.id,
+                changed_paths=["pkg/stale.py"],
+            )
+        assert report.records_marked_stale == 0

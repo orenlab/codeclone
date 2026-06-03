@@ -126,3 +126,15 @@ def test_rebuild_prunes_stale_ids() -> None:
     assert report.indexed == 1
     assert report.deleted == 1
     assert {row.id for row in writer.rows} == {"new"}
+
+
+def test_rebuild_available_source_with_empty_projections() -> None:
+    writer = _FakeWriter()
+    provider = DeterministicHashEmbeddingProvider(dimension=8)
+    source = _FakeSource("memory", [], available=True)
+
+    report = rebuild_semantic_index(writer=writer, provider=provider, sources=[source])
+
+    assert report.indexed == 0
+    assert report.by_source == {}
+    assert writer.rows == []

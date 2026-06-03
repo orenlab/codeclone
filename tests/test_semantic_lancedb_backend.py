@@ -15,6 +15,7 @@ from codeclone.memory.semantic import (
     resolve_semantic_index,
     resolve_semantic_index_writer,
 )
+from codeclone.memory.semantic.lancedb_backend import LanceDbSemanticIndex
 from codeclone.memory.semantic.models import SemanticRow
 
 # The backend is the optional `semantic-lancedb` extra; skip when absent.
@@ -116,3 +117,48 @@ def test_lancedb_backend_upsert_is_idempotent_by_id(tmp_path: Path) -> None:
     writer.upsert([_row("dup", vec)])  # same id -> merge, not duplicate
     assert writer.known_ids() == {"dup"}
     assert writer.status().indexed_count == 1
+
+
+def test_lancedb_backend_no_table_search_and_delete_are_noops(tmp_path: Path) -> None:
+    index = LanceDbSemanticIndex(
+        path=tmp_path / "empty.lance", dimension=4, create=False
+    )
+    assert index.status().available is False
+    assert index.status().reason == "not_built"
+    assert index.search([0.0, 0.0, 0.0, 0.0], k=3) == []
+    assert index.known_ids() == set()
+    index.delete([])
+    index.delete(["missing-table"])
+    index.upsert([])
+
+
+def test_lancedb_backend_upsert_creates_table_and_delete_nonempty(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, dimension=4)
+    writer = LanceDbSemanticIndex(
+        path=Path(config.index_path), dimension=config.dimension, create=False
+    )
+    assert writer._table is None
+    provider = resolve_embedding_provider(config)
+    (vec,) = provider.embed(["create on first upsert"])
+    writer.upsert([_row("first", vec)])
+    assert writer.status().indexed_count == 1
+    writer.delete(["first"])
+    assert writer.known_ids() == set()
+
+
+def test_lancedb_backend_open_table_propagates_unexpected_value_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index = LanceDbSemanticIndex(
+        path=tmp_path / "broken.lance", dimension=4, create=False
+    )
+
+    def _boom(_name: str) -> object:
+        raise ValueError("unexpected lancedb failure")
+
+    monkeypatch.setattr(index._db, "open_table", _boom)
+    with pytest.raises(ValueError, match="unexpected lancedb failure"):
+        index._open_table(create=False)

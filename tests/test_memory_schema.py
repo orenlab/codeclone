@@ -19,6 +19,7 @@ from codeclone.memory.schema import (
     get_meta,
     open_memory_db,
 )
+from codeclone.memory.schema_migrate import migrate_memory_schema
 
 
 def test_open_memory_db_enables_foreign_keys(tmp_path: Path) -> None:
@@ -74,5 +75,25 @@ def test_ensure_schema_rejects_unsupported_version(tmp_path: Path) -> None:
         conn.commit()
         with pytest.raises(MemorySchemaError, match="Unsupported engineering memory"):
             ensure_schema(conn)
+    finally:
+        conn.close()
+
+
+def test_migrate_memory_schema_noop_without_meta(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        migrate_memory_schema(conn)
+        assert get_meta(conn, "schema_version") is None
+    finally:
+        conn.close()
+
+
+def test_migrate_memory_schema_noop_when_already_current(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = open_memory_db(db_path)
+    try:
+        migrate_memory_schema(conn)
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
     finally:
         conn.close()

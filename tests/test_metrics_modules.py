@@ -28,6 +28,8 @@ from codeclone.metrics.complexity import (
 from codeclone.metrics.coupling import compute_cbo, coupling_risk
 from codeclone.metrics.dead_code import find_suppressed_unused, find_unused
 from codeclone.metrics.dependencies import (
+    _internal_roots,
+    _is_internal_target,
     build_dep_graph,
     build_import_graph,
     depth_profile,
@@ -52,6 +54,15 @@ def _parse_named_node(
         ):
             return node
     raise AssertionError(f"top-level node {name!r} not found")
+
+
+def test_dependency_internal_roots_and_target_guards() -> None:
+    dep = ModuleDep(source="pkg.a", target="ext.b", import_type="import", line=1)
+    roots = _internal_roots(["pkg.mod"], [dep])
+    assert roots == frozenset(["pkg"])
+    assert _is_internal_target("", internal_roots=roots) is False
+    assert _is_internal_target("pkg.sub", internal_roots=roots) is True
+    assert _is_internal_target("ext.b", internal_roots=roots) is False
 
 
 def test_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:

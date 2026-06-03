@@ -12,10 +12,12 @@ from pathlib import Path
 import pytest
 
 from codeclone.config.memory import resolve_memory_config
+from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
 from codeclone.memory.models import MemorySubject, generate_memory_id
 from codeclone.memory.project import resolve_memory_db_path, resolve_project_identity
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
-from codeclone.surfaces.cli.memory import memory_main
+from codeclone.surfaces.cli.memory import _render_semantic_text, memory_main
+from codeclone.surfaces.cli.memory_render import memory_console
 from tests.memory_fixtures import make_module_record
 
 
@@ -184,3 +186,88 @@ def test_memory_search_semantic_flag_blends_ranking(
     out = capsys.readouterr().out
     assert "semantic: on" in out
     assert "diagnostic" in out
+
+
+def test_semantic_search_text_renders_ranked_hits(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pytest.importorskip("lancedb")
+    _seed_semantic_repo(
+        tmp_path, statement="recover after MCP restart uses the checkpoint workflow"
+    )
+    capsys.readouterr()
+    code = memory_main(
+        ["semantic", "search", "recover restart", "--root", str(tmp_path)]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "Semantic matches for: recover restart" in out
+    assert "score=" in out
+    assert "subject: codeclone/x.py" in out
+    assert "recover after MCP restart" in out
+
+
+def test_semantic_status_shows_provider_when_index_built(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pytest.importorskip("lancedb")
+    _seed_semantic_repo(tmp_path, statement="recover checkpoint workflow")
+    capsys.readouterr()
+    code = memory_main(["semantic", "status", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "semantic index: available" in out
+    assert "provider: diagnostic-hash" in out
+
+
+def test_semantic_rebuild_requires_memory_database(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    pytest.importorskip("lancedb")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone.memory.semantic]\nenabled = true\ndimension = 64\n",
+        encoding="utf-8",
+    )
+    code = memory_main(["semantic", "rebuild", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code != 0
+    assert "Engineering memory database not found" in out
+    assert "codeclone memory init" in out
+
+
+def test_memory_coverage_rejects_invalid_scope_path(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from tests.memory_fixtures import cli_memory_repo
+
+    with cli_memory_repo(tmp_path) as (root, _project, _store):
+        code = memory_main(["coverage", ".", "--root", str(root)])
+    out = capsys.readouterr().out
+    assert code != 0
+    assert "not a valid memory scope" in out.lower()
+
+
+def test_memory_for_path_rejects_root_scope(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = memory_main(["for-path", ".", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code != 0
+    assert "not a valid memory scope" in out.lower()
+
+
+def test_render_semantic_text_reports_no_matches(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = resolve_memory_config(tmp_path)
+    provider = DeterministicHashEmbeddingProvider(dimension=config.semantic.dimension)
+    code = _render_semantic_text(
+        console=memory_console(),
+        query="empty",
+        config=config,
+        provider=provider,
+        results=[],
+    )
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "(no matches)" in out

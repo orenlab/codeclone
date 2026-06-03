@@ -83,3 +83,37 @@ def test_gate_decision_ignores_terminal_and_non_active_records() -> None:
     )
     assert decision.allowed is False
     assert decision.reason == "no_active_intent"
+
+
+def test_gate_decision_queued_reports_ignored_history() -> None:
+    records = [
+        _record(status="accepted"),
+        _record(status="queued"),
+    ]
+    decision = gate_mod._decision_from_records(
+        records,
+        registry_backend="file",
+        registry_path=".cache/codeclone/intents",
+    )
+    assert decision.allowed is False
+    assert decision.reason == "queued_intent_not_editable"
+    assert decision.details.get("ignored_records") == 1
+
+
+def test_gate_file_registry_skips_invalid_payload_files(tmp_path: Path) -> None:
+    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir.mkdir(parents=True)
+    (intents_dir / "bad.json").write_text("not-json", encoding="utf-8")
+    records = gate_mod._load_file_records(tmp_path)
+    assert records == ()
+
+
+def test_gate_load_registry_records_file_backend(tmp_path: Path) -> None:
+    from codeclone.config.intent_registry import IntentRegistryConfig
+
+    config = IntentRegistryConfig(
+        backend="file",
+        storage_path=tmp_path / ".cache/codeclone/intents",
+    )
+    records = gate_mod._load_registry_records_read_only(tmp_path, config)
+    assert records == ()

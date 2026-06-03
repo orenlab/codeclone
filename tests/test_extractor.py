@@ -1577,6 +1577,17 @@ target = loader()[name]
     assert reachability_mod._resolve_symbol(ast.Constant(value=1), {}) is None
 
 
+def test_runtime_binding_collect_first_arg_object_requires_args() -> None:
+    visitor = reachability_mod._RuntimeBindingVisitor(aliases={})
+    visitor.objects["app"] = "aiohttp_app"
+    stmt = ast.parse("app.add_routes()").body[0]
+    assert isinstance(stmt, ast.Expr)
+    call = stmt.value
+    assert isinstance(call, ast.Call)
+    visitor._collect_runtime_registration(call)
+    assert visitor.included_routers == set()
+
+
 def test_runtime_reachability_internal_guards_stay_safe() -> None:
     empty_collector = QualnameCollector()
     visitor = reachability_mod._RuntimeReachabilityVisitor(

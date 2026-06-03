@@ -68,6 +68,18 @@ enabled = true
     assert config.semantic.enabled is True
 
 
+def test_memory_table_must_be_object(tmp_path: Path) -> None:
+    _write_pyproject(
+        tmp_path,
+        """
+[tool.codeclone]
+memory = 1
+""",
+    )
+    with pytest.raises(ConfigValidationError, match="memory' must be object"):
+        resolve_memory_config(tmp_path)
+
+
 def test_semantic_rejects_unknown_key(tmp_path: Path) -> None:
     _write_pyproject(
         tmp_path,
@@ -134,3 +146,85 @@ def test_semantic_env_override_invalid_value_fails_clear(
     monkeypatch.setenv("CODECLONE_MEMORY_SEMANTIC_ENABLED", "maybe")
     with pytest.raises(ValueError, match=r"memory\.semantic"):
         resolve_memory_config(tmp_path)
+
+
+def test_memory_invalid_mcp_sync_policy(tmp_path: Path) -> None:
+    _write_pyproject(
+        tmp_path,
+        """
+[tool.codeclone.memory]
+mcp_sync_policy = "eventually"
+""",
+    )
+    with pytest.raises(ValueError, match="mcp_sync_policy"):
+        resolve_memory_config(tmp_path)
+
+
+def test_semantic_index_path_must_resolve_to_string(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.config.memory as memory_config_mod
+    from codeclone.config.pyproject_loader import normalize_path_config_value
+
+    _write_pyproject(
+        tmp_path,
+        """
+[tool.codeclone.memory.semantic]
+enabled = true
+index_path = "semantic.lance"
+""",
+    )
+
+    def _bad_index_path(
+        *,
+        key: str,
+        value: object,
+        root_path: Path,
+        path_config_keys: frozenset[str] | set[str] = frozenset(),
+    ) -> object:
+        if key == "index_path":
+            return 42
+        return normalize_path_config_value(
+            key=key,
+            value=value,
+            root_path=root_path,
+            path_config_keys=path_config_keys,
+        )
+
+    monkeypatch.setattr(
+        memory_config_mod, "normalize_path_config_value", _bad_index_path
+    )
+    with pytest.raises(TypeError, match="index_path must resolve to a string"):
+        resolve_memory_config(tmp_path)
+
+
+def test_format_semantic_error_fallback_when_validation_has_no_entries() -> None:
+    from pydantic import ValidationError
+
+    from codeclone.config.memory import _format_semantic_error
+
+    exc = ValidationError.from_exception_data("SemanticConfig", [])
+    assert (
+        _format_semantic_error(exc)
+        == "Invalid tool.codeclone.memory.semantic configuration"
+    )
+
+
+def test_format_semantic_error_includes_field_path() -> None:
+    from pydantic import ValidationError
+
+    from codeclone.config.memory import SemanticConfig, _format_semantic_error
+
+    with pytest.raises(ValidationError) as exc_info:
+        SemanticConfig.model_validate({"dimension": 0})
+    message = _format_semantic_error(exc_info.value)
+    assert "dimension" in message
+    assert "greater than" in message.lower() or "greater_than" in message
+
+
+def test_memory_int_rejects_non_integer_values() -> None:
+    from codeclone.config.memory import _memory_int
+
+    with pytest.raises(ValueError, match="max_records"):
+        _memory_int("lots", key="max_records")

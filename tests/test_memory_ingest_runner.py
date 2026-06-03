@@ -18,6 +18,7 @@ from codeclone.memory.ingest.runner import (
     planned_type_counts,
     run_memory_init,
 )
+from codeclone.memory.models import RecordBatch
 from codeclone.memory.project import (
     GitProvenance,
     analysis_fingerprint_from_report,
@@ -34,6 +35,7 @@ from .memory_fixtures import (
     REPO_ROOT,
     git_repo_with_cached_report,
     load_memory_init_report_document,
+    make_module_record,
 )
 
 
@@ -136,11 +138,89 @@ def test_build_init_batch_on_codeclone_repository() -> None:
     assert counts.get("contract_note", 0) >= 1
 
 
-def test_enrich_batch_git_evidence_noop_when_git_unavailable() -> None:
-    from codeclone.memory.models import RecordBatch
+def test_build_init_batch_rejects_invalid_project_and_git_types(
+    tmp_path: Path,
+) -> None:
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    git = read_git_provenance(root)
+    with pytest.raises(TypeError, match="MemoryProject"):
+        build_init_batch(
+            root_path=root,
+            project=object(),
+            report_document=report_document,
+            git=git,
+            report_digest=None,
+            analysis_fingerprint=None,
+            options=InitOptions(),
+        )
+    project = resolve_project_identity(root)
+    with pytest.raises(TypeError, match="GitProvenance"):
+        build_init_batch(
+            root_path=root,
+            project=project,
+            report_document=report_document,
+            git=object(),
+            report_digest=None,
+            analysis_fingerprint=None,
+            options=InitOptions(),
+        )
 
+
+def test_build_init_batch_tolerates_sparse_report_inventory(tmp_path: Path) -> None:
+    root, _report_path, _report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    batch = build_init_batch(
+        root_path=root,
+        project=project,
+        report_document={},
+        git=git,
+        report_digest=None,
+        analysis_fingerprint=None,
+        options=InitOptions(include_docs=False, include_tests=False),
+    )
+    assert batch.records == []
+
+
+def test_enrich_batch_git_evidence_noop_when_git_unavailable() -> None:
     batch = RecordBatch()
     git = GitProvenance(remote=None, branch=None, head=None, available=False)
+    enrich_batch_git_evidence(batch, git)
+    assert batch.evidence == []
+
+
+def test_enrich_batch_git_evidence_appends_head_for_records() -> None:
+    record = make_module_record("proj-1", "pkg/mod.py")
+    batch = RecordBatch(records=[record], evidence=[])
+    git = GitProvenance(
+        remote="origin",
+        branch="main",
+        head="abc123def456",
+        available=True,
+    )
+    enrich_batch_git_evidence(batch, git)
+    assert len(batch.evidence) == 1
+    assert batch.evidence[0].memory_id == record.id
+    assert batch.evidence[0].evidence_kind == "git_commit"
+
+
+def test_enrich_batch_git_evidence_skips_when_head_missing() -> None:
+    record = make_module_record("proj-1", "pkg/mod.py")
+    batch = RecordBatch(records=[record], evidence=[])
+    git = GitProvenance(
+        remote="origin",
+        branch="main",
+        head=None,
+        available=True,
+    )
     enrich_batch_git_evidence(batch, git)
     assert batch.evidence == []
 
