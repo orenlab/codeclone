@@ -23,6 +23,8 @@ artifacts.
 - **Changed-files review** — `Review Changes` scopes analysis to the current diff via a configurable git ref
 - **Blast Radius** — `Show Blast Radius` renders a concentric SVG diagram of structural
   impact for the active file; `Copy Blast Radius Brief` puts a Markdown summary on the clipboard
+- **Session & audit insights** — `Show Session Stats` and `Show Controller Audit Trail` mirror
+  CLI `--session-stats` and `--audit` in read-only webviews (IDE-only MCP tools, not exposed to agents)
 - **Coverage Join** — integrates `coverage.xml` to surface untested hotspots when available
 - **Source-first navigation** — `Reveal Source` opens the exact location; `Next / Previous Hotspot`
   steps through active targets in the editor
@@ -121,6 +123,37 @@ Both commands are available from the editor title context menu and the command
 palette when a run is active and the workspace is trusted. The webview uses
 `enableScripts: false` and a nonce-scoped Content Security Policy with no
 external resource access.
+
+### Session stats & controller audit
+
+Workspace coordination dashboards (no analysis run required beyond MCP connection):
+
+- **Show Session Stats** — live agents, change intents, lease health, latest cached
+  run summary, and audit token footprint (`get_workspace_session_stats`)
+- **Show Controller Audit Trail** — recent controller events when `audit_enabled=true`
+  (`get_controller_audit_trail`)
+- **Copy Session Stats Brief** / **Copy Controller Audit Brief** — Markdown summaries
+  for review notes
+
+Available from the **Session** view title bar when the workspace is trusted and connected.
+These MCP tools register only when the extension launches the server with
+`--ide-governance-channel`; agent clients on the default `codeclone-mcp` launcher do not
+see them in `list_tools`.
+
+### Memory (inbox + search)
+
+The **Memory** view remains the governance inbox (draft approve/reject). Search
+is separate so the tree stays focused on human review work:
+
+- **Search Engineering Memory** — keyword QuickPick (`query_engineering_memory`
+  mode=search; optional semantic re-rank via settings)
+- **Memory for Active File** — records bound to the current editor path
+  (mode=for_path)
+- **Open Memory Search Panel** — read-only results webview (CSP, no scripts,
+  allowlisted `command:` links to open a record)
+
+Use **Configure Memory Search** to adjust semantic recall, drafts/stale filters,
+and result limits per workspace.
 
 ---
 

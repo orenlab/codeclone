@@ -18,21 +18,26 @@ from unittest.mock import patch
 import pytest
 from rich.console import Console
 
+import codeclone.controller_insights.session_stats as insights_mod
 import codeclone.surfaces.cli.session_stats as session_stats_mod
 from codeclone.contracts import ExitCode
-from codeclone.surfaces.cli.session_stats import (
-    _AgentSnapshot,
+from codeclone.controller_insights.session_stats import (
+    AgentSnapshot,
+    IntentSnapshot,
+    SessionSnapshot,
+    WorkflowFootprintSnapshot,
     _classify_workspace_health,
     _format_age,
     _format_duration,
     _has_scope_overlap,
-    _IntentSnapshot,
     _is_pid_alive,
     _lease_remaining_seconds,
+    _read_audit_config,
+    _read_audit_token_footprint,
     _read_cached_report,
-    _WorkflowFootprintSnapshot,
-    render_session_stats,
+    collect_session_snapshot,
 )
+from codeclone.surfaces.cli.session_stats import render_session_stats
 from codeclone.surfaces.cli.types import PrinterLike
 from codeclone.surfaces.mcp._workspace_intents import (
     MIN_LEASE_SECONDS,
@@ -149,7 +154,7 @@ def _render_rich_session_stats(root: Path, *, width: int = 120) -> str:
 
 
 def _render_rich_snapshot(
-    snapshot: session_stats_mod._SessionSnapshot,
+    snapshot: SessionSnapshot,
     *,
     width: int = 120,
 ) -> str:
@@ -165,7 +170,7 @@ def _render_rich_snapshot(
 
 def _snapshot(
     *,
-    agents: tuple[_AgentSnapshot, ...] = (),
+    agents: tuple[AgentSnapshot, ...] = (),
     workspace_health: str = "idle",
     latest_run_id: str | None = None,
     latest_run_health: int | None = None,
@@ -176,9 +181,9 @@ def _snapshot(
     mcp_token_footprint: int | None = None,
     mcp_token_encoding: str | None = None,
     mcp_token_event_count: int = 0,
-    top_workflows: tuple[_WorkflowFootprintSnapshot, ...] = (),
-) -> session_stats_mod._SessionSnapshot:
-    return session_stats_mod._SessionSnapshot(
+    top_workflows: tuple[WorkflowFootprintSnapshot, ...] = (),
+) -> SessionSnapshot:
+    return SessionSnapshot(
         root=Path("/tmp/test"),
         agents=agents,
         stale_count=0,
@@ -207,8 +212,8 @@ def _workflow_snapshot(
     calls: int = 5,
     tokens: int = 4200,
     agent: str = "test-agent",
-) -> _WorkflowFootprintSnapshot:
-    return _WorkflowFootprintSnapshot(
+) -> WorkflowFootprintSnapshot:
+    return WorkflowFootprintSnapshot(
         workflow_kind=workflow_kind,
         workflow_id=workflow_id,
         call_count=calls,
@@ -238,7 +243,7 @@ def _snapshot_with_audit_and_run(
     findings: int = 3,
     age_seconds: int = 12,
     files: int | None = None,
-) -> session_stats_mod._SessionSnapshot:
+) -> SessionSnapshot:
     return replace(
         _snapshot(
             latest_run_id="run1234567890",
@@ -318,7 +323,7 @@ def test_session_stats_stale_quiet(tmp_path: Path) -> None:
     )
     printer = _RecordingPrinter()
 
-    with patch.object(session_stats_mod, "_is_pid_alive", return_value=False):
+    with patch.object(insights_mod, "_is_pid_alive", return_value=False):
         exit_code = render_session_stats(
             console=printer,
             root_path=tmp_path,
@@ -456,16 +461,16 @@ def test_session_stats_verbose_truncates_allowed_files(tmp_path: Path) -> None:
 
 def test_session_stats_verbose_handles_empty_allowed_files(tmp_path: Path) -> None:
     printer = _RecordingPrinter()
-    snapshot = session_stats_mod._SessionSnapshot(
+    snapshot = SessionSnapshot(
         root=tmp_path,
         agents=(
-            _AgentSnapshot(
+            AgentSnapshot(
                 pid=123,
                 start_epoch=int(time.time()),
                 label="agent",
                 alive=True,
                 intents=(
-                    _IntentSnapshot(
+                    IntentSnapshot(
                         intent_id="intent-empty-files",
                         status="active",
                         ownership="foreign_active",
@@ -579,7 +584,7 @@ def test_session_stats_contract_error(
 
     monkeypatch.setattr(
         session_stats_mod,
-        "_collect_session_snapshot",
+        "collect_session_snapshot",
         raise_collection_error,
     )
     printer = _RecordingPrinter()
@@ -616,8 +621,8 @@ def test_collect_session_snapshot_tolerates_non_list_allowed_files(
         "codeclone.surfaces.mcp._workspace_intents.list_workspace_intent_records_for_recovery",
         lambda **_: (record,),
     )
-    monkeypatch.setattr(session_stats_mod, "_process_start_epoch", lambda: 100)
-    snapshot = session_stats_mod._collect_session_snapshot(tmp_path)
+    monkeypatch.setattr(insights_mod, "_process_start_epoch", lambda: 100)
+    snapshot = collect_session_snapshot(tmp_path)
     assert len(snapshot.agents) == 1
     assert snapshot.agents[0].intents[0].allowed_files == ()
 
@@ -650,16 +655,14 @@ def test_session_stats_counts_expired_stale_and_recoverable(
         start_epoch=own_start_epoch - 4000,
     )
 
+    monkeypatch.setattr(insights_mod, "_process_start_epoch", lambda: own_start_epoch)
     monkeypatch.setattr(
-        session_stats_mod, "_process_start_epoch", lambda: own_start_epoch
-    )
-    monkeypatch.setattr(
-        session_stats_mod,
+        insights_mod,
         "_is_pid_alive",
         lambda pid: pid == os.getpid(),
     )
 
-    snapshot = session_stats_mod._collect_session_snapshot(tmp_path)
+    snapshot = collect_session_snapshot(tmp_path)
 
     assert snapshot.stale_count == 1
     assert snapshot.recoverable_count == 1
@@ -682,8 +685,8 @@ def test_session_stats_groups_multiple_intents_per_agent(
             allowed_files=[f"src/{index}.py"],
         )
 
-    monkeypatch.setattr(session_stats_mod, "_process_start_epoch", lambda: start_epoch)
-    snapshot = session_stats_mod._collect_session_snapshot(tmp_path)
+    monkeypatch.setattr(insights_mod, "_process_start_epoch", lambda: start_epoch)
+    snapshot = collect_session_snapshot(tmp_path)
 
     assert len(snapshot.agents) == 1
     assert len(snapshot.agents[0].intents) == 2
@@ -784,13 +787,13 @@ def test_classify_idle_no_agents() -> None:
 
 
 def test_classify_clean_no_active_intents() -> None:
-    agent = _AgentSnapshot(
+    agent = AgentSnapshot(
         pid=1,
         start_epoch=1,
         label="a",
         alive=True,
         intents=(
-            _IntentSnapshot(
+            IntentSnapshot(
                 intent_id="i",
                 status="clean",
                 ownership="own_active",
@@ -808,13 +811,13 @@ def test_classify_clean_no_active_intents() -> None:
 
 
 def test_classify_active_with_active_intent() -> None:
-    agent = _AgentSnapshot(
+    agent = AgentSnapshot(
         pid=1,
         start_epoch=1,
         label="a",
         alive=True,
         intents=(
-            _IntentSnapshot(
+            IntentSnapshot(
                 intent_id="i",
                 status="active",
                 ownership="own_active",
@@ -832,7 +835,7 @@ def test_classify_active_with_active_intent() -> None:
 
 
 def test_classify_contested_overlapping_scope() -> None:
-    intent_a = _IntentSnapshot(
+    intent_a = IntentSnapshot(
         intent_id="ia",
         status="active",
         ownership="own_active",
@@ -841,7 +844,7 @@ def test_classify_contested_overlapping_scope() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    intent_b = _IntentSnapshot(
+    intent_b = IntentSnapshot(
         intent_id="ib",
         status="active",
         ownership="foreign_active",
@@ -850,10 +853,10 @@ def test_classify_contested_overlapping_scope() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    agent_a = _AgentSnapshot(
+    agent_a = AgentSnapshot(
         pid=1, start_epoch=1, label="a", alive=True, intents=(intent_a,)
     )
-    agent_b = _AgentSnapshot(
+    agent_b = AgentSnapshot(
         pid=2, start_epoch=2, label="b", alive=True, intents=(intent_b,)
     )
     result = _classify_workspace_health(
@@ -863,7 +866,7 @@ def test_classify_contested_overlapping_scope() -> None:
 
 
 def test_classify_active_non_overlapping_agents() -> None:
-    intent_a = _IntentSnapshot(
+    intent_a = IntentSnapshot(
         intent_id="ia",
         status="active",
         ownership="own_active",
@@ -872,7 +875,7 @@ def test_classify_active_non_overlapping_agents() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    intent_b = _IntentSnapshot(
+    intent_b = IntentSnapshot(
         intent_id="ib",
         status="active",
         ownership="foreign_active",
@@ -881,14 +884,14 @@ def test_classify_active_non_overlapping_agents() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    agent_a = _AgentSnapshot(
+    agent_a = AgentSnapshot(
         pid=1,
         start_epoch=1,
         label="a",
         alive=True,
         intents=(intent_a,),
     )
-    agent_b = _AgentSnapshot(
+    agent_b = AgentSnapshot(
         pid=2,
         start_epoch=2,
         label="b",
@@ -907,7 +910,7 @@ def test_classify_active_non_overlapping_agents() -> None:
 
 
 def test_classify_ignores_inactive_empty_scopes() -> None:
-    inactive = _IntentSnapshot(
+    inactive = IntentSnapshot(
         intent_id="ia",
         status="clean",
         ownership="own_active",
@@ -916,7 +919,7 @@ def test_classify_ignores_inactive_empty_scopes() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    empty_active = _IntentSnapshot(
+    empty_active = IntentSnapshot(
         intent_id="ib",
         status="active",
         ownership="foreign_active",
@@ -925,14 +928,14 @@ def test_classify_ignores_inactive_empty_scopes() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    agent_a = _AgentSnapshot(
+    agent_a = AgentSnapshot(
         pid=1,
         start_epoch=1,
         label="a",
         alive=True,
         intents=(inactive,),
     )
-    agent_b = _AgentSnapshot(
+    agent_b = AgentSnapshot(
         pid=2,
         start_epoch=2,
         label="b",
@@ -1090,7 +1093,7 @@ def test_session_stats_rich_no_live_agents() -> None:
     """Exercise Rich path with dead agent only (lines 329-330)."""
     snapshot = _snapshot(
         agents=(
-            _AgentSnapshot(
+            AgentSnapshot(
                 pid=999999,
                 start_epoch=int(time.time()),
                 label="dead-agent",
@@ -1162,7 +1165,7 @@ def test_read_audit_config_enabled_relative_path(tmp_path: Path) -> None:
         tmp_path,
         audit_path=".cache/codeclone/db/audit.sqlite3",
     )
-    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    enabled, storage = _read_audit_config(tmp_path)
     assert enabled is True
     assert storage == ".cache/codeclone/db/audit.sqlite3"
 
@@ -1177,20 +1180,20 @@ def test_read_audit_config_config_validation_error(
         "codeclone.config.pyproject_loader.load_pyproject_config",
         lambda _root: (_ for _ in ()).throw(ConfigValidationError("bad")),
     )
-    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    enabled, storage = _read_audit_config(tmp_path)
     assert enabled is False
     assert storage is None
 
 
 def test_read_audit_config_disabled(tmp_path: Path) -> None:
-    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    enabled, storage = _read_audit_config(tmp_path)
     assert enabled is False
     assert storage is None
 
 
 def test_read_audit_config_enabled_with_absolute_path(tmp_path: Path) -> None:
     _write_audit_pyproject(tmp_path, audit_path="/tmp/audit.sqlite3")
-    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    enabled, storage = _read_audit_config(tmp_path)
     assert enabled is True
     assert storage is None
 
@@ -1205,13 +1208,13 @@ def test_read_audit_config_storage_falls_back_when_not_relative(
         "codeclone.audit.validation.resolve_audit_path",
         lambda **_: outside,
     )
-    enabled, storage = session_stats_mod._read_audit_config(tmp_path)
+    enabled, storage = _read_audit_config(tmp_path)
     assert enabled is True
     assert storage == str(outside)
 
 
 def test_has_scope_overlap_ignores_non_active_intents() -> None:
-    queued = _IntentSnapshot(
+    queued = IntentSnapshot(
         intent_id="queued",
         status="queued",
         ownership="foreign_active",
@@ -1220,7 +1223,7 @@ def test_has_scope_overlap_ignores_non_active_intents() -> None:
         declared_at_utc="",
         lease_remaining_seconds=60,
     )
-    active = _IntentSnapshot(
+    active = IntentSnapshot(
         intent_id="active",
         status="active",
         ownership="foreign_active",
@@ -1230,8 +1233,8 @@ def test_has_scope_overlap_ignores_non_active_intents() -> None:
         lease_remaining_seconds=60,
     )
     agents = (
-        _AgentSnapshot(pid=1, start_epoch=1, label="a", alive=True, intents=(queued,)),
-        _AgentSnapshot(pid=2, start_epoch=2, label="b", alive=True, intents=(active,)),
+        AgentSnapshot(pid=1, start_epoch=1, label="a", alive=True, intents=(queued,)),
+        AgentSnapshot(pid=2, start_epoch=2, label="b", alive=True, intents=(active,)),
     )
     assert _has_scope_overlap(list(agents)) is False
 
@@ -1283,9 +1286,7 @@ def test_read_audit_token_footprint_handles_config_error(
         "codeclone.config.pyproject_loader.load_pyproject_config",
         lambda _root: (_ for _ in ()).throw(OSError("boom")),
     )
-    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
-        tmp_path
-    )
+    tokens, encoding, count, workflows = _read_audit_token_footprint(tmp_path)
     assert tokens is None
     assert encoding is None
     assert count == 0
@@ -1294,9 +1295,7 @@ def test_read_audit_token_footprint_handles_config_error(
 
 def test_read_audit_token_footprint_when_db_missing(tmp_path: Path) -> None:
     _write_audit_pyproject(tmp_path)
-    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
-        tmp_path
-    )
+    tokens, encoding, count, workflows = _read_audit_token_footprint(tmp_path)
     assert tokens is None
     assert encoding is None
     assert count == 0
@@ -1332,9 +1331,7 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     finally:
         writer.close()
 
-    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
-        tmp_path
-    )
+    tokens, encoding, count, workflows = _read_audit_token_footprint(tmp_path)
 
     assert tokens is not None
     assert tokens > 0
@@ -1347,9 +1344,7 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
 
 def test_resolve_mcp_tokens_no_db(tmp_path: Path) -> None:
     """_read_audit_token_footprint returns (None, None, 0) when no DB exists."""
-    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
-        tmp_path
-    )
+    tokens, encoding, count, workflows = _read_audit_token_footprint(tmp_path)
 
     assert tokens is None
     assert encoding is None
@@ -1363,9 +1358,7 @@ def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
     db_path.parent.mkdir(parents=True)
     db_path.write_text("NOT A DATABASE")
 
-    tokens, encoding, count, workflows = session_stats_mod._read_audit_token_footprint(
-        tmp_path
-    )
+    tokens, encoding, count, workflows = _read_audit_token_footprint(tmp_path)
 
     assert tokens is None
     assert encoding is None

@@ -404,6 +404,23 @@ MemoryMaxRecordsParam = Annotated[
     int,
     Field(description="Maximum engineering memory records to return."),
 ]
+AuditTrailLimitParam = Annotated[
+    int,
+    Field(
+        description=(
+            "Maximum recent audit events for IDE-only get_controller_audit_trail."
+        ),
+    ),
+]
+AuditPathOverrideParam = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Optional audit database path override for IDE-only "
+            "get_controller_audit_trail."
+        ),
+    ),
+]
 ManageMemoryActionParam = Annotated[
     str,
     Field(

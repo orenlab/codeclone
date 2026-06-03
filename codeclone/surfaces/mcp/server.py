@@ -23,6 +23,8 @@ from .messages.params import (
     AfterRunIdParam,
     AnalysisModeParam,
     ApiSurfaceParam,
+    AuditPathOverrideParam,
+    AuditTrailLimitParam,
     AutoClearParam,
     BeforeRunIdParam,
     BlastDepthParam,
@@ -1092,6 +1094,34 @@ def build_mcp_server(
     )
     def clear_session_runs() -> dict[str, object]:
         return service.clear_session_runs()
+
+    if ide_governance_channel:
+
+        @tool(
+            title=mcp_tools.TITLE_GET_WORKSPACE_SESSION_STATS,
+            description=mcp_tools.GET_WORKSPACE_SESSION_STATS,
+            annotations=read_only_tool,
+            structured_output=True,
+        )
+        def get_workspace_session_stats(root: RootParam) -> dict[str, object]:
+            return service.get_workspace_session_stats(root=root)
+
+        @tool(
+            title=mcp_tools.TITLE_GET_CONTROLLER_AUDIT_TRAIL,
+            description=mcp_tools.GET_CONTROLLER_AUDIT_TRAIL,
+            annotations=read_only_tool,
+            structured_output=True,
+        )
+        def get_controller_audit_trail(
+            root: RootParam,
+            limit: AuditTrailLimitParam = 50,
+            audit_path: AuditPathOverrideParam = None,
+        ) -> dict[str, object]:
+            return service.get_controller_audit_trail(
+                root=root,
+                limit=limit,
+                audit_path=audit_path,
+            )
 
     @resource(
         "codeclone://latest/summary",

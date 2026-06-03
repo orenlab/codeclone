@@ -38,6 +38,7 @@ from ._session_baseline import (
 )
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
+from ._session_insights_mixin import _MCPSessionInsightsMixin
 from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_memory_mixin import _MCPSessionMemoryMixin
 from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
@@ -112,6 +113,7 @@ class MCPSession(
     _MCPSessionIntentMixin,
     _MCPSessionMemoryMixin,
     _MCPSessionBlastRadiusMixin,
+    _MCPSessionInsightsMixin,
     _MCPSessionStateMixin,
 ):
     def __init__(

@@ -87,6 +87,10 @@ The extension currently supports:
   follow-up profile
 - blast-radius inspection (`Show Blast Radius`, `Copy Blast Radius Brief`) via
   `get_blast_radius`
+- workspace session stats and controller audit webviews (`Show Session Stats`,
+  `Show Controller Audit Trail`, brief copy commands) via IDE-only
+  `get_workspace_session_stats` and `get_controller_audit_trail` (registered only
+  with `--ide-governance-channel`; not listed for agent MCP clients)
 - session reset via `Clear Session` (`clear_session_runs`)
 - live production triage via **Open Production Triage** (`get_production_triage`
   with a 5-second per-run cooldown and in-flight deduplication)
@@ -109,6 +113,12 @@ The extension currently supports:
   (`prepare_governance` / `commit_governance` with session HMAC attestation). The
   extension launches MCP with `--ide-governance-channel` and registers a
   `SecretStorage` governance key on connect.
+- Engineering Memory **search** (command palette, Memory view toolbar, editor title):
+  `Search Engineering Memory` (QuickPick over `query_engineering_memory` mode=search),
+  `Memory for Active File` (mode=for_path on the active editor path),
+  and `Open Memory Search Panel` (read-only webview with CSP, no scripts,
+  allowlisted `command:` links only). Search does not add a separate tree section
+  under the inbox.
 
 These capabilities must remain clients of MCP and canonical report truth rather
 than parallel extension-only logic.

@@ -31,6 +31,10 @@ review receipts, and workflow consolidation tools.
 - Engineering Memory staleness and retention (Phase 18.3): refresh-time
   staleness engine, scope staleness on patch finish, `codeclone memory stale`,
   `codeclone memory vacuum`, and retention-driven purge via `MemoryConfig`.
+- IDE-only workspace insight MCP tools `get_workspace_session_stats` and
+  `get_controller_audit_trail` (registered only with `--ide-governance-channel`;
+  shared payloads in `codeclone/controller_insights/` mirroring CLI
+  `--session-stats` and `--audit`).
 - IDE governance channel for Engineering Memory: MCP flag
   `--ide-governance-channel`, actions `register_ide_governance`,
   `prepare_governance`, `commit_governance` (protocol v2 ticket + HMAC +
@@ -38,6 +42,9 @@ review receipts, and workflow consolidation tools.
   (`governance_mode_unavailable` → VS Code Memory view, not CLI).
 - VS Code extension **Memory** view (v0.4.0): inbox, approve/reject UX, sync from
   run, and automatic governance registration on MCP connect.
+- VS Code extension Engineering Memory **search**: QuickPick search, memory for
+  active file, and a secure search results webview (command-palette and Memory
+  toolbar; not a separate inbox tree section).
 - Engineering Memory governance (Phase 18.4): candidate/approve/reject/archive
   lifecycle, claim validation guardrails, CLI `codeclone memory
   review-candidates|approve|reject|archive`, and MCP `manage_engineering_memory`

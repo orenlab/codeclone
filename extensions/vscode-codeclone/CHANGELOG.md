@@ -1,5 +1,21 @@
 # Change Log
 
+## Unreleased
+
+- add **Show Session Stats** and **Show Controller Audit Trail** — secure
+  webviews mirroring CLI `--session-stats` and `--audit` via IDE-only MCP tools
+  (`get_workspace_session_stats`, `get_controller_audit_trail`; not listed for
+  agent clients on the default launcher)
+- add **Copy Session Stats Brief** and **Copy Controller Audit Brief** commands
+- Session view toolbar entries when the workspace is trusted and connected
+- add **Search Engineering Memory** — QuickPick keyword search over MCP
+  `query_engineering_memory` (FTS + optional semantic re-rank)
+- add **Memory for Active File** — path-scoped memory for the active editor
+- add **Open Memory Search Panel** — secure read-only webview (`enableScripts:
+  false`, nonce CSP, allowlisted `codeclone.openMemoryRecordById` command URIs)
+- add workspace settings under `codeclone.memory.*` for search semantics and limits
+- Memory view welcome and toolbar link search commands without a search tree section
+
 ## 0.3.0
 
 - add **Show Blast Radius** command — concentric SVG diagram of structural

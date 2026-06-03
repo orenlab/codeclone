@@ -240,6 +240,21 @@ CLEAR_SESSION_RUNS: Final = (
     "for this server process."
 )
 
+GET_WORKSPACE_SESSION_STATS: Final = (
+    "IDE-only workspace session dashboard: active agents, change intents, "
+    "lease health, latest cached run summary, and audit token footprint. "
+    "Mirrors CLI --session-stats. Registered only when the MCP server is "
+    "launched with --ide-governance-channel (CodeClone VS Code). Not exposed "
+    "to agent clients on the default launcher."
+)
+
+GET_CONTROLLER_AUDIT_TRAIL: Final = (
+    "IDE-only controller audit trail summary with recent events and optional "
+    "payload token footprint. Mirrors CLI --audit and requires "
+    "audit_enabled=true. Registered only with --ide-governance-channel. "
+    "Not for agent MCP clients."
+)
+
 TITLE_ANALYZE_REPOSITORY: Final = "Analyze Repository"
 TITLE_ANALYZE_CHANGED_PATHS: Final = "Analyze Changed Paths"
 TITLE_GET_RUN_SUMMARY: Final = "Get Run Summary"
@@ -271,3 +286,5 @@ TITLE_START_CONTROLLED_CHANGE: Final = "Start Controlled Change"
 TITLE_FINISH_CONTROLLED_CHANGE: Final = "Finish Controlled Change"
 TITLE_MANAGE_CHANGE_INTENT: Final = "Manage Change Intent"
 TITLE_CLEAR_SESSION_RUNS: Final = "Clear Session Runs"
+TITLE_GET_WORKSPACE_SESSION_STATS: Final = "Get Workspace Session Stats"
+TITLE_GET_CONTROLLER_AUDIT_TRAIL: Final = "Get Controller Audit Trail"

@@ -59,6 +59,18 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("get_blast_radius", **params)
 
+    def get_workspace_session_stats(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_workspace_session_stats", **params)
+
+    def get_controller_audit_trail(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_controller_audit_trail", **params)
+
     def get_relevant_memory(
         self: _RunDictService,
         **params: object,

@@ -506,6 +506,31 @@ class MemoryController {
      * @param {import("vscode").WorkspaceFolder} folder
      * @param {object} node
      */
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {string} recordId
+     */
+    async fetchRecordById(folder, recordId) {
+        const root = folder.uri.fsPath;
+        const response = await this.extension.client.callTool(
+            "query_engineering_memory",
+            {
+                root,
+                mode: "get",
+                record_id: recordId,
+            }
+        );
+        const body = safeObject(safeObject(response).payload);
+        if (String(response.status || "") === "not_found" || !body.record) {
+            throw new Error(`Memory record not found: ${recordId}`);
+        }
+        return safeObject(body.record);
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {object} node
+     */
     async openRecordDetail(folder, node) {
         const record = safeObject(node.record);
         const subjects = safeArray(record.subjects)

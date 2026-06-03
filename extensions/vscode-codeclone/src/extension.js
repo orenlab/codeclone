@@ -81,8 +81,19 @@ const {
     renderSetupMarkdown,
     renderTriageMarkdown,
 } = require("./renderers");
+const {
+    renderAuditTrailHtml,
+    renderAuditTrailMarkdown,
+    renderSessionStatsHtml,
+    renderSessionStatsMarkdown,
+} = require("./workspaceInsightsRenderer");
 const {fetchProductionTriage, loadRunArtifacts, shouldUseCachedTriage} = require("./runArtifacts");
 const {MemoryController, recordStatement} = require("./memoryController");
+const {
+    MemorySearchController,
+    activeEditorMemoryPath,
+    isValidMemoryRecordId,
+} = require("./memorySearch");
 const {
     ensureIdeGovernanceRegistered,
     withIdeGovernanceChannel,
@@ -137,6 +148,7 @@ class CodeCloneController {
         });
         this.client = new CodeCloneMcpClient(this.outputChannel);
         this.memoryController = new MemoryController(this);
+        this.memorySearchController = new MemorySearchController(this);
         this.states = new Map();
         this.hotspotFocusMode = this.loadHotspotFocusMode();
         const storedHelpTopic = this.context.workspaceState.get(
@@ -402,6 +414,18 @@ class CodeCloneController {
             vscode.commands.registerCommand("codeclone.copyBlastRadiusBrief", () =>
                 this.copyBlastRadiusBrief()
             ),
+            vscode.commands.registerCommand("codeclone.showWorkspaceSessionStats", () =>
+                this.showWorkspaceSessionStats()
+            ),
+            vscode.commands.registerCommand("codeclone.showControllerAuditTrail", () =>
+                this.showControllerAuditTrail()
+            ),
+            vscode.commands.registerCommand("codeclone.copyWorkspaceSessionStatsBrief", () =>
+                this.copyWorkspaceSessionStatsBrief()
+            ),
+            vscode.commands.registerCommand("codeclone.copyControllerAuditTrailBrief", () =>
+                this.copyControllerAuditTrailBrief()
+            ),
             vscode.commands.registerCommand("codeclone.refreshMemory", () =>
                 this.refreshMemoryView()
             ),
@@ -416,6 +440,24 @@ class CodeCloneController {
             ),
             vscode.commands.registerCommand("codeclone.openMemoryRecord", (node) =>
                 this.openMemoryRecord(node)
+            ),
+            vscode.commands.registerCommand("codeclone.openMemoryRecordById", (recordId) =>
+                this.openMemoryRecordById(recordId)
+            ),
+            vscode.commands.registerCommand("codeclone.searchEngineeringMemory", () =>
+                this.searchEngineeringMemory()
+            ),
+            vscode.commands.registerCommand("codeclone.memoryForActiveFile", () =>
+                this.memoryForActiveFile()
+            ),
+            vscode.commands.registerCommand("codeclone.openMemorySearchPanel", () =>
+                this.openMemorySearchPanel()
+            ),
+            vscode.commands.registerCommand("codeclone.refreshMemorySearch", () =>
+                this.refreshMemorySearchPanel()
+            ),
+            vscode.commands.registerCommand("codeclone.configureMemorySearch", () =>
+                this.configureMemorySearch()
             ),
             vscode.commands.registerCommand("codeclone.openMemoryView", () =>
                 vscode.commands.executeCommand("codeclone.memory.focus")
@@ -3035,6 +3077,112 @@ class CodeCloneController {
         }
     }
 
+    async showWorkspaceSessionStats() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_workspace_session_stats", {
+                root: folder.uri.fsPath,
+            });
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.sessionStats",
+                `Session Stats: ${folder.name}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("debug-console");
+            panel.webview.html = renderSessionStatsHtml(payload, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load workspace session stats.");
+        }
+    }
+
+    async showControllerAuditTrail() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_controller_audit_trail", {
+                root: folder.uri.fsPath,
+                limit: 50,
+            });
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.controllerAudit",
+                `Controller Audit: ${folder.name}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("history");
+            panel.webview.html = renderAuditTrailHtml(payload, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load controller audit trail.");
+        }
+    }
+
+    async copyWorkspaceSessionStatsBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_workspace_session_stats", {
+                root: folder.uri.fsPath,
+            });
+            await vscode.env.clipboard.writeText(renderSessionStatsMarkdown(payload));
+            await vscode.window.showInformationMessage(
+                "Copied workspace session stats brief."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not copy session stats brief.");
+        }
+    }
+
+    async copyControllerAuditTrailBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_controller_audit_trail", {
+                root: folder.uri.fsPath,
+                limit: 50,
+            });
+            await vscode.env.clipboard.writeText(renderAuditTrailMarkdown(payload));
+            await vscode.window.showInformationMessage(
+                "Copied controller audit trail brief."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not copy controller audit brief.");
+        }
+    }
+
     /**
      * @param {any} folder
      * @returns {string[]}
@@ -3893,6 +4041,158 @@ class CodeCloneController {
             await this.memoryController.openRecordDetail(folder, node);
         } catch (error) {
             this.handleError(error, "Could not open the memory record.");
+        }
+    }
+
+    async openMemoryRecordById(recordId) {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        if (!isValidMemoryRecordId(recordId)) {
+            this.handleError(
+                new Error("Invalid memory record id."),
+                "Could not open the memory record."
+            );
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            await this.memorySearchController.openRecordById(folder, recordId);
+        } catch (error) {
+            this.handleError(error, "Could not open the memory record.");
+        }
+    }
+
+    async searchEngineeringMemory() {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            const query = await this.memorySearchController.promptSearchQuery(folder);
+            if (!query) {
+                return;
+            }
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Searching engineering memory",
+                },
+                async () => this.memorySearchController.querySearch(folder, query)
+            );
+            const records = this.memorySearchController.extractRecords(result);
+            const picked = await this.memorySearchController.pickRecord(
+                records,
+                "Engineering Memory Search"
+            );
+            if (picked) {
+                await this.memorySearchController.openRecord(folder, picked);
+            }
+        } catch (error) {
+            this.handleError(error, "Could not search engineering memory.");
+        }
+    }
+
+    async memoryForActiveFile() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        const relPath = activeEditorMemoryPath(folder);
+        if (!relPath) {
+            await vscode.window.showInformationMessage(
+                "Open a workspace file in the editor to load memory for that path."
+            );
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Memory for ${relPath}`,
+                },
+                async () => this.memorySearchController.queryForPath(folder, relPath)
+            );
+            const records = this.memorySearchController.extractRecords(result);
+            const picked = await this.memorySearchController.pickRecord(
+                records,
+                `Memory: ${relPath}`
+            );
+            if (picked) {
+                await this.memorySearchController.openRecord(folder, picked);
+            }
+        } catch (error) {
+            this.handleError(error, "Could not load memory for the active file.");
+        }
+    }
+
+    async openMemorySearchPanel() {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            const query = await this.memorySearchController.promptSearchQuery(folder);
+            if (!query) {
+                return;
+            }
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Searching engineering memory",
+                },
+                async () => this.memorySearchController.querySearch(folder, query)
+            );
+            this.memorySearchController.showSearchPanel(folder, query, result);
+        } catch (error) {
+            this.handleError(error, "Could not open memory search.");
+        }
+    }
+
+    async refreshMemorySearchPanel() {
+        try {
+            await this.memorySearchController.refreshActivePanel();
+        } catch (error) {
+            this.handleError(error, "Could not refresh memory search.");
+        }
+    }
+
+    async configureMemorySearch() {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const updated = await this.memorySearchController.configureSearchFilters(
+                folder
+            );
+            if (!updated) {
+                return;
+            }
+            if (this.memorySearchController.activePanel) {
+                await this.memorySearchController.refreshActivePanel();
+            }
+            await vscode.window.showInformationMessage(
+                "Engineering memory search filters updated for this workspace."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not update memory search settings.");
         }
     }
 
