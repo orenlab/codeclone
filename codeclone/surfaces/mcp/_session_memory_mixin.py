@@ -12,7 +12,11 @@ from pathlib import Path
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...memory.embedding import resolve_embedding_provider
-from ...memory.exceptions import MemoryCapacityError, MemoryContractError
+from ...memory.exceptions import (
+    MemoryCapacityError,
+    MemoryContractError,
+    MemorySemanticUnavailableError,
+)
 from ...memory.ide_governance import (
     IdeGovernanceSessionState,
     _governance_rejected,
@@ -114,7 +118,13 @@ class _MCPSessionMemoryMixin:
         root_path = _helpers._resolve_root(root)
         store, db_path, config, project = self._open_memory_store(root_path)
         index = resolve_semantic_index(config.semantic) if semantic else None
-        provider = resolve_embedding_provider(config.semantic) if semantic else None
+        provider = None
+        semantic_reason = None
+        if semantic:
+            try:
+                provider = resolve_embedding_provider(config.semantic)
+            except MemorySemanticUnavailableError as exc:
+                semantic_reason = str(exc)
         audit_path = (
             resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
             if semantic
@@ -142,6 +152,7 @@ class _MCPSessionMemoryMixin:
                 semantic_index=index,
                 embedding_provider=provider,
                 provider_label=config.semantic.embedding_provider,
+                semantic_reason=semantic_reason,
                 audit_db_path=audit_path,
             )
         except MemoryContractError as exc:

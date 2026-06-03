@@ -98,7 +98,9 @@ def resolve_semantic_index(config: SemanticConfig) -> SemanticIndex:
     """
     if not config.enabled:
         return NullSemanticIndex()
-    backend = _resolve_backend(config)
+    if not Path(config.index_path).exists():
+        return UnavailableSemanticIndex(reason="not_built")
+    backend = _resolve_backend(config, create=False)
     if backend is None:
         return UnavailableSemanticIndex(reason="lancedb_not_installed")
     return backend
@@ -112,10 +114,12 @@ def resolve_semantic_index_writer(config: SemanticConfig) -> SemanticIndexWriter
     """
     if not config.enabled:
         return None
-    return _resolve_backend(config)
+    return _resolve_backend(config, create=True)
 
 
-def _resolve_backend(config: SemanticConfig) -> SemanticIndexWriter | None:
+def _resolve_backend(
+    config: SemanticConfig, *, create: bool
+) -> SemanticIndexWriter | None:
     # Lazy, isolated import: the only place a vector DB is referenced. Absence
     # of the optional `semantic-lancedb` extra degrades to None (no backend).
     try:
@@ -125,6 +129,7 @@ def _resolve_backend(config: SemanticConfig) -> SemanticIndexWriter | None:
     return LanceDbSemanticIndex(
         path=Path(config.index_path),
         dimension=config.dimension,
+        create=create,
     )
 
 

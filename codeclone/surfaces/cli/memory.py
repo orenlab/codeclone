@@ -14,7 +14,7 @@ from ...config.memory import MemoryConfig, resolve_memory_config
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import ExitCode
 from ...memory.embedding import EmbeddingProvider, resolve_embedding_provider
-from ...memory.exceptions import MemoryContractError
+from ...memory.exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ...memory.governance import approve_record, archive_record, reject_record
 from ...memory.ingest import InitOptions
 from ...memory.ingest.runner import run_memory_init
@@ -335,7 +335,13 @@ def _run_search(
         return int(ExitCode.CONTRACT_ERROR)
     semantic = bool(args.semantic)
     index = resolve_semantic_index(config.semantic) if semantic else None
-    provider = resolve_embedding_provider(config.semantic) if semantic else None
+    provider: EmbeddingProvider | None = None
+    semantic_reason: str | None = None
+    if semantic:
+        try:
+            provider = resolve_embedding_provider(config.semantic)
+        except MemorySemanticUnavailableError as exc:
+            semantic_reason = str(exc)
     try:
         result = query_engineering_memory(
             store,
@@ -352,6 +358,7 @@ def _run_search(
             semantic_index=index,
             embedding_provider=provider,
             provider_label=config.semantic.embedding_provider,
+            semantic_reason=semantic_reason,
         )
     finally:
         store.close()
@@ -574,6 +581,17 @@ def _semantic_unavailable(console: PrinterLike, message: str) -> int:
     return int(ExitCode.CONTRACT_ERROR)
 
 
+def _resolve_semantic_provider_or_fail(
+    console: PrinterLike, config: MemoryConfig
+) -> EmbeddingProvider | int:
+    try:
+        return resolve_embedding_provider(config.semantic)
+    except MemorySemanticUnavailableError as exc:
+        return _semantic_unavailable(
+            console, f"Semantic embedding provider unavailable: {exc}"
+        )
+
+
 def _run_semantic(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
@@ -588,15 +606,30 @@ def _run_semantic(
 def _run_semantic_status(*, console: PrinterLike, root_path: Path) -> int:
     config = resolve_memory_config(root_path)
     status = resolve_semantic_index(config.semantic).status()
-    state = "available" if status.available else "unavailable"
+    provider_status = "available"
+    provider_reason: str | None = None
+    if config.semantic.enabled:
+        try:
+            provider = resolve_embedding_provider(config.semantic)
+        except MemorySemanticUnavailableError as exc:
+            provider_status = "unavailable"
+            provider_reason = str(exc)
+        else:
+            provider_status = provider.model_id
+    state = (
+        "available" if status.available and provider_reason is None else "unavailable"
+    )
     console.print(f"semantic index: {state}")
-    if status.reason:
-        console.print(f"  reason: {status.reason}")
+    for reason in (status.reason, provider_reason):
+        if reason:
+            console.print(f"  reason: {reason}")
     console.print(f"  enabled: {config.semantic.enabled}")
     console.print(
         f"  embedding: {config.semantic.embedding_provider} "
         f"(dim {config.semantic.dimension})"
     )
+    if config.semantic.enabled:
+        console.print(f"  provider: {provider_status}", markup=False)
     return int(ExitCode.SUCCESS)
 
 
@@ -613,11 +646,14 @@ def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
         console.print("Run: codeclone memory init")
         return int(ExitCode.CONTRACT_ERROR)
     project = resolve_project_identity(root_path)
+    provider = _resolve_semantic_provider_or_fail(console, config)
+    if isinstance(provider, int):
+        return provider
     store = SqliteEngineeringMemoryStore(db_path)
     try:
         report = rebuild_semantic_index(
             writer=writer,
-            provider=resolve_embedding_provider(config.semantic),
+            provider=provider,
             sources=_semantic_sources(root_path, config, store, project),
         )
     finally:
@@ -640,7 +676,9 @@ def _run_semantic_search(
         return _semantic_unavailable(
             console, f"Semantic search unavailable: {status.reason}."
         )
-    provider = resolve_embedding_provider(config.semantic)
+    provider = _resolve_semantic_provider_or_fail(console, config)
+    if isinstance(provider, int):
+        return provider
     db_path = resolve_memory_db_path(root_path, config)
     store = SqliteEngineeringMemoryStore(db_path) if db_path.exists() else None
     try:

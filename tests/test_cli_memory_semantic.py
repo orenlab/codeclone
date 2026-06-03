@@ -83,6 +83,69 @@ def _seed_semantic_repo(tmp_path: Path, *, statement: str) -> None:
     assert memory_main(["semantic", "rebuild", "--root", str(tmp_path)]) == 0
 
 
+def _init_semantic_repo_with_provider(tmp_path: Path, *, provider: str) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone.memory.semantic]\n"
+        "enabled = true\n"
+        f'embedding_provider = "{provider}"\n',
+        encoding="utf-8",
+    )
+    config = resolve_memory_config(tmp_path)
+    project = resolve_project_identity(tmp_path)
+    db_path = resolve_memory_db_path(tmp_path, config)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        store.initialize(project)
+    finally:
+        store.close()
+
+
+def test_memory_search_semantic_provider_unavailable_degrades_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_semantic_repo_with_provider(tmp_path, provider="local_model")
+
+    code = memory_main(["search", "anything", "--root", str(tmp_path), "--semantic"])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "semantic: off" in out
+    assert "local_model embedding provider is not available" in out
+    assert "Traceback" not in out
+
+
+def test_semantic_explicit_commands_fail_clear_when_provider_unavailable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_semantic_repo_with_provider(tmp_path, provider="local_model")
+
+    for command in (
+        ["semantic", "rebuild", "--root", str(tmp_path)],
+        ["semantic", "search", "anything", "--root", str(tmp_path)],
+    ):
+        code = memory_main(command)
+        assert code != 0
+        out = capsys.readouterr().out
+        assert "Semantic embedding provider unavailable" in out
+        assert "local_model embedding provider is not available" in out
+        assert "Traceback" not in out
+
+
+def test_semantic_status_reports_provider_unavailable(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _init_semantic_repo_with_provider(tmp_path, provider="local_model")
+
+    code = memory_main(["semantic", "status", "--root", str(tmp_path)])
+
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "semantic index: unavailable" in out
+    assert "provider: unavailable" in out
+    assert "local_model embedding provider is not available" in out
+
+
 def test_semantic_search_hydrates_and_renders_json(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

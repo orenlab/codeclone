@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import lancedb  # type: ignore[import-untyped]  # 0.33 ships no py.typed/stubs
 import pyarrow as pa
@@ -63,17 +64,30 @@ class LanceDbSemanticIndex:
     carries the projection metadata plus the embedding vector.
     """
 
-    def __init__(self, *, path: Path, dimension: int) -> None:
+    def __init__(self, *, path: Path, dimension: int, create: bool = False) -> None:
         self._dimension = dimension
         self._db = lancedb.connect(str(path))
-        # Idempotent open-or-create. A membership check against list_tables()
-        # is unreliable (it returns a paginated result object, not a list), so
-        # let lancedb open the table when it exists and create it otherwise.
-        self._table = self._db.create_table(
-            _TABLE_NAME, schema=_schema(dimension), exist_ok=True
-        )
+        self._table: Any | None = self._open_table(create=create)
+
+    def _open_table(self, *, create: bool) -> Any | None:
+        if create:
+            # Idempotent writer open-or-create. A membership check against
+            # list_tables() is unreliable (it returns a paginated result
+            # object, not a list), so let lancedb open the table when it exists
+            # and create it otherwise.
+            return self._db.create_table(
+                _TABLE_NAME, schema=_schema(self._dimension), exist_ok=True
+            )
+        try:
+            return self._db.open_table(_TABLE_NAME)
+        except ValueError as exc:
+            if f"Table '{_TABLE_NAME}' was not found" in str(exc):
+                return None
+            raise
 
     def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+        if self._table is None:
+            return []
         rows = self._table.search(list(vector)).limit(k).to_list()
         return [
             SemanticHit(
@@ -87,6 +101,13 @@ class LanceDbSemanticIndex:
         ]
 
     def status(self) -> SemanticIndexStatus:
+        if self._table is None:
+            return SemanticIndexStatus(
+                available=False,
+                backend="lancedb",
+                dimension=self._dimension,
+                reason="not_built",
+            )
         return SemanticIndexStatus(
             available=True,
             backend="lancedb",
@@ -97,6 +118,9 @@ class LanceDbSemanticIndex:
     def upsert(self, rows: Sequence[SemanticRow]) -> None:
         if not rows:
             return
+        if self._table is None:
+            self._table = self._open_table(create=True)
+        assert self._table is not None
         records = [_to_record(row) for row in rows]
         (
             self._table.merge_insert("id")
@@ -108,10 +132,14 @@ class LanceDbSemanticIndex:
     def delete(self, ids: Sequence[str]) -> None:
         if not ids:
             return
+        if self._table is None:
+            return
         clause = ", ".join(_sql_quote(value) for value in ids)
         self._table.delete(f"id IN ({clause})")
 
     def known_ids(self) -> set[str]:
+        if self._table is None:
+            return set()
         column = self._table.to_arrow().column("id").to_pylist()
         return {str(value) for value in column}
 

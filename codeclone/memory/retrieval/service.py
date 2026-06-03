@@ -735,6 +735,7 @@ def _semantic_status_block(
     used: bool,
     provider_label: str | None,
     model: str | None,
+    reason: str | None = None,
 ) -> dict[str, object]:
     return {
         "used": used,
@@ -742,7 +743,7 @@ def _semantic_status_block(
         "provider": provider_label,
         "model": model,
         "index_version": SEMANTIC_INDEX_FORMAT_VERSION if used else None,
-        "reason": None if used else status.reason,
+        "reason": None if used else reason or status.reason,
     }
 
 
@@ -822,6 +823,7 @@ def _handle_semantic_search_mode(
     semantic_index: SemanticIndex | None,
     embedding_provider: EmbeddingProvider | None,
     provider_label: str | None,
+    semantic_reason: str | None,
     audit_db_path: Path | None,
 ) -> dict[str, object]:
     statement = _require_query_field(query, mode="search", field="query")
@@ -867,7 +869,11 @@ def _handle_semantic_search_mode(
         audit_events = []
         semantic_block = (
             _semantic_status_block(
-                status, used=False, provider_label=provider_label, model=None
+                status,
+                used=False,
+                provider_label=provider_label,
+                model=None,
+                reason=semantic_reason,
             )
             if status is not None
             else _semantic_disabled_block()
@@ -928,6 +934,7 @@ def query_engineering_memory(
     semantic_index: SemanticIndex | None = None,
     embedding_provider: EmbeddingProvider | None = None,
     provider_label: str | None = None,
+    semantic_reason: str | None = None,
     audit_db_path: Path | None = None,
 ) -> dict[str, object]:
     if mode not in QUERY_MODES:
@@ -1016,6 +1023,7 @@ def query_engineering_memory(
             semantic_index=semantic_index,
             embedding_provider=embedding_provider,
             provider_label=provider_label,
+            semantic_reason=semantic_reason,
             audit_db_path=audit_db_path,
         )
     records = _records_for_list_mode(

@@ -67,10 +67,26 @@ def test_lancedb_backend_round_trip(tmp_path: Path) -> None:
 
 def test_lancedb_backend_resolves_as_read_index(tmp_path: Path) -> None:
     config = _config(tmp_path, dimension=8)
+    index_path = tmp_path / "semantic_index.lance"
+    assert not index_path.exists()
+
     index = resolve_semantic_index(config)
     status = index.status()
+    assert status.available is False
+    assert status.backend is None
+    assert status.reason == "not_built"
+    assert index.search([0.0] * 8, k=3) == []
+    assert not index_path.exists()
+
+    writer = resolve_semantic_index_writer(config)
+    assert writer is not None
+    writer.upsert([_row("built", [0.0] * 8)])
+
+    built = resolve_semantic_index(config)
+    status = built.status()
     assert status.available is True
     assert status.backend == "lancedb"
+    assert status.indexed_count == 1
 
 
 def test_lancedb_backend_reopens_existing_table(tmp_path: Path) -> None:
