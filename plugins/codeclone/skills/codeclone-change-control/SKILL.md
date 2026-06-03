@@ -61,7 +61,7 @@ reads. Default policy auto-bootstraps on `get_relevant_memory`; use
 |----------------------|--------------------------------------------------------------------------|
 | Ranked scope context | `get_relevant_memory(root=abs, scope=… \| intent_id=…)`                  |
 | One path             | `query_engineering_memory(mode=for_path, path=…)`                        |
-| Keyword search       | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` |
+| Keyword search       | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})`; optional `semantic=true` when index built |
 | Draft observation    | `manage_engineering_memory(action=record_candidate, …)`                  |
 | Post-edit proposals  | `finish(..., propose_memory=true)`                                       |
 

@@ -65,7 +65,9 @@ patch-local verification, which compares a clean before-run to an after-run.
 reports violations but exits `0`.
 
 `--session-stats` shows workspace session status: active agents, intents, and
-lease health. Read-only, does not run analysis.
+lease health. Read-only, does not run analysis. Collection is implemented in
+`codeclone/controller_insights/session_stats.py` (CLI and IDE-only MCP tools
+consume the same payload).
 
 CLI controller queries are terminal-only and read-only with respect to source
 files, baselines, reports, and analysis cache data. They are incompatible with

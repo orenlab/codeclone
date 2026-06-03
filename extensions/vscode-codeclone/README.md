@@ -159,16 +159,48 @@ and result limits per workspace.
 
 ## Settings
 
-| Setting                             | Default        | Scope    | Description                                                                                         |
-|-------------------------------------|----------------|----------|-----------------------------------------------------------------------------------------------------|
-| `codeclone.mcp.command`             | `auto`         | Machine  | Launcher used to start the local CodeClone server. `auto` checks workspace virtualenv, then `PATH`. |
-| `codeclone.mcp.args`                | `[]`           | Machine  | Extra arguments passed to the launcher.                                                             |
-| `codeclone.analysis.cachePolicy`    | —              | Resource | Default cache policy for analysis requests. Can differ per workspace or folder.                     |
-| `codeclone.analysis.changedDiffRef` | —              | Resource | Git revision used by **Review Changes**.                                                            |
-| `codeclone.analysis.profile`        | `defaults`     | Resource | Analysis sensitivity: `defaults` (conservative first pass), `deeperReview`, or `custom`.            |
-| `codeclone.analysis.minLoc`         | —              | Resource | Function/block/segment thresholds — active only when profile is `custom`.                           |
-| `codeclone.analysis.coverageXml`    | —              | Resource | Path to `coverage.xml`. Auto-detects workspace-root file when unset.                                |
-| `codeclone.ui.showStatusBar`        | `true`         | Window   | Show or hide the workspace-level status bar item.                                                   |
+Defaults and scopes match `package.json` → `contributes.configuration.properties`.
+
+### Launcher
+
+| Setting | Default | Scope | Description |
+|---------|---------|-------|-------------|
+| `codeclone.mcp.command` | `auto` | Machine | Launcher for `codeclone-mcp` (`auto`: workspace venv, then `PATH`). |
+| `codeclone.mcp.args` | `[]` | Machine | Extra launcher argv. The extension injects `--ide-governance-channel` for Memory governance and session/audit MCP tools. |
+
+### Analysis
+
+| Setting | Default | Scope | Description |
+|---------|---------|-------|-------------|
+| `codeclone.analysis.profile` | `defaults` | Resource | `defaults`, `deeperReview`, or `custom`. |
+| `codeclone.analysis.cachePolicy` | `reuse` | Resource | `reuse` or `off` for analysis requests. |
+| `codeclone.analysis.changedDiffRef` | `HEAD` | Resource | Git ref for **Review Changes**. |
+| `codeclone.analysis.coverageXml` | `""` | Resource | Cobertura path for Coverage Join. |
+| `codeclone.analysis.autoDetectCoverageXml` | `true` | Resource | Use workspace-root `coverage.xml` when path is empty. |
+| `codeclone.analysis.minLoc` | `10` | Resource | Custom clone thresholds (only when `profile=custom`). |
+| `codeclone.analysis.minStmt` | `6` | Resource | Same. |
+| `codeclone.analysis.blockMinLoc` | `20` | Resource | Same. |
+| `codeclone.analysis.blockMinStmt` | `8` | Resource | Same. |
+| `codeclone.analysis.segmentMinLoc` | `20` | Resource | Same. |
+| `codeclone.analysis.segmentMinStmt` | `10` | Resource | Same. |
+
+### UI
+
+| Setting | Default | Scope | Description |
+|---------|---------|-------|-------------|
+| `codeclone.ui.showStatusBar` | `true` | Window | Workspace-level status bar item. |
+
+### Engineering Memory search
+
+| Setting | Default | Scope | Description |
+|---------|---------|-------|-------------|
+| `codeclone.memory.searchSemantic` | `true` | Resource | Pass `semantic=true` to MCP keyword search. FTS still runs when the server index is missing; server needs `memory.semantic` enabled + `semantic-lancedb` + rebuild for real blend. |
+| `codeclone.memory.searchIncludeDrafts` | `false` | Resource | Include draft records in search / search panel (`include_drafts`). |
+| `codeclone.memory.searchIncludeStale` | `false` | Resource | Include stale records (`include_stale`; also used for **Memory for Active File**). |
+| `codeclone.memory.searchMaxResults` | `20` | Resource | Cap per search (5–50). |
+| `codeclone.memory.searchDetailLevel` | `compact` | Resource | `compact` or `full` statement payloads in list modes. |
+
+**Configure Memory Search** sets semantic, drafts, stale, and max results per workspace folder. **Detail level** is editor-settings only.
 
 ---
 

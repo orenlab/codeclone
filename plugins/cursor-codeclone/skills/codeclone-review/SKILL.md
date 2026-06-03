@@ -1,6 +1,6 @@
 ---
 name: codeclone-review
-description: Use when Codex should review a Python repository through CodeClone MCP — conservative first pass, baseline-aware triage, changed-files review, or deeper exploratory follow-up.
+description: Use when the agent should review a Python repository through CodeClone MCP — conservative first pass, baseline-aware triage, changed-files review, or deeper exploratory follow-up.
 ---
 
 # CodeClone Review

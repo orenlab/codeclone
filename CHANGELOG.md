@@ -57,6 +57,16 @@ review receipts, and workflow consolidation tools.
   (`off`, `bootstrap_if_missing`, `refresh_when_stale`), auto bootstrap on
   `get_relevant_memory`, explicit `manage_engineering_memory(action="refresh_from_run")`,
   and `memory_sync` payload on responses when ingest runs.
+- Engineering Memory optional semantic retrieval (Phase 20): opt-in
+  `[tool.codeclone.memory.semantic]` (default `enabled=false`,
+  `embedding_provider=diagnostic`), LanceDB sidecar at
+  `.cache/codeclone/memory/semantic_index.lance` (`SEMANTIC_INDEX_FORMAT_VERSION`
+  `1`, separate from memory schema `1.1`), optional extra
+  `pip install 'codeclone[semantic-lancedb]'`, CLI `codeclone memory semantic
+  status|rebuild|search`, `codeclone memory search --semantic`, MCP/CLI
+  `query_engineering_memory(mode=search, semantic=true)` with FTS-first merge and
+  `semantic` status envelope; indexed prose memory types and bounded audit
+  incident summaries when `index_audit=true` and `audit_enabled=true`.
 - Engineering Memory search and git provenance (Phase 18.6): schema `1.1` with
   SQLite FTS5 index, `match_mode` (`any`/`all`) for CLI and MCP search,
   refresh-time digest reactivation for unchanged records, resilient git
@@ -144,6 +154,13 @@ review receipts, and workflow consolidation tools.
   is still allowed.
 - `respect_pyproject=false` no longer surfaces golden-fixture clone groups as
   false `new` regressions.
+- VS Code workspace session stats and controller audit webviews: payload
+  footprint `top_workflows` metrics use `calls` / `tokens` from the shared audit
+  footprint collector (fixes zeroed workflow columns when the UI expected other
+  field names).
+- Controller insights payloads centralized in `codeclone/controller_insights/`
+  for CLI `--session-stats` / `--audit` and IDE-only MCP tools (avoids
+  duplicating collection in the MCP layer).
 
 ## [2.0.2] - 2026-05-19
 

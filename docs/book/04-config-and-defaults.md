@@ -155,6 +155,26 @@ Values above `14` are contract errors in the open-source edition. See
 [Plans and Retention](../plans-and-retention.md) for Team (up to 30 days) and
 Enterprise (up to 90 days, PostgreSQL backend) options.
 
+### Engineering Memory (nested tables)
+
+Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
+**not** part of the root `[tool.codeclone]` table above. They are validated by
+`codeclone/config/memory.py` / `SemanticConfig` and documented in
+[Engineering Memory](26-engineering-memory.md).
+
+| Key (semantic) | Default | Meaning |
+|----------------|---------|---------|
+| `enabled` | `false` | Turn on LanceDB sidecar indexing and search blend |
+| `backend` | `lancedb` | Vector backend (only `lancedb` today) |
+| `index_path` | `.cache/codeclone/memory/semantic_index.lance` | Sidecar directory |
+| `embedding_provider` | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `local_model`, `api` (latter two fail clear until Phase 20.6) |
+| `dimension` | `256` | Vector size for diagnostic provider |
+| `max_results` | `20` | Cap for vector `k` and merged search ranking |
+| `index_audit` | `true` | Index bounded audit `summary` rows when audit DB exists |
+
+Requires `pip install 'codeclone[semantic-lancedb]'` and
+`codeclone memory semantic rebuild` after enabling.
+
 This is the exact accepted `[tool.codeclone]` key set from
 `codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown
 keys are contract errors.

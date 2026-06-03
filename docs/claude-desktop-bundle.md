@@ -55,6 +55,15 @@ Node wrapper launches `codeclone-mcp` via local `stdio`. It prefers a
 workspace-local `.venv`, then a Poetry environment, then user-local install
 paths, then `PATH`.
 
+The bundle does **not** pass `--ide-governance-channel`. Agents see the standard
+**31** MCP tools. VS Code session stats, audit trail webviews, and IDE Memory
+governance (`prepare_governance` / `commit_governance`) require the VS Code
+extension launcher.
+
+Engineering Memory and optional semantic search follow the server contract in
+[Engineering Memory](book/26-engineering-memory.md) (`query_engineering_memory`,
+`get_relevant_memory`; semantic off by default in pyproject).
+
 ## Privacy
 
 Local wrapper only — no telemetry, no cloud sync, no remote listener.

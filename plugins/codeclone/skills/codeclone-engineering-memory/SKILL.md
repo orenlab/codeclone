@@ -33,7 +33,7 @@ Do not invent memory from local files or report dumps.
 | After `start`, before first edit | `get_relevant_memory`      | **`root` required**; `scope` or `intent_id` from active intent |
 | One file deep-dive               | `query_engineering_memory` | `mode=for_path`, `path`                                     |
 | Symbol context                   | `query_engineering_memory` | `mode=for_symbol`, `symbol`                                 |
-| Keyword discovery                | `query_engineering_memory` | `mode=search`, `query`, `filters={match_mode:"any"\|"all"}` |
+| Keyword discovery                | `query_engineering_memory` | `mode=search`, `query`, `filters={match_mode:"any"\|"all"}`; optional `semantic=true` when index built |
 | Store health                     | `query_engineering_memory` | `mode=status`                                               |
 | Stale inventory                  | `query_engineering_memory` | `mode=stale`                                                |
 
@@ -41,6 +41,19 @@ Defaults exclude **stale**. Keyword `search` excludes drafts unless
 `include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
 `for_symbol` include draft agent notes automatically so handoffs are visible.
 Draft records remain non-authoritative.
+
+### Optional semantic search (Phase 20)
+
+Repository default: `memory.semantic.enabled=false`. To use semantic blend:
+
+1. Enable `[tool.codeclone.memory.semantic]` in `pyproject.toml`
+2. `pip install 'codeclone[semantic-lancedb]'`
+3. `codeclone memory semantic rebuild`
+4. `query_engineering_memory(mode=search, semantic=true, …)`
+
+Without a built index, search stays FTS-only (`semantic.used: false` in the
+response). Default provider `diagnostic` is **deterministic hash vectors**, not
+semantic-quality embeddings — do not present hits as LLM recall.
 
 ### Read checklist
 

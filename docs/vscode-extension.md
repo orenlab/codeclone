@@ -104,16 +104,39 @@ The extension stays source-first:
 `Open in HTML Report` exists as an explicit bridge to the richer human report,
 not as the primary IDE workflow.
 
-## Blast radius and session commands
+## Blast radius, session, and audit commands
 
 The extension also exposes structural change-controller helpers over MCP:
 
 - **Show Blast Radius** — `get_blast_radius` for a repo-relative file path
 - **Copy Blast Radius Brief** — same payload formatted for review notes
+- **Show Session Stats** / **Show Controller Audit Trail** — IDE-only MCP tools
+  (`get_workspace_session_stats`, `get_controller_audit_trail`) registered only
+  when the extension launches `codeclone-mcp` with `--ide-governance-channel`.
+  Payloads match CLI `--session-stats` and `--audit` via
+  `codeclone/controller_insights/`.
 - **Clear Session** — `clear_session_runs` (in-memory runs, reviewed markers,
   and workspace intent registry state for the MCP process)
 
 These commands require workspace trust and an active MCP connection.
+
+## Engineering Memory in the IDE
+
+- **Memory** view — draft inbox, approve/reject through the IDE governance
+  channel (`prepare_governance` / `commit_governance`), sync from run.
+- **Search Engineering Memory** — QuickPick (`mode=search`; FTS + optional
+  semantic per `codeclone.memory.searchSemantic`, default **on** in the extension).
+- **Memory for Active File** — `mode=for_path` for the active editor path.
+- **Open Memory Search Panel** / **Refresh Memory Search** — results webview.
+- **Configure Memory Search** — workspace wizard for semantic, drafts, stale, and
+  result limit (see **Engineering Memory search** settings below).
+
+Server-side semantic still requires `[tool.codeclone.memory.semantic] enabled`,
+`codeclone[semantic-lancedb]`, and `codeclone memory semantic rebuild` — see
+[Engineering Memory](book/26-engineering-memory.md).
+
+Full contract: [VS Code extension (book)](book/21-vscode-extension.md),
+[Engineering Memory](book/26-engineering-memory.md).
 
 ## Open Production Triage
 
@@ -160,30 +183,56 @@ the local MCP launcher.
 - `Open in HTML Report` opens a local HTML report only when it exists and looks
   fresh enough for the current run
 
-## Settings that shape analysis depth
+## Settings
 
-- `codeclone.mcp.command` and `codeclone.mcp.args` are machine-scoped launcher
-  settings, so they belong in user or remote settings.
-- `codeclone.analysis.profile` selects the analysis sensitivity profile:
-  `defaults` (conservative first pass), `deeperReview`, or `custom`
-- `codeclone.analysis.cachePolicy` and the threshold settings below are
-  resource-scoped, so they can vary by workspace or folder
-- `codeclone.analysis.changedDiffRef` selects the git revision used by
-  changed-files review
-- `codeclone.analysis.coverageXml` passes an explicit Cobertura XML path to
-  Coverage Join
-- `codeclone.analysis.autoDetectCoverageXml` passes workspace-root
-  `coverage.xml` when present and `coverageXml` is empty
-- `codeclone.analysis.minLoc`
-- `codeclone.analysis.minStmt`
-- `codeclone.analysis.blockMinLoc`
-- `codeclone.analysis.blockMinStmt`
-- `codeclone.analysis.segmentMinLoc`
-- `codeclone.analysis.segmentMinStmt`
+Authoritative definitions: `extensions/vscode-codeclone/package.json` →
+`contributes.configuration.properties`.
 
-Custom thresholds apply only when the profile is set to `custom`.
+### Launcher (machine-scoped)
 
-`codeclone.ui.showStatusBar` is a window-scoped presentation setting.
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `codeclone.mcp.command` | `auto` | Workspace venv, then `PATH`. User/remote settings. |
+| `codeclone.mcp.args` | `[]` | Extra launcher argv. The extension injects `--ide-governance-channel` for Memory governance and session/audit tools (do not duplicate in args). |
+
+### Analysis (resource-scoped)
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `codeclone.analysis.profile` | `defaults` | `defaults`, `deeperReview`, or `custom`. |
+| `codeclone.analysis.cachePolicy` | `reuse` | `reuse` or `off`. |
+| `codeclone.analysis.changedDiffRef` | `HEAD` | Git ref for **Review Changes**. |
+| `codeclone.analysis.coverageXml` | `""` | Explicit Cobertura path for Coverage Join. |
+| `codeclone.analysis.autoDetectCoverageXml` | `true` | Use workspace-root `coverage.xml` when path empty. |
+| `codeclone.analysis.minLoc` | `10` | Custom thresholds — only when `profile=custom`. |
+| `codeclone.analysis.minStmt` | `6` | Same. |
+| `codeclone.analysis.blockMinLoc` | `20` | Same. |
+| `codeclone.analysis.blockMinStmt` | `8` | Same. |
+| `codeclone.analysis.segmentMinLoc` | `20` | Same. |
+| `codeclone.analysis.segmentMinStmt` | `10` | Same. |
+
+### UI (window-scoped)
+
+| Setting | Default | Notes |
+|---------|---------|-------|
+| `codeclone.ui.showStatusBar` | `true` | Workspace-level status bar item. |
+
+### Engineering Memory search (resource-scoped)
+
+These map to MCP `query_engineering_memory` parameters from
+`extensions/vscode-codeclone/src/memorySearch.js` (`readMemorySearchSettings`).
+
+| Setting | Default | MCP mapping | Notes |
+|---------|---------|-------------|-------|
+| `codeclone.memory.searchSemantic` | `true` | `semantic` on `mode=search` only | Extension **asks** for semantic blend by default. Server still needs `[tool.codeclone.memory.semantic] enabled`, `codeclone[semantic-lancedb]`, and `memory semantic rebuild` — otherwise FTS-only with `semantic.used: false`. |
+| `codeclone.memory.searchIncludeDrafts` | `false` | `include_drafts` (search) | Drafts are still included automatically on `for_path` per memory contract. |
+| `codeclone.memory.searchIncludeStale` | `false` | `include_stale` (search and `for_path`) | |
+| `codeclone.memory.searchMaxResults` | `20` | `max_results` (clamped 5–50) | |
+| `codeclone.memory.searchDetailLevel` | `compact` | `detail_level`: `compact` or `full` | `mode=get` always returns full records. Not exposed in **Configure Memory Search** (settings UI only). |
+
+**Configure Memory Search** writes `searchSemantic`, `searchIncludeDrafts`,
+`searchIncludeStale`, and `searchMaxResults` to the workspace folder target.
+Query length: 2–200 characters (`sanitizeSearchQuery` in `memorySearch.js`).
 
 ## Source of truth
 

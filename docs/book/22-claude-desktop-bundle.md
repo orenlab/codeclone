@@ -61,6 +61,16 @@ The bundle currently provides:
 
 It intentionally does not add bundle-only MCP tools or prompts.
 
+The wrapper does **not** pass `--ide-governance-channel`. Claude Desktop agents
+receive the standard **31** MCP tools. IDE-only
+`get_workspace_session_stats` / `get_controller_audit_trail` and VS Code Memory
+governance are VS Code extension surfaces only.
+
+Engineering Memory tools (`get_relevant_memory`, `query_engineering_memory`,
+`manage_engineering_memory`) are included in that passthrough. Optional semantic
+search (Phase 20) is server-configured — see
+[Engineering Memory](26-engineering-memory.md).
+
 ## Runtime model
 
 The wrapper:

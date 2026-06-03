@@ -30,9 +30,14 @@ controlled edits.
 | 18.5  | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                    |
 | 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                            |
 | 18.7  | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`     |
+| 20    | Optional semantic retrieval (LanceDB sidecar)                 | `[tool.codeclone.memory.semantic]`; CLI `memory semantic *`; MCP/CLI search `--semantic` |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.1`**).
+
+Semantic index format (separate contract): `SEMANTIC_INDEX_FORMAT_VERSION`
+(currently **`1`**) in the same module. The vector sidecar is independent of
+the SQLite memory schema version.
 
 ---
 
@@ -81,6 +86,8 @@ Module ownership:
 | `codeclone/memory/sqlite_store.py`                | SQLite persistence, FTS sync, subject dedup          |
 | `codeclone/memory/ingest/*`                       | Init/refresh batch builders from report + git + docs |
 | `codeclone/memory/retrieval/*`                    | Scoped ranking and query router                      |
+| `codeclone/memory/semantic/*`                     | Projections, LanceDB sidecar, rebuild, search hits   |
+| `codeclone/memory/embedding/*`                    | Embedding providers (`diagnostic` default)           |
 | `codeclone/memory/governance.py`                  | Draft candidates, approve/reject, claim validation   |
 | `codeclone/memory/staleness.py`                   | Refresh-time and scope-time staleness                |
 | `codeclone/config/memory*.py`                     | `[tool.codeclone.memory]` resolution                 |
@@ -285,9 +292,28 @@ git_hotspot_min_changes = 5
 stale_retention_days = 180
 draft_retention_days = 14
 mcp_sync_policy = "bootstrap_if_missing"   # off | bootstrap_if_missing | refresh_when_stale
+
+[tool.codeclone.memory.semantic]
+enabled = false                          # default: off, zero extra deps
+backend = "lancedb"
+index_path = ".cache/codeclone/memory/semantic_index.lance"
+embedding_provider = "diagnostic"        # diagnostic | local_model | api
+dimension = 256
+max_results = 20
+index_audit = true                       # project audit summaries when audit DB exists
 ```
 
-Environment override: `CODECLONE_MEMORY_DB_PATH`.
+Environment overrides:
+
+| Variable | Effect |
+|----------|--------|
+| `CODECLONE_MEMORY_DB_PATH` | SQLite store path |
+| `CODECLONE_MEMORY_SEMANTIC_ENABLED` | `true` / `false` for `semantic.enabled` |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | Provider literal |
+| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH` | LanceDB directory path |
+
+Unknown keys under `[tool.codeclone.memory.semantic]` are contract errors
+(Pydantic `extra="forbid"` on `SemanticConfig`).
 
 Refs:
 
@@ -305,7 +331,10 @@ All commands live under `codeclone memory` and accept `--root` (default `.`).
 | `init [--refresh] [--dry-run]`                                | Create or refresh the memory store           |
 | `status`                                                      | Schema version, counts, last ingest metadata |
 | `for-path PATH [--limit N]`                                   | Records linked to a repo-relative path       |
-| `search QUERY [--match any\|all] [--active-only] [--limit N]` | FTS keyword search                           |
+| `search QUERY [--match any\|all] [--semantic] [--active-only] [--limit N]` | FTS search; optional semantic blend |
+| `semantic status`                                               | Index availability, provider, row counts     |
+| `semantic rebuild`                                            | Rebuild LanceDB sidecar from memory + audit  |
+| `semantic search QUERY [--limit N]`                           | Search with semantic ranking (index required) |
 | `stale [--limit N]`                                           | List stale records and reasons               |
 | `vacuum [--dry-run]`                                          | Retention purge per config                   |
 | `coverage --scope PATH [PATH...]`                             | Scope coverage metrics                       |
@@ -363,7 +392,7 @@ Mode router for inspection and search.
 
 | `mode`       | Required inputs | Purpose                             |
 |--------------|-----------------|-------------------------------------|
-| `search`     | `query`         | FTS keyword search                  |
+| `search`     | `query`; optional `semantic=true` | FTS keyword search; optional vector blend |
 | `get`        | `record_id`     | Single record + subjects + evidence |
 | `for_path`   | `path`          | Path-linked records                 |
 | `for_symbol` | `symbol`        | Symbol-linked records               |
@@ -511,6 +540,8 @@ Stale records remain in the database for audit but are **excluded** from
 
 ## Search semantics (schema 1.1)
 
+### FTS (always available)
+
 FTS5 index (`memory_fts`) indexes record statements and metadata.
 
 | `match_mode`    | Behavior                                      |
@@ -525,6 +556,123 @@ Refs:
 
 - `codeclone/memory/search_index.py`
 - `codeclone/memory/display.py`
+
+### Optional semantic retrieval (Phase 20)
+
+Semantic search is **opt-in** and **off by default** (`enabled = false` in
+`codeclone/config/memory_defaults.py`). It does not replace FTS: keyword search
+still runs first; when the index is available, vector proximity **merges extra
+candidates** and adjusts ranking (`semantic_proximity * 0.3` in
+`codeclone/memory/retrieval/ranking.py`).
+
+```mermaid
+flowchart LR
+    Q[Query text] --> FTS[FTS5 memory_fts]
+    Q --> EMB[EmbeddingProvider.embed]
+    EMB --> VEC[LanceDB k-NN]
+    FTS --> MERGE[Candidate union]
+    VEC --> MERGE
+    MERGE --> RANK[Rank + semantic weight]
+    RANK --> OUT[search payload + semantic block]
+```
+
+**Prerequisites (all required for `semantic.used: true`):**
+
+1. `memory.semantic.enabled = true` in effective config.
+2. Optional extra installed: `pip install 'codeclone[semantic-lancedb]'`.
+3. Index built at `index_path` (default
+   `.cache/codeclone/memory/semantic_index.lance`) via
+   `codeclone memory semantic rebuild`.
+
+**Degraded states (never crash read paths):**
+
+| Condition | Index behavior | Search `semantic` block |
+|-----------|----------------|-------------------------|
+| `enabled=false` | `NullSemanticIndex` | `used: false`, `reason: disabled` |
+| Enabled, index missing | `UnavailableSemanticIndex` (`not_built`) | FTS only; `used: false` |
+| Enabled, LanceDB extra missing | `UnavailableSemanticIndex` (`lancedb_not_installed`) | FTS only; explicit `semantic rebuild` fails clear |
+| Provider unavailable | `semantic_reason` set (e.g. `local_model` not wired) | FTS only |
+
+The index is a **derived, rebuildable sidecar** — not updated on the memory
+write hot path. Rebuild is idempotent on projection `text_hash`
+(`codeclone/memory/semantic/rebuild.py`).
+
+#### Embedding providers
+
+| Provider | Status | Meaning |
+|----------|--------|---------|
+| `diagnostic` (default) | Always available | `DeterministicHashEmbeddingProvider`: sha256-derived unit vectors. **Stable across runs, not semantic-quality recall.** CLI prints an advisory when `provider=diagnostic`. |
+| `local_model` | Raises `MemorySemanticUnavailableError` | Reserved for Phase 20.6 (lazy model backend). |
+| `api` | Raises `MemorySemanticUnavailableError` | Reserved for Phase 20.6 (remote API backend). |
+
+Model id for diagnostic: `diagnostic-hash-v1`
+(`codeclone/memory/embedding/__init__.py`).
+
+#### What gets indexed
+
+**Memory record types** (`INDEXED_MEMORY_TYPES` in
+`codeclone/memory/semantic/projection.py`):
+
+`contract_note`, `change_rationale`, `risk_note`, `architecture_decision`,
+`contradiction_note`, `protocol_rule`, `human_note`.
+
+**Not** semantically indexed (served by exact subject / path match instead):
+`module_role`, `test_anchor`, `document_link`, `public_surface`, `stale_marker`.
+
+**Audit incidents** when `index_audit=true` (default) and `audit_enabled=true`
+with a readable audit DB — projected from **`controller_events.summary` only**
+(never `payload_json`). Event types:
+
+`intent.declared`, `patch_contract.violated`, `workspace.conflict_detected`,
+`baseline_abuse.detected`, `claim_validation.violated`, `review_receipt.created`.
+
+Empty audit summaries are skipped.
+
+#### Surfaces
+
+| Surface | Semantic flag |
+|---------|---------------|
+| `query_engineering_memory(mode=search, semantic=true)` | MCP |
+| `codeclone memory search --semantic` | CLI |
+| `codeclone memory semantic search` | CLI (requires built index) |
+| VS Code `codeclone.memory.searchSemantic` (default **`true`**) | Passes MCP `semantic` on IDE search; server opt-in unchanged |
+| `get_relevant_memory` | **No** semantic parameter (scoped ranking only) |
+
+Search responses include a top-level **`semantic`** object:
+
+| Field | When set |
+|-------|----------|
+| `used` | `true` only when index + provider + rebuild succeeded |
+| `backend` | e.g. `lancedb` from index status |
+| `provider` | Config label (`diagnostic`, …) |
+| `model` | Provider `model_id` when used |
+| `index_version` | `SEMANTIC_INDEX_FORMAT_VERSION` when used |
+| `reason` | Degrade reason when `used` is false |
+
+When semantic hits audit rows, `payload.audit_events` lists hydrated incidents
+(event type, bounded summary preview, score) alongside memory records.
+
+Refs:
+
+- `codeclone/memory/retrieval/service.py:_handle_semantic_search_mode`
+- `codeclone/memory/semantic/__init__.py:resolve_semantic_index`
+- `tests/test_semantic_projection.py`, `tests/test_semantic_rebuild.py`,
+  `tests/test_mcp_memory_semantic.py`, `tests/test_cli_memory_semantic.py`
+
+---
+
+## Regressions and UX fixes (2.1.0a1)
+
+These are documentation anchors for shipped fixes — see `CHANGELOG.md` **Fixed**
+for the full controller list.
+
+| Area | Symptom | Fix (code truth) |
+|------|---------|------------------|
+| VS Code session/audit webviews | Payload footprint table showed zeros for workflow metrics | Audit footprint JSON uses `calls` and `tokens` in `top_workflows`; the webview maps both legacy and mistaken field names (`workspaceInsightsRenderer.js`). |
+| CLI session stats | Import / duplication issues | Collection lives in `codeclone/controller_insights/`; CLI renders only (`surfaces/cli/session_stats.py`). |
+| MCP vs CLI insights | Session stats logic must not live only in MCP | IDE-only tools `get_workspace_session_stats` / `get_controller_audit_trail` share the same collectors as `--session-stats` / `--audit`. |
+| Patch verify | Identical before/after run accepted | `after_run_not_new` for `python_structural` and `governance_config` profiles. |
+| Finish hygiene | Over-blocking on foreign out-of-scope dirt | Unattributed out-of-scope dirt is advisory; blocking reasons are `missing_evidence` and `foreign_dirty_overlap`. |
 
 ---
 
@@ -606,6 +754,11 @@ or project-wide dumps.
 - `tests/test_memory_cli.py`
 - `tests/test_mcp_service.py` (memory tool wiring)
 - `tests/test_mcp_server.py` (tool registration)
+- `tests/test_semantic_projection.py`, `tests/test_semantic_rebuild.py`,
+  `tests/test_semantic_embedding.py`, `tests/test_semantic_index_null.py`
+- `tests/test_cli_memory_semantic.py`, `tests/test_mcp_memory_semantic.py`
+- `tests/test_config_semantic.py`, `tests/test_semantic_determinism_gate.py`
+- `tests/test_controller_insights.py` (shared session/audit payloads)
 
 ---
 

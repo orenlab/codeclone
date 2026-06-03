@@ -71,14 +71,31 @@ editing, maps blast radius, verifies the patch against the contract, generates
 a review receipt, and validates cited review claims. This is the governance
 skill — use it whenever the task requires changing files.
 
+### codeclone-engineering-memory
+
+Scope-aware Engineering Memory over MCP: `get_relevant_memory` (absolute
+`root` required), `query_engineering_memory`, draft `record_candidate`, and
+`finish(..., propose_memory=true)`. Complements change control — does not replace
+intent declaration or patch verify. Human approve stays in the CodeClone VS Code
+**Memory** view (not MCP).
+
+Optional **semantic search** (Phase 20): off by default in
+`[tool.codeclone.memory.semantic]`; when enabled, install
+`codeclone[semantic-lancedb]`, rebuild the index, then
+`query_engineering_memory(mode=search, semantic=true)`. Default provider
+`diagnostic` is deterministic, not semantic-quality embeddings. See
+[Engineering Memory](book/26-engineering-memory.md).
+
 ## Runtime model
 
-Additive — the marketplace install provides a local MCP definition and three
+Additive — the marketplace install provides a local MCP definition and **four**
 skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
 through directly, including Coverage Join facts and the optional `coverage`
 help topic when supported. The plugin does not mutate `~/.codex/config.toml` or
 install a second server binary. The bundled launcher does not filter MCP tools;
-agents receive the full 31-tool surface from the resolved `codeclone-mcp` server.
+agents receive the **31-tool** agent surface from the resolved `codeclone-mcp`
+server (no `--ide-governance-channel` — IDE-only session/audit tools are VS Code
+only).
 
 `.agents/plugins/marketplace.json` is the monorepo-local source entry used for
 development and packaging into `orenlab/codeclone-codex`; it is not the public
@@ -102,4 +119,5 @@ registry (file or SQLite backend) and optional audit records when enabled.
 
 - [MCP usage guide](mcp.md)
 - [MCP interface contract](book/20-mcp-interface.md)
+- [Engineering Memory](book/26-engineering-memory.md)
 - [Structural Change Controller](book/24-structural-change-controller.md)

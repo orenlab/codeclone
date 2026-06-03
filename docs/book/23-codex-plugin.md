@@ -52,10 +52,11 @@ The plugin currently provides:
 - `.mcp.json`
 - `scripts/launch_mcp`
 - `README.md`
-- three bundled skills:
+- four bundled skills:
     - `codeclone-review`
     - `codeclone-hotspots`
     - `codeclone-change-control`
+    - `codeclone-engineering-memory`
 - a repo-local marketplace entry in `.agents/plugins/marketplace.json`
 
 ## Runtime model
@@ -66,7 +67,9 @@ The plugin surface is additive:
 - `plugins/codeclone/scripts/launch_mcp.py` resolves the local launcher without shell wrapping
 - that launcher prefers a workspace `.venv`, then a Poetry env, then `PATH`;
   it does not filter MCP tools — agents receive the full 31-tool surface
-- the skills contribute workflow guidance and starter prompts
+- the skills contribute workflow guidance and starter prompts (review, hotspots,
+  change control, engineering memory — including optional semantic search when
+  the server index is built; see [Engineering Memory](26-engineering-memory.md))
 - `README.md` documents local usage and boundaries inside the repository tree
 - Codex remains free to use direct `mcp add` config alongside or instead of the
   plugin

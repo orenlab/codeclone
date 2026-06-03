@@ -104,14 +104,21 @@ Refs:
       memory store from canonical report + git + docs + tests.
     - `status`, `for-path`, `search`, `stale`, `vacuum`, `coverage` — query
       modes mirroring MCP `query_engineering_memory`.
+    - `semantic status|rebuild|search` — optional LanceDB sidecar (requires
+      `[tool.codeclone.memory.semantic] enabled = true`, extra
+      `codeclone[semantic-lancedb]`, and a successful `semantic rebuild`).
     - `review-candidates`, `approve`, `reject`, `archive` — human governance
       for draft records (not available on MCP).
-    - `search` accepts `--match any|all` for FTS token matching (default `any`).
+    - `search` accepts `--match any|all` for FTS token matching (default `any`)
+      and `--semantic` to blend vector proximity when the index is available.
     - Requires a prior normal analysis run or cached report for `init`.
     - Full contract: [Engineering Memory](26-engineering-memory.md).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.
+    - `--session-stats` and `--audit` collect payloads from
+      `codeclone/controller_insights/` (same facts as IDE-only MCP tools when
+      the server runs with `--ide-governance-channel`).
     - `--session-stats` cannot combine with `--audit`, `--blast-radius`, or
       `--patch-verify`.
     - `--audit` cannot combine with `--blast-radius` or `--patch-verify`.

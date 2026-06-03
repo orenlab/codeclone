@@ -535,7 +535,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "engineering_memory": MCPHelpTopicSpec(
         summary=(
             "Engineering Memory: ranked scope context before edits, FTS search, "
-            "MCP sync from analysis runs, and draft-only agent writes."
+            "optional semantic search (off by default), MCP sync from analysis "
+            "runs, and draft-only agent writes."
         ),
         key_points=(
             "After start_controlled_change with edit_allowed=true, call "
@@ -551,6 +552,9 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "for_symbol resolves exact symbol subjects first, then falls back to "
             "module_role records for the owning module prefix.",
             "Search filters.match_mode: any (default) or all.",
+            "Optional semantic: query_engineering_memory(mode=search, "
+            "semantic=true) when memory.semantic.enabled and index rebuilt; "
+            "default provider diagnostic is deterministic, not semantic-quality.",
             "Scoped get_relevant_memory includes draft agent notes automatically; "
             "for_path/for_symbol include drafts without an extra flag.",
             "Stale excluded by default; do not ignore stale warnings.",

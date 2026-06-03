@@ -71,7 +71,13 @@ Current server characteristics:
 
 ## Tools
 
-Current tool set: **31 tools** organized by workflow phase.
+Current tool set: **31 tools** for agent clients, organized by workflow phase.
+
+When the MCP server starts with `--ide-governance-channel` (CodeClone VS Code
+extension), two additional read-only tools register:
+`get_workspace_session_stats` and `get_controller_audit_trail` (**33 tools**
+total). They are not listed in generic agent tool catalogs; payloads mirror CLI
+`--session-stats` and `--audit` via `codeclone/controller_insights/`.
 
 ```mermaid
 graph LR
@@ -173,7 +179,7 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
 | `manage_change_intent`      | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools                                                                                                                                                                                                                                       |
 | `get_blast_radius`          | `run_id`, `files`, `depth`, `include`                                                                                          | Pre-change risk boundary: full transitive graph, custom include filters                                                                                                                                                                                                                                                                                                                                                       |
 | `get_relevant_memory`       | `root`, `scope`, `intent_id`, `symbols`, `max_records`, `include_stale`, `include_drafts`                                      | Ranked engineering memory for declared edit scope. Auto-bootstraps store when `mcp_sync_policy=bootstrap_if_missing` (default). See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                                                            |
-| `query_engineering_memory`  | `root`, `mode`, `record_id`, `path`, `symbol`, `query`, `scope`, `filters`, `max_results`, `include_stale`, `include_drafts`   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. `filters` supports `types`, `statuses`, `confidences`, and `match_mode` (`any`\|`all`) for search. See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                |
+| `query_engineering_memory`  | `root`, `mode`, …, optional `semantic` (search only)   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. `filters` supports `types`, `statuses`, `confidences`, and `match_mode` (`any`\|`all`) for search. `semantic=true` blends LanceDB proximity when `[tool.codeclone.memory.semantic] enabled` and index built (default off). See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                |
 | `manage_engineering_memory` | `root`, `action`, …                                                                                                            | Agent-side: `refresh_from_run`, `record_candidate`, `validate_claims`, `propose_from_receipt`. Human approve/reject/archive: VS Code **Memory** view via IDE governance channel (`register_ide_governance`, `prepare_governance`, `commit_governance` with `--ide-governance-channel`). Agents calling `approve`/`reject`/`archive` receive `governance_mode_unavailable`. See [Engineering Memory](26-engineering-memory.md) |
 | `check_patch_contract`      | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                    | Manual budget query or step-by-step verification                                                                                                                                                                                                                                                                                                                                                                              |
 | `create_review_receipt`     | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                              | Manual receipt generation                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -217,6 +223,21 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
 | `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Session-local review marker (in-memory)                                                               |
 | `list_reviewed_findings` | `run_id`                       | List reviewed markers for a run                                                                       |
 | `clear_session_runs`     | —                              | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process |
+
+### IDE-only tools (`--ide-governance-channel`)
+
+Registered only when the MCP launcher passes `--ide-governance-channel` (VS Code
+extension). Agent MCP clients without that flag do not see these tools in
+`list_tools`.
+
+| Tool                            | Key parameters | Purpose                                                                 |
+|---------------------------------|----------------|-------------------------------------------------------------------------|
+| `get_workspace_session_stats`   | `root`         | Workspace agents, intents, leases — same collector as CLI `--session-stats` |
+| `get_controller_audit_trail`    | `root`         | Audit trail + payload footprint — same collector as CLI `--audit`       |
+
+Requires `audit_enabled=true` for meaningful audit rows. Payload footprint
+`top_workflows` entries expose workflow metrics as `calls` and `tokens` (see
+`codeclone/controller_insights/audit_trail.py`).
 
 ---
 

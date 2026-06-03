@@ -90,7 +90,10 @@ The extension currently supports:
 - workspace session stats and controller audit webviews (`Show Session Stats`,
   `Show Controller Audit Trail`, brief copy commands) via IDE-only
   `get_workspace_session_stats` and `get_controller_audit_trail` (registered only
-  with `--ide-governance-channel`; not listed for agent MCP clients)
+  with `--ide-governance-channel`; not listed for agent MCP clients). Payloads
+  come from `codeclone/controller_insights/` (same collectors as CLI
+  `--session-stats` / `--audit`). Audit footprint workflow metrics use `calls` and
+  `tokens` per workflow row.
 - session reset via `Clear Session` (`clear_session_runs`)
 - live production triage via **Open Production Triage** (`get_production_triage`
   with a 5-second per-run cooldown and in-flight deduplication)
@@ -114,14 +117,75 @@ The extension currently supports:
   extension launches MCP with `--ide-governance-channel` and registers a
   `SecretStorage` governance key on connect.
 - Engineering Memory **search** (command palette, Memory view toolbar, editor title):
-  `Search Engineering Memory` (QuickPick over `query_engineering_memory` mode=search),
-  `Memory for Active File` (mode=for_path on the active editor path),
-  and `Open Memory Search Panel` (read-only webview with CSP, no scripts,
-  allowlisted `command:` links only). Search does not add a separate tree section
-  under the inbox.
+  `Search Engineering Memory` (QuickPick, `mode=search`),
+  `Memory for Active File` (`mode=for_path` on the active editor path),
+  `Open Memory Search Panel` (read-only webview; CSP, no scripts, allowlisted
+  `command:` links),
+  `Refresh Memory Search` (re-run the panel’s last query),
+  and `Configure Memory Search` (workspace QuickPick wizard for semantic / drafts /
+  stale / result limit). Search does not add a separate tree section under the inbox.
 
 These capabilities must remain clients of MCP and canonical report truth rather
 than parallel extension-only logic.
+
+## Configuration
+
+Settings are declared in `extensions/vscode-codeclone/package.json`
+(`contributes.configuration`). Scope follows VS Code: **machine** (launcher),
+**resource** (per workspace folder), **window** (UI).
+
+### Launcher
+
+| Key | Default | Scope | Behavior |
+|-----|---------|-------|----------|
+| `codeclone.mcp.command` | `auto` | Machine | Resolve `codeclone-mcp` (workspace venv, then `PATH`). |
+| `codeclone.mcp.args` | `[]` | Machine | Extra launcher arguments. The extension adds `--ide-governance-channel` internally for Memory governance and IDE-only session/audit tools — do not pass a conflicting flag in `args`. |
+
+### Analysis depth
+
+| Key | Default | Scope | Behavior |
+|-----|---------|-------|----------|
+| `codeclone.analysis.profile` | `defaults` | Resource | `defaults`, `deeperReview`, or `custom`. |
+| `codeclone.analysis.cachePolicy` | `reuse` | Resource | `reuse` or `off` for MCP analysis requests. |
+| `codeclone.analysis.changedDiffRef` | `HEAD` | Resource | Git ref for changed-files analysis. |
+| `codeclone.analysis.coverageXml` | `""` | Resource | Cobertura path for Coverage Join. |
+| `codeclone.analysis.autoDetectCoverageXml` | `true` | Resource | Pass workspace-root `coverage.xml` when path is empty. |
+| `codeclone.analysis.minLoc` … `segmentMinStmt` | see `package.json` | Resource | Used only when `profile=custom`. |
+
+### UI
+
+| Key | Default | Scope | Behavior |
+|-----|---------|-------|----------|
+| `codeclone.ui.showStatusBar` | `true` | Window | Single workspace-level status bar entry. |
+
+### Engineering Memory search
+
+Resource keys under `codeclone.memory.*` are read by
+`readMemorySearchSettings()` in `extensions/vscode-codeclone/src/memorySearch.js`
+and passed to `query_engineering_memory`.
+
+| Key | Default | MCP parameter | Applies to |
+|-----|---------|---------------|------------|
+| `codeclone.memory.searchSemantic` | `true` | `semantic` | `mode=search` only |
+| `codeclone.memory.searchIncludeDrafts` | `false` | `include_drafts` | `mode=search` |
+| `codeclone.memory.searchIncludeStale` | `false` | `include_stale` | `mode=search` and `mode=for_path` |
+| `codeclone.memory.searchMaxResults` | `20` | `max_results` (clamped 5–50) | search and `for_path` |
+| `codeclone.memory.searchDetailLevel` | `compact` | `detail_level` (`compact` \| `full`) | search and `for_path` |
+
+!!! important "Extension default ≠ server default"
+    `searchSemantic` defaults to **`true` in VS Code** so the IDE requests semantic
+    blend when the user searches. CodeClone’s **repository** default remains
+    `memory.semantic.enabled = false` until you opt in in `pyproject.toml`, install
+    `codeclone[semantic-lancedb]`, and run `codeclone memory semantic rebuild`.
+    When the server index is unavailable, MCP still returns FTS hits and
+    `semantic.used: false` with a `reason` (for example `disabled`, `not_built`).
+
+**Configure Memory Search** updates `searchSemantic`, `searchIncludeDrafts`,
+`searchIncludeStale`, and `searchMaxResults` at `ConfigurationTarget.WorkspaceFolder`.
+`searchDetailLevel` is settings-editor only. Search queries must be 2–200 characters
+without control characters (`sanitizeSearchQuery`).
+
+Refs: [Engineering Memory](26-engineering-memory.md), `extensions/vscode-codeclone/src/memorySearch.js`.
 
 ## State boundaries
 

@@ -38,6 +38,7 @@ codeclone-mcp --help
 | **Blast Radius**      | `/codeclone-blast-radius`      | Structural impact of changing specific files                           |
 | **Review**            | `/codeclone-review`            | Full structural review session with baseline-aware triage              |
 | **Change Control**    | `/codeclone-change-control`    | Intent-first edit workflow: declare, blast radius, edit, verify, clear |
+| **Engineering Memory** | `/codeclone-engineering-memory` | Scope memory before edits, search, draft `record_candidate`, finish proposals |
 
 ### Typical flow
 
@@ -57,11 +58,17 @@ deterministic findings with file paths and evidence, not opinions.
 
 ## Rules
 
-- **CodeClone MCP Rules** (`alwaysApply`) — how to use the MCP server correctly:
-  tool preferences, absolute roots, source-of-truth discipline.
-- **Python Context** (glob: `**/*.py`) — auto-triggers when Python files are in
-  context: run analysis before structural changes, check blast radius, do not
-  introduce regressions.
+Three rules ship in `rules/` (load via plugin discovery, not only manual symlinks):
+
+| File | Activation | Role |
+|------|------------|------|
+| `codeclone-workflow.mdc` | always | MCP-only, absolute `root`, tool preferences |
+| `change-control-gate.mdc` | always | Hard gate: `start` / `finish`, memory before finish when required |
+| `codeclone-python.mdc` | `**/*.py` | Analyze before structural edits; respect blast radius |
+
+Chat skill ids use the `name:` field in each `SKILL.md` (folders `production-triage/`
+and `blast-radius/` differ from ids `codeclone-production-triage` and
+`codeclone-blast-radius`).
 
 ---
 
@@ -72,7 +79,7 @@ Cursor **Settings → Hooks** lists only **project** (`.cursor/hooks.json`) and
 project hooks so the IDE shows them and they run in this repo:
 
 ```bash
-# from the codeclone repo root (creates .cursor/hooks.json + codeclone-hooks.json)
+# from the codeclone repo root (creates .cursor/hooks.json + .cursor/codeclone-hooks.json)
 uv run python plugins/cursor-codeclone/scripts/install-project-hooks.py
 
 # gate all repository files (not only Python)
@@ -97,8 +104,9 @@ Hook behavior:
   and SQLite registry backends behave the same. Without an authorized intent,
   direct repository file writes are blocked, including `.git/**`; only read-only
   Git inspection shell commands are allowed.
-- **Python write reminder** (`postToolUse`) — advisory `additional_context` after
-  `.py` / `.pyi` writes.
+- **Python write reminder** (`postToolUse`) — advisory `additional_context` only
+  when the edited path is `.py` / `.pyi` (matcher fires on all writes; script
+  filters to Python).
 - **Session cleanup** (`stop`) — optional `followup_message` for unclosed intents.
 
 Reload Cursor or reopen the workspace after installing. Project hooks require a
@@ -110,9 +118,11 @@ Reload Cursor or reopen the workspace after installing. Project hooks require a
 
 The plugin bundles a stdio-based `codeclone-mcp` server configuration via
 `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → `PATH`).
-The server exposes all 31 MCP tools (full passthrough). Skills and rules steer
-agents toward the documented workflow; the plugin does not filter tools at the
-transport layer.
+The server exposes all **31** MCP tools for agents (full passthrough; no
+`--ide-governance-channel`). Skills and rules steer agents toward the documented
+workflow; the plugin does not filter tools at the transport layer. IDE-only
+`get_workspace_session_stats` / `get_controller_audit_trail` require the VS Code
+extension launcher.
 
 ## Distribution
 

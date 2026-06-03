@@ -215,7 +215,10 @@ the client workspace.
 
 ## Tool surface
 
-Current surface: **31 tools**, **7 fixed resources**, **3 URI templates**.
+Current surface: **31 tools** for agent clients, **7 fixed resources**, **3 URI
+templates**. With `--ide-governance-channel` (VS Code), **33 tools** — adds
+`get_workspace_session_stats` and `get_controller_audit_trail` (not exposed to
+generic agent catalogs).
 
 The surface is organized by workflow phase. Start at the top, drill down
 as needed.
@@ -440,6 +443,7 @@ sequenceDiagram
 | After `start`, before edit | `get_relevant_memory(root, scope \| intent_id)`                          | Ranked scope context      |
 | One path / symbol          | `query_engineering_memory(mode=for_path\|for_symbol)`                    | Targeted lookup           |
 | Keyword discovery          | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search                |
+| Semantic discovery (opt-in) | `query_engineering_memory(mode=search, semantic=true, …)`              | FTS + LanceDB blend when `[tool.codeclone.memory.semantic] enabled` and index built; default config is **off** |
 | Refresh system facts       | `manage_engineering_memory(action=refresh_from_run, run_id?)`            | Force ingest from MCP run |
 | Unclear semantics          | `help(topic="engineering_memory")`                                       | Compact playbook          |
 
@@ -448,6 +452,15 @@ Defaults exclude **stale** records. Keyword search excludes drafts unless
 `for_symbol` include draft agent notes automatically so handoffs are visible.
 Draft records remain non-authoritative. Surface stale warnings when present —
 they signal changed context.
+
+**Optional semantic search (Phase 20):** off by default (`enabled=false`).
+When enabled, install `codeclone[semantic-lancedb]`, run
+`codeclone memory semantic rebuild`, then pass `semantic=true` on
+`mode=search`. Responses include a `semantic` object (`used`, `provider`,
+`reason`, …). The default `diagnostic` provider uses deterministic hash
+vectors — **not** semantic-quality embeddings; treat hits as proximity over
+projected text, not LLM recall. See
+[Engineering Memory — semantic retrieval](book/26-engineering-memory.md#optional-semantic-retrieval-phase-20).
 
 **Scope and token hygiene:** project root is not a valid memory scope; unscoped
 `get_relevant_memory` is rejected (use `status`/`search` for orientation). List

@@ -21,6 +21,7 @@ directly, including `Coverage Join` facts and the optional `coverage` help topic
 | `skills/codeclone-review/`            | Conservative-first full review skill          |
 | `skills/codeclone-hotspots/`          | Quick hotspot discovery skill                 |
 | `skills/codeclone-change-control/`    | Intent-first change workflow skill            |
+| `skills/codeclone-engineering-memory/` | Engineering Memory retrieval and draft writes |
 | `assets/`                             | Plugin branding                               |
 
 `plugin.json` keeps the machine identifier as lowercase `codeclone`; the
@@ -82,6 +83,11 @@ single-metric queries, pre-merge sanity checks, coverage/adoption/API snapshots.
 **codeclone-change-control** — intent-first workflow for repository edits:
 workspace intent check, blast radius, patch contract verification, claim guard,
 and review receipt.
+
+**codeclone-engineering-memory** — ranked scope context before edits, FTS search,
+optional semantic blend (`semantic=true` on `mode=search` when the server index
+is built), draft candidates, and finish proposals. Human approve via VS Code
+Memory view.
 
 ## Links
 
