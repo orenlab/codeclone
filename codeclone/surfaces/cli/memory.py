@@ -635,6 +635,9 @@ def _run_semantic_status(*, console: PrinterLike, root_path: Path) -> int:
 
 def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
     config = resolve_memory_config(root_path)
+    provider = _resolve_semantic_provider_or_fail(console, config)
+    if isinstance(provider, int):
+        return provider
     writer = resolve_semantic_index_writer(config.semantic)
     if writer is None:
         return _semantic_unavailable(
@@ -646,9 +649,6 @@ def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
         console.print("Run: codeclone memory init")
         return int(ExitCode.CONTRACT_ERROR)
     project = resolve_project_identity(root_path)
-    provider = _resolve_semantic_provider_or_fail(console, config)
-    if isinstance(provider, int):
-        return provider
     store = SqliteEngineeringMemoryStore(db_path)
     try:
         report = rebuild_semantic_index(
@@ -670,15 +670,15 @@ def _run_semantic_search(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
     config = resolve_memory_config(root_path)
+    provider = _resolve_semantic_provider_or_fail(console, config)
+    if isinstance(provider, int):
+        return provider
     index = resolve_semantic_index(config.semantic)
     status = index.status()
     if not status.available:
         return _semantic_unavailable(
             console, f"Semantic search unavailable: {status.reason}."
         )
-    provider = _resolve_semantic_provider_or_fail(console, config)
-    if isinstance(provider, int):
-        return provider
     db_path = resolve_memory_db_path(root_path, config)
     store = SqliteEngineeringMemoryStore(db_path) if db_path.exists() else None
     try:
