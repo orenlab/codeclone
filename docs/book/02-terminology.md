@@ -44,6 +44,11 @@ Refs:
 ## Contracts
 
 - New/known classification is key-based, not heuristic-based.
+- `novelty="known"` is baseline-relative: the finding fingerprint is accepted
+  by the trusted baseline. It does not prove that the current patch did not
+  introduce or reintroduce that finding.
+- Patch-local regressions require clean before-run to after-run evidence
+  (`compare_runs` / `check_patch_contract(mode="verify")`).
 - Baseline trust is status-driven.
 - Cache trust is status-driven and independent from baseline trust.
 - Design finding universe is determined by the canonical report builder; MCP and HTML read it, never resynthesize it.

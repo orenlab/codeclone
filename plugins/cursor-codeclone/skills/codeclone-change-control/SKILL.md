@@ -202,6 +202,11 @@ No "done" / "verified" / "implemented" / "ready" unless all hold:
 `accepted` = patch contract passed for declared scope — **not** "no regressions" or
 unchanged health.
 
+`novelty="known"` is baseline-relative, not patch-relative. It means the finding
+fingerprint is accepted by the trusted baseline; it does **not** prove the patch
+did not introduce or reintroduce it. Patch-local regression claims require clean
+before-run to after-run evidence from compare/verify.
+
 ## Advisory acceptance (do not hide)
 
 Read **before** the user summary, even when `intent_cleared=true`:
@@ -261,5 +266,6 @@ analyze/queue/promote runs automatically.
 
 ## Claims (do not)
 
-Report-only ≠ CI fail; Security Surfaces ≠ vulns; baselined debt ≠ new regression;
-dead code vs runtime reachability; structural verify without profile evidence.
+Report-only ≠ CI fail; Security Surfaces ≠ vulns; baselined debt ≠ new relative
+to baseline; patch-local regression needs before/after evidence; dead code vs
+runtime reachability; structural verify without profile evidence.

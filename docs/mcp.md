@@ -674,6 +674,10 @@ Verify compares the intent's **before-run** to the explicit **after-run** via
 | `structural_delta.health_delta`  | `health_after - health_before` from `compare_runs` | **Patch delta** between those two stored runs        |
 | `receipt.health.delta`           | After-run summary vs trusted baseline              | **Repository drift** signal in the receipt narrative |
 
+Patch deltas are run-relative, not baseline-novelty-relative. A finding absent
+from the clean before-run and present in the after-run is a patch regression
+even when its fingerprint is `novelty="known"` against the trusted baseline.
+
 If `before.run_id == after.run_id` for `python_structural` or
 `governance_config` profiles, verify returns `status: "unverified"` with
 `reason: "after_run_not_new"` — run a fresh post-edit analysis and pass the new
@@ -811,7 +815,7 @@ Explain the exact reasons. Do not change any files.
 
 ```text title="AI-generated code check"
 I added code with an AI agent. Use codeclone MCP to check for new structural drift.
-Separate accepted baseline debt from new regressions.
+Separate accepted baseline debt from patch-local before/after regressions.
 ```
 
 !!! tip "Best practices"

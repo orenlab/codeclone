@@ -306,6 +306,9 @@ Key rules:
 - Claim Guard may reject or warn on claims that exceed the derived profile.
   For documentation-only patches, "no Python files touched" is allowed;
   "no structural regressions" requires structural evidence from an after-run.
+- `novelty="known"` is baseline-relative, not patch-relative. Do not infer that
+  a patch did not introduce/reintroduce a finding from baseline novelty alone;
+  patch-local regression claims require clean before-run to after-run evidence.
 
 ### When to skip
 

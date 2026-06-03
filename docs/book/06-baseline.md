@@ -46,6 +46,12 @@ Current runtime policy:
 
 - new clone baseline saves write schema `2.1`
 - runtime accepts `1.0`, `2.0`, and `2.1`
+- baseline novelty is **baseline-relative**. A `known` finding is accepted by
+  the trusted baseline, but that alone does not prove the current patch did not
+  introduce or reintroduce it.
+- patch-local regression claims require a clean before-run to after-run
+  comparison (`compare_runs` / `check_patch_contract(mode="verify")`), not a
+  single run's baseline novelty.
 
 Unified-baseline contract:
 

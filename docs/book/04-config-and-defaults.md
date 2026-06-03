@@ -175,7 +175,7 @@ keys are contract errors.
     | `--diff-against GIT_REF`         | Analysis      | Resolve changed files from `git diff --name-only <REF>`; requires `--changed-only` |
     | `--paths-from-git-diff GIT_REF`  | Analysis      | Shorthand for `--changed-only` + git diff selection                                |
     | `--blast-radius FILE [FILE ...]` | Analysis      | Render structural blast radius for given files after analysis                      |
-    | `--patch-verify`                 | Analysis      | Verify current patch against trusted clone baseline budget                         |
+    | `--patch-verify`                 | Analysis      | Verify current patch against trusted clone baseline-relative budget                |
     | `--strictness LEVEL`             | Analysis      | `ci`, `strict`, or `relaxed`; valid only with `--patch-verify` (default: `ci`)     |
     | `--session-stats`                | Analysis      | Show workspace session status; read-only                                           |
     | `--audit`                        | Analysis      | Show local Controller audit trail; requires `audit_enabled=true`                   |

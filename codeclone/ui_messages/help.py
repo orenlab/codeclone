@@ -55,7 +55,7 @@ HELP_BLAST_RADIUS = (
 )
 HELP_PATCH_VERIFY = (
     "Verify the current patch against the trusted baseline budget.\n"
-    "Runs analysis, checks baseline regressions and gate status, then exits."
+    "Runs analysis, checks baseline-relative regressions and gate status, then exits."
 )
 HELP_STRICTNESS = (
     "Strictness profile for --patch-verify: ci, strict, or relaxed.\nDefault: ci."

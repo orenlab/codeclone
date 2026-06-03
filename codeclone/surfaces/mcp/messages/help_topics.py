@@ -221,8 +221,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "baseline": MCPHelpTopicSpec(
         summary=(
             "A baseline is CodeClone's accepted comparison snapshot for clones "
-            "and optional metrics. It separates known debt from new regressions "
-            "and is trust-checked before use."
+            "and optional metrics. It separates accepted debt from "
+            "baseline-relative new findings and is trust-checked before use."
         ),
         key_points=(
             (
@@ -237,7 +237,12 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             ),
             (
                 "Known means already present in the trusted baseline; new "
-                "means not accepted by baseline."
+                "means not accepted by baseline. This is baseline-relative, "
+                "not proof that a patch did or did not introduce the finding."
+            ),
+            (
+                "Patch-local regressions require clean before-run to after-run "
+                "comparison evidence from compare_runs or patch contract verify."
             ),
             (
                 "In CI and gating contexts, untrusted baseline states are "
@@ -249,6 +254,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         doc_links=(BASELINE_DOC_LINK,),
         warnings=(
             "Baseline trust semantics directly affect new-vs-known classification.",
+            "Do not use baseline novelty alone for patch-local regression claims.",
         ),
         anti_patterns=(
             "Treating baseline as mutable MCP session state.",

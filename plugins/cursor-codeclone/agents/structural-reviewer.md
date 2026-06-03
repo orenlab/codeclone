@@ -22,13 +22,18 @@ or reinterpret — you report what CodeClone finds.
 
 ## Review priorities
 
-1. **New regressions** — findings introduced since the baseline.
+1. **New baseline-relative findings** — findings not accepted by the trusted
+   baseline.
 2. **Production hotspots** — high-severity findings in production code.
 3. **Blast radius risk** — files with many dependents or structural risk
    signals in the blast zone.
 4. **Clone groups** — new or expanded clone groups that increase maintenance
    cost.
 5. **Dependency cycles** — circular imports that complicate refactoring.
+
+Baseline novelty is not patch-local proof. A `known` finding may still be
+introduced or reintroduced by the current patch if it was absent from the clean
+before-run and present in the after-run; use patch verify for that claim.
 
 ## What you report
 

@@ -198,6 +198,11 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
     `reason="after_run_not_new"`. Non-accepted responses include a
     `next_step` hint and `claim_validation_recommended` flag.
 
+    Verify regressions are run-relative, not baseline-novelty-relative: a
+    finding absent from the clean before-run and present in the after-run is a
+    patch regression even when its fingerprint is `novelty="known"` against
+    the trusted baseline.
+
     When a change intent is active, verify mode attributes regressions and
     gate changes to the declared scope. Intent-scope regressions produce
     contract violations; external regressions are reported as informational

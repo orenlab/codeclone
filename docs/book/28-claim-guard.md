@@ -102,8 +102,10 @@ informational.
 
 ### P-3: Regression overclaim
 
-A finding with `novelty="known"` described as new or introduced. Known
-findings are accepted baseline debt, not new regressions.
+A finding with `novelty="known"` described as new relative to the baseline.
+Known findings are accepted baseline debt. A patch-local introduction or
+reintroduction claim requires before-run to after-run verification evidence;
+single-run baseline novelty is insufficient.
 
 ### P-4: Dead code certainty overclaim
 

@@ -15,8 +15,8 @@ CLAIM_REASON_SECURITY_NOT_VULNERABILITY: Final = (
     "not vulnerability claims."
 )
 CLAIM_REASON_BASELINE_DEBT_NOT_REGRESSION: Final = (
-    "Known baseline debt was not treated as a new regression; "
-    "novelty='known' remains baseline context."
+    "Known baseline debt was not treated as new relative to the baseline; "
+    "patch-local regression claims require before-run to after-run evidence."
 )
 CLAIM_REASON_REPORT_ONLY_NOT_CI_FAILURE: Final = (
     "Report-only signals were not treated as CI gate failures."

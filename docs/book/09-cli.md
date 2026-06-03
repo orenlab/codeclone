@@ -85,8 +85,10 @@ Refs:
     - `--blast-radius FILE [FILE...]` builds the canonical report in memory and
       renders the same blast-radius projection used by MCP.
     - `--patch-verify` compares the current run against the trusted clone
-      baseline, previews gate status, and exits `3` for blocking violations in
-      `ci` or `strict` mode.
+      baseline for baseline-relative regressions, previews gate status, and
+      exits `3` for blocking violations in `ci` or `strict` mode. Patch-local
+      before-run to after-run regression claims require MCP change-control
+      verify.
 - Session query mode is terminal-only:
     - `--session-stats` shows workspace session status: active agents, intents,
       and lease health. Read-only, does not run analysis.

@@ -1,21 +1,25 @@
 ---
 name: codeclone-production-triage
-description: Quick production-focused triage — health score, top hotspots, new regressions, and the next recommended review action.
+description: Quick production triage with baseline-relative regressions and next review action.
 ---
 
 # CodeClone Production Triage
 
 Use this skill for a fast, production-focused first pass over the repository.
-Returns health score, top hotspots, new regressions, and the recommended next
-action without entering a full review loop.
+Returns health score, top hotspots, baseline-relative regressions, and the
+recommended next action without entering a full review loop.
 
 ## When to use
 
 - "What's the state of this repo?"
-- "Any production regressions since the baseline?"
+- "Any production regressions relative to the baseline?"
 - "What should I review first?"
 - Before starting work on a new task.
 - Quick standup-level quality snapshot.
+
+This is baseline-relative triage. Do not use `new`/`known` novelty alone as
+patch-local proof; patch-local regressions require before-run to after-run
+verify evidence.
 
 ## Workflow
 

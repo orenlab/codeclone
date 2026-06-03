@@ -57,10 +57,12 @@ codeclone . --session-stats
 `--blast-radius` runs normal analysis, builds the canonical report in memory,
 and renders the same dependent/context split as `get_blast_radius`.
 
-`--patch-verify` uses the trusted clone baseline as the accepted before-state
-and the current working tree as after-state. It checks new clone regressions and
-the selected gate profile. `ci` is the default; `strict` applies tighter
-controller budgets; `relaxed` reports violations but exits `0`.
+`--patch-verify` is a baseline-relative terminal check: it uses the trusted
+clone baseline as the accepted comparison snapshot and checks baseline-relative
+new clone regressions plus the selected gate profile. It is not the same as MCP
+patch-local verification, which compares a clean before-run to an after-run.
+`ci` is the default; `strict` applies tighter controller budgets; `relaxed`
+reports violations but exits `0`.
 
 `--session-stats` shows workspace session status: active agents, intents, and
 lease health. Read-only, does not run analysis.
@@ -107,6 +109,11 @@ run and optional intent. Verify mode compares explicit before/after stored runs,
 previews gates, validates scope when intent is available, and reports baseline
 abuse signals. Missing before or after runs return `status="unverified"` with
 `reason="no_before_run"` or `reason="no_after_run"`.
+
+Patch verify is run-relative, not baseline-novelty-relative: if a finding is
+absent from the clean before-run and present in the after-run, it is a patch
+regression even when that finding's fingerprint is `novelty="known"` against the
+trusted baseline.
 
 Budget payloads use `null` for disabled numeric thresholds rather than sentinel
 values. Boolean policy gates are named `forbid_*`, for example
@@ -236,8 +243,8 @@ The receipt includes:
 - human decision points: bounded list of clone divergence, scope expansion, and
   known-baseline-debt prompts
 - claims not made: explicit reminders that Security Surfaces are boundary
-  inventory, report-only signals are not gates, and known baseline debt is not a
-  new regression
+  inventory, report-only signals are not gates, and known baseline debt is not
+  new relative to the baseline
 
 Receipt verdicts are `clean`, `incomplete`, or `needs_attention`. They summarize
 receipt completeness only; they are not CI gates.
@@ -252,7 +259,8 @@ The guard checks for deterministic overclaims:
 
 - Security Surfaces described as vulnerabilities or exploitability.
 - Report-only metric families described as CI failures or blocking gates.
-- known baseline findings described as new regressions.
+- known baseline findings described as new relative to the baseline. Patch-local
+  introduction/reintroduction claims require before-run to after-run evidence.
 - dead-code certainty where runtime reachability evidence exists.
 - fixed/resolved claims before a post-patch run is available.
 

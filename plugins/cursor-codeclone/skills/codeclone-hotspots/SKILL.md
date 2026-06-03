@@ -12,9 +12,12 @@ session but a quick answer about health, top risks, or a specific metric.
 
 - "How healthy is this repo?"
 - "What are the worst hotspots?"
-- "Any new regressions since the baseline?"
+- "Any new baseline-relative regressions?"
 - "Show me the complexity hotspots."
 - Quick pre-merge sanity checks.
+
+Baseline-relative `new`/`known` is not patch-local proof. For "did my patch
+introduce this?", use the change-control before-run to after-run verify path.
 
 ## Workflow
 

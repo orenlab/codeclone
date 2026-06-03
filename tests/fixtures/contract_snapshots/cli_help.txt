@@ -63,7 +63,7 @@ Analysis:
                         Runs analysis first, then projects dependents, clone cohorts,
                         risk signals, and do-not-touch boundaries.
   --patch-verify        Verify the current patch against the trusted baseline budget.
-                        Runs analysis, checks baseline regressions and gate status, then exits.
+                        Runs analysis, checks baseline-relative regressions and gate status, then exits.
   --strictness LEVEL    Strictness profile for --patch-verify: ci, strict, or relaxed.
                         Default: ci.
   --session-stats       Show workspace session status: active agents, intents, lease health.

@@ -25,8 +25,9 @@ VIOLATION_REASON_REPORT_ONLY_GATE: Final = (
     "It cannot fail CI or block a pipeline."
 )
 VIOLATION_REASON_KNOWN_DEBT_OVERCLAIM: Final = (
-    "This finding has novelty='known'; it exists in baseline "
-    "and cannot be described as a new regression."
+    "This finding has novelty='known'; it is accepted baseline debt. "
+    "Do not describe it as new relative to the baseline. Patch-local "
+    "introduction requires before-run to after-run verification evidence."
 )
 VIOLATION_REASON_DEAD_CODE_REACHABILITY: Final = (
     "'{qualname}' has runtime reachability evidence; it must not be claimed "

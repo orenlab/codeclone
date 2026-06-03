@@ -197,6 +197,13 @@ versions from another document.
 - Runtime writes baseline schema `2.1`.
 - Runtime accepts baseline schema `1.0` and `2.0`–`2.1` (governed by
   `_BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR` in `codeclone/baseline/trust.py`).
+- Baseline novelty is **baseline-relative**, not patch-relative:
+  `novelty="known"` means a finding fingerprint is accepted by the trusted
+  baseline. It does not prove that the current patch did not introduce or
+  reintroduce that finding.
+- Patch-local regression claims require clean before-run to after-run evidence
+  (`compare_runs` / `check_patch_contract(mode="verify")`), not a single run's
+  baseline novelty.
 - Compatibility is tied to:
     - `fingerprint_version`
     - `python_tag`
