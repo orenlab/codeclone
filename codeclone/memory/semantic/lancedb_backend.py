@@ -6,25 +6,20 @@
 
 from __future__ import annotations
 
+import importlib
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-import lancedb  # type: ignore[import-untyped]  # 0.33 ships no py.typed/stubs
-import pyarrow as pa
-
 from .models import SemanticHit, SemanticIndexStatus, SemanticRow
 
-# Module-level lancedb/pyarrow imports are intentional: this module is the
-# isolation boundary. The factory imports it inside a try/except, so when the
-# optional `semantic-lancedb` extra is absent the ImportError is caught and the
-# index degrades to Unavailable — the rest of the memory package never imports
-# a vector DB at module level.
+# This module is importable in the base install. The optional vector DB packages
+# are loaded only when a LanceDB backend instance is constructed.
 
 _TABLE_NAME = "semantic_index"
 
 
-def _schema(dimension: int) -> pa.Schema:
+def _schema(pa: Any, dimension: int) -> Any:
     return pa.schema(
         [
             pa.field("id", pa.string()),
@@ -66,6 +61,8 @@ class LanceDbSemanticIndex:
 
     def __init__(self, *, path: Path, dimension: int, create: bool = False) -> None:
         self._dimension = dimension
+        lancedb = importlib.import_module("lancedb")
+        self._pa = importlib.import_module("pyarrow")
         self._db = lancedb.connect(str(path))
         self._table: Any | None = self._open_table(create=create)
 
@@ -76,7 +73,7 @@ class LanceDbSemanticIndex:
             # object, not a list), so let lancedb open the table when it exists
             # and create it otherwise.
             return self._db.create_table(
-                _TABLE_NAME, schema=_schema(self._dimension), exist_ok=True
+                _TABLE_NAME, schema=_schema(self._pa, self._dimension), exist_ok=True
             )
         try:
             return self._db.open_table(_TABLE_NAME)

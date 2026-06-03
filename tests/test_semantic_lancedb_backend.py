@@ -15,11 +15,12 @@ from codeclone.memory.semantic import (
     resolve_semantic_index,
     resolve_semantic_index_writer,
 )
-from codeclone.memory.semantic.lancedb_backend import LanceDbSemanticIndex
 from codeclone.memory.semantic.models import SemanticRow
 
 # The backend is the optional `semantic-lancedb` extra; skip when absent.
 pytest.importorskip("lancedb")
+
+from codeclone.memory.semantic.lancedb_backend import LanceDbSemanticIndex
 
 
 def _config(tmp_path: Path, *, dimension: int) -> SemanticConfig:

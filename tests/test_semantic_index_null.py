@@ -5,7 +5,9 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -14,6 +16,7 @@ from codeclone.memory.semantic import (
     NullSemanticIndex,
     UnavailableSemanticIndex,
     resolve_semantic_index,
+    resolve_semantic_index_writer,
 )
 
 
@@ -68,6 +71,26 @@ def test_resolve_semantic_index_writer_returns_none_when_backend_missing(
         "codeclone.memory.semantic._resolve_backend",
         lambda *_args, **_kwargs: None,
     )
-    from codeclone.memory.semantic import resolve_semantic_index_writer
+    assert resolve_semantic_index_writer(config) is None
 
+
+def test_resolve_backend_degrades_when_optional_package_missing_in_constructor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    index_dir = tmp_path / "semantic_index.lance"
+    index_dir.mkdir()
+    config = SemanticConfig(enabled=True, index_path=str(index_dir))
+    real_import_module = importlib.import_module
+
+    def _import_module(name: str, package: str | None = None) -> ModuleType:
+        if name == "lancedb":
+            raise ModuleNotFoundError("No module named 'lancedb'")
+        return real_import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import_module)
+
+    index = resolve_semantic_index(config)
+    assert isinstance(index, UnavailableSemanticIndex)
+    assert index.status().reason == "lancedb_not_installed"
     assert resolve_semantic_index_writer(config) is None

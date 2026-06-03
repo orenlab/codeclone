@@ -124,13 +124,14 @@ def _resolve_backend(
     # of the optional `semantic-lancedb` extra degrades to None (no backend).
     try:
         from .lancedb_backend import LanceDbSemanticIndex
+
+        return LanceDbSemanticIndex(
+            path=Path(config.index_path),
+            dimension=config.dimension,
+            create=create,
+        )
     except ImportError:
         return None
-    return LanceDbSemanticIndex(
-        path=Path(config.index_path),
-        dimension=config.dimension,
-        create=create,
-    )
 
 
 __all__ = [
