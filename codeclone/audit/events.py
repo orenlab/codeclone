@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import time
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -212,7 +212,65 @@ def event_summary(
     if event_type in _INTENT_PAYLOAD_EVENTS:
         text = _bounded_text(payload.get("intent_description"), SUMMARY_TEXT_LIMIT)
         return text or None
-    return None
+    incident = _incident_summary(event_type, payload)
+    return _bounded_text(incident, SUMMARY_TEXT_LIMIT) if incident else None
+
+
+# Incident events whose summary is a labelled count of a payload list.
+_COUNT_INCIDENTS: dict[str, tuple[str, str, str]] = {
+    EVENT_WORKSPACE_CONFLICT: (
+        "concurrent_intents",
+        "workspace conflict",
+        "concurrent intent(s)",
+    ),
+    EVENT_CLAIM_VIOLATED: ("violations", "claim validation failed", "violation(s)"),
+}
+
+
+def _join_or(values: object, *, default: str) -> str:
+    items = [str(item) for item in _sequence(values)]
+    return ", ".join(items) if items else default
+
+
+def _summary_patch_violated(payload: Mapping[str, object]) -> str:
+    delta = _mapping(payload.get("structural_delta"))
+    regressions = len(_sequence(delta.get("regressions")))
+    detail = _join_or(payload.get("contract_violations"), default="none")
+    return f"patch contract violated: {regressions} regression(s); {detail}"
+
+
+def _summary_baseline_abuse(payload: Mapping[str, object]) -> str:
+    abuse = _mapping(payload.get("baseline_abuse"))
+    detail = _join_or(abuse.get("triggers"), default="unspecified")
+    return f"baseline abuse detected: {detail}"
+
+
+def _summary_receipt_created(payload: Mapping[str, object]) -> str:
+    receipt = _mapping(payload.get("receipt"))
+    verdict = str(receipt.get("verdict", "")).strip() or "unknown"
+    return f"review receipt: {verdict}"
+
+
+# Incident events whose summary needs bespoke per-type field extraction.
+_INCIDENT_BUILDERS: dict[str, Callable[[Mapping[str, object]], str]] = {
+    EVENT_PATCH_VIOLATED: _summary_patch_violated,
+    EVENT_BASELINE_ABUSE: _summary_baseline_abuse,
+    EVENT_RECEIPT_CREATED: _summary_receipt_created,
+}
+
+
+def _incident_summary(event_type: str, payload: Mapping[str, object]) -> str:
+    """Bounded human-readable line for an indexed incident event.
+
+    Field paths mirror ``compact_payload_for_event`` so the summary and the
+    compact payload stay in lockstep. Non-incident event types yield "".
+    """
+    count_spec = _COUNT_INCIDENTS.get(event_type)
+    if count_spec is not None:
+        key, prefix, noun = count_spec
+        return f"{prefix}: {len(_sequence(payload.get(key)))} {noun}"
+    builder = _INCIDENT_BUILDERS.get(event_type)
+    return builder(payload) if builder is not None else ""
 
 
 def _compact_check_payload(payload: Mapping[str, object]) -> dict[str, object]:

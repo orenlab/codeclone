@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Literal, cast
+from typing import TYPE_CHECKING, Literal, cast
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
+from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
 from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
@@ -24,6 +25,14 @@ from ..search_index import SearchMatchMode
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
 from .ranking import RankingContext, relevance_score
+from .semantic import audit_event_row
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from ..embedding import EmbeddingProvider
+    from ..semantic import SemanticIndex
+    from ..semantic.models import SemanticHit, SemanticIndexStatus
 
 QueryMode = Literal[
     "search",
@@ -234,7 +243,9 @@ def _rank_records(
     context: RankingContext,
     max_records: int,
     detail_level: MemoryDetailLevel,
+    proximity: Mapping[str, float] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
+    proximity_map = proximity or {}
     scored: list[tuple[float, str, dict[str, object]]] = []
     for record in candidates:
         subjects = store.list_subjects_for_memory(record.id)
@@ -244,6 +255,7 @@ def _rank_records(
             subjects=subjects,
             context=context,
             evidence_count=evidence_count,
+            semantic_proximity=proximity_map.get(record.id, 0.0),
         )
         if score <= 0.0 and (context.scope_paths or context.symbols):
             continue
@@ -688,6 +700,212 @@ def _records_for_list_mode(
     return ()
 
 
+def _search_payload_body(
+    payload_records: list[dict[str, object]],
+    *,
+    truncated: bool,
+    include_drafts: bool,
+    audit_events: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    body: dict[str, object] = {
+        "records": payload_records,
+        "record_count": len(payload_records),
+        "truncated": truncated,
+        "retrieval_policy": _retrieval_policy(include_drafts=include_drafts),
+    }
+    if audit_events is not None:
+        body["audit_events"] = audit_events
+    return body
+
+
+def _semantic_disabled_block() -> dict[str, object]:
+    return {
+        "used": False,
+        "backend": None,
+        "provider": None,
+        "model": None,
+        "index_version": None,
+        "reason": "disabled",
+    }
+
+
+def _semantic_status_block(
+    status: SemanticIndexStatus,
+    *,
+    used: bool,
+    provider_label: str | None,
+    model: str | None,
+) -> dict[str, object]:
+    return {
+        "used": used,
+        "backend": status.backend,
+        "provider": provider_label,
+        "model": model,
+        "index_version": SEMANTIC_INDEX_FORMAT_VERSION if used else None,
+        "reason": None if used else status.reason,
+    }
+
+
+def _semantic_hits(
+    *,
+    index: SemanticIndex,
+    provider: EmbeddingProvider,
+    query: str,
+    k: int,
+) -> tuple[dict[str, float], list[SemanticHit]]:
+    (vector,) = provider.embed([query])
+    proximity: dict[str, float] = {}
+    audit_hits: list[SemanticHit] = []
+    for hit in index.search(vector, k=k):
+        if hit.source == "memory":
+            proximity.setdefault(hit.source_id, hit.score)
+        elif hit.source == "audit":
+            audit_hits.append(hit)
+    return proximity, audit_hits
+
+
+def _hydrate_audit_events(
+    audit_db_path: Path | None, hits: Sequence[SemanticHit]
+) -> list[dict[str, object]]:
+    if audit_db_path is None:
+        return []
+    events: list[dict[str, object]] = []
+    for hit in hits:
+        row = audit_event_row(audit_db_path, hit.source_id)
+        if row is None:
+            continue
+        event_type, status, summary = row
+        events.append(
+            {
+                "event_id": hit.source_id,
+                "event_type": event_type,
+                "status": status,
+                "summary": _statement_preview(summary),
+                "score": hit.score,
+            }
+        )
+    return events
+
+
+def _semantic_search_candidates(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    fts_records: Sequence[MemoryRecord],
+    proximity: Mapping[str, float],
+) -> list[MemoryRecord]:
+    seen = {record.id for record in fts_records}
+    candidates = list(fts_records)
+    for record_id in proximity:
+        if record_id in seen:
+            continue
+        record = store.find_record(record_id)
+        if record is not None and record.project_id == project_id:
+            candidates.append(record)
+            seen.add(record_id)
+    return candidates
+
+
+def _handle_semantic_search_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    query: str | None,
+    filter_types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    filter_confidences: tuple[MemoryConfidence, ...],
+    match_mode: SearchMatchMode,
+    max_results: int,
+    detail_level: MemoryDetailLevel,
+    include_stale: bool,
+    include_drafts: bool,
+    semantic_index: SemanticIndex | None,
+    embedding_provider: EmbeddingProvider | None,
+    provider_label: str | None,
+    audit_db_path: Path | None,
+) -> dict[str, object]:
+    statement = _require_query_field(query, mode="search", field="query")
+    fts_records = _fetch_search_mode_records(
+        store,
+        project_id=project_id,
+        query=statement,
+        filter_types=filter_types,
+        statuses=statuses,
+        filter_confidences=filter_confidences,
+        max_results=max_results,
+        match_mode=match_mode,
+    )
+    status = semantic_index.status() if semantic_index is not None else None
+    if (
+        semantic_index is not None
+        and embedding_provider is not None
+        and status is not None
+        and status.available
+    ):
+        proximity, audit_hits = _semantic_hits(
+            index=semantic_index,
+            provider=embedding_provider,
+            query=statement,
+            k=max_results,
+        )
+        candidates = _semantic_search_candidates(
+            store,
+            project_id=project_id,
+            fts_records=fts_records,
+            proximity=proximity,
+        )
+        audit_events = _hydrate_audit_events(audit_db_path, audit_hits)
+        semantic_block = _semantic_status_block(
+            status,
+            used=True,
+            provider_label=provider_label,
+            model=embedding_provider.model_id,
+        )
+    else:
+        proximity = {}
+        candidates = list(fts_records)
+        audit_events = []
+        semantic_block = (
+            _semantic_status_block(
+                status, used=False, provider_label=provider_label, model=None
+            )
+            if status is not None
+            else _semantic_disabled_block()
+        )
+    effective_stale = include_stale or "stale" in statuses
+    visible = [
+        record
+        for record in candidates
+        if _record_visible(
+            record,
+            include_stale=effective_stale,
+            include_drafts=include_drafts,
+        )
+    ]
+    context = RankingContext.from_scope(scope_paths=(), symbols=(), blast_dependents=())
+    payload_records, truncated = _rank_records(
+        store,
+        project_id=project_id,
+        candidates=visible,
+        context=context,
+        max_records=max_results,
+        detail_level=detail_level,
+        proximity=proximity,
+    )
+    return {
+        "mode": "search",
+        "status": "ok",
+        "detail_level": detail_level,
+        "semantic": semantic_block,
+        "payload": _search_payload_body(
+            payload_records,
+            truncated=truncated,
+            include_drafts=include_drafts,
+            audit_events=audit_events,
+        ),
+    }
+
+
 def query_engineering_memory(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -706,6 +924,11 @@ def query_engineering_memory(
     include_stale: bool = False,
     include_drafts: bool = False,
     detail_level: str = "compact",
+    semantic: bool = False,
+    semantic_index: SemanticIndex | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    provider_label: str | None = None,
+    audit_db_path: Path | None = None,
 ) -> dict[str, object]:
     if mode not in QUERY_MODES:
         raise MemoryContractError(
@@ -777,6 +1000,24 @@ def query_engineering_memory(
         include_stale=include_stale,
         include_drafts=effective_include_drafts,
     )
+    if mode == "search" and semantic:
+        return _handle_semantic_search_mode(
+            store,
+            project_id=project_id,
+            query=query,
+            filter_types=filter_types,
+            statuses=statuses,
+            filter_confidences=filter_confidences,
+            match_mode=match_mode,
+            max_results=max_results,
+            detail_level=normalized_detail,
+            include_stale=include_stale,
+            include_drafts=effective_include_drafts,
+            semantic_index=semantic_index,
+            embedding_provider=embedding_provider,
+            provider_label=provider_label,
+            audit_db_path=audit_db_path,
+        )
     records = _records_for_list_mode(
         store,
         mode=mode,
@@ -810,14 +1051,11 @@ def query_engineering_memory(
         "mode": mode,
         "status": "ok",
         "detail_level": normalized_detail,
-        "payload": {
-            "records": payload_records,
-            "record_count": len(payload_records),
-            "truncated": truncated,
-            "retrieval_policy": _retrieval_policy(
-                include_drafts=effective_include_drafts
-            ),
-        },
+        "payload": _search_payload_body(
+            payload_records,
+            truncated=truncated,
+            include_drafts=effective_include_drafts,
+        ),
     }
 
 

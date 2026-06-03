@@ -116,6 +116,7 @@ from .messages.params import (
     RunIdParam,
     RunIdRequiredParam,
     ScopeParam,
+    SemanticParam,
     SeverityParam,
     SortByParam,
     SourceKindParam,
@@ -494,6 +495,7 @@ def build_mcp_server(
         include_stale: IncludeStaleParam = False,
         include_drafts: IncludeDraftsParam = False,
         detail_level: MemoryDetailLevelParam = "compact",
+        semantic: SemanticParam = False,
     ) -> dict[str, object]:
         return service.query_engineering_memory(
             root=root,
@@ -508,6 +510,7 @@ def build_mcp_server(
             include_stale=include_stale,
             include_drafts=include_drafts,
             detail_level=detail_level,
+            semantic=semantic,
         )
 
     @tool(

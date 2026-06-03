@@ -13,6 +13,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from codeclone.audit.schema import open_audit_db
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
@@ -31,6 +32,33 @@ from codeclone.report.meta import current_report_timestamp_utc
 from codeclone.utils.json_io import read_json_object
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def insert_audit_event(
+    audit_db: Path,
+    *,
+    event_id: str,
+    event_type: str,
+    status: str,
+    summary: str,
+    created_at_utc: str = "2026-01-01T00:00:00Z",
+) -> None:
+    """Insert one controller_events row (type/status/summary) for tests.
+
+    Shared by the semantic audit-hydration tests so the controlled-row setup
+    lives in one place instead of being copy-pasted (which trips the clone gate).
+    """
+    conn = open_audit_db(audit_db)
+    try:
+        conn.execute(
+            "INSERT INTO controller_events (event_id, event_type, created_at_utc, "
+            "repo_root_digest, agent_pid, status, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (event_id, event_type, created_at_utc, "digest", 1, status, summary),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def memory_project_db_paths(root: Path) -> tuple[MemoryProject, Path]:

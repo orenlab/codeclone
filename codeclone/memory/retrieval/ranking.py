@@ -28,6 +28,10 @@ _INGEST_BOOST: dict[str, float] = {
     "test": 0.05,
     "analysis": 0.04,
 }
+# Semantic proximity re-ranks recall; the weight is deliberately small so it
+# never dominates an exact subject match (1.0) or a scope match. It is applied
+# only after the scoped short-circuit, so it cannot inject out-of-scope records.
+_SEMANTIC_WEIGHT = 0.3
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +62,7 @@ def relevance_score(
     subjects: Sequence[MemorySubject],
     context: RankingContext,
     evidence_count: int,
+    semantic_proximity: float = 0.0,
 ) -> float:
     scoped = bool(context.scope_paths or context.symbols)
     score = 0.0
@@ -96,6 +101,7 @@ def relevance_score(
             score += 0.05
     if record.status == "stale":
         score -= 0.5
+    score += semantic_proximity * _SEMANTIC_WEIGHT
     return round(score, 4)
 
 

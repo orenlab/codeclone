@@ -379,6 +379,16 @@ IncludeStaleParam = Annotated[
     bool,
     Field(description="Include stale engineering memory records."),
 ]
+SemanticParam = Annotated[
+    bool,
+    Field(
+        description=(
+            "Blend semantic recall into mode=search (FTS plus semantic, "
+            "re-ranked); audit incidents are returned typed-separate. Requires "
+            "the optional index; falls back to FTS-only when unavailable."
+        )
+    ),
+]
 IncludeDraftsParam = Annotated[
     bool,
     Field(

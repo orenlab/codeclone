@@ -2600,6 +2600,12 @@
           "description": "Repo-relative scope paths for engineering memory retrieval.",
           "title": "Scope"
         },
+        "semantic": {
+          "default": false,
+          "description": "Blend semantic recall into mode=search (FTS plus semantic, re-ranked); audit incidents are returned typed-separate. Requires the optional index; falls back to FTS-only when unavailable.",
+          "title": "Semantic",
+          "type": "boolean"
+        },
         "symbol": {
           "anyOf": [
             {

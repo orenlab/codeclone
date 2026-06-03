@@ -11,8 +11,9 @@ from pathlib import Path
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
+from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import ExitCode
-from ...memory.embedding import resolve_embedding_provider
+from ...memory.embedding import EmbeddingProvider, resolve_embedding_provider
 from ...memory.exceptions import MemoryContractError
 from ...memory.governance import approve_record, archive_record, reject_record
 from ...memory.ingest import InitOptions
@@ -21,6 +22,7 @@ from ...memory.models import MemoryProject, MemoryQuery
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
+from ...memory.retrieval.semantic import semantic_search
 from ...memory.semantic import (
     AuditIndexSource,
     IndexSource,
@@ -29,6 +31,7 @@ from ...memory.semantic import (
     resolve_semantic_index,
     resolve_semantic_index_writer,
 )
+from ...memory.semantic.models import SemanticSearchResult
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
 from ...memory.vacuum import run_memory_vacuum
@@ -144,6 +147,11 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Exclude stale records from search results.",
     )
+    search_parser.add_argument(
+        "--semantic",
+        action="store_true",
+        help="Blend semantic proximity into ranking (requires the index).",
+    )
 
     stale_parser = subparsers.add_parser(
         "stale",
@@ -216,6 +224,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_root(sem_search)
     sem_search.add_argument("query", help="Free-text query.")
     sem_search.add_argument("--limit", type=int, default=10)
+    sem_search.add_argument("--json", action="store_true", help="Emit results as JSON.")
 
     return parser
 
@@ -324,6 +333,9 @@ def _run_search(
     except FileNotFoundError as exc:
         console.print(f"Engineering memory database not found: {exc}")
         return int(ExitCode.CONTRACT_ERROR)
+    semantic = bool(args.semantic)
+    index = resolve_semantic_index(config.semantic) if semantic else None
+    provider = resolve_embedding_provider(config.semantic) if semantic else None
     try:
         result = query_engineering_memory(
             store,
@@ -336,6 +348,10 @@ def _run_search(
             filters={"match_mode": str(args.match)},
             max_results=max(1, int(args.limit)),
             include_stale=not bool(args.active_only),
+            semantic=semantic,
+            semantic_index=index,
+            embedding_provider=provider,
+            provider_label=config.semantic.embedding_provider,
         )
     finally:
         store.close()
@@ -349,7 +365,21 @@ def _run_search(
         records = []
     typed_records = [item for item in records if isinstance(item, dict)]
     render_search_results(console=console, query=str(args.query), records=typed_records)
+    _print_semantic_advisory(console, result.get("semantic"))
     return int(ExitCode.SUCCESS)
+
+
+def _print_semantic_advisory(console: PrinterLike, semantic: object) -> None:
+    if not isinstance(semantic, dict):
+        return
+    if semantic.get("used"):
+        provider = str(semantic.get("provider") or "")
+        quality = (
+            "diagnostic, NOT semantic-quality" if provider == "diagnostic" else provider
+        )
+        console.print(f"semantic: on ({quality})", markup=False)
+    else:
+        console.print(f"semantic: off ({semantic.get('reason')})", markup=False)
 
 
 def _open_store(
@@ -611,16 +641,86 @@ def _run_semantic_search(
             console, f"Semantic search unavailable: {status.reason}."
         )
     provider = resolve_embedding_provider(config.semantic)
-    (vector,) = provider.embed([str(args.query)])
-    hits = index.search(vector, k=max(1, int(args.limit)))
-    if not hits:
-        console.print(f"No semantic matches for: {args.query}")
-        return int(ExitCode.SUCCESS)
-    console.print(f"Semantic matches for: {args.query}")
-    for hit in hits:
-        console.print(
-            f"  {hit.source}/{hit.source_id}  score={hit.score:.3f}", markup=False
+    db_path = resolve_memory_db_path(root_path, config)
+    store = SqliteEngineeringMemoryStore(db_path) if db_path.exists() else None
+    try:
+        results = semantic_search(
+            index=index,
+            provider=provider,
+            store=store,
+            audit_db_path=resolve_audit_path(
+                root_path=root_path, value=DEFAULT_AUDIT_PATH
+            ),
+            query=str(args.query),
+            limit=max(1, int(args.limit)),
+            preview_chars=DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS,
         )
+    finally:
+        if store is not None:
+            store.close()
+    if bool(args.json):
+        return _render_semantic_json(
+            console=console, query=str(args.query), config=config, results=results
+        )
+    return _render_semantic_text(
+        console=console,
+        query=str(args.query),
+        config=config,
+        provider=provider,
+        results=results,
+    )
+
+
+def _provider_note(config: MemoryConfig, provider: EmbeddingProvider) -> str:
+    kind = config.semantic.embedding_provider
+    quality = "diagnostic, NOT semantic-quality" if kind == "diagnostic" else kind
+    return f"provider: {provider.model_id} ({quality})"
+
+
+def _render_semantic_text(
+    *,
+    console: PrinterLike,
+    query: str,
+    config: MemoryConfig,
+    provider: EmbeddingProvider,
+    results: list[SemanticSearchResult],
+) -> int:
+    console.print(f"Semantic matches for: {query}", markup=False)
+    console.print(_provider_note(config, provider), markup=False)
+    if not results:
+        console.print("  (no matches)")
+        return int(ExitCode.SUCCESS)
+    for rank, result in enumerate(results, start=1):
+        console.print(
+            f"{rank}. {result.source}/{result.source_id}  score={result.score:.3f}",
+            markup=False,
+        )
+        meta = " · ".join(
+            part for part in (result.kind, result.status, result.confidence) if part
+        )
+        console.print(f"   {meta}", markup=False)
+        if result.subject_path:
+            console.print(f"   subject: {result.subject_path}", markup=False)
+        console.print(f'   "{result.preview}"', markup=False)
+    return int(ExitCode.SUCCESS)
+
+
+def _render_semantic_json(
+    *,
+    console: PrinterLike,
+    query: str,
+    config: MemoryConfig,
+    results: list[SemanticSearchResult],
+) -> int:
+    import json
+
+    kind = config.semantic.embedding_provider
+    payload = {
+        "query": query,
+        "semantic": {"provider": kind, "diagnostic": kind == "diagnostic"},
+        "results": [result.model_dump() for result in results],
+    }
+    console.print(json.dumps(payload, indent=2), markup=False)
     return int(ExitCode.SUCCESS)
 
 

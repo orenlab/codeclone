@@ -9,7 +9,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
+from ...memory.embedding import resolve_embedding_provider
 from ...memory.exceptions import MemoryCapacityError, MemoryContractError
 from ...memory.ide_governance import (
     IdeGovernanceSessionState,
@@ -23,6 +25,7 @@ from ...memory.models import MemoryProject
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import get_relevant_memory, query_engineering_memory
+from ...memory.semantic import resolve_semantic_index
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from . import _session_helpers as _helpers
 from ._intent import IntentRecord
@@ -106,9 +109,17 @@ class _MCPSessionMemoryMixin:
         include_stale: bool = False,
         include_drafts: bool = False,
         detail_level: str = "compact",
+        semantic: bool = False,
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
         store, db_path, config, project = self._open_memory_store(root_path)
+        index = resolve_semantic_index(config.semantic) if semantic else None
+        provider = resolve_embedding_provider(config.semantic) if semantic else None
+        audit_path = (
+            resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
+            if semantic
+            else None
+        )
         try:
             return query_engineering_memory(
                 store,
@@ -127,6 +138,11 @@ class _MCPSessionMemoryMixin:
                 include_stale=include_stale,
                 include_drafts=include_drafts,
                 detail_level=detail_level,
+                semantic=semantic,
+                semantic_index=index,
+                embedding_provider=provider,
+                provider_label=config.semantic.embedding_provider,
+                audit_db_path=audit_path,
             )
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc

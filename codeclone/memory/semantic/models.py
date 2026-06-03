@@ -80,10 +80,28 @@ class SemanticIndexStatus(BaseModel):
     reason: str | None = None
 
 
+class SemanticSearchResult(BaseModel):
+    """A hydrated semantic search hit: the proximity score plus record/event
+    metadata and a bounded preview, loaded from the source of truth.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source: SemanticSource
+    source_id: str = Field(min_length=1)
+    score: float
+    kind: str = Field(min_length=1)
+    status: str | None = None
+    confidence: str | None = None
+    subject_path: str | None = None
+    preview: str = Field(min_length=1)
+
+
 __all__ = [
     "SemanticHit",
     "SemanticIndexStatus",
     "SemanticProjection",
     "SemanticRow",
+    "SemanticSearchResult",
     "SemanticSource",
 ]
