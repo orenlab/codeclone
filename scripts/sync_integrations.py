@@ -22,6 +22,7 @@ from pathlib import Path
 
 SOURCE_REPOSITORY = "orenlab/codeclone"
 MANIFEST_NAME = "SYNC_MANIFEST.json"
+INTEGRATION_DIST = "scripts/integration_dist"
 
 
 class SyncValidationError(Exception):
@@ -71,23 +72,38 @@ class SyncResult:
     dry_run: bool
 
 
+def _dist_file(name: str, destination: str) -> tuple[str, str]:
+    return (f"{INTEGRATION_DIST}/{name}", destination)
+
+
 SYNC_TARGETS: dict[str, SyncTarget] = {
     "codex": SyncTarget(
         name="codex",
         copies=(
             ("plugins/codeclone", "plugins/codeclone"),
-            (".agents/plugins/marketplace.json", ".agents/plugins/marketplace.json"),
+            _dist_file("README.codex.root.md", "README.md"),
+            _dist_file("gitignore.codex", ".gitignore"),
+            _dist_file(
+                "marketplace.codex.json",
+                ".agents/plugins/marketplace.json",
+            ),
         ),
         generated=(MANIFEST_NAME,),
     ),
     "claude-desktop": SyncTarget(
         name="claude-desktop",
-        copies=(("extensions/claude-desktop-codeclone", "."),),
+        copies=(
+            ("extensions/claude-desktop-codeclone", "."),
+            _dist_file("gitignore.claude-desktop", ".gitignore"),
+        ),
         generated=(MANIFEST_NAME,),
     ),
     "vscode": SyncTarget(
         name="vscode",
-        copies=(("extensions/vscode-codeclone", "."),),
+        copies=(
+            ("extensions/vscode-codeclone", "."),
+            _dist_file("gitignore.vscode", ".gitignore"),
+        ),
         generated=(MANIFEST_NAME,),
         denylist=("node_modules/**", ".coverage"),
     ),
@@ -99,6 +115,7 @@ SYNC_TARGETS: dict[str, SyncTarget] = {
                 "plugins/codeclone/scripts/launch_mcp.py",
                 "scripts/launch_mcp.py",
             ),
+            _dist_file("gitignore.cursor", ".gitignore"),
         ),
         generated=(MANIFEST_NAME,),
     ),

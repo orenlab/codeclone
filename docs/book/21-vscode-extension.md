@@ -180,12 +180,12 @@ and passed to `query_engineering_memory`.
     When the server index is unavailable, MCP still returns FTS hits and
     `semantic.used: false` with a `reason` (for example `disabled`, `not_built`).
 
-**Configure Memory Search** updates `searchSemantic`, `searchIncludeDrafts`,
-`searchIncludeStale`, and `searchMaxResults` at `ConfigurationTarget.WorkspaceFolder`.
-`searchDetailLevel` is settings-editor only. Search queries must be 2–200 characters
-without control characters (`sanitizeSearchQuery`).
+    **Configure Memory Search** updates `searchSemantic`, `searchIncludeDrafts`,
+    `searchIncludeStale`, and `searchMaxResults` at `ConfigurationTarget.WorkspaceFolder`.
+    `searchDetailLevel` is settings-editor only. Search queries must be 2–200 characters
+    without control characters (`sanitizeSearchQuery`).
 
-Refs: [Engineering Memory](26-engineering-memory.md), `extensions/vscode-codeclone/src/memorySearch.js`.
+    Refs: [Engineering Memory](26-engineering-memory.md), `extensions/vscode-codeclone/src/memorySearch.js`.
 
 ## State boundaries
 

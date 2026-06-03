@@ -72,6 +72,10 @@
       "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "get_controller_audit_trail",
+      "signature": "(self: '_RunDictService', **params: 'object') -> 'dict[str, object]'"
+    },
+    {
       "name": "get_finding",
       "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
     },
@@ -98,6 +102,10 @@
     {
       "name": "get_run_summary",
       "signature": "(self, run_id: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_workspace_session_stats",
+      "signature": "(self: '_RunDictService', **params: 'object') -> 'dict[str, object]'"
     },
     {
       "name": "list_findings",

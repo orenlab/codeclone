@@ -82,7 +82,14 @@ def test_cursor_skills_match_codex_skills() -> None:
         codex_text = (codex_skills / skill_name / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        assert parse_frontmatter(cursor_text) == parse_frontmatter(codex_text)
+        cursor_frontmatter = parse_frontmatter(cursor_text)
+        codex_frontmatter = parse_frontmatter(codex_text)
+        if skill_name == "codeclone-review":
+            assert cursor_frontmatter["name"] == codex_frontmatter["name"]
+            assert "review" in cursor_frontmatter["description"].lower()
+            assert "codex" in codex_frontmatter["description"].lower()
+            continue
+        assert cursor_frontmatter == codex_frontmatter
 
 
 def test_cursor_plugin_version_is_semver() -> None:

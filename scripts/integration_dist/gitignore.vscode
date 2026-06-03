@@ -1,0 +1,22 @@
+# Distribution repo — synced from orenlab/codeclone (scripts/sync_integrations.py)
+
+# IDE / OS
+.idea/
+.DS_Store
+
+# VS Code extension build / test
+node_modules/
+out/
+dist/
+*.vsix
+.vscode-test/
+.coverage
+.coverage.*
+coverage/
+
+# Local secrets
+.env
+.env.*
+
+# Logs
+*.log

@@ -1,0 +1,18 @@
+# Distribution repo — synced from orenlab/codeclone (scripts/sync_integrations.py)
+
+# IDE / OS
+.idea/
+.DS_Store
+
+# Python (plugin launcher under plugins/codeclone/scripts/)
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local secrets
+.env
+.env.*
+
+# Logs
+*.log

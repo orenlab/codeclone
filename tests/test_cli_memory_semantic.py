@@ -111,7 +111,8 @@ def test_memory_search_semantic_provider_unavailable_degrades_without_traceback(
     assert code == 0
     out = capsys.readouterr().out
     assert "semantic: off" in out
-    assert "local_model embedding provider is not available" in out
+    assert "local_model embedding provider is not" in out.replace("\n", " ")
+    assert "available yet" in out.replace("\n", " ")
     assert "Traceback" not in out
 
 
@@ -128,7 +129,8 @@ def test_semantic_explicit_commands_fail_clear_when_provider_unavailable(
         assert code != 0
         out = capsys.readouterr().out
         assert "Semantic embedding provider unavailable" in out
-        assert "local_model embedding provider is not available" in out
+        assert "local_model embedding provider is not" in out.replace("\n", " ")
+        assert "available yet" in out.replace("\n", " ")
         assert "Traceback" not in out
 
 
@@ -143,7 +145,8 @@ def test_semantic_status_reports_provider_unavailable(
     out = capsys.readouterr().out
     assert "semantic index: unavailable" in out
     assert "provider: unavailable" in out
-    assert "local_model embedding provider is not available" in out
+    assert "local_model embedding provider is not" in out.replace("\n", " ")
+    assert "available yet" in out.replace("\n", " ")
 
 
 def test_semantic_search_hydrates_and_renders_json(

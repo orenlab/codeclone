@@ -162,15 +162,15 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 `codeclone/config/memory.py` / `SemanticConfig` and documented in
 [Engineering Memory](26-engineering-memory.md).
 
-| Key (semantic) | Default | Meaning |
+| Semantic field | Default | Meaning |
 |----------------|---------|---------|
-| `enabled` | `false` | Turn on LanceDB sidecar indexing and search blend |
-| `backend` | `lancedb` | Vector backend (only `lancedb` today) |
-| `index_path` | `.cache/codeclone/memory/semantic_index.lance` | Sidecar directory |
-| `embedding_provider` | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `local_model`, `api` (latter two fail clear until Phase 20.6) |
-| `dimension` | `256` | Vector size for diagnostic provider |
-| `max_results` | `20` | Cap for vector `k` and merged search ranking |
-| `index_audit` | `true` | Index bounded audit `summary` rows when audit DB exists |
+| enabled | `false` | Turn on LanceDB sidecar indexing and search blend |
+| backend | `lancedb` | Vector backend (only `lancedb` today) |
+| index_path | `.cache/codeclone/memory/semantic_index.lance` | Sidecar directory |
+| embedding_provider | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `local_model`, `api` (latter two fail clear until Phase 20.6) |
+| dimension | `256` | Vector size for diagnostic provider |
+| max_results | `20` | Cap for vector `k` and merged search ranking |
+| index_audit | `true` | Index bounded audit `summary` rows when audit DB exists |
 
 Requires `pip install 'codeclone[semantic-lancedb]'` and
 `codeclone memory semantic rebuild` after enabling.
