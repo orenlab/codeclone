@@ -101,8 +101,8 @@ review receipts, and workflow consolidation tools.
   change-control gate via read-only `codeclone.workspace_intent` (file and SQLite
   registry backends), project hook installer, `enforce_scope` (`python` |
   `repo`), and bundled `codeclone-engineering-memory` skill.
-- MkDocs admonition lint (`scripts/lint_mkdocs_admonitions.py`) with contract test
-  `tests/test_docs_mkdocs_admonitions.py`.
+- Markdown admonition lint (`scripts/lint_mkdocs_admonitions.py`) covered by the
+  docs build contract test.
 
 ### Changed
 
@@ -125,6 +125,10 @@ review receipts, and workflow consolidation tools.
   `summary`/`normal` return counts and blocking fields.
 - Audit `intent.declared` in `audit_payloads=compact` retains bounded
   `intent_description`; SQLite `summary` column always stores event essence.
+- Documentation site build migrated from MkDocs to Zensical: `mkdocs.yml` was
+  replaced by `zensical.toml`, the docs workflow runs
+  `uv run --with zensical==0.0.43 zensical build --clean --strict`, and the
+  strict docs build contract test is now `tests/test_docs_build_contract.py`.
 - Repository test coverage gate raised to `>=99%` (`pyproject.toml` `fail_under`,
   CI `--cov-fail-under=99`).
 
