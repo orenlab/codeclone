@@ -59,7 +59,7 @@ def runtime_filepath_from_wire(
         resolve_under_repo_root(
             root,
             wire_path,
-            policy=RepoPathPolicy(),
+            policy=RepoPathPolicy(allow_absolute=True),
         )
     )
 

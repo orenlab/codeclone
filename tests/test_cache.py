@@ -1867,19 +1867,20 @@ def test_runtime_filepath_from_wire_rejects_external_absolute_path(
     root = tmp_path / "project"
     root.mkdir()
 
-    with pytest.raises(PathOutsideRepoError, match="absolute paths require"):
+    with pytest.raises(PathOutsideRepoError, match="escapes repository root"):
         runtime_filepath_from_wire(str(tmp_path / "outside.py"), root=root)
 
 
-def test_runtime_filepath_from_wire_rejects_absolute_under_root(
+def test_runtime_filepath_from_wire_accepts_absolute_under_root(
     tmp_path: Path,
 ) -> None:
     root = tmp_path / "project"
     root.mkdir()
     absolute_under_root = root / "pkg" / "module.py"
 
-    with pytest.raises(PathOutsideRepoError, match="absolute paths require"):
-        runtime_filepath_from_wire(str(absolute_under_root), root=root)
+    assert runtime_filepath_from_wire(str(absolute_under_root), root=root) == str(
+        absolute_under_root
+    )
 
 
 def test_as_str_dict_rejects_non_string_keys() -> None:
