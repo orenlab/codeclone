@@ -32,6 +32,7 @@ from ._workspace_intent_contract import (
     verify_intent_integrity,
 )
 from ._workspace_intent_lifecycle import (
+    PidLiveness,
     WorkspaceIntentStatus,
     utc_now,
 )
@@ -80,13 +81,17 @@ class IntentOwnership(str, Enum):
 
 
 def _is_pid_alive(pid: int) -> bool:
+    return _pid_liveness(pid) == PidLiveness.ALIVE
+
+
+def _pid_liveness(pid: int) -> PidLiveness:
     from . import _workspace_intent_pid as pid_mod
 
-    return pid_mod.is_agent_pid_alive(pid)
+    return pid_mod.agent_pid_liveness(pid)
 
 
 def is_orphaned(record: WorkspaceIntentRecord) -> bool:
-    return not _is_pid_alive(record.agent_pid)
+    return _pid_liveness(record.agent_pid) == PidLiveness.DEAD
 
 
 def is_stale(record: WorkspaceIntentRecord) -> bool:
@@ -154,13 +159,12 @@ def classify_intent_ownership(
     lease_valid = lease_expiry is not None and lease_expiry > now
     if is_own:
         return IntentOwnership.OWN_ACTIVE if lease_valid else IntentOwnership.OWN_STALE
-    if _is_pid_alive(record.agent_pid):
-        return (
-            IntentOwnership.FOREIGN_ACTIVE
-            if lease_valid
-            else IntentOwnership.FOREIGN_STALE
-        )
-    return IntentOwnership.RECOVERABLE
+    liveness = _pid_liveness(record.agent_pid)
+    if liveness == PidLiveness.DEAD:
+        return IntentOwnership.RECOVERABLE
+    return (
+        IntentOwnership.FOREIGN_ACTIVE if lease_valid else IntentOwnership.FOREIGN_STALE
+    )
 
 
 def resolved_lease_seconds(value: object = None, *, env_value: object = None) -> int:
@@ -378,7 +382,9 @@ def workspace_status_counts(*, root: Path) -> dict[str, int]:
     return {
         "stale_count": len(stale_records),
         "orphaned_count": sum(
-            1 for record in records if not _is_pid_alive(record.agent_pid)
+            1
+            for record in records
+            if _pid_liveness(record.agent_pid) == PidLiveness.DEAD
         ),
         "total_agents": len({record.agent_pid for record in records}),
     }
@@ -688,6 +694,7 @@ __all__ = [
     "MIN_TTL_SECONDS",
     "REGISTRY_VERSION",
     "IntentOwnership",
+    "PidLiveness",
     "WorkspaceIntentRecord",
     "WorkspaceIntentStatus",
     "_is_pid_alive",
@@ -695,6 +702,7 @@ __all__ = [
     "_is_safe_intent_path",
     "_lease_expiry",
     "_parse_utc",
+    "_pid_liveness",
     "_read_payload",
     "_ttl_expired",
     "_unlink",

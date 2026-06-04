@@ -20,6 +20,7 @@ from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 from codeclone.utils.json_io import read_json_object, write_json_document_atomically
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
+_PID_LIVENESS = "codeclone.surfaces.mcp._workspace_intent_pid.agent_pid_liveness"
 
 
 def _record(
@@ -274,6 +275,30 @@ def test_workspace_intent_lease_expiry_is_recoverable_not_gc(
     ) == (record,)
 
 
+def test_workspace_intent_unknown_pid_liveness_is_not_orphaned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    active = _record(intent_id="intent-unknown-active-001", pid=44444)
+    lease_expired = _record(
+        intent_id="intent-unknown-lease-expired-001",
+        pid=44444,
+        lease_renewed_delta=timedelta(minutes=-10),
+        lease_seconds=workspace_intents.MIN_LEASE_SECONDS,
+    )
+    for record in (active, lease_expired):
+        assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    monkeypatch.setattr(
+        _PID_LIVENESS,
+        lambda _pid: workspace_intents.PidLiveness.UNKNOWN,
+    )
+
+    assert workspace_intents.stale_reason(active) is None
+    assert workspace_intents.stale_reason(lease_expired) == "lease_expired"
+    counts = workspace_intents.workspace_status_counts(root=tmp_path)
+    assert counts["orphaned_count"] == 0
+
+
 def test_workspace_intent_io_failure_paths(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -518,6 +543,7 @@ def test_workspace_intent_private_edge_helpers(
         raise ProcessLookupError
 
     monkeypatch.setattr(os, "kill", raise_permission_error)
+    assert workspace_intents._pid_liveness(123) == workspace_intents.PidLiveness.UNKNOWN
     assert workspace_intents._is_pid_alive(123) is False
     monkeypatch.setattr(os, "kill", raise_oserror)
     assert workspace_intents._is_pid_alive(123) is True
@@ -527,8 +553,8 @@ def test_workspace_intent_private_edge_helpers(
     from codeclone.surfaces.mcp._workspace_intent_lifecycle import is_orphaned
 
     monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_intent_lifecycle.is_pid_alive",
-        lambda _pid: False,
+        "codeclone.surfaces.mcp._workspace_intent_lifecycle.pid_liveness",
+        lambda _pid: workspace_intents.PidLiveness.DEAD,
     )
     assert is_orphaned(_record()) is True
 
@@ -785,6 +811,27 @@ def test_workspace_intent_ownership_classification(
             now=now,
         )
         == workspace_intents.IntentOwnership.RECOVERABLE
+    )
+    monkeypatch.setattr(
+        _PID_LIVENESS, lambda pid: workspace_intents.PidLiveness.UNKNOWN
+    )
+    assert (
+        workspace_intents.classify_intent_ownership(
+            foreign,
+            own_pid=111,
+            own_start_epoch=100,
+            now=now,
+        )
+        == workspace_intents.IntentOwnership.FOREIGN_ACTIVE
+    )
+    assert (
+        workspace_intents.classify_intent_ownership(
+            foreign_stale,
+            own_pid=111,
+            own_start_epoch=100,
+            now=now,
+        )
+        == workspace_intents.IntentOwnership.FOREIGN_STALE
     )
     assert (
         workspace_intents.classify_intent_ownership(

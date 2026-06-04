@@ -138,12 +138,13 @@ def _decision_from_records(
                 own_start_epoch=0,
                 now=current_time,
             )
+            liveness = workspace_intents._pid_liveness(record.agent_pid)
             if record.status == WorkspaceIntentStatus.QUEUED.value:
                 queued = queued or record
                 continue
             if (
                 record.status == WorkspaceIntentStatus.ACTIVE.value
-                and _ownership_authorizes_hook(ownership)
+                and _ownership_authorizes_hook(ownership, liveness=liveness)
             ):
                 return WorkspaceEditGateDecision(
                     allowed=True,
@@ -183,7 +184,11 @@ def _decision_from_records(
 
 def _ownership_authorizes_hook(
     ownership: workspace_intents.IntentOwnership,
+    *,
+    liveness: workspace_intents.PidLiveness,
 ) -> bool:
+    if liveness != workspace_intents.PidLiveness.ALIVE:
+        return False
     if ownership == workspace_intents.IntentOwnership.OWN_ACTIVE:
         return True
     if ownership == workspace_intents.IntentOwnership.FOREIGN_ACTIVE:

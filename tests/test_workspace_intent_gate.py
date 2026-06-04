@@ -27,6 +27,7 @@ from tests.test_workspace_intents import _record
 from tests.workspace_intent_gate_helpers import assert_gate_denied
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
+_PID_LIVENESS = "codeclone.surfaces.mcp._workspace_intent_pid.agent_pid_liveness"
 
 
 def _write_record(root: Path, record: workspace_intents.WorkspaceIntentRecord) -> None:
@@ -57,6 +58,22 @@ def test_gate_denies_foreign_active_when_hook_env_disables_it(
 ) -> None:
     monkeypatch.setenv(HOOK_AUTHORIZE_FOREIGN_ENV, "0")
     monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    _write_record(tmp_path, _record(pid=os.getpid() + 1000))
+
+    decision = evaluate_workspace_edit_gate(tmp_path)
+
+    assert decision.allowed is False
+    assert decision.reason == "no_active_intent"
+
+
+def test_gate_denies_unknown_pid_liveness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        _PID_LIVENESS,
+        lambda _pid: workspace_intents.PidLiveness.UNKNOWN,
+    )
     _write_record(tmp_path, _record(pid=os.getpid() + 1000))
 
     decision = evaluate_workspace_edit_gate(tmp_path)

@@ -23,6 +23,12 @@ class WorkspaceIntentStatus(str, Enum):
     ORPHANED = "orphaned"
 
 
+class PidLiveness(str, Enum):
+    ALIVE = "alive"
+    DEAD = "dead"
+    UNKNOWN = "unknown"
+
+
 TERMINAL_WORKSPACE_INTENT_STATUSES: frozenset[str] = frozenset(
     {
         WorkspaceIntentStatus.CLEAN.value,
@@ -56,22 +62,26 @@ def parse_utc(value: str) -> datetime | None:
     return parsed.astimezone(timezone.utc)
 
 
-def is_pid_alive(pid: int) -> bool:
+def pid_liveness(pid: int) -> PidLiveness:
     if pid <= 0:
-        return False
+        return PidLiveness.DEAD
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
-        return False
+        return PidLiveness.DEAD
     except PermissionError:
-        return False
+        return PidLiveness.UNKNOWN
     except OSError:
-        return True
-    return True
+        return PidLiveness.ALIVE
+    return PidLiveness.ALIVE
+
+
+def is_pid_alive(pid: int) -> bool:
+    return pid_liveness(pid) == PidLiveness.ALIVE
 
 
 def is_orphaned(record: WorkspaceIntentRecord) -> bool:
-    return not is_pid_alive(record.agent_pid)
+    return pid_liveness(record.agent_pid) == PidLiveness.DEAD
 
 
 def lease_expiry(record: WorkspaceIntentRecord) -> datetime | None:
@@ -88,6 +98,7 @@ def is_lease_expired(record: WorkspaceIntentRecord) -> bool:
 
 __all__ = [
     "TERMINAL_WORKSPACE_INTENT_STATUSES",
+    "PidLiveness",
     "WorkspaceIntentStatus",
     "gc_status_for_reason",
     "is_lease_expired",
@@ -96,5 +107,6 @@ __all__ = [
     "is_terminal_workspace_intent_status",
     "lease_expiry",
     "parse_utc",
+    "pid_liveness",
     "utc_now",
 ]
