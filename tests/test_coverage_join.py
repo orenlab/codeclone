@@ -4,7 +4,9 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+import importlib
 from pathlib import Path
+from types import ModuleType
 from xml.etree import ElementTree
 
 import pytest
@@ -175,6 +177,51 @@ def test_coverage_join_defusedxml_import_path_when_available() -> None:
     root_element = _parse_xml_bytes(b"<coverage><packages/></coverage>")
 
     assert _local_tag_name(root_element.tag) == "coverage"
+
+
+def test_parse_xml_bytes_uses_mocked_defusedxml(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_module = ModuleType("defusedxml.ElementTree")
+
+    def _fromstring(payload: bytes) -> ElementTree.Element:
+        return ElementTree.fromstring(payload)
+
+    fake_module.fromstring = _fromstring  # type: ignore[attr-defined]
+
+    def _import(name: str, package: str | None = None) -> ModuleType:
+        if name == "defusedxml.ElementTree":
+            return fake_module
+        return importlib.import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import)
+    root_element = _parse_xml_bytes(b"<coverage><packages/></coverage>")
+    assert _local_tag_name(root_element.tag) == "coverage"
+
+
+def test_parse_xml_bytes_maps_defusedxml_errors_to_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DefusedError(Exception):
+        pass
+
+    _DefusedError.__module__ = "defusedxml.common"
+
+    fake_module = ModuleType("defusedxml.ElementTree")
+
+    def _fromstring(_payload: bytes) -> ElementTree.Element:
+        raise _DefusedError("unsafe xml")
+
+    fake_module.fromstring = _fromstring  # type: ignore[attr-defined]
+
+    def _import(name: str, package: str | None = None) -> ModuleType:
+        if name == "defusedxml.ElementTree":
+            return fake_module
+        return importlib.import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import)
+    with pytest.raises(ElementTree.ParseError, match="unsafe xml"):
+        _parse_xml_bytes(b"<coverage/>")
 
 
 def test_coverage_join_resolves_sources_and_filenames(tmp_path: Path) -> None:
