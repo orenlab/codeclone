@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import ipaddress
+import os
 import sys
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -15,6 +16,13 @@ from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
 from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
+from .auth import (
+    MCP_AUTH_TOKEN_ENV,
+    MCPAuthConfigurationError,
+    StaticBearerTokenVerifier,
+    build_http_auth_settings,
+    validated_mcp_auth_token,
+)
 from .messages import errors as err_msgs
 from .messages import instructions as mcp_instructions
 from .messages import resources as mcp_resources
@@ -231,6 +239,7 @@ def build_mcp_server(
         DEFAULT_MCP_LOG_LEVEL
     ),
     ide_governance_channel: bool = False,
+    auth_token: str | None = None,
 ) -> FastMCP:
     """Build and register the local read-only CodeClone FastMCP server."""
 
@@ -245,6 +254,12 @@ def build_mcp_server(
         yield {}
         service.shutdown_cleanup()
 
+    token_verifier = None
+    auth_settings = None
+    if auth_token is not None:
+        token_verifier = StaticBearerTokenVerifier(auth_token)
+        auth_settings = build_http_auth_settings(host=host, port=port)
+
     mcp = runtime_fastmcp(
         name="CodeClone",
         instructions=mcp_instructions.SERVER_INSTRUCTIONS,
@@ -257,6 +272,8 @@ def build_mcp_server(
         debug=debug,
         log_level=log_level,
         dependencies=(f"codeclone=={__version__}",),
+        token_verifier=token_verifier,
+        auth=auth_settings,
     )
     # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
     mcp._mcp_server.version = __version__
@@ -1259,7 +1276,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Allow binding streamable-http to a non-loopback host. "
-            "Disabled by default because CodeClone MCP has no built-in authentication."
+            f"HTTP still requires {MCP_AUTH_TOKEN_ENV}."
         ),
     )
     parser.add_argument(
@@ -1360,11 +1377,18 @@ def main() -> None:
             (
                 "Refusing to bind CodeClone MCP streamable-http to non-loopback "
                 f"host '{args.host}' without --allow-remote. "
-                "The server has no built-in authentication."
+                f"Set {MCP_AUTH_TOKEN_ENV} and pass --allow-remote explicitly."
             ),
             file=sys.stderr,
         )
         raise SystemExit(2)
+    auth_token = None
+    if args.transport == "streamable-http":
+        try:
+            auth_token = validated_mcp_auth_token(os.environ.get(MCP_AUTH_TOKEN_ENV))
+        except MCPAuthConfigurationError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(2) from exc
     try:
         server = build_mcp_server(
             history_limit=args.history_limit,
@@ -1375,6 +1399,7 @@ def main() -> None:
             debug=args.debug,
             log_level=args.log_level,
             ide_governance_channel=args.ide_governance_channel,
+            auth_token=auth_token,
         )
     except MCPDependencyError as exc:
         print(str(exc), file=sys.stderr)

@@ -20,6 +20,7 @@ import pytest
 import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
 from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
 from codeclone.surfaces.mcp.session import MCPServiceContractError
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
@@ -37,6 +38,21 @@ def _structured_tool_result(result: object) -> dict[str, object]:
 
 def _mapping_child(payload: Mapping[str, object], key: str) -> dict[str, object]:
     return cast("dict[str, object]", payload[key])
+
+
+def _install_fake_main_server(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: dict[str, object],
+) -> None:
+    class _FakeServer:
+        def run(self, *, transport: str) -> None:
+            captured["transport"] = transport
+
+    def _fake_build_mcp_server(**kwargs: object) -> _FakeServer:
+        captured["kwargs"] = kwargs
+        return _FakeServer()
+
+    monkeypatch.setattr(mcp_server, "build_mcp_server", _fake_build_mcp_server)
 
 
 def _require_mcp_runtime() -> None:
@@ -722,15 +738,8 @@ def test_mcp_server_parser_defaults_and_main_success(
 
     captured: dict[str, object] = {}
 
-    class _FakeServer:
-        def run(self, *, transport: str) -> None:
-            captured["transport"] = transport
-
-    def _fake_build_mcp_server(**kwargs: object) -> _FakeServer:
-        captured["kwargs"] = kwargs
-        return _FakeServer()
-
-    monkeypatch.setattr(mcp_server, "build_mcp_server", _fake_build_mcp_server)
+    monkeypatch.setenv(MCP_AUTH_TOKEN_ENV, "a" * 32)
+    _install_fake_main_server(monkeypatch, captured)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -751,6 +760,7 @@ def test_mcp_server_parser_defaults_and_main_success(
     kwargs = cast("dict[str, object]", captured["kwargs"])
     assert kwargs["port"] == 9000
     assert kwargs["history_limit"] == 8
+    assert kwargs["auth_token"] == "a" * 32
 
 
 def test_mcp_server_parser_rejects_excessive_history_limit() -> None:
@@ -787,11 +797,8 @@ def test_mcp_server_main_allows_non_loopback_host_with_opt_in(
 ) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeServer:
-        def run(self, *, transport: str) -> None:
-            captured["transport"] = transport
-
-    monkeypatch.setattr(mcp_server, "build_mcp_server", lambda **kwargs: _FakeServer())
+    monkeypatch.setenv(MCP_AUTH_TOKEN_ENV, "b" * 32)
+    _install_fake_main_server(monkeypatch, captured)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -808,6 +815,7 @@ def test_mcp_server_main_allows_non_loopback_host_with_opt_in(
     mcp_server.main()
 
     assert captured["transport"] == "streamable-http"
+    assert cast("dict[str, object]", captured["kwargs"])["auth_token"] == "b" * 32
 
 
 def test_mcp_server_main_reports_missing_optional_dependency(
@@ -869,6 +877,7 @@ def test_mcp_server_main_swallows_keyboard_interrupt(
         "build_mcp_server",
         lambda **_kwargs: _FakeServer(),
     )
+    monkeypatch.setenv(MCP_AUTH_TOKEN_ENV, "c" * 32)
     monkeypatch.setattr(
         sys, "argv", ["codeclone-mcp", "--transport", "streamable-http"]
     )
