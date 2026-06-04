@@ -23,7 +23,14 @@ def open_sqlite_db(
     *,
     ensure_schema: Callable[[sqlite3.Connection], None],
     foreign_keys: bool = False,
+    synchronous: str | None = None,
 ) -> sqlite3.Connection:
+    """Open a SQLite database with standard pragmas.
+
+    *synchronous* overrides the default ``NORMAL`` level.  Pass ``"FULL"``
+    for stores where every commit must survive an unclean process exit
+    (e.g. engineering memory).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(
         str(path),
@@ -36,7 +43,19 @@ def open_sqlite_db(
         if foreign_keys:
             pragmas = tuple(
                 "PRAGMA foreign_keys=ON" if stmt.endswith("foreign_keys=OFF") else stmt
-                for stmt in _SQLITE_PRAGMAS
+                for stmt in pragmas
+            )
+        if synchronous is not None:
+            allowed = ("NORMAL", "FULL", "EXTRA", "OFF")
+            upper = synchronous.upper()
+            if upper not in allowed:
+                msg = f"synchronous must be one of {allowed}, got {synchronous!r}"
+                raise ValueError(msg)
+            pragmas = tuple(
+                f"PRAGMA synchronous={upper}"
+                if stmt.startswith("PRAGMA synchronous=")
+                else stmt
+                for stmt in pragmas
             )
         for statement in pragmas:
             conn.execute(statement)

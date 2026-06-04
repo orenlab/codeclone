@@ -213,7 +213,14 @@ _INDEX_SQL = (
 
 
 def open_memory_db(path: Path) -> sqlite3.Connection:
-    return open_sqlite_db(path, ensure_schema=ensure_schema, foreign_keys=True)
+    # synchronous=FULL: every commit survives unclean process exit.
+    # Memory records are few, each governance-governed and valuable.
+    return open_sqlite_db(
+        path,
+        ensure_schema=ensure_schema,
+        foreign_keys=True,
+        synchronous="FULL",
+    )
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

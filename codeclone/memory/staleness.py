@@ -51,7 +51,10 @@ def _batch_evidence_index(
 
 
 def _skip_refresh_candidate(record: MemoryRecord) -> bool:
-    return record.status == "stale" or record.origin == "human"
+    # Drafts are unapproved agent candidates awaiting human governance.
+    # Marking them stale before review is premature — they become subject
+    # to normal staleness only after promotion to active.
+    return record.status in ("stale", "draft") or record.origin == "human"
 
 
 def _normalize_subject_path(subject_key: str) -> str:
