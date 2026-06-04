@@ -16,6 +16,7 @@ Describe implemented protections and explicit security boundaries.
 - HTML escaping: `codeclone/report/html/primitives/escape.py`,
   `codeclone/report/html/assemble.py`
 - MCP read-only enforcement: `codeclone/surfaces/mcp/*`
+- Repository path containment: `codeclone/utils/repo_paths.py`
 
 ## Data model
 
@@ -57,15 +58,29 @@ Security-relevant input classes:
 
 These are documented limits, not hidden guarantees.
 
+### Repository path containment
+
+`resolve_under_repo_root` in `codeclone/utils/repo_paths.py` is the shared
+resolver for audit paths, intent-registry DB paths, memory config paths, MCP
+optional artifacts, and cache wire filepath projection. By default paths must
+stay under the analysis root after normalization; symlink escapes outside the
+root are rejected.
+
+Refs:
+
+- `codeclone/utils/repo_paths.py`
+- `tests/test_repo_paths.py`
+
 ### MCP optional artifact paths
 
-`_resolve_optional_path` resolves `baseline_path`, `metrics_baseline_path`,
-`cache_path`, and `coverage_xml` relative to the repository root, but also
-accepts absolute paths anywhere on the host filesystem. That behavior is
-intentional for monorepo and shared-artifact workflows, but it is a trust
-boundary: the MCP client and operator must treat these parameters as privileged
-inputs. Blind containment would break valid external artifact paths; any future
-containment must be opt-in and contract-versioned.
+`baseline_path`, `metrics_baseline_path`, `cache_path`, and `coverage_xml` on
+`analyze_repository` / `analyze_changed_paths` resolve through the same helper.
+**Default:** repo-relative only; absolute or out-of-repo paths are rejected.
+**Opt-in:** set `allow_external_artifacts=true` on the analysis tool call when
+shared monorepo artifacts live outside the scan root (privileged input).
+
+Parameter details: [25-mcp-interface.md](25-mcp-interface.md). Tool copy:
+`help(topic="trust_boundaries")`.
 
 Refs:
 
@@ -95,8 +110,10 @@ baselines directly. Treat intents as coordination hints, not proof of agent
 identity.
 
 The Cursor plugin may enforce `preToolUse` by **reading** this registry through
-`codeclone.workspace_intent` (read-only; no lazy-close or writes). That reduces
-accidental edits without intent; it does not stop a hostile same-UID process.
+`codeclone.workspace_intent` (read-only; no lazy-close or writes). The hook gate
+authorizes edits only for **own active** or **foreign active** intents (not
+stale/queued). That reduces accidental edits without intent; it does not stop a
+hostile same-UID process.
 
 Refs:
 
@@ -107,13 +124,19 @@ Refs:
 ### Remote MCP transport
 
 Loopback binding is the default. `--allow-remote` removes the loopback-only
-transport guard so HTTP MCP can bind on non-local interfaces. CodeClone does
-not implement TLS, tokens, or session authentication for MCP. Operators must
-place remote MCP behind a trusted network boundary or external auth proxy.
+transport guard so HTTP MCP can bind on non-local interfaces.
+
+For `streamable-http`, set environment variable `CODECLONE_MCP_AUTH_TOKEN` (min
+32 characters). The server validates `Authorization: Bearer …` with
+`hmac.compare_digest` (stdlib only). Without a token, HTTP MCP is an
+unauthenticated local-trust surface. CodeClone does not ship TLS or multi-tenant
+session management — use a reverse proxy when exposing beyond loopback.
 
 Refs:
 
+- `codeclone/surfaces/mcp/auth.py`
 - `codeclone/surfaces/mcp/server.py`
+- `tests/test_mcp_http_auth.py`
 - `tests/test_mcp_server.py::test_mcp_server_main_rejects_non_loopback_host_without_opt_in`
 
 Refs:
@@ -170,6 +193,9 @@ Refs:
 - `tests/test_mcp_service.py::test_mcp_service_rejects_refresh_cache_policy_in_read_only_mode`
 - `tests/test_mcp_service.py::test_mcp_service_caps_process_count_from_request_and_config`
 - `tests/test_mcp_server.py::test_mcp_server_main_rejects_non_loopback_host_without_opt_in`
+- `tests/test_repo_paths.py`
+- `tests/test_mcp_http_auth.py`
+- `tests/test_security_invariants.py`
 
 ## Non-guarantees
 
@@ -178,5 +204,7 @@ Refs:
 - Baseline `payload_sha256` and cache signatures protect against accidental corruption and unsynchronized edits; they
   do not authenticate files against a hostile same-UID writer.
 - Workspace intent files are not signed and must not be treated as proof of which agent declared a change.
-- MCP optional absolute artifact paths are caller-controlled; CodeClone does not sandbox them to the scan root.
-- Remote MCP with `--allow-remote` is not a hardened multi-tenant network service.
+- MCP optional artifact paths outside the scan root require explicit
+  `allow_external_artifacts=true`; default resolution stays under the repo root.
+- Remote MCP without `CODECLONE_MCP_AUTH_TOKEN` is not authenticated; with
+  `--allow-remote` it is not a hardened multi-tenant network service.

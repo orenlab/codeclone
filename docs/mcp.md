@@ -203,9 +203,10 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 !!! warning "Remote exposure is opt-in"
-    Non-loopback hosts require `--allow-remote`. The built-in HTTP server
-    has no authentication. Use it only on trusted networks or behind an
-    authenticated reverse proxy.
+    Non-loopback hosts require `--allow-remote`. For `streamable-http`, set
+    `CODECLONE_MCP_AUTH_TOKEN` (≥32 chars) so clients must send
+    `Authorization: Bearer …`. Without a token, HTTP MCP is unauthenticated —
+    use only on trusted networks or behind a reverse proxy.
 
 ### Run retention
 
@@ -767,6 +768,8 @@ include `total`, `shown`, and `truncated` summaries.
 | Read-only         | Never mutates source, baseline, cache, or report artifacts                                                                                                                                                                                                  |
 | Default transport | Local `stdio`                                                                                                                                                                                                                                               |
 | Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                                                                                                         |
+| HTTP auth         | `CODECLONE_MCP_AUTH_TOKEN` Bearer check on `streamable-http` (stdlib `hmac`)                                                                                                                                                                                |
+| Artifact paths    | Under repo root by default; `allow_external_artifacts=true` for absolute/out-of-repo baseline/cache/coverage paths                                                                                                                                          |
 | Lazy loading      | Base `codeclone` install does not require MCP packages                                                                                                                                                                                                      |
 | Repository access | Limited to what the server process can read locally                                                                                                                                                                                                         |
 | Session state     | In-memory runs and review markers; do not survive restart                                                                                                                                                                                                   |

@@ -496,14 +496,15 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "trust_boundaries": MCPHelpTopicSpec(
         summary=(
             "Documented MCP trust limits: read-only analysis, advisory "
-            "workspace intents, optional absolute artifact paths, and "
-            "non-authenticated remote transport."
+            "workspace intents, strict artifact paths with opt-in external "
+            "resolution, and optional Bearer auth on streamable-http."
         ),
         key_points=(
             "MCP never mutates source, baseline, cache.json, or canonical reports.",
             (
-                "Optional paths (baseline_path, cache_path, coverage_xml) may "
-                "resolve outside the scan root by design."
+                "baseline_path, cache_path, coverage_xml resolve under the scan "
+                "root by default; pass allow_external_artifacts=true for "
+                "absolute or out-of-repo paths (privileged)."
             ),
             (
                 "Workspace intents under .codeclone/intents/ are "
@@ -514,8 +515,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "corruption, not hostile same-UID writers."
             ),
             (
-                "--allow-remote removes loopback guard only; add external "
-                "auth/network controls for HTTP MCP."
+                "streamable-http: set CODECLONE_MCP_AUTH_TOKEN (>=32 chars) for "
+                "Bearer auth; --allow-remote is separate loopback guard."
             ),
             (
                 "security_surfaces in responses is report-only inventory, "
@@ -529,7 +530,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         anti_patterns=(
             "Calling Security Surfaces a vulnerability audit.",
-            "Assuming MCP sandboxes optional absolute artifact paths.",
+            "Passing allow_external_artifacts=true without treating paths "
+            "as privileged.",
         ),
     ),
     "engineering_memory": MCPHelpTopicSpec(
