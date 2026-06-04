@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -21,6 +21,7 @@ from codeclone.memory.models import (
     MemoryProject,
     MemoryRecord,
     MemorySubject,
+    RecordBatch,
     generate_memory_id,
 )
 from codeclone.memory.project import (
@@ -168,6 +169,97 @@ def git_repo_with_cached_report(
         }
     }
     return root, report_path, report_document
+
+
+def registry_items_from_report(report_document: Mapping[str, object]) -> list[str]:
+    inventory = report_document.get("inventory")
+    if not isinstance(inventory, dict):
+        return []
+    registry = inventory.get("file_registry")
+    if not isinstance(registry, dict):
+        return []
+    raw_items = registry.get("items")
+    if not isinstance(raw_items, list):
+        return []
+    return [str(item) for item in raw_items]
+
+
+def enrich_report_with_api_surface(
+    report_document: Mapping[str, object],
+    *,
+    module_path: str,
+    symbol: str = "f",
+) -> dict[str, object]:
+    enriched = dict(report_document)
+    enriched["metrics"] = {
+        "api_surface": {
+            "items": [
+                {
+                    "path": module_path,
+                    "symbol": symbol,
+                    "kind": "function",
+                }
+            ]
+        }
+    }
+    return enriched
+
+
+def run_memory_extractor_smoke(
+    *,
+    root: Path,
+    extractor: Callable[..., RecordBatch],
+    report_document: Mapping[str, object],
+) -> dict[str, int]:
+    from codeclone.memory.ingest.extractors import (
+        extract_contract_notes,
+        extract_contradictions,
+        extract_document_links,
+        extract_git_hotspots,
+        extract_public_surfaces,
+        extract_test_anchors,
+        merge_batches,
+    )
+    from codeclone.memory.ingest.runner import planned_type_counts
+    from codeclone.memory.project import (
+        analysis_fingerprint_from_report,
+        read_git_provenance,
+        report_digest_from_report,
+        resolve_project_identity,
+    )
+
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    report_dict = dict(report_document)
+    digest = report_digest_from_report(report_dict)
+    fingerprint = analysis_fingerprint_from_report(report_dict)
+    kwargs: dict[str, object] = {
+        "project": project,
+        "git": git,
+        "report_digest": digest,
+        "analysis_fingerprint": fingerprint,
+    }
+    if extractor in {extract_contract_notes, extract_contradictions}:
+        kwargs["root_path"] = root
+    elif extractor is extract_public_surfaces:
+        kwargs["root_path"] = root
+        kwargs["report_document"] = report_document
+    elif extractor in {
+        extract_git_hotspots,
+        extract_test_anchors,
+        extract_document_links,
+    }:
+        kwargs["root_path"] = root
+        if extractor is extract_document_links:
+            kwargs["registry_paths"] = frozenset(
+                registry_items_from_report(report_document)
+            )
+    else:
+        kwargs["report_document"] = report_document
+
+    batch = extractor(**kwargs)
+    merged = merge_batches([batch])
+    return planned_type_counts(merged)
 
 
 def make_module_record(

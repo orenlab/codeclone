@@ -4,7 +4,11 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+"""Memory ingest extractors exercised on tmp_path git repos (CI-safe)."""
+
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
@@ -19,9 +23,8 @@ from codeclone.memory.ingest.extractors import (
     extract_test_anchors,
 )
 from tests.memory_fixtures import (
-    REPO_ROOT,
-    load_memory_init_report_document,
-    registry_items_from_report,
+    enrich_report_with_api_surface,
+    git_repo_with_cached_report,
     run_memory_extractor_smoke,
 )
 
@@ -37,26 +40,22 @@ _MEMORY_EXTRACTORS = (
 )
 
 
-def _load_report() -> dict[str, object]:
-    try:
-        return load_memory_init_report_document()
-    except FileNotFoundError:
-        pytest.skip("cached report.json not available")
-
-
 @pytest.mark.parametrize("extractor", _MEMORY_EXTRACTORS)
-def test_memory_extractors_on_codeclone_repo(extractor: object) -> None:
-    if not (REPO_ROOT / "codeclone").is_dir():
-        pytest.skip("not running inside codeclone checkout")
-    report_document = _load_report()
+def test_memory_extractors_on_fixture_git_repo(
+    tmp_path: Path,
+    extractor: object,
+) -> None:
+    root, _report_path, base_report = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/mod.py": "def f():\n    return 1\n"},
+        registry_items=["pkg/mod.py"],
+    )
+    report_document = enrich_report_with_api_surface(
+        base_report, module_path="pkg/mod.py"
+    )
     counts = run_memory_extractor_smoke(
-        root=REPO_ROOT,
+        root=root,
         extractor=extractor,  # type: ignore[arg-type]
         report_document=report_document,
     )
     assert isinstance(counts, dict)
-    if extractor is extract_document_links:
-        inventory = report_document.get("inventory")
-        assert isinstance(inventory, dict)
-        items = registry_items_from_report(report_document)
-        assert items

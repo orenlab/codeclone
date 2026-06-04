@@ -116,6 +116,27 @@ def test_run_memory_init_persists_and_vacuum(tmp_path: Path) -> None:
     assert vacuum_report.total_deleted >= 0
 
 
+def test_build_init_batch_on_fixture_git_repo(tmp_path: Path) -> None:
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/mod.py": "def f():\n    return 1\n"},
+        registry_items=["pkg/mod.py"],
+    )
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    batch = build_init_batch(
+        root_path=root,
+        project=project,
+        report_document=report_document,
+        git=git,
+        report_digest=report_digest_from_report(report_document),
+        analysis_fingerprint=analysis_fingerprint_from_report(report_document),
+        options=InitOptions(include_docs=False, include_tests=False),
+    )
+    counts = planned_type_counts(batch)
+    assert counts.get("module_role", 0) >= 1
+
+
 def test_build_init_batch_on_codeclone_repository() -> None:
     if not (REPO_ROOT / "codeclone" / "contracts" / "__init__.py").is_file():
         pytest.skip("not running inside codeclone checkout")
