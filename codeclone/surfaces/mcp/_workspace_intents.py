@@ -232,6 +232,16 @@ def write_workspace_intent(*, root: Path, record: WorkspaceIntentRecord) -> bool
     return bool(_intent_store(root).write(record))
 
 
+def write_workspace_intent_with_existing(
+    *,
+    root: Path,
+    record: WorkspaceIntentRecord,
+) -> tuple[tuple[WorkspaceIntentRecord, ...], bool]:
+    from ._workspace_intent_store import write_workspace_intent_with_existing as _write
+
+    return _write(root=root, record=record)
+
+
 def update_workspace_intent_status(
     *,
     root: Path,
@@ -720,4 +730,5 @@ __all__ = [
     "workspace_intent_to_payload",
     "workspace_status_counts",
     "write_workspace_intent",
+    "write_workspace_intent_with_existing",
 ]

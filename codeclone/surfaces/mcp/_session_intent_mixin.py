@@ -73,6 +73,7 @@ from ._workspace_intents import (
     workspace_intent_to_payload,
     workspace_status_counts,
     write_workspace_intent,
+    write_workspace_intent_with_existing,
 )
 from .messages import intent as intent_msgs
 
@@ -294,8 +295,10 @@ class _MCPSessionIntentMixin:
                 start_epoch=self._agent_start_epoch,
                 intent_id=replaced_intent.intent_id,
             )
-        workspace_existing = list_workspace_intents(root=record.root)
-        workspace_registered = write_workspace_intent(
+        (
+            workspace_existing,
+            workspace_registered,
+        ) = write_workspace_intent_with_existing(
             root=record.root,
             record=workspace_record,
         )

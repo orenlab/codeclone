@@ -112,7 +112,7 @@ def test_gate_denies_orphaned_active_intent(
     assert decision.reason == "no_active_intent"
 
 
-def test_gate_treats_live_foreign_stale_lease_as_authorizing_lock(
+def test_gate_denies_live_foreign_stale_lease(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -126,9 +126,8 @@ def test_gate_treats_live_foreign_stale_lease_as_authorizing_lock(
 
     decision = evaluate_workspace_edit_gate(tmp_path)
 
-    assert decision.allowed is True
-    assert decision.reason == "active_intent"
-    assert decision.ownership == "foreign_stale"
+    assert decision.allowed is False
+    assert decision.reason == "no_active_intent"
 
 
 def test_gate_does_not_create_missing_sqlite_registry(

@@ -64,7 +64,7 @@ def is_pid_alive(pid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        return False
     except OSError:
         return True
     return True

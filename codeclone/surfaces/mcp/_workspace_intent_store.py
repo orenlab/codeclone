@@ -472,6 +472,26 @@ def get_workspace_intent_store(root: Path) -> WorkspaceIntentStore:
         return store
 
 
+def write_workspace_intent_with_existing(
+    *,
+    root: Path,
+    record: WorkspaceIntentRecord,
+) -> tuple[tuple[WorkspaceIntentRecord, ...], bool]:
+    """Atomically snapshot active records and write ``record``.
+
+    The returned existing records are the pre-write active registry view.  This
+    closes the list-then-write race for declare conflict evaluation while
+    preserving the current advisory conflict semantics.
+    """
+
+    store = get_workspace_intent_store(root)
+    with registry_transaction(store):
+        _lazy_close_eligible_records_unlocked(store)
+        existing = store._active_records_unlocked()
+        registered = store.write_unlocked(record)
+    return existing, registered
+
+
 def clear_workspace_intent_store_cache() -> None:
     with _STORE_CACHE_LOCK:
         stores = tuple(_STORE_CACHE.values())
@@ -656,4 +676,5 @@ __all__ = [
     "lazy_close_eligible_records",
     "lazy_close_eligible_records_unlocked",
     "registry_transaction",
+    "write_workspace_intent_with_existing",
 ]

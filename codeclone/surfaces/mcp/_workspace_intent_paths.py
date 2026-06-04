@@ -42,7 +42,11 @@ def intent_path(
 def registry_files(root: Path) -> tuple[Path, ...]:
     directory = registry_dir(root)
     try:
-        return tuple(sorted(directory.glob("*.json")))
+        return tuple(
+            path
+            for path in sorted(directory.glob("*.json"))
+            if is_safe_intent_path(path, directory)
+        )
     except OSError:
         return ()
 
@@ -120,6 +124,7 @@ __all__ = [
     "intent_filename",
     "intent_path",
     "is_safe_intent_id",
+    "is_safe_intent_path",
     "read_payload",
     "record_sort_key",
     "registry_dir",

@@ -54,9 +54,7 @@ GateReason = Literal[
 _ALLOWING_OWNERSHIP: frozenset[workspace_intents.IntentOwnership] = frozenset(
     {
         workspace_intents.IntentOwnership.OWN_ACTIVE,
-        workspace_intents.IntentOwnership.OWN_STALE,
         workspace_intents.IntentOwnership.FOREIGN_ACTIVE,
-        workspace_intents.IntentOwnership.FOREIGN_STALE,
     }
 )
 

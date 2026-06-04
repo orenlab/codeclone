@@ -514,7 +514,7 @@ def test_workspace_intent_private_edge_helpers(
         raise ProcessLookupError
 
     monkeypatch.setattr(os, "kill", raise_permission_error)
-    assert workspace_intents._is_pid_alive(123) is True
+    assert workspace_intents._is_pid_alive(123) is False
     monkeypatch.setattr(os, "kill", raise_oserror)
     assert workspace_intents._is_pid_alive(123) is True
     monkeypatch.setattr(os, "kill", raise_process_lookup)
@@ -1266,6 +1266,49 @@ def test_registry_lock_file_ignored_by_listing(tmp_path: Path) -> None:
     lock_path.write_bytes(b"\0")
 
     assert workspace_intents.list_workspace_intents(root=tmp_path) == (record,)
+
+
+def test_registry_files_skips_unsafe_entries(tmp_path: Path) -> None:
+    record = _record(intent_id="intent-safe-list-001")
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=record)
+    from codeclone.surfaces.mcp._workspace_intent_paths import (
+        registry_dir,
+        registry_files,
+    )
+
+    directory = registry_dir(tmp_path)
+    (directory / "unsafe.json").write_text("{}", encoding="utf-8")
+    symlink_path = directory / "999-100-intent-symlink-001.json"
+    symlink_path.symlink_to(tmp_path / "outside.json")
+
+    assert registry_files(tmp_path) == (
+        workspace_intents.intent_path(
+            root=tmp_path,
+            pid=record.agent_pid,
+            start_epoch=record.agent_start_epoch,
+            intent_id=record.intent_id,
+        ),
+    )
+
+
+def test_write_workspace_intent_with_existing_snapshots_before_write(
+    tmp_path: Path,
+) -> None:
+    existing = _record(intent_id="intent-existing-001", start_epoch=100)
+    new = _record(intent_id="intent-new-001", start_epoch=101)
+    assert workspace_intents.write_workspace_intent(root=tmp_path, record=existing)
+
+    seen, registered = workspace_intents.write_workspace_intent_with_existing(
+        root=tmp_path,
+        record=new,
+    )
+
+    assert registered is True
+    assert seen == (existing,)
+    assert workspace_intents.list_workspace_intents(root=tmp_path) == (
+        existing,
+        new,
+    )
 
 
 def test_gc_removal_reason_keeps_orphaned_for_recovery(
