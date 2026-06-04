@@ -1,0 +1,126 @@
+name: integrations
+run-name: integrations • ${{ github.event_name }} • ${{ github.ref_name }}
+
+# Tests the IDE/agent integration surfaces that the main `tests` workflow does
+# not cover: the Node-based VS Code extension and Claude Desktop bundle, plus
+# the Codex and Cursor plugin contract tests. Runs only when an integration
+# surface (or the shared MCP tool snapshot the manifests are pinned to) changes.
+
+on:
+  push:
+    branches: [ "**" ]
+    paths:
+      - "extensions/**"
+      - "plugins/**"
+      - "tests/test_codex_plugin.py"
+      - "tests/test_cursor_plugin.py"
+      - "tests/test_cursor_plugin_hooks.py"
+      - "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
+      - ".github/workflows/integrations.yml"
+  pull_request:
+    paths:
+      - "extensions/**"
+      - "plugins/**"
+      - "tests/test_codex_plugin.py"
+      - "tests/test_cursor_plugin.py"
+      - "tests/test_cursor_plugin_hooks.py"
+      - "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
+      - ".github/workflows/integrations.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: integrations-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vscode-extension:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extensions/vscode-codeclone
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extensions/vscode-codeclone/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build, typecheck, and syntax-check
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+  claude-desktop-bundle:
+    name: Claude Desktop bundle
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: extensions/claude-desktop-codeclone
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: extensions/claude-desktop-codeclone/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Syntax-check launcher and server
+        run: npm run check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Bundle build smoke
+        run: npm run pack
+
+  plugins:
+    name: Codex and Cursor plugins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --extra dev --extra mcp
+
+      - name: Plugin contract tests
+        run: >-
+          uv run pytest -q
+          tests/test_codex_plugin.py
+          tests/test_cursor_plugin.py
+          tests/test_cursor_plugin_hooks.py
+
+      - name: Validate bundled plugin manifests
+        run: |
+          python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json > /dev/null
+          python3 -m json.tool plugins/codeclone/.mcp.json > /dev/null
+          python3 -m json.tool .agents/plugins/marketplace.json > /dev/null
