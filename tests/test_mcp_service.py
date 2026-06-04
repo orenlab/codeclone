@@ -2855,6 +2855,27 @@ def test_mcp_analysis_request_artifact_paths_stay_repo_relative_by_default(
         )
 
 
+def test_mcp_analysis_request_coverage_xml_allows_in_repo_absolute_path(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    coverage = root / "coverage.xml"
+    coverage.write_text("<coverage />", encoding="utf-8")
+    service = CodeCloneMCPService(history_limit=4)
+
+    args = service._build_args(
+        root_path=root,
+        request=_mcp_request_with_artifact_path(
+            root=root,
+            field="coverage_xml",
+            value=str(coverage.resolve(strict=False)),
+        ),
+    )
+
+    assert str(args.coverage_xml).endswith("coverage.xml")
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

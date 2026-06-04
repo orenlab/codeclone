@@ -75,6 +75,19 @@ function workspaceLocalPath(rootPath, candidatePath) {
     return null;
 }
 
+function toRepoRelativeMcpPath(rootPath, resolvedPath) {
+    const root = String(rootPath || "").trim();
+    const resolved = String(resolvedPath || "").trim();
+    if (!root || !resolved) {
+        return null;
+    }
+    const relative = path.relative(root, resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) {
+        return null;
+    }
+    return relative.split(path.sep).join("/");
+}
+
 async function resolveCoverageXmlPath(
     rootPath,
     configuredPath = "",
@@ -83,7 +96,8 @@ async function resolveCoverageXmlPath(
 ) {
     const configured = String(configuredPath || "").trim();
     if (configured) {
-        return workspaceLocalPath(rootPath, configured);
+        const local = workspaceLocalPath(rootPath, configured);
+        return local ? toRepoRelativeMcpPath(rootPath, local) : null;
     }
     if (!autoDetect) {
         return null;
@@ -92,7 +106,10 @@ async function resolveCoverageXmlPath(
     if (!detected) {
         return null;
     }
-    return (await exists(detected)) ? detected : null;
+    if (!(await exists(detected))) {
+        return null;
+    }
+    return toRepoRelativeMcpPath(rootPath, detected);
 }
 
 async function looksLikeCodeCloneRepo(folderPath) {

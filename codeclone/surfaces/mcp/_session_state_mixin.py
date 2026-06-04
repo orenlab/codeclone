@@ -329,6 +329,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                     request.coverage_xml,
                     root_path,
                     allow_external_artifacts=request.allow_external_artifacts,
+                    allow_repo_absolute=True,
                 )
             )
 
