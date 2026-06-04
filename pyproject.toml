@@ -71,6 +71,9 @@ mcp = [
 token-bench = [
     "tiktoken>=0.13.0",
 ]
+coverage-xml = [
+    "defusedxml>=0.7.1,<0.8",
+]
 semantic-lancedb = [
     "lancedb>=0.33.0",
 ]

@@ -9,11 +9,13 @@ from xml.etree import ElementTree
 
 import pytest
 
+import codeclone.metrics.coverage_join as coverage_join_mod
 from codeclone.metrics.coverage_join import (
     CoverageJoinParseError,
     _iter_cobertura_class_elements,
     _iter_cobertura_line_hits,
     _local_tag_name,
+    _parse_xml_bytes,
     _resolve_report_filename,
     _resolved_coverage_sources,
     build_coverage_join,
@@ -148,6 +150,31 @@ def test_build_coverage_join_rejects_invalid_cobertura_xml(tmp_path: Path) -> No
             hotspot_threshold_percent=50,
             units=(),
         )
+
+
+def test_build_coverage_join_rejects_oversized_cobertura_xml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coverage_xml = tmp_path / "coverage.xml"
+    coverage_xml.write_text("<coverage>too large</coverage>", encoding="utf-8")
+    monkeypatch.setattr(coverage_join_mod, "MAX_COVERAGE_XML_BYTES", 8)
+
+    with pytest.raises(CoverageJoinParseError, match="File too large"):
+        build_coverage_join(
+            coverage_xml=coverage_xml,
+            root_path=tmp_path,
+            hotspot_threshold_percent=50,
+            units=(),
+        )
+
+
+def test_coverage_join_defusedxml_import_path_when_available() -> None:
+    pytest.importorskip("defusedxml.ElementTree")
+
+    root_element = _parse_xml_bytes(b"<coverage><packages/></coverage>")
+
+    assert _local_tag_name(root_element.tag) == "coverage"
 
 
 def test_coverage_join_resolves_sources_and_filenames(tmp_path: Path) -> None:

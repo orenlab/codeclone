@@ -6,15 +6,17 @@
 
 from __future__ import annotations
 
+import importlib
 from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 from xml.etree import ElementTree
 
 from ..models import CoverageJoinResult, GroupItemLike, UnitCoverageFact
 from ..utils.coerce import as_int, as_str
+from ..utils.json_io import BoundedReadError, read_bounded_bytes
 
 __all__ = [
     "CoverageJoinParseError",
@@ -28,6 +30,7 @@ _MEASURED_STATUS: _CoverageStatus = "measured"
 _MISSING_FROM_REPORT_STATUS: _CoverageStatus = "missing_from_report"
 _NO_EXECUTABLE_LINES_STATUS: _CoverageStatus = "no_executable_lines"
 _HOTSPOT_RISKS: frozenset[_Risk] = frozenset({"medium", "high"})
+MAX_COVERAGE_XML_BYTES = 25 * 1024 * 1024
 
 
 class CoverageJoinParseError(ValueError):
@@ -161,19 +164,35 @@ def _iter_cobertura_line_hits(
     return tuple(rows)
 
 
+def _parse_xml_bytes(payload: bytes) -> ElementTree.Element:
+    try:
+        safe_element_tree = importlib.import_module("defusedxml.ElementTree")
+    except ImportError:
+        return ElementTree.fromstring(payload)
+    try:
+        return cast(ElementTree.Element, safe_element_tree.fromstring(payload))
+    except Exception as exc:
+        if exc.__class__.__module__.startswith("defusedxml"):
+            raise ElementTree.ParseError(str(exc)) from exc
+        raise
+
+
 def _parse_coverage_report(
     *,
     coverage_xml: Path,
     root_path: Path,
 ) -> _CoverageReport:
     try:
-        tree = ElementTree.parse(coverage_xml)
-    except (ElementTree.ParseError, OSError) as exc:
+        payload = read_bounded_bytes(
+            coverage_xml,
+            max_bytes=MAX_COVERAGE_XML_BYTES,
+        )
+        root_element = _parse_xml_bytes(payload)
+    except (BoundedReadError, ElementTree.ParseError, OSError) as exc:
         raise CoverageJoinParseError(
             f"Invalid Cobertura XML at {coverage_xml}: {exc}"
         ) from exc
 
-    root_element = tree.getroot()
     source_roots = _resolved_coverage_sources(
         root_element=root_element, root_path=root_path
     )

@@ -1448,18 +1448,14 @@ def test_cache_load_unreadable_read_graceful_ignore(
 ) -> None:
     cache_path = tmp_path / "cache.json"
     cache_path.write_text('{"version":"1.0","files":{}}', "utf-8")
-    original_read_text = Path.read_text
+    original_open = Path.open
 
-    def _raise_read_text(
-        self: Path,
-        encoding: str | None = None,
-        errors: str | None = None,
-    ) -> str:
+    def _raise_open(self: Path, *args: Any, **kwargs: Any) -> object:
         if self == cache_path:
             raise OSError("no read")
-        return original_read_text(self, encoding=encoding, errors=errors)
+        return original_open(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", _raise_read_text)
+    monkeypatch.setattr(Path, "open", _raise_open)
     cache = Cache(cache_path)
     cache.load()
     _assert_unreadable_cache_contract(cache)

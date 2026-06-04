@@ -1318,11 +1318,14 @@ def test_metrics_baseline_load_json_read_oserror_status(
 ) -> None:
     path = tmp_path / "metrics-baseline.json"
     path.write_text("{}", "utf-8")
+    original_open = Path.open
 
-    def _boom_read(_self: Path, _encoding: str) -> str:
-        raise OSError("read failed")
+    def _boom_open(self: Path, *args: Any, **kwargs: Any) -> object:
+        if self == path:
+            raise OSError("read failed")
+        return original_open(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", _boom_read)
+    monkeypatch.setattr(Path, "open", _boom_open)
     with pytest.raises(
         BaselineValidationError, match="Cannot read metrics baseline file"
     ):

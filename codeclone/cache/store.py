@@ -283,7 +283,7 @@ class Cache:
                 )
                 return
 
-            raw_obj = read_json_document(self.path)
+            raw_obj = read_json_document(self.path, max_bytes=self.max_size_bytes)
             parsed = self._load_and_validate(raw_obj)
             if parsed is None:
                 return
