@@ -14,7 +14,7 @@ import pytest
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.memory import memory_main
 
-from .memory_fixtures import REPO_ROOT, git_repo_with_cached_report
+from .memory_fixtures import git_repo_with_cached_report
 
 _ISOLATED_MEMORY_DB = ".codeclone/memory/test-isolated.sqlite3"
 
@@ -84,28 +84,3 @@ def test_memory_init_persists_and_for_path(
         ["for-path", "pkg/a.py", "--root", str(root), "--limit", "5"]
     )
     assert for_path_code == int(ExitCode.SUCCESS)
-
-
-def test_memory_init_dry_run_on_checkout_report(tmp_path: Path) -> None:
-    """Optional: reuse checkout report.json without writing the default memory DB."""
-    if not (REPO_ROOT / "codeclone").is_dir():
-        pytest.skip("not running inside codeclone checkout")
-    report_path = REPO_ROOT / ".codeclone" / "report.json"
-    if not report_path.is_file():
-        pytest.skip("cached report.json not available")
-    root, _report_path, _report_document = git_repo_with_cached_report(
-        tmp_path,
-        py_sources={"pkg/a.py": "y = 2\n"},
-        registry_items=["pkg/a.py"],
-    )
-    exit_code = memory_main(
-        [
-            "init",
-            "--dry-run",
-            "--root",
-            str(root),
-            "--from-report",
-            str(report_path),
-        ]
-    )
-    assert exit_code == int(ExitCode.SUCCESS)

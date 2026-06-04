@@ -29,7 +29,6 @@ from codeclone.memory.project import (
 )
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.memory.vacuum import run_memory_vacuum
-from codeclone.utils.json_io import read_json_object
 
 from .memory_fixtures import (
     REPO_ROOT,
@@ -39,7 +38,10 @@ from .memory_fixtures import (
 )
 
 
-def test_build_init_batch_git_repo_with_docs_and_tests(tmp_path: Path) -> None:
+def test_build_init_batch_git_repo_with_docs_and_tests(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     root, _report_path, base_doc = git_repo_with_cached_report(
         tmp_path,
         py_sources={
@@ -75,6 +77,21 @@ def test_build_init_batch_git_repo_with_docs_and_tests(tmp_path: Path) -> None:
     enrich_batch_git_evidence(batch, git)
     counts = planned_type_counts(batch)
     assert counts.get("module_role", 0) >= 1
+
+    isolated_rel = ".codeclone/memory/ci-ingest-isolated.sqlite3"
+    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", isolated_rel)
+    isolated_db = root / isolated_rel
+    isolated_db.parent.mkdir(parents=True, exist_ok=True)
+    if isolated_db.is_file():
+        isolated_db.unlink()
+    init_result = run_memory_init(
+        root_path=root,
+        report_document=report_document,
+        options=InitOptions(include_docs=True, include_tests=True, refresh=True),
+    )
+    assert init_result.dry_run is False
+    assert isolated_db.is_file()
+    assert sum(init_result.stats.values()) > 0
 
 
 def test_run_memory_init_dry_run_on_git_repo(tmp_path: Path) -> None:
@@ -244,31 +261,3 @@ def test_enrich_batch_git_evidence_skips_when_head_missing() -> None:
     )
     enrich_batch_git_evidence(batch, git)
     assert batch.evidence == []
-
-
-def test_run_memory_init_on_codeclone_repo(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    if not (REPO_ROOT / "codeclone").is_dir():
-        pytest.skip("not running inside codeclone checkout")
-    report_path = REPO_ROOT / ".codeclone" / "report.json"
-    if not report_path.is_file():
-        pytest.skip("cached report.json not available")
-    report_document = read_json_object(report_path)
-    db_path = REPO_ROOT / ".codeclone" / "memory" / "isolated-memory.sqlite3"
-    db_path.parent.mkdir(parents=True, exist_ok=True)
-    if db_path.is_file():
-        db_path.unlink()
-    monkeypatch.setenv(
-        "CODECLONE_MEMORY_DB_PATH",
-        ".codeclone/memory/isolated-memory.sqlite3",
-    )
-    result = run_memory_init(
-        root_path=REPO_ROOT,
-        report_document=report_document,
-        options=InitOptions(include_docs=True, include_tests=True, refresh=True),
-    )
-    assert result.dry_run is False
-    assert db_path.is_file()
-    assert sum(result.stats.values()) > 0

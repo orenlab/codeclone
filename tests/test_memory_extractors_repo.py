@@ -37,18 +37,21 @@ _MEMORY_EXTRACTORS = (
 )
 
 
-def _load_report() -> dict[str, object]:
-    try:
-        return load_memory_init_report_document()
-    except FileNotFoundError:
-        pytest.skip("cached report.json not available")
+_REPO_REGISTRY_ITEMS = [
+    "codeclone/contracts/__init__.py",
+    "codeclone/memory/ingest/runner.py",
+    "tests/test_memory_extractors_repo.py",
+]
 
 
 @pytest.mark.parametrize("extractor", _MEMORY_EXTRACTORS)
 def test_memory_extractors_on_codeclone_repo(extractor: object) -> None:
     if not (REPO_ROOT / "codeclone").is_dir():
         pytest.skip("not running inside codeclone checkout")
-    report_document = _load_report()
+    report_document = load_memory_init_report_document(
+        registry_items=_REPO_REGISTRY_ITEMS,
+        fallback_root=REPO_ROOT,
+    )
     counts = run_memory_extractor_smoke(
         root=REPO_ROOT,
         extractor=extractor,  # type: ignore[arg-type]
