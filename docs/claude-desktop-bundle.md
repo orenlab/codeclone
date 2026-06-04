@@ -18,10 +18,10 @@ production-first structural review.
     `codeclone-mcp`. Analysis truth, findings, and health semantics remain in
     the canonical MCP server.
 
-Because the bundle is only a launcher wrapper, newly added canonical MCP
-surfaces from the local `codeclone-mcp` version flow through directly,
-including current-run `Coverage Join` facts and the optional `coverage` help
-topic when supported by that server.
+    Because the bundle is only a launcher wrapper, newly added canonical MCP
+    surfaces from the local `codeclone-mcp` version flow through directly,
+    including current-run `Coverage Join` facts and the optional `coverage` help
+    topic when supported by that server.
 
 ## Install
 
