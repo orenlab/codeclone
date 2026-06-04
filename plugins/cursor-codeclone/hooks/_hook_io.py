@@ -15,7 +15,6 @@ import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 _SHELL_CHAIN_SPLIT = re.compile(r"\s*(?:&&|\|\||;|\|)\s*")
 
@@ -154,7 +153,7 @@ def is_git_shell_command(command: str) -> bool:
     return all(_segment_invokes_git(segment) for segment in segments)
 
 
-def shell_command_from_hook(data: Mapping[str, Any]) -> str:
+def shell_command_from_hook(data: Mapping[str, object]) -> str:
     if str(data.get("tool_name", "")) != "Shell":
         return ""
     tool_input = data.get("tool_input")
@@ -196,7 +195,7 @@ def emit_hook_payload(payload: Mapping[str, object] | None = None) -> None:
         print(_EMPTY_JSON)
 
 
-def parse_hook_input(raw: str) -> dict[str, Any] | None:
+def parse_hook_input(raw: str) -> dict[str, object] | None:
     if not raw:
         return None
     try:
@@ -220,11 +219,11 @@ def is_python_source_path(file_path: str) -> bool:
     return any(lowered.endswith(suffix) for suffix in _PYTHON_SUFFIXES)
 
 
-def edited_path_from_pre_tool_use(data: Mapping[str, Any]) -> str:
+def edited_path_from_pre_tool_use(data: Mapping[str, object]) -> str:
     return edited_path_from_post_tool_use(data)
 
 
-def edited_path_from_post_tool_use(data: Mapping[str, Any]) -> str:
+def edited_path_from_post_tool_use(data: Mapping[str, object]) -> str:
     tool_name = str(data.get("tool_name", ""))
     if tool_name not in _WRITE_TOOLS:
         return ""
@@ -238,7 +237,7 @@ def edited_path_from_post_tool_use(data: Mapping[str, Any]) -> str:
     return ""
 
 
-def workspace_root_from_hook(data: Mapping[str, Any]) -> str:
+def workspace_root_from_hook(data: Mapping[str, object]) -> str:
     roots = data.get("workspace_roots")
     if isinstance(roots, list) and roots:
         first = roots[0]
@@ -260,7 +259,7 @@ def python_edit_reminder_context(*, workspace_root: str) -> str:
     )
 
 
-def transcript_path_from_hook(data: Mapping[str, Any]) -> str:
+def transcript_path_from_hook(data: Mapping[str, object]) -> str:
     value = data.get("transcript_path")
     return value if isinstance(value, str) else ""
 

@@ -10,7 +10,7 @@ import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -88,8 +88,8 @@ def _is_hex_digest(value: str) -> bool:
 
 
 def _validate_dirty_snapshot_payload(
-    value: dict[str, Any] | None,
-) -> dict[str, Any] | None:
+    value: dict[str, object] | None,
+) -> dict[str, object] | None:
     if value is None:
         return None
     git_available = value.get("git_available")
@@ -178,19 +178,19 @@ class WorkspaceIntentDocument(BaseModel):
     intent: Annotated[str, Field(min_length=1)]
     scope: IntentScopeModel
     scope_digest: str
-    blast_radius_summary: dict[str, Any]
+    blast_radius_summary: dict[str, object]
     lease_renewed_at_utc: str | None = None
     lease_seconds: PositiveInt | None = None
     report_digest: str | None = None
-    dirty_snapshot: dict[str, Any] | None = None
+    dirty_snapshot: dict[str, object] | None = None
     integrity: IntentIntegrityModel
 
     @field_validator("dirty_snapshot")
     @classmethod
     def validate_dirty_snapshot(
         cls,
-        value: dict[str, Any] | None,
-    ) -> dict[str, Any] | None:
+        value: dict[str, object] | None,
+    ) -> dict[str, object] | None:
         return _validate_dirty_snapshot_payload(value)
 
     def _contract_violations(self) -> tuple[str, ...]:

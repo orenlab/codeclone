@@ -9,11 +9,12 @@ from __future__ import annotations
 import os
 import re
 import sys
+import types
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -23,12 +24,15 @@ from .types import CLIArgsLike, PrinterLike, StatusConsole, require_status_conso
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
+    from rich.panel import Panel as RichPanel
     from rich.progress import BarColumn as RichBarColumn
     from rich.progress import Progress as RichProgress
     from rich.progress import SpinnerColumn as RichSpinnerColumn
     from rich.progress import TextColumn as RichTextColumn
     from rich.progress import TimeElapsedColumn as RichTimeElapsedColumn
     from rich.rule import Rule as RichRule
+    from rich.table import Table as RichTable
+    from rich.text import Text as RichText
     from rich.theme import Theme as RichTheme
 
 _RICH_THEME_STYLES: dict[str, str] = {
@@ -111,7 +115,13 @@ def supports_rich_console(console: PrinterLike) -> bool:
 
 
 @lru_cache(maxsize=1)
-def rich_panel_symbols() -> tuple[Any, Any, Any, Any, Any]:
+def rich_panel_symbols() -> tuple[
+    types.ModuleType,
+    type[RichPanel],
+    type[RichRule],
+    type[RichTable],
+    type[RichText],
+]:
     from rich import box
     from rich.panel import Panel
     from rich.rule import Rule

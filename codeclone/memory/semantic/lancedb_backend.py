@@ -9,9 +9,10 @@ from __future__ import annotations
 import importlib
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any
+from types import ModuleType
+from typing import Protocol, cast
 
-from .models import SemanticHit, SemanticIndexStatus, SemanticRow
+from .models import SemanticHit, SemanticIndexStatus, SemanticRow, SemanticSource
 
 # This module is importable in the base install. The optional vector DB packages
 # are loaded only when a LanceDB backend instance is constructed.
@@ -20,7 +21,61 @@ _TABLE_NAME = "semantic_index"
 _SCHEMA_MISMATCH_REASON = "schema_mismatch"
 
 
-def _schema(pa: Any, dimension: int) -> Any:
+class _LanceSearchQuery(Protocol):
+    def limit(self, k: int) -> _LanceSearchQuery: ...
+
+    def to_list(self) -> list[dict[str, object]]: ...
+
+
+class _LanceMergeInsert(Protocol):
+    def when_matched_update_all(self) -> _LanceMergeInsert: ...
+
+    def when_not_matched_insert_all(self) -> _LanceMergeInsert: ...
+
+    def execute(self, records: list[dict[str, object]]) -> None: ...
+
+
+class _LanceField(Protocol):
+    type: object
+
+
+class _LanceSchema(Protocol):
+    def field(self, name: str) -> _LanceField: ...
+
+
+class _ArrowColumn(Protocol):
+    def to_pylist(self) -> list[object]: ...
+
+
+class _ArrowTable(Protocol):
+    def column(self, name: str) -> _ArrowColumn: ...
+
+
+class _LanceTable(Protocol):
+    schema: _LanceSchema
+
+    def search(self, vector: list[float]) -> _LanceSearchQuery: ...
+
+    def count_rows(self) -> int: ...
+
+    def merge_insert(self, key: str) -> _LanceMergeInsert: ...
+
+    def delete(self, clause: str) -> None: ...
+
+    def to_arrow(self) -> _ArrowTable: ...
+
+
+class _LanceConnection(Protocol):
+    def open_table(self, name: str) -> _LanceTable: ...
+
+    def create_table(
+        self, name: str, schema: object, *, exist_ok: bool = False
+    ) -> _LanceTable: ...
+
+    def drop_table(self, name: str) -> None: ...
+
+
+def _schema(pa: ModuleType, dimension: int) -> object:
     return pa.schema(
         [
             pa.field("id", pa.string()),
@@ -54,6 +109,12 @@ def _sql_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
+def _as_float(value: object) -> float:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return float(str(value))
+
+
 class LanceDbSemanticIndex:
     """LanceDB-backed semantic index (read + write); implements
     SemanticIndexWriter. The table is keyed by ``id`` (merge-insert upsert) and
@@ -65,10 +126,10 @@ class LanceDbSemanticIndex:
         self._unavailable_reason: str | None = None
         lancedb = importlib.import_module("lancedb")
         self._pa = importlib.import_module("pyarrow")
-        self._db = lancedb.connect(str(path))
-        self._table: Any | None = self._open_table(create=create)
+        self._db: _LanceConnection = lancedb.connect(str(path))
+        self._table: _LanceTable | None = self._open_table(create=create)
 
-    def _open_table(self, *, create: bool) -> Any | None:
+    def _open_table(self, *, create: bool) -> _LanceTable | None:
         table = self._open_existing_table()
         if table is None:
             if create:
@@ -83,7 +144,7 @@ class LanceDbSemanticIndex:
         self._unavailable_reason = None
         return self._create_table()
 
-    def _open_existing_table(self) -> Any | None:
+    def _open_existing_table(self) -> _LanceTable | None:
         try:
             return self._db.open_table(_TABLE_NAME)
         except ValueError as exc:
@@ -91,12 +152,12 @@ class LanceDbSemanticIndex:
                 return None
             raise
 
-    def _create_table(self) -> Any:
+    def _create_table(self) -> _LanceTable:
         return self._db.create_table(
             _TABLE_NAME, schema=_schema(self._pa, self._dimension), exist_ok=False
         )
 
-    def _schema_matches(self, table: Any) -> bool:
+    def _schema_matches(self, table: _LanceTable) -> bool:
         try:
             vector_type = table.schema.field("vector").type
         except (AttributeError, KeyError, ValueError):
@@ -107,16 +168,19 @@ class LanceDbSemanticIndex:
         if self._table is None:
             return []
         rows = self._table.search(list(vector)).limit(k).to_list()
-        return [
-            SemanticHit(
-                source_id=str(row["id"]),
-                source=row["source"],
-                # lancedb returns L2 _distance (smaller is closer); map to a
-                # bounded proximity score where higher means more similar.
-                score=1.0 / (1.0 + float(row["_distance"])),
+        hits: list[SemanticHit] = []
+        for row in rows:
+            distance = row.get("_distance", 0)
+            hits.append(
+                SemanticHit(
+                    source_id=str(row["id"]),
+                    source=cast(SemanticSource, str(row["source"])),
+                    # lancedb returns L2 _distance (smaller is closer); map to a
+                    # bounded proximity score where higher means more similar.
+                    score=1.0 / (1.0 + _as_float(distance)),
+                )
             )
-            for row in rows
-        ]
+        return hits
 
     def status(self) -> SemanticIndexStatus:
         if self._table is None:
@@ -158,7 +222,8 @@ class LanceDbSemanticIndex:
     def known_ids(self) -> set[str]:
         if self._table is None:
             return set()
-        column = self._table.to_arrow().column("id").to_pylist()
+        arrow_table = self._table.to_arrow()
+        column = arrow_table.column("id").to_pylist()
         return {str(value) for value in column}
 
 

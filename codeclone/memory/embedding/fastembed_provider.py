@@ -9,9 +9,13 @@ from __future__ import annotations
 import importlib
 from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Protocol, cast
 
 from ..exceptions import MemorySemanticUnavailableError
+
+
+class _TextEmbeddingModel(Protocol):
+    def embed(self, texts: list[str]) -> Iterable[object]: ...
 
 
 class FastEmbedEmbeddingProvider:
@@ -38,7 +42,7 @@ class FastEmbedEmbeddingProvider:
         self.allow_model_download = allow_model_download
         self._model = self._load_model()
 
-    def _load_model(self) -> Any:
+    def _load_model(self) -> _TextEmbeddingModel:
         try:
             fastembed = importlib.import_module("fastembed")
         except ImportError as exc:
@@ -52,10 +56,13 @@ class FastEmbedEmbeddingProvider:
                 "fastembed package does not expose TextEmbedding"
             )
         try:
-            return text_embedding(
-                model_name=self.model_name,
-                cache_dir=str(self.cache_dir),
-                local_files_only=not self.allow_model_download,
+            return cast(
+                _TextEmbeddingModel,
+                text_embedding(
+                    model_name=self.model_name,
+                    cache_dir=str(self.cache_dir),
+                    local_files_only=not self.allow_model_download,
+                ),
             )
         except Exception as exc:
             mode = (

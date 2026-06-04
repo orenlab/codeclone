@@ -6,8 +6,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING
 
 from ...memory.coverage import ScopeCoverageReport
 from ...memory.display import format_memory_record_line
@@ -16,6 +16,28 @@ from ...memory.status_report import MemoryStatusReport
 from ...memory.vacuum import VacuumReport
 from .console import make_query_console, rich_panel_symbols, supports_rich_console
 from .types import PrinterLike
+
+if TYPE_CHECKING:
+    from rich.text import Text as RichText
+
+_ColumnKwargs = dict[str, str | bool | int | None]
+
+if TYPE_CHECKING:
+    _MemoryRowBuilder = Callable[[int, object, type[RichText]], Sequence[object]]
+else:
+    _MemoryRowBuilder = Callable[[int, object, object], Sequence[object]]
+
+
+def _table_add_column(
+    table: object,
+    title: str,
+    kwargs: _ColumnKwargs,
+) -> None:
+    table.add_column(title, **kwargs)  # type: ignore[attr-defined]
+
+
+def _table_add_row(table: object, cells: Sequence[object]) -> None:
+    table.add_row(*cells)  # type: ignore[attr-defined]
 
 
 def memory_console() -> PrinterLike:
@@ -247,8 +269,8 @@ def _render_record_table_rich(
     command: str,
     subtitle: str,
     records: Sequence[object],
-    columns: Sequence[tuple[str, dict[str, object]]],
-    row_builder: Any,
+    columns: Sequence[tuple[str, _ColumnKwargs]],
+    row_builder: _MemoryRowBuilder,
     border_style: str = "blue",
     empty_message: str = "(no records)",
 ) -> None:
@@ -271,46 +293,50 @@ def _render_record_table_rich(
         padding=(0, 1),
     )
     for title, kwargs in columns:
-        table.add_column(title, **kwargs)
+        _table_add_column(table, title, kwargs)
     for index, item in enumerate(records, start=1):
-        table.add_row(*row_builder(index, item, text_cls))
+        _table_add_row(table, row_builder(index, item, text_cls))
     console.print(table)
 
 
 def _search_row(
     index: int,
-    item: Mapping[str, object],
-    text_cls: Any,
-) -> tuple[str, str, Any, str]:
-    record_type = str(item.get("type", "?"))
-    status = str(item.get("status", "?"))
+    item: object,
+    text_cls: type[RichText],
+) -> Sequence[object]:
+    mapping = item if isinstance(item, Mapping) else {}
+    record_type = str(mapping.get("type", "?"))
+    status = str(mapping.get("status", "?"))
     return (
         str(index),
         record_type,
         text_cls(status, style=_status_style(status)),
-        format_memory_record_line(item),
+        format_memory_record_line(mapping),
     )
 
 
 def _stale_row(
     index: int,
-    item: Mapping[str, object],
-    _text_cls: Any,
-) -> tuple[str, str, str, str]:
+    item: object,
+    _text_cls: type[RichText],
+) -> Sequence[object]:
+    mapping = item if isinstance(item, Mapping) else {}
     return (
         str(index),
-        str(item.get("type", "?")),
-        str(item.get("stale_reason", "")),
-        format_memory_record_line(item),
+        str(mapping.get("type", "?")),
+        str(mapping.get("stale_reason", "")),
+        format_memory_record_line(mapping),
     )
 
 
 def _draft_row(
     index: int,
-    record: MemoryRecord,
-    _text_cls: Any,
-) -> tuple[str, str, str, str]:
-    return (str(index), record.id, record.type, record.statement)
+    item: object,
+    _text_cls: type[RichText],
+) -> Sequence[object]:
+    if not isinstance(item, MemoryRecord):
+        return (str(index), "?", "?", "")
+    return (str(index), item.id, item.type, item.statement)
 
 
 def _render_status_report_rich(
