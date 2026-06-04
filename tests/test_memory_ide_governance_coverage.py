@@ -15,6 +15,7 @@ from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.governance import approve_record, record_candidate
 from codeclone.memory.ide_governance import (
     IDE_GOVERNANCE_ALLOWED_CLIENTS,
+    IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS,
     IDE_GOVERNANCE_PROTOCOL_VERSION,
     IdeGovernanceSessionState,
     commit_governance,
@@ -787,5 +788,54 @@ def test_commit_governance_rejected_when_channel_disabled(tmp_path: Path) -> Non
         )
         assert payload["status"] == "rejected"
         assert payload["action"] == "commit_governance"
+    finally:
+        store.close()
+
+
+def test_commit_governance_rate_limit_rejects_without_mutation(
+    tmp_path: Path,
+) -> None:
+    root, project, store, state = _make_store_project_and_state(
+        tmp_path=tmp_path,
+        channel_enabled=True,
+    )
+    try:
+        draft = record_candidate(
+            store,
+            project=project,  # type: ignore[arg-type]
+            record_type="change_rationale",
+            statement="rate limited draft",
+            subject_path="pkg/mod.py",
+            max_candidates=10,
+        )
+        _register_default_ide_governance(
+            state=state,
+            root=root,
+            store=store,
+            key_hex=_VALID_KEY_HEX,
+            client_version="0.3.0",
+        )
+        state.commit_attempts = IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS
+
+        payload = commit_governance(
+            state,
+            store,
+            project_id=project.id,  # type: ignore[attr-defined]
+            root_path=str(root),
+            record_id=draft.id,
+            decision="approve",
+            governance_ticket="whatever",
+            confirmation_nonce="nonce",
+            proof="0" * 64,
+            actor="vscode-test",
+            protocol=IDE_GOVERNANCE_PROTOCOL_VERSION,
+        )
+
+        assert payload["status"] == "rejected"
+        assert payload["reason"] == "governance_rate_limited"
+        assert state.commit_attempts == IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS
+        unchanged = store.find_record(draft.id)
+        assert unchanged is not None
+        assert unchanged.status == "draft"
     finally:
         store.close()

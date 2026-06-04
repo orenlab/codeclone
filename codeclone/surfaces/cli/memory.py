@@ -53,6 +53,13 @@ from .memory_render import (
 )
 from .types import PrinterLike
 
+_CLI_GOVERNANCE_BREAK_GLASS_FLAG = "--i-know-what-im-doing"
+_CLI_GOVERNANCE_BREAK_GLASS_MESSAGE = (
+    "Direct CLI memory governance is disabled by default. Use the IDE "
+    "governance channel, or pass --i-know-what-im-doing for an explicit "
+    "human break-glass action."
+)
+
 
 def _print_memory_contract_error(console: PrinterLike, exc: MemoryContractError) -> int:
     console.print(str(exc))
@@ -193,6 +200,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_root(approve_parser)
     approve_parser.add_argument("record_id")
     approve_parser.add_argument("--by", default="human")
+    approve_parser.add_argument(_CLI_GOVERNANCE_BREAK_GLASS_FLAG, action="store_true")
 
     reject_parser = subparsers.add_parser(
         "reject",
@@ -202,6 +210,7 @@ def _build_parser() -> argparse.ArgumentParser:
     reject_parser.add_argument("record_id")
     reject_parser.add_argument("--by", default="human")
     reject_parser.add_argument("--reason")
+    reject_parser.add_argument(_CLI_GOVERNANCE_BREAK_GLASS_FLAG, action="store_true")
 
     archive_parser = subparsers.add_parser(
         "archive",
@@ -210,6 +219,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_root(archive_parser)
     archive_parser.add_argument("record_id")
     archive_parser.add_argument("--by", default="human")
+    archive_parser.add_argument(_CLI_GOVERNANCE_BREAK_GLASS_FLAG, action="store_true")
 
     semantic_parser = subparsers.add_parser(
         "semantic",
@@ -492,6 +502,8 @@ def _run_review_candidates(
 def _run_approve(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
+    if not _confirm_cli_governance_break_glass(console, args):
+        return int(ExitCode.CONTRACT_ERROR)
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
@@ -520,6 +532,8 @@ def _run_approve(
 def _run_reject(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
+    if not _confirm_cli_governance_break_glass(console, args):
+        return int(ExitCode.CONTRACT_ERROR)
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
@@ -549,6 +563,8 @@ def _run_reject(
 def _run_archive(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
+    if not _confirm_cli_governance_break_glass(console, args):
+        return int(ExitCode.CONTRACT_ERROR)
     try:
         store, _config, _project = _open_store(root_path)
     except FileNotFoundError as exc:
@@ -572,6 +588,16 @@ def _run_archive(
         detail=f"Archived {record.id}",
     )
     return int(ExitCode.SUCCESS)
+
+
+def _confirm_cli_governance_break_glass(
+    console: PrinterLike,
+    args: argparse.Namespace,
+) -> bool:
+    if bool(getattr(args, "i_know_what_im_doing", False)):
+        return True
+    console.print(_CLI_GOVERNANCE_BREAK_GLASS_MESSAGE)
+    return False
 
 
 def _semantic_unavailable(console: PrinterLike, message: str) -> int:

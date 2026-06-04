@@ -23,6 +23,7 @@ from .sqlite_store import SqliteEngineeringMemoryStore
 IDE_GOVERNANCE_PROTOCOL_VERSION = 2
 IDE_GOVERNANCE_TICKET_TTL_SECONDS = 120
 IDE_GOVERNANCE_MIN_KEY_BYTES = 32
+IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS = 100
 IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset({"CodeClone VS Code"})
 
 GovernanceDecision = Literal["approve", "reject", "archive"]
@@ -60,6 +61,7 @@ class IdeGovernanceSessionState:
     client_name: str | None = None
     client_version: str | None = None
     tickets: dict[str, IdeGovernanceTicket] = field(default_factory=dict)
+    commit_attempts: int = 0
 
 
 def compute_statement_digest(statement: str) -> str:
@@ -211,6 +213,24 @@ def _require_valid_governance_proof(
         _raise_memory_contract("Invalid IDE governance proof.")
 
 
+def _register_commit_attempt(
+    state: IdeGovernanceSessionState,
+    *,
+    action: str,
+) -> dict[str, object] | None:
+    if state.commit_attempts >= IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS:
+        return _governance_rejected(
+            action,
+            reason="governance_rate_limited",
+            message=(
+                "IDE governance commit attempt limit reached for this MCP session. "
+                "Restart the CodeClone MCP session before further governance commits."
+            ),
+        )
+    state.commit_attempts += 1
+    return None
+
+
 def _resolve_client_label(state: IdeGovernanceSessionState) -> str:
     name = state.client_name or "unknown-client"
     version = state.client_version
@@ -312,12 +332,14 @@ def register_ide_governance(
     state.client_name = client_name
     state.client_version = client_version
     state.tickets.clear()
+    state.commit_attempts = 0
     return {
         "action": "register_ide_governance",
         "status": "ok",
         "protocol": IDE_GOVERNANCE_PROTOCOL_VERSION,
         "client_name": client_name,
         "client_version": client_version,
+        "max_commit_attempts": IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS,
     }
 
 
@@ -435,6 +457,9 @@ def commit_governance(
     rejected = _require_governance_channel(state, action="commit_governance")
     if rejected is not None:
         return rejected
+    rate_limited = _register_commit_attempt(state, action="commit_governance")
+    if rate_limited is not None:
+        return rate_limited
     _validate_ide_governance_protocol(protocol)
     key_or_rejected = _governance_key_or_reject(
         state,
@@ -515,6 +540,7 @@ __all__ = [
     "GOVERNANCE_MODE_UNAVAILABLE_MESSAGE",
     "GOVERNANCE_MODE_UNAVAILABLE_NEXT_STEP",
     "IDE_GOVERNANCE_ALLOWED_CLIENTS",
+    "IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS",
     "IDE_GOVERNANCE_PROTOCOL_VERSION",
     "IDE_GOVERNANCE_TICKET_TTL_SECONDS",
     "IdeGovernanceSessionState",

@@ -72,6 +72,17 @@ def test_memory_cli_for_path_and_governance(tmp_path: Path) -> None:
     ) == int(ExitCode.SUCCESS)
     assert memory_main(
         ["approve", draft_id, "--root", root_str, "--by", "tester"]
+    ) == int(ExitCode.CONTRACT_ERROR)
+    assert memory_main(
+        [
+            "approve",
+            draft_id,
+            "--root",
+            root_str,
+            "--by",
+            "tester",
+            "--i-know-what-im-doing",
+        ]
     ) == int(ExitCode.SUCCESS)
 
     reject_parent = tmp_path / "reject"
@@ -98,6 +109,7 @@ def test_memory_cli_for_path_and_governance(tmp_path: Path) -> None:
             "tester",
             "--reason",
             "not needed",
+            "--i-know-what-im-doing",
         ]
     ) == int(ExitCode.SUCCESS)
 
@@ -119,7 +131,15 @@ def test_memory_cli_for_path_and_governance(tmp_path: Path) -> None:
         store3.close()
     root3_str = str(root3.resolve())
     assert memory_main(
-        ["archive", archive_id, "--root", root3_str, "--by", "tester"]
+        [
+            "archive",
+            archive_id,
+            "--root",
+            root3_str,
+            "--by",
+            "tester",
+            "--i-know-what-im-doing",
+        ]
     ) == int(ExitCode.SUCCESS)
 
 

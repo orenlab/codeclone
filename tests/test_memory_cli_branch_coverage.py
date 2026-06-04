@@ -246,7 +246,15 @@ def test_memory_cli_action_failure_returns_contract_error(
         monkeypatch.setattr(f"codeclone.surfaces.cli.memory.{patch_attr}", _boom)
 
         if command == "approve":
-            argv = ["approve", "mem-any", "--root", root_str, "--by", "tester"]
+            argv = [
+                "approve",
+                "mem-any",
+                "--root",
+                root_str,
+                "--by",
+                "tester",
+                "--i-know-what-im-doing",
+            ]
         elif command == "reject":
             argv = [
                 "reject",
@@ -257,9 +265,18 @@ def test_memory_cli_action_failure_returns_contract_error(
                 "tester",
                 "--reason",
                 "nope",
+                "--i-know-what-im-doing",
             ]
         else:
-            argv = ["archive", "mem-any", "--root", root_str, "--by", "tester"]
+            argv = [
+                "archive",
+                "mem-any",
+                "--root",
+                root_str,
+                "--by",
+                "tester",
+                "--i-know-what-im-doing",
+            ]
 
         code = memory_main(argv)
         assert code == int(ExitCode.CONTRACT_ERROR)
