@@ -67,7 +67,8 @@ WARN_LEGACY_CACHE = (
     "`.codeclone/` to .gitignore.[/warning]"
 )
 WARN_LEGACY_REPO_WORKSPACE = (
-    "[warning]Legacy CodeClone workspace found at: {legacy_dir}.[/warning]\n"
+    "[warning]Legacy CodeClone workspace (.cache/codeclone/) found at: "
+    "{legacy_dir}.[/warning]\n"
     "[warning]Artifacts now live under: {new_dir}.[/warning]\n"
     "[warning]Remove the legacy directory after you no longer need its "
     "contents.[/warning]"

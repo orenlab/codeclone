@@ -872,6 +872,8 @@ def test_cli_warns_on_legacy_cache(
 def test_cli_warns_on_legacy_repo_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    import codeclone.surfaces.cli.state as cli_state_mod
+
     root = tmp_path / "proj"
     _prepare_basic_project(root)
     legacy_dir = root / ".cache" / "codeclone"
@@ -879,6 +881,7 @@ def test_cli_warns_on_legacy_repo_workspace(
     (legacy_dir / "cache.json").write_text("{}", encoding="utf-8")
     missing_home_legacy = tmp_path / "missing" / "cache.json"
     monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", missing_home_legacy)
+    monkeypatch.setattr(cli_state_mod, "LEGACY_CACHE_PATH", missing_home_legacy)
     baseline = _write_baseline(
         root / "baseline.json",
         python_version=_current_py_minor(),
@@ -887,10 +890,15 @@ def test_cli_warns_on_legacy_repo_workspace(
         monkeypatch,
         [str(root), "--baseline", str(baseline), "--no-progress"],
     )
-    out = capsys.readouterr().out
-    assert "Legacy CodeClone workspace found at" in out
-    assert str(legacy_dir) in out or ".cache/codeclone" in out
-    assert ".codeclone" in out
+    captured = capsys.readouterr()
+    out = f"{captured.out}\n{captured.err}"
+    assert_contains_all(
+        out,
+        "Legacy CodeClone workspace (.cache/codeclone/) found at",
+        "Artifacts now live under",
+        "Remove the legacy directory",
+        ".codeclone",
+    )
 
 
 def test_cli_legacy_cache_resolve_failure(

@@ -6,11 +6,17 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.memory import memory_main
-from codeclone.utils.json_io import read_json_object
+
+from .memory_fixtures import REPO_ROOT, git_repo_with_cached_report
+
+_ISOLATED_MEMORY_DB = ".codeclone/memory/test-isolated.sqlite3"
 
 
 def test_memory_status_without_db(tmp_path: Path) -> None:
@@ -19,56 +25,87 @@ def test_memory_status_without_db(tmp_path: Path) -> None:
 
 
 def test_memory_init_dry_run_uses_fixture_report(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    report_path = repo_root / ".codeclone" / "report.json"
-    if not report_path.is_file():
-        return
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    report_copy = tmp_path / "fixture-report.json"
+    report_copy.write_text(
+        json.dumps(report_document, sort_keys=True),
+        encoding="utf-8",
+    )
     exit_code = memory_main(
         [
             "init",
             "--dry-run",
             "--root",
-            str(repo_root),
+            str(root),
             "--from-report",
-            str(report_path),
+            str(report_copy),
         ]
     )
     assert exit_code == int(ExitCode.SUCCESS)
 
 
-def test_memory_init_persists_and_for_path(tmp_path: Path) -> None:
-    repo_root = Path(__file__).resolve().parents[1]
-    report_path = repo_root / ".codeclone" / "report.json"
-    if not report_path.is_file():
-        return
-    db_root = tmp_path / "work"
-    db_root.mkdir()
-    (db_root / "pyproject.toml").write_text("", encoding="utf-8")
-    report_copy = db_root / "report.json"
-    report_copy.write_text(report_path.read_text(encoding="utf-8"), encoding="utf-8")
+def test_memory_init_persists_and_for_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    report_copy = tmp_path / "fixture-report.json"
+    report_copy.write_text(
+        json.dumps(report_document, sort_keys=True),
+        encoding="utf-8",
+    )
+    (root / ".codeclone" / "memory").mkdir(parents=True, exist_ok=True)
+    isolated_db = root / _ISOLATED_MEMORY_DB
+    if isolated_db.is_file():
+        isolated_db.unlink()
+    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", _ISOLATED_MEMORY_DB)
 
     init_code = memory_main(
         [
             "init",
             "--root",
-            str(repo_root),
+            str(root),
             "--from-report",
             str(report_copy),
         ]
     )
     assert init_code == int(ExitCode.SUCCESS)
-
-    payload = read_json_object(report_path)
-    inventory = payload.get("inventory")
-    assert isinstance(inventory, dict)
-    file_registry = inventory.get("file_registry")
-    assert isinstance(file_registry, dict)
-    items = file_registry.get("items")
-    assert isinstance(items, list)
-    assert items
-    sample_path = str(items[0]).replace("\\", "/")
+    assert isolated_db.is_file()
 
     for_path_code = memory_main(
-        ["for-path", sample_path, "--root", str(repo_root), "--limit", "5"]
+        ["for-path", "pkg/a.py", "--root", str(root), "--limit", "5"]
     )
     assert for_path_code == int(ExitCode.SUCCESS)
+
+
+def test_memory_init_dry_run_on_checkout_report(tmp_path: Path) -> None:
+    """Optional: reuse checkout report.json without writing the default memory DB."""
+    if not (REPO_ROOT / "codeclone").is_dir():
+        pytest.skip("not running inside codeclone checkout")
+    report_path = REPO_ROOT / ".codeclone" / "report.json"
+    if not report_path.is_file():
+        pytest.skip("cached report.json not available")
+    root, _report_path, _report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "y = 2\n"},
+        registry_items=["pkg/a.py"],
+    )
+    exit_code = memory_main(
+        [
+            "init",
+            "--dry-run",
+            "--root",
+            str(root),
+            "--from-report",
+            str(report_path),
+        ]
+    )
+    assert exit_code == int(ExitCode.SUCCESS)
