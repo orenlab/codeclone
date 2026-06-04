@@ -13,12 +13,12 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DOCS_ROOT = _REPO_ROOT / "docs"
-_LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint_mkdocs_admonitions.py"
+_LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint_admonitions.py"
 
 
 def _load_lint_module() -> types.ModuleType:
     spec = importlib.util.spec_from_file_location(
-        "lint_mkdocs_admonitions",
+        "lint_admonitions",
         _LINT_SCRIPT,
     )
     assert spec is not None and spec.loader is not None

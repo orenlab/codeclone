@@ -139,10 +139,10 @@ Contract-first documentation derived from code and locked tests.
 
 ```bash
 # Build the site
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run --with zensical==0.0.43 zensical build --clean --strict
 
 # Build with live sample report
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run --with zensical==0.0.43 zensical build --clean --strict
 uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
 ```
 

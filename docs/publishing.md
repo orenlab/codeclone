@@ -13,10 +13,10 @@ remains the current repository code and CI workflow.
 
 ## Current stack
 
-- Site generator: `MkDocs`
-- Theme: `Material for MkDocs`
+- Site generator: `Zensical`
+- Theme: Zensical built-in theme (Material-derived)
 - Docs root: `docs/`
-- Site config: `mkdocs.yml`
+- Site config: `zensical.toml`
 - Publish workflow: `.github/workflows/docs.yml`
 
 ## What gets published
@@ -34,19 +34,19 @@ The published site contains:
 The docs workflow (`.github/workflows/docs.yml`) follows this order:
 
 1. install project dependencies
-2. build the MkDocs site with `mkdocs build --strict`
+2. build the site with `zensical build --clean --strict`
 3. generate a live sample report into `site/examples/report/live`
 4. upload the built site as a GitHub Pages artifact
 5. deploy on pushes to `main`
 
 Admonition indentation (`!!!` / `???` body must be indented 4 spaces) is enforced
-in the main test workflow via `tests/test_docs_mkdocs_admonitions.py`, not in
+in the main test workflow via `tests/test_docs_build_contract.py`, not in
 `docs.yml`. Repair locally with
-`python3 scripts/lint_mkdocs_admonitions.py docs/ --fix`.
+`python3 scripts/lint_admonitions.py docs/ --fix`.
 
 Relevant files:
 
-- `mkdocs.yml`
+- `zensical.toml`
 - `.github/workflows/docs.yml`
 - `scripts/build_docs_example_report.py`
 
@@ -72,14 +72,14 @@ git. `site/` remains ignored.
 
 === "Build the site"
 
-    ```bash title="Validate the MkDocs site"
-    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+    ```bash title="Validate the Zensical site"
+    uv run --with zensical==0.0.43 zensical build --clean --strict
     ```
 
 === "Build the site and sample report"
 
     ```bash title="Generate the live sample report into site/"
-    uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+    uv run --with zensical==0.0.43 zensical build --clean --strict
     uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
     ```
 
@@ -242,7 +242,7 @@ the monorepo delegate stub).
 
 Update this page when you change:
 
-- `mkdocs.yml`
+- `zensical.toml`
 - `.github/workflows/docs.yml`
 - `scripts/sync_integrations.py` or `scripts/integration_dist/*`
 - `tests/test_sync_integrations.py`

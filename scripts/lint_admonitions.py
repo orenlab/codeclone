@@ -4,7 +4,7 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
-"""Validate and fix MkDocs Material admonition / details indentation in docs/."""
+"""Validate and fix admonition / details indentation in docs/."""
 
 from __future__ import annotations
 

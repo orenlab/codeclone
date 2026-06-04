@@ -79,7 +79,7 @@ Key artifacts:
   baseline/cache/report artifacts. Optional audit trail is passive evidence
   state and must not affect canonical report digests, baseline trust, cache
   compatibility, or finding identity.
-- `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
+- `docs/`, `zensical.toml`, `.github/workflows/docs.yml` — published documentation site and docs build pipeline
 
 ---
 
@@ -96,10 +96,10 @@ Full `pytest` runs enforce package coverage `>=99%` (`fail_under` in
 
 If you touched baseline/cache/report contracts or CLI/MCP audit surfaces, also exercise the CLI audit path
 (`--audit` / `codeclone/surfaces/cli/audit.py`) or the relevant audit/MCP tests.
-If you touched `docs/`, `mkdocs.yml`, docs publishing workflow, or sample-report generation, also run:
+If you touched `docs/`, `zensical.toml`, docs publishing workflow, or sample-report generation, also run:
 
 ```bash
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run --with zensical==0.0.43 zensical build --clean --strict
 ```
 
 If you touched the MCP surface, also run:
@@ -450,7 +450,7 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
   `codeclone/surfaces/cli/audit.py` / MCP audit emit). It must not affect canonical report digests, baseline trust,
   cache compatibility, or finding identity.
 - **Patch budget helpers** (`codeclone/budget/*`) provide shared budget estimation for CLI/MCP patch-verify flows.
-- **Documentation/publishing surface** (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`,
+- **Documentation/publishing surface** (`docs/`, `zensical.toml`, `.github/workflows/docs.yml`,
   `scripts/build_docs_example_report.py`) publishes contract docs and the live sample report.
 - **VS Code extension surface** (`extensions/vscode-codeclone/*`) is a native, workspace-only IDE client over
   `codeclone-mcp`, with baseline-aware, triage-first, source-first review UX.
@@ -541,7 +541,7 @@ Use this map to route changes to the right owner module.
 - `codeclone/report/messages/*` — report-layer user copy (glossary, suggestions,
   explainability, overview, security, chrome, text/markdown/sarif projections,
   gate prefixes).
-- `docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py` — docs-site source,
+- `docs/`, `zensical.toml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py` — docs-site source,
   publication workflow, and live sample-report generation; keep published docs aligned with code contracts.
 - `extensions/vscode-codeclone/*` — stable VS Code extension surface; keep it baseline-aware, triage-first,
   source-first, and faithful to MCP/canonical report semantics rather than building a second analyzer or report model.
@@ -617,7 +617,7 @@ If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 | Claude Desktop bundle surface (`extensions/claude-desktop-codeclone/*`)                                                                                                                                       | `docs/book/22-claude-desktop-bundle.md`, `docs/claude-desktop-bundle.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`       | `node --check extensions/claude-desktop-codeclone/server/index.js`, `node --check extensions/claude-desktop-codeclone/src/launcher.js`, `node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs`, `node --test extensions/claude-desktop-codeclone/test/*.test.js`, plus `.mcpb` build smoke                        | bundle install/runtime model, launcher UX, local-stdio constraints, or bundle metadata change                               | documented Claude Desktop install/setup/runtime behavior or packaged bundle semantics change                          |
 | Codex plugin surface (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`)                                                                                                                              | `docs/book/23-codex-plugin.md`, `docs/codex-plugin.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                         | `python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json`, `python3 -m json.tool plugins/codeclone/.mcp.json`, `python3 -m json.tool .agents/plugins/marketplace.json`, `tests/test_codex_plugin.py`                                                                                                                        | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, or plugin metadata change                       | documented Codex plugin install/discovery/runtime behavior or plugin manifest/marketplace semantics change            |
 | Cursor plugin surface (`plugins/cursor-codeclone/*`)                                                                                                                                                          | `docs/book/25-cursor-plugin.md`, `docs/cursor-plugin.md`, `docs/mcp.md`, `docs/book/01-architecture-map.md`, `docs/README.md`, `CHANGELOG.md`                       | `tests/test_cursor_plugin.py`, `tests/test_cursor_plugin_hooks.py`                                                                                                                                                                                                                                                                   | plugin discovery/runtime model, bundled MCP config, bundled skill/rule/hook behavior, or plugin metadata change             | documented Cursor plugin install/discovery/runtime behavior or plugin manifest semantics change                       |
-| Docs site / sample report publication (`docs/`, `mkdocs.yml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`)                                                                           | `docs/README.md`, `docs/publishing.md`, `docs/examples/report.md`, and any contract pages surfaced by the change, `CHANGELOG.md` when user-visible behavior changes | `mkdocs build --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                                                                                                                                                                                                  | published docs navigation, sample-report generation, or Pages workflow semantics change                                     | published documentation behavior or sample-report generation contract changes                                         |
+| Docs site / sample report publication (`docs/`, `zensical.toml`, `.github/workflows/docs.yml`, `scripts/build_docs_example_report.py`)                                                                           | `docs/README.md`, `docs/publishing.md`, `docs/examples/report.md`, and any contract pages surfaced by the change, `CHANGELOG.md` when user-visible behavior changes | `zensical build --clean --strict`, sample-report generation smoke path, and relevant report/html tests if generated examples or embeds change                                                                                                                                                                                                  | published docs navigation, sample-report generation, or Pages workflow semantics change                                     | published documentation behavior or sample-report generation contract changes                                         |
 
 Golden rule: do not “fix” failures by snapshot refresh unless the underlying contract change is intentional, documented,
 and approved.

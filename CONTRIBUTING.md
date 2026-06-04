@@ -200,10 +200,10 @@ Static checks:
 uv run pre-commit run --all-files
 ```
 
-Build documentation (if you touched `docs/` or `mkdocs.yml`):
+Build documentation (if you touched `docs/` or `zensical.toml`):
 
 ```bash
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run --with zensical==0.0.43 zensical build --clean --strict
 ```
 
 Run MCP tests (if you touched `mcp_service.py` or `mcp_server.py`):

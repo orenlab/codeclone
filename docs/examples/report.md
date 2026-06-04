@@ -39,7 +39,7 @@ documentation, so the HTML, canonical JSON, and SARIF artifacts stay aligned.
 Build the docs site, then generate the example report into the built site:
 
 ```bash
-uv run --with mkdocs --with mkdocs-material mkdocs build --strict
+uv run --with zensical==0.0.43 zensical build --clean --strict
 uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
 ```
 
