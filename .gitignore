@@ -49,3 +49,4 @@ extensions/vscode-codeclone/node_modules
 /codeclone-v2.1-roadmap.md
 /specs/
 /coverage.json
+/benchmarks/memory_semantic_eval.md

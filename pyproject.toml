@@ -178,7 +178,16 @@ audit_payloads = "full"    # "off" | "compact" | "full"
 audit_retention_days = 30
 
 [tool.codeclone.memory.semantic]
-enabled = true
+enabled = true                          # default: off, zero extra deps
+backend = "lancedb"
+index_path = ".cache/codeclone/memory/semantic_index.lance"
+embedding_provider = "fastembed"        # diagnostic | fastembed | local_model | api
+embedding_model = "BAAI/bge-small-en-v1.5"  # used by fastembed
+embedding_cache_dir = ".cache/codeclone/memory/fastembed"  # used by fastembed
+allow_model_download = true             # fastembed: download if cache is missing
+dimension = 384
+max_results = 20
+index_audit = true                       # project audit summaries when audit DB exists
 
 [tool.coverage.report]
 show_missing = true
