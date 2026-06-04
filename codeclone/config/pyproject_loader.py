@@ -6,9 +6,10 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
@@ -86,6 +87,8 @@ def load_pyproject_config(
 ) -> dict[str, object]:
     config_path = root_path / "pyproject.toml"
     if not config_path.exists():
+        if config_path.is_symlink():
+            raise ConfigValidationError("pyproject.toml must not be a symlink.")
         return {}
 
     load_toml_fn = _load_toml if load_toml is None else load_toml
@@ -93,6 +96,8 @@ def load_pyproject_config(
     payload: object
     try:
         payload = load_toml_fn(config_path)
+    except ConfigValidationError:
+        raise
     except OSError as exc:
         raise ConfigValidationError(
             f"Cannot read pyproject.toml at {config_path}: {exc}"
@@ -270,7 +275,7 @@ def _load_toml(path: Path) -> object:
     if sys.version_info >= (3, 11):
         import tomllib
 
-        with path.open("rb") as config_file:
+        with _open_toml_file_no_follow(path) as config_file:
             return tomllib.load(config_file)
 
     try:
@@ -284,8 +289,27 @@ def _load_toml(path: Path) -> object:
     if not callable(load_fn):
         raise ConfigValidationError("Invalid 'tomli' module: missing callable 'load'.")
 
-    with path.open("rb") as config_file:
+    with _open_toml_file_no_follow(path) as config_file:
         return load_fn(config_file)
+
+
+def open_repo_config(root_path: Path) -> BinaryIO:
+    """Open repo ``pyproject.toml`` through the security-hardened config path."""
+
+    return _open_toml_file_no_follow(root_path / "pyproject.toml")
+
+
+def _open_toml_file_no_follow(path: Path) -> BinaryIO:
+    if path.is_symlink():
+        raise ConfigValidationError("pyproject.toml must not be a symlink.")
+    if getattr(sys, "platform", "") == "win32":
+        return path.open("rb")
+    flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if isinstance(nofollow, int):
+        flags |= nofollow
+    fd = os.open(path, flags)
+    return os.fdopen(fd, "rb")
 
 
 __all__ = [
@@ -295,5 +319,6 @@ __all__ = [
     "_load_toml",
     "load_pyproject_config",
     "normalize_path_config_value",
+    "open_repo_config",
     "validate_config_value",
 ]

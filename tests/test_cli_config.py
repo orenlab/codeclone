@@ -39,6 +39,26 @@ def test_load_pyproject_config_missing_file_returns_empty(tmp_path: Path) -> Non
     assert loader_mod.load_pyproject_config(tmp_path) == {}
 
 
+def test_load_pyproject_config_rejects_symlinked_pyproject(tmp_path: Path) -> None:
+    real_config = tmp_path / "actual.toml"
+    _write_pyproject(real_config, "[tool]\n")
+    config_link = tmp_path / "pyproject.toml"
+    try:
+        config_link.symlink_to(real_config)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    with pytest.raises(ConfigValidationError, match="must not be a symlink"):
+        loader_mod.load_pyproject_config(tmp_path)
+
+
+def test_open_repo_config_reads_pyproject_bytes(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path / "pyproject.toml", "[tool]\n")
+
+    with loader_mod.open_repo_config(tmp_path) as handle:
+        assert handle.read() == b"[tool]\n"
+
+
 def test_load_pyproject_config_raises_on_loader_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

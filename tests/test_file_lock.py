@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import os
+import sys
 import types
 from pathlib import Path
 
@@ -37,6 +39,28 @@ def test_advisory_file_lock_timeout_and_release(
     ):
         raise AssertionError("should not enter")
     assert attempts["count"] >= 1
+
+
+def test_advisory_file_lock_rejects_symlink_target(tmp_path: Path) -> None:
+    if sys.platform == "win32" or not hasattr(os, "O_NOFOLLOW"):
+        pytest.skip("symlink-resistant lock open is Unix-only")
+    target = tmp_path / "target.lock"
+    target.write_bytes(b"x")
+    lock_path = tmp_path / "memory.lock"
+    try:
+        lock_path.symlink_to(target)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    with (
+        pytest.raises(OSError),
+        file_lock.advisory_file_lock(
+            lock_path,
+            timeout_seconds=0.1,
+            timeout_error=lambda _path: TimeoutError("timed out"),
+        ),
+    ):
+        raise AssertionError("symlink lock must not be acquired")
 
 
 def test_file_lock_windows_branches(monkeypatch: pytest.MonkeyPatch) -> None:

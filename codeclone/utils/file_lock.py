@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Final
+from typing import BinaryIO, Final
 
 DEFAULT_FILE_LOCK_POLL_SECONDS: Final[float] = 0.05
 
@@ -29,7 +29,7 @@ def advisory_file_lock(
 ) -> Iterator[None]:
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_seconds
-    with open(lock_path, "a+b") as handle:
+    with _open_lock_file(lock_path) as handle:
         if handle.seek(0, os.SEEK_END) == 0:
             handle.write(b"\0")
             handle.flush()
@@ -46,6 +46,17 @@ def advisory_file_lock(
             finally:
                 _release_exclusive_lock(handle)
             return
+
+
+def _open_lock_file(lock_path: Path) -> BinaryIO:
+    if sys.platform == "win32":
+        return lock_path.open("a+b")
+    flags = os.O_RDWR | os.O_CREAT
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if isinstance(nofollow, int):
+        flags |= nofollow
+    fd = os.open(lock_path, flags, 0o600)
+    return os.fdopen(fd, "r+b")
 
 
 def _acquire_exclusive_lock(handle: object) -> None:
