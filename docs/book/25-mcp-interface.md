@@ -4,7 +4,7 @@
      does-not-own: MCP usage guide (→ ../mcp.md), change controller (→ 12),
        engineering memory (→ 13).
      rule: this is the CONTRACT. docs/mcp.md is the GUIDE. Do not merge. -->
-# 20. MCP Interface
+# 25. MCP Interface
 
 ## Purpose
 

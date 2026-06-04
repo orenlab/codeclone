@@ -1,7 +1,7 @@
 <!-- doc-scope: TESTS AS SPECIFICATION.
      owns: testing philosophy, golden test contract, snapshot update policy.
      does-not-own: test taxonomy (→ AGENTS.md §17), specific test files. -->
-# 13. Testing as Specification
+# 23. Testing as Specification
 
 ## Purpose
 

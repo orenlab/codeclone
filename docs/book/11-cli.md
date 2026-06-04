@@ -3,7 +3,7 @@
      does-not-own: exit-code enum (→ 09), config keys (→ 10), memory subcommands
        (→ 13), session/audit details (→ 12).
      rule: keep LEAN — push normative tables to their canonical owners. -->
-# 09. CLI
+# 11. CLI
 
 ## Purpose
 

@@ -1,7 +1,7 @@
 <!-- doc-scope: SUGGESTIONS AND CLONE TYPING contract.
      owns: clone type definitions (Type-1..4), suggestion generation, typing determinism.
      does-not-own: pipeline (→ 03), report schema (→ 05). -->
-# 17. Suggestions and Clone Typing
+# 18. Suggestions and Clone Typing
 
 ## Purpose
 

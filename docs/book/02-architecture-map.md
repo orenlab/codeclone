@@ -2,7 +2,7 @@
      owns: module-to-chapter routing table.
      does-not-own: narrative architecture (→ ../architecture.md), module internals.
      rule: this is the MAP. architecture.md is the NARRATIVE. Do not merge. -->
-# 01. Architecture Map
+# 02. Architecture Map
 
 ## Purpose
 

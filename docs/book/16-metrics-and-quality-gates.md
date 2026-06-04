@@ -2,7 +2,7 @@
      owns: gate flag definitions, threshold semantics, metrics-baseline contract.
      does-not-own: health score formula (→ 15), dead-code rules (→ 17),
        config keys (→ 10). -->
-# 15. Metrics and Quality Gates
+# 16. Metrics and Quality Gates
 
 ## Purpose
 

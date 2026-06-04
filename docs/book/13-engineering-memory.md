@@ -3,7 +3,7 @@
        semantic search, approval model.
      does-not-own: change controller (→ 12), claim guard (→ 14),
        VS Code Memory UI (→ ../vscode-extension.md). -->
-# 26. Engineering Memory
+# 13. Engineering Memory
 
 ## Purpose
 

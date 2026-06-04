@@ -1,7 +1,7 @@
 <!-- doc-scope: REPRODUCIBLE DOCKER BENCHMARKING.
      owns: benchmark methodology, Docker setup, reproduction guarantees.
      does-not-own: determinism policy (→ 22), versioning (→ 24). -->
-# 18. Benchmarking (Docker)
+# 20. Benchmarking (Docker)
 
 ## Purpose
 

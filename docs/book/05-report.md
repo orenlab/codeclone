@@ -2,7 +2,7 @@
      owns: report schema, section definitions, integrity metadata, explainability.
      does-not-own: HTML rendering (→ 06), CLI output modes (→ 11),
        SARIF projection (→ ../sarif.md). -->
-# 08. Report
+# 05. Report
 
 ## Purpose
 

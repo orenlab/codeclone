@@ -6,7 +6,7 @@
        MCP tool schemas (→ 25).
      rule: payload semantics block was moved here from docs/mcp.md.
        Do not move it back. -->
-# Structural Change Controller
+# 12. Structural Change Controller
 
 CodeClone v2.1 adds structural change control for AI-assisted edits. The MCP
 surface owns session-aware agent workflows; the CLI exposes the two

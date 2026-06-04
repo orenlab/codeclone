@@ -1,7 +1,7 @@
 <!-- doc-scope: SECURITY MODEL AND THREAT BOUNDARIES.
      owns: trust boundaries, read-only invariant, allowed writes, transport security.
      does-not-own: MCP tool surface (→ 25), change controller (→ 12). -->
-# 11. Security Model
+# 21. Security Model
 
 ## Purpose
 

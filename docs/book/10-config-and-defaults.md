@@ -2,7 +2,7 @@
      owns: all [tool.codeclone] keys, precedence rules, defaults, flag mapping.
      does-not-own: CLI behavior (→ 11), exit codes (→ 09), gate thresholds (→ 16).
      rule: stray flag docs from other chapters belong HERE. -->
-# 04. Config and Defaults
+# 10. Config and Defaults
 
 ## Purpose
 

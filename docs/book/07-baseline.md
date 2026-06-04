@@ -3,7 +3,7 @@
        validation order.
      does-not-own: CI setup (→ ../getting-started.md), cache (→ 08),
        versioning policy (→ 24). -->
-# 06. Baseline
+# 07. Baseline
 
 ## Purpose
 

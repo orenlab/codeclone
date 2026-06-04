@@ -2,184 +2,102 @@
 
 ## [2.1.0a1] - Unreleased
 
-`2.1.0a1` opens the v2.1 alpha line with the structural change controller:
-intent-first edit workflow, blast radius, patch verification, claim guard,
-review receipts, and workflow consolidation tools.
-
-### Changed
-
-- Default per-project workspace directory for cache, reports, Engineering Memory,
-  controller audit/intent SQLite stores, and semantic sidecars moved from
-  `.cache/codeclone/` to `.codeclone/`. CLI warns when legacy home cache
-  (`~/.cache/codeclone/cache.json`) or a non-empty repo `.cache/codeclone/`
-  directory is still present; remove those artifacts after you no longer need them.
+`2.1.0a1` opens the v2.1 alpha line with the structural change controller,
+Engineering Memory, semantic retrieval, and a fully reorganized documentation
+site.
 
 ### Added
 
-- Structural change controller for MCP: 31 tools total, with
-  `start_controlled_change` / `finish_controlled_change` reducing the edit
-  cycle from 7–11 MCP calls to 3–4, plus engineering memory tools
-  (`get_relevant_memory`, `query_engineering_memory`, `manage_engineering_memory`).
-- Change intent lifecycle (`manage_change_intent`): declare, check, clear,
-  queue (`on_conflict="queue"`), promote, recover. Renewable ownership leases
-  with own/recoverable/foreign-active classification.
-- Workspace intent registry under `.codeclone/intents/` for multi-agent
-  coordination. Optional SQLite backend (`intent_registry_backend = "sqlite"`,
-  env `CODECLONE_INTENT_REGISTRY_BACKEND`); closed intents auditable up to
-  `intent_registry_retention_days` (default 7). Cross-process locks, lazy
-  closure on reads, scoped git working-tree hygiene, and repo-level
-  `workspace_dirty_summary` on `list_workspace`.
-- Engineering Memory foundation (Phase 18.1): SQLite schema/store under
-  `.codeclone/memory/`, `[tool.codeclone.memory]` config, CLI commands
-  `codeclone memory init|status|for-path|search`, and deterministic init ingestion
-  from analysis, contracts, docs, tests, git history, and contradictions.
-- Engineering Memory scoped retrieval (Phase 18.2): MCP tools
-  `get_relevant_memory` and `query_engineering_memory`, ranked scope-aware
-  retrieval, `help(topic="engineering_memory")`, and CLI `codeclone memory search`.
-- Engineering Memory staleness and retention (Phase 18.3): refresh-time
-  staleness engine, scope staleness on patch finish, `codeclone memory stale`,
-  `codeclone memory vacuum`, and retention-driven purge via `MemoryConfig`.
-- IDE-only workspace insight MCP tools `get_workspace_session_stats` and
-  `get_controller_audit_trail` (registered only with `--ide-governance-channel`;
-  shared payloads in `codeclone/controller_insights/` mirroring CLI
-  `--session-stats` and `--audit`).
-- IDE governance channel for Engineering Memory: MCP flag
-  `--ide-governance-channel`, actions `register_ide_governance`,
-  `prepare_governance`, `commit_governance` (protocol v2 ticket + HMAC +
-  `statement_digest`), and agent-safe rejection for `approve`/`reject`/`archive`
-  (`governance_mode_unavailable` → VS Code Memory view, not CLI).
-- VS Code extension **Memory** view (v0.4.0): inbox, approve/reject UX, sync from
-  run, and automatic governance registration on MCP connect.
-- VS Code extension Engineering Memory **search**: QuickPick search, memory for
-  active file, and a secure search results webview (command-palette and Memory
-  toolbar; not a separate inbox tree section).
-- Engineering Memory governance (Phase 18.4): candidate/approve/reject/archive
-  lifecycle, claim validation guardrails, CLI `codeclone memory
-  review-candidates|approve|reject|archive`, and MCP `manage_engineering_memory`
-  for agent-side candidate recording and claim checks (human approval stays CLI).
-- Engineering Memory coverage and finish hook (Phase 18.5): scope coverage
-  metrics, `codeclone memory coverage`, `finish_controlled_change(propose_memory=true)`
-  for draft candidates and coverage delta on accepted patches, and receipt-based
-  memory proposals via `manage_engineering_memory(action="propose_from_receipt")`.
-- Engineering Memory MCP sync (Phase 18.7): `mcp_sync_policy` config
-  (`off`, `bootstrap_if_missing`, `refresh_when_stale`), auto bootstrap on
-  `get_relevant_memory`, explicit `manage_engineering_memory(action="refresh_from_run")`,
-  and `memory_sync` payload on responses when ingest runs.
-- Engineering Memory optional semantic retrieval (Phase 20): opt-in
-  `[tool.codeclone.memory.semantic]` (default `enabled=false`,
-  `embedding_provider=diagnostic`), LanceDB sidecar at
-  `.codeclone/memory/semantic_index.lance` (`SEMANTIC_INDEX_FORMAT_VERSION`
-  `1`, separate from memory schema `1.1`), optional extra
-  `pip install 'codeclone[semantic-lancedb]'`, CLI `codeclone memory semantic
-  status|rebuild|search`, `manage_engineering_memory(action="rebuild_semantic_index")`,
-  `codeclone memory search --semantic`, MCP/CLI
-  `query_engineering_memory(mode=search, semantic=true)` with FTS-first merge and
-  `semantic` status envelope; indexed prose memory types and bounded audit
-  incident summaries when `index_audit=true` and `audit_enabled=true`.
-- Engineering Memory semantic-quality local embeddings: optional FastEmbed
-  provider (`embedding_provider="fastembed"`, default
-  `BAAI/bge-small-en-v1.5`) via `codeclone[semantic-fastembed]`; use
-  `codeclone[semantic-local]` to install both LanceDB and FastEmbed. Model
-  downloads are disabled by default (`allow_model_download=false`) so offline
-  installs can pre-populate `.codeclone/memory/fastembed`.
-- Engineering Memory search and git provenance (Phase 18.6): schema `1.1` with
-  SQLite FTS5 index, `match_mode` (`any`/`all`) for CLI and MCP search,
-  refresh-time digest reactivation for unchanged records, resilient git
-  provenance without `origin`, `git_commit` evidence on init, document→path
-  linking, git hotspot config (`git_hotspot_period_days`,
-  `git_hotspot_min_changes`), normalized document-link statements, Rich CLI
-  output for all `codeclone memory` commands, and deduplicated subject rows
-  in retrieval payloads.
-- Blast radius projection (`get_blast_radius`): direct/transitive dependents,
-  clone cohorts, structural risk, do-not-touch boundaries.
-- Patch contract (`check_patch_contract`): pre-edit budget and post-edit verify
-  with profile-aware depth (python_structural, documentation_only,
-  governance_config, non_python_patch, state_artifact_change). Auto-resolved
-  `before_run_id` from intent, `next_step` hints, `claim_validation_recommended`
-  flag.
-- Claim guard (`validate_review_claims`): citation-based overclaim detection;
-  optional `patch_health_delta` from verify for regression-free claim checks.
-- Review receipts (`create_review_receipt`): deterministic audit artifacts with
-  provenance, scope, patch status, and claims-not-made.
-- Workspace hygiene tips when `.codeclone/` is not gitignored — advisory
-  in MCP `tips[]` and CLI output; never edits `.gitignore` automatically.
-- CLI controller query modes: `--blast-radius` and `--patch-verify`.
-- Audit trail events for intent lifecycle and token budget tracking.
+- **Structural Change Controller.** `start_controlled_change` /
+  `finish_controlled_change` reduce the agent edit cycle from 7-11 MCP calls
+  to 3-4. Blast radius projection (`get_blast_radius`), patch contract
+  verification with profile-aware depth (`check_patch_contract`), citation-based
+  claim guard (`validate_review_claims`), and deterministic review receipts
+  (`create_review_receipt`). 31 MCP tools total.
+- **Change intent lifecycle.** `manage_change_intent`: declare, check, clear,
+  queue, promote, recover. Renewable ownership leases with
+  own/recoverable/foreign-active classification. Optional SQLite backend with
+  configurable retention (default 7 days, max 14 in open source).
+- **Engineering Memory.** SQLite store under `.codeclone/memory/` with typed,
+  evidence-linked repository facts (contracts, decisions, risks, git
+  provenance). Scoped retrieval via `get_relevant_memory` and
+  `query_engineering_memory`, FTS5 search, refresh-time staleness engine,
+  retention-driven vacuum, and MCP auto-sync
+  (`mcp_sync_policy=bootstrap_if_missing`). Agent-side draft recording with
+  human-governed promotion (VS Code Memory view or CLI
+  `codeclone memory approve`). Scope coverage metrics and
+  `finish_controlled_change(propose_memory=true)` for draft candidates on
+  accepted patches.
+- **Semantic retrieval.** Opt-in `[tool.codeclone.memory.semantic]` with
+  LanceDB sidecar. Local `fastembed` provider (`BAAI/bge-small-en-v1.5`) via
+  `codeclone[semantic-local]`; `api` provider reserved for Team+; `local_model`
+  reserved for Enterprise. CLI `codeclone memory semantic status|rebuild|search`,
+  MCP `query_engineering_memory(mode=search, semantic=true)`.
+- **IDE surfaces.** VS Code extension Memory view: draft inbox, approve/reject
+  UX, QuickPick search, memory-for-active-file, search results webview. IDE
+  governance channel (`--ide-governance-channel`) with session HMAC attestation.
+  Workspace session stats and controller audit trail webviews (IDE-only MCP
+  tools; shared payloads in `codeclone/controller_insights/`).
+- **Cursor plugin** (`plugins/cursor-codeclone/`): six skills, three rules
+  (including always-on `change-control-gate`), fail-closed `preToolUse` hook
+  via `codeclone.workspace_intent`, project hook installer with
+  `enforce_scope` (`python` | `repo`), and a `codeclone-structural-reviewer`
+  agent definition.
+- **CLI controller query modes:** `--blast-radius`, `--patch-verify`,
+  `--session-stats`, `--audit`.
+- **Documentation reorganization.** Book chapters renumbered 00-25 in thematic
+  groups. Four integration guide+contract splits merged into single pages
+  (VS Code, Claude Desktop, Codex, Cursor). Six-tab nav (Home, Get started,
+  Guides, Reference, Legal & plans, Maintainers). Doc-scope ownership comments
+  on all 45 documentation files.
+- **Edition-specific feature tiers** (plans-and-retention): Engineering Memory
+  limits and retention, semantic provider editions (fastembed/api/local_model),
+  audit trail retention, and workspace intent registry limits per Open Source /
+  Team / Enterprise.
+- Workspace hygiene tips when `.codeclone/` is not gitignored.
 - MCP tool JSON schemas with per-parameter descriptions; `next_tool` hint in
-  analysis responses; `help(detail="compact")` includes `anti_patterns`;
-  `trust_boundaries` help topic.
-- One-time CLI migration note when a 2.0.2 baseline is analyzed by 2.1.0+
-  (LCOM4 cohesion change due to Protocol/Pydantic exclusions).
-- Extract UI/message strings into focused submodules: `ui_messages/*`,
-  `report/messages/*`, `surfaces/mcp/messages/*`.
-- Cursor plugin (`plugins/cursor-codeclone/`): fail-closed `preToolUse`
-  change-control gate via read-only `codeclone.workspace_intent` (file and SQLite
-  registry backends), project hook installer, `enforce_scope` (`python` |
-  `repo`), and bundled `codeclone-engineering-memory` skill.
-- Markdown admonition lint (`scripts/lint_mkdocs_admonitions.py`) covered by the
+  analysis responses.
+- Audit trail events for intent lifecycle and token budget tracking.
+- Admonition indentation lint (`scripts/lint_admonitions.py`) covered by the
   docs build contract test.
 
 ### Changed
 
-- `start_controlled_change` may return `status: "blocked"` with
-  `edit_allowed: false` on foreign scope overlap or hygiene blocks; `blocked`
-  is workflow-only, never persisted.
+- Default per-project workspace directory moved from `.cache/codeclone/` to
+  `.codeclone/`. CLI warns when legacy paths are still present.
+- Documentation site build migrated from MkDocs to Zensical (`zensical.toml`);
+  docs workflow runs `uv run --with zensical==0.0.43 zensical build --clean --strict`.
+- `pydantic` is now a base dependency.
 - LCOM4 cohesion graph excludes Protocol methods and Pydantic
   validation/serialization hooks; `computed_field` remains included.
-- MCP rejects `cache_policy=refresh` (CLI-only); always loads
-  `golden_fixture_paths` from pyproject even with `respect_pyproject=false`.
-- Workspace intent registry v2 with lease and report-digest fields; v1 records
-  accepted until expiry. Registry I/O serialized with cross-process locks.
-- `finish_controlled_change` sets `user_action_required` on digest mismatch.
-- `pydantic` is now a base dependency.
-- MCP session state is process-local; workspace intent files are ephemeral
-  coordination state, not analysis cache or report truth. Queued intents do
-  not pin runs; pinning happens at promotion.
-- Workspace hygiene MCP payloads: path-level fields (`dirty_attribution`,
-  classification arrays) only when `finish_controlled_change(detail_level="full")`;
-  `summary`/`normal` return counts and blocking fields.
-- Audit `intent.declared` in `audit_payloads=compact` retains bounded
-  `intent_description`; SQLite `summary` column always stores event essence.
-- Documentation site build migrated from MkDocs to Zensical: `mkdocs.yml` was
-  replaced by `zensical.toml`, the docs workflow runs
-  `uv run --with zensical==0.0.43 zensical build --clean --strict`, and the
-  strict docs build contract test is now `tests/test_docs_build_contract.py`.
-- Repository test coverage gate raised to `>=99%` (`pyproject.toml` `fail_under`,
-  CI `--cov-fail-under=99`).
+- Repository test coverage gate raised to `>=99%`.
 
 ### Fixed
 
-- `finish_controlled_change` hygiene gate blocks finish only on
-  `missing_evidence` (in-scope git dirty not listed in evidence) and
-  `foreign_dirty_overlap` (live foreign intent on overlapping in-scope paths).
-  Out-of-scope unattributed dirt is advisory and may elevate top-level status to
-  `accepted_with_external_changes` via `external_changes` without failing verify.
-  Scope `check` uses agent evidence only (`files_for_scope_check`). Foreign
-  dirty outside declared scope is ignored when attributed to **foreign
-  active/stale** intents; **recoverable** intents do not grant attribution.
-- Blast-radius graph core moved to `codeclone/analysis/blast_radius.py`; MCP and
-  CLI surfaces consume it as presentation adapters (fixes CLI→MCP import
-  violation).
+- **Memory draft persistence:** `open_memory_db` now uses
+  `synchronous=FULL` so every commit survives unclean MCP process exit
+  (SIGKILL, IDE restart, stdio timeout). Intent and audit stores keep
+  `synchronous=NORMAL` — their writes are frequent and recovery-designed.
+- **Memory draft staleness:** refresh-time staleness engine no longer marks
+  draft records stale before human governance; drafts become subject to
+  staleness only after promotion to active.
+- `finish_controlled_change` hygiene gate blocks only on `missing_evidence`
+  and `foreign_dirty_overlap`; out-of-scope dirt is advisory
+  (`accepted_with_external_changes`). Recoverable intents do not grant
+  foreign attribution.
 - `dirty_scope_policy=continue_own_wip` allows resuming own dirty scope when
-  no foreign overlap; finish still requires evidence.
-- Queued foreign intents no longer populate `foreign_dirty_overlaps`, unblocking
-  active agents on overlapping scope.
+  no foreign overlap.
+- Queued foreign intents no longer populate `foreign_dirty_overlaps`.
 - Patch verify rejects identical before/after runs for python_structural and
   governance_config profiles (`reason: after_run_not_new`).
-- Negative `health_delta` on verify surfaces `health_regression_advisory`; Claim
-  Guard warns on overclaims when `patch_health_delta < 0`.
-- `list_workspace` recovery discoverability after MCP restart.
-- `start_controlled_change` budget `gate_preview.would_fail` advisory when edit
-  is still allowed.
+- Negative `health_delta` surfaces `health_regression_advisory`; Claim Guard
+  warns on overclaims when `patch_health_delta < 0`.
+- MCP doc URLs updated across help topics, plugin READMEs, skill definitions,
+  and test expectations after book renumber.
+- Blast-radius graph core moved to `codeclone/analysis/blast_radius.py` (fixes
+  CLI-to-MCP import violation).
 - `respect_pyproject=false` no longer surfaces golden-fixture clone groups as
   false `new` regressions.
-- VS Code workspace session stats and controller audit webviews: payload
-  footprint `top_workflows` metrics use `calls` / `tokens` from the shared audit
-  footprint collector (fixes zeroed workflow columns when the UI expected other
-  field names).
-- Controller insights payloads centralized in `codeclone/controller_insights/`
-  for CLI `--session-stats` / `--audit` and IDE-only MCP tools (avoids
-  duplicating collection in the MCP layer).
 
 ## [2.0.2] - 2026-05-19
 

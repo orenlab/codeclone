@@ -3,7 +3,7 @@
      does-not-own: pipeline contract (→ 03), determinism policy (→ 22),
        python-tag rules (→ 24).
      rule: moved here from docs/cfg.md. Do not move back. -->
-# Control Flow Graph (CFG) — Design and Semantics
+# 04. Control Flow Graph (CFG) — Design and Semantics
 
 > Contract-level guarantees are in [Core Pipeline](03-core-pipeline.md) and
 > [Determinism](22-determinism.md).

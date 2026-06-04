@@ -1,7 +1,7 @@
 <!-- doc-scope: HTML RENDERING CONTRACT.
      owns: HTML report rendering rules, widget behavior, display-only constraint.
      does-not-own: report schema (→ 05), sample report (→ ../examples/report.md). -->
-# 10. HTML Render
+# 06. HTML Render
 
 ## Purpose
 

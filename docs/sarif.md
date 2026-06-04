@@ -87,6 +87,6 @@ Contract-adjacent coverage includes:
 
 ## See also
 
-- [08. Report](book/05-report.md)
-- [10. HTML Render](book/06-html-render.md)
+- [05. Report](book/05-report.md)
+- [06. HTML Render](book/06-html-render.md)
 - [Examples / Sample Report](examples/report.md)

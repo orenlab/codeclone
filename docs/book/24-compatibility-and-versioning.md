@@ -3,7 +3,7 @@
        breaking-change criteria.
      does-not-own: baseline schema (→ 07), cache schema (→ 08),
        report schema (→ 05). -->
-# 14. Compatibility and Versioning
+# 24. Compatibility and Versioning
 
 ## Purpose
 
