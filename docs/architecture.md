@@ -1,9 +1,14 @@
-# CodeClone Architecture
+<!-- doc-scope: NARRATIVE PIPELINE OVERVIEW — how CodeClone works.
+     owns: pipeline stage descriptions, surfaces table, design principles.
+     does-not-own: contract details (→ book/ chapters), MCP tools (→ mcp.md),
+       CFG semantics (→ book/04), report schema (→ book/05).
+     rule: this is a MAP — 1-2 sentences per topic + link into Reference.
+       Do not shadow-copy book chapters here. -->
+# How CodeClone Works
 
-> Scope note: this file is an architecture narrative/deep-dive.
-> Contract-level guarantees (schemas, statuses, exit codes, trust model, determinism) are defined in `docs/book/`.
-
-This document describes the high-level architecture of **CodeClone**.
+> This page is a narrative architecture overview.
+> Contract-level guarantees are defined in the
+> [Contracts Book](book/README.md).
 
 ---
 
@@ -20,6 +25,8 @@ CodeClone processes Python projects in the following stages:
 7. **Clone grouping**
 8. **Reporting / CI decision**
 
+Full contract: [Core pipeline](book/03-core-pipeline.md).
+
 ---
 
 ## 1. Source Scanning
@@ -28,11 +35,8 @@ CodeClone processes Python projects in the following stages:
 - Uses deterministic sorted traversal.
 - Skips paths that resolve outside the root (symlink traversal guard).
 - Applies cache-based skipping using file stat signatures.
-- Default cache location is project-local: `<root>/.cache/codeclone/cache.json`
-  (override via `--cache-path`, legacy alias: `--cache-dir`).
-- Cache file size guard is configurable via `--max-cache-size-mb` (oversized cache is ignored with warning).
-- Cache is best-effort: signature/version/shape mismatches are ignored with warnings, and
-  invalid entries are skipped deterministically.
+
+Cache contract: [Cache](book/08-cache.md).
 
 ---
 
@@ -66,31 +70,31 @@ This ensures structural stability across refactors.
 - Built per-function using `CFGBuilder`.
 - Produces deterministic basic blocks.
 - Captures structural control flow (`if`, `for`, `while`, `try`, `with`, `match`).
-- Models short‑circuit `and`/`or` as micro‑CFG branches.
+- Models short-circuit `and`/`or` as micro-CFG branches.
 - Links `try/except` only from statements that may raise.
 - Preserves `match case` and `except` handler order structurally.
 - Models `break` / `continue` as terminating loop transitions.
 - Preserves `for/while ... else` semantics.
 
-📄 See [docs/cfg.md](cfg.md) for full semantics.
+Full semantics: [CFG Semantics](book/04-cfg-semantics.md).
 
 ---
 
 ## 5. Fingerprinting
 
 Each function CFG is converted into a canonical string form and hashed.
-
 This fingerprint is used to group structurally identical functions.
 
 ---
 
 ## 6. Segment Windows
 
-Large functions are also scanned with **segment windows** (sliding windows over normalized
-statements). These are used to detect **internal clones** inside the same function.
+Large functions are also scanned with **segment windows** (sliding windows over
+normalized statements). These are used to detect **internal clones** inside the
+same function.
 
-Segment windows are **never** used as a final equivalence signal; they are candidate
-generators with strict hash confirmation.
+Segment windows are **never** used as a final equivalence signal; they are
+candidate generators with strict hash confirmation.
 
 ---
 
@@ -115,18 +119,11 @@ Noise filters applied:
 - no same-function block clones
 - `__init__` excluded from block analysis
 
----
-
 ### Segment clones (internal/report-only)
 
 - Detected only **inside the same function**.
-- Used for internal copy‑paste discovery and report explainability.
+- Used for internal copy-paste discovery and report explainability.
 - Not included in baseline or CI failure logic.
-- Report UX merges overlapping segment windows and suppresses boilerplate‑only groups.
-- A segment group is reported only if it has at least **2** unique statement types
-  or contains a control‑flow statement.
-
----
 
 ### Structural findings (report-only)
 
@@ -141,164 +138,28 @@ gating decisions.
 
 ## 8. Reporting
 
-Detected findings can be rendered as:
+Detected findings can be rendered as interactive HTML, canonical JSON (schema
+`2.11`), deterministic text, Markdown, or SARIF projections.
 
-- interactive HTML (`--html`),
-- canonical JSON (`--json`, schema `2.11`),
-- deterministic text projection (`--text`),
-- deterministic Markdown projection (`--md`),
-- deterministic SARIF projection (`--sarif`).
-
-Reporting uses a layered model:
-
-- canonical sections: `report_schema_version`, `meta`, `inventory`, `findings`, `metrics`
-- non-canonical view layer: `derived`
-- integrity metadata: `integrity` (`canonicalization` + `digest`)
-
-Provenance is carried through `meta` and includes:
-
-- runtime/context (`codeclone_version`, `python_version`, `python_tag`, `analysis_mode`, `report_mode`)
-- analysis profile (`meta.analysis_profile`)
-- analysis thresholds (`meta.analysis_thresholds.design_findings`)
-- baseline status block (`meta.baseline.*`)
-- cache status block (`meta.cache.*`)
-- metrics-baseline status block (`meta.metrics_baseline.*`)
-- generation timestamp (`meta.runtime.report_generated_at_utc`)
-
-Explainability contract (v1):
-
-- Explainability facts are produced only by Python core/report layer.
-- HTML/JS renderer is display-only and must not recalculate metrics or introduce new semantics.
-- UI can format, filter, and highlight facts, but cannot invent new hints.
+Report contract: [Report](book/05-report.md).
+HTML rendering: [HTML Render](book/06-html-render.md).
 
 ---
 
-## 9. MCP Agent Interface
+## Surfaces
 
-CodeClone also exposes an optional MCP layer for AI agents and MCP-capable
-clients.
+Every output surface — CLI, HTML, MCP, IDE — is a projection of the same
+canonical report. No surface adds a second analysis engine.
 
-Current shape:
-
-- install via the optional `codeclone[mcp]` extra
-- launch via `codeclone-mcp`
-- transports:
-    - `stdio`
-    - `streamable-http`
-- semantics:
-    - read-only
-    - baseline-aware
-    - built on the same pipeline/report contracts as the CLI
-    - bounded in-memory run history
-
-Operational note:
-
-- `codeclone/surfaces/mcp/server.py` is only a thin launcher/registration layer.
-- Agent-facing MCP copy lives in `codeclone/surfaces/mcp/messages/*` (tool/resource
-  titles and descriptions, help topics, workflow/intent strings, parameter Field
-  docs, patch-contract and verification copy).
-- Report-layer user copy lives in `codeclone/report/messages/*` (glossary,
-  suggestions, explainability, overview, security, chrome, text/markdown/sarif
-  projections, gate reason prefixes). HTML widgets such as
-  `report/html/widgets/glossary.py` render facts from those catalogs.
-- The optional MCP runtime is imported lazily so the base `codeclone` install
-  and normal CI paths do not require MCP packages.
-- `codeclone/surfaces/mcp/service.py` is the in-process adapter over the existing
-  pipeline/report contracts.
-- Blast-radius graph traversal core lives in `codeclone/analysis/blast_radius.py`
-  (report `Mapping` inputs only). MCP `get_blast_radius` and CLI `--blast-radius`
-  are presentation adapters; non-MCP surfaces must not import
-  `codeclone/surfaces/mcp/_blast_radius.py`.
-
-The MCP layer is intentionally thin. It does not add a separate analysis engine;
-it adapts the existing pipeline into tools/resources such as:
-
-- analyze repository or changed paths
-- get run summary, production triage, and report sections
-- compare runs, list findings/hotspots, inspect one finding, project remediation
-- focused `check_*` queries and gate preview
-- generate PR summary
-- structural change control (`start_controlled_change`, `finish_controlled_change`,
-  `manage_change_intent`, `get_blast_radius`, `check_patch_contract`,
-  `validate_review_claims`, `create_review_receipt`)
-- session-local review markers and bounded in-memory run history
-
-Native clients (VS Code extension, Claude Desktop bundle, Codex plugin, Cursor
-plugin) connect to the same `codeclone-mcp` contract; they do not introduce a
-second analysis engine.
-
-This keeps agent integrations deterministic and aligned with the same canonical
-report document used by JSON/HTML/SARIF.
-
-Security boundaries:
-
-- Read-only with respect to source files, baselines, analysis cache
-  (`cache.json`), and canonical report artifacts.
-- Allowed repo-local writes are limited to ephemeral controller coordination
-  (workspace intent registry: file backend under `.cache/codeclone/intents/`,
-  or SQLite backend under `.cache/codeclone/db/intents.sqlite3` when configured)
-  and optional audit trail (`.cache/codeclone/db/audit.sqlite3` when
-  `audit_enabled=true`).
-- Session-local review markers and in-memory run history do not survive
-  process restart.
-- `--allow-remote` guard required for non-local transports; default is `stdio`.
-- MCP accepts cache policies `reuse` and `off`; `refresh` is rejected at
-  runtime with a contract error.
-- Run history bounded by `--history-limit` to prevent unbounded memory growth.
-- `git_diff_ref` validated as a safe single revision expression before any
-  `git diff` subprocess call.
-
----
-
-## CI Integration
-
-Baseline comparison allows CI to fail **only on new clones**,
-enabling gradual architectural improvement.
-
-Baseline files use a stable v2 contract (current schema `2.1`, with compatibility
-support for major `1` legacy schema checks where applicable). Compatibility is checked by
-`schema_version`, `fingerprint_version`, `python_tag`, and `generator.name`,
-not package patch/minor version.
-Regeneration is typically required when `fingerprint_version` or `python_tag` changes.
-Baseline integrity is tamper-evident via canonical `payload_sha256`, which covers
-`clones.functions`, `clones.blocks`, `meta.fingerprint_version`, and `meta.python_tag`.
-`schema_version` and `generator.name` are compatibility gates and intentionally
-excluded from the integrity hash.
-`created_at` and `generator.version` are informational metadata and do not affect
-integrity validation.
-
-Baseline validation order is deterministic:
-
-1. size guard (before JSON parse),
-2. JSON parse and root object/type checks,
-3. required fields and type checks,
-4. compatibility checks (`generator`, `schema_version`, `fingerprint_version`, `python_tag`),
-5. integrity checks (`payload_sha256`).
-
-Baseline loading is strict: schema/type violations, integrity failures, generator mismatch,
-or oversized files are treated as untrusted input.
-In `--ci` (or explicit `--fail-on-new`), untrusted baseline states fail fast.
-Outside gating mode, untrusted baseline is ignored with warning and comparison proceeds
-against an empty baseline.
-Baseline size guard is configurable via `--max-baseline-size-mb`.
-
-CLI exit code contract:
-
-- `0` success
-- `2` contract error (invalid arguments/output options, untrusted baseline, or unreadable source files in gating mode)
-- `3` gating failure (`--ci` new clones, or `--fail-threshold` exceeded)
-- `5` unexpected internal error (reserved)
-
-`5` is reserved only for unexpected internal exception paths (tool bug), not for
-baseline/options contract violations.
-
-## Python Tag Consistency for Baseline Checks
-
-Due to inherent AST differences across interpreter builds, baseline compatibility
-is pinned to `python_tag` (for example `cp314`).
-
-This preserves deterministic and reproducible clone detection results while allowing
-patch updates within the same interpreter tag.
+| Surface | Role | Contract |
+|---------|------|----------|
+| CLI | Scripting and CI | [CLI](book/11-cli.md) |
+| MCP | Read-only agent/client integration | [MCP interface](book/25-mcp-interface.md) |
+| VS Code | Guided IDE review | [VS Code](vscode-extension.md) |
+| Claude Desktop | Local `.mcpb` bundle | [Claude Desktop](claude-desktop-bundle.md) |
+| Codex | Marketplace plugin with skills | [Codex](codex-plugin.md) |
+| Cursor | Plugin with skills, rules, hooks | [Cursor](cursor-plugin.md) |
+| SARIF | IDE code scanning | [SARIF](sarif.md) |
 
 ---
 
@@ -309,9 +170,4 @@ patch updates within the same interpreter tag.
 - Low-noise > completeness
 - CI-first design
 
----
-
-## Summary
-
-CodeClone provides **structural code quality analysis** for Python —
-clone detection, quality metrics, and baseline-aware CI governance.
+Module map: [Architecture Map](book/02-architecture-map.md).

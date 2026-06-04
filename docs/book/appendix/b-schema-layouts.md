@@ -1,3 +1,6 @@
+<!-- doc-scope: APPENDIX — schema layouts (baseline / cache / report / memory).
+     owns: JSON schema shape tables, field-level layout documentation.
+     does-not-own: schema semantics (→ respective contract chapters). -->
 # Appendix B. Schema Layouts
 
 ## Purpose
@@ -820,7 +823,7 @@ Core tables:
 Record identity uses stable `identity_key` strings for upsert during refresh.
 Migration path: `codeclone/memory/schema_migrate.py`.
 
-See [Engineering Memory](../26-engineering-memory.md) for lifecycle and agent
+See [Engineering Memory](../13-engineering-memory.md) for lifecycle and agent
 surfaces.
 
 ## Refs

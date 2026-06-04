@@ -1,3 +1,6 @@
+<!-- doc-scope: APPENDIX — error catalog (contract vs internal).
+     owns: error code tables, contract-error vs internal-error classification.
+     does-not-own: exit-code contract (→ 09), CLI behavior (→ 11). -->
 # Appendix C. Error Catalog
 
 ## Purpose

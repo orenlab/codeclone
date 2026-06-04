@@ -1,3 +1,8 @@
+<!-- doc-scope: ENGINEERING MEMORY — evidence-linked repository memory.
+     owns: record types, governance lifecycle, retrieval contract, MCP sync,
+       semantic search, approval model.
+     does-not-own: change controller (→ 12), claim guard (→ 14),
+       VS Code Memory UI (→ ../vscode-extension.md). -->
 # 26. Engineering Memory
 
 ## Purpose
@@ -721,7 +726,7 @@ for the full controller list.
 ## Integration with change control
 
 Memory complements — does not replace — the Structural Change Controller
-([24-structural-change-controller.md](24-structural-change-controller.md)):
+([12-structural-change-controller.md](12-structural-change-controller.md)):
 
 ```mermaid
 graph LR
@@ -806,8 +811,8 @@ or project-wide dumps.
 
 ## Related docs
 
-- [MCP Interface](20-mcp-interface.md) — tool catalog
-- [Structural Change Controller](24-structural-change-controller.md) — intent workflow
-- [Claim Guard](28-claim-guard.md) — finish claims validation
-- [CLI](09-cli.md) — `codeclone memory` commands
+- [MCP Interface](25-mcp-interface.md) — tool catalog
+- [Structural Change Controller](12-structural-change-controller.md) — intent workflow
+- [Claim Guard](14-claim-guard.md) — finish claims validation
+- [CLI](11-cli.md) — `codeclone memory` commands
 - [MCP for AI Agents](../mcp.md) — agent-oriented narrative

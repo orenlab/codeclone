@@ -1,3 +1,8 @@
+<!-- doc-scope: CLAIM GUARD — review claim validation.
+     owns: claim validation rules, pattern catalog, citation checks,
+       patch_health_delta handling.
+     does-not-own: change controller (→ 12), engineering memory (→ 13),
+       MCP tool schemas (→ 25). -->
 # 28. Claim Guard
 
 ## Purpose
@@ -170,5 +175,5 @@ non-empty unless the user explicitly scoped to ignore peer WIP.
 
 ## See also
 
-- [20-mcp-interface.md](20-mcp-interface.md) — full MCP tool and resource contract
+- [25-mcp-interface.md](25-mcp-interface.md) — full MCP tool and resource contract
 - [MCP deep dive](../mcp.md) — architecture, workflows, prompt patterns

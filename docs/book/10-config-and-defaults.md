@@ -1,3 +1,7 @@
+<!-- doc-scope: CONFIGURATION REFERENCE — single home for all config keys.
+     owns: all [tool.codeclone] keys, precedence rules, defaults, flag mapping.
+     does-not-own: CLI behavior (→ 11), exit codes (→ 09), gate thresholds (→ 16).
+     rule: stray flag docs from other chapters belong HERE. -->
 # 04. Config and Defaults
 
 ## Purpose
@@ -160,7 +164,7 @@ Enterprise (up to 90 days, PostgreSQL backend) options.
 Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 **not** part of the root `[tool.codeclone]` table above. They are validated by
 `codeclone/config/memory.py` / `SemanticConfig` and documented in
-[Engineering Memory](26-engineering-memory.md).
+[Engineering Memory](13-engineering-memory.md).
 
 | Semantic field | Default | Meaning |
 |----------------|---------|---------|
@@ -351,5 +355,5 @@ Refs:
 
 ## See also
 
-- [09-cli.md](09-cli.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- [11-cli.md](11-cli.md)
+- [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)

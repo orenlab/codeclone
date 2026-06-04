@@ -1,3 +1,6 @@
+<!-- doc-scope: REPRODUCIBLE DOCKER BENCHMARKING.
+     owns: benchmark methodology, Docker setup, reproduction guarantees.
+     does-not-own: determinism policy (→ 22), versioning (→ 24). -->
 # 18. Benchmarking (Docker)
 
 ## Purpose
@@ -105,6 +108,6 @@ Permissions note:
 
 ## See also
 
-- [12-determinism.md](12-determinism.md)
-- [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- [22-determinism.md](22-determinism.md)
+- [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md)
+- [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)

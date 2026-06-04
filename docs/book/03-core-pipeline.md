@@ -1,3 +1,6 @@
+<!-- doc-scope: CANONICAL PIPELINE CONTRACT.
+     owns: pipeline stage contracts, ordering guarantees, normalization rules.
+     does-not-own: CFG design (→ 04), report schema (→ 05), CLI flags (→ 11). -->
 # 05. Core Pipeline
 
 ## Purpose

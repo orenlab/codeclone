@@ -1,7 +1,12 @@
+<!-- doc-scope: CFG DESIGN AND SEMANTICS deep-dive.
+     owns: CFG v1 structure, block/edge model, control-flow semantics, limitations.
+     does-not-own: pipeline contract (→ 03), determinism policy (→ 22),
+       python-tag rules (→ 24).
+     rule: moved here from docs/cfg.md. Do not move back. -->
 # Control Flow Graph (CFG) — Design and Semantics
 
-> Scope note: this file is a CFG deep-dive.
-> Contract-level guarantees are documented in `docs/book/` (especially `05-core-pipeline.md` and `12-determinism.md`).
+> Contract-level guarantees are in [Core Pipeline](03-core-pipeline.md) and
+> [Determinism](22-determinism.md).
 
 This document describes the **Control Flow Graph (CFG)** model used by **CodeClone**,
 its design goals, semantics, and known limitations.
@@ -183,15 +188,7 @@ CFG v1 guarantees:
 
 This is critical for CI usage and baseline comparison.
 
-## Python Tag Consistency for Baseline Checks
-
-Due to AST differences between interpreter versions, baseline compatibility is pinned to
-the same `python_tag` (for example `cp314`), not full patch version equality.
-
-This keeps clone detection deterministic while allowing patch updates within the same tag.
-
-CI gating uses the baseline tag policy, while the test matrix validates runtime
-compatibility across Python 3.10-3.14.
+Python tag consistency: see [Compatibility and Versioning](24-compatibility-and-versioning.md).
 
 ---
 

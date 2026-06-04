@@ -141,7 +141,7 @@ agent workflows. The canonical report is the source of truth; surfaces render, f
 never a second analysis engine.
 
 [Architecture narrative](https://orenlab.github.io/codeclone/architecture/) &middot;
-[CFG semantics](https://orenlab.github.io/codeclone/cfg/)
+[CFG semantics](https://orenlab.github.io/codeclone/book/04-cfg-semantics/)
 
 ## Structural Change Controller
 
@@ -162,7 +162,7 @@ ephemeral workspace coordination state under `.cache/codeclone/intents/`. An opt
 controller events when enabled. CodeClone never mutates source files, baselines, generated reports, or analysis
 cache through MCP — **read-only by contract**.
 
-[Structural Change Controller docs](https://orenlab.github.io/codeclone/book/24-structural-change-controller/)
+[Structural Change Controller docs](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
 
 ## What CodeClone reviews
 
@@ -199,7 +199,7 @@ deterministic projections, and run identity is derived from the canonical report
 > default transport for local clients — HTTP exposure beyond loopback requires explicit `--allow-remote`.
 
 [MCP usage guide](https://orenlab.github.io/codeclone/mcp/) &middot;
-[MCP interface contract](https://orenlab.github.io/codeclone/book/20-mcp-interface/)
+[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/)
 
 ### Engineering Memory
 
@@ -214,16 +214,16 @@ codeclone memory search "baseline schema" --match all
 codeclone memory approve mem-…   # human-only governance
 ```
 
-[Engineering Memory docs](https://orenlab.github.io/codeclone/book/26-engineering-memory/)
+[Engineering Memory docs](https://orenlab.github.io/codeclone/book/13-engineering-memory/)
 
 ### Native agent and IDE clients
 
 | Surface                   | Install                                                                                                                       | Docs                                                                        |
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | [Guide](https://orenlab.github.io/codeclone/book/21-vscode-extension/)      |
-| **Claude Desktop bundle** | [`orenlab/codeclone-claude-desktop`](https://github.com/orenlab/codeclone-claude-desktop) | [Guide](https://orenlab.github.io/codeclone/book/22-claude-desktop-bundle/) |
-| **Codex plugin**          | [`orenlab/codeclone-codex`](https://github.com/orenlab/codeclone-codex)                                                      | [Guide](https://orenlab.github.io/codeclone/book/23-codex-plugin/)          |
-| **Cursor plugin**         | [`orenlab/codeclone-cursor`](https://github.com/orenlab/codeclone-cursor)                       | [Guide](https://orenlab.github.io/codeclone/book/25-cursor-plugin/)         |
+| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | [Guide](https://orenlab.github.io/codeclone/vscode-extension/)      |
+| **Claude Desktop bundle** | [`orenlab/codeclone-claude-desktop`](https://github.com/orenlab/codeclone-claude-desktop) | [Guide](https://orenlab.github.io/codeclone/claude-desktop-bundle/) |
+| **Codex plugin**          | [`orenlab/codeclone-codex`](https://github.com/orenlab/codeclone-codex)                                                      | [Guide](https://orenlab.github.io/codeclone/codex-plugin/)          |
+| **Cursor plugin**         | [`orenlab/codeclone-cursor`](https://github.com/orenlab/codeclone-cursor)                       | [Guide](https://orenlab.github.io/codeclone/cursor-plugin/)         |
 
 All clients connect to the same `codeclone-mcp` contract — no second analysis engine.
 
@@ -240,7 +240,7 @@ codeclone . --ci
 `--ci` is equivalent to `--fail-on-new --no-color --quiet`, and enables `--fail-on-new-metrics` when a trusted
 metrics baseline is present. The baseline becomes the contract CI enforces — separating accepted legacy debt from
 real regressions. Exit codes: `0` success · `2` contract error · `3` gating failure · `5` internal
-([policy](https://orenlab.github.io/codeclone/book/03-contracts-exit-codes/)).
+([policy](https://orenlab.github.io/codeclone/book/09-exit-codes/)).
 
 <details>
 <summary>Quality gate flags</summary>
@@ -258,7 +258,7 @@ codeclone . --min-typing-coverage 80 --api-surface --fail-on-api-break
 codeclone . --coverage coverage.xml --fail-on-untested-hotspots --coverage-min 50
 ```
 
-[Gate reference](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/)
+[Gate reference](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/)
 
 </details>
 
@@ -309,7 +309,7 @@ codeclone . --html --json --md --sarif --text
 
 `--open-html-report` opens the HTML in the default browser; `--timestamped-report-paths` appends a UTC timestamp to
 default filenames. The canonical JSON (`report_schema_version`, `meta`, `inventory`, `findings`, `metrics`,
-`derived`, `integrity`) is documented in the [report contract](https://orenlab.github.io/codeclone/book/08-report/).
+`derived`, `integrity`) is documented in the [report contract](https://orenlab.github.io/codeclone/book/05-report/).
 
 ## Configuration
 
@@ -327,22 +327,22 @@ block_min_loc = 20
 block_min_stmt = 8
 ```
 
-[Config reference](https://orenlab.github.io/codeclone/book/04-config-and-defaults/) &middot;
+[Config reference](https://orenlab.github.io/codeclone/book/10-config-and-defaults/) &middot;
 [Inline suppressions](https://orenlab.github.io/codeclone/book/19-inline-suppressions/) &middot;
-[Baseline contract](https://orenlab.github.io/codeclone/book/06-baseline/)
+[Baseline contract](https://orenlab.github.io/codeclone/book/07-baseline/)
 
 ## Documentation
 
 Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)
 
-[Baseline](https://orenlab.github.io/codeclone/book/06-baseline/) &middot;
-[Report](https://orenlab.github.io/codeclone/book/08-report/) &middot;
-[Metrics & gates](https://orenlab.github.io/codeclone/book/15-metrics-and-quality-gates/) &middot;
-[MCP](https://orenlab.github.io/codeclone/book/20-mcp-interface/) &middot;
-[Structural Change Controller](https://orenlab.github.io/codeclone/book/24-structural-change-controller/) &middot;
-[Engineering Memory](https://orenlab.github.io/codeclone/book/26-engineering-memory/) &middot;
-[CLI](https://orenlab.github.io/codeclone/book/09-cli/) &middot;
-[Benchmarking](https://orenlab.github.io/codeclone/book/18-benchmarking/)
+[Baseline](https://orenlab.github.io/codeclone/book/07-baseline/) &middot;
+[Report](https://orenlab.github.io/codeclone/book/05-report/) &middot;
+[Metrics & gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) &middot;
+[MCP](https://orenlab.github.io/codeclone/book/25-mcp-interface/) &middot;
+[Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/) &middot;
+[Engineering Memory](https://orenlab.github.io/codeclone/book/13-engineering-memory/) &middot;
+[CLI](https://orenlab.github.io/codeclone/book/11-cli/) &middot;
+[Benchmarking](https://orenlab.github.io/codeclone/book/20-benchmarking/)
 
 ## License
 

@@ -1,3 +1,6 @@
+<!-- doc-scope: APPENDIX — status enums and typed contracts.
+     owns: enum value tables for intent, registry, verify, and profile statuses.
+     does-not-own: main chapter content — reference back-links only. -->
 # Appendix A. Status Enums
 
 ## Purpose
@@ -68,8 +71,8 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 - `expired`
 
 Semantics are defined in
-[Structural Change Controller § Pre-Change Workflow](../24-structural-change-controller.md#pre-change-workflow)
-and [§ Intent Queue](../24-structural-change-controller.md#intent-queue).
+[Structural Change Controller § Pre-Change Workflow](../12-structural-change-controller.md#pre-change-workflow)
+and [§ Intent Queue](../12-structural-change-controller.md#intent-queue).
 
 ### IntentOwnership
 
@@ -81,7 +84,7 @@ and [§ Intent Queue](../24-structural-change-controller.md#intent-queue).
 - `expired`
 
 Semantics are defined in
-[Structural Change Controller § Workspace Intent Registry](../24-structural-change-controller.md#workspace-intent-registry).
+[Structural Change Controller § Workspace Intent Registry](../12-structural-change-controller.md#workspace-intent-registry).
 
 ### PatchContractStatus
 
@@ -92,7 +95,7 @@ Semantics are defined in
 - `expired`
 
 Semantics are defined in
-[Structural Change Controller § Scope-Aware Patch Contract Verification](../24-structural-change-controller.md#scope-aware-patch-contract-verification).
+[Structural Change Controller § Scope-Aware Patch Contract Verification](../12-structural-change-controller.md#scope-aware-patch-contract-verification).
 
 ### WorkspaceIntentStatus
 
@@ -113,7 +116,7 @@ persisted to the workspace registry.
 
 Priority-ordered. A single file from a higher-priority category overrides
 the entire patch. Semantics are defined in
-[Structural Change Controller § Verification Profiles](../24-structural-change-controller.md#verification-profiles).
+[Structural Change Controller § Verification Profiles](../12-structural-change-controller.md#verification-profiles).
 
 ## Contracts
 

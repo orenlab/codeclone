@@ -1,8 +1,19 @@
+<!-- doc-scope: SINGLE PAGE for Codex plugin — usage AND contract merged.
+     owns: plugin contents, install, skills (4), runtime model, read-only contract,
+       design rules, non-guarantees.
+     does-not-own: MCP contract (→ book/25), engineering memory (→ book/13),
+       change controller (→ book/12).
+     rule: replaces former guide + book/23 split. Do NOT re-split. -->
 # Codex Plugin
 
 **Structural Change Controller for AI-assisted Python development** — native
 Codex plugin. Source lives in `plugins/codeclone/`; public installs use the
 distribution repo `orenlab/codeclone-codex`.
+
+!!! note "Guidance layer only"
+    The plugin contributes discovery metadata, a local MCP definition, and
+    review skills. It does not add a second analyzer or Codex-only finding
+    semantics.
 
 ## What ships in the plugin
 
@@ -79,14 +90,14 @@ Scope-aware Engineering Memory over MCP: `get_relevant_memory` (absolute
 intent declaration or patch verify. Human approve stays in the CodeClone VS Code
 **Memory** view (not MCP).
 
-Optional **semantic search** (Phase 20): off by default in
+Optional **semantic search**: off by default in
 `[tool.codeclone.memory.semantic]`; when enabled, install
 `codeclone[semantic-local]` for local semantic-quality recall (or
 `codeclone[semantic-lancedb]` for the diagnostic sidecar only), rebuild the index, then
 `query_engineering_memory(mode=search, semantic=true)`. Default provider
 `diagnostic` is deterministic, not semantic-quality embeddings; set
 `embedding_provider = "fastembed"` for FastEmbed. See
-[Engineering Memory](book/26-engineering-memory.md).
+[Engineering Memory](book/13-engineering-memory.md).
 
 ## Runtime model
 
@@ -110,6 +121,30 @@ analysis cache, or canonical report artifacts. Change-control and session tools
 may write ephemeral coordination state through the configured workspace intent
 registry (file or SQLite backend) and optional audit records when enabled.
 
+## Design rules
+
+- **Codex-native packaging**: keep source under `plugins/` and publish the
+  marketplace distribution through `orenlab/codeclone-codex`.
+- **Canonical MCP first**: all analysis still flows through `codeclone-mcp`.
+- **Skill guidance, not analysis logic**: the skill teaches conservative-first
+  CodeClone review but does not create new findings.
+- **No hidden installation side effects**: the plugin does not patch
+  `~/.codex/config.toml`.
+- **Source clarity**: the monorepo copy is the source; the public install
+  surface is the `orenlab/codeclone-codex` distribution.
+- **Launcher honesty**: the plugin assumes `codeclone-mcp` is already
+  installable in the current workspace or reachable on `PATH`, and prefers the
+  workspace environment when one is present.
+- **Shell-free launch**: the bundled launcher must stay argv-based and
+  local-stdio-only.
+
+## Non-guarantees
+
+- Codex plugin UI presentation may evolve independently of the plugin manifest
+  content.
+- Users who already configured `codeclone-mcp` manually may still prefer the
+  direct MCP path over the bundled plugin MCP definition.
+
 ## Current limits
 
 - If you already registered `codeclone-mcp` manually, keep only one setup path
@@ -120,6 +155,6 @@ registry (file or SQLite backend) and optional audit records when enabled.
 ## Further reading
 
 - [MCP usage guide](mcp.md)
-- [MCP interface contract](book/20-mcp-interface.md)
-- [Engineering Memory](book/26-engineering-memory.md)
-- [Structural Change Controller](book/24-structural-change-controller.md)
+- [MCP interface contract](book/25-mcp-interface.md)
+- [Engineering Memory](book/13-engineering-memory.md)
+- [Structural Change Controller](book/12-structural-change-controller.md)

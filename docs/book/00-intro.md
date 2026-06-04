@@ -1,3 +1,6 @@
+<!-- doc-scope: BOOK CHARTER — goals, contract rule, reading paths.
+     owns: what the book is, "code wins" rule, reading-path suggestions.
+     does-not-own: the TOC (→ README.md), terminology (→ 01), architecture map (→ 02). -->
 # 00. Intro
 
 ## Purpose
@@ -83,21 +86,21 @@ Refs:
 ## Recommended reading paths
 
 - CI contract path:
-  [03-contracts-exit-codes.md](03-contracts-exit-codes.md) →
-  [06-baseline.md](06-baseline.md) →
-  [07-cache.md](07-cache.md) →
-  [08-report.md](08-report.md) →
-  [09-cli.md](09-cli.md)
+  [09-exit-codes.md](09-exit-codes.md) →
+  [07-baseline.md](07-baseline.md) →
+  [08-cache.md](08-cache.md) →
+  [05-report.md](05-report.md) →
+  [11-cli.md](11-cli.md)
 - Metrics governance path:
-  [04-config-and-defaults.md](04-config-and-defaults.md) →
+  [10-config-and-defaults.md](10-config-and-defaults.md) →
   [15-health-score.md](15-health-score.md) →
-  [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md) →
-  [16-dead-code-contract.md](16-dead-code-contract.md) →
+  [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md) →
+  [17-dead-code-contract.md](17-dead-code-contract.md) →
   [19-inline-suppressions.md](19-inline-suppressions.md) →
-  [17-suggestions-and-clone-typing.md](17-suggestions-and-clone-typing.md)
+  [18-suggestions-and-clone-typing.md](18-suggestions-and-clone-typing.md)
 - Determinism and compatibility path:
-  [12-determinism.md](12-determinism.md) →
-  [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
+  [22-determinism.md](22-determinism.md) →
+  [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md)
 - Benchmarking path:
-  [12-determinism.md](12-determinism.md) →
-  [18-benchmarking.md](18-benchmarking.md)
+  [22-determinism.md](22-determinism.md) →
+  [20-benchmarking.md](20-benchmarking.md)

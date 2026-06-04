@@ -1,3 +1,9 @@
+<!-- doc-scope: MCP INTERFACE CONTRACT — normative tool and resource definitions.
+     owns: tool schemas, resource URIs, contract rules, IDE governance channel,
+       public surface table.
+     does-not-own: MCP usage guide (→ ../mcp.md), change controller (→ 12),
+       engineering memory (→ 13).
+     rule: this is the CONTRACT. docs/mcp.md is the GUIDE. Do not merge. -->
 # 20. MCP Interface
 
 ## Purpose
@@ -167,10 +173,10 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
     **Recoverable** intents do not grant foreign attribution. Queued foreign
     intents do not populate `foreign_dirty_overlaps`. `files_for_scope_check` is
     agent evidence only. Full pipeline and field reference:
-    [finish_controlled_change](24-structural-change-controller.md#finish_controlled_change).
+    [finish_controlled_change](12-structural-change-controller.md#finish_controlled_change).
     `manage_change_intent(list_workspace)` returns repo-level
     `workspace_dirty_summary` only. Registry lazy close vs `gc_workspace`: see
-    [Workspace hygiene and registry consistency](24-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
+    [Workspace hygiene and registry consistency](12-structural-change-controller.md#workspace-hygiene-and-registry-consistency).
 
 ### Atomic change control tools (advanced / diagnostic)
 
@@ -178,9 +184,9 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
 |-----------------------------|--------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `manage_change_intent`      | `action`, `root`, `run_id`, `intent_id`, `scope`, `on_conflict`, `ttl_seconds`, `lease_seconds`, `changed_files` or `diff_ref` | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace. Use for queue/promote/recover operations alongside workflow tools                                                                                                                                                                                                                                       |
 | `get_blast_radius`          | `run_id`, `files`, `depth`, `include`                                                                                          | Pre-change risk boundary: full transitive graph, custom include filters                                                                                                                                                                                                                                                                                                                                                       |
-| `get_relevant_memory`       | `root`, `scope`, `intent_id`, `symbols`, `max_records`, `include_stale`, `include_drafts`                                      | Ranked engineering memory for declared edit scope. Auto-bootstraps store when `mcp_sync_policy=bootstrap_if_missing` (default). See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                                                            |
-| `query_engineering_memory`  | `root`, `mode`, …, optional `semantic` (search only)   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. `filters` supports `types`, `statuses`, `confidences`, and `match_mode` (`any`\|`all`) for search. `semantic=true` blends LanceDB proximity when `[tool.codeclone.memory.semantic] enabled` and index built (default off). See [Engineering Memory](26-engineering-memory.md)                                                                                                                                                                                                |
-| `manage_engineering_memory` | `root`, `action`, …                                                                                                            | Agent-side: `refresh_from_run`, `rebuild_semantic_index`, `record_candidate`, `validate_claims`, `propose_from_receipt`. Human approve/reject/archive: VS Code **Memory** view via IDE governance channel (`register_ide_governance`, `prepare_governance`, `commit_governance` with `--ide-governance-channel`). Agents calling `approve`/`reject`/`archive` receive `governance_mode_unavailable`. See [Engineering Memory](26-engineering-memory.md) |
+| `get_relevant_memory`       | `root`, `scope`, `intent_id`, `symbols`, `max_records`, `include_stale`, `include_drafts`                                      | Ranked engineering memory for declared edit scope. Auto-bootstraps store when `mcp_sync_policy=bootstrap_if_missing` (default). See [Engineering Memory](13-engineering-memory.md)                                                                                                                                                                                                                                            |
+| `query_engineering_memory`  | `root`, `mode`, …, optional `semantic` (search only)   | Mode router: search, get, for_path, for_symbol, stale, coverage, status. `filters` supports `types`, `statuses`, `confidences`, and `match_mode` (`any`\|`all`) for search. `semantic=true` blends LanceDB proximity when `[tool.codeclone.memory.semantic] enabled` and index built (default off). See [Engineering Memory](13-engineering-memory.md)                                                                                                                                                                                                |
+| `manage_engineering_memory` | `root`, `action`, …                                                                                                            | Agent-side: `refresh_from_run`, `rebuild_semantic_index`, `record_candidate`, `validate_claims`, `propose_from_receipt`. Human approve/reject/archive: VS Code **Memory** view via IDE governance channel (`register_ide_governance`, `prepare_governance`, `commit_governance` with `--ide-governance-channel`). Agents calling `approve`/`reject`/`archive` receive `governance_mode_unavailable`. See [Engineering Memory](13-engineering-memory.md) |
 | `check_patch_contract`      | `mode`, `run_id`, `before_run_id`, `after_run_id`, `intent_id`, `strictness`, `changed_files` or `diff_ref`                    | Manual budget query or step-by-step verification                                                                                                                                                                                                                                                                                                                                                                              |
 | `create_review_receipt`     | `run_id`, `intent_id`, `format`, `include_blast_radius`, `include_patch_contract`                                              | Manual receipt generation                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `validate_review_claims`    | `text`, `run_id`, `require_citations`, `patch_health_delta`                                                                    | Standalone citation-based overclaim detection; pass `patch_health_delta` from verify when using the atomic workflow                                                                                                                                                                                                                                                                                                           |
@@ -213,8 +219,8 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
     gate changes to the declared scope. Intent-scope regressions produce
     contract violations; external regressions are reported as informational
     context. Queued intents are rejected with `reason="intent_not_active"`.
-    See [Scope-Aware Patch Contract Verification](24-structural-change-controller.md#scope-aware-patch-contract-verification)
-    and [Verify Ergonomics](24-structural-change-controller.md#verify-ergonomics).
+    See [Scope-Aware Patch Contract Verification](12-structural-change-controller.md#scope-aware-patch-contract-verification)
+    and [Verify Ergonomics](12-structural-change-controller.md#verify-ergonomics).
 
 ### Session-local tools
 
@@ -293,7 +299,7 @@ not trigger analysis.
   inventory of security-relevant capability surfaces. It does not claim
   vulnerabilities or exploitability.
 - `validate_review_claims` detects deterministic overclaims. See
-  [28-claim-guard.md](28-claim-guard.md) for the full pattern catalog.
+  [14-claim-guard.md](14-claim-guard.md) for the full pattern catalog.
 
 ---
 
@@ -328,8 +334,8 @@ not trigger analysis.
 
 ## See also
 
-- [28-claim-guard.md](28-claim-guard.md) — citation-based review validation
-- [24-structural-change-controller.md](24-structural-change-controller.md) — change control workflow
-- [09-cli.md](09-cli.md) — CLI reference
-- [08-report.md](08-report.md) — canonical report schema
+- [14-claim-guard.md](14-claim-guard.md) — citation-based review validation
+- [12-structural-change-controller.md](12-structural-change-controller.md) — change control workflow
+- [11-cli.md](11-cli.md) — CLI reference
+- [05-report.md](05-report.md) — canonical report schema
 - [MCP deep dive](../mcp.md) — architecture, client setup, workflows, and prompt patterns

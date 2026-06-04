@@ -1,3 +1,8 @@
+<!-- doc-scope: CLI BEHAVIOR, MODES, AND UX.
+     owns: CLI modes, output format selection, interactive hints, controller flags.
+     does-not-own: exit-code enum (→ 09), config keys (→ 10), memory subcommands
+       (→ 13), session/audit details (→ 12).
+     rule: keep LEAN — push normative tables to their canonical owners. -->
 # 09. CLI
 
 ## Purpose
@@ -116,7 +121,7 @@ Refs:
     - `search` accepts `--match any|all` for FTS token matching (default `any`)
       and `--semantic` to blend vector proximity when the index is available.
     - Requires a prior normal analysis run or cached report for `init`.
-    - Full contract: [Engineering Memory](26-engineering-memory.md).
+    - Full contract: [Engineering Memory](13-engineering-memory.md).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.

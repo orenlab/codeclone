@@ -1,3 +1,7 @@
+<!-- doc-scope: SARIF integration — usage and contract on one page.
+     owns: SARIF output format, IDE code-scanning integration, upload guides.
+     does-not-own: report contract (→ book/05), HTML rendering (→ book/06).
+     rule: model page — one surface, one file, contract + usage co-located. -->
 # SARIF for IDEs and Code Scanning
 
 ## Purpose
@@ -83,6 +87,6 @@ Contract-adjacent coverage includes:
 
 ## See also
 
-- [08. Report](book/08-report.md)
-- [10. HTML Render](book/10-html-render.md)
+- [08. Report](book/05-report.md)
+- [10. HTML Render](book/06-html-render.md)
 - [Examples / Sample Report](examples/report.md)

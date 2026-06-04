@@ -1,4 +1,4 @@
-# Zensical configuration — migrated from mkdocs.yml.
+# Zensical configuration for CodeClone docs site.
 # Docs: https://zensical.org/docs/
 
 [project]
@@ -16,48 +16,63 @@ exclude_docs = ["README-pypi.md"]
 extra_css = ["assets/stylesheets/extra.css"]
 
 nav = [
-    { "Home" = "README.md" },
-    { "Getting Started" = "getting-started.md" },
-    { "Contracts Book" = [
+    { "Home" = "index.md" },
+    { "Get started" = [
+        { "Getting Started" = "getting-started.md" },
+        { "Example report" = "examples/report.md" },
+    ] },
+    { "Guides" = [
+        { "How CodeClone works" = "architecture.md" },
+        { "MCP for AI agents" = "mcp.md" },
+        { "Integrations" = [
+            { "VS Code" = "vscode-extension.md" },
+            { "Cursor" = "cursor-plugin.md" },
+            { "Codex" = "codex-plugin.md" },
+            { "Claude Desktop" = "claude-desktop-bundle.md" },
+            { "SARIF & code scanning" = "sarif.md" },
+        ] },
+    ] },
+    { "Reference" = [
         { "Overview" = "book/README.md" },
         { "Foundations" = [
             { "Intro" = "book/00-intro.md" },
-            { "Architecture Map" = "book/01-architecture-map.md" },
-            { "Terminology" = "book/02-terminology.md" },
+            { "Terminology" = "book/01-terminology.md" },
+            { "Architecture Map" = "book/02-architecture-map.md" },
         ] },
-        { "Contract Spine" = [
-            { "Exit Codes" = "book/03-contracts-exit-codes.md" },
-            { "Config and Defaults" = "book/04-config-and-defaults.md" },
-            { "Core Pipeline" = "book/05-core-pipeline.md" },
-            { "Baseline" = "book/06-baseline.md" },
-            { "Cache" = "book/07-cache.md" },
-            { "Report" = "book/08-report.md" },
+        { "Pipeline & data" = [
+            { "Core Pipeline" = "book/03-core-pipeline.md" },
+            { "CFG Semantics" = "book/04-cfg-semantics.md" },
+            { "Report" = "book/05-report.md" },
+            { "HTML Render" = "book/06-html-render.md" },
+            { "Baseline" = "book/07-baseline.md" },
+            { "Cache" = "book/08-cache.md" },
         ] },
-        { "Interfaces" = [
-            { "CLI" = "book/09-cli.md" },
-            { "MCP Interface" = "book/20-mcp-interface.md" },
-            { "VS Code Extension" = "book/21-vscode-extension.md" },
-            { "Claude Desktop Bundle" = "book/22-claude-desktop-bundle.md" },
-            { "Codex Plugin" = "book/23-codex-plugin.md" },
-            { "Cursor Plugin" = "book/25-cursor-plugin.md" },
-            { "Structural Change Controller" = "book/24-structural-change-controller.md" },
-            { "Engineering Memory" = "book/26-engineering-memory.md" },
-            { "Claim Guard" = "book/28-claim-guard.md" },
-            { "HTML Render" = "book/10-html-render.md" },
+        { "Contracts & config" = [
+            { "Exit Codes" = "book/09-exit-codes.md" },
+            { "Config and Defaults" = "book/10-config-and-defaults.md" },
+            { "CLI" = "book/11-cli.md" },
         ] },
-        { "System Properties" = [
-            { "Security Model" = "book/11-security-model.md" },
-            { "Determinism" = "book/12-determinism.md" },
-            { "Testing as Spec" = "book/13-testing-as-spec.md" },
-            { "Compatibility and Versioning" = "book/14-compatibility-and-versioning.md" },
+        { "Change control" = [
+            { "Structural Change Controller" = "book/12-structural-change-controller.md" },
+            { "Engineering Memory" = "book/13-engineering-memory.md" },
+            { "Claim Guard" = "book/14-claim-guard.md" },
         ] },
-        { "Quality" = [
+        { "Quality signals" = [
             { "Health Score" = "book/15-health-score.md" },
-            { "Metrics and Gates" = "book/15-metrics-and-quality-gates.md" },
-            { "Dead Code" = "book/16-dead-code-contract.md" },
-            { "Suggestions and Clone Typing" = "book/17-suggestions-and-clone-typing.md" },
-            { "Benchmarking" = "book/18-benchmarking.md" },
+            { "Metrics and Gates" = "book/16-metrics-and-quality-gates.md" },
+            { "Dead Code" = "book/17-dead-code-contract.md" },
+            { "Suggestions and Clone Typing" = "book/18-suggestions-and-clone-typing.md" },
             { "Inline Suppressions" = "book/19-inline-suppressions.md" },
+            { "Benchmarking" = "book/20-benchmarking.md" },
+        ] },
+        { "System properties" = [
+            { "Security Model" = "book/21-security-model.md" },
+            { "Determinism" = "book/22-determinism.md" },
+            { "Testing as Spec" = "book/23-testing-as-spec.md" },
+            { "Compatibility and Versioning" = "book/24-compatibility-and-versioning.md" },
+        ] },
+        { "MCP interface" = [
+            { "MCP Interface Contract" = "book/25-mcp-interface.md" },
         ] },
         { "Appendix" = [
             { "Status Enums" = "book/appendix/a-status-enums.md" },
@@ -65,22 +80,14 @@ nav = [
             { "Error Catalog" = "book/appendix/c-error-catalog.md" },
         ] },
     ] },
-    { "Deep Dives" = [
-        { "Architecture Narrative" = "architecture.md" },
-        { "CFG Semantics" = "cfg.md" },
-        { "MCP for AI Agents" = "mcp.md" },
-        { "VS Code Extension" = "vscode-extension.md" },
-        { "Claude Desktop Bundle" = "claude-desktop-bundle.md" },
-        { "Codex Plugin" = "codex-plugin.md" },
-        { "Cursor Plugin" = "cursor-plugin.md" },
+    { "Legal & plans" = [
         { "Privacy Policy" = "privacy-policy.md" },
         { "Terms of Use" = "terms-of-use.md" },
         { "Plans and Retention" = "plans-and-retention.md" },
-        { "SARIF for IDEs" = "sarif.md" },
-        { "Publishing and Docs Site" = "publishing.md" },
     ] },
-    { "Examples" = [
-        { "Sample Report" = "examples/report.md" },
+    { "Maintainers" = [
+        { "Publishing the docs site" = "publishing.md" },
+        { "Releasing & storefront sync" = "releasing.md" },
     ] },
 ]
 

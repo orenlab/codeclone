@@ -1,3 +1,6 @@
+<!-- doc-scope: HEALTH SCORE MODEL and evolution policy.
+     owns: score formula, grade thresholds, dimension weights, evolution rules.
+     does-not-own: gate flags (→ 16), report schema (→ 05). -->
 # Health Score
 
 ## Purpose
@@ -92,6 +95,6 @@ If that happens:
 
 ## See also
 
-- [08-report.md](08-report.md)
-- [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- [05-report.md](05-report.md)
+- [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md)
+- [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)

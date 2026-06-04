@@ -163,7 +163,7 @@ When contributing to MCP:
 - MCP reuses pipeline/report contracts — do not create a second analysis truth path.
 - Tool names, resource URIs, and response shapes are public surfaces — changes require tests and docs.
 
-See `docs/mcp.md` and `docs/book/20-mcp-interface.md` for details.
+See `docs/mcp.md` and `docs/book/25-mcp-interface.md` for details.
 
 ---
 

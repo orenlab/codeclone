@@ -1,3 +1,8 @@
+<!-- doc-scope: BASELINE CONTRACT (schema v2.1).
+     owns: baseline schema, trust model, integrity (payload_sha256), compatibility,
+       validation order.
+     does-not-own: CI setup (→ ../getting-started.md), cache (→ 08),
+       versioning policy (→ 24). -->
 # 06. Baseline
 
 ## Purpose

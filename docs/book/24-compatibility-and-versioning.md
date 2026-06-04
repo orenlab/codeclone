@@ -1,3 +1,8 @@
+<!-- doc-scope: COMPATIBILITY AND VERSIONING RULES.
+     owns: python-tag policy, schema version rules, fingerprint version,
+       breaking-change criteria.
+     does-not-own: baseline schema (→ 07), cache schema (→ 08),
+       report schema (→ 05). -->
 # 14. Compatibility and Versioning
 
 ## Purpose

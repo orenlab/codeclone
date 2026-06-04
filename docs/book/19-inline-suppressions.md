@@ -1,3 +1,6 @@
+<!-- doc-scope: INLINE SUPPRESSIONS contract (# codeclone: ignore[...]).
+     owns: suppression syntax, rule catalog, scope semantics, finding interaction.
+     does-not-own: dead-code rules (→ 17), report schema (→ 05). -->
 # 19. Inline Suppressions
 
 ## Purpose
@@ -106,5 +109,5 @@ Refs:
 
 ## See also
 
-- [16-dead-code-contract.md](16-dead-code-contract.md)
-- [08-report.md](08-report.md)
+- [17-dead-code-contract.md](17-dead-code-contract.md)
+- [05-report.md](05-report.md)

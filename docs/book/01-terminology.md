@@ -1,3 +1,7 @@
+<!-- doc-scope: GLOSSARY — single canonical home for all CodeClone terms.
+     owns: every defined term used across docs and codebase.
+     does-not-own: architecture (→ 02), pipeline (→ 03).
+     rule: new terms go HERE, nowhere else. -->
 # 02. Terminology
 
 ## Purpose

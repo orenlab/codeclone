@@ -1,3 +1,7 @@
+<!-- doc-scope: PLANS, PRICING TIERS, AND DATA RETENTION.
+     owns: OSS/Team/Enterprise tier definitions, retention policy.
+     does-not-own: config keys (→ book/10), change controller internals (→ book/12).
+     rule: cross-link to contracts, do not restate them. -->
 # Plans and Retention
 
 CodeClone is open source and runs locally. Some coordination and audit features
@@ -75,8 +79,8 @@ premium support details:
 
 ## Related configuration
 
-See [Config and Defaults — workspace intent registry](book/04-config-and-defaults.md)
-and [Structural Change Controller — workspace intent registry](book/24-structural-change-controller.md).
+See [Config and Defaults — workspace intent registry](book/10-config-and-defaults.md)
+and [Structural Change Controller — workspace intent registry](book/12-structural-change-controller.md).
 
 Open-source keys:
 

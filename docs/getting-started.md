@@ -1,3 +1,8 @@
+<!-- doc-scope: SOLE OWNER of install, first-run, CI setup, and MCP registration.
+     owns: install snippets, first-run walkthrough, CI pipeline, MCP quick-start.
+     does-not-own: contract details (→ book/), architecture (→ architecture.md),
+       MCP tool reference (→ mcp.md).
+     rule: other pages link HERE for install — never duplicate install blocks. -->
 # Getting Started
 
 Install CodeClone, run your first analysis, set up CI gating, and connect
@@ -102,7 +107,7 @@ codeclone . --fail-on-typing-regression --fail-on-docstring-regression
 codeclone . --coverage coverage.xml --fail-on-untested-hotspots
 ```
 
-See [Metrics and quality gates](book/15-metrics-and-quality-gates.md) for the
+See [Metrics and quality gates](book/16-metrics-and-quality-gates.md) for the
 full gate reference.
 
 ### GitHub Action
@@ -144,7 +149,7 @@ repos:
 | `5`  | Internal error                                      |
 
 Contract errors (`2`) take precedence over gating failures (`3`).
-See [Exit codes](book/03-contracts-exit-codes.md).
+See [Exit codes](book/09-exit-codes.md).
 
 ## MCP Setup
 
@@ -224,7 +229,7 @@ boundary:
 4. **Generate receipt** — auditable artifact
 5. **Validate claims** — cross-check review text against report
 
-See [Structural Change Controller](book/24-structural-change-controller.md).
+See [Structural Change Controller](book/12-structural-change-controller.md).
 
 ## Configuration
 
@@ -241,11 +246,11 @@ block_min_stmt = 8
 
 Precedence: CLI flags > `pyproject.toml` > built-in defaults.
 
-See [Config and defaults](book/04-config-and-defaults.md).
+See [Config and defaults](book/10-config-and-defaults.md).
 
 ## Next Steps
 
 - [Architecture narrative](architecture.md) — how the pipeline works
-- [Baseline contract](book/06-baseline.md) — trust model and schema
-- [MCP interface contract](book/20-mcp-interface.md) — tool surface and guarantees
-- [Report contract](book/08-report.md) — canonical JSON schema
+- [Baseline contract](book/07-baseline.md) — trust model and schema
+- [MCP interface contract](book/25-mcp-interface.md) — tool surface and guarantees
+- [Report contract](book/05-report.md) — canonical JSON schema

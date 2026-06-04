@@ -1,3 +1,6 @@
+<!-- doc-scope: DEAD-CODE DETECTION and test-boundary policy.
+     owns: dead-code liveness rules, test-boundary classification, confidence levels.
+     does-not-own: pipeline (→ 03), suppressions (→ 19), CLI flags (→ 11). -->
 # 16. Dead Code Contract
 
 ## Purpose
@@ -211,6 +214,6 @@ Refs:
 
 ## See also
 
-- [05-core-pipeline.md](05-core-pipeline.md)
-- [09-cli.md](09-cli.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- [03-core-pipeline.md](03-core-pipeline.md)
+- [11-cli.md](11-cli.md)
+- [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)

@@ -28,27 +28,27 @@ MCP_BOOK_URL: Final = f"{DOCS_URL}book/"
 MCP_GUIDE_URL: Final = f"{DOCS_URL}mcp/"
 MCP_INTERFACE_DOC_LINK: Final[tuple[str, str]] = (
     "MCP interface contract",
-    f"{MCP_BOOK_URL}20-mcp-interface/",
+    f"{MCP_BOOK_URL}25-mcp-interface/",
 )
 BASELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Baseline contract",
-    f"{MCP_BOOK_URL}06-baseline/",
+    f"{MCP_BOOK_URL}07-baseline/",
 )
 CONFIG_DOC_LINK: Final[tuple[str, str]] = (
     "Config and defaults",
-    f"{MCP_BOOK_URL}04-config-and-defaults/",
+    f"{MCP_BOOK_URL}10-config-and-defaults/",
 )
 REPORT_DOC_LINK: Final[tuple[str, str]] = (
     "Report contract",
-    f"{MCP_BOOK_URL}08-report/",
+    f"{MCP_BOOK_URL}05-report/",
 )
 CLI_DOC_LINK: Final[tuple[str, str]] = (
     "CLI contract",
-    f"{MCP_BOOK_URL}09-cli/",
+    f"{MCP_BOOK_URL}11-cli/",
 )
 PIPELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Core pipeline",
-    f"{MCP_BOOK_URL}05-core-pipeline/",
+    f"{MCP_BOOK_URL}03-core-pipeline/",
 )
 SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
     "Inline suppressions contract",
@@ -57,7 +57,7 @@ SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
 MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = ("MCP usage guide", MCP_GUIDE_URL)
 CHANGE_CONTROL_DOC_LINK: Final[tuple[str, str]] = (
     "Structural change controller",
-    f"{MCP_BOOK_URL}24-structural-change-controller/",
+    f"{MCP_BOOK_URL}12-structural-change-controller/",
 )
 HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "workflow": MCPHelpTopicSpec(

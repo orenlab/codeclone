@@ -66,7 +66,7 @@ reads. Default policy auto-bootstraps on `get_relevant_memory`; use
 | Post-edit proposals  | `finish(..., propose_memory=true)`                                       |
 
 Full playbook: `codeclone-engineering-memory` skill and
-`docs/book/26-engineering-memory.md`. Human approval via VS Code Memory view (not
+`docs/book/13-engineering-memory.md`. Human approval via VS Code Memory view (not
 MCP) required to promote
 drafts — agents cannot activate records via MCP.
 

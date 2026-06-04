@@ -1,3 +1,7 @@
+<!-- doc-scope: AUTHORITATIVE MODULE TABLE — maps source paths to chapters/tests.
+     owns: module-to-chapter routing table.
+     does-not-own: narrative architecture (→ ../architecture.md), module internals.
+     rule: this is the MAP. architecture.md is the NARRATIVE. Do not merge. -->
 # 01. Architecture Map
 
 ## Purpose
@@ -132,14 +136,14 @@ Refs:
 
 | Topic                                 | Primary chapters                                                                                                 |
 |---------------------------------------|------------------------------------------------------------------------------------------------------------------|
-| CLI behavior and failure routing      | [03-contracts-exit-codes.md](03-contracts-exit-codes.md), [09-cli.md](09-cli.md)                                 |
-| Config precedence and defaults        | [04-config-and-defaults.md](04-config-and-defaults.md)                                                           |
-| Core processing pipeline              | [05-core-pipeline.md](05-core-pipeline.md)                                                                       |
-| Clone baseline trust/compat/integrity | [06-baseline.md](06-baseline.md)                                                                                 |
-| Cache trust and fail-open behavior    | [07-cache.md](07-cache.md)                                                                                       |
-| Report schema and provenance          | [08-report.md](08-report.md), [10-html-render.md](10-html-render.md)                                             |
-| MCP agent surface                     | [20-mcp-interface.md](20-mcp-interface.md), [28-claim-guard.md](28-claim-guard.md)                               |
+| CLI behavior and failure routing      | [09-exit-codes.md](09-exit-codes.md), [11-cli.md](11-cli.md)                                 |
+| Config precedence and defaults        | [10-config-and-defaults.md](10-config-and-defaults.md)                                                           |
+| Core processing pipeline              | [03-core-pipeline.md](03-core-pipeline.md)                                                                       |
+| Clone baseline trust/compat/integrity | [07-baseline.md](07-baseline.md)                                                                                 |
+| Cache trust and fail-open behavior    | [08-cache.md](08-cache.md)                                                                                       |
+| Report schema and provenance          | [05-report.md](05-report.md), [06-html-render.md](06-html-render.md)                                             |
+| MCP agent surface                     | [25-mcp-interface.md](25-mcp-interface.md), [14-claim-guard.md](14-claim-guard.md)                               |
 | Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
-| Metrics gates and metrics baseline    | [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)                                               |
-| Dead-code liveness policy             | [16-dead-code-contract.md](16-dead-code-contract.md)                                                             |
-| Determinism and versioning policy     | [12-determinism.md](12-determinism.md), [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md) |
+| Metrics gates and metrics baseline    | [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)                                               |
+| Dead-code liveness policy             | [17-dead-code-contract.md](17-dead-code-contract.md)                                                             |
+| Determinism and versioning policy     | [22-determinism.md](22-determinism.md), [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md) |

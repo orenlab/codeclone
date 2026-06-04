@@ -1,3 +1,9 @@
+<!-- doc-scope: SINGLE PAGE for Cursor plugin — usage AND contract merged.
+     owns: plugin contents, install, skills (6), agent, rules (3), hooks (3),
+       distribution, skill/hook/agent contracts, design rules, non-guarantees.
+     does-not-own: MCP contract (→ book/25), engineering memory (→ book/13),
+       change controller (→ book/12).
+     rule: replaces former guide + book/25-cursor split. Do NOT re-split. -->
 # Cursor Plugin
 
 **Structural Change Controller for AI-assisted Python development** — native
@@ -10,12 +16,17 @@ Plugin manifest version (`plugins/cursor-codeclone/.cursor-plugin/plugin.json`):
 **`0.1.0`** (independent of the CodeClone Python package version in
 `pyproject.toml`).
 
+!!! note "Guidance layer only"
+    The plugin contributes discovery metadata, a local MCP definition, skills,
+    rules, hooks, and an agent definition. It does not add a second analyzer or
+    Cursor-only finding semantics.
+
 ## What ships in the plugin
 
 | Component | Path | Purpose |
 |-----------|------|---------|
 | `.cursor-plugin/plugin.json` | Manifest | `skills/`, `rules/`, `agents/`, `hooks/hooks.json`, `mcp.json` |
-| `mcp.json` | MCP | `python3` + `./scripts/launch_mcp.py` → resolves `codeclone-mcp` (`.venv` → Poetry → `PATH`) |
+| `mcp.json` | MCP | `python3` + `./scripts/launch_mcp.py` — resolves `codeclone-mcp` (`.venv` → Poetry → `PATH`) |
 | Skills (6) | `skills/*/` | See table below |
 | Agent | `agents/structural-reviewer.md` | Invoke id: **`codeclone-structural-reviewer`** |
 | Rules (3) | `rules/*.mdc` | See **Rules** |
@@ -134,7 +145,7 @@ plus `embedding_provider = "fastembed"` for local semantic-quality recall;
 provider. Human
 approve/reject: VS Code **Memory** view only (MCP agents cannot approve).
 
-Full contract: [Engineering Memory](book/26-engineering-memory.md).
+Full contract: [Engineering Memory](book/13-engineering-memory.md).
 
 ## Agent
 
@@ -142,7 +153,9 @@ Full contract: [Engineering Memory](book/26-engineering-memory.md).
 
 Defined in `agents/structural-reviewer.md` with frontmatter `name:
 codeclone-structural-reviewer`. Read-only review protocol; does not declare
-intent or modify files.
+intent or modify files. The structural reviewer agent uses CodeClone MCP tools
+exclusively for evidence, does not modify files or declare change intent, and
+does not treat report-only signals as CI failures or vulnerability claims.
 
 ## Rules
 
@@ -157,12 +170,27 @@ All three ship under `plugins/cursor-codeclone/rules/`:
 The change-control **skill** expands profiles and queue/promote; the
 **change-control-gate** rule is the always-on prohibition layer.
 
+### Skill contract invariants
+
+Each skill follows these invariants:
+
+- **MCP tools only** — no CLI or local report fallbacks
+- **Absolute roots** — analysis and memory tools require absolute `root`
+- **Source of truth** — report CodeClone findings as-is
+- **Conservative first pass** unless the user requests deeper sensitivity
+- **Workflow tools preferred** — `start_controlled_change` /
+  `finish_controlled_change` for edits; atomic verify is advanced/fallback
+- **Engineering Memory** — optional semantic search when server index is built;
+  human approve via VS Code only
+
+Skills are invocable via `/name` in Cursor chat (see each `SKILL.md`).
+
 ## Hooks
 
 Documented from `hooks/hooks.json` and installers — **hook Python sources not
 edited in doc-only passes.**
 
-### Why Settings → Hooks can show “Configured Hooks (0)”
+### Why Settings → Hooks can show "Configured Hooks (0)"
 
 | Source | Path | Shown in Hooks UI |
 |--------|------|-------------------|
@@ -191,6 +219,16 @@ Plugin manifest commands use `python "${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py"
 Without an authorized intent, only read-only Git inspection shell commands are
 allowed; `git apply`, commits, and direct `.git/**` writes are blocked.
 
+`enforce_scope` (`python` vs `repo`) is configured in `.cursor/codeclone-hooks.json`
+or `CODECLONE_HOOKS_ENFORCE_SCOPE`.
+
+## Distribution
+
+- **Monorepo source:** `plugins/cursor-codeclone/`
+- **Marketplace:** not in `.agents/plugins/marketplace.json` (Codex-only entry)
+- **Install:** Cursor local plugin discovery (recommended) or `.cursor/` symlinks
+- **Standalone releases:** ship full `plugins/codeclone/scripts/launch_mcp.py` body
+
 ## Runtime model
 
 Additive: local MCP via `launch_mcp.py`, six skills, three rules (two
@@ -210,6 +248,21 @@ Change-control and session tools may write ephemeral intent state
 (`.cache/codeclone/intents/` file backend by default; SQLite optional) and
 optional audit rows when `audit_enabled=true`.
 
+## Design rules
+
+- **Cursor-native packaging** under `plugins/cursor-codeclone/`
+- **Canonical MCP first** — launcher resolves `codeclone-mcp`, no tool filtering
+- **Rules + skills** — `change-control-gate` always on; skills carry workflows
+- **Hook safety** — `preToolUse` fail-closed; `postToolUse` / `stop` advisory
+- **No hidden installs** — plugin does not patch Cursor or install Python packages
+
+## Non-guarantees
+
+- Cursor UI for skills/hooks may evolve independently of manifest content.
+- Manual symlink installs may omit bundled rules/hooks unless the full plugin dir
+  is registered.
+- Hook behavior follows Cursor's hook API contract.
+
 ## Current limits
 
 - Duplicate MCP registration (plugin `mcp.json` + manual `codeclone-mcp` entry)
@@ -223,7 +276,6 @@ optional audit rows when `audit_enabled=true`.
 ## Further reading
 
 - [MCP usage guide](mcp.md)
-- [MCP interface contract](book/20-mcp-interface.md)
-- [Engineering Memory](book/26-engineering-memory.md)
-- [Structural Change Controller](book/24-structural-change-controller.md)
-- [Cursor plugin contract](book/25-cursor-plugin.md)
+- [MCP interface contract](book/25-mcp-interface.md)
+- [Engineering Memory](book/13-engineering-memory.md)
+- [Structural Change Controller](book/12-structural-change-controller.md)

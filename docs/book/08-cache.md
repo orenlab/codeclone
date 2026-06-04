@@ -1,3 +1,6 @@
+<!-- doc-scope: CACHE CONTRACT (schema v2.8).
+     owns: cache schema, profile compatibility, fail-open behavior, size guards.
+     does-not-own: baseline (→ 07), pipeline (→ 03). -->
 # 07. Cache
 
 ## Purpose
