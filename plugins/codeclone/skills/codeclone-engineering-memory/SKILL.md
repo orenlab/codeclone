@@ -48,7 +48,8 @@ Repository default: `memory.semantic.enabled=false`. To use semantic blend:
 
 1. Enable `[tool.codeclone.memory.semantic]` in `pyproject.toml`
 2. `pip install 'codeclone[semantic-lancedb]'`
-3. `codeclone memory semantic rebuild`
+3. `manage_engineering_memory(action=rebuild_semantic_index)` (MCP) or
+   `codeclone memory semantic rebuild` (CLI/CI)
 4. `query_engineering_memory(mode=search, semantic=true, …)`
 
 Without a built index, search stays FTS-only (`semantic.used: false` in the
@@ -70,6 +71,7 @@ semantic-quality embeddings — do not present hits as LLM recall.
 | Validate claims before finish   | `manage_engineering_memory(action=validate_claims, text=…)`                                 | Memory-layer guard           |
 | Post-edit batch proposal        | `finish_controlled_change(..., propose_memory=true)`                                        | On **accept** only           |
 | Refresh system facts from run   | `manage_engineering_memory(action=refresh_from_run, run_id?)`                               | Force ingest                 |
+| Rebuild semantic LanceDB sidecar | `manage_engineering_memory(action=rebuild_semantic_index)`                                 | After semantic enabled + extras |
 | Atomic fallback                 | `manage_engineering_memory(action=propose_from_receipt, text=…, intent_id?)`                | When finish hook unavailable |
 
 ### Write rules

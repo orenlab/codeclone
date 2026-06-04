@@ -126,7 +126,9 @@ workflow tools are unavailable.
 
 Scope memory before edits; optional `semantic=true` on `mode=search` when
 `[tool.codeclone.memory.semantic]` is enabled, the semantic sidecar is installed,
-and `codeclone memory semantic rebuild` succeeded. Use `codeclone[semantic-local]`
+and semantic index rebuild succeeded (`manage_engineering_memory`
+`action=rebuild_semantic_index` or CLI `memory semantic rebuild`). Use
+`codeclone[semantic-local]`
 plus `embedding_provider = "fastembed"` for local semantic-quality recall;
 `codeclone[semantic-lancedb]` alone supports only the deterministic diagnostic
 provider. Human

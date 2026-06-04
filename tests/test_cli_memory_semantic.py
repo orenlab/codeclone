@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+import codeclone.memory.semantic as semantic_pkg
 import codeclone.surfaces.cli.memory as cli_memory
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
@@ -66,7 +67,7 @@ def _install_fake_semantic_index(
 ) -> _FakeSemanticIndex:
     index = _FakeSemanticIndex()
     monkeypatch.setattr(
-        cli_memory,
+        semantic_pkg,
         "resolve_semantic_index_writer",
         lambda config: index if config.enabled else None,
     )
@@ -96,7 +97,7 @@ def test_semantic_rebuild_fails_clear_without_backend(
     out = capsys.readouterr().out.lower()
     assert code != 0
     assert "semantic" in out
-    assert "semantic-lancedb" in out
+    assert "semantic-lancedb" in out or "disabled" in out
 
 
 def test_semantic_search_fails_clear_without_backend(
@@ -193,7 +194,10 @@ def test_semantic_explicit_commands_fail_clear_when_provider_unavailable(
         code = memory_main(command)
         assert code != 0
         out = capsys.readouterr().out
-        assert "Semantic embedding provider unavailable" in out
+        if command[1] == "rebuild":
+            assert "Semantic index rebuild unavailable" in out
+        else:
+            assert "Semantic embedding provider unavailable" in out
         assert "local_model embedding provider is not" in out.replace("\n", " ")
         assert "available yet" in out.replace("\n", " ")
         assert "Traceback" not in out

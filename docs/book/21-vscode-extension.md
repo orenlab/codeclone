@@ -176,7 +176,8 @@ and passed to `query_engineering_memory`.
     `searchSemantic` defaults to **`true` in VS Code** so the IDE requests semantic
     blend when the user searches. CodeClone’s **repository** default remains
     `memory.semantic.enabled = false` until you opt in in `pyproject.toml`, install
-    the semantic extras, and run `codeclone memory semantic rebuild`.
+    the semantic extras, and rebuild the sidecar (MCP
+    `rebuild_semantic_index` or CLI `memory semantic rebuild`).
     `codeclone[semantic-local]` installs both LanceDB and FastEmbed; configure
     `embedding_provider = "fastembed"` for local semantic-quality recall.
     `codeclone[semantic-lancedb]` alone supports the deterministic diagnostic

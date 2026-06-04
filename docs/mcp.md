@@ -352,7 +352,7 @@ sequenceDiagram
 | `get_blast_radius`          | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                                                                                                                               |
 | `get_relevant_memory`       | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`                                                                                                                  |
 | `query_engineering_memory`  | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`)                                                                                                    |
-| `manage_engineering_memory` | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents). |
+| `manage_engineering_memory` | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`, `rebuild_semantic_index`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents). |
 | `check_patch_contract`      | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                                                                                                                                          |
 | `create_review_receipt`     | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile                                                                                                                          |
 | `validate_review_claims`    | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks                                                                                                                  |
@@ -445,6 +445,7 @@ sequenceDiagram
 | Keyword discovery          | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search                |
 | Semantic discovery (opt-in) | `query_engineering_memory(mode=search, semantic=true, …)`              | FTS + LanceDB blend when `[tool.codeclone.memory.semantic] enabled` and index built; default config is **off** |
 | Refresh system facts       | `manage_engineering_memory(action=refresh_from_run, run_id?)`            | Force ingest from MCP run |
+| Rebuild semantic sidecar   | `manage_engineering_memory(action=rebuild_semantic_index)`               | LanceDB index when semantic enabled |
 | Unclear semantics          | `help(topic="engineering_memory")`                                       | Compact playbook          |
 
 Defaults exclude **stale** records. Keyword search excludes drafts unless
@@ -455,7 +456,8 @@ they signal changed context.
 
 **Optional semantic search (Phase 20):** off by default (`enabled=false`).
 When enabled, install `codeclone[semantic-lancedb]` for the sidecar, run
-`codeclone memory semantic rebuild`, then pass `semantic=true` on
+`manage_engineering_memory(action=rebuild_semantic_index)` (agents) or
+`codeclone memory semantic rebuild` (CLI/CI), then pass `semantic=true` on
 `mode=search`. For semantic-quality local recall, install
 `codeclone[semantic-local]` and set `embedding_provider = "fastembed"` under
 `[tool.codeclone.memory.semantic]`. Responses include a `semantic` object
@@ -475,6 +477,7 @@ responses default to compact statement previews; use `mode=get` or
 | Action                    | Tool                                                          | Result                        |
 |---------------------------|---------------------------------------------------------------|-------------------------------|
 | Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)` | System ingest from MCP report |
+| Rebuild semantic index    | `manage_engineering_memory(action=rebuild_semantic_index)`   | LanceDB sidecar from memory + audit |
 | Observation during edit   | `manage_engineering_memory(action=record_candidate, …)`       | `draft` record                |
 | Validate finish claims    | `manage_engineering_memory(action=validate_claims, text=…)`   | warnings/errors               |
 | Post-edit proposals       | `finish_controlled_change(propose_memory=true)`               | draft candidates + staleness  |

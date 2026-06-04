@@ -62,7 +62,8 @@ QUERY_ENGINEERING_MEMORY: Final = (
 
 MANAGE_ENGINEERING_MEMORY: Final = (
     "Governance router for engineering memory. Agent actions: refresh_from_run "
-    "(ingest from MCP run report), record_candidate (draft agent memory), "
+    "(ingest from MCP run report), rebuild_semantic_index (LanceDB sidecar when "
+    "memory.semantic.enabled), record_candidate (draft agent memory), "
     "validate_claims (memory-layer claim guard), propose_from_receipt "
     "(atomic fallback for finish hook). Human approve/reject/archive use the "
     "CodeClone VS Code Memory view (IDE channel: register_ide_governance, "

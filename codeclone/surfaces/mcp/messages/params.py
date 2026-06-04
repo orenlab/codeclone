@@ -426,7 +426,8 @@ ManageMemoryActionParam = Annotated[
     Field(
         description=(
             "Agent: record_candidate, validate_claims, propose_from_receipt, "
-            "refresh_from_run. IDE channel only (VS Code): register_ide_governance, "
+            "refresh_from_run, rebuild_semantic_index. IDE channel only (VS Code): "
+            "register_ide_governance, "
             "prepare_governance, commit_governance. approve/reject/archive are not "
             "available through MCP."
         ),

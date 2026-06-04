@@ -428,6 +428,7 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 | `action`               | Required params                                     | Effect                                                     |
 |------------------------|-----------------------------------------------------|------------------------------------------------------------|
 | `refresh_from_run`     | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
+| `rebuild_semantic_index` | (none)                                          | Rebuild LanceDB sidecar when `memory.semantic.enabled`   |
 | `record_candidate`     | `record_type`, `statement`; optional `subject_path` | Creates **draft** record                                   |
 | `validate_claims`      | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
 | `propose_from_receipt` | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
@@ -593,7 +594,8 @@ flowchart LR
    instead (or combine `semantic-lancedb` + `semantic-fastembed`).
 3. Index built at `index_path` (default
    `.cache/codeclone/memory/semantic_index.lance`) via
-   `codeclone memory semantic rebuild`.
+   `manage_engineering_memory(action="rebuild_semantic_index")` (MCP agents) or
+   `codeclone memory semantic rebuild` (CLI/CI).
 
 Minimal local semantic-quality setup:
 
@@ -610,6 +612,7 @@ allow_model_download = true  # or pre-populate embedding_cache_dir and keep fals
 
 ```bash
 codeclone memory init --root .
+# Agents (MCP): manage_engineering_memory(action=rebuild_semantic_index)
 codeclone memory semantic rebuild --root .
 codeclone memory semantic search "recover after MCP restart" --root .
 codeclone memory search "recover after MCP restart" --semantic --root .
@@ -670,8 +673,10 @@ Empty audit summaries are skipped.
 | Surface | Semantic flag |
 |---------|---------------|
 | `query_engineering_memory(mode=search, semantic=true)` | MCP |
+| `manage_engineering_memory(action=rebuild_semantic_index)` | MCP (build sidecar) |
 | `codeclone memory search --semantic` | CLI |
 | `codeclone memory semantic search` | CLI (requires built index) |
+| `codeclone memory semantic rebuild` | CLI (build sidecar) |
 | VS Code `codeclone.memory.searchSemantic` (default **`true`**) | Passes MCP `semantic` on IDE search; server opt-in unchanged |
 | `get_relevant_memory` | **No** semantic parameter (scoped ranking only) |
 

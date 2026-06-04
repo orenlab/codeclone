@@ -27,6 +27,10 @@ from .projection import (
     text_hash,
 )
 from .rebuild import RebuildReport, rebuild_semantic_index
+from .rebuild_workflow import (
+    build_semantic_index_sources,
+    execute_semantic_index_rebuild,
+)
 from .sources import AuditIndexSource, IndexSource, MemoryIndexSource
 
 if TYPE_CHECKING:
@@ -150,6 +154,8 @@ __all__ = [
     "SemanticRow",
     "SemanticSource",
     "UnavailableSemanticIndex",
+    "build_semantic_index_sources",
+    "execute_semantic_index_rebuild",
     "is_indexed_audit_event",
     "is_indexed_memory_type",
     "project_audit_event",

@@ -546,6 +546,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "from the latest MCP run on first get_relevant_memory.",
             "Explicit refresh: manage_engineering_memory(action=refresh_from_run) "
             "after analyze_repository.",
+            "Semantic sidecar: when memory.semantic.enabled, run "
+            "manage_engineering_memory(action=rebuild_semantic_index) after "
+            "refresh/init (requires codeclone[semantic-lancedb]); then "
+            "query_engineering_memory(mode=search, semantic=true).",
             "Optional mcp_sync_policy=refresh_when_stale in pyproject for digest-based "
             "auto refresh.",
             "Drill down with query_engineering_memory(mode=for_path|search|get).",

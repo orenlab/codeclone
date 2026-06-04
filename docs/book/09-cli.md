@@ -106,7 +106,8 @@ Refs:
       modes mirroring MCP `query_engineering_memory`.
     - `semantic status|rebuild|search` — optional LanceDB sidecar (requires
       `[tool.codeclone.memory.semantic] enabled = true`, extra
-      `codeclone[semantic-lancedb]`, and a successful `semantic rebuild`).
+      `codeclone[semantic-lancedb]`, and a successful rebuild — MCP agents use
+      `manage_engineering_memory(action=rebuild_semantic_index)`).
       For semantic-quality local recall, install `codeclone[semantic-local]`
       and configure `embedding_provider = "fastembed"`; `semantic-lancedb`
       alone can still run the deterministic diagnostic provider.

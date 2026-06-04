@@ -62,7 +62,7 @@
     },
     {
       "name": "manage_engineering_memory",
-      "description": "Engineering memory governance router: refresh_from_run, record_candidate (draft), validate_claims, propose_from_receipt. Human approve/reject use the VS Code Memory view."
+      "description": "Engineering memory governance router: refresh_from_run, rebuild_semantic_index, record_candidate (draft), validate_claims, propose_from_receipt. Human approve/reject use the VS Code Memory view."
     },
     {
       "name": "manage_change_intent",

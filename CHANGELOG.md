@@ -63,7 +63,8 @@ review receipts, and workflow consolidation tools.
   `.cache/codeclone/memory/semantic_index.lance` (`SEMANTIC_INDEX_FORMAT_VERSION`
   `1`, separate from memory schema `1.1`), optional extra
   `pip install 'codeclone[semantic-lancedb]'`, CLI `codeclone memory semantic
-  status|rebuild|search`, `codeclone memory search --semantic`, MCP/CLI
+  status|rebuild|search`, `manage_engineering_memory(action="rebuild_semantic_index")`,
+  `codeclone memory search --semantic`, MCP/CLI
   `query_engineering_memory(mode=search, semantic=true)` with FTS-first merge and
   `semantic` status envelope; indexed prose memory types and bounded audit
   incident summaries when `index_audit=true` and `audit_enabled=true`.

@@ -132,7 +132,9 @@ These commands require workspace trust and an active MCP connection.
   result limit (see **Engineering Memory search** settings below).
 
 Server-side semantic still requires `[tool.codeclone.memory.semantic] enabled`,
-the semantic sidecar, and `codeclone memory semantic rebuild`. Install
+the semantic sidecar, and a successful rebuild (`manage_engineering_memory`
+`action=rebuild_semantic_index` for MCP agents, or `codeclone memory semantic
+rebuild` for CLI/CI). Install
 `codeclone[semantic-local]` and set `embedding_provider = "fastembed"` for local
 semantic-quality recall; `codeclone[semantic-lancedb]` alone can run only the
 deterministic diagnostic provider. See

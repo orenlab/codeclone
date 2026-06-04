@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import cast
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
@@ -29,7 +30,7 @@ from ...memory.models import MemoryProject
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import get_relevant_memory, query_engineering_memory
-from ...memory.semantic import resolve_semantic_index
+from ...memory.semantic import execute_semantic_index_rebuild, resolve_semantic_index
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from . import _session_helpers as _helpers
 from ._intent import IntentRecord
@@ -249,6 +250,15 @@ class _MCPSessionMemoryMixin:
                     )
                 finally:
                     store.close()
+            if normalized == "rebuild_semantic_index":
+                config = resolve_memory_config(root_path)
+                return cast(
+                    dict[str, object],
+                    execute_semantic_index_rebuild(
+                        root_path=root_path,
+                        config=config,
+                    ),
+                )
             if normalized == "refresh_from_run":
                 return self._manage_memory_refresh_from_run(
                     root_path,
@@ -294,6 +304,7 @@ class _MCPSessionMemoryMixin:
                 "validate_claims",
                 "propose_from_receipt",
                 "refresh_from_run",
+                "rebuild_semantic_index",
                 "register_ide_governance",
                 "prepare_governance",
                 "commit_governance",

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
@@ -24,14 +25,15 @@ from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
 from ...memory.retrieval.semantic import semantic_search
 from ...memory.semantic import (
-    AuditIndexSource,
-    IndexSource,
-    MemoryIndexSource,
-    rebuild_semantic_index,
+    execute_semantic_index_rebuild,
     resolve_semantic_index,
-    resolve_semantic_index_writer,
 )
 from ...memory.semantic.models import SemanticSearchResult
+from ...memory.semantic.rebuild_workflow import (
+    RebuildSemanticIndexOkPayload,
+    RebuildSemanticIndexSkippedPayload,
+    RebuildSemanticIndexUnavailablePayload,
+)
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
 from ...memory.vacuum import run_memory_vacuum
@@ -635,35 +637,30 @@ def _run_semantic_status(*, console: PrinterLike, root_path: Path) -> int:
 
 def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
     config = resolve_memory_config(root_path)
-    provider = _resolve_semantic_provider_or_fail(console, config)
-    if isinstance(provider, int):
-        return provider
-    writer = resolve_semantic_index_writer(config.semantic)
-    if writer is None:
-        return _semantic_unavailable(
-            console, "Semantic index is not available for writing."
-        )
-    db_path = resolve_memory_db_path(root_path, config)
-    if not db_path.exists():
-        console.print(f"Engineering memory database not found: {db_path}")
+    try:
+        payload = execute_semantic_index_rebuild(root_path=root_path, config=config)
+    except MemoryContractError as exc:
+        console.print(str(exc))
         console.print("Run: codeclone memory init")
         return int(ExitCode.CONTRACT_ERROR)
-    project = resolve_project_identity(root_path)
-    store = SqliteEngineeringMemoryStore(db_path)
-    try:
-        report = rebuild_semantic_index(
-            writer=writer,
-            provider=provider,
-            sources=_semantic_sources(root_path, config, store, project),
+    status = payload["status"]
+    if status == "ok":
+        ok = cast(RebuildSemanticIndexOkPayload, payload)
+        console.print(
+            f"Rebuilt semantic index: {ok['indexed']} indexed, {ok['deleted']} pruned."
         )
-    finally:
-        store.close()
-    console.print(
-        f"Rebuilt semantic index: {report.indexed} indexed, {report.deleted} pruned."
+        for name, count in sorted(ok["by_source"].items()):
+            console.print(f"  {name}: {count}")
+        return int(ExitCode.SUCCESS)
+    if status == "skipped":
+        skipped = cast(RebuildSemanticIndexSkippedPayload, payload)
+        return _semantic_unavailable(
+            console, f"Semantic indexing is disabled ({skipped['reason']})."
+        )
+    unavailable = cast(RebuildSemanticIndexUnavailablePayload, payload)
+    return _semantic_unavailable(
+        console, f"Semantic index rebuild unavailable: {unavailable['reason']}."
     )
-    for name, count in sorted(report.by_source.items()):
-        console.print(f"  {name}: {count}")
-    return int(ExitCode.SUCCESS)
 
 
 def _run_semantic_search(
@@ -760,20 +757,6 @@ def _render_semantic_json(
     }
     console.print(json.dumps(payload, indent=2), markup=False)
     return int(ExitCode.SUCCESS)
-
-
-def _semantic_sources(
-    root_path: Path,
-    config: MemoryConfig,
-    store: SqliteEngineeringMemoryStore,
-    project: MemoryProject,
-) -> list[IndexSource]:
-    audit_db_path = resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
-    sources: list[IndexSource] = [
-        MemoryIndexSource(store, project_id=project.id),
-        AuditIndexSource(enabled=config.semantic.index_audit, db_path=audit_db_path),
-    ]
-    return sources
 
 
 __all__ = ["memory_main"]

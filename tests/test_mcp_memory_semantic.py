@@ -17,6 +17,20 @@ def _semantic_payload(result: dict[str, object]) -> dict[str, object]:
     return semantic
 
 
+def test_mcp_manage_memory_rebuild_semantic_index_skipped_when_disabled(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="rebuild_semantic_index",
+        )
+    assert payload["action"] == "rebuild_semantic_index"
+    assert payload["status"] == "skipped"
+    assert payload["reason"] == "disabled"
+
+
 def test_mcp_query_semantic_block_present_when_disabled(tmp_path: Path) -> None:
     # The semantic param flows through the MCP layer to the service and back.
     # With the default config (semantic disabled) the index resolves to the
