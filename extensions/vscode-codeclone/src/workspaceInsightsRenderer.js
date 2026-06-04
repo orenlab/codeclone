@@ -103,7 +103,7 @@ function formatDurationSeconds(seconds) {
 }
 
 /**
- * @param {number | null | undefined} bytes
+ * @param {unknown} bytes
  */
 function formatBytes(bytes) {
     if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
