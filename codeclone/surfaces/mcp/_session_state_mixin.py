@@ -1212,7 +1212,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
             latest = self._runs.get()
-            suffix = uri[len(latest_prefix) :]
+            suffix = _helpers._validate_resource_suffix(uri[len(latest_prefix) :])
             return self._render_resource(latest, suffix)
         if not uri.startswith(run_prefix):
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
@@ -1220,6 +1220,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         run_id, sep, suffix = remainder.partition("/")
         if not sep:
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
+        suffix = _helpers._validate_resource_suffix(suffix)
         record = self._runs.get(run_id)
         return self._render_resource(record, suffix)
 

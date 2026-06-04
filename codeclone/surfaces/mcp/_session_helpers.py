@@ -204,12 +204,30 @@ def _normalize_relative_path(path: str) -> str:
         return ""
     if cleaned.startswith("./"):
         cleaned = cleaned[2:]
+    if Path(cleaned).is_absolute():
+        _raise_path_traversal(path)
     cleaned = cleaned.rstrip("/")
     if ".." in Path(cleaned).parts:
-        from .messages import errors as err_msgs
-
-        raise MCPServiceContractError(err_msgs.PATH_TRAVERSAL.format(path=path))
+        _raise_path_traversal(path)
     return cleaned
+
+
+def _validate_resource_suffix(suffix: str) -> str:
+    cleaned = suffix.strip()
+    if (
+        not cleaned
+        or cleaned.startswith("/")
+        or Path(cleaned).is_absolute()
+        or ".." in Path(cleaned).parts
+    ):
+        _raise_path_traversal(suffix)
+    return cleaned
+
+
+def _raise_path_traversal(path: str) -> None:
+    from .messages import errors as err_msgs
+
+    raise MCPServiceContractError(err_msgs.PATH_TRAVERSAL.format(path=path))
 
 
 def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
