@@ -20,6 +20,7 @@ import pytest
 from codeclone.surfaces.mcp import _workspace_hygiene as hygiene_mod
 from codeclone.surfaces.mcp._workspace_hygiene import (
     DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
+    STRICT_FINISH_ENV,
     DirtyAttribution,
     DirtySnapshot,
     DirtySnapshotEntry,
@@ -290,6 +291,40 @@ def test_finish_hygiene_check_treats_new_unattributed_as_advisory(
     assert hygiene.finish_block_reason is None
 
 
+def test_finish_hygiene_check_blocks_unattributed_when_strict(
+    tmp_path: Path,
+) -> None:
+    store = get_workspace_intent_store(tmp_path)
+    start_snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/a.py",
+                status_xy=" M",
+                digest="start-a",
+                digest_status="ok",
+            ),
+        ),
+    )
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+            start_dirty_snapshot=start_snapshot,
+            strict_finish=True,
+        )
+    assert hygiene.new_unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "own_unscoped_dirty"
+
+
 def test_finish_hygiene_check_legacy_snapshot_treats_unknown_as_advisory(
     tmp_path: Path,
 ) -> None:
@@ -311,6 +346,28 @@ def test_finish_hygiene_check_legacy_snapshot_treats_unknown_as_advisory(
     assert hygiene.dirty_snapshot_status == "missing_legacy_conservative"
     assert hygiene.blocks_finish is False
     assert hygiene.finish_block_reason is None
+
+
+def test_finish_hygiene_check_strict_finish_env_blocks_unknown_unattributed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(STRICT_FINISH_ENV, "1")
+    store = get_workspace_intent_store(tmp_path)
+    with _mock_git_porcelain(" M pkg/a.py\n M pkg/extra.py\n"):
+        hygiene = finish_hygiene_check(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=[],
+            resolved_files=["pkg/a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            own_intent_id="intent-own-001",
+        )
+    assert hygiene.unknown_unattributed_unscoped_dirty == ("pkg/extra.py",)
+    assert hygiene.blocks_finish is True
+    assert hygiene.finish_block_reason == "own_unscoped_dirty"
 
 
 def test_finish_hygiene_check_treats_modified_unattributed_as_advisory(

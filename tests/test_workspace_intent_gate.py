@@ -18,6 +18,7 @@ from codeclone.surfaces.mcp._workspace_intent_store import (
     clear_workspace_intent_store_cache,
 )
 from codeclone.workspace_intent.gate import (
+    HOOK_AUTHORIZE_FOREIGN_ENV,
     evaluate_workspace_edit_gate,
     has_authorized_workspace_intent,
     has_blocking_workspace_intent,
@@ -48,6 +49,20 @@ def test_gate_allows_active_file_registry_intent(
     assert decision.registry_backend == "file"
     assert has_authorized_workspace_intent(tmp_path) is True
     assert has_blocking_workspace_intent(tmp_path) is True
+
+
+def test_gate_denies_foreign_active_when_hook_env_disables_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(HOOK_AUTHORIZE_FOREIGN_ENV, "0")
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    _write_record(tmp_path, _record(pid=os.getpid() + 1000))
+
+    decision = evaluate_workspace_edit_gate(tmp_path)
+
+    assert decision.allowed is False
+    assert decision.reason == "no_active_intent"
 
 
 def test_gate_allows_active_sqlite_registry_intent(

@@ -14,6 +14,7 @@ local edit hooks.
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -51,12 +52,9 @@ GateReason = Literal[
     "registry_error",
 ]
 
-_ALLOWING_OWNERSHIP: frozenset[workspace_intents.IntentOwnership] = frozenset(
-    {
-        workspace_intents.IntentOwnership.OWN_ACTIVE,
-        workspace_intents.IntentOwnership.FOREIGN_ACTIVE,
-    }
-)
+HOOK_AUTHORIZE_FOREIGN_ENV = "CODECLONE_HOOK_AUTHORIZE_FOREIGN"
+_TRUTHY_HOOK_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSY_HOOK_VALUES = frozenset({"0", "false", "no", "off"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,7 +143,7 @@ def _decision_from_records(
                 continue
             if (
                 record.status == WorkspaceIntentStatus.ACTIVE.value
-                and ownership in _ALLOWING_OWNERSHIP
+                and _ownership_authorizes_hook(ownership)
             ):
                 return WorkspaceEditGateDecision(
                     allowed=True,
@@ -181,6 +179,30 @@ def _decision_from_records(
         registry_path=registry_path,
         details={"ignored_records": ignored_count},
     )
+
+
+def _ownership_authorizes_hook(
+    ownership: workspace_intents.IntentOwnership,
+) -> bool:
+    if ownership == workspace_intents.IntentOwnership.OWN_ACTIVE:
+        return True
+    if ownership == workspace_intents.IntentOwnership.FOREIGN_ACTIVE:
+        return _hook_authorizes_foreign_active()
+    return False
+
+
+def _hook_authorizes_foreign_active() -> bool:
+    raw_value = os.environ.get(HOOK_AUTHORIZE_FOREIGN_ENV)
+    if raw_value is None:
+        # Current hook inputs do not carry the declaring agent PID/start_epoch,
+        # so live active MCP intents appear foreign to the hook reader.
+        # Operators can opt into strict own-only authorization with
+        # CODECLONE_HOOK_AUTHORIZE_FOREIGN=0 once their hook passes identity.
+        return True
+    normalized = raw_value.strip().lower()
+    if normalized in _FALSY_HOOK_VALUES:
+        return False
+    return normalized in _TRUTHY_HOOK_VALUES
 
 
 def _load_registry_records_read_only(
@@ -247,6 +269,7 @@ def _display_registry_path(root: Path, registry_path: Path) -> str:
 
 
 __all__ = [
+    "HOOK_AUTHORIZE_FOREIGN_ENV",
     "WorkspaceEditGateDecision",
     "evaluate_workspace_edit_gate",
     "has_authorized_workspace_intent",

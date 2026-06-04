@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import subprocess
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
@@ -38,6 +39,8 @@ _FOREIGN_DIRTY_OWNERSHIP: frozenset[IntentOwnership] = frozenset(
 
 _DIRTY_SUMMARY_SAMPLE_LIMIT = 10
 _BASE_DIRTY_SCOPE_MESSAGE = "Uncommitted changes overlap your declared scope."
+STRICT_FINISH_ENV: Final = "CODECLONE_STRICT_FINISH"
+_TRUTHY_ENV_VALUES: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
 
 DIRTY_SCOPE_POLICY_BLOCK: Final = "block"
 DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP: Final = "continue_own_wip"
@@ -511,6 +514,7 @@ def finish_hygiene_check(
     own_start_epoch: int,
     own_intent_id: str,
     start_dirty_snapshot: DirtySnapshot | None = None,
+    strict_finish: bool | None = None,
 ) -> WorkspaceHygieneResult:
     """Finish-time hygiene gate against declared scope and git evidence."""
     hygiene = evaluate_scoped_hygiene(
@@ -582,14 +586,12 @@ def finish_hygiene_check(
     # overlapping the declared scope. New/modified/unknown unattributed dirt
     # outside the declared scope is non-blocking advisory (surfaced via
     # dirty_paths_outside_scope and the attribution detail).
-    blocks_finish = False
-    finish_block_reason: str | None = None
-    if unacknowledged:
-        blocks_finish = True
-        finish_block_reason = "missing_evidence"
-    elif hygiene.foreign_dirty_overlaps:
-        blocks_finish = True
-        finish_block_reason = "foreign_dirty_overlap"
+    finish_block_reason = _finish_block_reason(
+        unacknowledged=unacknowledged,
+        foreign_dirty_overlaps=hygiene.foreign_dirty_overlaps,
+        unattributed_unscoped=unattributed_unscoped,
+        strict_finish=strict_finish,
+    )
     return WorkspaceHygieneResult(
         git_available=hygiene.git_available,
         dirty_paths=all_dirty_paths,
@@ -611,7 +613,7 @@ def finish_hygiene_check(
         dirty_snapshot=current_snapshot,
         dirty_snapshot_status=_snapshot_status(start_dirty_snapshot),
         files_for_scope_check=files_for_scope_check,
-        blocks_finish=blocks_finish,
+        blocks_finish=finish_block_reason is not None,
         finish_block_reason=finish_block_reason,
     )
 
@@ -730,6 +732,28 @@ def _dirty_classification(
     if start_state == "present_changed":
         return "modified_unattributed_unscoped_dirty", False
     return "unknown_unattributed_unscoped_dirty", False
+
+
+def _finish_block_reason(
+    *,
+    unacknowledged: Sequence[str],
+    foreign_dirty_overlaps: Sequence[ForeignDirtyOverlap],
+    unattributed_unscoped: Sequence[str],
+    strict_finish: bool | None,
+) -> str | None:
+    if unacknowledged:
+        return "missing_evidence"
+    if foreign_dirty_overlaps:
+        return "foreign_dirty_overlap"
+    if _strict_finish_enabled(strict_finish) and unattributed_unscoped:
+        return "own_unscoped_dirty"
+    return None
+
+
+def _strict_finish_enabled(value: bool | None) -> bool:
+    if value is not None:
+        return value
+    return os.environ.get(STRICT_FINISH_ENV, "").strip().lower() in _TRUTHY_ENV_VALUES
 
 
 def _classified_paths(
@@ -980,6 +1004,7 @@ def hygiene_blocks_start_edit(
 __all__ = [
     "DIRTY_SCOPE_POLICY_BLOCK",
     "DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP",
+    "STRICT_FINISH_ENV",
     "VALID_DIRTY_SCOPE_POLICIES",
     "DirtyAttribution",
     "DirtyPathsResult",
