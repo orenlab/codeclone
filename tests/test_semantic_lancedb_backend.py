@@ -12,6 +12,7 @@ import pytest
 from codeclone.config.memory import SemanticConfig
 from codeclone.memory.embedding import resolve_embedding_provider
 from codeclone.memory.semantic import (
+    SemanticIndexWriter,
     resolve_semantic_index,
     resolve_semantic_index_writer,
 )
@@ -42,12 +43,25 @@ def _row(record_id: str, vector: list[float]) -> SemanticRow:
     )
 
 
-def test_lancedb_backend_round_trip(tmp_path: Path) -> None:
-    config = _config(tmp_path, dimension=4)
+def _writer_and_vector(
+    tmp_path: Path,
+    *,
+    dimension: int,
+    text: str,
+) -> tuple[SemanticIndexWriter, list[float], SemanticConfig]:
+    config = _config(tmp_path, dimension=dimension)
     writer = resolve_semantic_index_writer(config)
     assert writer is not None
     provider = resolve_embedding_provider(config)
-    (vec_a,) = provider.embed(["alpha alpha"])
+    (vector,) = provider.embed([text])
+    return writer, vector, config
+
+
+def test_lancedb_backend_round_trip(tmp_path: Path) -> None:
+    writer, vec_a, config = _writer_and_vector(
+        tmp_path, dimension=4, text="alpha alpha"
+    )
+    provider = resolve_embedding_provider(config)
     (vec_b,) = provider.embed(["beta beta beta"])
 
     writer.upsert([_row("a", vec_a), _row("b", vec_b)])
@@ -105,6 +119,54 @@ def test_lancedb_backend_reopens_existing_table(tmp_path: Path) -> None:
     assert second is not None
     assert second.known_ids() == {"keep"}
     assert second.status().indexed_count == 1
+
+
+def test_lancedb_backend_read_reports_schema_mismatch(
+    tmp_path: Path,
+) -> None:
+    writer, vec, config = _writer_and_vector(
+        tmp_path, dimension=4, text="old dimension"
+    )
+    writer.upsert([_row("old", vec)])
+
+    read_mismatch = LanceDbSemanticIndex(
+        path=Path(config.index_path),
+        dimension=8,
+        create=False,
+    )
+
+    status = read_mismatch.status()
+    assert status.available is False
+    assert status.reason == "schema_mismatch"
+    assert read_mismatch.search([0.0] * 8, k=3) == []
+
+    original = LanceDbSemanticIndex(
+        path=Path(config.index_path),
+        dimension=4,
+        create=False,
+    )
+    assert original.known_ids() == {"old"}
+
+
+def test_lancedb_backend_writer_recreates_schema_mismatch(
+    tmp_path: Path,
+) -> None:
+    old_writer, vec, old_config = _writer_and_vector(
+        tmp_path, dimension=4, text="old dimension"
+    )
+    old_writer.upsert([_row("old", vec)])
+
+    new_writer = LanceDbSemanticIndex(
+        path=Path(old_config.index_path),
+        dimension=8,
+        create=True,
+    )
+
+    assert new_writer.status().available is True
+    assert new_writer.status().dimension == 8
+    assert new_writer.known_ids() == set()
+    new_writer.upsert([_row("new", [0.0] * 8)])
+    assert new_writer.known_ids() == {"new"}
 
 
 def test_lancedb_backend_upsert_is_idempotent_by_id(tmp_path: Path) -> None:

@@ -17,6 +17,7 @@ from .models import SemanticHit, SemanticIndexStatus, SemanticRow
 # are loaded only when a LanceDB backend instance is constructed.
 
 _TABLE_NAME = "semantic_index"
+_SCHEMA_MISMATCH_REASON = "schema_mismatch"
 
 
 def _schema(pa: Any, dimension: int) -> Any:
@@ -61,26 +62,46 @@ class LanceDbSemanticIndex:
 
     def __init__(self, *, path: Path, dimension: int, create: bool = False) -> None:
         self._dimension = dimension
+        self._unavailable_reason: str | None = None
         lancedb = importlib.import_module("lancedb")
         self._pa = importlib.import_module("pyarrow")
         self._db = lancedb.connect(str(path))
         self._table: Any | None = self._open_table(create=create)
 
     def _open_table(self, *, create: bool) -> Any | None:
-        if create:
-            # Idempotent writer open-or-create. A membership check against
-            # list_tables() is unreliable (it returns a paginated result
-            # object, not a list), so let lancedb open the table when it exists
-            # and create it otherwise.
-            return self._db.create_table(
-                _TABLE_NAME, schema=_schema(self._pa, self._dimension), exist_ok=True
-            )
+        table = self._open_existing_table()
+        if table is None:
+            if create:
+                return self._create_table()
+            return None
+        if self._schema_matches(table):
+            return table
+        self._unavailable_reason = _SCHEMA_MISMATCH_REASON
+        if not create:
+            return None
+        self._db.drop_table(_TABLE_NAME)
+        self._unavailable_reason = None
+        return self._create_table()
+
+    def _open_existing_table(self) -> Any | None:
         try:
             return self._db.open_table(_TABLE_NAME)
         except ValueError as exc:
             if f"Table '{_TABLE_NAME}' was not found" in str(exc):
                 return None
             raise
+
+    def _create_table(self) -> Any:
+        return self._db.create_table(
+            _TABLE_NAME, schema=_schema(self._pa, self._dimension), exist_ok=False
+        )
+
+    def _schema_matches(self, table: Any) -> bool:
+        try:
+            vector_type = table.schema.field("vector").type
+        except (AttributeError, KeyError, ValueError):
+            return False
+        return getattr(vector_type, "list_size", None) == self._dimension
 
     def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
         if self._table is None:
@@ -103,7 +124,7 @@ class LanceDbSemanticIndex:
                 available=False,
                 backend="lancedb",
                 dimension=self._dimension,
-                reason="not_built",
+                reason=self._unavailable_reason or "not_built",
             )
         return SemanticIndexStatus(
             available=True,
