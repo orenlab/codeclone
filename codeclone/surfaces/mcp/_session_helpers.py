@@ -27,6 +27,12 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
+from ...utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
 from ._session_runtime import resolve_cache_path
 from ._session_shared import (
     _COMPACT_ITEM_EMPTY_VALUES,
@@ -245,14 +251,25 @@ def _resolve_root(root: str | None) -> Path:
     return resolved
 
 
-def _resolve_optional_path(value: str, root_path: Path) -> Path:
+def _resolve_optional_path(
+    value: str,
+    root_path: Path,
+    *,
+    allow_external_artifacts: bool = False,
+    allow_repo_absolute: bool = False,
+) -> Path:
     from .messages import errors as err_msgs
 
-    candidate = Path(value).expanduser()
-    resolved = candidate if candidate.is_absolute() else root_path / candidate
     try:
-        return resolved.resolve()
-    except OSError as exc:
+        return resolve_under_repo_root(
+            root_path,
+            value,
+            policy=RepoPathPolicy(
+                allow_absolute=allow_external_artifacts or allow_repo_absolute,
+                allow_external=allow_external_artifacts,
+            ),
+        )
+    except (PathOutsideRepoError, RepoPathError) as exc:
         raise MCPServiceContractError(
             err_msgs.INVALID_RELATIVE_PATH.format(
                 value=value,
@@ -557,7 +574,19 @@ def _comparison_summary_text(
 
 
 def _resolve_cache_path(*, root_path: Path, args: Namespace) -> Path:
-    return resolve_cache_path(root_path=root_path, args=args)
+    from .messages import errors as err_msgs
+
+    raw_value = getattr(args, "cache_path", None)
+    try:
+        return resolve_cache_path(root_path=root_path, args=args)
+    except (PathOutsideRepoError, RepoPathError) as exc:
+        raise MCPServiceContractError(
+            err_msgs.INVALID_RELATIVE_PATH.format(
+                value=raw_value,
+                root=root_path,
+                error=str(exc),
+            )
+        ) from exc
 
 
 def _build_cache(

@@ -54,7 +54,12 @@ ApiSurfaceParam = Annotated[
 ]
 CoverageXmlParam = Annotated[
     str | None,
-    Field(description="Cobertura XML path; absolute or repo-relative."),
+    Field(
+        description=(
+            "Cobertura XML path. Absolute/out-of-repo paths require "
+            "allow_external_artifacts=true."
+        )
+    ),
 ]
 CoverageMinParam = Annotated[
     int | None,
@@ -62,7 +67,21 @@ CoverageMinParam = Annotated[
 ]
 OptionalPathParam = Annotated[
     str | None,
-    Field(description="Repo-relative or absolute artifact path."),
+    Field(
+        description=(
+            "Repo-relative artifact path. Absolute/out-of-repo paths require "
+            "allow_external_artifacts=true."
+        )
+    ),
+]
+AllowExternalArtifactsParam = Annotated[
+    bool,
+    Field(
+        description=(
+            "Allow optional artifact paths (baseline_path, metrics_baseline_path, "
+            "cache_path, coverage_xml) to be absolute or outside the repository."
+        )
+    ),
 ]
 MaxSizeMbParam = Annotated[
     int | None,

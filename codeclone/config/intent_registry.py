@@ -11,6 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from ..utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
 from .intent_registry_defaults import (
     DEFAULT_INTENT_REGISTRY_BACKEND,
     DEFAULT_INTENT_REGISTRY_DB_PATH,
@@ -84,11 +90,7 @@ def resolve_intent_registry_db_path(*, root_path: Path, value: object) -> Path:
     raw = value.strip()
     if not raw:
         raise IntentRegistryConfigError("intent_registry_path must not be empty")
-    path = Path(raw).expanduser()
-    if path.is_absolute():
-        raise IntentRegistryConfigError(
-            "intent_registry_path must be relative to the repository root"
-        )
+    path = Path(raw)
     if any(part in {"", ".", ".."} for part in path.parts):
         raise IntentRegistryConfigError(
             "intent_registry_path must not contain empty, '.', or '..' parts"
@@ -97,7 +99,18 @@ def resolve_intent_registry_db_path(*, root_path: Path, value: object) -> Path:
         raise IntentRegistryConfigError(
             "intent_registry_path must end with .sqlite3 or .db"
         )
-    return root_path / path
+    try:
+        return resolve_under_repo_root(
+            root_path,
+            path,
+            policy=RepoPathPolicy(),
+        )
+    except PathOutsideRepoError as exc:
+        raise IntentRegistryConfigError(
+            "intent_registry_path must be relative to the repository root"
+        ) from exc
+    except RepoPathError as exc:
+        raise IntentRegistryConfigError(f"invalid intent_registry_path: {exc}") from exc
 
 
 def resolve_intent_registry_config(root: Path) -> IntentRegistryConfig:

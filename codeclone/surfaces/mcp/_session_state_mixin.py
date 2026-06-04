@@ -237,6 +237,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             debug=False,
             open_html_report=False,
             timestamped_report_paths=False,
+            allow_external_artifacts=request.allow_external_artifacts,
         )
         try:
             config_values = load_pyproject_config(root_path)
@@ -300,22 +301,35 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
 
         if request.baseline_path is not None:
             args.baseline = str(
-                _helpers._resolve_optional_path(request.baseline_path, root_path)
+                _helpers._resolve_optional_path(
+                    request.baseline_path,
+                    root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
+                )
             )
         if request.metrics_baseline_path is not None:
             args.metrics_baseline = str(
                 _helpers._resolve_optional_path(
                     request.metrics_baseline_path,
                     root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
         if request.cache_path is not None:
             args.cache_path = str(
-                _helpers._resolve_optional_path(request.cache_path, root_path)
+                _helpers._resolve_optional_path(
+                    request.cache_path,
+                    root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
+                )
             )
         if request.coverage_xml is not None:
             args.coverage_xml = str(
-                _helpers._resolve_optional_path(request.coverage_xml, root_path)
+                _helpers._resolve_optional_path(
+                    request.coverage_xml,
+                    root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
+                )
             )
 
     def _resolve_baseline_inputs(
@@ -324,12 +338,22 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         root_path: Path,
         args: Namespace,
     ) -> tuple[Path, bool, Path, bool, dict[str, object] | None]:
-        baseline_path = _helpers._resolve_optional_path(str(args.baseline), root_path)
+        allow_external_artifacts = bool(
+            getattr(args, "allow_external_artifacts", False)
+        )
+        baseline_path = _helpers._resolve_optional_path(
+            str(args.baseline),
+            root_path,
+            allow_external_artifacts=allow_external_artifacts,
+            allow_repo_absolute=True,
+        )
         baseline_exists = baseline_path.exists()
 
         metrics_baseline_arg_path = _helpers._resolve_optional_path(
             str(args.metrics_baseline),
             root_path,
+            allow_external_artifacts=allow_external_artifacts,
+            allow_repo_absolute=True,
         )
         shared_baseline_payload: dict[str, object] | None = None
         if metrics_baseline_arg_path == baseline_path:

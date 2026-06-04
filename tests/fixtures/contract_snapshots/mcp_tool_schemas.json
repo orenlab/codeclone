@@ -163,7 +163,7 @@
             }
           ],
           "default": null,
-          "description": "Cobertura XML path; absolute or repo-relative.",
+          "description": "Cobertura XML path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Coverage Xml"
         },
         "coverage_min": {
@@ -228,7 +228,7 @@
             }
           ],
           "default": null,
-          "description": "Repo-relative or absolute artifact path.",
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Baseline Path"
         },
         "metrics_baseline_path": {
@@ -241,7 +241,7 @@
             }
           ],
           "default": null,
-          "description": "Repo-relative or absolute artifact path.",
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Metrics Baseline Path"
         },
         "max_baseline_size_mb": {
@@ -273,7 +273,7 @@
             }
           ],
           "default": null,
-          "description": "Repo-relative or absolute artifact path.",
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Cache Path"
         },
         "max_cache_size_mb": {
@@ -288,6 +288,12 @@
           "default": null,
           "description": "Max artifact size in megabytes.",
           "title": "Max Cache Size Mb"
+        },
+        "allow_external_artifacts": {
+          "default": false,
+          "description": "Allow optional artifact paths (baseline_path, metrics_baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
+          "title": "Allow External Artifacts",
+          "type": "boolean"
         }
       },
       "required": [
@@ -461,7 +467,7 @@
             }
           ],
           "default": null,
-          "description": "Cobertura XML path; absolute or repo-relative.",
+          "description": "Cobertura XML path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Coverage Xml"
         },
         "coverage_min": {
@@ -526,7 +532,7 @@
             }
           ],
           "default": null,
-          "description": "Repo-relative or absolute artifact path.",
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Baseline Path"
         },
         "metrics_baseline_path": {
@@ -539,7 +545,7 @@
             }
           ],
           "default": null,
-          "description": "Repo-relative or absolute artifact path.",
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Metrics Baseline Path"
         },
         "max_baseline_size_mb": {
@@ -571,7 +577,7 @@
             }
           ],
           "default": null,
-          "description": "Repo-relative or absolute artifact path.",
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
           "title": "Cache Path"
         },
         "max_cache_size_mb": {
@@ -586,6 +592,12 @@
           "default": null,
           "description": "Max artifact size in megabytes.",
           "title": "Max Cache Size Mb"
+        },
+        "allow_external_artifacts": {
+          "default": false,
+          "description": "Allow optional artifact paths (baseline_path, metrics_baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
+          "title": "Allow External Artifacts",
+          "type": "boolean"
         }
       },
       "required": [

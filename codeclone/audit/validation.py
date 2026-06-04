@@ -9,6 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
 from .events import (
     KNOWN_EVENT_TYPES,
     PAYLOAD_MODES,
@@ -99,14 +105,23 @@ def resolve_audit_path(*, root_path: Path, value: object) -> Path:
     raw = value.strip()
     if not raw:
         raise AuditConfigError("audit_path must not be empty")
-    path = Path(raw).expanduser()
-    if path.is_absolute():
-        raise AuditConfigError("audit_path must be relative to the repository root")
+    path = Path(raw)
     if any(part in {"", ".", ".."} for part in path.parts):
         raise AuditConfigError("audit_path must not contain empty, '.', or '..' parts")
     if path.suffix not in _VALID_AUDIT_SUFFIXES:
         raise AuditConfigError("audit_path must end with .sqlite3 or .db")
-    return root_path / path
+    try:
+        return resolve_under_repo_root(
+            root_path,
+            path,
+            policy=RepoPathPolicy(),
+        )
+    except PathOutsideRepoError as exc:
+        raise AuditConfigError(
+            "audit_path must be relative to the repository root"
+        ) from exc
+    except RepoPathError as exc:
+        raise AuditConfigError(f"invalid audit_path: {exc}") from exc
 
 
 def validate_payload_mode(value: object) -> AuditPayloadMode:

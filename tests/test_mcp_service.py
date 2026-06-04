@@ -707,11 +707,40 @@ def _assert_loaded_mcp_baseline_state(
 
 
 def test_mcp_runtime_resolve_cache_path_prefers_explicit_path(tmp_path: Path) -> None:
-    args = SimpleNamespace(cache_path="~/codeclone-explicit-cache.json")
+    args = SimpleNamespace(
+        cache_path=".cache/codeclone/explicit-cache.json",
+        allow_external_artifacts=False,
+    )
 
     resolved = mcp_runtime_mod.resolve_cache_path(root_path=tmp_path, args=args)
 
-    assert resolved == Path("~/codeclone-explicit-cache.json").expanduser()
+    assert resolved == (tmp_path / ".cache" / "codeclone" / "explicit-cache.json")
+
+
+def test_mcp_runtime_resolve_cache_path_rejects_external_by_default(
+    tmp_path: Path,
+) -> None:
+    args = SimpleNamespace(
+        cache_path=str(tmp_path.parent / "codeclone-explicit-cache.json"),
+        allow_external_artifacts=False,
+    )
+
+    with pytest.raises(ValueError, match="escapes repository root"):
+        mcp_runtime_mod.resolve_cache_path(root_path=tmp_path, args=args)
+
+
+def test_mcp_runtime_resolve_cache_path_allows_external_with_opt_in(
+    tmp_path: Path,
+) -> None:
+    external = tmp_path.parent / "codeclone-explicit-cache.json"
+    args = SimpleNamespace(
+        cache_path=str(external),
+        allow_external_artifacts=True,
+    )
+
+    resolved = mcp_runtime_mod.resolve_cache_path(root_path=tmp_path, args=args)
+
+    assert resolved == external.resolve(strict=False)
 
 
 def test_mcp_clone_baseline_state_loads_existing_baseline(
@@ -2755,6 +2784,113 @@ def test_mcp_service_invalid_path_resolution_contract_errors(
         mcp_helpers_mod._resolve_root(".")
     with pytest.raises(MCPServiceContractError):
         mcp_helpers_mod._resolve_optional_path("cache.json", tmp_path)
+
+
+def _mcp_request_with_artifact_path(
+    *,
+    root: Path,
+    field: str,
+    value: str,
+    allow_external_artifacts: bool = False,
+) -> MCPAnalysisRequest:
+    root_text = str(root.resolve(strict=False))
+    if field == "baseline_path":
+        return MCPAnalysisRequest(
+            root=root_text,
+            respect_pyproject=False,
+            allow_external_artifacts=allow_external_artifacts,
+            baseline_path=value,
+        )
+    if field == "metrics_baseline_path":
+        return MCPAnalysisRequest(
+            root=root_text,
+            respect_pyproject=False,
+            allow_external_artifacts=allow_external_artifacts,
+            metrics_baseline_path=value,
+        )
+    if field == "cache_path":
+        return MCPAnalysisRequest(
+            root=root_text,
+            respect_pyproject=False,
+            allow_external_artifacts=allow_external_artifacts,
+            cache_path=value,
+        )
+    if field == "coverage_xml":
+        return MCPAnalysisRequest(
+            root=root_text,
+            respect_pyproject=False,
+            allow_external_artifacts=allow_external_artifacts,
+            coverage_xml=value,
+        )
+    raise AssertionError(f"unknown artifact path field: {field}")
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("baseline_path", "baseline.json"),
+        ("metrics_baseline_path", "metrics.json"),
+        ("cache_path", "cache.json"),
+        ("coverage_xml", "coverage.xml"),
+    ],
+)
+def test_mcp_analysis_request_artifact_paths_stay_repo_relative_by_default(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    external = tmp_path / value
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    with pytest.raises(MCPServiceContractError, match="Invalid path"):
+        service._build_args(
+            root_path=root,
+            request=_mcp_request_with_artifact_path(
+                root=root,
+                field=field,
+                value=str(external.resolve(strict=False)),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("baseline_path", "baseline.json"),
+        ("metrics_baseline_path", "metrics.json"),
+        ("cache_path", "cache.json"),
+        ("coverage_xml", "coverage.xml"),
+    ],
+)
+def test_mcp_analysis_request_allows_external_artifact_paths_with_opt_in(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    service = CodeCloneMCPService(history_limit=4)
+    external = tmp_path / value
+
+    args = service._build_args(
+        root_path=root,
+        request=_mcp_request_with_artifact_path(
+            root=root,
+            field=field,
+            value=str(external.resolve(strict=False)),
+            allow_external_artifacts=True,
+        ),
+    )
+
+    expected_attr = {
+        "baseline_path": "baseline",
+        "metrics_baseline_path": "metrics_baseline",
+        "cache_path": "cache_path",
+        "coverage_xml": "coverage_xml",
+    }[field]
+    assert getattr(args, expected_attr) == str(external.resolve(strict=False))
 
 
 def test_mcp_service_granular_checks_reject_relative_root_and_allow_omission(

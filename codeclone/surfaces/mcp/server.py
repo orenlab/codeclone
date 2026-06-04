@@ -21,6 +21,7 @@ from .messages import resources as mcp_resources
 from .messages import tools as mcp_tools
 from .messages.params import (
     AfterRunIdParam,
+    AllowExternalArtifactsParam,
     AnalysisModeParam,
     ApiSurfaceParam,
     AuditPathOverrideParam,
@@ -315,6 +316,7 @@ def build_mcp_server(
         cache_policy: CachePolicyParam = "reuse",
         cache_path: OptionalPathParam = None,
         max_cache_size_mb: MaxSizeMbParam = None,
+        allow_external_artifacts: AllowExternalArtifactsParam = False,
     ) -> dict[str, object]:
         return service.analyze_repository(
             MCPAnalysisRequest(
@@ -342,6 +344,7 @@ def build_mcp_server(
                 cache_policy=_validated_cache_policy(cache_policy),
                 cache_path=cache_path,
                 max_cache_size_mb=max_cache_size_mb,
+                allow_external_artifacts=allow_external_artifacts,
             )
         )
 
@@ -376,6 +379,7 @@ def build_mcp_server(
         cache_policy: CachePolicyParam = "reuse",
         cache_path: OptionalPathParam = None,
         max_cache_size_mb: MaxSizeMbParam = None,
+        allow_external_artifacts: AllowExternalArtifactsParam = False,
     ) -> dict[str, object]:
         return service.analyze_changed_paths(
             MCPAnalysisRequest(
@@ -403,6 +407,7 @@ def build_mcp_server(
                 cache_policy=_validated_cache_policy(cache_policy),
                 cache_path=cache_path,
                 max_cache_size_mb=max_cache_size_mb,
+                allow_external_artifacts=allow_external_artifacts,
             )
         )
 

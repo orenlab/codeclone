@@ -44,26 +44,20 @@ def test_resolve_memory_config_rejects_non_digit_int_string(tmp_path: Path) -> N
 
 
 def test_resolve_memory_config_rejects_non_string_db_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
 ) -> None:
     root = tmp_path / "repo"
     root.mkdir()
 
-    # Force the normalizer to return non-str to cover the TypeError branch.
-    monkeypatch.setattr(
-        "codeclone.config.memory.normalize_path_config_value",
-        lambda **_kwargs: 123,
-    )
-
     with pytest.raises(
         TypeError,
-        match="memory db_path must resolve to a string path",
+        match="memory\\.db_path must resolve to a string path",
     ):
         resolve_memory_config(
             root,
             pyproject_config={
                 "memory": {
-                    "db_path": ".cache/codeclone/memory.sqlite3",
+                    "db_path": 123,
                 }
             },
         )

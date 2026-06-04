@@ -93,6 +93,7 @@ from codeclone.models import (
     SegmentUnit,
     Unit,
 )
+from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
 
 
 def _make_unit(filepath: str) -> Unit:
@@ -1848,7 +1849,30 @@ def test_runtime_filepath_from_wire_resolve_oserror(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert runtime_filepath_from_wire("pkg/module.py", root=cache.root) == str(combined)
+    with pytest.raises(RepoPathError, match="cannot resolve path"):
+        runtime_filepath_from_wire("pkg/module.py", root=cache.root)
+
+
+@pytest.mark.parametrize("wire_path", ["../outside.py", "pkg/../../outside.py"])
+def test_runtime_filepath_from_wire_rejects_traversal_escape(
+    tmp_path: Path,
+    wire_path: str,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+
+    with pytest.raises(PathOutsideRepoError, match="escapes repository root"):
+        runtime_filepath_from_wire(wire_path, root=root)
+
+
+def test_runtime_filepath_from_wire_rejects_external_absolute_path(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+
+    with pytest.raises(PathOutsideRepoError, match="escapes repository root"):
+        runtime_filepath_from_wire(str(tmp_path / "outside.py"), root=root)
 
 
 def test_as_str_dict_rejects_non_string_keys() -> None:

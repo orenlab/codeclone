@@ -578,6 +578,7 @@ class MCPAnalysisRequest:
     cache_policy: CachePolicy = "reuse"
     cache_path: str | None = None
     max_cache_size_mb: int | None = None
+    allow_external_artifacts: bool = False
 
 
 @dataclass(frozen=True, slots=True)

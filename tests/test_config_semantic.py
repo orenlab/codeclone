@@ -205,113 +205,44 @@ mcp_sync_policy = "eventually"
         resolve_memory_config(tmp_path)
 
 
-def test_semantic_index_path_must_resolve_to_string(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import codeclone.config.memory as memory_config_mod
-    from codeclone.config.pyproject_loader import normalize_path_config_value
-
+def test_semantic_index_path_rejects_external_absolute_path(tmp_path: Path) -> None:
     _write_pyproject(
         tmp_path,
-        """
+        f"""
 [tool.codeclone.memory.semantic]
 enabled = true
-index_path = "semantic.lance"
+index_path = "{tmp_path.parent / "semantic.lance"}"
 """,
     )
-
-    def _bad_index_path(
-        *,
-        key: str,
-        value: object,
-        root_path: Path,
-        path_config_keys: frozenset[str] | set[str] = frozenset(),
-    ) -> object:
-        if key == "index_path":
-            return 42
-        return normalize_path_config_value(
-            key=key,
-            value=value,
-            root_path=root_path,
-            path_config_keys=path_config_keys,
-        )
-
-    monkeypatch.setattr(
-        memory_config_mod, "normalize_path_config_value", _bad_index_path
-    )
-    with pytest.raises(TypeError, match="index_path must resolve to a string"):
+    with pytest.raises(ValueError, match="memory\\.semantic\\.index_path"):
         resolve_memory_config(tmp_path)
 
 
-def test_semantic_embedding_cache_dir_must_resolve_to_string(
+def test_semantic_embedding_cache_dir_rejects_traversal_escape(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import codeclone.config.memory as memory_config_mod
-    from codeclone.config.pyproject_loader import normalize_path_config_value
-
     _write_pyproject(
         tmp_path,
         """
 [tool.codeclone.memory.semantic]
 enabled = true
 embedding_provider = "fastembed"
-embedding_cache_dir = "models"
+embedding_cache_dir = "../models"
 """,
     )
-
-    def _bad_cache_dir(
-        *,
-        key: str,
-        value: object,
-        root_path: Path,
-        path_config_keys: frozenset[str] | set[str] = frozenset(),
-    ) -> object:
-        if key == "embedding_cache_dir":
-            return 42
-        return normalize_path_config_value(
-            key=key,
-            value=value,
-            root_path=root_path,
-            path_config_keys=path_config_keys,
-        )
-
-    monkeypatch.setattr(
-        memory_config_mod, "normalize_path_config_value", _bad_cache_dir
-    )
     with pytest.raises(
-        TypeError,
-        match="embedding_cache_dir must resolve to a string",
+        ValueError,
+        match="memory\\.semantic\\.embedding_cache_dir",
     ):
         resolve_memory_config(tmp_path)
 
 
-def test_memory_db_path_must_resolve_to_string(
+def test_memory_db_path_rejects_external_env_absolute_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import codeclone.config.memory as memory_config_mod
-    from codeclone.config.pyproject_loader import normalize_path_config_value
-
-    def _bad_db_path(
-        *,
-        key: str,
-        value: object,
-        root_path: Path,
-        path_config_keys: frozenset[str] | set[str] = frozenset(),
-    ) -> object:
-        if key == "db_path":
-            return 42
-        return normalize_path_config_value(
-            key=key,
-            value=value,
-            root_path=root_path,
-            path_config_keys=path_config_keys,
-        )
-
-    monkeypatch.setattr(memory_config_mod, "normalize_path_config_value", _bad_db_path)
-    with pytest.raises(TypeError, match="memory db_path"):
+    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", str(tmp_path.parent / "memory.db"))
+    with pytest.raises(ValueError, match="memory\\.db_path"):
         resolve_memory_config(tmp_path)
 
 

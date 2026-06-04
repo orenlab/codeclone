@@ -12,6 +12,12 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from ..utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
 from .memory_defaults import (
     DEFAULT_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
     DEFAULT_SEMANTIC_BACKEND,
@@ -37,7 +43,7 @@ from .memory_defaults import (
     SemanticEmbeddingProvider,
 )
 from .memory_specs import MEMORY_CONFIG_DEFAULTS, SEMANTIC_NESTED_TABLE_KEY
-from .pyproject_loader import load_pyproject_config, normalize_path_config_value
+from .pyproject_loader import load_pyproject_config
 
 _VALID_BACKENDS = frozenset({"sqlite", "postgres"})
 _VALID_MCP_SYNC_POLICIES = frozenset(
@@ -154,27 +160,34 @@ def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
         config = SemanticConfig.model_validate(data)
     except ValidationError as exc:
         raise ValueError(_format_semantic_error(exc)) from exc
-    index_path = normalize_path_config_value(
-        key="index_path",
+    index_path = _resolve_memory_state_path(
+        key="memory.semantic.index_path",
         value=config.index_path,
         root_path=root_path,
-        path_config_keys=frozenset({"index_path"}),
     )
-    if not isinstance(index_path, str):
-        raise TypeError("memory.semantic.index_path must resolve to a string path")
-    cache_dir = normalize_path_config_value(
-        key="embedding_cache_dir",
+    cache_dir = _resolve_memory_state_path(
+        key="memory.semantic.embedding_cache_dir",
         value=config.embedding_cache_dir,
         root_path=root_path,
-        path_config_keys=frozenset({"embedding_cache_dir"}),
     )
-    if not isinstance(cache_dir, str):
-        raise TypeError(
-            "memory.semantic.embedding_cache_dir must resolve to a string path"
-        )
     return config.model_copy(
-        update={"index_path": index_path, "embedding_cache_dir": cache_dir}
+        update={"index_path": str(index_path), "embedding_cache_dir": str(cache_dir)}
     )
+
+
+def _resolve_memory_state_path(*, key: str, value: object, root_path: Path) -> Path:
+    if not isinstance(value, str):
+        raise TypeError(f"{key} must resolve to a string path")
+    try:
+        return resolve_under_repo_root(
+            root_path,
+            value,
+            policy=RepoPathPolicy(allow_absolute=True),
+        )
+    except PathOutsideRepoError as exc:
+        raise ValueError(f"{key} must stay under the repository root") from exc
+    except RepoPathError as exc:
+        raise ValueError(f"Invalid tool.codeclone.{key}: {exc}") from exc
 
 
 def resolve_memory_config(
@@ -204,19 +217,17 @@ def resolve_memory_config(
         valid=_VALID_MCP_SYNC_POLICIES,
     )
 
-    db_path_raw = os.environ.get(MEMORY_ENV_DB_PATH, str(merged["db_path"]))
-    db_path_value = normalize_path_config_value(
-        key="db_path",
+    env_db_path = os.environ.get(MEMORY_ENV_DB_PATH)
+    db_path_raw: object = env_db_path if env_db_path is not None else merged["db_path"]
+    db_path_value = _resolve_memory_state_path(
+        key="memory.db_path",
         value=db_path_raw,
         root_path=root_path,
-        path_config_keys=frozenset({"db_path"}),
     )
-    if not isinstance(db_path_value, str):
-        raise TypeError("memory db_path must resolve to a string path")
 
     return MemoryConfig(
         backend=backend_raw,  # type: ignore[arg-type]
-        db_path=Path(db_path_value),
+        db_path=db_path_value,
         active_retention_days=_memory_int(
             merged["active_retention_days"], key="active_retention_days"
         ),

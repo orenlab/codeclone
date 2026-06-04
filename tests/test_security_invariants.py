@@ -144,20 +144,29 @@ def test_mcp_resolve_root_requires_absolute_existing_directory(tmp_path: Path) -
         _resolve_root(str(file_root.resolve()))
 
 
-def test_mcp_resolve_optional_path_keeps_documented_absolute_outside_root(
+def test_mcp_resolve_optional_path_rejects_external_absolute_by_default(
     tmp_path: Path,
 ) -> None:
-    """Contract sentinel: optional MCP paths may point outside scan root today."""
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     outside = tmp_path / "outside-cache.json"
     outside.write_text("{}", encoding="utf-8")
 
-    resolved = _resolve_optional_path(str(outside.resolve()), workspace)
+    with pytest.raises(MCPServiceContractError, match="Invalid path"):
+        _resolve_optional_path(str(outside.resolve()), workspace)
+
+    resolved = _resolve_optional_path(
+        str(outside.resolve()),
+        workspace,
+        allow_external_artifacts=True,
+    )
     assert resolved == outside.resolve()
 
     inside = workspace / "cache.json"
     assert _resolve_optional_path("cache.json", workspace) == inside.resolve()
+
+    with pytest.raises(MCPServiceContractError, match="Invalid path"):
+        _resolve_optional_path(str(inside.resolve()), workspace)
 
 
 def test_mcp_resolve_optional_path_resolves_relative_under_root(tmp_path: Path) -> None:

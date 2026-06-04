@@ -18,10 +18,19 @@ def test_resolve_memory_config_env_db_path(
 ) -> None:
     root = tmp_path / "repo"
     root.mkdir()
-    custom = tmp_path / "custom.sqlite3"
-    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", str(custom))
+    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", ".cache/codeclone/custom.sqlite3")
     config = resolve_memory_config(root)
-    assert config.db_path == custom.resolve()
+    assert config.db_path == (root / ".cache" / "codeclone" / "custom.sqlite3")
+
+
+def test_resolve_memory_config_rejects_external_env_db_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", str(tmp_path / "custom.sqlite3"))
+    with pytest.raises(ValueError, match="memory\\.db_path"):
+        resolve_memory_config(root)
 
 
 def test_resolve_memory_config_rejects_invalid_backend(tmp_path: Path) -> None:
