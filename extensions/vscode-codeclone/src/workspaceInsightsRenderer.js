@@ -149,7 +149,7 @@ function sessionStatsBody(payload) {
         ]);
     }
 
-    let latestHtml = '<p class="muted">No cached report in .cache/codeclone/report.json.</p>';
+    let latestHtml = '<p class="muted">No cached report in .codeclone/report.json.</p>';
     if (latest.cache_present && latest.run_id) {
         const age = formatAgeSeconds(
             typeof latest.age_seconds === "number" ? latest.age_seconds : null

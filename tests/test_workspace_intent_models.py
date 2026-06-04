@@ -32,7 +32,7 @@ def test_intent_scope_model_normalizes_paths() -> None:
         {
             "allowed_files": ["pkg/a.py", "pkg/a.py", "./pkg/b.py"],
             "allowed_related": [],
-            "forbidden": [".cache/codeclone/**"],
+            "forbidden": [".codeclone/**"],
         }
     )
     assert scope.allowed_files == ["./pkg/b.py", "pkg/a.py"]
@@ -88,13 +88,13 @@ def test_workspace_intent_document_rejects_tampered_integrity() -> None:
         scope={
             "allowed_files": ["pkg/a.py"],
             "allowed_related": [],
-            "forbidden": [".cache/codeclone/**"],
+            "forbidden": [".codeclone/**"],
         },
         scope_digest=workspace_intents.compute_scope_digest(
             {
                 "allowed_files": ["pkg/a.py"],
                 "allowed_related": [],
-                "forbidden": [".cache/codeclone/**"],
+                "forbidden": [".codeclone/**"],
             }
         ),
         blast_radius_summary={"radius_level": "medium"},

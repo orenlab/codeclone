@@ -5,10 +5,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from ...paths.workspace import legacy_home_cache_path
 
 console: object | None = None
-LEGACY_CACHE_PATH = Path("~/.cache/codeclone/cache.json").expanduser()
+
+LEGACY_CACHE_PATH = legacy_home_cache_path()
 
 
 def get_console() -> object:

@@ -118,7 +118,7 @@ def test_single_baseline_json() -> None:
 
 
 def test_single_cache_file() -> None:
-    result = classify_patch([".cache/codeclone/report.json"])
+    result = classify_patch([".codeclone/report.json"])
     assert result.profile == VerificationProfile.STATE_ARTIFACT_CHANGE
 
 
@@ -177,7 +177,7 @@ def test_state_artifact_overrides_python() -> None:
 
 
 def test_state_artifact_overrides_docs() -> None:
-    result = classify_patch(["README.md", ".cache/codeclone/report.json"])
+    result = classify_patch(["README.md", ".codeclone/report.json"])
     assert result.profile == VerificationProfile.STATE_ARTIFACT_CHANGE
 
 
@@ -309,7 +309,7 @@ def test_deeply_nested_workflow() -> None:
 
 
 def test_deeply_nested_cache() -> None:
-    result = classify_patch([".cache/codeclone/intents/some-intent.json"])
+    result = classify_patch([".codeclone/intents/some-intent.json"])
     assert result.profile == VerificationProfile.STATE_ARTIFACT_CHANGE
 
 

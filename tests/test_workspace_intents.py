@@ -38,7 +38,11 @@ def _record(
     scope_payload = scope or {
         "allowed_files": ["pkg/a.py"],
         "allowed_related": ["tests/test_a.py"],
-        "forbidden": [".cache/codeclone/**", "codeclone.baseline.json"],
+        "forbidden": [
+            ".cache/codeclone/**",
+            ".codeclone/**",
+            "codeclone.baseline.json",
+        ],
     }
     return WorkspaceIntentRecord(
         intent_id=intent_id,

@@ -73,8 +73,7 @@ HELP_AUDIT_JSON = (
     "Implies --audit. Useful for cross-repository comparison."
 )
 HELP_CACHE_PATH = (
-    "Path to the cache file.\n"
-    "If FILE is omitted, uses <root>/.cache/codeclone/cache.json."
+    "Path to the cache file.\nIf FILE is omitted, uses <root>/.codeclone/cache.json."
 )
 HELP_CACHE_DIR_LEGACY = (
     "Legacy alias for --cache-path.\nPrefer --cache-path in new configurations."

@@ -6,7 +6,7 @@ bundle wrapper for `codeclone-mcp`. Installs as a `.mcpb` package instead of man
 Same canonical 31-tool MCP surface used by CLI, VS Code, Codex, and Claude Code.
 Repository read-only (source, baselines, cache, canonical reports); local stdio
 only. The bundle proxies the full MCP server, including change-control and
-session tools — ephemeral coordination under `.cache/codeclone/intents/` and
+session tools — ephemeral coordination under `.codeclone/intents/` and
 optional audit records when enabled.
 As the local `codeclone-mcp` server gains new canonical surfaces, the bundle
 exposes them without adding a second client-side interpretation layer.

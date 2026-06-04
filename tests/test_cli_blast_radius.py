@@ -75,7 +75,7 @@ def test_blast_radius_quiet_output_uses_canonical_projection(tmp_path: Path) -> 
 
     assert exit_code == int(ExitCode.SUCCESS)
     assert printer.text == (
-        "blast-radius: medium | dependents=1 cohorts=0 cycles=0 do-not-touch=2"
+        "blast-radius: medium | dependents=1 cohorts=0 cycles=0 do-not-touch=3"
     )
 
 

@@ -232,7 +232,7 @@ def test_cli_vscode_extension_tip_uses_versioned_cache(
     printer = _RecordingPrinter()
     args = SimpleNamespace(quiet=False, ci=False)
     env = {"TERM_PROGRAM": "vscode"}
-    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+    cache_path = tmp_path / ".codeclone" / "cache.json"
 
     cli_tips.maybe_print_vscode_extension_tip(
         args=args,
@@ -290,7 +290,7 @@ def test_cli_vscode_extension_tip_tolerates_state_write_failure(
         args=args,
         console=printer,
         codeclone_version=__version__,
-        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        cache_path=tmp_path / ".codeclone" / "cache.json",
         environ={"TERM_PROGRAM": "vscode"},
         stream=_TTYStream(is_tty=True),
     )
@@ -330,7 +330,7 @@ def test_cli_vscode_extension_tip_respects_context_gates(
         args=args,
         console=printer,
         codeclone_version=__version__,
-        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        cache_path=tmp_path / ".codeclone" / "cache.json",
         environ=effective_env,
         stream=_TTYStream(is_tty=isatty),
     )
@@ -350,7 +350,7 @@ def test_cli_gitignore_codeclone_cache_tip(tmp_path: Path) -> None:
     )
     assert shown is True
     assert len(printer.lines) == 1
-    assert ".cache/codeclone/" in printer.lines[0]
+    assert ".codeclone/" in printer.lines[0]
 
     covered_root = tmp_path / "covered"
     covered_root.mkdir()
@@ -448,7 +448,7 @@ def test_cli_migration_notes_use_one_shot_cache(
 ) -> None:
     printer = _RecordingPrinter()
     args = SimpleNamespace(quiet=False, ci=False)
-    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+    cache_path = tmp_path / ".codeclone" / "cache.json"
     tips_path = cache_path.parent / "tips.json"
     if preexisting_tip_keys:
         tips_path.parent.mkdir(parents=True)
@@ -531,7 +531,7 @@ def test_cli_dead_code_reachability_migration_note_respects_gates(
         args=args,
         console=printer,
         codeclone_version=current_version,
-        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        cache_path=tmp_path / ".codeclone" / "cache.json",
         baseline_generator_version=baseline_version,
         baseline_trusted_for_diff=trusted,
         environ=env,
@@ -578,7 +578,7 @@ def test_migration_note_still_reports_when_tip_cache_write_fails(
 ) -> None:
     printer = _RecordingPrinter()
     args = SimpleNamespace(quiet=False, ci=False)
-    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+    cache_path = tmp_path / ".codeclone" / "cache.json"
 
     def _fail_remember(**_kwargs: object) -> None:
         raise OSError("read-only tips cache")
@@ -662,7 +662,7 @@ def test_cli_help_text_consistency(
         "If enabled without a value, uses 10.",
         "If enabled without a value, uses 4.",
         "If enabled without a value, uses 60.",
-        "<root>/.cache/codeclone/cache.json",
+        "<root>/.codeclone/cache.json",
         "Legacy alias for --cache-path",
         "--max-baseline-size-mb MB",
         "--max-cache-size-mb MB",

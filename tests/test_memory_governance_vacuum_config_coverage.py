@@ -37,7 +37,7 @@ from codeclone.memory.vacuum import run_memory_vacuum
 def _memory_config() -> MemoryConfig:
     return MemoryConfig(
         backend="sqlite",
-        db_path=Path(".cache/codeclone/memory.sqlite3"),
+        db_path=Path(".codeclone/memory.sqlite3"),
         active_retention_days=30,
         stale_retention_days=30,
         draft_retention_days=7,

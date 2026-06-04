@@ -41,11 +41,11 @@ DEFAULT_MAX_CACHE_SIZE_MB: Final = 50
 DEFAULT_MAX_BASELINE_SIZE_MB: Final = 5
 DEFAULT_COVERAGE_MIN: Final = 50
 DEFAULT_BASELINE_PATH: Final = "codeclone.baseline.json"
-DEFAULT_HTML_REPORT_PATH: Final = ".cache/codeclone/report.html"
-DEFAULT_JSON_REPORT_PATH: Final = ".cache/codeclone/report.json"
-DEFAULT_MARKDOWN_REPORT_PATH: Final = ".cache/codeclone/report.md"
-DEFAULT_SARIF_REPORT_PATH: Final = ".cache/codeclone/report.sarif"
-DEFAULT_TEXT_REPORT_PATH: Final = ".cache/codeclone/report.txt"
+DEFAULT_HTML_REPORT_PATH: Final = ".codeclone/report.html"
+DEFAULT_JSON_REPORT_PATH: Final = ".codeclone/report.json"
+DEFAULT_MARKDOWN_REPORT_PATH: Final = ".codeclone/report.md"
+DEFAULT_SARIF_REPORT_PATH: Final = ".codeclone/report.sarif"
+DEFAULT_TEXT_REPORT_PATH: Final = ".codeclone/report.txt"
 
 COMPLEXITY_RISK_LOW_MAX: Final = 10
 COMPLEXITY_RISK_MEDIUM_MAX: Final = 20

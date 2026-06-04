@@ -61,9 +61,9 @@ def test_ensure_schema_rejects_unknown_version(tmp_path: Path) -> None:
 def test_resolve_audit_path_accepts_repo_relative_sqlite_path(tmp_path: Path) -> None:
     resolved = resolve_audit_path(
         root_path=tmp_path,
-        value=".cache/codeclone/audit.db",
+        value=".codeclone/audit.db",
     )
-    assert resolved == tmp_path / ".cache" / "codeclone" / "audit.db"
+    assert resolved == tmp_path / ".codeclone" / "audit.db"
 
 
 @pytest.mark.parametrize(

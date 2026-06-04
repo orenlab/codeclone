@@ -63,7 +63,7 @@ def _write_audit_event(
     status: str = "accepted",
 ) -> None:
     writer = SqliteAuditWriter(
-        db_path=root / ".cache" / "codeclone" / "db" / "audit.sqlite3",
+        db_path=root / ".codeclone" / "db" / "audit.sqlite3",
         payloads="compact",
         retention_days=30,
     )
@@ -104,7 +104,7 @@ def _write_multiple_events(root: Path) -> None:
         (EVENT_BLAST_RADIUS, "info", "computed"),
     ]
     writer = SqliteAuditWriter(
-        db_path=root / ".cache" / "codeclone" / "db" / "audit.sqlite3",
+        db_path=root / ".codeclone" / "db" / "audit.sqlite3",
         payloads="compact",
         retention_days=30,
     )
@@ -216,7 +216,7 @@ def test_audit_contract_errors(
         console=printer,
         root_path=tmp_path,
         audit_enabled=audit_enabled,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=True,
     )
 
@@ -260,7 +260,7 @@ def test_audit_quiet_with_events(tmp_path: Path) -> None:
         console=printer,
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=True,
     )
 
@@ -280,7 +280,7 @@ def test_audit_verbose_renders_plain_table(tmp_path: Path) -> None:
         console=printer,
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=False,
     )
 
@@ -302,7 +302,7 @@ def test_audit_verbose_uses_rich_table(tmp_path: Path) -> None:
         console=cast(PrinterLike, console),
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=False,
     )
 
@@ -324,7 +324,7 @@ def test_audit_rich_with_payload_footprint(tmp_path: Path) -> None:
         console=cast(PrinterLike, console),
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=False,
     )
 
@@ -425,7 +425,7 @@ def test_audit_json_summary_with_footprint(tmp_path: Path) -> None:
         console=printer,
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=False,
         json_summary=True,
     )
@@ -449,7 +449,7 @@ def test_audit_json_summary_without_footprint(tmp_path: Path) -> None:
         console=printer,
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=False,
         json_summary=True,
     )
@@ -462,7 +462,7 @@ def test_audit_json_summary_without_footprint(tmp_path: Path) -> None:
 
 def _write_event_without_tokens(root: Path) -> None:
     """Insert an event row directly with NULL token columns."""
-    db_path = root / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = root / ".codeclone" / "db" / "audit.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
@@ -565,7 +565,7 @@ def test_payload_footprint_to_dict_roundtrip() -> None:
 
 def test_read_audit_summary_includes_payload_footprint(tmp_path: Path) -> None:
     _write_multiple_events(tmp_path)
-    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
     summary = read_audit_summary(db_path=db_path, limit=50)
 
     assert summary.payload_footprint is not None
@@ -584,7 +584,7 @@ def test_read_audit_summary_includes_payload_footprint(tmp_path: Path) -> None:
 
 def test_read_audit_summary_no_tokens_yields_no_footprint(tmp_path: Path) -> None:
     _write_event_without_tokens(tmp_path)
-    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
     summary = read_audit_summary(db_path=db_path, limit=50)
 
     # Event has NULL estimated_tokens → footprint should be None
@@ -644,7 +644,7 @@ def test_short_workflow(kind: str, value: str, expected: str) -> None:
 
 def test_audit_plain_output_includes_retention_days(tmp_path: Path) -> None:
     _write_audit_event(tmp_path)
-    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
     conn = sqlite3.connect(str(db_path))
     try:
         conn.execute(
@@ -659,7 +659,7 @@ def test_audit_plain_output_includes_retention_days(tmp_path: Path) -> None:
         console=printer,
         root_path=tmp_path,
         audit_enabled=True,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
         quiet=False,
     )
     assert exit_code == int(ExitCode.SUCCESS)
@@ -899,7 +899,7 @@ class TestRunPreAnalysisControllerQuery:
             "no_color": True,
             "quiet": True,
             "audit_enabled": False,
-            "audit_path": ".cache/codeclone/db/audit.sqlite3",
+            "audit_path": ".codeclone/db/audit.sqlite3",
         }
         defaults.update(attrs)
         return cast(CLIArgsLike, Namespace(**defaults))

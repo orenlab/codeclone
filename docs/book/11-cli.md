@@ -58,7 +58,7 @@ Refs:
 ## Contracts
 
 - Help output includes canonical exit-code section and project links.
-- Bare report flags write to deterministic default paths under `.cache/codeclone/`.
+- Bare report flags write to deterministic default paths under `.codeclone/`.
 - `--open-html-report` is layered on top of `--html`; it does not imply HTML output.
 - `--timestamped-report-paths` rewrites only default report paths requested via bare flags.
 - In interactive VS Code terminals, the CLI may print a one-time extension hint
@@ -78,7 +78,7 @@ Refs:
   the LCOM4 graph.
 - After a normal interactive analysis run, the CLI may print a workspace
   hygiene tip when the repository root `.gitignore` does not cover
-  `.cache/codeclone/` (or the broader `.cache/` tree). The tip is advisory
+  `.codeclone/` (or the broader `.cache/` tree). The tip is advisory
   only, suppressed in `--quiet`, CI, and non-TTY contexts, and repeats on
   each eligible run until `.gitignore` covers the cache path. CodeClone never
   edits `.gitignore` automatically.

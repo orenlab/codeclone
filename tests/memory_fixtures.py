@@ -74,7 +74,7 @@ def load_memory_init_report_document(
     registry_items: list[str] | None = None,
     fallback_root: Path | None = None,
 ) -> dict[str, object]:
-    report_path = REPO_ROOT / ".cache" / "codeclone" / "report.json"
+    report_path = REPO_ROOT / ".codeclone" / "report.json"
     if report_path.is_file():
         loaded = read_json_object(report_path)
         if registry_items is not None:
@@ -151,7 +151,7 @@ def git_repo_with_cached_report(
         capture_output=True,
     )
 
-    report_path = root / ".cache" / "codeclone" / "report.json"
+    report_path = root / ".codeclone" / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("{}", encoding="utf-8")
     report_document: dict[str, object] = {

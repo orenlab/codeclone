@@ -30,6 +30,7 @@ from enum import Enum
 from fnmatch import fnmatchcase
 from typing import Final
 
+from ...paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
 from .messages.verification import (
     EMPTY_PROFILE_REASON,
     PROFILE_REASONS,
@@ -59,7 +60,7 @@ class VerificationProfile(str, Enum):
 
 STATE_ARTIFACT_PATTERNS: Final[tuple[str, ...]] = (
     "codeclone.baseline.json",
-    ".cache/codeclone/**",
+    *FORBIDDEN_WORKSPACE_GLOBS,
 )
 
 PYTHON_SOURCE_EXTENSIONS: Final[tuple[str, ...]] = (".py", ".pyi")

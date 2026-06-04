@@ -28,7 +28,7 @@ inputs:
   json-path:
     description: "Canonical JSON report output path"
     required: false
-    default: ".cache/codeclone/report.json"
+    default: ".codeclone/report.json"
 
   sarif:
     description: "Generate SARIF and upload to Code Scanning"
@@ -38,7 +38,7 @@ inputs:
   sarif-path:
     description: "SARIF output path"
     required: false
-    default: ".cache/codeclone/report.sarif"
+    default: ".codeclone/report.sarif"
 
   pr-comment:
     description: "Post or update a PR summary comment"

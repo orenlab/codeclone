@@ -6,6 +6,14 @@
 intent-first edit workflow, blast radius, patch verification, claim guard,
 review receipts, and workflow consolidation tools.
 
+### Changed
+
+- Default per-project workspace directory for cache, reports, Engineering Memory,
+  controller audit/intent SQLite stores, and semantic sidecars moved from
+  `.cache/codeclone/` to `.codeclone/`. CLI warns when legacy home cache
+  (`~/.cache/codeclone/cache.json`) or a non-empty repo `.cache/codeclone/`
+  directory is still present; remove those artifacts after you no longer need them.
+
 ### Added
 
 - Structural change controller for MCP: 31 tools total, with
@@ -15,14 +23,14 @@ review receipts, and workflow consolidation tools.
 - Change intent lifecycle (`manage_change_intent`): declare, check, clear,
   queue (`on_conflict="queue"`), promote, recover. Renewable ownership leases
   with own/recoverable/foreign-active classification.
-- Workspace intent registry under `.cache/codeclone/intents/` for multi-agent
+- Workspace intent registry under `.codeclone/intents/` for multi-agent
   coordination. Optional SQLite backend (`intent_registry_backend = "sqlite"`,
   env `CODECLONE_INTENT_REGISTRY_BACKEND`); closed intents auditable up to
   `intent_registry_retention_days` (default 7). Cross-process locks, lazy
   closure on reads, scoped git working-tree hygiene, and repo-level
   `workspace_dirty_summary` on `list_workspace`.
 - Engineering Memory foundation (Phase 18.1): SQLite schema/store under
-  `.cache/codeclone/memory/`, `[tool.codeclone.memory]` config, CLI commands
+  `.codeclone/memory/`, `[tool.codeclone.memory]` config, CLI commands
   `codeclone memory init|status|for-path|search`, and deterministic init ingestion
   from analysis, contracts, docs, tests, git history, and contradictions.
 - Engineering Memory scoped retrieval (Phase 18.2): MCP tools
@@ -60,7 +68,7 @@ review receipts, and workflow consolidation tools.
 - Engineering Memory optional semantic retrieval (Phase 20): opt-in
   `[tool.codeclone.memory.semantic]` (default `enabled=false`,
   `embedding_provider=diagnostic`), LanceDB sidecar at
-  `.cache/codeclone/memory/semantic_index.lance` (`SEMANTIC_INDEX_FORMAT_VERSION`
+  `.codeclone/memory/semantic_index.lance` (`SEMANTIC_INDEX_FORMAT_VERSION`
   `1`, separate from memory schema `1.1`), optional extra
   `pip install 'codeclone[semantic-lancedb]'`, CLI `codeclone memory semantic
   status|rebuild|search`, `manage_engineering_memory(action="rebuild_semantic_index")`,
@@ -73,7 +81,7 @@ review receipts, and workflow consolidation tools.
   `BAAI/bge-small-en-v1.5`) via `codeclone[semantic-fastembed]`; use
   `codeclone[semantic-local]` to install both LanceDB and FastEmbed. Model
   downloads are disabled by default (`allow_model_download=false`) so offline
-  installs can pre-populate `.cache/codeclone/memory/fastembed`.
+  installs can pre-populate `.codeclone/memory/fastembed`.
 - Engineering Memory search and git provenance (Phase 18.6): schema `1.1` with
   SQLite FTS5 index, `match_mode` (`any`/`all`) for CLI and MCP search,
   refresh-time digest reactivation for unchanged records, resilient git
@@ -93,7 +101,7 @@ review receipts, and workflow consolidation tools.
   optional `patch_health_delta` from verify for regression-free claim checks.
 - Review receipts (`create_review_receipt`): deterministic audit artifacts with
   provenance, scope, patch status, and claims-not-made.
-- Workspace hygiene tips when `.cache/codeclone/` is not gitignored — advisory
+- Workspace hygiene tips when `.codeclone/` is not gitignored — advisory
   in MCP `tips[]` and CLI output; never edits `.gitignore` automatically.
 - CLI controller query modes: `--blast-radius` and `--patch-verify`.
 - Audit trail events for intent lifecycle and token budget tracking.
@@ -888,7 +896,7 @@ codeclone . --update-baseline
 
 ### Cache & Security
 
-- Cache default moved to `<root>/.cache/codeclone/cache.json` with legacy path warning.
+- Cache default moved to `<root>/.codeclone/cache.json` with legacy path warning.
 - Cache schema moved to compact signed payload format (`CACHE_VERSION=1.2`) with
   relative file keys and fixed-array entries for faster IO and smaller files.
 - Cache integrity uses constant-time signature checks and deep schema validation.

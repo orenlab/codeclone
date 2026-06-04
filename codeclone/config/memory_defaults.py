@@ -14,7 +14,7 @@ SemanticBackend = Literal["lancedb"]
 SemanticEmbeddingProvider = Literal["diagnostic", "fastembed", "local_model", "api"]
 
 DEFAULT_MEMORY_BACKEND: Final[MemoryBackend] = "sqlite"
-DEFAULT_MEMORY_DB_PATH: Final = ".cache/codeclone/memory/engineering_memory.sqlite3"
+DEFAULT_MEMORY_DB_PATH: Final = ".codeclone/memory/engineering_memory.sqlite3"
 DEFAULT_MEMORY_ACTIVE_RETENTION_DAYS: Final = -1
 DEFAULT_MEMORY_STALE_RETENTION_DAYS: Final = 180
 DEFAULT_MEMORY_DRAFT_RETENTION_DAYS: Final = 14
@@ -38,11 +38,11 @@ DEFAULT_MEMORY_MCP_SYNC_POLICY: Final[MemoryMcpSyncPolicy] = "bootstrap_if_missi
 # opt-in (fastembed/community local, api/paid later).
 DEFAULT_SEMANTIC_ENABLED: Final = False
 DEFAULT_SEMANTIC_BACKEND: Final[SemanticBackend] = "lancedb"
-DEFAULT_SEMANTIC_INDEX_PATH: Final = ".cache/codeclone/memory/semantic_index.lance"
+DEFAULT_SEMANTIC_INDEX_PATH: Final = ".codeclone/memory/semantic_index.lance"
 DEFAULT_SEMANTIC_EMBEDDING_PROVIDER: Final[SemanticEmbeddingProvider] = "diagnostic"
 DEFAULT_SEMANTIC_FASTEMBED_MODEL: Final = "BAAI/bge-small-en-v1.5"
 DEFAULT_SEMANTIC_FASTEMBED_DIMENSION: Final = 384
-DEFAULT_SEMANTIC_EMBEDDING_CACHE_DIR: Final = ".cache/codeclone/memory/fastembed"
+DEFAULT_SEMANTIC_EMBEDDING_CACHE_DIR: Final = ".codeclone/memory/fastembed"
 DEFAULT_SEMANTIC_ALLOW_MODEL_DOWNLOAD: Final = False
 DEFAULT_SEMANTIC_DIMENSION: Final = 256
 DEFAULT_SEMANTIC_MAX_RESULTS: Final = 20

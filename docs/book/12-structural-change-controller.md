@@ -40,12 +40,12 @@ queries:
 
 - The canonical report remains the source of truth.
 - Intent truth is **session-local** for the active MCP process; the optional
-  workspace registry (file backend under `.cache/codeclone/intents/` or SQLite
+  workspace registry (file backend under `.codeclone/intents/` or SQLite
   per `[tool.codeclone]`) provides advisory, TTL/lease-bound cross-process
   visibility only.
 - MCP may write ephemeral workspace coordination records through the configured
   intent registry backend and optional audit records under
-  `.cache/codeclone/db/` when enabled.
+  `.codeclone/db/` when enabled.
 - MCP must not mutate source files, baselines, reports, or analysis cache data.
 - Tools derive responses from existing run/report facts rather than LLM
   inference.
@@ -164,14 +164,14 @@ coordination:
   registry records. Foreign active and foreign stale intents are rejected
   and require coordination.
 
-Registry records live under `.cache/codeclone/intents/` by default (one JSON
+Registry records live under `.codeclone/intents/` by default (one JSON
 file per intent) and are protected with a SHA-256 integrity digest over
 canonical JSON. Repositories may opt into a SQLite backend instead:
 
 ```toml
 [tool.codeclone]
 intent_registry_backend = "sqlite"
-intent_registry_path = ".cache/codeclone/db/intents.sqlite3"
+intent_registry_path = ".codeclone/db/intents.sqlite3"
 ```
 
 Environment overrides: `CODECLONE_INTENT_REGISTRY_BACKEND`,

@@ -73,7 +73,7 @@ Analysis:
   --audit-json          Output audit payload footprint as JSON.
                         Implies --audit. Useful for cross-repository comparison.
   --cache-path [FILE]   Path to the cache file.
-                        If FILE is omitted, uses <root>/.cache/codeclone/cache.json.
+                        If FILE is omitted, uses <root>/.codeclone/cache.json.
   --cache-dir [FILE]    Legacy alias for --cache-path.
                         Prefer --cache-path in new configurations.
   --max-cache-size-mb MB
@@ -167,15 +167,15 @@ Analysis stages:
 
 Reporting:
   --html [FILE]         Generate an HTML report.
-                        If FILE is omitted, writes to .cache/codeclone/report.html.
+                        If FILE is omitted, writes to .codeclone/report.html.
   --json [FILE]         Generate the canonical JSON report.
-                        If FILE is omitted, writes to .cache/codeclone/report.json.
+                        If FILE is omitted, writes to .codeclone/report.json.
   --md [FILE]           Generate a Markdown report.
-                        If FILE is omitted, writes to .cache/codeclone/report.md.
+                        If FILE is omitted, writes to .codeclone/report.md.
   --sarif [FILE]        Generate a SARIF 2.1.0 report.
-                        If FILE is omitted, writes to .cache/codeclone/report.sarif.
+                        If FILE is omitted, writes to .codeclone/report.sarif.
   --text [FILE]         Generate a plain-text report.
-                        If FILE is omitted, writes to .cache/codeclone/report.txt.
+                        If FILE is omitted, writes to .codeclone/report.txt.
   --timestamped-report-paths, --no-timestamped-report-paths
                         Append a UTC timestamp to default report filenames.
                         Applies only to report flags passed without FILE.

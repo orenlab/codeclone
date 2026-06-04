@@ -39,6 +39,7 @@ from codeclone.controller_insights.session_stats import (
 )
 from codeclone.surfaces.cli.session_stats import render_session_stats
 from codeclone.surfaces.cli.types import PrinterLike
+from codeclone.surfaces.mcp._workspace_intent_paths import registry_dir
 from codeclone.surfaces.mcp._workspace_intents import (
     MIN_LEASE_SECONDS,
     WorkspaceIntentRecord,
@@ -47,6 +48,17 @@ from codeclone.surfaces.mcp._workspace_intents import (
     format_utc,
     write_workspace_intent,
 )
+
+
+def _repo_root_from_intents_dir(intents_dir: Path) -> Path:
+    resolved = intents_dir.resolve()
+    current = resolved.parent
+    while current != current.parent:
+        if registry_dir(current) == resolved:
+            return current
+        current = current.parent
+    msg = f"cannot resolve repository root from intents dir: {intents_dir}"
+    raise ValueError(msg)
 
 
 class _RecordingPrinter:
@@ -83,7 +95,7 @@ def _write_intent_file(
         "allowed_related": [],
         "forbidden": [],
     }
-    root = intents_dir.parent.parent.parent
+    root = _repo_root_from_intents_dir(intents_dir)
     record = WorkspaceIntentRecord(
         intent_id=intent_id,
         agent_pid=pid,
@@ -115,7 +127,7 @@ def _write_report(root: Path, *, health: int = 90, files: int = 10) -> Path:
         "health": {"score": health, "grade": "A"},
         "findings": {"total": 0},
     }
-    report_dir = root / ".cache" / "codeclone"
+    report_dir = root / ".codeclone"
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "report.json"
     report_path.write_text(json.dumps(report))
@@ -123,7 +135,7 @@ def _write_report(root: Path, *, health: int = 90, files: int = 10) -> Path:
 
 
 def _write_report_payload(root: Path, payload: object) -> Path:
-    report_dir = root / ".cache" / "codeclone"
+    report_dir = root / ".codeclone"
     report_dir.mkdir(parents=True, exist_ok=True)
     report_path = report_dir / "report.json"
     report_path.write_text(json.dumps(payload))
@@ -197,7 +209,7 @@ def _snapshot(
         cache_present=cache_present,
         workspace_health=workspace_health,
         intent_registry_backend="file",
-        intent_registry_storage=".cache/codeclone/intents",
+        intent_registry_storage=".codeclone/intents",
         mcp_token_footprint=mcp_token_footprint,
         mcp_token_encoding=mcp_token_encoding,
         mcp_token_event_count=mcp_token_event_count,
@@ -254,7 +266,7 @@ def _snapshot_with_audit_and_run(
             cache_present=True,
         ),
         audit_enabled=True,
-        audit_storage=".cache/codeclone/db/audit.sqlite3",
+        audit_storage=".codeclone/db/audit.sqlite3",
     )
 
 
@@ -279,7 +291,7 @@ def test_session_stats_idle_quiet(tmp_path: Path) -> None:
 
 
 def test_session_stats_active_quiet(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     current_pid = os.getpid()
     _write_intent_file(
@@ -312,7 +324,7 @@ def test_session_stats_with_cached_report(tmp_path: Path) -> None:
 
 
 def test_session_stats_stale_quiet(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     _write_intent_file(
         intents_dir,
@@ -356,7 +368,7 @@ def test_session_stats_idle_verbose(tmp_path: Path) -> None:
 
 
 def test_session_stats_active_verbose(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     current_pid = os.getpid()
     _write_intent_file(
@@ -402,7 +414,7 @@ def test_session_stats_verbose_with_report(tmp_path: Path) -> None:
 
 
 def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     _write_intent_file(
         intents_dir,
@@ -419,7 +431,7 @@ def test_session_stats_verbose_uses_rich_table(tmp_path: Path) -> None:
 def test_session_stats_verbose_with_report_without_file_count(
     tmp_path: Path,
 ) -> None:
-    report_dir = tmp_path / ".cache" / "codeclone"
+    report_dir = tmp_path / ".codeclone"
     report_dir.mkdir(parents=True)
     (report_dir / "report.json").write_text(
         json.dumps(
@@ -439,7 +451,7 @@ def test_session_stats_verbose_with_report_without_file_count(
 
 
 def test_session_stats_verbose_truncates_allowed_files(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     _write_intent_file(
         intents_dir,
@@ -493,7 +505,7 @@ def test_session_stats_verbose_handles_empty_allowed_files(tmp_path: Path) -> No
         cache_present=False,
         workspace_health="active",
         intent_registry_backend="file",
-        intent_registry_storage=".cache/codeclone/intents",
+        intent_registry_storage=".codeclone/intents",
     )
 
     exit_code = session_stats_mod._render_verbose(printer, snapshot)
@@ -521,7 +533,7 @@ def test_session_stats_no_cache_dir(tmp_path: Path) -> None:
 
 
 def test_session_stats_corrupt_intent_file(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     (intents_dir / "999-999-intent-bad.json").write_text("{corrupt json!!!")
     printer = _RecordingPrinter()
@@ -537,7 +549,7 @@ def test_session_stats_corrupt_intent_file(tmp_path: Path) -> None:
 
 
 def test_session_stats_corrupt_report(tmp_path: Path) -> None:
-    report_dir = tmp_path / ".cache" / "codeclone"
+    report_dir = tmp_path / ".codeclone"
     report_dir.mkdir(parents=True)
     (report_dir / "report.json").write_text("NOT JSON")
     printer = _RecordingPrinter()
@@ -631,7 +643,7 @@ def test_session_stats_counts_expired_stale_and_recoverable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     own_start_epoch = int(time.time()) - MIN_LEASE_SECONDS - 10
     _write_intent_file(
@@ -673,7 +685,7 @@ def test_session_stats_groups_multiple_intents_per_agent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     start_epoch = int(time.time())
     for index in range(2):
@@ -1163,11 +1175,11 @@ def test_ownership_style_branches() -> None:
 def test_read_audit_config_enabled_relative_path(tmp_path: Path) -> None:
     _write_audit_pyproject(
         tmp_path,
-        audit_path=".cache/codeclone/db/audit.sqlite3",
+        audit_path=".codeclone/db/audit.sqlite3",
     )
     enabled, storage = _read_audit_config(tmp_path)
     assert enabled is True
-    assert storage == ".cache/codeclone/db/audit.sqlite3"
+    assert storage == ".codeclone/db/audit.sqlite3"
 
 
 def test_read_audit_config_config_validation_error(
@@ -1203,7 +1215,7 @@ def test_read_audit_config_storage_falls_back_when_not_relative(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     outside = Path("/tmp/codeclone-audit-outside.sqlite3")
-    _write_audit_pyproject(tmp_path, audit_path=".cache/codeclone/db/audit.sqlite3")
+    _write_audit_pyproject(tmp_path, audit_path=".codeclone/db/audit.sqlite3")
     monkeypatch.setattr(
         "codeclone.audit.validation.resolve_audit_path",
         lambda **_: outside,
@@ -1311,7 +1323,7 @@ def test_resolve_mcp_tokens_with_audit_data(tmp_path: Path) -> None:
     )
     from codeclone.audit.writer import SqliteAuditWriter
 
-    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
     _write_audit_pyproject(tmp_path)
     writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
     try:
@@ -1354,7 +1366,7 @@ def test_resolve_mcp_tokens_no_db(tmp_path: Path) -> None:
 
 def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
     """_read_audit_token_footprint tolerates corrupt audit storage."""
-    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
     db_path.parent.mkdir(parents=True)
     db_path.write_text("NOT A DATABASE")
 

@@ -48,7 +48,7 @@ def report_meta_factory() -> ReportMetaFactory:
             "baseline_payload_sha256_verified": True,
             "baseline_loaded": True,
             "baseline_status": "ok",
-            "cache_path": "/repo/.cache/codeclone/cache.json",
+            "cache_path": "/repo/.codeclone/cache.json",
             "cache_schema_version": CACHE_VERSION,
             "cache_status": "ok",
             "cache_used": True,

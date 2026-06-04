@@ -60,7 +60,7 @@ CodeClone operates purely on static input and follows a conservative execution m
   with explicit warning and comparison proceeds against an empty baseline.
 - Cache files are integrity-signed with canonical payload hashing (constant-time comparison),
   size-limited, and ignored on mismatch.
-- Legacy cache secret files (`.cache/codeclone/.cache_secret`) are obsolete and should be removed.
+- Legacy cache secret files (`.codeclone/.cache_secret`) are obsolete and should be removed.
 
 ### MCP server
 
@@ -70,8 +70,8 @@ analysis results over JSON-RPC (stdio transport).
 - The MCP server is **read-only** with respect to source files, baselines,
   analysis cache, and canonical report artifacts.
 - Allowed repo-local writes are limited to ephemeral controller coordination
-  (`.cache/codeclone/intents/`) and optional audit trail
-  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+  (`.codeclone/intents/`) and optional audit trail
+  (`.codeclone/db/audit.sqlite3` when `audit_enabled=true`).
 - Session-local review markers and in-memory run history do not survive process
   exit.
 - Tool arguments that accept git refs (`git_diff_ref`) are validated against a strict regex

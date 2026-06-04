@@ -108,19 +108,15 @@ def resolve_cache_path(
     if from_args and cache_path_arg:
         return Path(cache_path_arg).expanduser()
 
-    cache_path = root_path / ".cache" / "codeclone" / "cache.json"
-    if legacy_cache_path.exists():
-        try:
-            legacy_resolved = legacy_cache_path.resolve()
-        except OSError:
-            legacy_resolved = legacy_cache_path
-        if legacy_resolved != cache_path:
-            console.print(
-                ui.fmt_legacy_cache_warning(
-                    legacy_path=legacy_resolved,
-                    new_path=cache_path,
-                )
-            )
+    from ...paths.workspace import default_cache_path, emit_legacy_workspace_warnings
+
+    cache_path = default_cache_path(root_path)
+    emit_legacy_workspace_warnings(
+        root_path=root_path,
+        cache_path=cache_path,
+        legacy_home_cache_path=legacy_cache_path,
+        console=console,
+    )
     return cache_path
 
 

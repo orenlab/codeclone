@@ -22,6 +22,7 @@ site/
 
 # Tool caches
 .cache/
+.codeclone/
 .codeclone-cache/
 .codeclone-baseline.json.bak
 

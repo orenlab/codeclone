@@ -59,8 +59,8 @@ CodeClone provides structural code quality analysis for Python. It supports:
 Key artifacts:
 
 - `codeclone.baseline.json` — trusted baseline snapshot (for CI comparisons)
-- `.cache/codeclone/cache.json` — analysis cache (integrity-checked)
-- `.cache/codeclone/report.html|report.json|report.md|report.sarif|report.txt` — reports
+- `.codeclone/cache.json` — analysis cache (integrity-checked)
+- `.codeclone/report.html|report.json|report.md|report.sarif|report.txt` — reports
 - `codeclone-mcp` — optional MCP server: read-only with respect to source
   files, baselines, canonical reports, and analysis cache; stateful only for
   session-local review/controller state, ephemeral workspace intent
@@ -75,7 +75,7 @@ Key artifacts:
   bundled skills, rules, hooks, and an agent definition
 - MCP runs are in-memory only. Review markers are session-local. Change intent
   truth is session-local, with optional ephemeral workspace coordination records
-  under `.cache/codeclone/intents/`; none of this may leak into
+  under `.codeclone/intents/`; none of this may leak into
   baseline/cache/report artifacts. Optional audit trail is passive evidence
   state and must not affect canonical report digests, baseline trust, cache
   compatibility, or finding identity.
@@ -257,7 +257,7 @@ read-only with respect to repository source, baselines, canonical reports,
 generated reports, and analysis cache. Session-local controller state,
 workspace intent records, and audit trail are allowed only through explicit
 controller/audit contracts. Workspace intent registry files under
-`.cache/codeclone/intents/` are advisory coordination state only, not analysis
+`.codeclone/intents/` are advisory coordination state only, not analysis
 cache or report truth.
 
 For file edits, agents should prefer the workflow tools
@@ -522,7 +522,7 @@ Use this map to route changes to the right owner module.
   tools only — not the general edit workflow.
 - `codeclone/surfaces/mcp/service.py` — typed, in-process MCP service over the current pipeline/report contracts;
   keep it deterministic and read-only except for session-local state and
-  ephemeral workspace intent records under `.cache/codeclone/intents/`.
+  ephemeral workspace intent records under `.codeclone/intents/`.
 - `codeclone/surfaces/mcp/server.py` — optional MCP launcher/server wiring, transport config, and MCP tool/resource
   registration; keep dependency loading lazy so base installs/CI do not require MCP runtime packages.
 - `codeclone/surfaces/mcp/messages/*` — MCP user-facing copy (tool/resource descriptions, help topics, workflow and

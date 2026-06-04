@@ -241,7 +241,7 @@ def test_mcp_open_memory_store_requires_db_after_auto_sync(
     root = tmp_path / "repo"
     root.mkdir()
     service = CodeCloneMCPService(history_limit=2)
-    db_path = root / ".cache" / "codeclone" / "memory" / "engineering_memory.sqlite3"
+    db_path = root / ".codeclone" / "memory" / "engineering_memory.sqlite3"
     monkeypatch.setattr(
         mcp_memory_mixin_mod,
         "resolve_memory_db_path",

@@ -19,7 +19,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 
-_REPORT_PATH_PARTS = (".cache", "codeclone", "report.json")
+from ..paths.workspace import REPORT_JSON_PARTS as _REPORT_PATH_PARTS
+
 _MAX_ALLOWED_FILES_SHOWN = 2
 _MAX_TOP_WORKFLOWS_SHOWN = 3
 _PLAIN_LABEL_WIDTH = 25

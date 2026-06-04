@@ -24,16 +24,19 @@ from codeclone.paths.gitignore import (
         (".cache", True),
         ("/.cache/", True),
         (".cache/**", True),
-        (".cache/codeclone/", True),
-        (".cache/codeclone", True),
-        (".cache/codeclone/**", True),
-        ("**/.cache/codeclone/", True),
-        ("**/.cache/codeclone/**", True),
+        (".codeclone/", True),
+        (".codeclone", True),
+        (".codeclone/**", True),
+        (".codeclone/", True),
+        (".codeclone", True),
+        (".codeclone/**", True),
+        ("**/.codeclone/", True),
+        ("**/.codeclone/**", True),
         (".cache/*", False),
         ("node_modules/", False),
         ("", False),
         ("# .cache/", False),
-        ("!.cache/codeclone/", False),
+        ("!.codeclone/", False),
     ],
 )
 def test_gitignore_pattern_covers_codeclone_cache(pattern: str, expected: bool) -> None:
@@ -41,16 +44,16 @@ def test_gitignore_pattern_covers_codeclone_cache(pattern: str, expected: bool) 
 
 
 def test_normalize_gitignore_pattern_strips_comments_and_slashes() -> None:
-    assert normalize_gitignore_pattern("  /.cache/codeclone/  ") == ".cache/codeclone"
+    assert normalize_gitignore_pattern("  /.codeclone/  ") == ".codeclone"
     assert normalize_gitignore_pattern("# ignore cache") == ""
-    assert normalize_gitignore_pattern("\\# .cache/codeclone/") == "# .cache/codeclone"
+    assert normalize_gitignore_pattern("\\# .codeclone/") == "# .codeclone"
 
 
 def test_repo_gitignore_covers_codeclone_cache_read_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    (tmp_path / ".gitignore").write_text(".cache/codeclone/\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
 
     def raise_oserror(self: Path, encoding: str | None = None) -> str:
         raise OSError("denied")
@@ -68,7 +71,7 @@ def test_repo_gitignore_covers_codeclone_cache(tmp_path: Path) -> None:
     (tmp_path / ".gitignore").write_text(".cache/\n", encoding="utf-8")
     assert repo_gitignore_covers_codeclone_cache(tmp_path) is True
 
-    (tmp_path / ".gitignore").write_text(".cache/codeclone/\n", encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
     assert repo_gitignore_covers_codeclone_cache(tmp_path) is True
 
 
@@ -81,4 +84,4 @@ def test_gitignore_codeclone_cache_tip_payload_shape() -> None:
     payload = gitignore_codeclone_cache_tip_payload()
     assert payload["id"] == GITIGNORE_CODECLONE_CACHE_TIP_ID
     assert payload["category"] == "workspace_hygiene"
-    assert payload["suggested_entry"] == ".cache/codeclone/"
+    assert payload["suggested_entry"] == ".codeclone/"

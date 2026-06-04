@@ -158,7 +158,7 @@ structural facts come from the canonical report, not from LLM inference.
 | **Generate receipt**         | `create_review_receipt`                     | Auditable artifact: intent, scope, blast radius, patch outcome               |
 
 Intent execution is **session-local**; cross-agent visibility is optional, advisory, TTL/lease-bound, and stored as
-ephemeral workspace coordination state under `.cache/codeclone/intents/`. An optional audit trail records passive
+ephemeral workspace coordination state under `.codeclone/intents/`. An optional audit trail records passive
 controller events when enabled. CodeClone never mutates source files, baselines, generated reports, or analysis
 cache through MCP — **read-only by contract**.
 
@@ -297,11 +297,11 @@ All formats render from one canonical JSON payload — same facts, different aud
 
 | Format   | Flag      | Default path                    |
 |----------|-----------|---------------------------------|
-| HTML     | `--html`  | `.cache/codeclone/report.html`  |
-| JSON     | `--json`  | `.cache/codeclone/report.json`  |
-| Markdown | `--md`    | `.cache/codeclone/report.md`    |
-| SARIF    | `--sarif` | `.cache/codeclone/report.sarif` |
-| Text     | `--text`  | `.cache/codeclone/report.txt`   |
+| HTML     | `--html`  | `.codeclone/report.html`  |
+| JSON     | `--json`  | `.codeclone/report.json`  |
+| Markdown | `--md`    | `.codeclone/report.md`    |
+| SARIF    | `--sarif` | `.codeclone/report.sarif` |
+| Text     | `--text`  | `.codeclone/report.txt`   |
 
 ```bash
 codeclone . --html --json --md --sarif --text

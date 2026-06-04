@@ -11,8 +11,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
+from .workspace import WORKSPACE_DIR_NAME
+
 _COVERING_PATTERN_CORES: Final[frozenset[str]] = frozenset(
     {
+        ".codeclone",
+        ".codeclone/**",
         ".cache",
         ".cache/**",
         ".cache/codeclone",
@@ -22,9 +26,9 @@ _COVERING_PATTERN_CORES: Final[frozenset[str]] = frozenset(
 
 GITIGNORE_CODECLONE_CACHE_TIP_ID: Final = "gitignore-codeclone-cache"
 WORKSPACE_HYGIENE_CATEGORY: Final = "workspace_hygiene"
-GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY: Final = ".cache/codeclone/"
+GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY: Final = f"{WORKSPACE_DIR_NAME}/"
 GITIGNORE_CODECLONE_CACHE_MESSAGE: Final = (
-    "Add `.cache/codeclone/` to `.gitignore` to keep CodeClone "
+    f"Add `{WORKSPACE_DIR_NAME}/` to `.gitignore` to keep CodeClone "
     "coordination state, audit DB, and generated artifacts out of "
     "version control."
 )
@@ -40,14 +44,21 @@ def normalize_gitignore_pattern(line: str) -> str:
 
 
 def gitignore_pattern_covers_codeclone_cache(pattern: str) -> bool:
-    """Return True when a single gitignore line covers ``.cache/codeclone/``."""
+    """Return True when a single gitignore line covers the CodeClone workspace."""
     normalized = normalize_gitignore_pattern(pattern)
     if not normalized or normalized.startswith("!"):
         return False
     core = normalized.lstrip("/").rstrip("/")
     if core in _COVERING_PATTERN_CORES:
         return True
-    return core.endswith((".cache/codeclone", ".cache/codeclone/**"))
+    return core.endswith(
+        (
+            ".codeclone",
+            ".codeclone/**",
+            ".cache/codeclone",
+            ".cache/codeclone/**",
+        )
+    )
 
 
 def repo_gitignore_covers_codeclone_cache(root: Path) -> bool:

@@ -48,7 +48,7 @@ def test_memory_render_plain_console_paths(capsys: pytest.CaptureFixture[str]) -
         }
     ]
     status = MemoryStatusReport(
-        db_path=Path("/tmp/repo/.cache/codeclone/memory/engineering_memory.sqlite3"),
+        db_path=Path("/tmp/repo/.codeclone/memory/engineering_memory.sqlite3"),
         schema_version="1.1",
         project_id="proj-1",
         project_root="/tmp/repo",

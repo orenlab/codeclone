@@ -45,7 +45,9 @@ def resolve_cache_path(*, root_path: Path, args: object) -> Path:
                 allow_external=allow_external_artifacts,
             ),
         )
-    return root_path / ".cache" / "codeclone" / "cache.json"
+    from ...paths.workspace import default_cache_path
+
+    return default_cache_path(root_path)
 
 
 def _int_attr(args: object, name: str, default: int = 0) -> int:

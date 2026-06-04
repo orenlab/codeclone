@@ -139,7 +139,7 @@ def resolve_intent_registry_config(root: Path) -> IntentRegistryConfig:
     if backend == "file":
         return IntentRegistryConfig(
             backend="file",
-            storage_path=root_path.joinpath(".cache", "codeclone", "intents"),
+            storage_path=root_path.joinpath(".codeclone", "intents"),
             retention_days=retention_days,
         )
     db_value = config.get("intent_registry_path", DEFAULT_INTENT_REGISTRY_DB_PATH)

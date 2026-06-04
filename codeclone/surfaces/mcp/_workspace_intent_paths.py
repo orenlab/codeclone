@@ -10,10 +10,10 @@ import re
 from pathlib import Path
 from typing import Final
 
+from ...paths.workspace import REGISTRY_DIR_PARTS
 from ...utils.json_io import read_json_object
 from ._workspace_intent_contract import WorkspaceIntentRecord
 
-REGISTRY_DIR_PARTS: Final = (".cache", "codeclone", "intents")
 _SAFE_INTENT_ID_RE: Final = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
 
 

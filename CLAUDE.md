@@ -383,7 +383,7 @@ See `AGENTS.md` §3 for surface-specific commands.
 - Never make base `codeclone` depend on MCP runtime packages.
 - Never let MCP mutate baselines, source files, canonical reports, or
   analysis cache. Ephemeral coordination state (workspace intents) and
-  audit trail under `.cache/codeclone/` are allowed only through the
+  audit trail under `.codeclone/` are allowed only through the
   controller and audit contracts.
 - Never iterate sets/dicts without sorting when output order matters.
 - Never introduce `Any` in core/domain code without narrowing it immediately.

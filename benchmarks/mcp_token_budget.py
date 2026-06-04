@@ -123,7 +123,7 @@ def _blast_radius_bounded() -> dict[str, object]:
             for i in range(3)
         ],
         "do_not_touch": [
-            {"path": ".cache/codeclone/**", "reason": "generated state"},
+            {"path": ".codeclone/**", "reason": "generated state"},
             {"path": "codeclone.baseline.json", "reason": "baseline file"},
         ],
         "review_context": [

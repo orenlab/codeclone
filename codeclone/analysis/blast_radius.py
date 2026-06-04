@@ -13,6 +13,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from ..paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
+
 BlastRadiusDepth = Literal["direct", "transitive"]
 
 BOUNDARY_REASON_BASELINE_OR_STATE: Final = (
@@ -43,7 +45,7 @@ GUARDRAIL_DO_NOT_TOUCH_APPROVAL: Final = (
 
 DEFAULT_DO_NOT_TOUCH_PATTERNS: Final[tuple[str, ...]] = (
     "codeclone.baseline.json",
-    ".cache/codeclone/**",
+    *FORBIDDEN_WORKSPACE_GLOBS,
 )
 MAX_CONTEXT_ITEMS: Final[int] = 20
 

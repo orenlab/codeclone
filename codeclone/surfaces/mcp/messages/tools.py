@@ -233,7 +233,7 @@ MANAGE_CHANGE_INTENT: Final = (
     "'recover' to explicitly reclaim a recoverable intent, and "
     "'reset_workspace' for interrupted-session recovery. In-memory "
     "intent state remains session-local; workspace coordination state "
-    "is ephemeral under .cache/codeclone/intents/."
+    "is ephemeral under .codeclone/intents/."
 )
 
 CLEAR_SESSION_RUNS: Final = (

@@ -39,14 +39,17 @@ Key defaults:
 - `--max-baseline-size-mb=5`
 - `--max-cache-size-mb=50`
 - `--coverage-min=50`
-- default cache path (when no cache flag is given): `<root>/.cache/codeclone/cache.json`
+- default cache path (when no cache flag is given): `<root>/.codeclone/cache.json`
 - `--metrics-baseline=codeclone.baseline.json` (same default path as `--baseline`)
 - bare reporting flags use default report paths:
-    - `--html` -> `<root>/.cache/codeclone/report.html`
-    - `--json` -> `<root>/.cache/codeclone/report.json`
-    - `--md` -> `<root>/.cache/codeclone/report.md`
-    - `--sarif` -> `<root>/.cache/codeclone/report.sarif`
-    - `--text` -> `<root>/.cache/codeclone/report.txt`
+    - `--html` -> `<root>/.codeclone/report.html`
+    - `--json` -> `<root>/.codeclone/report.json`
+    - `--md` -> `<root>/.codeclone/report.md`
+    - `--sarif` -> `<root>/.codeclone/report.sarif`
+    - `--text` -> `<root>/.codeclone/report.txt`
+- legacy locations (CLI warns, does not migrate automatically):
+    - home cache: `~/.cache/codeclone/cache.json` when it differs from the project cache path
+    - repo workspace: non-empty `<root>/.cache/codeclone/` from releases before `2.1.0a1`
 
 Fragment-level admission thresholds (pyproject.toml only, advanced tuning):
 
@@ -82,7 +85,7 @@ Analysis:
 | `segment_min_loc`      | `int`         | `20`                                 | Minimum function LOC for segment analysis                                                                                                     | `-`                                                                |
 | `segment_min_stmt`     | `int`         | `10`                                 | Minimum function statements for segment analysis                                                                                              | `-`                                                                |
 | `processes`            | `int`         | `4`                                  | Worker process count                                                                                                                          | `-`                                                                |
-| `cache_path`           | `str \| null` | `<root>/.cache/codeclone/cache.json` | Cache file path                                                                                                                               | `-`                                                                |
+| `cache_path`           | `str \| null` | `<root>/.codeclone/cache.json` | Cache file path                                                                                                                               | `-`                                                                |
 | `max_cache_size_mb`    | `int`         | `50`                                 | Maximum accepted cache size before fail-open ignore                                                                                           | `-`                                                                |
 | `skip_metrics`         | `bool`        | `false*`                             | Skip full metrics mode when allowed                                                                                                           | Incompatible with metrics gates/update; auto-enabled in some runs* |
 | `skip_dead_code`       | `bool`        | `false`                              | Skip dead-code analysis                                                                                                                       | Forced on by `skip_metrics`; overridden by `fail_dead_code`        |
@@ -143,7 +146,7 @@ Controller audit trail:
 | Key                    | Type   | Default                             | Meaning                                                                                                                                | Requires / Implies                  |
 |------------------------|--------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
 | `audit_enabled`        | `bool` | `false`                             | Enable the optional local controller audit trail                                                                                       | Required for `--audit` output       |
-| `audit_path`           | `str`  | `.cache/codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
+| `audit_path`           | `str`  | `.codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
 | `audit_payloads`       | `str`  | `compact`                           | Audit payload mode: `off`, `compact`, or `full`. Compact omits large fields but keeps `intent_description` on `intent.declared`; row `summary` always stores a short essence | Used only when `audit_enabled=true` |
 | `audit_retention_days` | `int`  | `30`                                | Retention window for audit rows                                                                                                        | Used only when `audit_enabled=true` |
 
@@ -152,7 +155,7 @@ Workspace intent registry:
 | Key                              | Type  | Default                               | Meaning                                                                  | Requires / Implies                              |
 |----------------------------------|-------|---------------------------------------|--------------------------------------------------------------------------|-------------------------------------------------|
 | `intent_registry_backend`        | `str` | `file`                                | Workspace intent storage backend: `file` or `sqlite`                     | MCP workspace coordination                      |
-| `intent_registry_path`           | `str` | `.cache/codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root             | Used only when `intent_registry_backend=sqlite` |
+| `intent_registry_path`           | `str` | `.codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root             | Used only when `intent_registry_backend=sqlite` |
 | `intent_registry_retention_days` | `int` | `7`                                   | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
 
 Values above `14` are contract errors in the open-source edition. See
@@ -170,10 +173,10 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 |----------------|---------|---------|
 | enabled | `false` | Turn on LanceDB sidecar indexing and search blend |
 | backend | `lancedb` | Vector backend (only `lancedb` today) |
-| index_path | `.cache/codeclone/memory/semantic_index.lance` | Sidecar directory |
+| index_path | `.codeclone/memory/semantic_index.lance` | Sidecar directory |
 | embedding_provider | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `fastembed` (local semantic-quality provider), `local_model`, `api` |
 | embedding_model | `null` (`BAAI/bge-small-en-v1.5` for `fastembed`) | Optional provider model name |
-| embedding_cache_dir | `.cache/codeclone/memory/fastembed` | Local model cache used by `fastembed` |
+| embedding_cache_dir | `.codeclone/memory/fastembed` | Local model cache used by `fastembed` |
 | allow_model_download | `false` | Permit `fastembed` to download a missing model instead of requiring a pre-populated cache |
 | dimension | `256` (`384` for `fastembed`) | Vector size; must match the provider model |
 | max_results | `20` | Cap for vector `k` and merged search ranking |
@@ -230,7 +233,7 @@ keys are contract errors.
     - `skip_metrics=false*`: parser default is `false`, but runtime may auto-enable
       it when no metrics work is requested and no metrics baseline exists.
     - Report output keys default to `null`; bare CLI flags still write to the
-      deterministic `.cache/codeclone/report.*` paths listed above.
+      deterministic `.codeclone/report.*` paths listed above.
 
     CLI always has precedence when option is explicitly provided, including boolean
     overrides via `--foo/--no-foo` (e.g. `--no-skip-metrics`).
@@ -305,7 +308,7 @@ Refs:
 - All six thresholds are part of cache compatibility (`payload.ap`).
 - Reporting flags (`--html/--json/--md/--sarif/--text`) affect output only.
 - Reporting flags accept optional path values; passing bare flag writes to
-  deterministic default path under `.cache/codeclone/`.
+  deterministic default path under `.codeclone/`.
 - `--cache-path` overrides project-local cache default; legacy alias `--cache-dir` maps to same destination.
 - Metrics baseline update/gating flags require metrics mode; incompatible
   combinations with `--skip-metrics` are contract errors.

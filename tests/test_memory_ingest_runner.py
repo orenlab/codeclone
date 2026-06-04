@@ -231,12 +231,18 @@ def test_run_memory_init_on_codeclone_repo(
 ) -> None:
     if not (REPO_ROOT / "codeclone").is_dir():
         pytest.skip("not running inside codeclone checkout")
-    report_path = REPO_ROOT / ".cache" / "codeclone" / "report.json"
+    report_path = REPO_ROOT / ".codeclone" / "report.json"
     if not report_path.is_file():
         pytest.skip("cached report.json not available")
     report_document = read_json_object(report_path)
-    db_path = tmp_path / "isolated-memory.sqlite3"
-    monkeypatch.setenv("CODECLONE_MEMORY_DB_PATH", str(db_path))
+    db_path = REPO_ROOT / ".codeclone" / "memory" / "isolated-memory.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if db_path.is_file():
+        db_path.unlink()
+    monkeypatch.setenv(
+        "CODECLONE_MEMORY_DB_PATH",
+        ".codeclone/memory/isolated-memory.sqlite3",
+    )
     result = run_memory_init(
         root_path=REPO_ROOT,
         report_document=report_document,

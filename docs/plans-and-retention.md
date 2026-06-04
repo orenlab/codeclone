@@ -17,7 +17,7 @@ at configuration time.
 
 | Edition     | Default retention | Maximum retention | Intent registry backend                          |
 |-------------|-------------------|-------------------|--------------------------------------------------|
-| Open source | 7 days            | 14 days           | SQLite (local file under `.cache/codeclone/db/`) |
+| Open source | 7 days            | 14 days           | SQLite (local file under `.codeclone/db/`) |
 | Team        | configurable      | up to 30 days     | SQLite or managed deployment                     |
 | Enterprise  | configurable      | up to 90 days     | PostgreSQL (managed or self-hosted)              |
 
@@ -87,7 +87,7 @@ Open-source keys:
 ```toml
 [tool.codeclone]
 intent_registry_backend = "sqlite"
-intent_registry_path = ".cache/codeclone/db/intents.sqlite3"
+intent_registry_path = ".codeclone/db/intents.sqlite3"
 intent_registry_retention_days = 7   # max 14 in open source
 ```
 

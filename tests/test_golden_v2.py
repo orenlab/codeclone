@@ -282,7 +282,7 @@ def _collect_cli_snapshot(
     shutil.copytree(fixture_root, project_root)
     report_path = project_root / "report.json"
     baseline_path = project_root / "codeclone.baseline.json"
-    cache_path = project_root / ".cache" / "codeclone" / "cache.json"
+    cache_path = project_root / ".codeclone" / "cache.json"
 
     exit_code = _run_cli(
         [

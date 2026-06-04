@@ -381,7 +381,7 @@ def test_file_store_backend_metadata(
     store = get_workspace_intent_store(tmp_path)
     assert isinstance(store, FileWorkspaceIntentStore)
     assert store.backend == "file"
-    assert store.storage_path == tmp_path / ".cache" / "codeclone" / "intents"
+    assert store.storage_path == tmp_path / ".codeclone" / "intents"
 
 
 def test_file_store_write_returns_false_on_os_error(
@@ -440,7 +440,7 @@ def test_resolve_intent_registry_config_honors_env_overrides(
 def test_intent_registry_summary_file_backend(tmp_path: Path) -> None:
     summary = intent_registry_summary(tmp_path)
     assert summary["registry_backend"] == "file"
-    assert summary["registry_storage"] == ".cache/codeclone/intents"
+    assert summary["registry_storage"] == ".codeclone/intents"
     assert summary["registry_retention_days"] == str(
         DEFAULT_INTENT_REGISTRY_RETENTION_DAYS
     )

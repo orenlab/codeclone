@@ -33,7 +33,7 @@ SERVER_INSTRUCTIONS: Final = (
     "If concurrent intents overlap, narrow scope or coordinate. This server never "
     "updates baselines and never mutates source files, analysis cache, or reports; "
     "it may write ephemeral workspace coordination state under "
-    ".cache/codeclone/intents/."
+    ".codeclone/intents/."
 )
 
 MCP_INSTALL_HINT: Final = (

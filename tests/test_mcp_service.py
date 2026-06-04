@@ -708,13 +708,13 @@ def _assert_loaded_mcp_baseline_state(
 
 def test_mcp_runtime_resolve_cache_path_prefers_explicit_path(tmp_path: Path) -> None:
     args = SimpleNamespace(
-        cache_path=".cache/codeclone/explicit-cache.json",
+        cache_path=".codeclone/explicit-cache.json",
         allow_external_artifacts=False,
     )
 
     resolved = mcp_runtime_mod.resolve_cache_path(root_path=tmp_path, args=args)
 
-    assert resolved == (tmp_path / ".cache" / "codeclone" / "explicit-cache.json")
+    assert resolved == (tmp_path / ".codeclone" / "explicit-cache.json")
 
 
 def test_mcp_runtime_resolve_cache_path_rejects_external_by_default(
@@ -3062,6 +3062,7 @@ def test_mcp_blast_radius_projection_is_deterministic() -> None:
     assert direct.structural_risk["low_coverage_in_blast_zone"] == ["pkg/a.py"]
     assert [item["path"] for item in direct.do_not_touch] == [
         ".cache/codeclone/**",
+        ".codeclone/**",
         "codeclone.baseline.json",
     ]
     assert direct.review_context == (
@@ -3085,7 +3086,7 @@ def test_mcp_blast_radius_projection_is_deterministic() -> None:
     assert do_not_touch_only["direct_dependents"] == []
     assert do_not_touch_only["review_context"] == []
     assert (
-        cast(dict[str, object], do_not_touch_only["do_not_touch_summary"])["total"] == 2
+        cast(dict[str, object], do_not_touch_only["do_not_touch_summary"])["total"] == 3
     )
 
 
@@ -3252,6 +3253,7 @@ def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
         item["path"] for item in cast("list[dict[str, str]]", second["do_not_touch"])
     ] == [
         ".cache/codeclone/**",
+        ".codeclone/**",
         "codeclone.baseline.json",
     ]
     assert second["review_context"] == []
@@ -3283,6 +3285,7 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
     assert declared["status"] == "active"
     assert cast(dict[str, object], declared["scope"])["forbidden"] == [
         ".cache/codeclone/**",
+        ".codeclone/**",
         "codeclone.baseline.json",
         "pkg/c.py",
     ]
@@ -3294,7 +3297,7 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
     )
     assert (
         cast(dict[str, object], declared["blast_radius_summary"])["do_not_touch_count"]
-        == 3
+        == 4
     )
     assert (
         cast(dict[str, object], declared["blast_radius_summary"])[
@@ -3306,6 +3309,7 @@ def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
         item["category"]
         for item in cast("list[dict[str, str]]", declared["do_not_touch"])
     ] == [
+        "baseline_or_generated_state",
         "baseline_or_generated_state",
         "baseline_or_generated_state",
         "explicit_forbidden",
@@ -4309,7 +4313,11 @@ def test_mcp_service_check_patch_contract_budget_uses_intent_and_gate_preview(
     assert payload["declared_scope"] == {
         "allowed_files": ["pkg/a.py"],
         "allowed_related": [],
-        "forbidden": [".cache/codeclone/**", "codeclone.baseline.json"],
+        "forbidden": [
+            ".cache/codeclone/**",
+            ".codeclone/**",
+            "codeclone.baseline.json",
+        ],
     }
     assert (
         cast("dict[str, object]", payload["blast_radius_summary"])["radius_level"]
@@ -4317,7 +4325,7 @@ def test_mcp_service_check_patch_contract_budget_uses_intent_and_gate_preview(
     )
     assert (
         cast("dict[str, object]", payload["blast_radius_summary"])["do_not_touch_count"]
-        == 2
+        == 3
     )
     assert (
         cast("dict[str, object]", payload["blast_radius_summary"])[
@@ -9288,7 +9296,7 @@ def test_mcp_workspace_hygiene_gitignore_tip(tmp_path: Path) -> None:
     tips = cast("list[dict[str, object]]", summary["tips"])
     assert tips[0]["id"] == "gitignore-codeclone-cache"
     assert tips[0]["category"] == "workspace_hygiene"
-    assert tips[0]["suggested_entry"] == ".cache/codeclone/"
+    assert tips[0]["suggested_entry"] == ".codeclone/"
 
     run_summary = service.get_run_summary(run_id=str(summary["run_id"]))
     assert cast("list[dict[str, object]]", run_summary["tips"])[0]["id"] == (

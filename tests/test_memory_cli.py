@@ -20,7 +20,7 @@ def test_memory_status_without_db(tmp_path: Path) -> None:
 
 def test_memory_init_dry_run_uses_fixture_report(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    report_path = repo_root / ".cache" / "codeclone" / "report.json"
+    report_path = repo_root / ".codeclone" / "report.json"
     if not report_path.is_file():
         return
     exit_code = memory_main(
@@ -38,7 +38,7 @@ def test_memory_init_dry_run_uses_fixture_report(tmp_path: Path) -> None:
 
 def test_memory_init_persists_and_for_path(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    report_path = repo_root / ".cache" / "codeclone" / "report.json"
+    report_path = repo_root / ".codeclone" / "report.json"
     if not report_path.is_file():
         return
     db_root = tmp_path / "work"

@@ -36,7 +36,7 @@ const SAMPLE_SESSION = {
         root: "/tmp/repo",
         health: "idle",
         intent_registry_backend: "file",
-        intent_registry_storage: ".cache/codeclone/intents",
+        intent_registry_storage: ".codeclone/intents",
     },
     counts: {
         live_agents: 0,
@@ -106,7 +106,7 @@ test("renderAuditTrailHtml reads payload_footprint calls/tokens keys from audit 
     const html = renderAuditTrailHtml(
         {
             status: "ok",
-            database: {path: ".cache/codeclone/audit.sqlite3"},
+            database: {path: ".codeclone/db/audit.sqlite3"},
             counts: {
                 total_events: 10,
                 intent_events: 4,

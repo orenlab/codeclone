@@ -189,9 +189,9 @@ def test_resolve_audit_path_rejects_absolute_and_traversal(tmp_path: Path) -> No
     assert (
         resolve_audit_path(
             root_path=root,
-            value=".cache/codeclone/db/audit.sqlite3",
+            value=".codeclone/db/audit.sqlite3",
         )
-        == root / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+        == root / ".codeclone" / "db" / "audit.sqlite3"
     )
 
     with pytest.raises(AuditConfigError, match="relative to the repository root"):

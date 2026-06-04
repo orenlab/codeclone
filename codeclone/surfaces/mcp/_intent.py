@@ -13,9 +13,11 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Final
 
+from ...paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
+
 DEFAULT_FORBIDDEN: Final[tuple[str, ...]] = (
     "codeclone.baseline.json",
-    ".cache/codeclone/**",
+    *FORBIDDEN_WORKSPACE_GLOBS,
 )
 DEFAULT_INTENT_GUARDS: Final[tuple[str, ...]] = (
     "scope_expansion_requires_explanation",

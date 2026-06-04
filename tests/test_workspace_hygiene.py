@@ -487,7 +487,7 @@ def test_registry_lock_retries_until_acquired(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    lock_path = tmp_path / ".cache" / "codeclone" / "intents" / ".lock"
+    lock_path = tmp_path / ".codeclone" / "intents" / ".lock"
     attempts = iter([BlockingIOError(), None])
 
     def _acquire_once(handle: object) -> None:
@@ -512,7 +512,7 @@ def test_registry_lock_timeout_raises(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    lock_path = tmp_path / ".cache" / "codeclone" / "intents" / ".lock"
+    lock_path = tmp_path / ".codeclone" / "intents" / ".lock"
     times = iter([0.0, 10.0])
 
     def _always_busy(handle: object) -> None:
@@ -600,7 +600,7 @@ def test_finish_hygiene_check_returns_early_when_git_unavailable(
 
 
 def test_registry_lock_acquire_and_release(tmp_path: Path) -> None:
-    lock_path = tmp_path / ".cache" / "codeclone" / "intents" / ".lock"
+    lock_path = tmp_path / ".codeclone" / "intents" / ".lock"
     with workspace_registry_lock(lock_path):
         assert lock_path.is_file()
 

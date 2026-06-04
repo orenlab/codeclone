@@ -18,7 +18,7 @@ controlled edits.
     path, mutate source files, or override structural findings.
 
 !!! note "Not analysis cache"
-    The SQLite database under `.cache/codeclone/memory/` is a **governed memory
+    The SQLite database under `.codeclone/memory/` is a **governed memory
     contract**, separate from analysis cache (`cache.json`) and baselines
     (`codeclone.baseline.json`).
 
@@ -289,7 +289,7 @@ Nested table in `pyproject.toml`:
 ```toml
 [tool.codeclone.memory]
 backend = "sqlite"
-db_path = ".cache/codeclone/memory/engineering_memory.sqlite3"
+db_path = ".codeclone/memory/engineering_memory.sqlite3"
 max_records = 10000
 max_candidates = 1000
 git_hotspot_period_days = 90
@@ -301,10 +301,10 @@ mcp_sync_policy = "bootstrap_if_missing"   # off | bootstrap_if_missing | refres
 [tool.codeclone.memory.semantic]
 enabled = false                          # default: off, zero extra deps
 backend = "lancedb"
-index_path = ".cache/codeclone/memory/semantic_index.lance"
+index_path = ".codeclone/memory/semantic_index.lance"
 embedding_provider = "diagnostic"        # diagnostic | fastembed | local_model | api
 embedding_model = "BAAI/bge-small-en-v1.5"  # used by fastembed
-embedding_cache_dir = ".cache/codeclone/memory/fastembed"  # used by fastembed
+embedding_cache_dir = ".codeclone/memory/fastembed"  # used by fastembed
 allow_model_download = false             # fastembed: require pre-populated model cache
 dimension = 256
 max_results = 20
@@ -598,7 +598,7 @@ flowchart LR
    For semantic-quality local embeddings, install `codeclone[semantic-local]`
    instead (or combine `semantic-lancedb` + `semantic-fastembed`).
 3. Index built at `index_path` (default
-   `.cache/codeclone/memory/semantic_index.lance`) via
+   `.codeclone/memory/semantic_index.lance`) via
    `manage_engineering_memory(action="rebuild_semantic_index")` (MCP agents) or
    `codeclone memory semantic rebuild` (CLI/CI).
 
@@ -763,7 +763,7 @@ or project-wide dumps.
 
 ## Invariants (MUST)
 
-- Memory store path defaults under `.cache/codeclone/memory/` — not baseline or analysis cache.
+- Memory store path defaults under `.codeclone/memory/` — not baseline or analysis cache.
 - Init ingest is deterministic given identical report + git inputs.
 - MCP memory tools are read-only except draft writes through governance actions.
 - MCP agents cannot approve/reject/archive; IDE channel + CLI only.

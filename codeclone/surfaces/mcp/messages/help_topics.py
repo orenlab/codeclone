@@ -477,7 +477,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         warnings=(
             (
                 "The workspace registry is advisory coordination state under "
-                ".cache/codeclone/intents/, not analysis truth."
+                ".codeclone/intents/, not analysis truth."
             ),
             (
                 "Do not treat review_context as a ban or concurrent_intents as "
@@ -506,7 +506,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "resolve outside the scan root by design."
             ),
             (
-                "Workspace intents under .cache/codeclone/intents/ are "
+                "Workspace intents under .codeclone/intents/ are "
                 "advisory same-UID coordination, not signed proof."
             ),
             (

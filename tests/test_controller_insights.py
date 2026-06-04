@@ -74,7 +74,7 @@ def _write_audit_pyproject(tmp_path: Path) -> None:
 
 def _emit_audit_event(root: Path) -> None:
     writer = SqliteAuditWriter(
-        db_path=root / ".cache" / "codeclone" / "db" / "audit.sqlite3",
+        db_path=root / ".codeclone" / "db" / "audit.sqlite3",
         payloads="compact",
         retention_days=30,
     )
@@ -118,7 +118,7 @@ def test_controller_audit_trail_ok_when_audit_db_has_events(tmp_path: Path) -> N
 def _write_event_without_tokens(root: Path) -> None:
     from codeclone.audit.schema import ensure_schema
 
-    db_path = root / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = root / ".codeclone" / "db" / "audit.sqlite3"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db_path))
     try:
@@ -148,7 +148,7 @@ def _write_event_without_tokens(root: Path) -> None:
 
 def test_audit_summary_to_payload_without_footprint(tmp_path: Path) -> None:
     _write_event_without_tokens(tmp_path)
-    db_path = tmp_path / ".cache" / "codeclone" / "db" / "audit.sqlite3"
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
     summary = read_audit_summary(db_path=db_path, limit=5)
     payload = audit_summary_to_payload(summary)
     assert payload["status"] == "ok"

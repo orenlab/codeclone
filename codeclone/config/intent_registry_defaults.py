@@ -13,7 +13,7 @@ from ..contracts import DOCS_URL
 IntentRegistryBackend = Literal["file", "sqlite"]
 
 DEFAULT_INTENT_REGISTRY_BACKEND: Final[IntentRegistryBackend] = "file"
-DEFAULT_INTENT_REGISTRY_DB_PATH: Final = ".cache/codeclone/db/intents.sqlite3"
+DEFAULT_INTENT_REGISTRY_DB_PATH: Final = ".codeclone/db/intents.sqlite3"
 DEFAULT_INTENT_REGISTRY_RETENTION_DAYS: Final = 7
 MIN_INTENT_REGISTRY_RETENTION_DAYS: Final = 1
 MAX_INTENT_REGISTRY_RETENTION_DAYS: Final = 14

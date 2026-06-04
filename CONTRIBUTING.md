@@ -156,8 +156,8 @@ When contributing to MCP:
 - MCP must remain **read-only** with respect to source files, baselines, analysis
   cache, and canonical report artifacts.
 - Allowed repo-local writes are limited to ephemeral controller coordination
-  (`.cache/codeclone/intents/`) and optional audit trail
-  (`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`).
+  (`.codeclone/intents/`) and optional audit trail
+  (`.codeclone/db/audit.sqlite3` when `audit_enabled=true`).
 - Session-local review markers and in-memory run history are ephemeral and do
   not survive process restart.
 - MCP reuses pipeline/report contracts — do not create a second analysis truth path.

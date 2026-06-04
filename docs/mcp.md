@@ -49,7 +49,7 @@ graph TD
     end
 
     subgraph Disk["Disk (coordination + audit)"]
-        WIR["Workspace Intent Registry<br/>file: .cache/codeclone/intents/<br/>sqlite: .cache/codeclone/db/intents.sqlite3"]
+        WIR["Workspace Intent Registry<br/>file: .codeclone/intents/<br/>sqlite: .codeclone/db/intents.sqlite3"]
     end
 
     MCPSession -->|" writes coordination records "| Disk
@@ -257,14 +257,14 @@ stored runs.
 
 Selected MCP responses may include a non-blocking `tips[]` array with
 structured workspace guidance. The first tip checks whether the repository
-root `.gitignore` covers `.cache/codeclone/` (or the broader `.cache/` tree).
+root `.gitignore` covers `.codeclone/` (or the broader `.cache/` tree).
 
 | Field             | Example                     |
 |-------------------|-----------------------------|
 | `id`              | `gitignore-codeclone-cache` |
 | `severity`        | `info`                      |
 | `category`        | `workspace_hygiene`         |
-| `suggested_entry` | `.cache/codeclone/`         |
+| `suggested_entry` | `.codeclone/`         |
 
 Tips are advisory only — not findings, gates, or failures. MCP never edits
 `.gitignore` automatically; agents must declare scope before changing it.
@@ -770,8 +770,8 @@ include `total`, `shown`, and `truncated` summaries.
 | Lazy loading      | Base `codeclone` install does not require MCP packages                                                                                                                                                                                                      |
 | Repository access | Limited to what the server process can read locally                                                                                                                                                                                                         |
 | Session state     | In-memory runs and review markers; do not survive restart                                                                                                                                                                                                   |
-| Workspace intents | File backend: ephemeral JSON under `.cache/codeclone/intents/`; SQLite backend: auditable rows under `.cache/codeclone/db/intents.sqlite3` with retention purge (default 7 days, max 14 in open source — see [Plans and Retention](plans-and-retention.md)) |
-| Audit trail       | Optional SQLite under `.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`                                                                                                                                                                         |
+| Workspace intents | File backend: ephemeral JSON under `.codeclone/intents/`; SQLite backend: auditable rows under `.codeclone/db/intents.sqlite3` with retention purge (default 7 days, max 14 in open source — see [Plans and Retention](plans-and-retention.md)) |
+| Audit trail       | Optional SQLite under `.codeclone/db/audit.sqlite3` when `audit_enabled=true`                                                                                                                                                                         |
 
 ---
 

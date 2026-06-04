@@ -35,9 +35,9 @@ Security-relevant input classes:
 - MCP is read-only with respect to source files, baselines, analysis cache
   (`cache.json`), and canonical report artifacts.
 - Allowed repo-local writes are limited to ephemeral controller coordination
-  (workspace intent registry: file backend under `.cache/codeclone/intents/`,
-  or SQLite under `.cache/codeclone/db/intents.sqlite3` when configured) and
-  optional audit trail (`.cache/codeclone/db/audit.sqlite3` when
+  (workspace intent registry: file backend under `.codeclone/intents/`,
+  or SQLite under `.codeclone/db/intents.sqlite3` when configured) and
+  optional audit trail (`.codeclone/db/audit.sqlite3` when
   `audit_enabled=true`).
 - Session-local review markers and in-memory run history do not survive
   process restart.
@@ -75,7 +75,7 @@ Refs:
 
 Cache signatures detect corruption and accidental mutation of the canonical
 cache payload. They are not adversarial authentication against a privileged
-local attacker who can rewrite `.cache/codeclone/cache.json` directly.
+local attacker who can rewrite `.codeclone/cache.json` directly.
 
 Refs:
 
@@ -86,7 +86,7 @@ Refs:
 
 The workspace intent registry coordinates concurrent edits between processes
 running as the same local UID on the same host (file backend:
-`.cache/codeclone/intents/`; SQLite backend: `.cache/codeclone/db/intents.sqlite3`
+`.codeclone/intents/`; SQLite backend: `.codeclone/db/intents.sqlite3`
 when configured). Records are advisory, TTL-bound (default 1 hour, lease 5
 minutes), gitignored, and integrity-checked (SHA-256 over canonical JSON) but not
 cryptographically authenticated. A same-UID process with repository write access

@@ -27,7 +27,7 @@ def test_semantic_defaults_when_table_absent(tmp_path: Path) -> None:
     assert semantic.index_audit is True
     # index_path is normalized to an absolute path under the repo root.
     assert semantic.index_path == str(
-        tmp_path / ".cache/codeclone/memory/semantic_index.lance"
+        tmp_path / ".codeclone/memory/semantic_index.lance"
     )
 
 
@@ -66,9 +66,7 @@ embedding_provider = "fastembed"
     assert semantic.embedding_model == "BAAI/bge-small-en-v1.5"
     assert semantic.dimension == 384
     assert semantic.allow_model_download is False
-    assert semantic.embedding_cache_dir == str(
-        tmp_path / ".cache/codeclone/memory/fastembed"
-    )
+    assert semantic.embedding_cache_dir == str(tmp_path / ".codeclone/memory/fastembed")
 
 
 def test_semantic_provider_defaults_ignore_non_mapping_input() -> None:

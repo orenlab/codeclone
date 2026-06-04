@@ -38,7 +38,7 @@ def test_gate_sqlite_load_error_is_fail_closed(
 ) -> None:
     class _Config:
         backend = "sqlite"
-        storage_path = Path(".cache/codeclone/db/intents.sqlite3")
+        storage_path = Path(".codeclone/db/intents.sqlite3")
 
     monkeypatch.setattr(
         "codeclone.workspace_intent.gate.resolve_intent_registry_config",
@@ -79,7 +79,7 @@ def test_gate_decision_ignores_terminal_and_non_active_records() -> None:
     decision = gate_mod._decision_from_records(
         records,
         registry_backend="file",
-        registry_path=".cache/codeclone/intents",
+        registry_path=".codeclone/intents",
     )
     assert decision.allowed is False
     assert decision.reason == "no_active_intent"
@@ -93,7 +93,7 @@ def test_gate_decision_queued_reports_ignored_history() -> None:
     decision = gate_mod._decision_from_records(
         records,
         registry_backend="file",
-        registry_path=".cache/codeclone/intents",
+        registry_path=".codeclone/intents",
     )
     assert decision.allowed is False
     assert decision.reason == "queued_intent_not_editable"
@@ -101,7 +101,7 @@ def test_gate_decision_queued_reports_ignored_history() -> None:
 
 
 def test_gate_file_registry_skips_invalid_payload_files(tmp_path: Path) -> None:
-    intents_dir = tmp_path / ".cache" / "codeclone" / "intents"
+    intents_dir = tmp_path / ".codeclone" / "intents"
     intents_dir.mkdir(parents=True)
     (intents_dir / "bad.json").write_text("not-json", encoding="utf-8")
     records = gate_mod._load_file_records(tmp_path)
@@ -113,7 +113,7 @@ def test_gate_load_registry_records_file_backend(tmp_path: Path) -> None:
 
     config = IntentRegistryConfig(
         backend="file",
-        storage_path=tmp_path / ".cache/codeclone/intents",
+        storage_path=tmp_path / ".codeclone/intents",
     )
     records = gate_mod._load_registry_records_read_only(tmp_path, config)
     assert records == ()

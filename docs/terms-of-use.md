@@ -57,9 +57,9 @@ review data, but do not mutate:
 - CI configuration
 
 Ephemeral controller coordination (workspace intent registry: file backend under
-`.cache/codeclone/intents/`, or SQLite under `.cache/codeclone/db/intents.sqlite3`
+`.codeclone/intents/`, or SQLite under `.codeclone/db/intents.sqlite3`
 when configured) and optional audit trail
-(`.cache/codeclone/db/audit.sqlite3` when `audit_enabled=true`) are the only
+(`.codeclone/db/audit.sqlite3` when `audit_enabled=true`) are the only
 allowed repo-local writes.
 
 Remote, shared, or network-exposed MCP deployments are the responsibility of

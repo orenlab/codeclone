@@ -245,7 +245,7 @@ full launcher body.
 
 MCP must not mutate source, baselines, analysis cache, or canonical reports.
 Change-control and session tools may write ephemeral intent state
-(`.cache/codeclone/intents/` file backend by default; SQLite optional) and
+(`.codeclone/intents/` file backend by default; SQLite optional) and
 optional audit rows when `audit_enabled=true`.
 
 ## Design rules

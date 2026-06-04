@@ -992,7 +992,7 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("def f():\n    return 1\n", "utf-8")
 
-    cache_path = project_root / ".cache" / "codeclone" / "cache.json"
+    cache_path = project_root / ".codeclone" / "cache.json"
     cache = Cache(cache_path, root=project_root)
     cache.put_file_entry(
         str(target),

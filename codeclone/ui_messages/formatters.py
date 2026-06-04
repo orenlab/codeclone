@@ -54,6 +54,7 @@ from .runtime import (
     WARN_FAILED_FILES_HEADER,
     WARN_HTML_REPORT_OPEN_FAILED,
     WARN_LEGACY_CACHE,
+    WARN_LEGACY_REPO_WORKSPACE,
     WARN_PARALLEL_FALLBACK,
     WARN_WORKER_FAILED,
 )
@@ -168,6 +169,10 @@ def fmt_cohesion_lcom4_migration_note(
 
 def fmt_legacy_cache_warning(*, legacy_path: Path, new_path: Path) -> str:
     return WARN_LEGACY_CACHE.format(legacy_path=legacy_path, new_path=new_path)
+
+
+def fmt_legacy_repo_workspace_warning(*, legacy_dir: Path, new_dir: Path) -> str:
+    return WARN_LEGACY_REPO_WORKSPACE.format(legacy_dir=legacy_dir, new_dir=new_dir)
 
 
 def fmt_invalid_baseline(error: object) -> str:

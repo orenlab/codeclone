@@ -64,7 +64,13 @@ WARN_LEGACY_CACHE = (
     "[warning]Legacy cache file found at: {legacy_path}.[/warning]\n"
     "[warning]Cache is now stored per-project at: {new_path}.[/warning]\n"
     "[warning]Please delete the legacy cache file and add "
-    ".cache/ to .gitignore.[/warning]"
+    "`.codeclone/` to .gitignore.[/warning]"
+)
+WARN_LEGACY_REPO_WORKSPACE = (
+    "[warning]Legacy CodeClone workspace found at: {legacy_dir}.[/warning]\n"
+    "[warning]Artifacts now live under: {new_dir}.[/warning]\n"
+    "[warning]Remove the legacy directory after you no longer need its "
+    "contents.[/warning]"
 )
 
 ERR_INVALID_BASELINE = (

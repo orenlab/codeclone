@@ -22,7 +22,7 @@ def test_load_pyproject_config_accepts_memory_nested_table(tmp_path: Path) -> No
         """
 [tool.codeclone.memory]
 backend = "sqlite"
-db_path = ".cache/codeclone/memory/engineering_memory.sqlite3"
+db_path = ".codeclone/memory/engineering_memory.sqlite3"
 max_records = 5000
 """.strip()
         + "\n",

@@ -806,7 +806,7 @@ INTEGRITY
 
 ## Engineering Memory schema (`1.1`)
 
-SQLite database at `.cache/codeclone/memory/engineering_memory.sqlite3` (default).
+SQLite database at `.codeclone/memory/engineering_memory.sqlite3` (default).
 Schema version stored in `memory_meta.schema_version`.
 
 Core tables:

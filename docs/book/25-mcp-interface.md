@@ -63,8 +63,8 @@ Current server characteristics:
 - **Cache policies** — `reuse` (default) and `off` only; `refresh` is CLI-only
   and rejected by MCP.
 - **Workspace intent registry** — `intent_registry_backend` selects `file`
-  (ephemeral JSON under `.cache/codeclone/intents/`) or `sqlite` (auditable
-  rows under `.cache/codeclone/db/intents.sqlite3` with closed-row retention;
+  (ephemeral JSON under `.codeclone/intents/`) or `sqlite` (auditable
+  rows under `.codeclone/db/intents.sqlite3` with closed-row retention;
   default 7 days, max 14 in open source). See
   [Plans and Retention](../plans-and-retention.md).
 
@@ -114,7 +114,7 @@ drill into one finding or one hotspot family.
 | `help`                  | `topic`, `detail`                                                                                                                                               | Bounded workflow/contract guidance                                   |
 
 Selected analysis and workflow responses may include non-blocking `tips[]`
-entries for workspace hygiene (for example when `.cache/codeclone/` is not
+entries for workspace hygiene (for example when `.codeclone/` is not
 covered by the repository root `.gitignore`). The CLI prints the same
 advisory after interactive analysis runs (suppressed in `--quiet`, CI, and
 non-TTY contexts). Tips are advisory only; MCP and CLI never edit
@@ -310,7 +310,7 @@ not trigger analysis.
 | Default transport | Local `stdio`                                                                                                                                                          |
 | Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                    |
 | Lazy loading      | Base installs and CI do not require MCP packages                                                                                                                       |
-| Read-only         | Never mutates source, baseline, cache, or report artifacts; optional workspace intent registry (file or sqlite) and audit DB under `.cache/codeclone/db/` when enabled |
+| Read-only         | Never mutates source, baseline, cache, or report artifacts; optional workspace intent registry (file or sqlite) and audit DB under `.codeclone/db/` when enabled |
 
 ---
 
