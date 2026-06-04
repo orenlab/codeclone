@@ -67,6 +67,12 @@ review receipts, and workflow consolidation tools.
   `query_engineering_memory(mode=search, semantic=true)` with FTS-first merge and
   `semantic` status envelope; indexed prose memory types and bounded audit
   incident summaries when `index_audit=true` and `audit_enabled=true`.
+- Engineering Memory semantic-quality local embeddings: optional FastEmbed
+  provider (`embedding_provider="fastembed"`, default
+  `BAAI/bge-small-en-v1.5`) via `codeclone[semantic-fastembed]`; use
+  `codeclone[semantic-local]` to install both LanceDB and FastEmbed. Model
+  downloads are disabled by default (`allow_model_download=false`) so offline
+  installs can pre-populate `.cache/codeclone/memory/fastembed`.
 - Engineering Memory search and git provenance (Phase 18.6): schema `1.1` with
   SQLite FTS5 index, `match_mode` (`any`/`all`) for CLI and MCP search,
   refresh-time digest reactivation for unchanged records, resilient git

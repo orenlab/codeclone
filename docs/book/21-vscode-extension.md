@@ -176,7 +176,11 @@ and passed to `query_engineering_memory`.
     `searchSemantic` defaults to **`true` in VS Code** so the IDE requests semantic
     blend when the user searches. CodeClone’s **repository** default remains
     `memory.semantic.enabled = false` until you opt in in `pyproject.toml`, install
-    `codeclone[semantic-lancedb]`, and run `codeclone memory semantic rebuild`.
+    the semantic extras, and run `codeclone memory semantic rebuild`.
+    `codeclone[semantic-local]` installs both LanceDB and FastEmbed; configure
+    `embedding_provider = "fastembed"` for local semantic-quality recall.
+    `codeclone[semantic-lancedb]` alone supports the deterministic diagnostic
+    provider, not semantic-quality embeddings.
     When the server index is unavailable, MCP still returns FTS hits and
     `semantic.used: false` with a `reason` (for example `disabled`, `not_built`).
 

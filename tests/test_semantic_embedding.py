@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,15 +30,23 @@ class _FakeTextEmbedding:
         cache_dir: str,
         local_files_only: bool,
         vector_value: float = 1.0,
+        vectors: list[object] | None = None,
+        raise_on_embed: bool = False,
     ) -> None:
         self.model_name = model_name
         self.cache_dir = cache_dir
         self.local_files_only = local_files_only
         self.vector_value = vector_value
+        self.vectors = vectors
+        self.raise_on_embed = raise_on_embed
         self.inputs: list[str] = []
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
+    def embed(self, texts: list[str]) -> list[object]:
+        if self.raise_on_embed:
+            raise RuntimeError("embed failed")
         self.inputs.extend(texts)
+        if self.vectors is not None:
+            return self.vectors
         return [[self.vector_value] * 384 for _ in texts]
 
 
@@ -45,6 +54,10 @@ def _install_fake_fastembed(
     monkeypatch: pytest.MonkeyPatch,
     *,
     vector_value: float = 1.0,
+    vectors: list[object] | None = None,
+    raise_on_init: bool = False,
+    raise_on_embed: bool = False,
+    expose_text_embedding: bool = True,
 ) -> list[_FakeTextEmbedding]:
     import importlib
 
@@ -54,6 +67,8 @@ def _install_fake_fastembed(
     def _fake_import_module(name: str, package: str | None = None) -> Any:
         if name != "fastembed":
             return original_import_module(name, package)
+        if not expose_text_embedding:
+            return SimpleNamespace()
 
         class _ConfiguredFakeTextEmbedding(_FakeTextEmbedding):
             def __init__(
@@ -63,11 +78,15 @@ def _install_fake_fastembed(
                 cache_dir: str,
                 local_files_only: bool,
             ) -> None:
+                if raise_on_init:
+                    raise RuntimeError("model unavailable")
                 super().__init__(
                     model_name=model_name,
                     cache_dir=cache_dir,
                     local_files_only=local_files_only,
                     vector_value=vector_value,
+                    vectors=vectors,
+                    raise_on_embed=raise_on_embed,
                 )
                 created.append(self)
 
@@ -99,6 +118,12 @@ def test_deterministic_embedding_distinguishes_texts() -> None:
     assert vectors[0] != vectors[1]
 
 
+def test_deterministic_query_and_document_helpers_use_provider_methods() -> None:
+    provider = DeterministicHashEmbeddingProvider(dimension=7)
+    assert embed_query(provider, "alpha") == provider.embed_query("alpha")
+    assert embed_documents(provider, ["beta"]) == provider.embed_documents(["beta"])
+
+
 def test_deterministic_embedding_rejects_nonpositive_dimension() -> None:
     with pytest.raises(ValueError, match="dimension must be positive"):
         DeterministicHashEmbeddingProvider(dimension=0)
@@ -123,6 +148,20 @@ def test_resolve_api_provider_fails_clear() -> None:
         resolve_embedding_provider(config)
 
 
+class _LegacyEmbeddingProvider:
+    model_id = "legacy"
+    dimension = 2
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        return [[float(len(text)), 0.0] for text in texts]
+
+
+def test_embedding_helpers_fall_back_to_embed() -> None:
+    provider = _LegacyEmbeddingProvider()
+    assert embed_query(provider, "abc") == [3.0, 0.0]
+    assert embed_documents(provider, ["a", "abcd"]) == [[1.0, 0.0], [4.0, 0.0]]
+
+
 def test_fastembed_provider_uses_local_model_cache_and_prefixes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -139,6 +178,7 @@ def test_fastembed_provider_uses_local_model_cache_and_prefixes(
         "query: recover after restart",
         "passage: scope-aware hygiene",
     ]
+    assert provider.embed(["legacy call"]) == [[1.0] * 384]
 
 
 def test_fastembed_provider_honors_download_opt_in(
@@ -153,6 +193,80 @@ def test_fastembed_provider_honors_download_opt_in(
 
     assert provider.dimension == 384
     assert [item.local_files_only for item in created] == [False]
+
+
+def test_fastembed_provider_fails_clear_without_text_embedding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_fastembed(monkeypatch, expose_text_embedding=False)
+    config = SemanticConfig(embedding_provider="fastembed")
+
+    with pytest.raises(MemorySemanticUnavailableError, match="TextEmbedding"):
+        resolve_embedding_provider(config)
+
+
+@pytest.mark.parametrize(
+    ("allow_model_download", "message"),
+    [(False, "download disabled"), (True, "download allowed")],
+)
+def test_fastembed_provider_fails_clear_when_model_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    allow_model_download: bool,
+    message: str,
+) -> None:
+    _install_fake_fastembed(monkeypatch, raise_on_init=True)
+    config = SemanticConfig(
+        embedding_provider="fastembed",
+        allow_model_download=allow_model_download,
+    )
+
+    with pytest.raises(MemorySemanticUnavailableError, match=message):
+        resolve_embedding_provider(config)
+
+
+def test_fastembed_provider_fails_clear_when_embedding_call_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_fastembed(monkeypatch, raise_on_embed=True)
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+
+    with pytest.raises(MemorySemanticUnavailableError, match="embedding failed"):
+        embed_query(provider, "boom")
+
+
+def test_fastembed_provider_fails_clear_on_dimension_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_fastembed(monkeypatch, vectors=[[1.0, 2.0]])
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+
+    with pytest.raises(MemorySemanticUnavailableError, match="dimension mismatch"):
+        embed_query(provider, "short vector")
+
+
+def test_fastembed_provider_fails_clear_on_non_iterable_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_fastembed(monkeypatch, vectors=[object()])
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+
+    with pytest.raises(MemorySemanticUnavailableError, match="non-iterable"):
+        embed_query(provider, "bad vector")
+
+
+def test_fastembed_provider_fails_clear_on_string_vector(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_fastembed(monkeypatch, vectors=["bad"])
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+
+    with pytest.raises(MemorySemanticUnavailableError, match="non-iterable"):
+        embed_query(provider, "bad vector")
 
 
 def test_fastembed_provider_fails_clear_when_extra_missing(

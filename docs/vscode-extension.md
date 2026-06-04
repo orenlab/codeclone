@@ -132,7 +132,10 @@ These commands require workspace trust and an active MCP connection.
   result limit (see **Engineering Memory search** settings below).
 
 Server-side semantic still requires `[tool.codeclone.memory.semantic] enabled`,
-`codeclone[semantic-lancedb]`, and `codeclone memory semantic rebuild` — see
+the semantic sidecar, and `codeclone memory semantic rebuild`. Install
+`codeclone[semantic-local]` and set `embedding_provider = "fastembed"` for local
+semantic-quality recall; `codeclone[semantic-lancedb]` alone can run only the
+deterministic diagnostic provider. See
 [Engineering Memory](book/26-engineering-memory.md).
 
 Full contract: [VS Code extension (book)](book/21-vscode-extension.md),
@@ -224,7 +227,7 @@ These map to MCP `query_engineering_memory` parameters from
 
 | Setting | Default | MCP mapping | Notes |
 |---------|---------|-------------|-------|
-| `codeclone.memory.searchSemantic` | `true` | `semantic` on `mode=search` only | Extension **asks** for semantic blend by default. Server still needs `[tool.codeclone.memory.semantic] enabled`, `codeclone[semantic-lancedb]`, and `memory semantic rebuild` — otherwise FTS-only with `semantic.used: false`. |
+| `codeclone.memory.searchSemantic` | `true` | `semantic` on `mode=search` only | Extension **asks** for semantic blend by default. Server still needs `[tool.codeclone.memory.semantic] enabled`, a built sidecar, and a provider. Use `codeclone[semantic-local]` + `embedding_provider="fastembed"` for semantic-quality recall; otherwise FTS-only or diagnostic/degraded results report `semantic.used: false` / provider details. |
 | `codeclone.memory.searchIncludeDrafts` | `false` | `include_drafts` (search) | Drafts are still included automatically on `for_path` per memory contract. |
 | `codeclone.memory.searchIncludeStale` | `false` | `include_stale` (search and `for_path`) | |
 | `codeclone.memory.searchMaxResults` | `20` | `max_results` (clamped 5–50) | |

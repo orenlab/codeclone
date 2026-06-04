@@ -297,7 +297,10 @@ mcp_sync_policy = "bootstrap_if_missing"   # off | bootstrap_if_missing | refres
 enabled = false                          # default: off, zero extra deps
 backend = "lancedb"
 index_path = ".cache/codeclone/memory/semantic_index.lance"
-embedding_provider = "diagnostic"        # diagnostic | local_model | api
+embedding_provider = "diagnostic"        # diagnostic | fastembed | local_model | api
+embedding_model = "BAAI/bge-small-en-v1.5"  # used by fastembed
+embedding_cache_dir = ".cache/codeclone/memory/fastembed"  # used by fastembed
+allow_model_download = false             # fastembed: require pre-populated model cache
 dimension = 256
 max_results = 20
 index_audit = true                       # project audit summaries when audit DB exists
@@ -310,6 +313,9 @@ Environment overrides:
 | `CODECLONE_MEMORY_DB_PATH` | SQLite store path |
 | `CODECLONE_MEMORY_SEMANTIC_ENABLED` | `true` / `false` for `semantic.enabled` |
 | `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | Provider literal |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL` | Provider model name |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR` | Local embedding cache directory |
+| `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`; opt in to model download |
 | `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH` | LanceDB directory path |
 
 Unknown keys under `[tool.codeclone.memory.semantic]` are contract errors
@@ -568,8 +574,11 @@ candidates** and adjusts ranking (`semantic_proximity * 0.3` in
 ```mermaid
 flowchart LR
     Q[Query text] --> FTS[FTS5 memory_fts]
-    Q --> EMB[EmbeddingProvider.embed]
+    Q --> EMB[EmbeddingProvider.embed_query]
+    DOCS[Index projections] --> DOCEMB[EmbeddingProvider.embed_documents]
     EMB --> VEC[LanceDB k-NN]
+    DOCEMB --> INDEX[LanceDB rebuild]
+    INDEX --> VEC
     FTS --> MERGE[Candidate union]
     VEC --> MERGE
     MERGE --> RANK[Rank + semantic weight]
@@ -579,10 +588,36 @@ flowchart LR
 **Prerequisites (all required for `semantic.used: true`):**
 
 1. `memory.semantic.enabled = true` in effective config.
-2. Optional extra installed: `pip install 'codeclone[semantic-lancedb]'`.
+2. Optional vector backend installed: `pip install 'codeclone[semantic-lancedb]'`.
+   For semantic-quality local embeddings, install `codeclone[semantic-local]`
+   instead (or combine `semantic-lancedb` + `semantic-fastembed`).
 3. Index built at `index_path` (default
    `.cache/codeclone/memory/semantic_index.lance`) via
    `codeclone memory semantic rebuild`.
+
+Minimal local semantic-quality setup:
+
+```bash
+pip install 'codeclone[semantic-local]'
+```
+
+```toml
+[tool.codeclone.memory.semantic]
+enabled = true
+embedding_provider = "fastembed"
+allow_model_download = true  # or pre-populate embedding_cache_dir and keep false
+```
+
+```bash
+codeclone memory init --root .
+codeclone memory semantic rebuild --root .
+codeclone memory semantic search "recover after MCP restart" --root .
+codeclone memory search "recover after MCP restart" --semantic --root .
+```
+
+Use `codeclone[semantic-lancedb]` only when you intentionally want the derived
+sidecar with the deterministic diagnostic provider; it is stable, but not
+semantic-quality recall.
 
 **Degraded states (never crash read paths):**
 
@@ -591,7 +626,7 @@ flowchart LR
 | `enabled=false` | `NullSemanticIndex` | `used: false`, `reason: disabled` |
 | Enabled, index missing | `UnavailableSemanticIndex` (`not_built`) | FTS only; `used: false` |
 | Enabled, LanceDB extra missing | `UnavailableSemanticIndex` (`lancedb_not_installed`) | FTS only; explicit `semantic rebuild` fails clear |
-| Provider unavailable | `semantic_reason` set (e.g. `local_model` not wired) | FTS only |
+| Provider unavailable | `semantic_reason` set (e.g. FastEmbed extra/model unavailable) | FTS only |
 
 The index is a **derived, rebuildable sidecar** — not updated on the memory
 write hot path. Rebuild is idempotent on projection `text_hash`
@@ -602,11 +637,13 @@ write hot path. Rebuild is idempotent on projection `text_hash`
 | Provider | Status | Meaning |
 |----------|--------|---------|
 | `diagnostic` (default) | Always available | `DeterministicHashEmbeddingProvider`: sha256-derived unit vectors. **Stable across runs, not semantic-quality recall.** CLI prints an advisory when `provider=diagnostic`. |
-| `local_model` | Raises `MemorySemanticUnavailableError` | Reserved for Phase 20.6 (lazy model backend). |
-| `api` | Raises `MemorySemanticUnavailableError` | Reserved for Phase 20.6 (remote API backend). |
+| `fastembed` | Optional: `codeclone[semantic-fastembed]` | Local ONNX embeddings through FastEmbed. Default model is `BAAI/bge-small-en-v1.5` (`384` dimensions). Query text uses a `query:` prefix; indexed records use `passage:`. Model download is disabled unless `allow_model_download=true`, so air-gapped installs can pre-populate `embedding_cache_dir`. |
+| `local_model` | Raises `MemorySemanticUnavailableError` | Reserved compatibility literal; use `fastembed` for community local semantic search. |
+| `api` | Raises `MemorySemanticUnavailableError` | Reserved for remote/API providers. |
 
 Model id for diagnostic: `diagnostic-hash-v1`
 (`codeclone/memory/embedding/__init__.py`).
+Model id for FastEmbed: `fastembed:<embedding_model>`.
 
 #### What gets indexed
 

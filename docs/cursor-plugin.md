@@ -125,8 +125,11 @@ workflow tools are unavailable.
 ### codeclone-engineering-memory
 
 Scope memory before edits; optional `semantic=true` on `mode=search` when
-`[tool.codeclone.memory.semantic]` is enabled, `codeclone[semantic-lancedb]` is
-installed, and `codeclone memory semantic rebuild` succeeded. Human
+`[tool.codeclone.memory.semantic]` is enabled, the semantic sidecar is installed,
+and `codeclone memory semantic rebuild` succeeded. Use `codeclone[semantic-local]`
+plus `embedding_provider = "fastembed"` for local semantic-quality recall;
+`codeclone[semantic-lancedb]` alone supports only the deterministic diagnostic
+provider. Human
 approve/reject: VS Code **Memory** view only (MCP agents cannot approve).
 
 Full contract: [Engineering Memory](book/26-engineering-memory.md).

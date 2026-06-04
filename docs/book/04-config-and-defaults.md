@@ -167,13 +167,20 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 | enabled | `false` | Turn on LanceDB sidecar indexing and search blend |
 | backend | `lancedb` | Vector backend (only `lancedb` today) |
 | index_path | `.cache/codeclone/memory/semantic_index.lance` | Sidecar directory |
-| embedding_provider | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `local_model`, `api` (latter two fail clear until Phase 20.6) |
-| dimension | `256` | Vector size for diagnostic provider |
+| embedding_provider | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `fastembed` (local semantic-quality provider), `local_model`, `api` |
+| embedding_model | `null` (`BAAI/bge-small-en-v1.5` for `fastembed`) | Optional provider model name |
+| embedding_cache_dir | `.cache/codeclone/memory/fastembed` | Local model cache used by `fastembed` |
+| allow_model_download | `false` | Permit `fastembed` to download a missing model instead of requiring a pre-populated cache |
+| dimension | `256` (`384` for `fastembed`) | Vector size; must match the provider model |
 | max_results | `20` | Cap for vector `k` and merged search ranking |
 | index_audit | `true` | Index bounded audit `summary` rows when audit DB exists |
 
-Requires `pip install 'codeclone[semantic-lancedb]'` and
-`codeclone memory semantic rebuild` after enabling.
+Semantic-quality local search requires both the LanceDB sidecar and FastEmbed:
+install `codeclone[semantic-local]` (or combine `semantic-lancedb` +
+`semantic-fastembed`), set `embedding_provider = "fastembed"`, then run
+`codeclone memory semantic rebuild` after enabling. `semantic-lancedb` alone can
+build the sidecar with the diagnostic hash provider, which is deterministic but
+not semantic-quality recall.
 
 This is the exact accepted `[tool.codeclone]` key set from
 `codeclone/config/spec.py` and `codeclone/config/pyproject_loader.py`; unknown

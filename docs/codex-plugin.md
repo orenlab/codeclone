@@ -81,9 +81,11 @@ intent declaration or patch verify. Human approve stays in the CodeClone VS Code
 
 Optional **semantic search** (Phase 20): off by default in
 `[tool.codeclone.memory.semantic]`; when enabled, install
-`codeclone[semantic-lancedb]`, rebuild the index, then
+`codeclone[semantic-local]` for local semantic-quality recall (or
+`codeclone[semantic-lancedb]` for the diagnostic sidecar only), rebuild the index, then
 `query_engineering_memory(mode=search, semantic=true)`. Default provider
-`diagnostic` is deterministic, not semantic-quality embeddings. See
+`diagnostic` is deterministic, not semantic-quality embeddings; set
+`embedding_provider = "fastembed"` for FastEmbed. See
 [Engineering Memory](book/26-engineering-memory.md).
 
 ## Runtime model

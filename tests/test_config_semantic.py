@@ -71,6 +71,15 @@ embedding_provider = "fastembed"
     )
 
 
+def test_semantic_provider_defaults_ignore_non_mapping_input() -> None:
+    from pydantic import ValidationError
+
+    from codeclone.config.memory import SemanticConfig
+
+    with pytest.raises(ValidationError, match="valid dictionary"):
+        SemanticConfig.model_validate("nope")
+
+
 def test_semantic_fastembed_env_overrides(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -235,6 +244,77 @@ index_path = "semantic.lance"
         resolve_memory_config(tmp_path)
 
 
+def test_semantic_embedding_cache_dir_must_resolve_to_string(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.config.memory as memory_config_mod
+    from codeclone.config.pyproject_loader import normalize_path_config_value
+
+    _write_pyproject(
+        tmp_path,
+        """
+[tool.codeclone.memory.semantic]
+enabled = true
+embedding_provider = "fastembed"
+embedding_cache_dir = "models"
+""",
+    )
+
+    def _bad_cache_dir(
+        *,
+        key: str,
+        value: object,
+        root_path: Path,
+        path_config_keys: frozenset[str] | set[str] = frozenset(),
+    ) -> object:
+        if key == "embedding_cache_dir":
+            return 42
+        return normalize_path_config_value(
+            key=key,
+            value=value,
+            root_path=root_path,
+            path_config_keys=path_config_keys,
+        )
+
+    monkeypatch.setattr(
+        memory_config_mod, "normalize_path_config_value", _bad_cache_dir
+    )
+    with pytest.raises(
+        TypeError,
+        match="embedding_cache_dir must resolve to a string",
+    ):
+        resolve_memory_config(tmp_path)
+
+
+def test_memory_db_path_must_resolve_to_string(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.config.memory as memory_config_mod
+    from codeclone.config.pyproject_loader import normalize_path_config_value
+
+    def _bad_db_path(
+        *,
+        key: str,
+        value: object,
+        root_path: Path,
+        path_config_keys: frozenset[str] | set[str] = frozenset(),
+    ) -> object:
+        if key == "db_path":
+            return 42
+        return normalize_path_config_value(
+            key=key,
+            value=value,
+            root_path=root_path,
+            path_config_keys=path_config_keys,
+        )
+
+    monkeypatch.setattr(memory_config_mod, "normalize_path_config_value", _bad_db_path)
+    with pytest.raises(TypeError, match="memory db_path"):
+        resolve_memory_config(tmp_path)
+
+
 def test_format_semantic_error_fallback_when_validation_has_no_entries() -> None:
     from pydantic import ValidationError
 
@@ -264,3 +344,16 @@ def test_memory_int_rejects_non_integer_values() -> None:
 
     with pytest.raises(ValueError, match="max_records"):
         _memory_int("lots", key="max_records")
+
+
+def test_memory_int_rejects_bool_values() -> None:
+    from codeclone.config.memory import _memory_int
+
+    with pytest.raises(ValueError, match="max_records"):
+        _memory_int(True, key="max_records")
+
+
+def test_memory_int_accepts_digit_strings() -> None:
+    from codeclone.config.memory import _memory_int
+
+    assert _memory_int(" 42 ", key="max_records") == 42

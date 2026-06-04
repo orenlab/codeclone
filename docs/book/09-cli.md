@@ -107,6 +107,9 @@ Refs:
     - `semantic status|rebuild|search` — optional LanceDB sidecar (requires
       `[tool.codeclone.memory.semantic] enabled = true`, extra
       `codeclone[semantic-lancedb]`, and a successful `semantic rebuild`).
+      For semantic-quality local recall, install `codeclone[semantic-local]`
+      and configure `embedding_provider = "fastembed"`; `semantic-lancedb`
+      alone can still run the deterministic diagnostic provider.
     - `review-candidates`, `approve`, `reject`, `archive` — human governance
       for draft records (not available on MCP).
     - `search` accepts `--match any|all` for FTS token matching (default `any`)

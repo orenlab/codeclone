@@ -454,12 +454,14 @@ Draft records remain non-authoritative. Surface stale warnings when present —
 they signal changed context.
 
 **Optional semantic search (Phase 20):** off by default (`enabled=false`).
-When enabled, install `codeclone[semantic-lancedb]`, run
+When enabled, install `codeclone[semantic-lancedb]` for the sidecar, run
 `codeclone memory semantic rebuild`, then pass `semantic=true` on
-`mode=search`. Responses include a `semantic` object (`used`, `provider`,
-`reason`, …). The default `diagnostic` provider uses deterministic hash
-vectors — **not** semantic-quality embeddings; treat hits as proximity over
-projected text, not LLM recall. See
+`mode=search`. For semantic-quality local recall, install
+`codeclone[semantic-local]` and set `embedding_provider = "fastembed"` under
+`[tool.codeclone.memory.semantic]`. Responses include a `semantic` object
+(`used`, `provider`, `model`, `reason`, …). The default `diagnostic` provider
+uses deterministic hash vectors — **not** semantic-quality embeddings; treat
+hits as deterministic proximity over projected text, not LLM recall. See
 [Engineering Memory — semantic retrieval](book/26-engineering-memory.md#optional-semantic-retrieval-phase-20).
 
 **Scope and token hygiene:** project root is not a valid memory scope; unscoped
