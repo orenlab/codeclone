@@ -26,6 +26,7 @@ const {
     renderAuditTrailHtml,
     renderSessionStatsMarkdown,
     renderAuditTrailMarkdown,
+    formatBytes,
 } = require("../src/workspaceInsightsRenderer");
 
 moduleInternals._load = originalLoad;
@@ -146,4 +147,47 @@ test("renderAuditTrailHtml reads payload_footprint calls/tokens keys from audit 
     assert.match(html, />~12000</);
     assert.match(html, />5</);
     assert.doesNotMatch(html, />~0<\/td><td class="num">0<\/td>/);
+});
+
+test("formatBytes humanizes sizes across units", () => {
+    assert.equal(formatBytes(0), "0 B");
+    assert.equal(formatBytes(512), "512 B");
+    assert.equal(formatBytes(1024), "1 KB");
+    assert.equal(formatBytes(1536), "1.5 KB");
+    assert.equal(formatBytes(1024 * 1024), "1 MB");
+    assert.equal(formatBytes(5 * 1024 * 1024 + 512 * 1024), "5.5 MB");
+    assert.equal(formatBytes(1024 ** 3), "1 GB");
+    assert.equal(formatBytes(1024 ** 4), "1 TB");
+});
+
+test("formatBytes rounds to whole numbers at and above 10 units", () => {
+    // < 10 keeps one decimal; >= 10 rounds to an integer for compact display.
+    assert.equal(formatBytes(9.4 * 1024), "9.4 KB");
+    assert.equal(formatBytes(12.7 * 1024), "13 KB");
+});
+
+test("formatBytes returns 'unknown' for invalid input", () => {
+    assert.equal(formatBytes(-1), "unknown");
+    assert.equal(formatBytes(Number.NaN), "unknown");
+    assert.equal(formatBytes(null), "unknown");
+    assert.equal(formatBytes(undefined), "unknown");
+    assert.equal(formatBytes("4096"), "unknown");
+});
+
+test("renderAuditTrailHtml humanizes the database size", () => {
+    const html = renderAuditTrailHtml(
+        {
+            status: "ok",
+            database: {
+                path: ".codeclone/db/audit.sqlite3",
+                size_bytes: 2 * 1024 * 1024,
+            },
+            counts: {total_events: 0},
+            events: [],
+        },
+        "demo",
+        "nonce-size"
+    );
+    assert.match(html, /2 MB/);
+    assert.doesNotMatch(html, /2097152/);
 });

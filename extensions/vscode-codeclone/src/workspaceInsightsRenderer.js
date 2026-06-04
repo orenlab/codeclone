@@ -103,6 +103,28 @@ function formatDurationSeconds(seconds) {
 }
 
 /**
+ * @param {number | null | undefined} bytes
+ */
+function formatBytes(bytes) {
+    if (typeof bytes !== "number" || !Number.isFinite(bytes) || bytes < 0) {
+        return "unknown";
+    }
+    if (bytes < 1024) {
+        return `${bytes} B`;
+    }
+    const units = ["KB", "MB", "GB", "TB"];
+    let value = bytes / 1024;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+    }
+    const rounded =
+        value >= 10 ? Math.round(value) : Math.round(value * 10) / 10;
+    return `${rounded} ${units[unitIndex]}`;
+}
+
+/**
  * @param {string} health
  */
 function workspaceHealthClass(health) {
@@ -294,7 +316,7 @@ function auditTrailBody(payload) {
         metaRows.push(["Database", `<code>${escapeHtml(String(database.path))}</code>`]);
     }
     if (database.size_bytes !== null && database.size_bytes !== undefined) {
-        metaRows.push(["Size", escapeHtml(String(database.size_bytes))]);
+        metaRows.push(["Size", escapeHtml(formatBytes(Number(database.size_bytes)))]);
     }
     if (database.retention_days !== null && database.retention_days !== undefined) {
         metaRows.push(["Retention", `${escapeHtml(String(database.retention_days))} days`]);
@@ -569,6 +591,7 @@ module.exports = {
     footprintAggregateBanner,
     formatAgeSeconds,
     formatDurationSeconds,
+    formatBytes,
     renderSessionStatsHtml,
     renderAuditTrailHtml,
     renderSessionStatsMarkdown,
