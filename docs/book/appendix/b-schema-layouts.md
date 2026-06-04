@@ -826,12 +826,27 @@ Migration path: `codeclone/memory/schema_migrate.py`.
 See [Engineering Memory](../13-engineering-memory.md) for lifecycle and agent
 surfaces.
 
+## Semantic index sidecar (format `1`)
+
+Optional LanceDB directory (default `.codeclone/memory/semantic_index.lance`).
+Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
+`codeclone/contracts/__init__.py` (currently **`1`**).
+
+- **Not** governed by `ENGINEERING_MEMORY_SCHEMA_VERSION` — bumping memory SQLite
+  schema does not automatically invalidate the vector sidecar.
+- **Rebuild** on incompatible format bumps (`codeclone memory semantic rebuild`);
+  no SQLite migration path for the sidecar.
+- Row/projection semantics: [Engineering Memory](../13-engineering-memory.md);
+  bump rules: [24-compatibility-and-versioning.md](../24-compatibility-and-versioning.md).
+
 ## Refs
 
 - `codeclone/baseline/clone_baseline.py`
 - `codeclone/cache/store.py`
 - `codeclone/memory/schema.py`
 - `codeclone/memory/schema_migrate.py`
+- `codeclone/memory/semantic/models.py`
+- `codeclone/contracts/__init__.py` (`SEMANTIC_INDEX_FORMAT_VERSION`)
 - `codeclone/report/document/builder.py`
 - `codeclone/report/renderers/text.py`
 - `codeclone/report/renderers/markdown.py`

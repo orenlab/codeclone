@@ -33,6 +33,7 @@ Current contract versions:
 - `REPORT_SCHEMA_VERSION = "2.11"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
 - `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.1"`
+- `SEMANTIC_INDEX_FORMAT_VERSION = "1"` (LanceDB sidecar; separate from SQLite memory schema)
 
 Refs:
 
@@ -47,6 +48,10 @@ Version bump rules:
 - bump **cache schema** for cache wire-format or compatibility-semantics changes
 - bump **report schema** for canonical report document shape/meaning changes
 - bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
+- bump **engineering memory schema** for SQLite DDL / governed record-shape changes
+  (`codeclone/memory/schema_migrate.py`)
+- bump **semantic index format** when LanceDB projection or stored row fields change
+  incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory.md](13-engineering-memory.md))
 
 Operational compatibility rules:
 
@@ -100,6 +105,8 @@ Refs:
 | Cache schema bump            | Old caches are ignored and rebuilt automatically               |
 | Report schema bump           | Downstream report consumers must update                        |
 | Metrics-baseline schema bump | Dedicated metrics-baseline files must be regenerated           |
+| Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`       |
+| Semantic index format bump   | LanceDB sidecar invalidated; run `memory semantic rebuild`   |
 
 ## Determinism / canonicalization
 

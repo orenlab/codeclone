@@ -1,6 +1,7 @@
 <!-- doc-scope: TESTS AS SPECIFICATION.
-     owns: testing philosophy, golden test contract, snapshot update policy.
-     does-not-own: test taxonomy (→ AGENTS.md §17), specific test files. -->
+     owns: testing philosophy, test taxonomy, golden/snapshot policy, contract matrix.
+     does-not-own: per-file test inventory (→ test modules), maintainer playbook detail
+       (→ AGENTS.md §17, mirrored here). -->
 # 23. Testing as Specification
 
 ## Purpose
@@ -23,14 +24,24 @@ Contract tests are concentrated in:
 - `tests/test_mcp_service.py`
 - `tests/test_detector_golden.py`
 - `tests/test_golden_v2.py`
+- `tests/test_memory_*.py`, `tests/test_semantic_*.py`, `tests/test_mcp_memory_management.py`
+- `tests/test_architecture.py`
 
-## Data model
+## Test taxonomy
 
-Test classes by role:
+Treat tests as specification. Every new behavior belongs in the closest bucket;
+public-surface changes need contract tests, not only unit tests.
 
-- Unit contract tests (schema, validation, canonicalization)
-- Integration contract tests (CLI mode behavior, exit-code priority)
-- Golden detector snapshot (single canonical python tag)
+| Bucket | Intent | Examples |
+|--------|--------|----------|
+| **Unit** | Module behavior and edge conditions | `tests/test_cfg.py`, `tests/test_normalize.py`, `tests/test_metrics_modules.py`, `tests/test_suppressions.py` |
+| **Contract** | Baseline, cache, report, CLI, MCP public semantics | `tests/test_baseline.py`, `tests/test_cache.py`, `tests/test_report_contract_coverage.py`, `tests/test_cli_unit.py`, `tests/test_mcp_service.py` |
+| **Golden** | Snapshot sentinels for stable outputs | `tests/test_detector_golden.py`, `tests/test_golden_v2.py` |
+| **Determinism / invariant** | Ordering, branch paths, canonical stability | `tests/test_report_branch_invariants.py`, `tests/test_core_branch_coverage.py`, `tests/test_semantic_determinism_gate.py` |
+| **Scenario / regression** | Multi-step integration and process behavior | `tests/test_cli_inprocess.py`, `tests/test_pipeline_process.py`, `tests/test_cli_smoke.py` |
+
+Maintainer routing tables and golden-update policy also live in `AGENTS.md` §17
+and §16 (change routing); this chapter is the published contract copy.
 
 ## Contracts
 
@@ -48,6 +59,9 @@ The following matrix is treated as executable contract:
 | Framework-aware dead-code reachability facts                                                                                                           | `tests/test_extractor.py`, `tests/test_pipeline_metrics.py`, `tests/test_cache.py`                                                                                                                                                                                                        |
 | Golden fixture clone exclusion policy                                                                                                                  | `tests/test_golden_fixtures.py`, `tests/test_cli_inprocess.py::test_cli_pyproject_golden_fixture_paths_exclude_fixture_clone_groups`, `tests/test_report.py::test_report_json_clone_groups_can_include_suppressed_golden_fixture_bucket`                                                  |
 | Scanner traversal safety                                                                                                                               | `tests/test_scanner_extra.py`, `tests/test_security.py`                                                                                                                                                                                                                                   |
+| Engineering Memory SQLite schema, governance, retrieval                                                                                                  | `tests/test_memory_schema.py`, `tests/test_memory_store.py`, `tests/test_memory_governance.py`, `tests/test_memory_retrieval.py`, `tests/test_memory_mcp_sync.py`                                                                                                                         |
+| Semantic index projection, rebuild, LanceDB backend                                                                                                      | `tests/test_semantic_projection.py`, `tests/test_semantic_rebuild.py`, `tests/test_semantic_lancedb_backend.py`, `tests/test_semantic_embedding.py`                                                                                                                                       |
+| Layer dependency direction                                                                                                                             | `tests/test_architecture.py`                                                                                                                                                                                                                                                              |
 
 ## Invariants (MUST)
 
