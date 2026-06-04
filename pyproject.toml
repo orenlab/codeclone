@@ -74,6 +74,13 @@ token-bench = [
 semantic-lancedb = [
     "lancedb>=0.33.0",
 ]
+semantic-fastembed = [
+    "fastembed>=0.8.0,<0.9",
+]
+semantic-local = [
+    "lancedb>=0.33.0",
+    "fastembed>=0.8.0,<0.9",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
@@ -92,11 +99,14 @@ codeclone-mcp = "codeclone.surfaces.mcp.server:main"
 packages = [
     "codeclone",
     "codeclone.analysis",
+    "codeclone.audit",
     "codeclone.baseline",
     "codeclone.blocks",
+    "codeclone.budget",
     "codeclone.cache",
     "codeclone.config",
     "codeclone.contracts",
+    "codeclone.controller_insights",
     "codeclone.core",
     "codeclone.findings",
     "codeclone.findings.clones",
@@ -104,6 +114,11 @@ packages = [
     "codeclone.domain",
     "codeclone.meta_markers",
     "codeclone.metrics",
+    "codeclone.memory",
+    "codeclone.memory.embedding",
+    "codeclone.memory.ingest",
+    "codeclone.memory.retrieval",
+    "codeclone.memory.semantic",
     "codeclone.paths",
     "codeclone.qualnames",
     "codeclone.report",
@@ -114,14 +129,17 @@ packages = [
     "codeclone.report.html.primitives",
     "codeclone.report.html.sections",
     "codeclone.report.html.widgets",
+    "codeclone.report.messages",
     "codeclone.report.renderers",
     "codeclone.scanner",
     "codeclone.surfaces",
     "codeclone.surfaces.cli",
     "codeclone.surfaces.mcp",
+    "codeclone.surfaces.mcp.messages",
     "codeclone.surfaces.mcp.tools",
     "codeclone.ui_messages",
     "codeclone.utils",
+    "codeclone.workspace_intent",
 ]
 
 [tool.setuptools.package-data]

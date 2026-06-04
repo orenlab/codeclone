@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
+from ..embedding import embed_query
 from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
@@ -754,7 +755,7 @@ def _semantic_hits(
     query: str,
     k: int,
 ) -> tuple[dict[str, float], list[SemanticHit]]:
-    (vector,) = provider.embed([query])
+    vector = embed_query(provider, query)
     proximity: dict[str, float] = {}
     audit_hits: list[SemanticHit] = []
     for hit in index.search(vector, k=k):

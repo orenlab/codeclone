@@ -11,6 +11,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from ..embedding import embed_query
 from ..semantic.models import SemanticSearchResult
 
 if TYPE_CHECKING:
@@ -41,7 +42,7 @@ def semantic_search(
     always loaded from SQLite / the audit DB (truth never lives in the vector
     row). Stale hits whose record/event no longer exists are skipped.
     """
-    (vector,) = provider.embed([query])
+    vector = embed_query(provider, query)
     results: list[SemanticSearchResult] = []
     for hit in index.search(vector, k=limit):
         if hit.source == "memory":

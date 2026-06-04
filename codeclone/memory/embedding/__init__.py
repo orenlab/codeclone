@@ -9,7 +9,8 @@ from __future__ import annotations
 import hashlib
 import math
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Protocol
+from pathlib import Path
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..exceptions import MemorySemanticUnavailableError
 
@@ -28,6 +29,16 @@ class EmbeddingProvider(Protocol):
     dimension: int
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]: ...
+
+
+@runtime_checkable
+class _QueryEmbeddingProvider(Protocol):
+    def embed_query(self, text: str) -> list[float]: ...
+
+
+@runtime_checkable
+class _DocumentEmbeddingProvider(Protocol):
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
 
 
 class DeterministicHashEmbeddingProvider:
@@ -49,6 +60,12 @@ class DeterministicHashEmbeddingProvider:
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return [self._embed_one(text) for text in texts]
 
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed_one(text)
+
+    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+        return self.embed(texts)
+
     def _embed_one(self, text: str) -> list[float]:
         values: list[float] = []
         counter = 0
@@ -64,20 +81,50 @@ class DeterministicHashEmbeddingProvider:
         return [value / norm for value in values]
 
 
+def embed_query(provider: EmbeddingProvider, text: str) -> list[float]:
+    if isinstance(provider, _QueryEmbeddingProvider):
+        return provider.embed_query(text)
+    (vector,) = provider.embed([text])
+    return vector
+
+
+def embed_documents(
+    provider: EmbeddingProvider,
+    texts: Sequence[str],
+) -> list[list[float]]:
+    if isinstance(provider, _DocumentEmbeddingProvider):
+        return provider.embed_documents(texts)
+    return provider.embed(texts)
+
+
+def _resolve_fastembed_provider(config: SemanticConfig) -> EmbeddingProvider:
+    from .fastembed_provider import FastEmbedEmbeddingProvider
+
+    model_name = config.embedding_model or "BAAI/bge-small-en-v1.5"
+    return FastEmbedEmbeddingProvider(
+        model_name=model_name,
+        dimension=config.dimension,
+        cache_dir=Path(config.embedding_cache_dir),
+        allow_model_download=config.allow_model_download,
+    )
+
+
 def resolve_embedding_provider(config: SemanticConfig) -> EmbeddingProvider:
     """Resolve the embedding provider for the given config.
 
-    ``diagnostic`` is always available (no deps). ``local_model`` and ``api``
-    are real providers wired in Phase 20.6 (lazy import of an optional model
-    dependency); until then they fail clear via MemorySemanticUnavailableError.
+    ``diagnostic`` is always available (no deps). ``fastembed`` is the
+    community local-quality provider and is loaded lazily from the optional
+    ``semantic-fastembed`` extra. ``api`` is reserved for paid/cloud providers.
     """
     kind = config.embedding_provider
     if kind == "diagnostic":
         return DeterministicHashEmbeddingProvider(dimension=config.dimension)
+    if kind == "fastembed":
+        return _resolve_fastembed_provider(config)
     if kind == "local_model":
         raise MemorySemanticUnavailableError(
-            "local_model embedding provider is not available yet (Phase 20.6); "
-            "use embedding_provider='diagnostic' or wait for the model backend"
+            "local_model embedding provider is not available yet; use "
+            "embedding_provider='fastembed' for community local semantic search"
         )
     raise MemorySemanticUnavailableError(
         "api embedding provider is not available yet (Phase 20.6); "
@@ -89,5 +136,7 @@ __all__ = [
     "DIAGNOSTIC_EMBEDDING_MODEL_ID",
     "DeterministicHashEmbeddingProvider",
     "EmbeddingProvider",
+    "embed_documents",
+    "embed_query",
     "resolve_embedding_provider",
 ]

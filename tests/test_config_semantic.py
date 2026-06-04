@@ -51,6 +51,42 @@ index_audit = false
     assert semantic.index_audit is False
 
 
+def test_semantic_fastembed_provider_defaults(tmp_path: Path) -> None:
+    _write_pyproject(
+        tmp_path,
+        """
+[tool.codeclone.memory.semantic]
+enabled = true
+embedding_provider = "fastembed"
+""",
+    )
+    semantic = resolve_memory_config(tmp_path).semantic
+    assert semantic.enabled is True
+    assert semantic.embedding_provider == "fastembed"
+    assert semantic.embedding_model == "BAAI/bge-small-en-v1.5"
+    assert semantic.dimension == 384
+    assert semantic.allow_model_download is False
+    assert semantic.embedding_cache_dir == str(
+        tmp_path / ".cache/codeclone/memory/fastembed"
+    )
+
+
+def test_semantic_fastembed_env_overrides(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODECLONE_MEMORY_SEMANTIC_ENABLED", "true")
+    monkeypatch.setenv("CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER", "fastembed")
+    monkeypatch.setenv("CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL", "custom/model")
+    monkeypatch.setenv("CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD", "true")
+    semantic = resolve_memory_config(tmp_path).semantic
+    assert semantic.enabled is True
+    assert semantic.embedding_provider == "fastembed"
+    assert semantic.embedding_model == "custom/model"
+    assert semantic.dimension == 384
+    assert semantic.allow_model_download is True
+
+
 def test_semantic_frozen_flat_memory_keys_still_work(tmp_path: Path) -> None:
     # The flat memory keys and the nested semantic sub-table coexist.
     _write_pyproject(

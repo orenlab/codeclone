@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from ..embedding import embed_documents
 from .models import SemanticRow
 
 if TYPE_CHECKING:
@@ -68,7 +69,7 @@ def _index_source(
     projections = list(source.iter_projections())
     if not projections:
         return set()
-    vectors = provider.embed([projection.text for projection in projections])
+    vectors = embed_documents(provider, [projection.text for projection in projections])
     rows = [
         SemanticRow(
             id=projection.source_id,

@@ -10,17 +10,24 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from .memory_defaults import (
+    DEFAULT_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
     DEFAULT_SEMANTIC_BACKEND,
     DEFAULT_SEMANTIC_DIMENSION,
+    DEFAULT_SEMANTIC_EMBEDDING_CACHE_DIR,
     DEFAULT_SEMANTIC_EMBEDDING_PROVIDER,
     DEFAULT_SEMANTIC_ENABLED,
+    DEFAULT_SEMANTIC_FASTEMBED_DIMENSION,
+    DEFAULT_SEMANTIC_FASTEMBED_MODEL,
     DEFAULT_SEMANTIC_INDEX_AUDIT,
     DEFAULT_SEMANTIC_INDEX_PATH,
     DEFAULT_SEMANTIC_MAX_RESULTS,
     MEMORY_ENV_DB_PATH,
+    MEMORY_ENV_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
+    MEMORY_ENV_SEMANTIC_EMBEDDING_CACHE_DIR,
+    MEMORY_ENV_SEMANTIC_EMBEDDING_MODEL,
     MEMORY_ENV_SEMANTIC_EMBEDDING_PROVIDER,
     MEMORY_ENV_SEMANTIC_ENABLED,
     MEMORY_ENV_SEMANTIC_INDEX_PATH,
@@ -40,6 +47,9 @@ _VALID_MCP_SYNC_POLICIES = frozenset(
 _SEMANTIC_ENV_OVERRIDES: dict[str, str] = {
     MEMORY_ENV_SEMANTIC_ENABLED: "enabled",
     MEMORY_ENV_SEMANTIC_EMBEDDING_PROVIDER: "embedding_provider",
+    MEMORY_ENV_SEMANTIC_EMBEDDING_MODEL: "embedding_model",
+    MEMORY_ENV_SEMANTIC_EMBEDDING_CACHE_DIR: "embedding_cache_dir",
+    MEMORY_ENV_SEMANTIC_ALLOW_MODEL_DOWNLOAD: "allow_model_download",
     MEMORY_ENV_SEMANTIC_INDEX_PATH: "index_path",
 }
 
@@ -51,7 +61,8 @@ class SemanticConfig(BaseModel):
     ``frozen`` + ``extra="forbid"`` reject unknown keys, bad literals, and
     non-positive sizes here, so no flat ConfigKeySpec table duplicates these
     field definitions. ``enabled=false`` + ``diagnostic`` keep the default
-    offline and zero-extra-dependency.
+    offline and zero-extra-dependency. ``fastembed`` is the community local
+    quality provider and remains opt-in.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -60,9 +71,25 @@ class SemanticConfig(BaseModel):
     backend: SemanticBackend = DEFAULT_SEMANTIC_BACKEND
     index_path: str = Field(default=DEFAULT_SEMANTIC_INDEX_PATH, min_length=1)
     embedding_provider: SemanticEmbeddingProvider = DEFAULT_SEMANTIC_EMBEDDING_PROVIDER
+    embedding_model: str | None = Field(default=None, min_length=1)
+    embedding_cache_dir: str = Field(
+        default=DEFAULT_SEMANTIC_EMBEDDING_CACHE_DIR, min_length=1
+    )
+    allow_model_download: bool = DEFAULT_SEMANTIC_ALLOW_MODEL_DOWNLOAD
     dimension: int = Field(default=DEFAULT_SEMANTIC_DIMENSION, gt=0)
     max_results: int = Field(default=DEFAULT_SEMANTIC_MAX_RESULTS, gt=0)
     index_audit: bool = DEFAULT_SEMANTIC_INDEX_AUDIT
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_provider_defaults(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        if normalized.get("embedding_provider") == "fastembed":
+            normalized.setdefault("embedding_model", DEFAULT_SEMANTIC_FASTEMBED_MODEL)
+            normalized.setdefault("dimension", DEFAULT_SEMANTIC_FASTEMBED_DIMENSION)
+        return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,7 +162,19 @@ def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
     )
     if not isinstance(index_path, str):
         raise TypeError("memory.semantic.index_path must resolve to a string path")
-    return config.model_copy(update={"index_path": index_path})
+    cache_dir = normalize_path_config_value(
+        key="embedding_cache_dir",
+        value=config.embedding_cache_dir,
+        root_path=root_path,
+        path_config_keys=frozenset({"embedding_cache_dir"}),
+    )
+    if not isinstance(cache_dir, str):
+        raise TypeError(
+            "memory.semantic.embedding_cache_dir must resolve to a string path"
+        )
+    return config.model_copy(
+        update={"index_path": index_path, "embedding_cache_dir": cache_dir}
+    )
 
 
 def resolve_memory_config(
