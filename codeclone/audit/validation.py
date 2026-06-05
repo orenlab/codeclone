@@ -29,7 +29,7 @@ from .events import (
     AuditSeverity,
 )
 
-AUDIT_SCHEMA_VERSION = "2"
+AUDIT_SCHEMA_VERSION = "3"
 DEFAULT_AUDIT_PATH = ".codeclone/db/audit.sqlite3"
 DEFAULT_AUDIT_PAYLOADS: AuditPayloadMode = "compact"
 DEFAULT_AUDIT_RETENTION_DAYS = 30
@@ -80,6 +80,7 @@ class EventRow:
     agent_pid: int
     status: str | None
     payload_json: str
+    agent_start_epoch: int | None = None
     estimated_tokens: int | None = None
     token_encoding: str | None = None
     payload_characters: int | None = None
@@ -99,6 +100,7 @@ class EventRow:
             self.agent_pid,
             self.status,
             self.payload_json,
+            self.agent_start_epoch,
             self.estimated_tokens,
             self.token_encoding,
             self.payload_characters,
@@ -180,6 +182,13 @@ def validate_event_row(row: EventRow) -> None:
         raise AuditValidationError("agent_pid must be an integer")
     if row.agent_pid <= 0:
         raise AuditValidationError("agent_pid must be positive")
+    if row.agent_start_epoch is not None:
+        if not isinstance(row.agent_start_epoch, int) or isinstance(
+            row.agent_start_epoch, bool
+        ):
+            raise AuditValidationError("agent_start_epoch must be an integer")
+        if row.agent_start_epoch < 0:
+            raise AuditValidationError("agent_start_epoch must be non-negative")
     _validate_optional_text(row.status, "status", max_len=_MAX_STATUS_LEN)
     _validate_text(row.payload_json, "payload_json", max_len=MAX_PAYLOAD_JSON_LEN)
     _validate_optional_text(row.summary, "summary", max_len=SUMMARY_TEXT_LIMIT)

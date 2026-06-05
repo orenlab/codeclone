@@ -90,7 +90,7 @@ def test_payload_mode_and_retention_validation() -> None:
         validate_retention_days(0)
 
 
-def test_fresh_database_is_v2_with_summary_column(tmp_path: Path) -> None:
+def test_fresh_database_is_v3_with_agent_start_epoch_column(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
 
     conn = open_audit_db(db_path)
@@ -106,8 +106,72 @@ def test_fresh_database_is_v2_with_summary_column(tmp_path: Path) -> None:
         conn.close()
 
     assert "summary" in columns
+    assert "agent_start_epoch" in columns
     assert version == (AUDIT_SCHEMA_VERSION,)
-    assert AUDIT_SCHEMA_VERSION == "2"
+    assert AUDIT_SCHEMA_VERSION == "3"
+
+
+def test_v2_database_migrates_to_v3_preserving_rows(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE controller_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                event_type TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'info',
+                created_at_utc TEXT NOT NULL,
+                repo_root_digest TEXT NOT NULL,
+                run_id TEXT,
+                intent_id TEXT,
+                report_digest TEXT,
+                agent_label TEXT NOT NULL DEFAULT '',
+                agent_pid INTEGER NOT NULL,
+                status TEXT,
+                payload_json TEXT NOT NULL DEFAULT '{}',
+                estimated_tokens INTEGER,
+                token_encoding TEXT,
+                payload_characters INTEGER,
+                summary TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE TABLE audit_meta(key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO audit_meta(key, value) VALUES ('schema_version', '2')"
+        )
+        conn.execute(
+            "INSERT INTO controller_events"
+            "(event_id, event_type, severity, created_at_utc, "
+            "repo_root_digest, agent_label, agent_pid, status, summary) "
+            "VALUES ('evt_legacy', 'intent.declared', 'info', "
+            "'2026-01-01T00:00:00Z', 'abc123', 'agent', 1, 'active', 'declare')"
+        )
+        conn.commit()
+
+        ensure_schema(conn)
+
+        columns = {
+            row[1]
+            for row in conn.execute("PRAGMA table_info(controller_events)").fetchall()
+        }
+        version = conn.execute(
+            "SELECT value FROM audit_meta WHERE key = 'schema_version'"
+        ).fetchone()
+        preserved = conn.execute(
+            "SELECT event_id, status, summary, agent_start_epoch "
+            "FROM controller_events WHERE event_id = 'evt_legacy'"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert "agent_start_epoch" in columns
+    assert version == (AUDIT_SCHEMA_VERSION,)
+    assert preserved == ("evt_legacy", "active", "declare", None)
 
 
 def test_v1_database_migrates_to_v2_preserving_rows(tmp_path: Path) -> None:
@@ -177,6 +241,7 @@ def test_v1_database_migrates_to_v2_preserving_rows(tmp_path: Path) -> None:
         conn.close()
 
     assert "summary" in columns_after
+    assert "agent_start_epoch" in columns_after
     assert version == (AUDIT_SCHEMA_VERSION,)
     assert AUDIT_SCHEMA_VERSION != "1"
     assert preserved == ("evt_legacy", "active", None)

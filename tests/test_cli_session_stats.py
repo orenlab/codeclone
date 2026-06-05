@@ -34,7 +34,7 @@ from codeclone.controller_insights.session_stats import (
     _lease_remaining_seconds,
     _read_audit_config,
     _read_audit_token_footprint,
-    _read_cached_report,
+    _read_disk_report,
     collect_session_snapshot,
 )
 from codeclone.surfaces.cli.session_stats import render_session_stats
@@ -189,6 +189,7 @@ def _snapshot(
     latest_run_findings: int | None = None,
     latest_run_files: int | None = None,
     latest_run_age_seconds: int | None = None,
+    latest_run_source: str | None = None,
     cache_present: bool = False,
     mcp_token_footprint: int | None = None,
     mcp_token_encoding: str | None = None,
@@ -206,6 +207,7 @@ def _snapshot(
         latest_run_findings=latest_run_findings,
         latest_run_files=latest_run_files,
         latest_run_age_seconds=latest_run_age_seconds,
+        latest_run_source=latest_run_source,
         cache_present=cache_present,
         workspace_health=workspace_health,
         intent_registry_backend="file",
@@ -502,6 +504,7 @@ def test_session_stats_verbose_handles_empty_allowed_files(tmp_path: Path) -> No
         latest_run_findings=None,
         latest_run_files=None,
         latest_run_age_seconds=None,
+        latest_run_source=None,
         cache_present=False,
         workspace_health="active",
         intent_registry_backend="file",
@@ -707,15 +710,15 @@ def test_session_stats_groups_multiple_intents_per_agent(
 # ── Data collection helpers ──
 
 
-def test_read_cached_report_missing(tmp_path: Path) -> None:
-    run_id, _health, _findings, _files, _age, present = _read_cached_report(tmp_path)
+def test_read_disk_report_missing(tmp_path: Path) -> None:
+    run_id, _health, _findings, _files, _age, present = _read_disk_report(tmp_path)
     assert run_id is None
     assert not present
 
 
-def test_read_cached_report_valid(tmp_path: Path) -> None:
+def test_read_disk_report_valid(tmp_path: Path) -> None:
     _write_report(tmp_path, health=88, files=50)
-    run_id, health, _findings, files, age, present = _read_cached_report(tmp_path)
+    run_id, health, _findings, files, age, present = _read_disk_report(tmp_path)
     assert run_id == "abcdef01"
     assert health == 88
     assert files == 50
@@ -723,17 +726,17 @@ def test_read_cached_report_valid(tmp_path: Path) -> None:
     assert age is not None and age >= 0
 
 
-def test_read_cached_report_non_object_payload(tmp_path: Path) -> None:
+def test_read_disk_report_non_object_payload(tmp_path: Path) -> None:
     _write_report_payload(tmp_path, [])
 
-    run_id, _health, _findings, _files, age, present = _read_cached_report(tmp_path)
+    run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
 
     assert (run_id, _health, _findings, _files) == (None, None, None, None)
     assert age is not None
     assert present is True
 
 
-def test_read_cached_report_nested_type_mismatches(tmp_path: Path) -> None:
+def test_read_disk_report_nested_type_mismatches(tmp_path: Path) -> None:
     _write_report_payload(
         tmp_path,
         {
@@ -744,14 +747,14 @@ def test_read_cached_report_nested_type_mismatches(tmp_path: Path) -> None:
         },
     )
 
-    run_id, _health, _findings, _files, age, present = _read_cached_report(tmp_path)
+    run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
 
     assert (run_id, _health, _findings, _files) == (None, None, None, None)
     assert age is not None
     assert present is True
 
 
-def test_read_cached_report_leaf_type_mismatches(tmp_path: Path) -> None:
+def test_read_disk_report_leaf_type_mismatches(tmp_path: Path) -> None:
     _write_report_payload(
         tmp_path,
         {
@@ -763,14 +766,14 @@ def test_read_cached_report_leaf_type_mismatches(tmp_path: Path) -> None:
         },
     )
 
-    run_id, _health, _findings, _files, age, present = _read_cached_report(tmp_path)
+    run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
 
     assert (run_id, _health, _findings, _files) == (None, None, None, None)
     assert age is not None
     assert present is True
 
 
-def test_read_cached_report_stat_failure(
+def test_read_disk_report_stat_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -782,7 +785,7 @@ def test_read_cached_report_stat_failure(
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     monkeypatch.setattr(Path, "stat", raise_stat_error)
 
-    run_id, _health, _findings, _files, age, present = _read_cached_report(tmp_path)
+    run_id, _health, _findings, _files, age, present = _read_disk_report(tmp_path)
 
     assert run_id == "abcdef01"
     assert age is None

@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from ..audit.reader import AnalysisRunSnapshot
     from ..surfaces.mcp._workspace_intents import WorkspaceIntentRecord
 
 from ..paths.workspace import REPORT_JSON_PARTS as _REPORT_PATH_PARTS
+from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
 
 _MAX_ALLOWED_FILES_SHOWN = 2
 _MAX_TOP_WORKFLOWS_SHOWN = 3
@@ -68,6 +70,7 @@ class SessionSnapshot:
     latest_run_findings: int | None
     latest_run_files: int | None
     latest_run_age_seconds: int | None
+    latest_run_source: str | None
     cache_present: bool
     workspace_health: str
     intent_registry_backend: str
@@ -158,14 +161,16 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
             )
         )
 
+    audit_enabled, audit_storage = _read_audit_config(root_path)
     (
         latest_run_id,
         latest_run_health,
         latest_run_findings,
         latest_run_files,
         latest_run_age_seconds,
+        latest_run_source,
         cache_present,
-    ) = _read_cached_report(root_path)
+    ) = _resolve_latest_run(root_path, audit_enabled=audit_enabled)
 
     workspace_health = _classify_workspace_health(
         agents=agents,
@@ -176,7 +181,6 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
     mcp_tokens, mcp_enc, mcp_count, top_workflows = _read_audit_token_footprint(
         root_path
     )
-    audit_enabled, audit_storage = _read_audit_config(root_path)
     from ..config.intent_registry import intent_registry_summary
 
     registry = intent_registry_summary(root_path)
@@ -192,6 +196,7 @@ def collect_session_snapshot(root_path: Path) -> SessionSnapshot:
         latest_run_findings=latest_run_findings,
         latest_run_files=latest_run_files,
         latest_run_age_seconds=latest_run_age_seconds,
+        latest_run_source=latest_run_source,
         cache_present=cache_present,
         workspace_health=workspace_health,
         intent_registry_backend=registry["registry_backend"],
@@ -264,7 +269,54 @@ def _has_scope_overlap(agents: list[AgentSnapshot]) -> bool:
     return False
 
 
-def _read_cached_report(
+def _resolve_latest_run(
+    root_path: Path,
+    *,
+    audit_enabled: bool,
+) -> tuple[
+    str | None,
+    int | None,
+    int | None,
+    int | None,
+    int | None,
+    str | None,
+    bool,
+]:
+    disk = _read_disk_report(root_path)
+    if audit_enabled:
+        audit_run = _read_audit_latest_run(root_path)
+        if audit_run is not None:
+            return (
+                audit_run.run_id,
+                audit_run.health,
+                audit_run.findings,
+                audit_run.files,
+                audit_run.age_seconds,
+                audit_run.source,
+                disk[5],
+            )
+    if disk[0] is not None:
+        return (*disk[:5], "disk_report", disk[5])
+    return None, None, None, None, None, None, disk[5]
+
+
+def _read_audit_latest_run(root_path: Path) -> AnalysisRunSnapshot | None:
+    try:
+        from ..audit.reader import read_latest_analysis_run
+        from ..audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
+        from ..config.pyproject_loader import load_pyproject_config
+
+        config = load_pyproject_config(root_path)
+        db_path = resolve_audit_path(
+            root_path=root_path,
+            value=config.get("audit_path", DEFAULT_AUDIT_PATH),
+        )
+        return read_latest_analysis_run(db_path=db_path, repo_root=root_path)
+    except Exception:
+        return None
+
+
+def _read_disk_report(
     root_path: Path,
 ) -> tuple[str | None, int | None, int | None, int | None, int | None, bool]:
     report_path = root_path.joinpath(*_REPORT_PATH_PARTS)
@@ -297,11 +349,22 @@ def _read_cached_report(
         health = _int_field(_mapping_at(data_mapping, ("health",)), "score")
     findings = _int_field(_mapping_at(data_mapping, ("findings",)), "total")
 
-    try:
-        mtime = report_path.stat().st_mtime
-        age_seconds = max(0, int(time.time() - mtime))
-    except OSError:
-        pass
+    generated_at = _string_field(
+        _mapping_at(data_mapping, ("meta", "runtime")),
+        "report_generated_at_utc",
+    )
+    if generated_at is None:
+        generated_at = _string_field(
+            _mapping_at(data_mapping, ("meta",)),
+            "report_generated_at_utc",
+        )
+    age_seconds = age_seconds_since_utc_timestamp(generated_at)
+    if age_seconds is None:
+        try:
+            mtime = report_path.stat().st_mtime
+            age_seconds = max(0, int(time.time() - mtime))
+        except OSError:
+            pass
 
     return run_id, health, findings, files, age_seconds, True
 
@@ -457,6 +520,19 @@ def _format_age(seconds: int | None) -> str:
     return f"{hours}h ago"
 
 
+def latest_run_source_label(source: str | None) -> str | None:
+    from .. import ui_messages as ui
+
+    labels = {
+        "disk_report": ui.SESSION_STATS_LATEST_RUN_SOURCE_DISK,
+        "audit_mcp": ui.SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_MCP,
+        "audit_cli": ui.SESSION_STATS_LATEST_RUN_SOURCE_AUDIT_CLI,
+    }
+    if source is None:
+        return None
+    return labels.get(source)
+
+
 def _format_duration(seconds: int) -> str:
     if seconds <= 0:
         return "expired"
@@ -524,6 +600,7 @@ def session_snapshot_to_payload(snapshot: SessionSnapshot) -> dict[str, object]:
             "findings": snapshot.latest_run_findings,
             "files": snapshot.latest_run_files,
             "age_seconds": snapshot.latest_run_age_seconds,
+            "source": snapshot.latest_run_source,
             "cache_present": snapshot.cache_present,
         },
         "audit": {
@@ -555,6 +632,7 @@ __all__ = [
     "_live_agent_count",
     "_visible_intent_count",
     "collect_session_snapshot",
+    "latest_run_source_label",
     "session_snapshot_to_payload",
     "workspace_session_stats_payload",
 ]

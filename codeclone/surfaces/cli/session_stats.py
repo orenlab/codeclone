@@ -24,6 +24,7 @@ from ...controller_insights.session_stats import (
     _live_agent_count,
     _visible_intent_count,
     collect_session_snapshot,
+    latest_run_source_label,
 )
 from . import console as cli_console
 from .types import PrinterLike
@@ -88,7 +89,7 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             f"{ui.SESSION_STATS_AUDIT_ENABLED} ({snapshot.audit_storage})"
         )
 
-    if snapshot.cache_present and snapshot.latest_run_id:
+    if snapshot.latest_run_id:
         age_str = _format_age(snapshot.latest_run_age_seconds)
         health_part = (
             f", health={snapshot.latest_run_health}"
@@ -100,12 +101,13 @@ def _render_verbose(console: PrinterLike, snapshot: _SessionSnapshot) -> int:
             if snapshot.latest_run_findings is not None
             else ""
         )
+        source_part = _latest_run_source_suffix(snapshot)
         console.print(
             f"  {ui.SESSION_STATS_LATEST_RUN:<{_PLAIN_LABEL_WIDTH}}"
             f"{snapshot.latest_run_id}"
-            f" ({age_str}{health_part}{findings_part})"
+            f" ({age_str}{health_part}{findings_part}{source_part})"
         )
-        if snapshot.latest_run_files is not None:
+        if snapshot.cache_present and snapshot.latest_run_files is not None:
             console.print(
                 f"  {ui.SESSION_STATS_CACHE:<{_PLAIN_LABEL_WIDTH}}"
                 f"{ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files)}"
@@ -196,10 +198,10 @@ def _render_verbose_rich(console: PrinterLike, snapshot: _SessionSnapshot) -> in
             ui.SESSION_STATS_AUDIT.rstrip(":"),
             f"{ui.SESSION_STATS_AUDIT_ENABLED} ({snapshot.audit_storage})",
         )
-    if snapshot.cache_present and snapshot.latest_run_id:
+    if snapshot.latest_run_id:
         run_text = _latest_run_text(snapshot)
         summary.add_row(ui.SESSION_STATS_LATEST_RUN.rstrip(":"), run_text)
-        if snapshot.latest_run_files is not None:
+        if snapshot.cache_present and snapshot.latest_run_files is not None:
             summary.add_row(
                 ui.SESSION_STATS_CACHE.rstrip(":"),
                 ui.SESSION_STATS_REPORT_PRESENT.format(files=snapshot.latest_run_files),
@@ -334,8 +336,18 @@ def _latest_run_text(snapshot: _SessionSnapshot) -> str:
         parts.append(f", health={snapshot.latest_run_health}")
     if snapshot.latest_run_findings is not None:
         parts.append(f", findings={snapshot.latest_run_findings}")
+    source_part = _latest_run_source_suffix(snapshot)
+    if source_part:
+        parts.append(source_part)
     parts.append(")")
     return "".join(parts)
+
+
+def _latest_run_source_suffix(snapshot: _SessionSnapshot) -> str:
+    label = latest_run_source_label(snapshot.latest_run_source)
+    if label is None:
+        return ""
+    return f", source={label}"
 
 
 def _allowed_files_label(files: tuple[str, ...]) -> str:

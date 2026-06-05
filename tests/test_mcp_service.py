@@ -1027,7 +1027,10 @@ def test_mcp_session_audit_writer_config_paths(
             raise value
         return value
 
-    monkeypatch.setattr(mcp_session_mod, "load_pyproject_config", load_config)
+    monkeypatch.setattr(
+        "codeclone.audit.runtime.load_pyproject_config",
+        load_config,
+    )
     writer_types: list[type[object]] = []
     for _ in range(5):
         writer = service._build_audit_writer(tmp_path)
@@ -1049,8 +1052,7 @@ def test_mcp_session_audit_writer_for_root_caches_writer(
 ) -> None:
     service = mcp_session_mod.MCPSession(history_limit=4)
     monkeypatch.setattr(
-        mcp_session_mod,
-        "load_pyproject_config",
+        "codeclone.audit.runtime.load_pyproject_config",
         lambda _root: {
             "audit_enabled": True,
             "audit_path": "audit.sqlite3",

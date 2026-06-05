@@ -41,11 +41,12 @@ INSERT INTO controller_events(
     agent_pid,
     status,
     payload_json,
+    agent_start_epoch,
     estimated_tokens,
     token_encoding,
     payload_characters,
     summary
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -152,6 +153,7 @@ def event_to_row(
         agent_pid=event.agent_pid,
         status=event.status,
         payload_json=payload_json,
+        agent_start_epoch=event.agent_start_epoch,
         estimated_tokens=token_estimate.tokens if token_estimate else None,
         token_encoding=token_estimate.encoding if token_estimate else None,
         payload_characters=token_estimate.characters if token_estimate else None,

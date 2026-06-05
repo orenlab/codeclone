@@ -11,23 +11,9 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from ...audit import (
-    DEFAULT_AUDIT_PATH,
-    DEFAULT_AUDIT_PAYLOADS,
-    DEFAULT_AUDIT_RETENTION_DAYS,
-    DEFAULT_AUDIT_TOKEN_ESTIMATOR,
-    AuditEvent,
-    AuditWriter,
-    NullAuditWriter,
-    SqliteAuditWriter,
-    repo_root_digest,
-    resolve_audit_path,
-    validate_payload_mode,
-    validate_retention_days,
-    validate_token_estimator,
-)
+from ...audit import AuditEvent, AuditWriter, repo_root_digest
+from ...audit.runtime import open_audit_writer_for_root
 from ...cache.store import resolve_cache_status
-from ...config.pyproject_loader import ConfigValidationError, load_pyproject_config
 from ...memory.ide_governance import IdeGovernanceSessionState
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
@@ -213,6 +199,7 @@ class MCPSession(
                     else ("warn" if severity == "warn" else "info"),
                     repo_root_digest=repo_root_digest(root),
                     agent_pid=self._agent_pid,
+                    agent_start_epoch=self._agent_start_epoch,
                     agent_label=self._agent_label,
                     run_id=run_id,
                     intent_id=intent_id,
@@ -236,34 +223,7 @@ class MCPSession(
         return writer
 
     def _build_audit_writer(self, root: Path) -> AuditWriter:
-        try:
-            config = load_pyproject_config(root)
-        except (ConfigValidationError, OSError):
-            return NullAuditWriter()
-        if not bool(config.get("audit_enabled", False)):
-            return NullAuditWriter()
-        try:
-            db_path = resolve_audit_path(
-                root_path=root,
-                value=config.get("audit_path", DEFAULT_AUDIT_PATH),
-            )
-            payloads = validate_payload_mode(
-                config.get("audit_payloads", DEFAULT_AUDIT_PAYLOADS)
-            )
-            retention_days = validate_retention_days(
-                config.get("audit_retention_days", DEFAULT_AUDIT_RETENTION_DAYS)
-            )
-            token_estimator = validate_token_estimator(
-                config.get("audit_token_estimator", DEFAULT_AUDIT_TOKEN_ESTIMATOR)
-            )
-            return SqliteAuditWriter(
-                db_path=db_path,
-                payloads=payloads,
-                retention_days=retention_days,
-                token_estimator=token_estimator,
-            )
-        except Exception:
-            return NullAuditWriter()
+        return open_audit_writer_for_root(root.resolve())
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)
@@ -511,8 +471,40 @@ class MCPSession(
             metrics_diff=metrics_diff,
         )
         self._runs.register(record)
+        self._emit_analysis_completed_audit(
+            root_path=root_path,
+            record=record,
+            summary=summary,
+        )
         self._prune_session_state()
         return self._summary_payload(record.summary, record=record)
+
+    def _emit_analysis_completed_audit(
+        self,
+        *,
+        root_path: Path,
+        record: MCPRunRecord,
+        summary: Mapping[str, object],
+    ) -> None:
+        try:
+            from ...audit.analysis_completed import (
+                ANALYSIS_SOURCE_MCP,
+                emit_analysis_completed,
+            )
+
+            emit_analysis_completed(
+                root_path=root_path,
+                summary=summary,
+                source=ANALYSIS_SOURCE_MCP,
+                report_digest=self._report_digest_value(record),
+                run_id=record.run_id,
+                agent_pid=self._agent_pid,
+                agent_start_epoch=self._agent_start_epoch,
+                agent_label=self._agent_label,
+                writer=self._audit_writer_for_root(root_path),
+            )
+        except Exception:
+            return None
 
     def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
         if not request.changed_paths and request.git_diff_ref is None:

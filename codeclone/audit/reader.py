@@ -6,12 +6,33 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
+from .events import (
+    ANALYSIS_SOURCE_CLI,
+    ANALYSIS_SOURCE_MCP,
+    EVENT_ANALYSIS_COMPLETED,
+    repo_root_digest,
+)
 from .schema import ensure_schema, get_meta
 from .validation import AuditReadError, AuditSchemaError
+
+
+@dataclass(frozen=True, slots=True)
+class AnalysisRunSnapshot:
+    """Latest persisted analysis run summary from the audit trail."""
+
+    run_id: str | None
+    health: int | None
+    findings: int | None
+    files: int | None
+    age_seconds: int | None
+    source: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +120,61 @@ class AuditSummary:
     token_encoding: str | None = None
     token_event_count: int = 0
     payload_footprint: PayloadFootprint | None = None
+
+
+def read_latest_analysis_run(
+    *,
+    db_path: Path,
+    repo_root: Path,
+) -> AnalysisRunSnapshot | None:
+    """Return the newest ``analysis.completed`` row for ``repo_root``, if any."""
+
+    if not db_path.is_file():
+        return None
+    digest = repo_root_digest(repo_root.resolve())
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.Error as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT run_id, created_at_utc, payload_json "
+            "FROM controller_events "
+            "WHERE event_type = ? AND repo_root_digest = ? "
+            "ORDER BY created_at_utc DESC, id DESC "
+            "LIMIT 1",
+            (EVENT_ANALYSIS_COMPLETED, digest),
+        ).fetchone()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    run_id_raw = _str_or_none(row[0])
+    created_at_utc = _str_or_empty(row[1])
+    payload = _analysis_payload_from_json(row[2])
+    source = _analysis_run_source_label(str(payload.get("source", "")))
+    run_id = _short_run_id(run_id_raw, payload)
+    health = _int_or_none(_mapping(payload.get("health")).get("score"))
+    if health is None:
+        health = _int_or_none(payload.get("health_score"))
+    findings = _int_or_none(_mapping(payload.get("findings")).get("total"))
+    if findings is None:
+        findings = _int_or_none(payload.get("findings_total"))
+    files = _int_or_none(_mapping(payload.get("inventory")).get("files"))
+    if files is None:
+        files = _int_or_none(payload.get("files"))
+    age_seconds = age_seconds_since_utc_timestamp(created_at_utc)
+    return AnalysisRunSnapshot(
+        run_id=run_id,
+        health=health,
+        findings=findings,
+        files=files,
+        age_seconds=age_seconds,
+        source=source,
+    )
 
 
 def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
@@ -446,7 +522,41 @@ def _int_or_none(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
+def _mapping(value: object) -> dict[str, object]:
+    return value if isinstance(value, dict) else {}
+
+
+def _analysis_payload_from_json(value: object) -> dict[str, object]:
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _analysis_run_source_label(raw_source: str) -> str:
+    normalized = raw_source.strip().lower()
+    if normalized == ANALYSIS_SOURCE_MCP:
+        return "audit_mcp"
+    if normalized == ANALYSIS_SOURCE_CLI:
+        return "audit_cli"
+    return "audit_unknown"
+
+
+def _short_run_id(run_id: str | None, payload: Mapping[str, object]) -> str | None:
+    candidate = run_id or _str_or_none(payload.get("run_id"))
+    if candidate is None:
+        return None
+    trimmed = candidate.strip()
+    if not trimmed:
+        return None
+    return trimmed[:8] if len(trimmed) >= 8 else trimmed
+
+
 __all__ = [
+    "AnalysisRunSnapshot",
     "AuditRecord",
     "AuditSummary",
     "PayloadFootprint",
@@ -455,4 +565,5 @@ __all__ = [
     "WorkflowTokenProfile",
     "payload_footprint_to_dict",
     "read_audit_summary",
+    "read_latest_analysis_run",
 ]

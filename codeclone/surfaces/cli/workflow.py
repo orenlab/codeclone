@@ -47,6 +47,8 @@ from .attrs import bool_attr
 from .patch_verify import VALID_STRICTNESS_PROFILES
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
+_CLI_SESSION_START_EPOCH = int(time.time())
+
 __all__ = [
     "LEGACY_CACHE_PATH",
     "Baseline",
@@ -644,6 +646,13 @@ def _main_impl() -> None:
         api_surface_diff_available=diff_context.api_surface_diff_available,
         include_report_document=bool(changed_paths) or _controller_query_mode(args),
     )
+    _emit_cli_analysis_completed_if_enabled(
+        args=args,
+        root_path=root_path,
+        report_document=report_artifacts.report_document,
+        new_func_count=len(diff_context.new_func),
+        new_block_count=len(diff_context.new_block),
+    )
     controller_exit_code = _run_controller_query(
         args=args,
         report_document=report_artifacts.report_document,
@@ -736,6 +745,51 @@ def _main_impl() -> None:
         root_path=root_path,
     )
     print_pipeline_done_if_needed(args=args, run_started_at=run_started_at)
+
+
+def _emit_cli_analysis_completed_if_enabled(
+    *,
+    args: CLIArgsLike,
+    root_path: Path,
+    report_document: object,
+    new_func_count: int,
+    new_block_count: int,
+) -> None:
+    if not bool(getattr(args, "audit_enabled", False)):
+        return
+    if not isinstance(report_document, dict):
+        return
+    digest = _report_digest_from_document(report_document)
+    if not digest:
+        return
+    try:
+        from ...audit.analysis_completed import (
+            ANALYSIS_SOURCE_CLI,
+            emit_analysis_completed_from_report,
+        )
+
+        emit_analysis_completed_from_report(
+            root_path=root_path,
+            report_document=report_document,
+            report_digest=digest,
+            run_id=digest,
+            source=ANALYSIS_SOURCE_CLI,
+            new_func_count=new_func_count,
+            new_block_count=new_block_count,
+            agent_start_epoch=_CLI_SESSION_START_EPOCH,
+        )
+    except Exception:
+        return None
+
+
+def _report_digest_from_document(report_document: dict[str, object]) -> str:
+    integrity = report_document.get("integrity")
+    if not isinstance(integrity, dict):
+        return ""
+    digest = integrity.get("digest")
+    if not isinstance(digest, dict):
+        return ""
+    return str(digest.get("value", "")).strip()
 
 
 def main() -> None:

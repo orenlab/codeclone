@@ -7,6 +7,9 @@
 from __future__ import annotations
 
 from .events import (
+    ANALYSIS_SOURCE_CLI,
+    ANALYSIS_SOURCE_MCP,
+    EVENT_ANALYSIS_COMPLETED,
     EVENT_BASELINE_ABUSE,
     EVENT_BLAST_RADIUS,
     EVENT_CLAIM_COMPLETED,
@@ -28,6 +31,7 @@ from .events import (
     EVENT_RECEIPT_CREATED,
     EVENT_WORKSPACE_CONFLICT,
     EVENT_WORKSPACE_GC,
+    AnalysisSource,
     AuditEvent,
     repo_root_digest,
 )
@@ -48,10 +52,13 @@ from .validation import (
 from .writer import AuditWriter, NullAuditWriter, SqliteAuditWriter
 
 __all__ = [
+    "ANALYSIS_SOURCE_CLI",
+    "ANALYSIS_SOURCE_MCP",
     "DEFAULT_AUDIT_PATH",
     "DEFAULT_AUDIT_PAYLOADS",
     "DEFAULT_AUDIT_RETENTION_DAYS",
     "DEFAULT_AUDIT_TOKEN_ESTIMATOR",
+    "EVENT_ANALYSIS_COMPLETED",
     "EVENT_BASELINE_ABUSE",
     "EVENT_BLAST_RADIUS",
     "EVENT_CLAIM_COMPLETED",
@@ -73,6 +80,7 @@ __all__ = [
     "EVENT_RECEIPT_CREATED",
     "EVENT_WORKSPACE_CONFLICT",
     "EVENT_WORKSPACE_GC",
+    "AnalysisSource",
     "AuditConfigError",
     "AuditEvent",
     "AuditReadError",

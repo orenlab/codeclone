@@ -16,6 +16,7 @@ from typing import Literal
 
 AuditSeverity = Literal["info", "warn", "error"]
 AuditPayloadMode = Literal["off", "compact", "full"]
+AnalysisSource = Literal["mcp", "cli"]
 
 EVENT_INTENT_DECLARED = "intent.declared"
 EVENT_INTENT_QUEUED = "intent.queued"
@@ -38,6 +39,10 @@ EVENT_CLAIM_COMPLETED = "claim_validation.completed"
 EVENT_CLAIM_VIOLATED = "claim_validation.violated"
 EVENT_RECEIPT_CREATED = "review_receipt.created"
 EVENT_BASELINE_ABUSE = "baseline_abuse.detected"
+EVENT_ANALYSIS_COMPLETED = "analysis.completed"
+
+ANALYSIS_SOURCE_MCP: AnalysisSource = "mcp"
+ANALYSIS_SOURCE_CLI: AnalysisSource = "cli"
 
 KNOWN_EVENT_TYPES = frozenset(
     {
@@ -62,6 +67,7 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_CLAIM_VIOLATED,
         EVENT_RECEIPT_CREATED,
         EVENT_BASELINE_ABUSE,
+        EVENT_ANALYSIS_COMPLETED,
     }
 )
 
@@ -95,6 +101,7 @@ class AuditEvent:
     repo_root_digest: str
     agent_pid: int
     agent_label: str
+    agent_start_epoch: int | None = None
     run_id: str | None = None
     intent_id: str | None = None
     report_digest: str | None = None
@@ -151,6 +158,8 @@ def compact_payload_for_event(
         }
     if event_type == EVENT_BLAST_RADIUS:
         return _compact_blast_radius_payload(payload)
+    if event_type == EVENT_ANALYSIS_COMPLETED:
+        return _compact_analysis_completed_payload(payload)
     if event_type == EVENT_PATCH_BUDGET:
         return _compact_budget_payload(payload)
     if event_type in {
@@ -212,6 +221,8 @@ def event_summary(
     if event_type in _INTENT_PAYLOAD_EVENTS:
         text = _bounded_text(payload.get("intent_description"), SUMMARY_TEXT_LIMIT)
         return text or None
+    if event_type == EVENT_ANALYSIS_COMPLETED:
+        return _analysis_completed_summary(payload)
     incident = _incident_summary(event_type, payload)
     return _bounded_text(incident, SUMMARY_TEXT_LIMIT) if incident else None
 
@@ -279,6 +290,33 @@ def _compact_check_payload(payload: Mapping[str, object]) -> dict[str, object]:
         "unexpected_files": len(_sequence(payload.get("unexpected_files"))),
         "forbidden_touched": len(_sequence(payload.get("forbidden_touched"))),
     }
+
+
+def _compact_analysis_completed_payload(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    health = _mapping(payload.get("health"))
+    findings = _mapping(payload.get("findings"))
+    inventory = _mapping(payload.get("inventory"))
+    return {
+        "source": str(payload.get("source", "")),
+        "mode": str(payload.get("mode", "")),
+        "focus": str(payload.get("focus", "")),
+        "health_score": _int_or_none(health.get("score")),
+        "health_grade": str(health.get("grade", "")),
+        "findings_total": _int_or_none(findings.get("total")),
+        "findings_new": _int_or_none(findings.get("new")),
+        "files": _int_or_none(inventory.get("files")),
+    }
+
+
+def _analysis_completed_summary(payload: Mapping[str, object]) -> str:
+    health = _mapping(payload.get("health"))
+    score = health.get("score")
+    source = str(payload.get("source", "")).strip() or "unknown"
+    if isinstance(score, int) and not isinstance(score, bool):
+        return f"analysis completed ({source}): health={score}"
+    return f"analysis completed ({source})"
 
 
 def _compact_blast_radius_payload(payload: Mapping[str, object]) -> dict[str, object]:
@@ -353,6 +391,9 @@ def _bounded_text(value: object, limit: int) -> str:
 
 
 __all__ = [
+    "ANALYSIS_SOURCE_CLI",
+    "ANALYSIS_SOURCE_MCP",
+    "EVENT_ANALYSIS_COMPLETED",
     "EVENT_BASELINE_ABUSE",
     "EVENT_BLAST_RADIUS",
     "EVENT_CLAIM_COMPLETED",
@@ -377,6 +418,7 @@ __all__ = [
     "KNOWN_EVENT_TYPES",
     "PAYLOAD_MODES",
     "SUMMARY_TEXT_LIMIT",
+    "AnalysisSource",
     "AuditEvent",
     "AuditPayloadMode",
     "AuditSeverity",

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS controller_events (
 
     status          TEXT,
     payload_json    TEXT    NOT NULL DEFAULT '{}',
+    agent_start_epoch   INTEGER,
 
     estimated_tokens    INTEGER,
     token_encoding      TEXT,
@@ -59,11 +60,15 @@ _INDEX_SQL = (
     "ON controller_events(event_type, created_at_utc)",
     "CREATE INDEX IF NOT EXISTS idx_events_created "
     "ON controller_events(created_at_utc)",
+    "CREATE INDEX IF NOT EXISTS idx_events_analysis_repo "
+    "ON controller_events(event_type, repo_root_digest, created_at_utc)",
+    "CREATE INDEX IF NOT EXISTS idx_events_agent_session "
+    "ON controller_events(agent_pid, agent_start_epoch)",
 )
 
 # Schema versions this build can open: the current version plus any older
 # version reachable by an idempotent in-place migration.
-_MIGRATABLE_VERSIONS = frozenset({"1", "2"})
+_MIGRATABLE_VERSIONS = frozenset({"1", "2", "3"})
 
 # Additive, nullable columns expected on controller_events. Declarative so a
 # single idempotent pass upgrades any older database (pre-token, token-only)
@@ -74,6 +79,7 @@ _ADDITIVE_EVENT_COLUMNS = (
     ("token_encoding", "TEXT"),
     ("payload_characters", "INTEGER"),
     ("summary", "TEXT"),
+    ("agent_start_epoch", "INTEGER"),
 )
 
 
@@ -91,14 +97,18 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     # Idempotent self-heal: bring any migratable database up to the current
     # column shape, then advance the recorded version. Safe on every open.
     _ensure_event_columns(conn)
+    _ensure_event_indexes(conn)
     if current != AUDIT_SCHEMA_VERSION:
         _set_meta(conn, "schema_version", AUDIT_SCHEMA_VERSION)
 
 
 def create_schema_v2(conn: sqlite3.Connection) -> None:
+    for statement in (_CREATE_EVENTS_SQL, _CREATE_META_SQL):
+        conn.execute(statement)
+    _ensure_event_columns(conn)
     initialize_schema_v1(
         conn,
-        ddl_statements=(_CREATE_EVENTS_SQL, _CREATE_META_SQL),
+        ddl_statements=(),
         index_statements=_INDEX_SQL,
         meta_table=_AUDIT_META_TABLE,
         seed_meta={
@@ -108,6 +118,12 @@ def create_schema_v2(conn: sqlite3.Connection) -> None:
             "created_at_utc": current_report_timestamp_utc(),
         },
     )
+
+
+def _ensure_event_indexes(conn: sqlite3.Connection) -> None:
+    for statement in _INDEX_SQL:
+        conn.execute(statement)
+    conn.commit()
 
 
 def _ensure_event_columns(conn: sqlite3.Connection) -> None:
