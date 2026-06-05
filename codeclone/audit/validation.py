@@ -9,6 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from ..budget.estimator import (
+    TOKEN_ESTIMATOR_CHARS_APPROX,
+    TOKEN_ESTIMATOR_MODES,
+    TOKEN_ESTIMATOR_TIKTOKEN,
+    TokenEstimatorMode,
+)
 from ..utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -27,6 +33,7 @@ AUDIT_SCHEMA_VERSION = "2"
 DEFAULT_AUDIT_PATH = ".codeclone/db/audit.sqlite3"
 DEFAULT_AUDIT_PAYLOADS: AuditPayloadMode = "compact"
 DEFAULT_AUDIT_RETENTION_DAYS = 30
+DEFAULT_AUDIT_TOKEN_ESTIMATOR: TokenEstimatorMode = TOKEN_ESTIMATOR_CHARS_APPROX
 MIN_AUDIT_RETENTION_DAYS = 1
 MAX_AUDIT_RETENTION_DAYS = 365
 
@@ -146,6 +153,15 @@ def validate_retention_days(value: object) -> int:
     return value
 
 
+def validate_token_estimator(value: object) -> TokenEstimatorMode:
+    if value not in TOKEN_ESTIMATOR_MODES:
+        expected = ", ".join(sorted(TOKEN_ESTIMATOR_MODES))
+        raise AuditConfigError(f"audit_token_estimator must be one of: {expected}")
+    if value == TOKEN_ESTIMATOR_TIKTOKEN:
+        return TOKEN_ESTIMATOR_TIKTOKEN
+    return TOKEN_ESTIMATOR_CHARS_APPROX
+
+
 def validate_event_row(row: EventRow) -> None:
     _validate_text(row.event_id, "event_id", max_len=_MAX_EVENT_ID_LEN)
     _validate_text(row.event_type, "event_type", max_len=_MAX_EVENT_TYPE_LEN)
@@ -191,6 +207,7 @@ __all__ = [
     "DEFAULT_AUDIT_PATH",
     "DEFAULT_AUDIT_PAYLOADS",
     "DEFAULT_AUDIT_RETENTION_DAYS",
+    "DEFAULT_AUDIT_TOKEN_ESTIMATOR",
     "MAX_PAYLOAD_JSON_LEN",
     "AuditConfigError",
     "AuditReadError",
@@ -201,4 +218,5 @@ __all__ = [
     "validate_event_row",
     "validate_payload_mode",
     "validate_retention_days",
+    "validate_token_estimator",
 ]

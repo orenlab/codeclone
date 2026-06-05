@@ -5,6 +5,8 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+import builtins
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -12,15 +14,45 @@ import pytest
 from codeclone.budget.estimator import estimate_payload
 
 
-def test_estimate_payload_with_tiktoken() -> None:
-    """Exact BPE estimation when tiktoken is available."""
+def test_estimate_payload_defaults_to_chars_approx() -> None:
+    """Default estimation is cheap and does not import tiktoken."""
+    payload = {"key": "value", "number": 42}
+    result = estimate_payload(payload)
+    assert result.method == "chars_approx"
+    assert result.encoding == "chars_approx"
+    assert result.tokens == -(-result.characters // 4)
+
+
+def test_estimate_payload_default_does_not_import_tiktoken() -> None:
+    """Long-lived MCP paths must not import tiktoken by default."""
+    real_import = builtins.__import__
+
+    def guarded_import(
+        name: str,
+        globals_: dict[str, Any] | None = None,
+        locals_: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        if name == "tiktoken":
+            raise AssertionError("default estimator must not import tiktoken")
+        return real_import(name, globals_, locals_, fromlist, level)
+
+    with patch.object(builtins, "__import__", guarded_import):
+        result = estimate_payload({"key": "value"})
+
+    assert result.method == "chars_approx"
+
+
+def test_estimate_payload_with_tiktoken_opt_in() -> None:
+    """Exact BPE estimation when explicitly requested and available."""
     payload = {
         "status": "accepted",
         "health": 90,
         "findings": {"total": 5, "new": 2},
         "message": "Patch contract accepted.",
     }
-    result = estimate_payload(payload)
+    result = estimate_payload(payload, estimator="tiktoken")
     assert result.method == "tiktoken"
     assert result.encoding == "o200k_base"
     assert result.tokens > 0
@@ -29,10 +61,10 @@ def test_estimate_payload_with_tiktoken() -> None:
 
 
 def test_estimate_payload_without_tiktoken() -> None:
-    """Character-based fallback when tiktoken import fails."""
+    """Explicit tiktoken mode falls back when tiktoken import fails."""
     payload = {"key": "value", "number": 42}
     with patch.dict("sys.modules", {"tiktoken": None}):
-        result = estimate_payload(payload)
+        result = estimate_payload(payload, estimator="tiktoken")
     assert result.method == "chars_approx"
     assert result.encoding == "chars_approx"
     assert result.tokens == -(-result.characters // 4)
@@ -57,7 +89,11 @@ def test_estimate_empty_payload() -> None:
 
 def test_estimate_payload_custom_encoding() -> None:
     """Custom encoding parameter is passed through."""
-    result = estimate_payload({"key": "value"}, encoding="cl100k_base")
+    result = estimate_payload(
+        {"key": "value"},
+        encoding="cl100k_base",
+        estimator="tiktoken",
+    )
     assert result.encoding == "cl100k_base"
     assert result.method == "tiktoken"
     assert result.tokens > 0
@@ -96,3 +132,8 @@ def test_estimate_payload_with_unicode() -> None:
     result = estimate_payload(payload)
     assert result.tokens > 0
     assert result.characters > 0
+
+
+def test_estimate_payload_rejects_unknown_estimator() -> None:
+    with pytest.raises(ValueError, match="token estimator"):
+        estimate_payload({"x": 1}, estimator="bad")  # type: ignore[arg-type]

@@ -176,6 +176,7 @@ def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
         ("min_loc", 10, 10),
         ("baseline", "codeclone.baseline.json", "codeclone.baseline.json"),
         ("cache_path", None, None),
+        ("audit_token_estimator", "tiktoken", "tiktoken"),
         (
             "golden_fixture_paths",
             ["tests/fixtures/golden_*", "tests/fixtures/golden_*"],

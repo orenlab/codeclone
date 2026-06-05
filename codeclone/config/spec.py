@@ -13,6 +13,7 @@ from ..audit.validation import (
     DEFAULT_AUDIT_PATH,
     DEFAULT_AUDIT_PAYLOADS,
     DEFAULT_AUDIT_RETENTION_DAYS,
+    DEFAULT_AUDIT_TOKEN_ESTIMATOR,
 )
 from ..contracts import (
     DEFAULT_BASELINE_PATH,
@@ -320,6 +321,12 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         group=None,
         default=DEFAULT_AUDIT_RETENTION_DAYS,
         pyproject_type=int,
+    ),
+    _option(
+        dest="audit_token_estimator",
+        group=None,
+        default=DEFAULT_AUDIT_TOKEN_ESTIMATOR,
+        pyproject_type=str,
     ),
     _option(
         dest="intent_registry_backend",

@@ -15,6 +15,7 @@ from ...audit import (
     DEFAULT_AUDIT_PATH,
     DEFAULT_AUDIT_PAYLOADS,
     DEFAULT_AUDIT_RETENTION_DAYS,
+    DEFAULT_AUDIT_TOKEN_ESTIMATOR,
     AuditEvent,
     AuditWriter,
     NullAuditWriter,
@@ -23,6 +24,7 @@ from ...audit import (
     resolve_audit_path,
     validate_payload_mode,
     validate_retention_days,
+    validate_token_estimator,
 )
 from ...cache.store import resolve_cache_status
 from ...config.pyproject_loader import ConfigValidationError, load_pyproject_config
@@ -251,10 +253,14 @@ class MCPSession(
             retention_days = validate_retention_days(
                 config.get("audit_retention_days", DEFAULT_AUDIT_RETENTION_DAYS)
             )
+            token_estimator = validate_token_estimator(
+                config.get("audit_token_estimator", DEFAULT_AUDIT_TOKEN_ESTIMATOR)
+            )
             return SqliteAuditWriter(
                 db_path=db_path,
                 payloads=payloads,
                 retention_days=retention_days,
+                token_estimator=token_estimator,
             )
         except Exception:
             return NullAuditWriter()

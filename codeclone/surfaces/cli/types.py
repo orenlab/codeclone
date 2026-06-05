@@ -87,6 +87,7 @@ class CLIArgsLike(Protocol):
     audit_path: str
     audit_payloads: str
     audit_retention_days: int
+    audit_token_estimator: str
     skip_metrics: bool
     skip_dead_code: bool
     skip_dependencies: bool

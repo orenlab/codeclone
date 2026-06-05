@@ -23,6 +23,7 @@ from codeclone.audit.validation import (
     AuditValidationError,
     EventRow,
     validate_event_row,
+    validate_token_estimator,
 )
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
 
@@ -63,6 +64,32 @@ def _summaries(db_path: Path) -> list[object]:
     finally:
         conn.close()
     return [row[0] for row in rows]
+
+
+def _token_fields(db_path: Path) -> tuple[object, object, object]:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT estimated_tokens, token_encoding, payload_characters "
+            "FROM controller_events"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return row[0], row[1], row[2]
+
+
+def _assert_positive_token_fields(
+    db_path: Path,
+    *,
+    allowed_encodings: tuple[str, ...],
+) -> None:
+    estimated_tokens, token_encoding, payload_characters = _token_fields(db_path)
+    assert isinstance(estimated_tokens, int)
+    assert estimated_tokens > 0
+    assert token_encoding in allowed_encodings
+    assert isinstance(payload_characters, int)
+    assert payload_characters > 0
 
 
 def test_sqlite_writer_creates_db_and_emits_compact_event(tmp_path: Path) -> None:
@@ -236,8 +263,8 @@ def test_null_writer_is_noop(tmp_path: Path) -> None:
     writer.close()
 
 
-def test_audit_event_row_includes_token_fields(tmp_path: Path) -> None:
-    """Token estimation fields are populated when tiktoken is available."""
+def test_audit_event_row_includes_default_approx_token_fields(tmp_path: Path) -> None:
+    """Token estimation defaults to chars_approx for long-lived MCP writers."""
     db_path = tmp_path / "audit.sqlite3"
     writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
     try:
@@ -245,23 +272,37 @@ def test_audit_event_row_includes_token_fields(tmp_path: Path) -> None:
     finally:
         writer.close()
 
-    conn = sqlite3.connect(db_path)
-    try:
-        row = conn.execute(
-            "SELECT estimated_tokens, token_encoding, payload_characters "
-            "FROM controller_events"
-        ).fetchone()
-    finally:
-        conn.close()
+    _assert_positive_token_fields(db_path, allowed_encodings=("chars_approx",))
 
-    assert row is not None
-    estimated_tokens, token_encoding, payload_characters = row
-    assert isinstance(estimated_tokens, int)
-    assert estimated_tokens > 0
-    assert isinstance(token_encoding, str)
-    assert token_encoding in {"o200k_base", "chars_approx"}
-    assert isinstance(payload_characters, int)
-    assert payload_characters > 0
+
+def test_audit_event_row_can_opt_into_tiktoken_token_fields(tmp_path: Path) -> None:
+    """Exact tiktoken estimation is explicit opt-in, not install-time behavior."""
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(
+        db_path=db_path,
+        payloads="compact",
+        retention_days=30,
+        token_estimator="tiktoken",
+    )
+    try:
+        writer.emit(_event(tmp_path))
+    finally:
+        writer.close()
+
+    _assert_positive_token_fields(
+        db_path,
+        allowed_encodings=("o200k_base", "chars_approx"),
+    )
+
+
+def test_validate_token_estimator_accepts_supported_modes() -> None:
+    assert validate_token_estimator("chars_approx") == "chars_approx"
+    assert validate_token_estimator("tiktoken") == "tiktoken"
+
+
+def test_validate_token_estimator_rejects_unknown_mode() -> None:
+    with pytest.raises(ValueError, match="audit_token_estimator"):
+        validate_token_estimator("auto")
 
 
 def test_audit_event_row_token_fields_null_when_no_payload(tmp_path: Path) -> None:

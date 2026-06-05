@@ -25,7 +25,7 @@ from .schema import open_audit_db
 from .validation import EventRow, validate_event_row
 
 if TYPE_CHECKING:
-    from ..budget.estimator import TokenEstimate
+    from ..budget.estimator import TokenEstimate, TokenEstimatorMode
 
 _INSERT_SQL = """
 INSERT INTO controller_events(
@@ -69,10 +69,12 @@ class SqliteAuditWriter:
         db_path: Path,
         payloads: AuditPayloadMode,
         retention_days: int,
+        token_estimator: TokenEstimatorMode = "chars_approx",
     ) -> None:
         self._conn = open_audit_db(db_path)
         self._payloads = payloads
         self._retention_days = retention_days
+        self._token_estimator = token_estimator
         self._lock = threading.Lock()
         self._closed = False
         self._gc_counter = 0
@@ -100,7 +102,11 @@ class SqliteAuditWriter:
                 self._closed = True
 
     def _emit_impl(self, event: AuditEvent) -> None:
-        row = event_to_row(event=event, payloads=self._payloads)
+        row = event_to_row(
+            event=event,
+            payloads=self._payloads,
+            token_estimator=self._token_estimator,
+        )
         validate_event_row(row)
         with self._lock:
             if self._closed:
@@ -122,9 +128,17 @@ class SqliteAuditWriter:
         self._conn.commit()
 
 
-def event_to_row(*, event: AuditEvent, payloads: AuditPayloadMode) -> EventRow:
+def event_to_row(
+    *,
+    event: AuditEvent,
+    payloads: AuditPayloadMode,
+    token_estimator: TokenEstimatorMode = "chars_approx",
+) -> EventRow:
     payload_json = _payload_json(event=event, payloads=payloads)
-    token_estimate = _estimate_payload_tokens(event.payload)
+    token_estimate = _estimate_payload_tokens(
+        event.payload,
+        token_estimator=token_estimator,
+    )
     return EventRow(
         event_id=generate_event_id(),
         event_type=event.event_type,
@@ -147,6 +161,8 @@ def event_to_row(*, event: AuditEvent, payloads: AuditPayloadMode) -> EventRow:
 
 def _estimate_payload_tokens(
     payload: Mapping[str, object] | None,
+    *,
+    token_estimator: TokenEstimatorMode = "chars_approx",
 ) -> TokenEstimate | None:
     """Estimate token count for the full original payload.
 
@@ -159,7 +175,7 @@ def _estimate_payload_tokens(
     try:
         from ..budget.estimator import estimate_payload
 
-        return estimate_payload(payload)
+        return estimate_payload(payload, estimator=token_estimator)
     except Exception:
         return None
 

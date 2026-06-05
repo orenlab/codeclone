@@ -1010,6 +1010,14 @@ def test_mcp_session_audit_writer_config_paths(
             "audit_path": "audit.sqlite3",
             "audit_payloads": "full",
             "audit_retention_days": 1,
+            "audit_token_estimator": "bad",
+        },
+        {
+            "audit_enabled": True,
+            "audit_path": "audit.sqlite3",
+            "audit_payloads": "full",
+            "audit_retention_days": 1,
+            "audit_token_estimator": "tiktoken",
         },
     ]
 
@@ -1021,12 +1029,13 @@ def test_mcp_session_audit_writer_config_paths(
 
     monkeypatch.setattr(mcp_session_mod, "load_pyproject_config", load_config)
     writer_types: list[type[object]] = []
-    for _ in range(4):
+    for _ in range(5):
         writer = service._build_audit_writer(tmp_path)
         writer_types.append(type(writer))
         writer.close()
 
     assert writer_types == [
+        NullAuditWriter,
         NullAuditWriter,
         NullAuditWriter,
         NullAuditWriter,
@@ -1047,6 +1056,7 @@ def test_mcp_session_audit_writer_for_root_caches_writer(
             "audit_path": "audit.sqlite3",
             "audit_payloads": "compact",
             "audit_retention_days": 1,
+            "audit_token_estimator": "chars_approx",
         },
     )
 

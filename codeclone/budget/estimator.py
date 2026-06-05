@@ -6,13 +6,12 @@
 
 """Deterministic token-count estimator for MCP JSON payloads.
 
-Uses ``tiktoken`` when available, falls back to ``ceil(chars / 4)``
-character-based approximation otherwise.  The payload is serialized to
-canonical JSON (sorted keys, compact separators, no ASCII escaping)
-before counting.
+Defaults to ``ceil(chars / 4)`` so long-lived MCP processes do not import
+``tiktoken`` just because the optional package is installed. Exact BPE
+counting remains available through explicit ``estimator="tiktoken"`` opt-in.
 
-This module is imported lazily by the audit writer.  Base ``codeclone``
-never imports ``tiktoken``.
+The payload is serialized to canonical JSON (sorted keys, compact separators,
+no ASCII escaping) before counting.
 """
 
 from __future__ import annotations
@@ -20,6 +19,15 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Final, Literal
+
+TokenEstimatorMode = Literal["chars_approx", "tiktoken"]
+
+TOKEN_ESTIMATOR_CHARS_APPROX: Final[TokenEstimatorMode] = "chars_approx"
+TOKEN_ESTIMATOR_TIKTOKEN: Final[TokenEstimatorMode] = "tiktoken"
+TOKEN_ESTIMATOR_MODES: Final[frozenset[str]] = frozenset(
+    {TOKEN_ESTIMATOR_CHARS_APPROX, TOKEN_ESTIMATOR_TIKTOKEN}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,24 +44,27 @@ def estimate_payload(
     payload: Mapping[str, object],
     *,
     encoding: str = "o200k_base",
+    estimator: TokenEstimatorMode = TOKEN_ESTIMATOR_CHARS_APPROX,
 ) -> TokenEstimate:
     """Estimate token count for a canonical JSON payload.
 
-    Uses tiktoken if available, falls back to character-based approximation.
-    The payload is serialized to the same canonical form used by the audit
-    writer: sorted keys, compact separators, no ASCII escaping.
+    Character approximation is the default because this function is used by
+    long-lived MCP audit paths. ``tiktoken`` is imported only when explicitly
+    requested. If exact estimation is requested but unavailable, the function
+    falls back to approximation without failing audit writes.
     """
     text = _canonical_json(payload)
     characters = len(text)
-    try:
-        return _tiktoken_estimate(text, encoding=encoding)
-    except _TiktokenUnavailable:
-        return TokenEstimate(
-            encoding="chars_approx",
+    if estimator not in TOKEN_ESTIMATOR_MODES:
+        expected = ", ".join(sorted(TOKEN_ESTIMATOR_MODES))
+        raise ValueError(f"token estimator must be one of: {expected}")
+    if estimator == TOKEN_ESTIMATOR_TIKTOKEN:
+        return _tiktoken_or_chars_estimate(
+            text,
+            encoding=encoding,
             characters=characters,
-            tokens=_approx_tokens(characters),
-            method="chars_approx",
         )
+    return _chars_approx_estimate(characters)
 
 
 def _canonical_json(payload: Mapping[str, object]) -> str:
@@ -85,9 +96,37 @@ def _tiktoken_estimate(text: str, *, encoding: str) -> TokenEstimate:
     )
 
 
+def _tiktoken_or_chars_estimate(
+    text: str,
+    *,
+    encoding: str,
+    characters: int,
+) -> TokenEstimate:
+    try:
+        return _tiktoken_estimate(text, encoding=encoding)
+    except _TiktokenUnavailable:
+        return _chars_approx_estimate(characters)
+
+
+def _chars_approx_estimate(characters: int) -> TokenEstimate:
+    return TokenEstimate(
+        encoding=TOKEN_ESTIMATOR_CHARS_APPROX,
+        characters=characters,
+        tokens=_approx_tokens(characters),
+        method=TOKEN_ESTIMATOR_CHARS_APPROX,
+    )
+
+
 def _approx_tokens(characters: int) -> int:
     """Rough approximation: 1 token ~ 4 characters for JSON."""
     return -(-characters // 4)  # ceil division
 
 
-__all__ = ["TokenEstimate", "estimate_payload"]
+__all__ = [
+    "TOKEN_ESTIMATOR_CHARS_APPROX",
+    "TOKEN_ESTIMATOR_MODES",
+    "TOKEN_ESTIMATOR_TIKTOKEN",
+    "TokenEstimate",
+    "TokenEstimatorMode",
+    "estimate_payload",
+]

@@ -35,6 +35,7 @@ from .validation import (
     DEFAULT_AUDIT_PATH,
     DEFAULT_AUDIT_PAYLOADS,
     DEFAULT_AUDIT_RETENTION_DAYS,
+    DEFAULT_AUDIT_TOKEN_ESTIMATOR,
     AuditConfigError,
     AuditReadError,
     AuditSchemaError,
@@ -42,6 +43,7 @@ from .validation import (
     resolve_audit_path,
     validate_payload_mode,
     validate_retention_days,
+    validate_token_estimator,
 )
 from .writer import AuditWriter, NullAuditWriter, SqliteAuditWriter
 
@@ -49,6 +51,7 @@ __all__ = [
     "DEFAULT_AUDIT_PATH",
     "DEFAULT_AUDIT_PAYLOADS",
     "DEFAULT_AUDIT_RETENTION_DAYS",
+    "DEFAULT_AUDIT_TOKEN_ESTIMATOR",
     "EVENT_BASELINE_ABUSE",
     "EVENT_BLAST_RADIUS",
     "EVENT_CLAIM_COMPLETED",
@@ -82,4 +85,5 @@ __all__ = [
     "resolve_audit_path",
     "validate_payload_mode",
     "validate_retention_days",
+    "validate_token_estimator",
 ]

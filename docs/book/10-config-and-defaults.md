@@ -149,6 +149,7 @@ Controller audit trail:
 | `audit_path`           | `str`  | `.codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
 | `audit_payloads`       | `str`  | `compact`                           | Audit payload mode: `off`, `compact`, or `full`. Compact omits large fields but keeps `intent_description` on `intent.declared`; row `summary` always stores a short essence | Used only when `audit_enabled=true` |
 | `audit_retention_days` | `int`  | `30`                                | Retention window for audit rows                                                                                                        | Used only when `audit_enabled=true` |
+| `audit_token_estimator` | `str` | `chars_approx`                      | Audit payload token estimator: default `chars_approx`, or explicit `tiktoken` opt-in with `codeclone[token-bench]`                    | Used only when `audit_enabled=true` |
 
 Workspace intent registry:
 
