@@ -8,15 +8,23 @@
 from __future__ import annotations
 
 from .gate import (
+    UnclosedWorkspaceIntent,
     WorkspaceEditGateDecision,
+    WorkspaceIntentRegistryUnavailable,
     evaluate_workspace_edit_gate,
     has_authorized_workspace_intent,
     has_blocking_workspace_intent,
+    list_unclosed_workspace_intents,
+    list_unclosed_workspace_intents_for_hook_cleanup,
 )
 
 __all__ = [
+    "UnclosedWorkspaceIntent",
     "WorkspaceEditGateDecision",
+    "WorkspaceIntentRegistryUnavailable",
     "evaluate_workspace_edit_gate",
     "has_authorized_workspace_intent",
     "has_blocking_workspace_intent",
+    "list_unclosed_workspace_intents",
+    "list_unclosed_workspace_intents_for_hook_cleanup",
 ]

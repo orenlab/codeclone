@@ -19,19 +19,27 @@ from codeclone.surfaces.mcp._workspace_intent_store import (
 )
 from codeclone.workspace_intent.gate import (
     HOOK_AUTHORIZE_FOREIGN_ENV,
+    UnclosedWorkspaceIntent,
     evaluate_workspace_edit_gate,
     has_authorized_workspace_intent,
     has_blocking_workspace_intent,
+    list_unclosed_workspace_intents,
+    list_unclosed_workspace_intents_for_hook_cleanup,
 )
 from tests.test_workspace_intents import _record
-from tests.workspace_intent_gate_helpers import assert_gate_denied
+from tests.workspace_intent_gate_helpers import (
+    assert_gate_denied,
+    codex_foreign_record,
+    cursor_vscode_record,
+    write_workspace_record,
+)
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 _PID_LIVENESS = "codeclone.surfaces.mcp._workspace_intent_pid.agent_pid_liveness"
 
 
 def _write_record(root: Path, record: workspace_intents.WorkspaceIntentRecord) -> None:
-    assert workspace_intents.write_workspace_intent(root=root, record=record)
+    write_workspace_record(root, record)
 
 
 def test_gate_allows_active_file_registry_intent(
@@ -223,3 +231,91 @@ def test_gate_closes_sqlite_read_connection(
     assert seen["uri_flag"] is True
     assert str(seen["uri"]).endswith("?mode=ro")
     assert "SELECT payload_json" in str(seen["sql"])
+
+
+def test_list_unclosed_workspace_intents_returns_active_and_queued(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    active = _record(intent_id="intent-active-001", status="active")
+    queued = _record(intent_id="intent-queued-001", status="queued")
+    _write_record(tmp_path, active)
+    _write_record(tmp_path, queued)
+
+    unclosed = list_unclosed_workspace_intents(tmp_path)
+
+    assert unclosed == (
+        UnclosedWorkspaceIntent("intent-active-001", "active"),
+        UnclosedWorkspaceIntent("intent-queued-001", "queued"),
+    )
+
+
+def test_list_unclosed_workspace_intents_ignores_terminal_records(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    _write_record(tmp_path, _record(intent_id="intent-active-001", status="active"))
+    _write_record(tmp_path, _record(intent_id="intent-clean-001", status="clean"))
+    _write_record(tmp_path, _record(intent_id="intent-expired-001", status="expired"))
+    _write_record(tmp_path, _record(intent_id="intent-orphan-001", status="orphaned"))
+
+    unclosed = list_unclosed_workspace_intents(tmp_path)
+
+    assert unclosed == (UnclosedWorkspaceIntent("intent-active-001", "active"),)
+
+
+def test_hook_cleanup_excludes_foreign_active_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    _write_record(tmp_path, codex_foreign_record())
+
+    unclosed = list_unclosed_workspace_intents_for_hook_cleanup(tmp_path)
+
+    assert unclosed == ()
+
+
+def test_hook_cleanup_includes_own_active_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    own_pid = os.getpid()
+    own = cursor_vscode_record(
+        intent_id="intent-own-001",
+        pid=own_pid,
+        start_epoch=100,
+    )
+    _write_record(tmp_path, own)
+
+    unclosed = list_unclosed_workspace_intents_for_hook_cleanup(
+        tmp_path,
+        own_pid=own_pid,
+        own_start_epoch=100,
+    )
+
+    assert unclosed == (UnclosedWorkspaceIntent("intent-own-001", "active"),)
+
+
+def test_hook_cleanup_includes_recoverable_cursor_intent_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: False)
+    cursor_recoverable = cursor_vscode_record(
+        intent_id="intent-cursor-dead-001",
+        pid=os.getpid() + 9000,
+    )
+    codex_recoverable = codex_foreign_record(
+        intent_id="intent-codex-dead-001",
+        pid=os.getpid() + 9001,
+    )
+    _write_record(tmp_path, cursor_recoverable)
+    _write_record(tmp_path, codex_recoverable)
+
+    unclosed = list_unclosed_workspace_intents_for_hook_cleanup(tmp_path)
+
+    assert unclosed == (UnclosedWorkspaceIntent("intent-cursor-dead-001", "active"),)

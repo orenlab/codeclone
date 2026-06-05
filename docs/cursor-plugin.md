@@ -213,8 +213,13 @@ Plugin manifest commands use `python "${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py"
 - **postToolUse** (`Write|StrReplace|ApplyPatch`, 5s) — injects
   `additional_context` **only when the edited path is `.py` / `.pyi`**
   (`post-tool-use-python-edit.py`).
-- **stop** (`loop_limit: 1`, 5s) — optional `followup_message` when transcript
-  shows `start_controlled_change` without matching finish / `intent_cleared`.
+- **stop** (`loop_limit: 1`, 5s) — optional `followup_message` when the
+  workspace intent registry still has **own or recoverable Cursor** non-terminal
+  intents (active, queued, violated, expanded). Foreign active/stale intents
+  from other agents are ignored — they require coordination, not
+  `manage_change_intent(clear)` from this session. Transcript JSONL is a
+  fallback only when registry read fails; it counts `CallMcpTool` workflow
+  events, not raw substring matches.
 
 Without an authorized intent, only read-only Git inspection shell commands are
 allowed; `git apply`, commits, and direct `.git/**` writes are blocked.

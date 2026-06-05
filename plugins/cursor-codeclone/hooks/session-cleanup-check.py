@@ -4,11 +4,12 @@
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
-"""CodeClone stop hook — warn when workflow intents look unclosed.
+"""CodeClone stop hook — warn when workspace intents remain unclosed.
 
-Reads ``transcript_path`` from the Cursor hook base payload (on ``stop``).
-Uses workflow tool names (``start_controlled_change`` / ``finish_controlled_change``)
-with legacy ``manage_change_intent`` declare/clear as fallback.
+Primary source of truth: workspace intent registry via
+``codeclone.workspace_intent.gate.list_unclosed_workspace_intents`` (same family
+as the preToolUse gate). Transcript JSONL parsing is a fallback only when the
+registry cannot be read.
 """
 
 from __future__ import annotations
@@ -21,19 +22,11 @@ from _hook_io import (
     emit_hook_payload,
     parse_hook_input,
     read_bounded_stdin,
+    session_cleanup_followup_message,
+    session_cleanup_should_warn,
     transcript_path_from_hook,
-    workflow_intent_looks_unclosed,
+    workspace_root_from_hook,
 )
-
-_WARNING = {
-    "followup_message": (
-        "CodeClone: this session may have started change control without a matching "
-        "`finish_controlled_change` (intent_cleared). Before ending, run "
-        "`finish_controlled_change` with the active `intent_id`, or "
-        '`manage_change_intent(action="list_workspace", root=<abs>)` in the next '
-        "session to check for stale intents."
-    )
-}
 
 
 def _read_validated_transcript(raw_path: str) -> str | None:
@@ -59,11 +52,22 @@ def main() -> None:
     payload: dict[str, object] | None = None
     data = parse_hook_input(read_bounded_stdin())
     if data is not None:
+        workspace_root = workspace_root_from_hook(data)
+        repo_root = Path(workspace_root) if workspace_root else None
         transcript_path = transcript_path_from_hook(data)
-        if transcript_path:
-            content = _read_validated_transcript(transcript_path)
-            if content is not None and workflow_intent_looks_unclosed(content):
-                payload = _WARNING
+        transcript = (
+            _read_validated_transcript(transcript_path) if transcript_path else None
+        )
+        should_warn, intent_ids = session_cleanup_should_warn(
+            repo_root=repo_root,
+            transcript=transcript,
+        )
+        if should_warn:
+            payload = {
+                "followup_message": session_cleanup_followup_message(
+                    intent_ids=intent_ids,
+                ),
+            }
     emit_hook_payload(payload)
 
 

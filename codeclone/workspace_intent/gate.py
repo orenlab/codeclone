@@ -18,6 +18,7 @@ import os
 import sqlite3
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -52,9 +53,22 @@ GateReason = Literal[
     "registry_error",
 ]
 
+
+class WorkspaceIntentRegistryUnavailable(RuntimeError):
+    """Raised when the hook cannot read the workspace intent registry."""
+
+
 HOOK_AUTHORIZE_FOREIGN_ENV = "CODECLONE_HOOK_AUTHORIZE_FOREIGN"
 _TRUTHY_HOOK_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSY_HOOK_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+@dataclass(frozen=True, slots=True)
+class UnclosedWorkspaceIntent:
+    """Non-terminal workspace intent that still needs finish or clear."""
+
+    intent_id: str
+    status: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +133,131 @@ def has_blocking_workspace_intent(root: Path | str) -> bool:
     """Compatibility boolean for hooks that historically asked for a lock."""
 
     return has_authorized_workspace_intent(root)
+
+
+def list_unclosed_workspace_intents(
+    root: Path | str,
+) -> tuple[UnclosedWorkspaceIntent, ...]:
+    """Return non-terminal workspace intents still present in the registry."""
+
+    return _list_unclosed_workspace_intents_filtered(
+        root,
+        own_pid=0,
+        own_start_epoch=0,
+        recoverable_agent_label_prefix=None,
+        include_foreign=True,
+    )
+
+
+def list_unclosed_workspace_intents_for_hook_cleanup(
+    root: Path | str,
+    *,
+    own_pid: int | None = None,
+    own_start_epoch: int | None = None,
+    recoverable_agent_label_prefix: str | None = "cursor-vscode/",
+) -> tuple[UnclosedWorkspaceIntent, ...]:
+    """Return unclosed intents the local stop hook may ask the user to finish/clear.
+
+    Foreign active/stale intents are excluded; they require coordination, not
+    ``manage_change_intent(clear)`` from another agent. Recoverable rows are
+    included only when ``recoverable_agent_label_prefix`` matches ``agent_label``.
+    """
+
+    resolved_pid = _resolve_hook_int_env(
+        own_pid,
+        env_key="CODECLONE_HOOK_OWN_AGENT_PID",
+    )
+    resolved_epoch = _resolve_hook_int_env(
+        own_start_epoch,
+        env_key="CODECLONE_HOOK_OWN_AGENT_START_EPOCH",
+    )
+    return _list_unclosed_workspace_intents_filtered(
+        root,
+        own_pid=resolved_pid,
+        own_start_epoch=resolved_epoch,
+        recoverable_agent_label_prefix=recoverable_agent_label_prefix,
+        include_foreign=False,
+    )
+
+
+def _resolve_hook_int_env(explicit: int | None, *, env_key: str) -> int:
+    if explicit is not None:
+        return explicit
+    raw_value = os.environ.get(env_key, "").strip()
+    if raw_value.isdigit():
+        return int(raw_value)
+    return 0
+
+
+def _include_record_in_hook_cleanup(
+    record: WorkspaceIntentRecord,
+    *,
+    own_pid: int,
+    own_start_epoch: int,
+    recoverable_agent_label_prefix: str | None,
+    include_foreign: bool,
+    now: datetime,
+) -> bool:
+    ownership = workspace_intents.classify_intent_ownership(
+        record,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+        now=now,
+    )
+    if include_foreign:
+        return ownership != workspace_intents.IntentOwnership.EXPIRED
+    if ownership in {
+        workspace_intents.IntentOwnership.FOREIGN_ACTIVE,
+        workspace_intents.IntentOwnership.FOREIGN_STALE,
+        workspace_intents.IntentOwnership.EXPIRED,
+    }:
+        return False
+    if ownership in {
+        workspace_intents.IntentOwnership.OWN_ACTIVE,
+        workspace_intents.IntentOwnership.OWN_STALE,
+    }:
+        return True
+    if ownership == workspace_intents.IntentOwnership.RECOVERABLE:
+        if recoverable_agent_label_prefix is None:
+            return False
+        return record.agent_label.startswith(recoverable_agent_label_prefix)
+    return False
+
+
+def _list_unclosed_workspace_intents_filtered(
+    root: Path | str,
+    *,
+    own_pid: int,
+    own_start_epoch: int,
+    recoverable_agent_label_prefix: str | None,
+    include_foreign: bool,
+) -> tuple[UnclosedWorkspaceIntent, ...]:
+    root_path = Path(root).resolve()
+    try:
+        config = resolve_intent_registry_config(root_path)
+    except (IntentRegistryConfigError, OSError, ValueError) as exc:
+        raise WorkspaceIntentRegistryUnavailable(str(exc)) from exc
+
+    try:
+        records = _load_registry_records_read_only(root_path, config)
+    except (OSError, sqlite3.Error, ValueError) as exc:
+        raise WorkspaceIntentRegistryUnavailable(str(exc)) from exc
+
+    current_time = utc_now()
+    unclosed = [
+        UnclosedWorkspaceIntent(intent_id=record.intent_id, status=record.status)
+        for record in records
+        if not is_terminal_workspace_intent_status(record.status)
+        and _include_record_in_hook_cleanup(
+            record,
+            own_pid=own_pid,
+            own_start_epoch=own_start_epoch,
+            recoverable_agent_label_prefix=recoverable_agent_label_prefix,
+            include_foreign=include_foreign,
+            now=current_time,
+        )
+    ]
+    return tuple(sorted(unclosed, key=lambda item: item.intent_id))
 
 
 def _decision_from_records(
@@ -275,8 +414,12 @@ def _display_registry_path(root: Path, registry_path: Path) -> str:
 
 __all__ = [
     "HOOK_AUTHORIZE_FOREIGN_ENV",
+    "UnclosedWorkspaceIntent",
     "WorkspaceEditGateDecision",
+    "WorkspaceIntentRegistryUnavailable",
     "evaluate_workspace_edit_gate",
     "has_authorized_workspace_intent",
     "has_blocking_workspace_intent",
+    "list_unclosed_workspace_intents",
+    "list_unclosed_workspace_intents_for_hook_cleanup",
 ]

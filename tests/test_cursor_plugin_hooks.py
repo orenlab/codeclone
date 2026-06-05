@@ -24,6 +24,14 @@ from codeclone.surfaces.mcp._workspace_intent_store import (
     clear_workspace_intent_store_cache,
 )
 from tests.test_workspace_intents import _record
+from tests.workspace_intent_gate_helpers import (
+    bind_hook_own_agent_env,
+    codex_foreign_record,
+    cursor_vscode_record,
+    write_workspace_record,
+)
+
+_PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _HOOKS_DIR = _REPO_ROOT / "plugins" / "cursor-codeclone" / "hooks"
@@ -58,15 +66,24 @@ def _run_hook(
     return json.loads(result.stdout.strip())  # type: ignore[no-any-return]
 
 
-def _run_session_hook_with_home(
-    transcript_path: Path, home_dir: Path
+def _run_session_hook(
+    *,
+    transcript_path: Path | None = None,
+    home_dir: Path | None = None,
+    workspace_roots: list[str] | None = None,
 ) -> dict[str, object]:
+    stdin_payload: dict[str, object] = {}
+    if transcript_path is not None:
+        stdin_payload["transcript_path"] = str(transcript_path)
+    if workspace_roots is not None:
+        stdin_payload["workspace_roots"] = workspace_roots
     env = os.environ.copy()
-    env["HOME"] = str(home_dir)
-    env["USERPROFILE"] = str(home_dir)
+    if home_dir is not None:
+        env["HOME"] = str(home_dir)
+        env["USERPROFILE"] = str(home_dir)
     result = subprocess.run(
         [sys.executable, str(_SESSION_CHECK)],
-        input=json.dumps({"transcript_path": str(transcript_path)}),
+        input=json.dumps(stdin_payload),
         capture_output=True,
         text=True,
         timeout=10,
@@ -76,6 +93,40 @@ def _run_session_hook_with_home(
         f"Hook exited with {result.returncode}: {result.stderr}"
     )
     return json.loads(result.stdout.strip())  # type: ignore[no-any-return]
+
+
+def _run_session_hook_with_home(
+    transcript_path: Path, home_dir: Path, *, workspace_roots: list[str] | None = None
+) -> dict[str, object]:
+    return _run_session_hook(
+        transcript_path=transcript_path,
+        home_dir=home_dir,
+        workspace_roots=workspace_roots,
+    )
+
+
+def _call_mcp_tool_jsonl_line(
+    *,
+    tool_name: str,
+    arguments: dict[str, object] | None = None,
+) -> str:
+    payload = {
+        "role": "assistant",
+        "message": {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "CallMcpTool",
+                    "input": {
+                        "server": "project-0-codeclone-codeclone",
+                        "toolName": tool_name,
+                        "arguments": arguments or {},
+                    },
+                }
+            ],
+        },
+    }
+    return json.dumps(payload, sort_keys=True)
 
 
 # pre_tool_use_change_control.py
@@ -507,25 +558,112 @@ def test_hooks_no_bash_scripts_remain() -> None:
 # ═══════════════════════════════════════════════════════════════════
 
 
-def test_session_unclosed_workflow_intent_warns(tmp_path: Path) -> None:
+def test_session_registry_own_active_intent_warns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = str(tmp_path.resolve())
+    record = cursor_vscode_record()
+    write_workspace_record(tmp_path, record)
+    bind_hook_own_agent_env(monkeypatch, record)
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    out = _run_session_hook_with_home(
+        transcript,
+        tmp_path,
+        workspace_roots=[root],
+    )
+    assert "followup_message" in out
+    msg = out["followup_message"]
+    assert isinstance(msg, str)
+    assert record.intent_id in msg
+    assert "finish_controlled_change" in msg
+
+
+def test_session_registry_foreign_active_intent_is_silent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = str(tmp_path.resolve())
+    monkeypatch.setattr(_PID_ALIVE, lambda pid: True)
+    write_workspace_record(tmp_path, codex_foreign_record())
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        "start_controlled_change " * 20 + "\n",
+        encoding="utf-8",
+    )
+    out = _run_session_hook_with_home(
+        transcript,
+        tmp_path,
+        workspace_roots=[root],
+    )
+    assert "followup_message" not in out
+
+
+def test_session_registry_empty_ignores_noisy_transcript(tmp_path: Path) -> None:
+    root = str(tmp_path.resolve())
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        "start_controlled_change " * 50 + "\nfinish_controlled_change\n",
+        encoding="utf-8",
+    )
+    out = _run_session_hook_with_home(
+        transcript,
+        tmp_path,
+        workspace_roots=[root],
+    )
+    assert "followup_message" not in out
+
+
+def test_session_registry_queued_intent_warns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = str(tmp_path.resolve())
+    record = cursor_vscode_record(status="queued")
+    write_workspace_record(tmp_path, record)
+    bind_hook_own_agent_env(monkeypatch, record)
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text("", encoding="utf-8")
+    out = _run_session_hook_with_home(
+        transcript,
+        tmp_path,
+        workspace_roots=[root],
+    )
+    assert "followup_message" in out
+
+
+def test_session_transcript_fallback_warns_on_unclosed_mcp_tool(
+    tmp_path: Path,
+) -> None:
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        _call_mcp_tool_jsonl_line(tool_name="start_controlled_change") + "\n",
+        encoding="utf-8",
+    )
+    out = _run_session_hook_with_home(transcript, tmp_path)
+    assert "followup_message" in out
+
+
+def test_session_transcript_fallback_silent_when_balanced(tmp_path: Path) -> None:
+    transcript = tmp_path / "transcript.jsonl"
+    transcript.write_text(
+        _call_mcp_tool_jsonl_line(tool_name="start_controlled_change")
+        + "\n"
+        + _call_mcp_tool_jsonl_line(tool_name="finish_controlled_change")
+        + "\n",
+        encoding="utf-8",
+    )
+    out = _run_session_hook_with_home(transcript, tmp_path)
+    assert "followup_message" not in out
+
+
+def test_session_plaintext_substrings_do_not_trigger_warning(tmp_path: Path) -> None:
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text(
         "tool start_controlled_change intent_id=intent-abc\n"
         "tool finish_controlled_change intent_cleared=false\n"
         "tool start_controlled_change intent_id=intent-def\n",
-        encoding="utf-8",
-    )
-    out = _run_session_hook_with_home(transcript, tmp_path)
-    assert "followup_message" in out
-    msg = out["followup_message"]
-    assert isinstance(msg, str)
-    assert "finish_controlled_change" in msg
-
-
-def test_session_balanced_workflow_is_silent(tmp_path: Path) -> None:
-    transcript = tmp_path / "transcript.jsonl"
-    transcript.write_text(
-        'start_controlled_change\nfinish_controlled_change "intent_cleared":true\n',
         encoding="utf-8",
     )
     out = _run_session_hook_with_home(transcript, tmp_path)
@@ -549,10 +687,16 @@ def test_session_no_warning_when_intents_not_unclosed(
     assert "followup_message" not in out
 
 
-def test_session_legacy_unclosed_declare_warns(tmp_path: Path) -> None:
+def test_session_transcript_fallback_manage_change_intent_declare_warns(
+    tmp_path: Path,
+) -> None:
     transcript = tmp_path / "transcript.jsonl"
     transcript.write_text(
-        'manage_change_intent "action":"declare"\n',
+        _call_mcp_tool_jsonl_line(
+            tool_name="manage_change_intent",
+            arguments={"action": "declare"},
+        )
+        + "\n",
         encoding="utf-8",
     )
     out = _run_session_hook_with_home(transcript, tmp_path)
