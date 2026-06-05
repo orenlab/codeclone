@@ -51,6 +51,8 @@ def test_execute_semantic_rebuild_requires_memory_db_when_enabled(
     config = resolve_memory_config(tmp_path)
 
     class _Writer:
+        closed = False
+
         def known_ids(self) -> set[str]:
             return set()
 
@@ -60,12 +62,17 @@ def test_execute_semantic_rebuild_requires_memory_db_when_enabled(
         def upsert(self, rows: object) -> None:
             return None
 
+        def close(self) -> None:
+            self.closed = True
+
     import codeclone.memory.semantic as semantic_pkg
 
+    writer = _Writer()
     monkeypatch.setattr(
         semantic_pkg,
         "resolve_semantic_index_writer",
-        lambda _config: _Writer(),
+        lambda _config: writer,
     )
     with pytest.raises(MemoryContractError, match="database not found"):
         execute_semantic_index_rebuild(root_path=tmp_path, config=config)
+    assert writer.closed is True

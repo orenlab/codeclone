@@ -92,6 +92,22 @@ class UnavailableSemanticIndex:
         return SemanticIndexStatus(available=False, reason=self._reason)
 
 
+def close_semantic_index(index: object | None) -> None:
+    """Close a semantic backend if it exposes a close hook.
+
+    The read/write Protocols deliberately do not require ``close()`` because
+    degraded indexes are stateless and some optional backends do not expose a
+    public close API. Call boundaries can still release resources by using this
+    best-effort helper.
+    """
+
+    if index is None:
+        return
+    close = getattr(index, "close", None)
+    if callable(close):
+        close()
+
+
 def resolve_semantic_index(config: SemanticConfig) -> SemanticIndex:
     """Resolve the semantic index for the given config.
 
@@ -155,6 +171,7 @@ __all__ = [
     "SemanticSource",
     "UnavailableSemanticIndex",
     "build_semantic_index_sources",
+    "close_semantic_index",
     "execute_semantic_index_rebuild",
     "is_indexed_audit_event",
     "is_indexed_memory_type",

@@ -115,6 +115,14 @@ def _as_float(value: object) -> float:
     return float(str(value))
 
 
+def _close_if_available(target: object | None) -> None:
+    if target is None:
+        return
+    close = getattr(target, "close", None)
+    if callable(close):
+        close()
+
+
 class LanceDbSemanticIndex:
     """LanceDB-backed semantic index (read + write); implements
     SemanticIndexWriter. The table is keyed by ``id`` (merge-insert upsert) and
@@ -225,6 +233,12 @@ class LanceDbSemanticIndex:
         arrow_table = self._table.to_arrow()
         column = arrow_table.column("id").to_pylist()
         return {str(value) for value in column}
+
+    def close(self) -> None:
+        table = self._table
+        self._table = None
+        _close_if_available(table)
+        _close_if_available(self._db)
 
 
 __all__ = ["LanceDbSemanticIndex"]

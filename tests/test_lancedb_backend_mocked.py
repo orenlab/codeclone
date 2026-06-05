@@ -57,6 +57,7 @@ class _FakeTable:
         self._rows = list(rows or [])
         self._search_vector: list[float] | None = None
         self._search_limit: int | None = None
+        self.closed = False
 
     def search(self, vector: list[float]) -> _FakeTable:
         self._search_vector = list(vector)
@@ -89,6 +90,9 @@ class _FakeTable:
     def to_arrow(self) -> _FakeArrowTable:
         return _FakeArrowTable([row["id"] for row in self._rows])
 
+    def close(self) -> None:
+        self.closed = True
+
 
 class _FakeArrowTable:
     def __init__(self, ids: list[object]) -> None:
@@ -112,6 +116,7 @@ class _FakeDb:
     def __init__(self) -> None:
         self._table: _FakeTable | None = None
         self.dropped = False
+        self.closed = False
 
     def open_table(self, name: str) -> _FakeTable:
         if name != "semantic_index":
@@ -131,6 +136,9 @@ class _FakeDb:
         del name
         self.dropped = True
         self._table = None
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _install_fake_lancedb(
@@ -225,6 +233,21 @@ def test_lancedb_backend_mocked_not_built_and_schema_mismatch(
     assert fake_db.dropped is True
     writer.upsert([_row("fresh", [0.0] * 8)])
     assert writer.known_ids() == {"fresh"}
+
+
+def test_lancedb_backend_mocked_close_releases_available_handles(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_db = _install_fake_lancedb(monkeypatch)
+    index = LanceDbSemanticIndex(path=tmp_path / "idx.lance", dimension=4)
+    table = fake_db._table
+    assert table is not None
+
+    index.close()
+
+    assert table.closed is True
+    assert fake_db.closed is True
+    assert index.search([0.0, 0.0, 0.0, 0.0], k=1) == []
 
 
 class _OpenTableFailsDb(_FakeDb):

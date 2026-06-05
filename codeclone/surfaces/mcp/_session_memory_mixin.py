@@ -30,7 +30,11 @@ from ...memory.models import MemoryProject
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import get_relevant_memory, query_engineering_memory
-from ...memory.semantic import execute_semantic_index_rebuild, resolve_semantic_index
+from ...memory.semantic import (
+    close_semantic_index,
+    execute_semantic_index_rebuild,
+    resolve_semantic_index,
+)
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from . import _session_helpers as _helpers
 from ._intent import IntentRecord
@@ -159,6 +163,7 @@ class _MCPSessionMemoryMixin:
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
+            close_semantic_index(index)
             store.close()
 
     def manage_engineering_memory(

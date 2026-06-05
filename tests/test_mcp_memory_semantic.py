@@ -5,8 +5,13 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
+
+import codeclone.surfaces.mcp._session_memory_mixin as memory_mixin
+from codeclone.memory.semantic.models import SemanticHit, SemanticIndexStatus
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from tests.memory_fixtures import cli_memory_repo
 
@@ -73,3 +78,46 @@ def test_mcp_query_semantic_provider_unavailable_degrades(
     assert isinstance(payload, dict)
     assert "records" in payload
     assert "audit_events" in payload
+
+
+def test_mcp_query_semantic_closes_read_index(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _ClosableIndex:
+        closed = False
+
+        def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+            del vector, k
+            return []
+
+        def status(self) -> SemanticIndexStatus:
+            return SemanticIndexStatus(
+                available=True,
+                backend="fake",
+                embedding_model="diagnostic-hash-v1",
+                dimension=64,
+                indexed_count=0,
+            )
+
+        def close(self) -> None:
+            self.closed = True
+
+    index = _ClosableIndex()
+    monkeypatch.setattr(
+        memory_mixin,
+        "resolve_semantic_index",
+        lambda _config: index,
+    )
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        (root / "pyproject.toml").write_text(
+            "[tool.codeclone.memory.semantic]\nenabled = true\ndimension = 64\n",
+            encoding="utf-8",
+        )
+        service = CodeCloneMCPService(history_limit=2)
+        result = service.query_engineering_memory(
+            root=str(root), mode="search", query="module", semantic=True
+        )
+
+    assert result["status"] == "ok"
+    assert index.closed is True

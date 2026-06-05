@@ -126,7 +126,7 @@ def execute_semantic_index_rebuild(
             "reason": str(exc),
             "embedding_model": None,
         }
-    from . import resolve_semantic_index_writer
+    from . import close_semantic_index, resolve_semantic_index_writer
 
     writer = resolve_semantic_index_writer(config.semantic)
     if writer is None:
@@ -137,19 +137,19 @@ def execute_semantic_index_rebuild(
             "reason": "lancedb_not_installed",
             "embedding_model": None,
         }
-    resolved_project = project or resolve_project_identity(root_path)
     owns_store = store is None
     active_store = store
-    if active_store is None:
-        db_path = resolve_memory_db_path(root_path, config)
-        if not db_path.exists():
-            raise MemoryContractError(
-                f"Engineering memory database not found: {db_path}. "
-                "Run memory init or "
-                "manage_engineering_memory(action='refresh_from_run')."
-            )
-        active_store = SqliteEngineeringMemoryStore(db_path)
     try:
+        resolved_project = project or resolve_project_identity(root_path)
+        if active_store is None:
+            db_path = resolve_memory_db_path(root_path, config)
+            if not db_path.exists():
+                raise MemoryContractError(
+                    f"Engineering memory database not found: {db_path}. "
+                    "Run memory init or "
+                    "manage_engineering_memory(action='refresh_from_run')."
+                )
+            active_store = SqliteEngineeringMemoryStore(db_path)
         report = rebuild_semantic_index(
             writer=writer,
             provider=provider,
@@ -161,6 +161,7 @@ def execute_semantic_index_rebuild(
             ),
         )
     finally:
+        close_semantic_index(writer)
         if owns_store and active_store is not None:
             active_store.close()
     return {
