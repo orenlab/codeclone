@@ -216,7 +216,9 @@ def run_memory_extractor_smoke(
         extract_contradictions,
         extract_document_links,
         extract_git_hotspots,
+        extract_module_roles,
         extract_public_surfaces,
+        extract_risk_notes,
         extract_test_anchors,
         merge_batches,
     )
@@ -248,12 +250,16 @@ def run_memory_extractor_smoke(
         extract_git_hotspots,
         extract_test_anchors,
         extract_document_links,
+        extract_module_roles,
+        extract_risk_notes,
     }:
         kwargs["root_path"] = root
         if extractor is extract_document_links:
             kwargs["registry_paths"] = frozenset(
                 registry_items_from_report(report_document)
             )
+        if extractor in {extract_module_roles, extract_risk_notes}:
+            kwargs["report_document"] = report_document
     else:
         kwargs["report_document"] = report_document
 

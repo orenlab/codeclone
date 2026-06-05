@@ -31,7 +31,7 @@ from ..models import (
     RecordBatch,
     generate_memory_id,
 )
-from ..project import GitProvenance
+from ..project import GitProvenance, code_fingerprint_for_memory_subject
 
 _CODE_PATH_RE = re.compile(r"`([a-zA-Z0-9_./-]+\.(?:py|md|json|toml|yml))`")
 _MCP_TOOL_SCHEMAS = "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
@@ -91,6 +91,7 @@ def _append_path_risk_note(
     batch: RecordBatch,
     *,
     project: MemoryProject,
+    root_path: Path,
     path: str,
     now: str,
     git: GitProvenance,
@@ -130,7 +131,11 @@ def _append_path_risk_note(
             approved_by=None,
             approved_at_utc=None,
             report_digest=report_digest,
-            code_fingerprint=analysis_fingerprint,
+            code_fingerprint=code_fingerprint_for_memory_subject(
+                root_path,
+                subject_path=path,
+                analysis_fingerprint=analysis_fingerprint,
+            ),
             stale_reason=None,
             created_on_branch=git.branch,
             created_at_commit=git.head,
@@ -152,6 +157,7 @@ def _append_path_risk_note(
 def extract_module_roles(
     *,
     project: MemoryProject,
+    root_path: Path,
     report_document: Mapping[str, object],
     git: GitProvenance,
     report_digest: str | None,
@@ -201,7 +207,11 @@ def extract_module_roles(
                 approved_by=None,
                 approved_at_utc=None,
                 report_digest=report_digest,
-                code_fingerprint=analysis_fingerprint,
+                code_fingerprint=code_fingerprint_for_memory_subject(
+                    root_path,
+                    module_key=module_path,
+                    analysis_fingerprint=analysis_fingerprint,
+                ),
                 stale_reason=None,
                 created_on_branch=git.branch,
                 created_at_commit=git.head,
@@ -436,6 +446,7 @@ def extract_public_surfaces(
 def extract_risk_notes(
     *,
     project: MemoryProject,
+    root_path: Path,
     report_document: Mapping[str, object],
     git: GitProvenance,
     report_digest: str | None,
@@ -450,6 +461,7 @@ def extract_risk_notes(
         _append_path_risk_note(
             batch,
             project=project,
+            root_path=root_path,
             path=path,
             now=now,
             git=git,
@@ -478,6 +490,7 @@ def extract_risk_notes(
         _append_path_risk_note(
             batch,
             project=project,
+            root_path=root_path,
             path=path,
             now=now,
             git=git,
@@ -558,7 +571,11 @@ def extract_test_anchors(
                     approved_by=None,
                     approved_at_utc=None,
                     report_digest=report_digest,
-                    code_fingerprint=analysis_fingerprint,
+                    code_fingerprint=code_fingerprint_for_memory_subject(
+                        root_path,
+                        subject_path=rel,
+                        analysis_fingerprint=analysis_fingerprint,
+                    ),
                     stale_reason=None,
                     created_on_branch=git.branch,
                     created_at_commit=git.head,
@@ -679,7 +696,11 @@ def extract_document_links(
                         approved_by=None,
                         approved_at_utc=None,
                         report_digest=report_digest,
-                        code_fingerprint=analysis_fingerprint,
+                        code_fingerprint=code_fingerprint_for_memory_subject(
+                            root_path,
+                            subject_path=rel,
+                            analysis_fingerprint=analysis_fingerprint,
+                        ),
                         stale_reason=None,
                         created_on_branch=git.branch,
                         created_at_commit=git.head,
@@ -784,7 +805,11 @@ def extract_git_hotspots(
                 approved_by=None,
                 approved_at_utc=None,
                 report_digest=report_digest,
-                code_fingerprint=analysis_fingerprint,
+                code_fingerprint=code_fingerprint_for_memory_subject(
+                    root_path,
+                    subject_path=path,
+                    analysis_fingerprint=analysis_fingerprint,
+                ),
                 stale_reason=None,
                 created_on_branch=git.branch,
                 created_at_commit=git.head,

@@ -148,8 +148,6 @@ def test_memory_vacuum_respects_negative_retention_and_deleted_status_counts() -
         ) -> int:
             del updated_before_utc
             self.calls.append((status, commit))
-            if status == "stale":
-                return 2
             if status == "rejected":
                 return 1
             return 0
@@ -166,8 +164,8 @@ def test_memory_vacuum_respects_negative_retention_and_deleted_status_counts() -
     report = run_memory_vacuum(store, config, commit=True)  # type: ignore[arg-type]
     assert store.committed is True
     assert ("draft", False) not in store.calls
-    assert report.deleted_by_status == {"rejected": 1, "stale": 2}
-    assert report.total_deleted == 3
+    assert report.deleted_by_status == {"rejected": 1}
+    assert report.total_deleted == 1
 
 
 def test_ide_governance_key_or_reject_and_commit_dict_branch(

@@ -26,6 +26,7 @@ MemoryRecordType = Literal[
 MemoryStatus = Literal[
     "draft",
     "active",
+    "historical",
     "stale",
     "superseded",
     "rejected",

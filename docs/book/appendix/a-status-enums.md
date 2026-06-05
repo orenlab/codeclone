@@ -17,6 +17,7 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Workspace intent status: `codeclone/surfaces/mcp/_workspace_intents.py:WorkspaceIntentStatus`
 - Patch contract: `codeclone/surfaces/mcp/_patch_contract.py:PatchContractStatus`
 - Verification profile: `codeclone/surfaces/mcp/_verification_profile.py:VerificationProfile`
+- Engineering Memory status: `codeclone/memory/enums.py:MemoryStatus`
 
 ## Data model
 
@@ -117,6 +118,19 @@ persisted to the workspace registry.
 Priority-ordered. A single file from a higher-priority category overrides
 the entire patch. Semantics are defined in
 [Structural Change Controller § Verification Profiles](../12-structural-change-controller.md#verification-profiles).
+
+### MemoryStatus
+
+Defined by `codeclone/memory/enums.py:MemoryStatus`. Semantics are defined in
+[Engineering Memory § Staleness and anchor durability](../13-engineering-memory.md#staleness-and-anchor-durability).
+
+- `draft` — unapproved agent candidate
+- `active` — trusted or system fact; default retrieval includes
+- `historical` — anchor subject absent at `HEAD`; preserved, default retrieval includes
+- `stale` — drift or ingest contradiction; excluded from default retrieval
+- `superseded` — replaced by a newer record
+- `rejected` — human rejected draft
+- `archived` — explicitly archived
 
 ## Contracts
 

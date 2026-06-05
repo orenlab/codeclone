@@ -94,6 +94,7 @@ def build_init_batch(
     batches = [
         extract_module_roles(
             project=project,
+            root_path=root_path,
             report_document=report_document,
             git=git,
             report_digest=report_digest,
@@ -116,6 +117,7 @@ def build_init_batch(
         ),
         extract_risk_notes(
             project=project,
+            root_path=root_path,
             report_document=report_document,
             git=git,
             report_digest=report_digest,
@@ -242,6 +244,7 @@ def run_memory_init(
                         project_id=project.id,
                         batch=batch,
                         report_document=report_document,
+                        root_path=root_path,
                         report_digest=report_digest,
                         commit=False,
                     )

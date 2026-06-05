@@ -24,7 +24,7 @@ def test_refresh_marks_missing_system_records_stale(tmp_path: Path) -> None:
             "file_registry": {"items": ["pkg/kept.py"]},
         }
     }
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
+    with memory_store(tmp_path) as (root, project, store, _db_path):
         kept = make_module_record(project.id, "pkg.kept")
         removed = make_module_record(project.id, "pkg.removed")
         store.upsert_record(removed)
@@ -43,6 +43,7 @@ def test_refresh_marks_missing_system_records_stale(tmp_path: Path) -> None:
             project_id=project.id,
             batch=batch,
             report_document=report,
+            root_path=root,
         )
         assert report_result.records_marked_stale >= 1
         loaded = store.find_by_identity_key(project.id, removed.identity_key)
@@ -55,7 +56,7 @@ def test_refresh_preserves_approved_statement_on_contradiction(
     tmp_path: Path,
 ) -> None:
     report = {"inventory": {"file_registry": {"items": ["pkg/mod.py"]}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
+    with memory_store(tmp_path) as (root, project, store, _db_path):
         existing = make_module_record(project.id, "pkg.mod")
         approved = replace(
             existing, approved_by="human", approved_at_utc=existing.created_at_utc
@@ -68,6 +69,7 @@ def test_refresh_preserves_approved_statement_on_contradiction(
             project_id=project.id,
             batch=batch,
             report_document=report,
+            root_path=root,
         )
         loaded = store.find_by_identity_key(project.id, existing.identity_key)
         assert loaded is not None
@@ -78,7 +80,7 @@ def test_refresh_preserves_approved_statement_on_contradiction(
 
 def test_refresh_does_not_stale_batch_records_on_digest_shift(tmp_path: Path) -> None:
     report = {"inventory": {"file_registry": {"items": ["pkg/mod.py"]}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
+    with memory_store(tmp_path) as (root, project, store, _db_path):
         existing = make_module_record(project.id, "pkg.mod", report_digest="digest-a")
         store.upsert_record(existing)
         incoming = replace(existing, report_digest="digest-b")
@@ -88,6 +90,7 @@ def test_refresh_does_not_stale_batch_records_on_digest_shift(tmp_path: Path) ->
             project_id=project.id,
             batch=batch,
             report_document=report,
+            root_path=root,
             report_digest="digest-b",
         )
         assert report_result.records_marked_stale == 0
@@ -100,7 +103,7 @@ def test_refresh_marks_evidence_digest_mismatch_and_digest_shift(
     tmp_path: Path,
 ) -> None:
     report = {"inventory": {"file_registry": {"items": ["pkg/mod.py"]}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
+    with memory_store(tmp_path) as (root, project, store, _db_path):
         existing = make_module_record(project.id, "pkg.mod", report_digest="digest-a")
         store.upsert_record(existing)
         for evidence in RecordBatch(records=[existing]).evidence:
@@ -111,6 +114,7 @@ def test_refresh_marks_evidence_digest_mismatch_and_digest_shift(
             project_id=project.id,
             batch=RecordBatch(records=[]),
             report_document=report,
+            root_path=root,
             report_digest="digest-b",
         )
         assert report_result.records_marked_stale >= 1
@@ -140,55 +144,3 @@ def test_inventory_paths_from_report_normalizes_and_skips_blanks() -> None:
         }
     )
     assert paths == frozenset({"pkg/a.py", "pkg/b.py"})
-
-
-def test_refresh_marks_linked_path_missing(tmp_path: Path) -> None:
-    report = {"inventory": {"file_registry": {"items": ["pkg/kept.py"]}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
-        record = make_module_record(project.id, "pkg.orphan")
-        store.upsert_record(record)
-        store.write_subject(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record.id,
-                subject_kind="path",
-                subject_key="pkg/missing.py",
-                relation="about",
-            )
-        )
-        report_result = apply_refresh_staleness(
-            store,
-            project_id=project.id,
-            batch=RecordBatch(records=[record]),
-            report_document=report,
-        )
-        loaded = store.find_record(record.id)
-        assert report_result.records_marked_stale == 1
-        assert loaded is not None
-        assert loaded.stale_reason == "linked_path_missing"
-
-
-def test_refresh_marks_linked_test_missing(tmp_path: Path) -> None:
-    report: dict[str, object] = {"inventory": {"file_registry": {"items": []}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
-        record = make_module_record(project.id, "tests.anchor")
-        store.upsert_record(record)
-        store.write_subject(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record.id,
-                subject_kind="test",
-                subject_key="tests/test_missing.py",
-                relation="about",
-            )
-        )
-        report_result = apply_refresh_staleness(
-            store,
-            project_id=project.id,
-            batch=RecordBatch(records=[record]),
-            report_document=report,
-        )
-        loaded = store.find_record(record.id)
-        assert report_result.records_marked_stale == 1
-        assert loaded is not None
-        assert loaded.stale_reason == "linked_test_missing"

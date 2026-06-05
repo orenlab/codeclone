@@ -15,7 +15,14 @@ from ..baseline.trust import current_python_tag
 from ..config.memory import MemoryConfig, resolve_memory_config
 from ..report.meta import current_report_timestamp_utc
 from ..utils.coerce import as_mapping
-from .models import MemoryEvidence, MemoryProject, generate_memory_id
+from ..utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
+from .models import MemoryEvidence, MemoryProject, MemorySubject, generate_memory_id
+from .paths import normalize_repo_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +116,62 @@ def report_digest_from_report(report_document: dict[str, object]) -> str | None:
     return value or None
 
 
+def module_repo_path(module_key: str) -> str:
+    return module_key.replace(".", "/") + ".py"
+
+
+def subject_path_fingerprint(root_path: Path, rel_path: str) -> str | None:
+    """SHA-1 of on-disk bytes for a repo-relative subject path at HEAD."""
+
+    try:
+        normalized = normalize_repo_path(rel_path)
+    except ValueError:
+        return None
+    try:
+        file_path = resolve_under_repo_root(
+            root_path,
+            normalized,
+            policy=RepoPathPolicy(must_exist=True, must_be_file=True),
+        )
+    except (PathOutsideRepoError, RepoPathError):
+        return None
+    return hashlib.sha1(file_path.read_bytes()).hexdigest()
+
+
+def subject_fingerprint_for_subject(
+    root_path: Path,
+    subject: MemorySubject,
+) -> str | None:
+    if subject.subject_kind in ("path", "test", "doc"):
+        return subject_path_fingerprint(root_path, subject.subject_key)
+    if subject.subject_kind == "module":
+        return subject_path_fingerprint(
+            root_path, module_repo_path(subject.subject_key)
+        )
+    return None
+
+
+def code_fingerprint_for_memory_subject(
+    root_path: Path,
+    *,
+    subject_path: str | None = None,
+    module_key: str | None = None,
+    analysis_fingerprint: str | None = None,
+) -> str | None:
+    if subject_path is not None:
+        file_fingerprint = subject_path_fingerprint(root_path, subject_path)
+        if file_fingerprint is not None:
+            return file_fingerprint
+    if module_key is not None:
+        file_fingerprint = subject_path_fingerprint(
+            root_path,
+            module_repo_path(module_key),
+        )
+        if file_fingerprint is not None:
+            return file_fingerprint
+    return analysis_fingerprint
+
+
 def _git_output_optional(root_path: Path, args: list[str]) -> str | None:
     try:
         completed = subprocess.run(
@@ -128,10 +191,14 @@ def _git_output_optional(root_path: Path, args: list[str]) -> str | None:
 __all__ = [
     "GitProvenance",
     "analysis_fingerprint_from_report",
+    "code_fingerprint_for_memory_subject",
     "compute_project_id",
     "git_head_evidence",
+    "module_repo_path",
     "read_git_provenance",
     "report_digest_from_report",
     "resolve_memory_db_path",
     "resolve_project_identity",
+    "subject_fingerprint_for_subject",
+    "subject_path_fingerprint",
 ]

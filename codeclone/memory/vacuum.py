@@ -25,7 +25,6 @@ def _retention_days_for_status(
     config: MemoryConfig,
 ) -> int | None:
     mapping: dict[MemoryStatus, int] = {
-        "stale": config.stale_retention_days,
         "draft": config.draft_retention_days,
         "rejected": config.rejected_retention_days,
         "archived": config.archived_retention_days,
@@ -45,7 +44,7 @@ def run_memory_vacuum(
     now = datetime.now(tz=timezone.utc)
     deleted_by_status: dict[str, int] = {}
     total = 0
-    for status in ("stale", "draft", "rejected", "archived"):
+    for status in ("draft", "rejected", "archived"):
         days = _retention_days_for_status(status, config)
         if days is None:
             continue

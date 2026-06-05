@@ -3,6 +3,7 @@
        semantic search, approval model.
      does-not-own: change controller (→ 12), claim guard (→ 14),
        VS Code Memory UI (→ ../vscode-extension.md). -->
+
 # 13. Engineering Memory
 
 ## Purpose
@@ -26,15 +27,15 @@ controlled edits.
 
 ## Status
 
-| Phase | Capability                                                    | Surface                                                                            |
-|-------|---------------------------------------------------------------|------------------------------------------------------------------------------------|
-| 18.1  | Store, init ingest, CLI `init\|status\|for-path\|search`      | CLI                                                                                |
-| 18.2  | Scoped retrieval, ranking                                     | MCP `get_relevant_memory`, `query_engineering_memory`                              |
-| 18.3  | Refresh staleness, scope staleness, retention                 | CLI `stale`, `vacuum`; finish hook marks scope stale                               |
-| 18.4  | Draft governance, claim validation                            | MCP `manage_engineering_memory`; CLI `review-candidates\|approve\|reject\|archive` |
-| 18.5  | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                    |
-| 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                            |
-| 18.7  | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`     |
+| Phase | Capability                                                    | Surface                                                                                  |
+|-------|---------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| 18.1  | Store, init ingest, CLI `init\|status\|for-path\|search`      | CLI                                                                                      |
+| 18.2  | Scoped retrieval, ranking                                     | MCP `get_relevant_memory`, `query_engineering_memory`                                    |
+| 18.3  | Refresh staleness, scope staleness, retention                 | CLI `stale`, `vacuum`; finish hook marks scope stale                                     |
+| 18.4  | Draft governance, claim validation                            | MCP `manage_engineering_memory`; CLI `review-candidates\|approve\|reject\|archive`       |
+| 18.5  | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                          |
+| 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                                  |
+| 18.7  | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`           |
 | 20    | Optional semantic retrieval (LanceDB sidecar)                 | `[tool.codeclone.memory.semantic]`; CLI `memory semantic *`; MCP/CLI search `--semantic` |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
@@ -313,15 +314,15 @@ index_audit = true                       # project audit summaries when audit DB
 
 Environment overrides:
 
-| Variable | Effect |
-|----------|--------|
-| `CODECLONE_MEMORY_DB_PATH` | SQLite store path |
-| `CODECLONE_MEMORY_SEMANTIC_ENABLED` | `true` / `false` for `semantic.enabled` |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER` | Provider literal |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL` | Provider model name |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR` | Local embedding cache directory |
+| Variable                                         | Effect                                     |
+|--------------------------------------------------|--------------------------------------------|
+| `CODECLONE_MEMORY_DB_PATH`                       | SQLite store path                          |
+| `CODECLONE_MEMORY_SEMANTIC_ENABLED`              | `true` / `false` for `semantic.enabled`    |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER`   | Provider literal                           |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL`      | Provider model name                        |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`  | Local embedding cache directory            |
 | `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`; opt in to model download |
-| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH` | LanceDB directory path |
+| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | LanceDB directory path                     |
 
 Unknown keys under `[tool.codeclone.memory.semantic]` are contract errors
 (Pydantic `extra="forbid"` on `SemanticConfig`).
@@ -337,22 +338,22 @@ Refs:
 
 All commands live under `codeclone memory` and accept `--root` (default `.`).
 
-| Command                                                       | Purpose                                      |
-|---------------------------------------------------------------|----------------------------------------------|
-| `init [--refresh] [--dry-run]`                                | Create or refresh the memory store           |
-| `status`                                                      | Schema version, counts, last ingest metadata |
-| `for-path PATH [--limit N]`                                   | Records linked to a repo-relative path       |
-| `search QUERY [--match any\|all] [--semantic] [--active-only] [--limit N]` | FTS search; optional semantic blend |
-| `semantic status`                                               | Index availability, provider, row counts     |
-| `semantic rebuild`                                            | Rebuild LanceDB sidecar from memory + audit  |
-| `semantic search QUERY [--limit N]`                           | Search with semantic ranking (index required) |
-| `stale [--limit N]`                                           | List stale records and reasons               |
-| `vacuum [--dry-run]`                                          | Retention purge per config                   |
-| `coverage --scope PATH [PATH...]`                             | Scope coverage metrics                       |
-| `review-candidates [--limit N]`                               | List draft records awaiting human review     |
-| `approve RECORD_ID [--verified-by NAME]`                      | Promote draft → active                       |
-| `reject RECORD_ID [--reason TEXT]`                            | Reject draft                                 |
-| `archive RECORD_ID [--reason TEXT]`                           | Archive record                               |
+| Command                                                                    | Purpose                                       |
+|----------------------------------------------------------------------------|-----------------------------------------------|
+| `init [--refresh] [--dry-run]`                                             | Create or refresh the memory store            |
+| `status`                                                                   | Schema version, counts, last ingest metadata  |
+| `for-path PATH [--limit N]`                                                | Records linked to a repo-relative path        |
+| `search QUERY [--match any\|all] [--semantic] [--active-only] [--limit N]` | FTS search; optional semantic blend           |
+| `semantic status`                                                          | Index availability, provider, row counts      |
+| `semantic rebuild`                                                         | Rebuild LanceDB sidecar from memory + audit   |
+| `semantic search QUERY [--limit N]`                                        | Search with semantic ranking (index required) |
+| `stale [--limit N]`                                                        | List stale records and reasons                |
+| `vacuum [--dry-run]`                                                       | Retention purge per config                    |
+| `coverage --scope PATH [PATH...]`                                          | Scope coverage metrics                        |
+| `review-candidates [--limit N]`                                            | List draft records awaiting human review      |
+| `approve RECORD_ID [--verified-by NAME]`                                   | Promote draft → active                        |
+| `reject RECORD_ID [--reason TEXT]`                                         | Reject draft                                  |
+| `archive RECORD_ID [--reason TEXT]`                                        | Archive record                                |
 
 Human governance (`approve`, `reject`, `archive`) is available through the
 **CodeClone VS Code Memory** view (IDE governance channel) and the `codeclone memory`
@@ -381,7 +382,7 @@ Ranked, scope-aware context for the **declared edit scope**.
 | `symbols`                         | Optional qualname keys for boost                                                                                |
 | `max_records`                     | Cap (default 20)                                                                                                |
 | `include_stale`, `include_drafts` | `include_stale` defaults false; drafts are automatic for scoped retrieval / path / symbol and opt-in for search |
-| `detail_level`                    | `compact` (default) or `full` — compact returns statement previews without payload                            |
+| `detail_level`                    | `compact` (default) or `full` — compact returns statement previews without payload                              |
 
 Unscoped `get_relevant_memory` is **rejected**. Pass `scope`, `intent_id`, or
 `symbols`. For project-wide orientation use
@@ -401,15 +402,15 @@ When auto-sync runs, the response includes a `memory_sync` object (`status`,
 
 Mode router for inspection and search.
 
-| `mode`       | Required inputs | Purpose                             |
-|--------------|-----------------|-------------------------------------|
-| `search`     | `query`; optional `semantic=true` | FTS keyword search; optional vector blend |
-| `get`        | `record_id`     | Single record + subjects + evidence |
-| `for_path`   | `path`          | Path-linked records                 |
-| `for_symbol` | `symbol`        | Symbol-linked records               |
-| `stale`      | —               | Stale inventory                     |
-| `coverage`   | `scope` (non-empty, not project root) | Coverage metrics for paths          |
-| `status`     | —               | Store status (like CLI `status`)    |
+| `mode`       | Required inputs                       | Purpose                                   |
+|--------------|---------------------------------------|-------------------------------------------|
+| `search`     | `query`; optional `semantic=true`     | FTS keyword search; optional vector blend |
+| `get`        | `record_id`                           | Single record + subjects + evidence       |
+| `for_path`   | `path`                                | Path-linked records                       |
+| `for_symbol` | `symbol`                              | Symbol-linked records                     |
+| `stale`      | —                                     | Stale inventory                           |
+| `coverage`   | `scope` (non-empty, not project root) | Coverage metrics for paths                |
+| `status`     | —                                     | Store status (like CLI `status`)          |
 
 List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
 to **compact** payloads: statement preview, `statement_length`, no `payload`.
@@ -430,13 +431,13 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 
 #### `manage_engineering_memory`
 
-| `action`               | Required params                                     | Effect                                                     |
-|------------------------|-----------------------------------------------------|------------------------------------------------------------|
-| `refresh_from_run`     | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
-| `rebuild_semantic_index` | (none)                                          | Rebuild LanceDB sidecar when `memory.semantic.enabled`   |
-| `record_candidate`     | `record_type`, `statement`; optional `subject_path` | Creates **draft** record                                   |
-| `validate_claims`      | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
-| `propose_from_receipt` | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
+| `action`                 | Required params                                     | Effect                                                     |
+|--------------------------|-----------------------------------------------------|------------------------------------------------------------|
+| `refresh_from_run`       | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
+| `rebuild_semantic_index` | (none)                                              | Rebuild LanceDB sidecar when `memory.semantic.enabled`     |
+| `record_candidate`       | `record_type`, `statement`; optional `subject_path` | Creates **draft** record                                   |
+| `validate_claims`        | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
+| `propose_from_receipt`   | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
 
 IDE channel only (VS Code launches MCP with `--ide-governance-channel`):
 
@@ -523,30 +524,62 @@ style G fill: #fef9c3
 
 ---
 
-## Staleness
+## Staleness and anchor durability
+
+Records with a git anchor (`created_at_commit` + `code_fingerprint`) are judged
+by **drift from that anchor**, not by whether the subject appears in the current
+analysis inventory. Non-Python subjects (`.md`, `.toml`, `.js`, …) therefore
+stay `active` across refresh when their on-disk bytes are unchanged.
+
+| Anchor vs `HEAD`           | Status transition                                           |
+|----------------------------|-------------------------------------------------------------|
+| Fingerprint matches anchor | `active` (or reactivated from `historical` / drift `stale`) |
+| Fingerprint differs        | `stale` (`subject_fingerprint_drift`)                       |
+| Subject file absent        | `historical` (preserved, queryable)                         |
+
+A record is **anchored** only when both `created_at_commit` and `code_fingerprint`
+are present at write time. `record_candidate` sets git fields only when the
+subject fingerprint resolves (commit without fingerprint is treated as
+unanchored). Unanchored records skip anchor drift; system-ingest signals below
+still apply.
+
+Only `draft` records skip refresh drift evaluation. `human`-origin and
+human-approved records follow the same anchor table — approval does not exempt
+a record from honest content drift.
 
 ```mermaid
 flowchart TD
-    subgraph Refresh["init --refresh"]
+    subgraph Anchor["anchor drift (refresh)"]
+        A1[fingerprint match]
+        A2[subject_fingerprint_drift]
+        A3[subject deleted]
+    end
+
+    subgraph Refresh["init --refresh (system ingest)"]
         R1[missing_from_refresh]
         R2[evidence_digest_mismatch]
-        R3[linked_path_missing]
-        R4[refresh_content_contradiction]
-        R5[report_digest_shift]
+        R3[refresh_content_contradiction]
+        R4[report_digest_shift]
     end
 
     subgraph Scope["accepted finish"]
         S1[scope_files_changed]
     end
 
-    Refresh --> ST[(status = stale)]
+    A1 --> ACT[(status = active)]
+    A2 --> ST[(status = stale)]
+    A3 --> HIST[(status = historical)]
+    Refresh --> ST
     Scope --> ST
     ST --> RE[Excluded from default retrieval]
-    RE --> RA[Reactivate on refresh if content matches]
+    HIST --> RET[Included in default retrieval]
+    RE --> RA[Reactivate when anchor fingerprint matches]
+    HIST --> RA
 ```
 
-Stale records remain in the database for audit but are **excluded** from
-`get_relevant_memory` and default search unless explicitly included.
+`historical` is a durable resting state — vacuum never auto-deletes it.
+Stale records remain for audit but are **excluded** from `get_relevant_memory`
+and default search unless explicitly included.
 
 ---
 
@@ -629,12 +662,12 @@ semantic-quality recall.
 
 **Degraded states (never crash read paths):**
 
-| Condition | Index behavior | Search `semantic` block |
-|-----------|----------------|-------------------------|
-| `enabled=false` | `NullSemanticIndex` | `used: false`, `reason: disabled` |
-| Enabled, index missing | `UnavailableSemanticIndex` (`not_built`) | FTS only; `used: false` |
-| Enabled, LanceDB extra missing | `UnavailableSemanticIndex` (`lancedb_not_installed`) | FTS only; explicit `semantic rebuild` fails clear |
-| Provider unavailable | `semantic_reason` set (e.g. FastEmbed extra/model unavailable) | FTS only |
+| Condition                      | Index behavior                                                 | Search `semantic` block                           |
+|--------------------------------|----------------------------------------------------------------|---------------------------------------------------|
+| `enabled=false`                | `NullSemanticIndex`                                            | `used: false`, `reason: disabled`                 |
+| Enabled, index missing         | `UnavailableSemanticIndex` (`not_built`)                       | FTS only; `used: false`                           |
+| Enabled, LanceDB extra missing | `UnavailableSemanticIndex` (`lancedb_not_installed`)           | FTS only; explicit `semantic rebuild` fails clear |
+| Provider unavailable           | `semantic_reason` set (e.g. FastEmbed extra/model unavailable) | FTS only                                          |
 
 The index is a **derived, rebuildable sidecar** — not updated on the memory
 write hot path. Rebuild is idempotent on projection `text_hash`
@@ -642,12 +675,12 @@ write hot path. Rebuild is idempotent on projection `text_hash`
 
 #### Embedding providers
 
-| Provider | Status | Meaning |
-|----------|--------|---------|
-| `diagnostic` (default) | Always available | `DeterministicHashEmbeddingProvider`: sha256-derived unit vectors. **Stable across runs, not semantic-quality recall.** CLI prints an advisory when `provider=diagnostic`. |
-| `fastembed` | Optional: `codeclone[semantic-fastembed]` | Local ONNX embeddings through FastEmbed. Default model is `BAAI/bge-small-en-v1.5` (`384` dimensions). Query text uses a `query:` prefix; indexed records use `passage:`. Model download is disabled unless `allow_model_download=true`, so air-gapped installs can pre-populate `embedding_cache_dir`. |
-| `local_model` | Raises `MemorySemanticUnavailableError` | Reserved compatibility literal; use `fastembed` for community local semantic search. |
-| `api` | Raises `MemorySemanticUnavailableError` | Reserved for remote/API providers. |
+| Provider               | Status                                    | Meaning                                                                                                                                                                                                                                                                                                 |
+|------------------------|-------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `diagnostic` (default) | Always available                          | `DeterministicHashEmbeddingProvider`: sha256-derived unit vectors. **Stable across runs, not semantic-quality recall.** CLI prints an advisory when `provider=diagnostic`.                                                                                                                              |
+| `fastembed`            | Optional: `codeclone[semantic-fastembed]` | Local ONNX embeddings through FastEmbed. Default model is `BAAI/bge-small-en-v1.5` (`384` dimensions). Query text uses a `query:` prefix; indexed records use `passage:`. Model download is disabled unless `allow_model_download=true`, so air-gapped installs can pre-populate `embedding_cache_dir`. |
+| `local_model`          | Raises `MemorySemanticUnavailableError`   | Reserved compatibility literal; use `fastembed` for community local semantic search.                                                                                                                                                                                                                    |
+| `api`                  | Raises `MemorySemanticUnavailableError`   | Reserved for remote/API providers.                                                                                                                                                                                                                                                                      |
 
 Model id for diagnostic: `diagnostic-hash-v1`
 (`codeclone/memory/embedding/__init__.py`).
@@ -675,26 +708,26 @@ Empty audit summaries are skipped.
 
 #### Surfaces
 
-| Surface | Semantic flag |
-|---------|---------------|
-| `query_engineering_memory(mode=search, semantic=true)` | MCP |
-| `manage_engineering_memory(action=rebuild_semantic_index)` | MCP (build sidecar) |
-| `codeclone memory search --semantic` | CLI |
-| `codeclone memory semantic search` | CLI (requires built index) |
-| `codeclone memory semantic rebuild` | CLI (build sidecar) |
+| Surface                                                        | Semantic flag                                                |
+|----------------------------------------------------------------|--------------------------------------------------------------|
+| `query_engineering_memory(mode=search, semantic=true)`         | MCP                                                          |
+| `manage_engineering_memory(action=rebuild_semantic_index)`     | MCP (build sidecar)                                          |
+| `codeclone memory search --semantic`                           | CLI                                                          |
+| `codeclone memory semantic search`                             | CLI (requires built index)                                   |
+| `codeclone memory semantic rebuild`                            | CLI (build sidecar)                                          |
 | VS Code `codeclone.memory.searchSemantic` (default **`true`**) | Passes MCP `semantic` on IDE search; server opt-in unchanged |
-| `get_relevant_memory` | **No** semantic parameter (scoped ranking only) |
+| `get_relevant_memory`                                          | **No** semantic parameter (scoped ranking only)              |
 
 Search responses include a top-level **`semantic`** object:
 
-| Field | When set |
-|-------|----------|
-| `used` | `true` only when index + provider + rebuild succeeded |
-| `backend` | e.g. `lancedb` from index status |
-| `provider` | Config label (`diagnostic`, …) |
-| `model` | Provider `model_id` when used |
-| `index_version` | `SEMANTIC_INDEX_FORMAT_VERSION` when used |
-| `reason` | Degrade reason when `used` is false |
+| Field           | When set                                              |
+|-----------------|-------------------------------------------------------|
+| `used`          | `true` only when index + provider + rebuild succeeded |
+| `backend`       | e.g. `lancedb` from index status                      |
+| `provider`      | Config label (`diagnostic`, …)                        |
+| `model`         | Provider `model_id` when used                         |
+| `index_version` | `SEMANTIC_INDEX_FORMAT_VERSION` when used             |
+| `reason`        | Degrade reason when `used` is false                   |
 
 When semantic hits audit rows, `payload.audit_events` lists hydrated incidents
 (event type, bounded summary preview, score) alongside memory records.
@@ -713,13 +746,13 @@ Refs:
 These are documentation anchors for shipped fixes — see `CHANGELOG.md` **Fixed**
 for the full controller list.
 
-| Area | Symptom | Fix (code truth) |
-|------|---------|------------------|
+| Area                           | Symptom                                                   | Fix (code truth)                                                                                                                                           |
+|--------------------------------|-----------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | VS Code session/audit webviews | Payload footprint table showed zeros for workflow metrics | Audit footprint JSON uses `calls` and `tokens` in `top_workflows`; the webview maps both legacy and mistaken field names (`workspaceInsightsRenderer.js`). |
-| CLI session stats | Import / duplication issues | Collection lives in `codeclone/controller_insights/`; CLI renders only (`surfaces/cli/session_stats.py`). |
-| MCP vs CLI insights | Session stats logic must not live only in MCP | IDE-only tools `get_workspace_session_stats` / `get_controller_audit_trail` share the same collectors as `--session-stats` / `--audit`. |
-| Patch verify | Identical before/after run accepted | `after_run_not_new` for `python_structural` and `governance_config` profiles. |
-| Finish hygiene | Over-blocking on foreign out-of-scope dirt | Unattributed out-of-scope dirt is advisory; blocking reasons are `missing_evidence` and `foreign_dirty_overlap`. |
+| CLI session stats              | Import / duplication issues                               | Collection lives in `codeclone/controller_insights/`; CLI renders only (`surfaces/cli/session_stats.py`).                                                  |
+| MCP vs CLI insights            | Session stats logic must not live only in MCP             | IDE-only tools `get_workspace_session_stats` / `get_controller_audit_trail` share the same collectors as `--session-stats` / `--audit`.                    |
+| Patch verify                   | Identical before/after run accepted                       | `after_run_not_new` for `python_structural` and `governance_config` profiles.                                                                              |
+| Finish hygiene                 | Over-blocking on foreign out-of-scope dirt                | Unattributed out-of-scope dirt is advisory; blocking reasons are `missing_evidence` and `foreign_dirty_overlap`.                                           |
 
 ---
 
@@ -751,13 +784,13 @@ graph LR
 Engineering Memory stores **short, evidence-linked cards** — not chat transcripts
 or project-wide dumps.
 
-| Rule | Contract |
-|------|----------|
-| Root scope forbidden | No `scope=["."]`, `path="."`, empty scope for `coverage`, or repo root as subject |
-| Scoped retrieval | `get_relevant_memory` requires `scope`, `intent_id`, or `symbols`; use `status`/`search` for orientation |
-| Compact lists | Default `detail_level=compact`: statement preview + `statement_length`; full text via `mode=get` or `detail_level=full` |
-| Agent writes | `record_candidate` requires `subject_path`; target ≤300 chars, soft warn >500, hard reject >1000 (`max_statement_chars`) |
-| One fact per card | Compress observations before write; store details in receipt/spec/docs |
+| Rule                 | Contract                                                                                                                 |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------|
+| Root scope forbidden | No `scope=["."]`, `path="."`, empty scope for `coverage`, or repo root as subject                                        |
+| Scoped retrieval     | `get_relevant_memory` requires `scope`, `intent_id`, or `symbols`; use `status`/`search` for orientation                 |
+| Compact lists        | Default `detail_level=compact`: statement preview + `statement_length`; full text via `mode=get` or `detail_level=full`  |
+| Agent writes         | `record_candidate` requires `subject_path`; target ≤300 chars, soft warn >500, hard reject >1000 (`max_statement_chars`) |
+| One fact per card    | Compress observations before write; store details in receipt/spec/docs                                                   |
 
 ---
 

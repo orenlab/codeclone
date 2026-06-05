@@ -9,18 +9,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from codeclone.memory.governance import record_candidate
 from codeclone.memory.models import (
-    MemoryEvidence,
     MemoryRecord,
     MemorySubject,
     RecordBatch,
+    generate_memory_id,
 )
-from codeclone.memory.project import resolve_project_identity
 from codeclone.memory.retrieval.ranking import RankingContext, relevance_score
-from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.memory.staleness import apply_refresh_staleness, apply_scope_staleness
 from codeclone.report.meta import current_report_timestamp_utc
+from tests.memory_fixtures import make_module_record, memory_store
 
 
 def _record(
@@ -82,74 +80,40 @@ def test_relevance_score_blast_and_stale_branches() -> None:
     assert score > 0.0
 
 
-def test_apply_refresh_and_scope_staleness_missing_paths_and_digest_shift(
+def test_apply_refresh_and_scope_staleness_digest_shift_and_scope(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    project = resolve_project_identity(root)
-    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
-    try:
-        store.initialize(project)
-        draft = record_candidate(
-            store,
-            project=project,
-            record_type="change_rationale",
-            statement="scope stale",
-            subject_path="pkg/a.py",
-            max_candidates=100,
+    report = {"inventory": {"file_registry": {"items": ["pkg/a.py"]}}}
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        existing = make_module_record(
+            project.id,
+            "pkg.a",
+            report_digest="digest-a",
         )
-        store.update_record_status(draft.id, status="active")
-        rec = store.find_record(draft.id)
-        assert rec is not None
-        store.write_evidence(
-            MemoryEvidence(
-                id="e1",
-                memory_id=rec.id,
-                evidence_kind="report",
-                ref="R1",
-                locator=None,
-                quote=None,
-                digest="digest-a",
-                created_at_utc=current_report_timestamp_utc(),
+        store.upsert_record(existing)
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=existing.id,
+                subject_kind="path",
+                subject_key="pkg/a.py",
+                relation="about",
             )
         )
-        store.commit()
 
-        batch = RecordBatch(
-            records=[],
-            subjects=[],
-            evidence=[
-                MemoryEvidence(
-                    id="e2",
-                    memory_id="missing-in-batch-record-map",
-                    evidence_kind="report",
-                    ref="R1",
-                    locator=None,
-                    quote=None,
-                    digest="digest-b",
-                    created_at_utc=current_report_timestamp_utc(),
-                )
-            ],
-            links=[],
-        )
         refresh = apply_refresh_staleness(
             store,
             project_id=project.id,
-            batch=batch,
-            report_document={"inventory": {"file_registry": {"items": []}}},
-            report_digest="r2",
-            commit=True,
+            batch=RecordBatch(records=[]),
+            report_document=report,
+            root_path=root,
+            report_digest="digest-b",
         )
         assert refresh.records_marked_stale >= 1
 
-        # Skip stale records branch and changed-path scope branch.
         scope = apply_scope_staleness(
             store,
             project_id=project.id,
             changed_paths=["pkg/a.py"],
-            commit=True,
         )
         assert scope.records_marked_stale >= 0
-    finally:
-        store.close()

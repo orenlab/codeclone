@@ -647,19 +647,50 @@ class SqliteEngineeringMemoryStore:
             ),
         )
 
-    def mark_stale(self, record_id: str, reason: str, *, commit: bool = True) -> None:
+    def _update_lifecycle_status(
+        self,
+        record_id: str,
+        *,
+        status: str,
+        stale_reason: str | None,
+        commit: bool,
+    ) -> None:
         now = current_report_timestamp_utc()
         self._conn.execute(
             """
             UPDATE memory_records
-            SET status='stale', stale_reason=?, updated_at_utc=?
+            SET status=?, stale_reason=?, updated_at_utc=?
             WHERE id=?
             """,
-            (reason, now, record_id),
+            (status, stale_reason, now, record_id),
         )
         if commit:
             self._conn.commit()
         self.sync_fts_record(record_id)
+
+    def mark_stale(self, record_id: str, reason: str, *, commit: bool = True) -> None:
+        self._update_lifecycle_status(
+            record_id,
+            status="stale",
+            stale_reason=reason,
+            commit=commit,
+        )
+
+    def mark_historical(self, record_id: str, *, commit: bool = True) -> None:
+        self._update_lifecycle_status(
+            record_id,
+            status="historical",
+            stale_reason=None,
+            commit=commit,
+        )
+
+    def restore_anchor_active(self, record_id: str, *, commit: bool = True) -> None:
+        self._update_lifecycle_status(
+            record_id,
+            status="active",
+            stale_reason=None,
+            commit=commit,
+        )
 
     def list_records_for_project(
         self,

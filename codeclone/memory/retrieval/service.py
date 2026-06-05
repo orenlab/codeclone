@@ -86,7 +86,7 @@ def query_records_for_repo_path(
     rel_path: str,
     limit: int,
     types: tuple[MemoryRecordType, ...] = (),
-    statuses: tuple[MemoryStatus, ...] = ("active", "stale"),
+    statuses: tuple[MemoryStatus, ...] = ("active", "historical", "stale"),
 ) -> tuple[MemoryRecord, ...]:
     normalized = normalize_repo_path(rel_path)
     records = store.query_records(
@@ -137,7 +137,7 @@ def path_has_memory(
             project_id=project_id,
             rel_path=rel_path,
             limit=1,
-            statuses=("active", "stale"),
+            statuses=("active", "historical", "stale"),
         )
     )
 
@@ -147,7 +147,7 @@ def _default_statuses(
     include_stale: bool,
     include_drafts: bool,
 ) -> tuple[MemoryStatus, ...]:
-    statuses: list[MemoryStatus] = ["active"]
+    statuses: list[MemoryStatus] = ["active", "historical"]
     if include_stale:
         statuses.append("stale")
     if include_drafts:
@@ -163,6 +163,8 @@ def _record_visible(
 ) -> bool:
     if record.status == "stale" and not include_stale:
         return False
+    if record.status == "historical":
+        return True
     if record.status == "draft":
         return include_drafts
     if record.confidence == "inferred" and not record.approved_by:

@@ -350,7 +350,7 @@ def test_refresh_marks_evidence_digest_mismatch_when_batch_differs(
     tmp_path: Path,
 ) -> None:
     report = {"inventory": {"file_registry": {"items": ["pkg/mod.py"]}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
+    with memory_store(tmp_path) as (root, project, store, _db_path):
         existing = make_module_record(project.id, "pkg.mod")
         store.upsert_record(existing)
         store.write_evidence(
@@ -387,6 +387,7 @@ def test_refresh_marks_evidence_digest_mismatch_when_batch_differs(
             project_id=project.id,
             batch=batch,
             report_document=report,
+            root_path=root,
         )
         loaded = store.find_record(existing.id)
         assert result.records_marked_stale >= 1
@@ -394,9 +395,11 @@ def test_refresh_marks_evidence_digest_mismatch_when_batch_differs(
         assert loaded.stale_reason == "evidence_digest_mismatch"
 
 
-def test_refresh_skips_human_origin_records(tmp_path: Path) -> None:
+def test_refresh_human_origin_unanchored_stays_active_without_system_signals(
+    tmp_path: Path,
+) -> None:
     report: dict[str, object] = {"inventory": {"file_registry": {"items": []}}}
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
+    with memory_store(tmp_path) as (root, project, store, _db_path):
         human = replace(
             make_module_record(project.id, "pkg.human"),
             origin="human",
@@ -407,6 +410,7 @@ def test_refresh_skips_human_origin_records(tmp_path: Path) -> None:
             project_id=project.id,
             batch=RecordBatch(records=[]),
             report_document=report,
+            root_path=root,
         )
         assert result.records_marked_stale == 0
         loaded = store.find_record(human.id)

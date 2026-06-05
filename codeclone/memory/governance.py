@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TypeAlias
 
 from ..config.memory_defaults import (
@@ -30,6 +31,10 @@ from .models import (
     generate_memory_id,
 )
 from .paths import normalize_memory_scope_path
+from .project import (
+    code_fingerprint_for_memory_subject,
+    read_git_provenance,
+)
 from .sqlite_store import SqliteEngineeringMemoryStore
 
 _NEGATION_WINDOW = re.compile(
@@ -412,6 +417,7 @@ def record_candidate(
     record_type: MemoryRecordType,
     statement: str,
     subject_path: str | None = None,
+    root_path: Path | None = None,
     created_by: str = "agent",
     max_candidates: int,
     max_statement_chars: int = DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
@@ -447,6 +453,14 @@ def record_candidate(
         msg = f"Candidate already exists for identity_key={identity}"
         raise MemoryContractError(msg)
 
+    resolved_root = (root_path or Path(project.root)).resolve()
+    git = read_git_provenance(resolved_root)
+    code_fingerprint = code_fingerprint_for_memory_subject(
+        resolved_root,
+        subject_path=normalized_path,
+    )
+    anchor_available = git.available and code_fingerprint is not None
+
     record = MemoryRecord(
         id=generate_memory_id(),
         project_id=project.id,
@@ -468,10 +482,10 @@ def record_candidate(
         approved_by=None,
         approved_at_utc=None,
         report_digest=None,
-        code_fingerprint=None,
+        code_fingerprint=code_fingerprint,
         stale_reason=None,
-        created_on_branch=None,
-        created_at_commit=None,
+        created_on_branch=git.branch if anchor_available else None,
+        created_at_commit=git.head if anchor_available else None,
         verified_on_branch=None,
         verified_at_commit=None,
     )

@@ -63,6 +63,7 @@ def test_extract_module_roles_dedup_and_skips_non_py(tmp_path: Path) -> None:
     }
     batch = extract_module_roles(
         project=project,
+        root_path=tmp_path,
         report_document=report_document,
         git=git,
         report_digest="r1",
@@ -157,6 +158,7 @@ def test_extract_risk_notes_complexity_and_security_categories(
         git=git,
         report_digest="r1",
         analysis_fingerprint="f1",
+        root_path=tmp_path,
     )
 
     risk_kind: list[str | None] = []
