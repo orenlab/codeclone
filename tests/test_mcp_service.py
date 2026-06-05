@@ -1088,6 +1088,29 @@ def test_mcp_session_audit_emit_swallows_writer_errors(
     )
 
 
+def test_mcp_session_emit_analysis_completed_audit_swallows_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _audit, record = _mcp_session_with_registered_run(
+        tmp_path,
+        run_id="analysis1234567890",
+    )
+
+    def _boom(**kwargs: object) -> None:
+        raise RuntimeError("analysis.completed failed")
+
+    monkeypatch.setattr(
+        "codeclone.audit.analysis_completed.emit_analysis_completed",
+        _boom,
+    )
+    service._emit_analysis_completed_audit(
+        root_path=tmp_path,
+        record=record,
+        summary=record.summary,
+    )
+
+
 def test_mcp_session_renews_latest_active_intent(tmp_path: Path) -> None:
     service, audit, record = _mcp_session_with_registered_run(
         tmp_path,

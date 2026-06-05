@@ -754,6 +754,26 @@ def test_cli_plain_console_status_context() -> None:
         pass
 
 
+def test_main_dispatches_memory_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def _memory_main(argv: list[str]) -> int:
+        calls.append(argv)
+        return 0
+
+    monkeypatch.setattr(sys, "argv", ["codeclone", "memory", "status", "--root", "."])
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.memory_main",
+        _memory_main,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert calls == [["status", "--root", "."]]
+
+
 def test_cli_internal_error_marker(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

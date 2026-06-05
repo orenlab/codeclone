@@ -13,7 +13,7 @@ import pytest
 
 from codeclone.contracts import ExitCode
 from codeclone.memory.ingest import InitReport
-from codeclone.surfaces.cli.memory import memory_main
+from codeclone.surfaces.cli.memory import _CLI_GOVERNANCE_BREAK_GLASS_FLAG, memory_main
 
 from .memory_fixtures import cli_memory_repo
 
@@ -280,3 +280,63 @@ def test_memory_cli_action_failure_returns_contract_error(
 
         code = memory_main(argv)
         assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_memory_main_unknown_command_returns_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    class _Parser:
+        def parse_args(self, _argv: list[str]) -> SimpleNamespace:
+            return SimpleNamespace(root=str(root), command="unsupported")
+
+        def print_help(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory._build_parser",
+        lambda: _Parser(),
+    )
+    code = memory_main(["unsupported", "--root", str(root)])
+    assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "archive"])
+def test_memory_cli_governance_missing_database_reports_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    printed: list[str] = []
+
+    class _Console:
+        def print(self, message: str) -> None:
+            printed.append(message)
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.memory_console",
+        lambda: _Console(),
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory._open_store",
+        lambda _root: (_ for _ in ()).throw(FileNotFoundError("missing.db")),
+    )
+    argv = [
+        command,
+        "mem-1",
+        "--root",
+        str(root),
+        "--by",
+        "tester",
+        _CLI_GOVERNANCE_BREAK_GLASS_FLAG,
+    ]
+    if command == "reject":
+        argv.extend(["--reason", "nope"])
+    code = memory_main(argv)
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert any("database not found" in line for line in printed)

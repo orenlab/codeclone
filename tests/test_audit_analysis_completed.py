@@ -8,10 +8,15 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from codeclone.audit.analysis_completed import (
+    ANALYSIS_SOURCE_CLI,
     ANALYSIS_SOURCE_MCP,
+    analysis_completed_payload,
+    analysis_completed_payload_from_report,
     emit_analysis_completed,
+    emit_analysis_completed_from_report,
 )
 from codeclone.audit.events import EVENT_ANALYSIS_COMPLETED, event_summary
 from codeclone.audit.reader import read_latest_analysis_run
@@ -146,3 +151,155 @@ def test_emit_accepts_mcp_internal_summary_shape(tmp_path: Path) -> None:
     payload = json.loads(str(row[2]))
     assert payload["mode"] == "full"
     assert payload["findings_total"] == 3
+
+
+def test_analysis_completed_payload_from_report_document() -> None:
+    payload = analysis_completed_payload_from_report(
+        report_document={
+            "report_schema_version": "2.11",
+            "meta": {
+                "runtime": {"analysis_mode": "full"},
+                "health_score": 82,
+                "health_grade": "B",
+            },
+            "inventory": {
+                "file_registry": {"items": ["a.py", "b.py"]},
+                "lines": 100,
+                "functions": 4,
+            },
+            "findings": {"summary": {"total": 7, "new": 2}},
+            "metrics": {"summary": {"health": {"score": 80, "grade": "B"}}},
+        },
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=1,
+        new_block_count=2,
+    )
+    assert payload["source"] == "cli"
+    assert payload["mode"] == "full"
+    findings = cast(dict[str, object], payload["findings"])
+    inventory = cast(dict[str, object], payload["inventory"])
+    diff = cast(dict[str, object], payload["diff"])
+    assert findings["total"] == 7
+    assert inventory["files"] == 2
+    assert diff["new_clones"] == 3
+
+
+def test_emit_analysis_completed_from_report_writes_row(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\naudit_enabled = true\n",
+        encoding="utf-8",
+    )
+    report = {
+        "report_schema_version": "2.11",
+        "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 90},
+        "inventory": {"file_registry": {"items": ["x.py"]}},
+        "findings": {"total": 1},
+        "metrics": {"summary": {"health": {"score": 90, "grade": "A"}}},
+    }
+    emit_analysis_completed_from_report(
+        root_path=tmp_path,
+        report_document=report,
+        report_digest="d" * 64,
+        run_id="runfromreport",
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=0,
+        new_block_count=0,
+    )
+    row = _fetch_first_event_row(
+        tmp_path / ".codeclone/db/audit.sqlite3",
+        "SELECT status, agent_label FROM controller_events LIMIT 1",
+    )
+    assert row is not None
+    assert row[0] == "full"
+    assert str(row[1]).startswith("codeclone-cli/")
+
+
+def test_analysis_completed_payload_resolves_internal_summary_keys() -> None:
+    payload = analysis_completed_payload(
+        summary={
+            "analysis_mode": "changed_paths",
+            "findings_summary": {"total": 4, "new": 0},
+            "health": {"score": 55, "grade": "C"},
+            "inventory": {"files": 1},
+            "diff": {},
+        },
+        source=ANALYSIS_SOURCE_MCP,
+    )
+    assert payload["mode"] == "changed_paths"
+    findings = cast(dict[str, object], payload["findings"])
+    assert findings["total"] == 4
+
+
+def test_analysis_completed_payload_ignores_string_file_registry_items() -> None:
+    payload = analysis_completed_payload_from_report(
+        report_document={
+            "report_schema_version": "2.11",
+            "meta": {"runtime": {"analysis_mode": "full"}},
+            "inventory": {"file_registry": {"items": "not-a-list"}},
+            "findings": {"total": 0},
+            "metrics": {"summary": {"health": {"score": 1, "grade": "F"}}},
+        },
+        source=ANALYSIS_SOURCE_CLI,
+        new_func_count=0,
+        new_block_count=0,
+    )
+    inventory = cast(dict[str, object], payload["inventory"])
+    assert inventory["files"] == 0
+
+
+def test_analysis_mode_fallback_to_completed() -> None:
+    payload = analysis_completed_payload(
+        summary={"health": {"score": 1}, "findings": {}, "inventory": {}, "diff": {}},
+        source=ANALYSIS_SOURCE_MCP,
+    )
+    assert payload["mode"] == "completed"
+
+
+def test_analysis_mode_blank_string_falls_back_to_completed() -> None:
+    payload = analysis_completed_payload(
+        summary={
+            "mode": "   ",
+            "health": {"score": 1},
+            "findings": {},
+            "inventory": {},
+            "diff": {},
+        },
+        source=ANALYSIS_SOURCE_MCP,
+    )
+    assert payload["mode"] == "completed"
+
+
+def test_emit_analysis_completed_from_report_custom_agent_fields(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\naudit_enabled = true\n",
+        encoding="utf-8",
+    )
+    report = {
+        "report_schema_version": "2.11",
+        "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 90},
+        "inventory": {"file_registry": {"items": ["x.py"]}},
+        "findings": {"total": 1},
+        "metrics": {"summary": {"health": {"score": 90, "grade": "A"}}},
+    }
+    emit_analysis_completed_from_report(
+        root_path=tmp_path,
+        report_document=report,
+        report_digest="d" * 64,
+        run_id="runcustomagent",
+        source=ANALYSIS_SOURCE_MCP,
+        new_func_count=0,
+        new_block_count=0,
+        agent_pid=4242,
+        agent_start_epoch=1700000001,
+        agent_label="custom-agent",
+    )
+    row = _fetch_first_event_row(
+        tmp_path / ".codeclone/db/audit.sqlite3",
+        (
+            "SELECT agent_pid, agent_start_epoch, agent_label "
+            "FROM controller_events LIMIT 1"
+        ),
+    )
+    assert row == (4242, 1700000001, "custom-agent")

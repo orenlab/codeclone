@@ -549,3 +549,42 @@ def test_execute_mcp_memory_sync_skips_without_report_digest(tmp_path: Path) -> 
     )
     assert payload["status"] == "skipped"
     assert payload["reason"] == "missing_report_digest"
+
+
+def test_open_sqlite_db_rejects_invalid_synchronous(tmp_path: Path) -> None:
+    from codeclone.utils.sqlite_store import open_sqlite_db
+
+    def _schema(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+
+    with pytest.raises(ValueError, match="synchronous must be one of"):
+        open_sqlite_db(
+            tmp_path / "bad.sqlite3",
+            ensure_schema=_schema,
+            synchronous="invalid",
+        )
+
+
+def test_registry_paths_rejects_non_mapping_inventory() -> None:
+    from codeclone.memory.ingest.runner import _registry_paths
+
+    assert _registry_paths({}) == frozenset()
+    assert _registry_paths({"inventory": "bad"}) == frozenset()
+    assert _registry_paths({"inventory": {"file_registry": "bad"}}) == frozenset()
+
+
+def test_build_init_batch_rejects_invalid_project_and_git(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.ingest import InitOptions
+
+    with pytest.raises(TypeError, match="project must be MemoryProject"):
+        build_init_batch(
+            root_path=tmp_path,
+            project=object(),
+            report_document={},
+            git=read_git_provenance(tmp_path),
+            report_digest=None,
+            analysis_fingerprint=None,
+            options=InitOptions(),
+        )

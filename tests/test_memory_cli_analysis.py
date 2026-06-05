@@ -10,6 +10,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from codeclone.contracts import DEFAULT_JSON_REPORT_PATH
 from codeclone.memory.report_trust import CachedReportTrust
 from codeclone.surfaces.cli.memory_analysis import (
@@ -102,3 +104,24 @@ def test_load_report_without_cached_file_runs_fresh(tmp_path: Path) -> None:
 def test_rich_progress_symbols_exports_types() -> None:
     symbols = _rich_progress_symbols()
     assert len(symbols) == 5
+
+
+def test_run_memory_analysis_report_raises_when_document_missing(
+    tmp_path: Path,
+) -> None:
+    root, _report_path, _document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/mod.py": "def f():\n    return 1\n"},
+        registry_items=["pkg/mod.py"],
+    )
+    with (
+        patch(
+            "codeclone.surfaces.cli.memory_analysis.report",
+            return_value=type("Artifacts", (), {"report_document": None})(),
+        ),
+        pytest.raises(
+            RuntimeError,
+            match="did not produce a canonical report document",
+        ),
+    ):
+        run_memory_analysis_report(root_path=root)

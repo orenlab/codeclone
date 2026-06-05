@@ -10,6 +10,7 @@ import json
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
 
 import pytest
@@ -1107,3 +1108,98 @@ def test_reader_int_meta_value_error() -> None:
     result = _int_meta(conn, "retention_days")
     assert result is None
     conn.close()
+
+
+# ── workflow.py: analysis.completed CLI emit ──
+
+
+def test_report_digest_from_document_missing_integrity() -> None:
+    from codeclone.surfaces.cli.workflow import _report_digest_from_document
+
+    assert _report_digest_from_document({}) == ""
+    assert _report_digest_from_document({"integrity": "bad"}) == ""
+    assert _report_digest_from_document({"integrity": {"digest": "bad"}}) == ""
+
+
+def test_emit_cli_analysis_completed_if_enabled_skips_when_disabled(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.workflow import _emit_cli_analysis_completed_if_enabled
+
+    args = SimpleNamespace(audit_enabled=False)
+    _emit_cli_analysis_completed_if_enabled(
+        args=args,
+        root_path=tmp_path,
+        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        new_func_count=0,
+        new_block_count=0,
+    )
+
+
+def test_emit_cli_analysis_completed_if_enabled_writes_audit_row(
+    tmp_path: Path,
+) -> None:
+    from codeclone.audit.schema import open_audit_db
+    from codeclone.contracts import REPORT_SCHEMA_VERSION
+    from codeclone.surfaces.cli.workflow import _emit_cli_analysis_completed_if_enabled
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\naudit_enabled = true\n",
+        encoding="utf-8",
+    )
+    digest = "f" * 64
+    report_document = {
+        "report_schema_version": REPORT_SCHEMA_VERSION,
+        "integrity": {"digest": {"value": digest}},
+        "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 91},
+        "inventory": {"file_registry": {"items": ["pkg/a.py"]}},
+        "findings": {"total": 0},
+        "metrics": {"summary": {"health": {"score": 91, "grade": "A"}}},
+    }
+    args = SimpleNamespace(audit_enabled=True)
+    _emit_cli_analysis_completed_if_enabled(
+        args=args,
+        root_path=tmp_path,
+        report_document=report_document,
+        new_func_count=1,
+        new_block_count=0,
+    )
+    db_path = tmp_path / ".codeclone/db/audit.sqlite3"
+    conn = open_audit_db(db_path)
+    try:
+        row = conn.execute(
+            "SELECT event_type, payload_json FROM controller_events LIMIT 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    assert row[0] == "analysis.completed"
+    assert '"source": "cli"' in str(row[1]) or '"source":"cli"' in str(row[1])
+
+
+def test_emit_cli_analysis_completed_if_enabled_swallows_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.workflow import _emit_cli_analysis_completed_if_enabled
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\naudit_enabled = true\n",
+        encoding="utf-8",
+    )
+    args = SimpleNamespace(audit_enabled=True)
+
+    def _boom(**kwargs: object) -> None:
+        raise RuntimeError("emit failed")
+
+    monkeypatch.setattr(
+        "codeclone.audit.analysis_completed.emit_analysis_completed_from_report",
+        _boom,
+    )
+    _emit_cli_analysis_completed_if_enabled(
+        args=args,
+        root_path=tmp_path,
+        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        new_func_count=0,
+        new_block_count=0,
+    )

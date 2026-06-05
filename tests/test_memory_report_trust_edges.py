@@ -13,7 +13,10 @@ from subprocess import CompletedProcess
 
 import pytest
 
-from codeclone.memory.report_trust import cached_report_untrusted_reason
+from codeclone.memory.report_trust import (
+    assess_cached_report_trust,
+    cached_report_untrusted_reason,
+)
 
 
 def _base_report_document(*, root: Path, items: list[str]) -> dict[str, object]:
@@ -236,3 +239,25 @@ def test_cached_report_untrusted_reason_git_subprocess_failure_variants(
         report_document=report_doc,
     )
     assert reason is None
+
+
+def test_assess_cached_report_trust_returns_trusted_when_reason_is_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, report_path, report_doc = _git_root_and_report_doc(
+        tmp_path,
+        items=["pkg/a.py"],
+        old_ts=None,
+    )
+    monkeypatch.setattr(
+        "codeclone.memory.report_trust.cached_report_untrusted_reason",
+        lambda **_kwargs: None,
+    )
+    trust = assess_cached_report_trust(
+        root_path=root,
+        report_path=report_path,
+        report_document=report_doc,
+    )
+    assert trust.trusted is True
+    assert trust.reason is None

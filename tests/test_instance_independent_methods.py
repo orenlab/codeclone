@@ -11,6 +11,7 @@ import hashlib
 
 import pytest
 
+import codeclone.findings.design.instance_methods as instance_methods_mod
 from codeclone.domain.findings import (
     DESIGN_KIND_INSTANCE_INDEPENDENT_METHOD,
     IIM_CLASSIFICATION_CANDIDATE,
@@ -27,6 +28,8 @@ from codeclone.findings.design import (
     collect_instance_independent_methods,
     group_instance_independent_methods,
 )
+
+from .ast_test_helpers import parse_class_first_member
 
 
 def _collect(
@@ -282,6 +285,74 @@ def test_groups_order_by_candidate_count_then_path() -> None:
     groups = group_instance_independent_methods(occurrences)
     # Big (2 candidates) ranks before Small (1 candidate).
     assert [group.class_qualname for group in groups] == ["Big", "Small"]
+
+
+def test_helper_edge_cases_cover_ast_branches() -> None:
+    call_decorator = ast.parse("@cache(maxsize=1)\ndef f(): ...").body[0]
+    assert isinstance(call_decorator, ast.FunctionDef)
+    decorator = call_decorator.decorator_list[0]
+    assert instance_methods_mod._simple_decorator_name(decorator) == "cache"
+
+    name_decorator = ast.parse("@final\ndef f(): ...").body[0]
+    assert isinstance(name_decorator, ast.FunctionDef)
+    assert (
+        instance_methods_mod._simple_decorator_name(name_decorator.decorator_list[0])
+        == "final"
+    )
+
+    subscript_base = ast.parse("class A(Generic[T]): ...").body[0]
+    assert isinstance(subscript_base, ast.ClassDef)
+    assert instance_methods_mod._simple_base_name(subscript_base.bases[0]) == "Generic"
+
+    metaclass_node = ast.parse("class A(metaclass=ABCMeta): ...").body[0]
+    assert isinstance(metaclass_node, ast.ClassDef)
+    assert instance_methods_mod._class_is_interface(metaclass_node, ()) is True
+
+    kwonly = ast.parse("def helper(*, value):\n    return value\n").body[0]
+    assert isinstance(kwonly, ast.FunctionDef)
+    assert instance_methods_mod._first_positional_arg(kwonly) is None
+
+    vararg_func = ast.parse(
+        "def helper(self, *args, **kwargs):\n    return args\n"
+    ).body[0]
+    assert isinstance(vararg_func, ast.FunctionDef)
+    names = instance_methods_mod._function_param_names(vararg_func)
+    assert names == {"self", "args", "kwargs"}
+
+    _async_class, method = parse_class_first_member(
+        "class A:\n    async def helper(self):\n        return 1\n",
+        ast.AsyncFunctionDef,
+    )
+    visitor = instance_methods_mod._ReceiverUseVisitor()
+    visitor.visit(method)
+    assert visitor.receiver_reads == 0
+
+    _outer_class, outer_method = parse_class_first_member(
+        "class Outer:\n"
+        "    def build(self):\n"
+        "        class Inner(Base):\n"
+        "            pass\n",
+        ast.FunctionDef,
+    )
+    visitor = instance_methods_mod._ReceiverUseVisitor()
+    for statement in outer_method.body:
+        visitor.visit(statement)
+
+    class _NodeWithoutEndLine(ast.AST):
+        pass
+
+    assert instance_methods_mod._node_end_line(_NodeWithoutEndLine(), 9) == 9
+
+    bare_raise = ast.parse("raise\n").body[0]
+    assert isinstance(bare_raise, ast.Raise)
+    assert instance_methods_mod._raises_not_implemented(bare_raise) is False
+
+
+def test_grouping_counts_suppressed_classifications() -> None:
+    occurrences = _collect("class Mixin:\n    def hook(self):\n        pass\n")
+    groups = group_instance_independent_methods(occurrences)
+    assert groups[0].signature.suppressed_count == 1
+    assert groups[0].signature.candidate_count == 0
 
 
 def test_occurrences_are_deterministically_ordered() -> None:

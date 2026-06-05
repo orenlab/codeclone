@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -329,5 +330,38 @@ def test_sqlite_store_fts_sync_rebuild_links_commits_and_rollback(
         reloaded = store.find_record(rec_rb.id)
         assert reloaded is not None
         assert reloaded.status == initial_status
+    finally:
+        store.close()
+
+
+def test_upsert_skips_human_origin_record(tmp_path: Path) -> None:
+    project = resolve_project_identity(tmp_path)
+    db_path = tmp_path / ".codeclone" / "memory.sqlite3"
+    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        store.initialize(project)
+        human = replace(
+            _sample_record(
+                project_id=project.id,
+                statement="human approved fact",
+                updated_at_utc=current_report_timestamp_utc(),
+                discriminator="human-record",
+            ),
+            origin="human",
+            status="active",
+            approved_by="maintainer",
+        )
+        store.upsert_record(human)
+        incoming = replace(
+            human,
+            statement="agent tried to overwrite",
+            updated_at_utc=current_report_timestamp_utc(),
+            origin="system",
+        )
+        result = store.upsert_record(incoming)
+        assert result.action == "skipped"
+        loaded = store.find_record(human.id)
+        assert loaded is not None
+        assert loaded.statement == "human approved fact"
     finally:
         store.close()

@@ -333,6 +333,68 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert "warnings" in help_payload
     assert "recommended_tools" in help_payload
 
+    abs_root = str(tmp_path.resolve())
+    relevant_memory = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_relevant_memory",
+                {"root": abs_root, "scope": ["pkg/dup.py"]},
+            )
+        )
+    )
+    assert isinstance(relevant_memory, dict)
+    query_memory = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "query_engineering_memory",
+                {
+                    "root": abs_root,
+                    "mode": "search",
+                    "query": "dup",
+                },
+            )
+        )
+    )
+    assert isinstance(query_memory, dict)
+    controlled_start = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "start_controlled_change",
+                {
+                    "root": abs_root,
+                    "scope": {"allowed_files": ["pkg/dup.py"]},
+                    "intent": "server coverage roundtrip",
+                },
+            )
+        )
+    )
+    assert controlled_start["status"] == "active"
+    memory_validate = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "manage_engineering_memory",
+                {
+                    "root": abs_root,
+                    "action": "validate_claims",
+                    "text": "No structural regressions.",
+                },
+            )
+        )
+    )
+    assert memory_validate["action"] == "validate_claims"
+    finish_controlled = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "finish_controlled_change",
+                {
+                    "intent_id": str(controlled_start["intent_id"]),
+                    "changed_files": ["pkg/dup.py"],
+                },
+            )
+        )
+    )
+    assert finish_controlled["intent_id"] == controlled_start["intent_id"]
+
     findings_result = _structured_tool_result(
         asyncio.run(
             server.call_tool(

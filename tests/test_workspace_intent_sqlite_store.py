@@ -528,3 +528,13 @@ def test_is_stale_reports_expired_ttl() -> None:
         ),
     )
     assert is_stale(stale) is True
+
+
+def test_sqlite_store_write_returns_false_on_closed_connection(
+    sqlite_root: Path,
+) -> None:
+    store = get_workspace_intent_store(sqlite_root)
+    assert isinstance(store, SqliteWorkspaceIntentStore)
+    record = _record(intent_id="intent-write-fail-001")
+    store._conn.close()
+    assert store.write(record) is False

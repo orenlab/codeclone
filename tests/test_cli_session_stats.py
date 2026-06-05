@@ -142,6 +142,21 @@ def _write_report_payload(root: Path, payload: object) -> Path:
     return report_path
 
 
+def _assert_snapshot_latest_run_from_audit(
+    snapshot: SessionSnapshot,
+    *,
+    run_id: str,
+    health: int,
+    findings: int,
+    files: int,
+) -> None:
+    assert snapshot.latest_run_source == "audit_mcp"
+    assert snapshot.latest_run_id == run_id
+    assert snapshot.latest_run_health == health
+    assert snapshot.latest_run_findings == findings
+    assert snapshot.latest_run_files == files
+
+
 def _render_session_stats_text(root: Path, *, quiet: bool) -> str:
     printer = _RecordingPrinter()
     exit_code = render_session_stats(
@@ -1379,3 +1394,94 @@ def test_resolve_mcp_tokens_corrupt_db(tmp_path: Path) -> None:
     assert encoding is None
     assert count == 0
     assert workflows == ()
+
+
+def test_read_audit_token_footprint_uses_summary_totals_without_footprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.reader import AuditSummary
+
+    _write_audit_pyproject(tmp_path)
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.write_bytes(b"")
+    fake_summary = AuditSummary(
+        db_path=db_path,
+        db_size_bytes=0,
+        retention_days=30,
+        total_events=1,
+        intent_events=0,
+        contract_events=0,
+        receipt_events=0,
+        violation_events=0,
+        oldest_event_utc=None,
+        latest_event_utc=None,
+        events=(),
+        total_estimated_tokens=42,
+        token_encoding="chars_approx",
+        token_event_count=3,
+        payload_footprint=None,
+    )
+    monkeypatch.setattr(
+        "codeclone.audit.reader.read_audit_summary",
+        lambda **kwargs: fake_summary,
+    )
+    tokens, encoding, count, workflows = _read_audit_token_footprint(tmp_path)
+    assert tokens == 42
+    assert encoding == "chars_approx"
+    assert count == 3
+    assert workflows == ()
+
+
+def test_collect_session_snapshot_prefers_audit_latest_run(tmp_path: Path) -> None:
+    from codeclone.audit.analysis_completed import ANALYSIS_SOURCE_MCP
+
+    from .audit_fixtures import write_compact_analysis_completed_event
+
+    _write_audit_pyproject(tmp_path)
+    db_path = tmp_path / ".codeclone/db/audit.sqlite3"
+    write_compact_analysis_completed_event(
+        tmp_path,
+        db_path=db_path,
+        summary={
+            "mode": "full",
+            "health": {"score": 93, "grade": "A"},
+            "findings": {"total": 2, "new": 0},
+            "inventory": {"files": 11, "lines": 1, "functions": 1},
+            "diff": {"new_clones": 0, "health_delta": None},
+        },
+        source=ANALYSIS_SOURCE_MCP,
+        report_digest="a" * 64,
+        run_id="runaudit1234567890",
+        agent_pid=1,
+        agent_start_epoch=1,
+        agent_label="mcp/test",
+    )
+    _write_report(tmp_path, health=50, files=99)
+
+    _assert_snapshot_latest_run_from_audit(
+        collect_session_snapshot(tmp_path),
+        run_id="runaudit",
+        health=93,
+        findings=2,
+        files=11,
+    )
+
+
+def test_collect_session_snapshot_tolerates_audit_read_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_audit_pyproject(tmp_path)
+    _write_report(tmp_path, health=70, files=3)
+
+    def _boom(**_kwargs: object) -> None:
+        raise RuntimeError("audit read failed")
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.read_latest_analysis_run",
+        _boom,
+    )
+    snapshot = collect_session_snapshot(tmp_path)
+    assert snapshot.latest_run_source == "disk_report"

@@ -23,6 +23,8 @@ from codeclone.models import (
 )
 from tests._ast_metrics_helpers import tree_collector_and_imports
 
+from .ast_test_helpers import parse_class_first_member
+
 
 def test_collect_module_api_surface_skips_self_and_collects_public_symbols() -> None:
     tree, collector, import_names = tree_collector_and_imports(
@@ -277,16 +279,14 @@ def test_api_surface_helpers_cover_constant_symbols_and_break_variants() -> None
         )
         is None
     )
-    outer_class = ast.parse(
+    _outer_class, nested_class = parse_class_first_member(
         """
 class Outer:
     class Inner:
         pass
-"""
-    ).body[0]
-    assert isinstance(outer_class, ast.ClassDef)
-    nested_class = outer_class.body[0]
-    assert isinstance(nested_class, ast.ClassDef)
+""",
+        ast.ClassDef,
+    )
     assert (
         api_surface_mod._class_api_symbol(
             module_name="pkg.mod",
