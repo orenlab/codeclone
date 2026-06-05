@@ -2,7 +2,7 @@
   "name": "codeclone",
   "displayName": "CodeClone",
   "description": "Structural Change Controller for AI-assisted Python development — baseline-aware, triage-first structural review in VS Code, powered by codeclone-mcp.",
-  "version": "0.4.0",
+  "version": "0.3.0",
   "publisher": "orenlab",
   "license": "MPL-2.0",
   "repository": {
@@ -48,7 +48,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc -p jsconfig.json --noEmit",
-    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/memoryGovernance.js && node --check src/memoryController.js && node --check src/memorySearch.js && node --check src/memorySearchRenderer.js && node --check src/workspaceInsightsRenderer.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/memoryGovernance.js && node --check src/memoryBulkSelection.js && node --check src/memoryController.js && node --check src/memorySearch.js && node --check src/memorySearchRenderer.js && node --check src/workspaceInsightsRenderer.js && node --check src/mcpClient.js && node --check src/extension.js",
     "test": "node --test test/*.test.js",
     "test:host": "npm run build && node test/runExtensionHost.js",
     "vscode:prepublish": "npm run build"
@@ -89,6 +89,13 @@
     "onCommand:codeclone.syncMemoryFromRun",
     "onCommand:codeclone.approveMemoryRecord",
     "onCommand:codeclone.rejectMemoryRecord",
+    "onCommand:codeclone.approveCheckedMemoryDrafts",
+    "onCommand:codeclone.rejectCheckedMemoryDrafts",
+    "onCommand:codeclone.selectAllMemoryDrafts",
+    "onCommand:codeclone.selectMemoryDraftsByType",
+    "onCommand:codeclone.clearMemoryDraftSelection",
+    "onCommand:codeclone.selectAllMemoryStale",
+    "onCommand:codeclone.selectMemoryStaleByType",
     "onCommand:codeclone.openMemoryRecord",
     "onCommand:codeclone.openMemoryRecordById",
     "onCommand:codeclone.searchEngineeringMemory",
@@ -194,7 +201,7 @@
       {
         "view": "codeclone.memory",
         "when": "isWorkspaceTrusted && codeclone.connected",
-        "contents": "Review draft memory records in **Inbox**, then approve or reject with explicit confirmation.\n\n[Search memory](command:codeclone.searchEngineeringMemory) · [Memory for active file](command:codeclone.memoryForActiveFile) · [Search panel](command:codeclone.openMemorySearchPanel)\n\n[Refresh memory](command:codeclone.refreshMemory) · [Sync from latest run](command:codeclone.syncMemoryFromRun)"
+        "contents": "Check drafts in **Inbox**, then use the toolbar or context menu to approve or reject in bulk with one confirmation.\n\n[Search memory](command:codeclone.searchEngineeringMemory) · [Memory for active file](command:codeclone.memoryForActiveFile) · [Search panel](command:codeclone.openMemorySearchPanel)\n\n[Refresh memory](command:codeclone.refreshMemory) · [Sync from latest run](command:codeclone.syncMemoryFromRun)"
       }
     ],
     "commands": [
@@ -455,6 +462,48 @@
         "title": "Reject Memory Record",
         "category": "CodeClone",
         "icon": "$(close)"
+      },
+      {
+        "command": "codeclone.approveCheckedMemoryDrafts",
+        "title": "Approve Checked Memory Drafts",
+        "category": "CodeClone",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codeclone.rejectCheckedMemoryDrafts",
+        "title": "Reject Checked Memory Drafts",
+        "category": "CodeClone",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "codeclone.selectAllMemoryDrafts",
+        "title": "Select All Memory Drafts",
+        "category": "CodeClone",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "codeclone.selectMemoryDraftsByType",
+        "title": "Select Memory Drafts by Type",
+        "category": "CodeClone",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "codeclone.clearMemoryDraftSelection",
+        "title": "Clear Memory Draft Selection",
+        "category": "CodeClone",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "codeclone.selectAllMemoryStale",
+        "title": "Select All Stale Memory Records",
+        "category": "CodeClone",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "codeclone.selectMemoryStaleByType",
+        "title": "Select Stale Memory Records by Type",
+        "category": "CodeClone",
+        "icon": "$(filter)"
       },
       {
         "command": "codeclone.openMemoryRecord",
@@ -745,7 +794,42 @@
         {
           "command": "codeclone.syncMemoryFromRun",
           "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
-          "group": "navigation@2"
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.approveCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasCheckedDrafts",
+          "group": "navigation@6"
+        },
+        {
+          "command": "codeclone.rejectCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasCheckedDrafts",
+          "group": "navigation@7"
+        },
+        {
+          "command": "codeclone.selectAllMemoryDrafts",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasDrafts",
+          "group": "secondary@2"
+        },
+        {
+          "command": "codeclone.selectMemoryDraftsByType",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasDrafts",
+          "group": "secondary@3"
+        },
+        {
+          "command": "codeclone.clearMemoryDraftSelection",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasCheckedDrafts",
+          "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.selectAllMemoryStale",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasStale",
+          "group": "secondary@5"
+        },
+        {
+          "command": "codeclone.selectMemoryStaleByType",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasStale",
+          "group": "secondary@6"
         },
         {
           "command": "codeclone.manageWorkspaceTrust",
@@ -759,7 +843,7 @@
         },
         {
           "command": "codeclone.approveMemoryRecord",
-          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
           "group": "inline@1"
         },
         {
@@ -769,7 +853,7 @@
         },
         {
           "command": "codeclone.openMemoryRecord",
-          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
           "group": "1_memory@1"
         },
         {
@@ -863,6 +947,66 @@
           "command": "codeclone.copySecuritySurfaceBrief",
           "when": "viewItem == codeclone.securitySurface",
           "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.approveMemoryRecord",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "codeclone.rejectMemoryRecord",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "codeclone.openMemoryRecord",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
+          "group": "1_memory@3"
+        },
+        {
+          "command": "codeclone.selectAllMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "codeclone.selectMemoryDraftsByType",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "codeclone.approveCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@3"
+        },
+        {
+          "command": "codeclone.rejectCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@4"
+        },
+        {
+          "command": "codeclone.clearMemoryDraftSelection",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@5"
+        },
+        {
+          "command": "codeclone.selectAllMemoryStale",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "codeclone.selectMemoryStaleByType",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "codeclone.approveCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@3"
+        },
+        {
+          "command": "codeclone.clearMemoryDraftSelection",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@4"
         }
       ],
       "editor/title": [

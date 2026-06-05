@@ -90,6 +90,14 @@ const {
 const {fetchProductionTriage, loadRunArtifacts, shouldUseCachedTriage} = require("./runArtifacts");
 const {MemoryController, recordStatement} = require("./memoryController");
 const {
+    buildBulkConfirmDetail,
+    dedupeGovernanceNodes,
+    distinctRecordTypes,
+    formatBulkResultSummary,
+    recordIdFromTreeItemId,
+    resolveGovernanceTargets,
+} = require("./memoryBulkSelection");
+const {
     MemorySearchController,
     activeEditorMemoryPath,
     isValidMemoryRecordId,
@@ -204,6 +212,26 @@ class CodeCloneController {
         this.memoryView = vscode.window.createTreeView("codeclone.memory", {
             treeDataProvider: this.memoryProvider,
             showCollapseAll: true,
+            canSelectMany: true,
+        });
+        this.memoryView.onDidChangeCheckboxState((event) => {
+            const folder = this.getMemoryWorkspaceFolder();
+            if (!folder) {
+                return;
+            }
+            for (const [treeItem, state] of event.items) {
+                const recordId = recordIdFromTreeItemId(treeItem.id);
+                if (!recordId) {
+                    continue;
+                }
+                this.memoryController.setDraftChecked(
+                    folder,
+                    recordId,
+                    state === vscode.TreeItemCheckboxState.Checked
+                );
+            }
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
         });
         this.onClientState = (state) => {
             if (this.disposed) {
@@ -432,11 +460,36 @@ class CodeCloneController {
             vscode.commands.registerCommand("codeclone.syncMemoryFromRun", () =>
                 this.syncMemoryFromRun()
             ),
-            vscode.commands.registerCommand("codeclone.approveMemoryRecord", (node) =>
-                this.governMemoryRecord(node, "approve")
+            vscode.commands.registerCommand(
+                "codeclone.approveMemoryRecord",
+                (node, selectedItems) =>
+                    this.governMemoryRecordSelection(node, selectedItems, "approve")
             ),
-            vscode.commands.registerCommand("codeclone.rejectMemoryRecord", (node) =>
-                this.governMemoryRecord(node, "reject")
+            vscode.commands.registerCommand(
+                "codeclone.rejectMemoryRecord",
+                (node, selectedItems) =>
+                    this.governMemoryRecordSelection(node, selectedItems, "reject")
+            ),
+            vscode.commands.registerCommand("codeclone.approveCheckedMemoryDrafts", () =>
+                this.governCheckedMemoryDrafts("approve")
+            ),
+            vscode.commands.registerCommand("codeclone.rejectCheckedMemoryDrafts", () =>
+                this.governCheckedMemoryDrafts("reject")
+            ),
+            vscode.commands.registerCommand("codeclone.selectAllMemoryDrafts", () =>
+                this.selectAllMemoryDrafts()
+            ),
+            vscode.commands.registerCommand("codeclone.selectMemoryDraftsByType", () =>
+                this.selectMemoryDraftsByType()
+            ),
+            vscode.commands.registerCommand("codeclone.clearMemoryDraftSelection", () =>
+                this.clearMemoryDraftSelection()
+            ),
+            vscode.commands.registerCommand("codeclone.selectAllMemoryStale", () =>
+                this.selectAllMemoryStale()
+            ),
+            vscode.commands.registerCommand("codeclone.selectMemoryStaleByType", () =>
+                this.selectMemoryStaleByType()
             ),
             vscode.commands.registerCommand("codeclone.openMemoryRecord", (node) =>
                 this.openMemoryRecord(node)
@@ -3926,6 +3979,7 @@ class CodeCloneController {
         this.memoryController.invalidate(folder);
         this.memoryProvider.refresh();
         this.updateViewChrome();
+        this.updateContextKeys();
     }
 
     async syncMemoryFromRun() {
@@ -3958,19 +4012,179 @@ class CodeCloneController {
         }
     }
 
-    async governMemoryRecord(node, decision) {
+    async governMemoryRecordSelection(node, selectedItems, decision) {
         const folder = this.getMemoryWorkspaceFolder();
-        if (!folder || !node) {
+        if (!folder) {
             return;
         }
-        const record = safeObject(node.record);
-        const recordId = String(record.id || "");
-        if (!recordId) {
-            this.handleError(
-                new Error("Memory record is missing an id."),
-                "Could not update the memory record."
+        const resolved = resolveGovernanceTargets(node, selectedItems);
+        if (!resolved.length) {
+            await vscode.window.showWarningMessage(
+                "No memory records selected for governance."
             );
             return;
+        }
+        await this.governMemoryRecords(folder, resolved, decision);
+    }
+
+    async governCheckedMemoryDrafts(decision) {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        const checked = this.memoryController.getCheckedGovernanceNodes(folder);
+        if (!checked.length) {
+            await vscode.window.showWarningMessage(
+                "No memory records are checked. Use inbox or stale checkboxes, or Select all."
+            );
+            return;
+        }
+        await this.governMemoryRecords(folder, checked, decision);
+    }
+
+    async selectAllMemoryDrafts() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const recordIds = snapshot.drafts
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select memory drafts.");
+        }
+    }
+
+    async selectMemoryDraftsByType() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const types = distinctRecordTypes(snapshot.drafts);
+            if (!types.length) {
+                await vscode.window.showInformationMessage(
+                    "No draft memory records in the inbox."
+                );
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(types, {
+                placeHolder: "Select record type to check in the inbox",
+                canPickMany: true,
+            });
+            if (!picked?.length) {
+                return;
+            }
+            const typeSet = new Set(picked);
+            const recordIds = snapshot.drafts
+                .filter((record) => typeSet.has(String(record.type || "")))
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select memory drafts by type.");
+        }
+    }
+
+    async clearMemoryDraftSelection() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        this.memoryController.clearCheckedDrafts(folder);
+        this.memoryProvider.refresh();
+        this.updateContextKeys();
+    }
+
+    async selectAllMemoryStale() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const recordIds = snapshot.stale
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select stale memory records.");
+        }
+    }
+
+    async selectMemoryStaleByType() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const types = distinctRecordTypes(snapshot.stale);
+            if (!types.length) {
+                await vscode.window.showInformationMessage(
+                    "No stale memory records."
+                );
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(types, {
+                placeHolder: "Select record type to check in stale",
+                canPickMany: true,
+            });
+            if (!picked?.length) {
+                return;
+            }
+            const typeSet = new Set(picked);
+            const recordIds = snapshot.stale
+                .filter((record) => typeSet.has(String(record.type || "")))
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select stale memory records by type.");
+        }
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {object[]} nodes
+     * @param {"approve"|"reject"|"archive"} decision
+     */
+    async governMemoryRecords(folder, nodes, decision) {
+        await this.memoryController.ensureSnapshot(folder);
+        const hydrated = this.memoryController.hydrateGovernanceNodes(
+            folder,
+            dedupeGovernanceNodes(nodes)
+        );
+        if (!hydrated.length) {
+            await vscode.window.showWarningMessage(
+                "No memory records selected for governance."
+            );
+            return;
+        }
+        let workingTargets = hydrated;
+        if (decision === "reject") {
+            const draftTargets = hydrated.filter(
+                (node) => String(node.record?.status || "draft") === "draft"
+            );
+            if (!draftTargets.length) {
+                await vscode.window.showWarningMessage(
+                    "Only draft records can be rejected. Stale records can be approved or opened."
+                );
+                return;
+            }
+            workingTargets = draftTargets;
         }
         const labels = {
             approve: {verb: "Approve", gerund: "Approving", past: "approved"},
@@ -3978,57 +4192,122 @@ class CodeCloneController {
             archive: {verb: "Archive", gerund: "Archiving", past: "archived"},
         };
         const label = labels[decision] || labels.approve;
-        // Validate status and confirm with the user *before* any progress
-        // notification, so the spinner only covers the actual server work.
-        try {
-            this.memoryController.assertGovernanceAllowed(
-                String(record.status || "draft"),
-                decision
-            );
-        } catch (error) {
+        const validTargets = [];
+        const skipped = [];
+        for (const node of workingTargets) {
+            const record = safeObject(node.record);
+            try {
+                this.memoryController.assertGovernanceAllowed(
+                    String(record.status || "draft"),
+                    decision
+                );
+                validTargets.push(node);
+            } catch (error) {
+                skipped.push({
+                    recordId: String(record.id || ""),
+                    message:
+                        error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+        if (!validTargets.length) {
+            const first = skipped[0];
             await vscode.window.showWarningMessage(
-                error instanceof Error ? error.message : String(error)
+                first?.message || "Selected memory records cannot be updated."
             );
             return;
         }
-        const statement = recordStatement(record);
+        const confirmLabel =
+            validTargets.length === 1
+                ? label.verb
+                : `${label.verb} ${validTargets.length}`;
+        const confirmPrompt =
+            validTargets.length === 1
+                ? `${label.verb} this memory record?`
+                : `${label.verb} ${validTargets.length} memory records?`;
+        const detail = buildBulkConfirmDetail(validTargets, decision);
         const confirm = await vscode.window.showWarningMessage(
-            `${label.verb} this memory record?`,
-            {modal: true, detail: statement || recordId},
-            label.verb
+            confirmPrompt,
+            {modal: true, detail},
+            confirmLabel
         );
-        if (confirm !== label.verb) {
+        if (confirm !== confirmLabel) {
             return;
         }
+        /** @type {{succeeded: string[], failed: {recordId: string, message: string}[]}} */
+        const results = {succeeded: [], failed: [...skipped]};
         try {
-            const result = await vscode.window.withProgress(
+            await vscode.window.withProgress(
                 {
                     location: vscode.ProgressLocation.Notification,
-                    title: `${label.gerund} memory record`,
+                    title:
+                        validTargets.length === 1
+                            ? `${label.gerund} memory record`
+                            : `${label.gerund} ${validTargets.length} memory records`,
                     cancellable: true,
                 },
                 async (progress, token) => {
                     await this.ensureConnected(folder);
-                    return this.memoryController.runGovernance(folder, node, decision, {
-                        progress,
-                        token,
-                    });
+                    for (let index = 0; index < validTargets.length; index += 1) {
+                        if (token.isCancellationRequested) {
+                            break;
+                        }
+                        const node = validTargets[index];
+                        const recordId = String(node.record?.id || "");
+                        progress.report({
+                            message: `${index + 1}/${validTargets.length} — ${recordId}`,
+                        });
+                        try {
+                            await this.memoryController.runGovernance(
+                                folder,
+                                node,
+                                decision,
+                                {
+                                    progress,
+                                    token,
+                                    deferInvalidate: true,
+                                }
+                            );
+                            results.succeeded.push(recordId);
+                            this.memoryController.setDraftChecked(
+                                folder,
+                                recordId,
+                                false
+                            );
+                        } catch (error) {
+                            if (
+                                error instanceof Error &&
+                                error.message === "Canceled"
+                            ) {
+                                throw error;
+                            }
+                            results.failed.push({
+                                recordId,
+                                message:
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error),
+                            });
+                        }
+                    }
                 }
-            );
-            if (!result) {
-                return;
-            }
-            this.memoryController.invalidate(folder);
-            this.memoryProvider.refresh();
-            this.updateViewChrome();
-            await vscode.window.showInformationMessage(
-                `Memory record ${label.past}.`
             );
         } catch (error) {
             if (error instanceof Error && error.message === "Canceled") {
                 return;
             }
-            this.handleError(error, "Could not update the memory record.");
+            this.handleError(error, "Could not update the memory records.");
+            return;
+        }
+        this.memoryController.invalidate(folder);
+        this.memoryProvider.refresh();
+        this.updateViewChrome();
+        this.updateContextKeys();
+        const summary = formatBulkResultSummary(results, decision);
+        if (results.succeeded.length) {
+            await vscode.window.showInformationMessage(summary);
+        } else if (results.failed.length) {
+            await vscode.window.showWarningMessage(summary);
         }
     }
 
@@ -4489,6 +4768,7 @@ class CodeCloneController {
                 item.id = node.id;
                 item.description = node.description;
                 item.iconPath = node.icon;
+                item.contextValue = node.contextValue;
                 item.command = node.command;
                 break;
             }
@@ -4576,6 +4856,9 @@ class CodeCloneController {
                 item.iconPath = node.icon;
                 item.contextValue = node.contextValue || "codeclone.memoryDraft";
                 item.command = node.command;
+                if (node.checkboxState !== undefined) {
+                    item.checkboxState = node.checkboxState;
+                }
                 break;
             }
             case "memoryStale": {
@@ -4589,6 +4872,9 @@ class CodeCloneController {
                 item.iconPath = node.icon;
                 item.contextValue = node.contextValue || "codeclone.memoryStale";
                 item.command = node.command;
+                if (node.checkboxState !== undefined) {
+                    item.checkboxState = node.checkboxState;
+                }
                 break;
             }
             case "action": {
@@ -4823,6 +5109,31 @@ class CodeCloneController {
             "setContext",
             "codeclone.hotspotFocusMode",
             this.hotspotFocusMode
+        );
+        const memoryFolder = this.getMemoryWorkspaceFolder();
+        const draftCount = memoryFolder
+            ? this.memoryController.draftCount(memoryFolder)
+            : 0;
+        const staleCount = memoryFolder
+            ? this.memoryController.staleCount(memoryFolder)
+            : 0;
+        const checkedDraftCount = memoryFolder
+            ? this.memoryController.checkedDraftCount(memoryFolder)
+            : 0;
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.memoryHasDrafts",
+            draftCount > 0
+        );
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.memoryHasStale",
+            staleCount > 0
+        );
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.memoryHasCheckedDrafts",
+            checkedDraftCount > 0
         );
     }
 

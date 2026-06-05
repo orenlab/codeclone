@@ -1,21 +1,5 @@
 # Change Log
 
-## Unreleased
-
-- add **Show Session Stats** and **Show Controller Audit Trail** — secure
-  webviews mirroring CLI `--session-stats` and `--audit` via IDE-only MCP tools
-  (`get_workspace_session_stats`, `get_controller_audit_trail`; not listed for
-  agent clients on the default launcher)
-- add **Copy Session Stats Brief** and **Copy Controller Audit Brief** commands
-- Session view toolbar entries when the workspace is trusted and connected
-- add **Search Engineering Memory** — QuickPick keyword search over MCP
-  `query_engineering_memory` (FTS + optional semantic re-rank)
-- add **Memory for Active File** — path-scoped memory for the active editor
-- add **Open Memory Search Panel** — secure read-only webview (`enableScripts:
-  false`, nonce CSP, allowlisted `codeclone.openMemoryRecordById` command URIs)
-- add workspace settings under `codeclone.memory.*` for search semantics and limits
-- Memory view welcome and toolbar link search commands without a search tree section
-
 ## 0.3.0
 
 - add **Show Blast Radius** command — concentric SVG diagram of structural
@@ -31,6 +15,27 @@
   `tmp` path-traversal (GHSA-ph9p-34f9-6g65) and `qs` DoS
   (GHSA-q8mj-m7cp-5q26) vulnerabilities
 - upgrade `@types/node` to `25.9.1` and `typescript` to `6.0.3`
+- add **Show Session Stats** and **Show Controller Audit Trail** — secure
+  webviews mirroring CLI `--session-stats` and `--audit` via IDE-only MCP tools
+  (`get_workspace_session_stats`, `get_controller_audit_trail`; not listed for
+  agent clients on the default launcher)
+- add **Copy Session Stats Brief** and **Copy Controller Audit Brief** commands
+- Session view toolbar entries when the workspace is trusted and connected
+- add **Search Engineering Memory** — QuickPick keyword search over MCP
+  `query_engineering_memory` (FTS + optional semantic re-rank)
+- add **Memory for Active File** — path-scoped memory for the active editor
+- add **Open Memory Search Panel** — secure read-only webview (`enableScripts:
+  false`, nonce CSP, allowlisted `codeclone.openMemoryRecordById` command URIs)
+- add workspace settings under `codeclone.memory.*` for search semantics and limits
+- Memory view welcome and toolbar link search commands without a search tree section
+- add **bulk Memory inbox governance** — checkbox selection on draft rows,
+  `canSelectMany` multi-select with context-menu approve/reject, toolbar
+  **Approve/Reject Checked Memory Drafts**, **Select All Memory Drafts**,
+  **Select Memory Drafts by Type**, and **Clear Memory Draft Selection** with
+  one modal confirmation and progress notification per batch
+- extend bulk governance to **Stale** records — checkboxes, inline approve,
+  multi-select approve, **Select All Stale** / **Select Stale by Type**; fix
+  silent no-op when approving stale rows (hydration previously inbox-only)
 
 ## 0.2.7
 

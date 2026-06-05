@@ -10,6 +10,7 @@ const {
 } = require("./memoryGovernance");
 const {MCPClientError} = require("./mcpClient");
 const {safeArray, safeObject} = require("./formatters");
+const {recordIdFromGovernanceNode} = require("./memoryBulkSelection");
 
 const MEMORY_CACHE_TTL_MS = 15_000;
 
@@ -21,6 +22,173 @@ class MemoryController {
         this.extension = extension;
         /** @type {Map<string, {loadedAt: number, connected: boolean, memorySupported: boolean, status: object|null, drafts: object[], stale: object[]}>} */
         this.cacheByRoot = new Map();
+        /** @type {Map<string, Set<string>>} */
+        this.checkedDraftIdsByRoot = new Map();
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @returns {Set<string>}
+     */
+    _checkedDraftIds(folder) {
+        const key = this.workspaceKey(folder);
+        let checked = this.checkedDraftIdsByRoot.get(key);
+        if (!checked) {
+            checked = new Set();
+            this.checkedDraftIdsByRoot.set(key, checked);
+        }
+        return checked;
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {object[]} drafts
+     */
+    _syncCheckedDraftIds(folder, drafts, stale) {
+        const validIds = new Set(
+            [...drafts, ...stale]
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0)
+        );
+        const checked = this._checkedDraftIds(folder);
+        for (const recordId of [...checked]) {
+            if (!validIds.has(recordId)) {
+                checked.delete(recordId);
+            }
+        }
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {string} recordId
+     */
+    isDraftChecked(folder, recordId) {
+        return this._checkedDraftIds(folder).has(recordId);
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {string} recordId
+     * @param {boolean} checked
+     */
+    setDraftChecked(folder, recordId, checked) {
+        const ids = this._checkedDraftIds(folder);
+        if (checked) {
+            ids.add(recordId);
+        } else {
+            ids.delete(recordId);
+        }
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {string[]} recordIds
+     * @param {boolean} checked
+     */
+    setDraftsChecked(folder, recordIds, checked) {
+        const ids = this._checkedDraftIds(folder);
+        for (const recordId of recordIds) {
+            if (checked) {
+                ids.add(recordId);
+            } else {
+                ids.delete(recordId);
+            }
+        }
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     */
+    clearCheckedDrafts(folder) {
+        this.checkedDraftIdsByRoot.delete(this.workspaceKey(folder));
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder | undefined} folder
+     */
+    checkedDraftCount(folder) {
+        if (!folder) {
+            return 0;
+        }
+        return this._checkedDraftIds(folder).size;
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     */
+    getCheckedGovernanceNodes(folder) {
+        const snapshot = this.cacheByRoot.get(this.workspaceKey(folder));
+        if (!snapshot) {
+            return [];
+        }
+        const checked = this._checkedDraftIds(folder);
+        const nodes = [];
+        for (const record of snapshot.drafts) {
+            const recordId = String(record.id || "");
+            if (checked.has(recordId)) {
+                nodes.push(this.draftNodeFromRecord(record, folder));
+            }
+        }
+        for (const record of snapshot.stale) {
+            const recordId = String(record.id || "");
+            if (checked.has(recordId)) {
+                nodes.push(this.staleNodeFromRecord(record, folder));
+            }
+        }
+        return nodes;
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder | undefined} folder
+     */
+    staleCount(folder) {
+        if (!folder) {
+            return 0;
+        }
+        const cached = this.cacheByRoot.get(this.workspaceKey(folder));
+        return cached ? cached.stale.length : 0;
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {object[]} nodes
+     */
+    hydrateGovernanceNodes(folder, nodes) {
+        const snapshot = this.cacheByRoot.get(this.workspaceKey(folder));
+        const records = [
+            ...(snapshot?.drafts || []),
+            ...(snapshot?.stale || []),
+        ];
+        const byId = new Map(
+            records.map((record) => [String(record.id || ""), record])
+        );
+        const hydrated = [];
+        const seen = new Set();
+        for (const node of nodes) {
+            const recordId = recordIdFromGovernanceNode(node);
+            if (!recordId || seen.has(recordId)) {
+                continue;
+            }
+            const record = byId.get(recordId);
+            if (!record) {
+                continue;
+            }
+            seen.add(recordId);
+            hydrated.push(this.governanceNodeFromRecord(record, folder));
+        }
+        return hydrated;
+    }
+
+    /**
+     * @param {object} record
+     * @param {import("vscode").WorkspaceFolder} [folder]
+     */
+    governanceNodeFromRecord(record, folder) {
+        const status = String(record.status || "draft");
+        if (status === "stale") {
+            return this.staleNodeFromRecord(record, folder);
+        }
+        return this.draftNodeFromRecord(record, folder);
     }
 
     /**
@@ -120,6 +288,7 @@ class MemoryController {
             drafts,
             stale,
         };
+        this._syncCheckedDraftIds(folder, drafts, stale);
         this.cacheByRoot.set(key, snapshot);
         return snapshot;
     }
@@ -178,7 +347,7 @@ class MemoryController {
                             ? `${snapshot.drafts.length} draft`
                             : "empty",
                     icon: new vscode.ThemeIcon("inbox"),
-                    contextValue: "codeclone.memorySection",
+                    contextValue: "codeclone.memoryInbox",
                 },
                 {
                     nodeType: "section",
@@ -189,7 +358,7 @@ class MemoryController {
                             ? `${snapshot.stale.length}`
                             : undefined,
                     icon: new vscode.ThemeIcon("history"),
-                    contextValue: "codeclone.memorySection",
+                    contextValue: "codeclone.memoryStaleSection",
                 },
                 {
                     nodeType: "section",
@@ -212,11 +381,23 @@ class MemoryController {
                         },
                     ];
                 }
+                const byStatus = safeObject(snapshot.status.records_by_status);
+                const draftTotal =
+                    typeof byStatus.draft === "number"
+                        ? byStatus.draft
+                        : snapshot.drafts.length;
+                const activeTotal =
+                    typeof byStatus.active === "number" ? byStatus.active : null;
+                const staleTotal =
+                    typeof byStatus.stale === "number"
+                        ? byStatus.stale
+                        : snapshot.stale.length;
                 const lines = [
                     `Backend: ${snapshot.status.backend || "unknown"}`,
                     `Records: ${snapshot.status.record_count ?? "—"}`,
-                    `Drafts: ${snapshot.status.draft_count ?? snapshot.drafts.length}`,
-                    `Active: ${snapshot.status.active_count ?? "—"}`,
+                    `Drafts: ${draftTotal}`,
+                    `Active: ${activeTotal ?? "—"}`,
+                    `Stale: ${staleTotal}`,
                 ];
                 return lines.map((label) => ({
                     nodeType: "detail",
@@ -234,7 +415,9 @@ class MemoryController {
                         },
                     ];
                 }
-                return snapshot.drafts.map((record) => this._draftNode(record));
+                return snapshot.drafts.map((record) =>
+                    this.draftNodeFromRecord(record, folder)
+                );
             }
             if (node.id === "memory-stale") {
                 if (!snapshot.stale.length) {
@@ -246,7 +429,9 @@ class MemoryController {
                         },
                     ];
                 }
-                return snapshot.stale.map((record) => this._staleNode(record));
+                return snapshot.stale.map((record) =>
+                    this.staleNodeFromRecord(record, folder)
+                );
             }
             if (node.id === "memory-actions") {
                 return [
@@ -338,21 +523,28 @@ class MemoryController {
 
     /**
      * @param {object} record
+     * @param {import("vscode").WorkspaceFolder} [folder]
      */
-    _draftNode(record) {
+    draftNodeFromRecord(record, folder) {
         const statement = recordStatement(record);
         const label =
             statement.length > 72 ? `${statement.slice(0, 69)}…` : statement;
+        const recordId = String(record.id || "unknown");
         const node = {
             nodeType: "memoryDraft",
-            id: `memory-draft-${String(record.id || "unknown")}`,
+            id: `memory-draft-${recordId}`,
             record,
-            label: label || String(record.id || "draft"),
+            label: label || recordId,
             description: String(record.type || "record"),
             tooltip: statement,
             icon: new vscode.ThemeIcon("git-pull-request"),
             contextValue: "codeclone.memoryDraft",
         };
+        if (folder) {
+            node.checkboxState = this.isDraftChecked(folder, recordId)
+                ? vscode.TreeItemCheckboxState.Checked
+                : vscode.TreeItemCheckboxState.Unchecked;
+        }
         node.command = {
             command: "codeclone.openMemoryRecord",
             title: "Open Memory Record",
@@ -363,21 +555,28 @@ class MemoryController {
 
     /**
      * @param {object} record
+     * @param {import("vscode").WorkspaceFolder} [folder]
      */
-    _staleNode(record) {
+    staleNodeFromRecord(record, folder) {
         const statement = recordStatement(record);
         const label =
             statement.length > 72 ? `${statement.slice(0, 69)}…` : statement;
+        const recordId = String(record.id || "unknown");
         const node = {
             nodeType: "memoryStale",
-            id: `memory-stale-${String(record.id || "unknown")}`,
+            id: `memory-stale-${recordId}`,
             record,
-            label: label || String(record.id || "stale"),
+            label: label || recordId,
             description: String(record.type || "record"),
             tooltip: statement,
             icon: new vscode.ThemeIcon("history"),
             contextValue: "codeclone.memoryStale",
         };
+        if (folder) {
+            node.checkboxState = this.isDraftChecked(folder, recordId)
+                ? vscode.TreeItemCheckboxState.Checked
+                : vscode.TreeItemCheckboxState.Unchecked;
+        }
         node.command = {
             command: "codeclone.openMemoryRecord",
             title: "Open Memory Record",
@@ -395,7 +594,7 @@ class MemoryController {
      * @param {import("vscode").WorkspaceFolder} folder
      * @param {object} node
      * @param {"approve"|"reject"|"archive"} decision
-     * @param {{progress?: {report: Function}, token?: {isCancellationRequested: boolean}}} [options]
+     * @param {{progress?: {report: Function}, token?: {isCancellationRequested: boolean}, deferInvalidate?: boolean}} [options]
      */
     async runGovernance(folder, node, decision, options = {}) {
         const {progress, token} = options;
@@ -445,7 +644,9 @@ class MemoryController {
                 `${committed.message || "Governance commit was rejected."}${nextStep}`
             );
         }
-        this.invalidate(folder);
+        if (!options.deferInvalidate) {
+            this.invalidate(folder);
+        }
         return committed;
     }
 
