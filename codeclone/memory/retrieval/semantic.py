@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from ..embedding import embed_query
 from ..semantic.models import SemanticSearchResult
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ..embedding import EmbeddingProvider
     from ..models import MemoryRecord, MemorySubject
     from ..semantic import SemanticHit, SemanticIndex
+    from ..trajectory.models import Trajectory
 
 
 class _RecordStore(Protocol):
@@ -51,8 +52,14 @@ def semantic_search(
                 if store is not None
                 else None
             )
-        else:
+        elif hit.source == "audit":
             hydrated = _hydrate_audit(hit, audit_db_path, preview_chars)
+        else:
+            hydrated = (
+                _hydrate_trajectory(hit, store, preview_chars)
+                if store is not None
+                else None
+            )
         if hydrated is not None:
             results.append(hydrated)
     return results
@@ -95,6 +102,28 @@ def _hydrate_audit(
     )
 
 
+def _hydrate_trajectory(
+    hit: SemanticHit, store: _RecordStore, preview_chars: int
+) -> SemanticSearchResult | None:
+    find_trajectory = getattr(store, "find_trajectory", None)
+    if not callable(find_trajectory):
+        return None
+    typed_find = cast("Callable[[str], Trajectory | None]", find_trajectory)
+    trajectory = typed_find(hit.source_id)
+    if trajectory is None:
+        return None
+    return SemanticSearchResult(
+        source="trajectory",
+        source_id=hit.source_id,
+        score=hit.score,
+        kind="trajectory",
+        status=trajectory.outcome,
+        confidence=None,
+        subject_path=_primary_trajectory_path(trajectory),
+        preview=_preview(trajectory.summary, preview_chars),
+    )
+
+
 def audit_event_row(
     audit_db_path: Path, event_id: str
 ) -> tuple[str, str | None, str] | None:
@@ -122,6 +151,13 @@ def audit_event_row(
 
 def _primary_path(subjects: Sequence[MemorySubject]) -> str | None:
     for subject in subjects:
+        if subject.subject_kind == "path":
+            return subject.subject_key
+    return None
+
+
+def _primary_trajectory_path(trajectory: Trajectory) -> str | None:
+    for subject in trajectory.subjects:
         if subject.subject_kind == "path":
             return subject.subject_key
     return None

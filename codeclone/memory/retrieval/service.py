@@ -25,6 +25,14 @@ from ..paths import (
 from ..search_index import SearchMatchMode
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
+from ..trajectory.retrieval import (
+    DEFAULT_TRAJECTORY_PREVIEW_LIMIT,
+    rank_trajectories_for_query,
+    rank_trajectories_for_scope,
+    serialize_trajectory_detail,
+    trajectory_status_payload,
+    trajectory_subject_keys,
+)
 from .ranking import RankingContext, relevance_score
 from .semantic import audit_event_row
 
@@ -44,6 +52,9 @@ QueryMode = Literal[
     "drafts",
     "coverage",
     "status",
+    "trajectory_status",
+    "trajectory_search",
+    "trajectory_get",
 ]
 
 QUERY_MODES: tuple[str, ...] = (
@@ -55,6 +66,9 @@ QUERY_MODES: tuple[str, ...] = (
     "drafts",
     "coverage",
     "status",
+    "trajectory_status",
+    "trajectory_search",
+    "trajectory_get",
 )
 
 MemoryDetailLevel = Literal["compact", "full"]
@@ -177,6 +191,7 @@ def _retrieval_policy(*, include_drafts: bool) -> dict[str, object]:
         "drafts_included": include_drafts,
         "memory_does_not_authorize_edits": True,
         "memory_does_not_override_findings": True,
+        "trajectories_do_not_authorize_edits": True,
     }
 
 
@@ -357,6 +372,20 @@ def get_relevant_memory(
         max_records=max_records,
         detail_level=normalized_detail,
     )
+    trajectory_candidates = store.list_trajectories_for_subjects(
+        project_id=project_id,
+        subjects=trajectory_subject_keys(
+            scope_paths=normalized_scope,
+            symbols=tuple(normalized_symbols),
+        ),
+        limit=max(DEFAULT_TRAJECTORY_PREVIEW_LIMIT * 3, max_records),
+    )
+    trajectories_payload, trajectories_truncated = rank_trajectories_for_scope(
+        trajectory_candidates,
+        scope_paths=normalized_scope,
+        symbols=tuple(normalized_symbols),
+        max_results=min(max_records, DEFAULT_TRAJECTORY_PREVIEW_LIMIT),
+    )
     coverage: dict[str, object]
     if normalized_scope:
         coverage = _coverage_summary(
@@ -375,8 +404,11 @@ def get_relevant_memory(
         "project_id": project_id,
         "scope_resolved_from": scope_resolved_from,
         "records": records_payload,
+        "trajectories": trajectories_payload,
         "record_count": len(records_payload),
+        "trajectory_count": len(trajectories_payload),
         "truncated": truncated,
+        "trajectories_truncated": trajectories_truncated,
         "coverage": coverage,
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
@@ -545,6 +577,84 @@ def _handle_coverage_mode(
     return {"mode": mode, "status": "ok", "payload": coverage}
 
 
+def _handle_trajectory_status_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "status": "ok",
+        "payload": trajectory_status_payload(
+            count=store.count_trajectories(project_id=project_id),
+            latest_run=store.latest_trajectory_projection_run(project_id=project_id),
+        ),
+    }
+
+
+def _handle_trajectory_get_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    record_id: str | None,
+) -> dict[str, object]:
+    trajectory_id = _require_query_field(
+        record_id,
+        mode=mode,
+        field="record_id containing trajectory_id",
+    )
+    trajectory = store.find_trajectory(trajectory_id)
+    if trajectory is None or trajectory.project_id != project_id:
+        return {
+            "mode": mode,
+            "status": "not_found",
+            "payload": {"trajectory_id": trajectory_id},
+        }
+    return {
+        "mode": mode,
+        "status": "ok",
+        "detail_level": "full",
+        "payload": {"trajectory": serialize_trajectory_detail(trajectory)},
+    }
+
+
+def _handle_trajectory_search_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    query: str | None,
+    max_results: int,
+    match_mode: SearchMatchMode,
+) -> dict[str, object]:
+    statement = _require_query_field(query, mode=mode, field="query")
+    candidates = store.search_trajectories(
+        project_id=project_id,
+        query=statement,
+        limit=max_results + 1,
+        match_mode=match_mode,
+    )
+    trajectories, truncated = rank_trajectories_for_query(
+        candidates,
+        query=statement,
+        max_results=max_results,
+        match_mode=match_mode,
+    )
+    return {
+        "mode": mode,
+        "status": "ok",
+        "detail_level": "compact",
+        "payload": {
+            "trajectories": trajectories,
+            "trajectory_count": len(trajectories),
+            "truncated": truncated,
+            "retrieval_policy": _retrieval_policy(include_drafts=False),
+        },
+    }
+
+
 def _search_statuses_for_mode(
     mode: str,
     *,
@@ -709,6 +819,7 @@ def _search_payload_body(
     truncated: bool,
     include_drafts: bool,
     audit_events: list[dict[str, object]] | None = None,
+    trajectories: list[dict[str, object]] | None = None,
 ) -> dict[str, object]:
     body: dict[str, object] = {
         "records": payload_records,
@@ -718,6 +829,8 @@ def _search_payload_body(
     }
     if audit_events is not None:
         body["audit_events"] = audit_events
+    if trajectories is not None:
+        body["trajectories"] = trajectories
     return body
 
 
@@ -756,16 +869,19 @@ def _semantic_hits(
     provider: EmbeddingProvider,
     query: str,
     k: int,
-) -> tuple[dict[str, float], list[SemanticHit]]:
+) -> tuple[dict[str, float], list[SemanticHit], list[SemanticHit]]:
     vector = embed_query(provider, query)
     proximity: dict[str, float] = {}
     audit_hits: list[SemanticHit] = []
+    trajectory_hits: list[SemanticHit] = []
     for hit in index.search(vector, k=k):
         if hit.source == "memory":
             proximity.setdefault(hit.source_id, hit.score)
         elif hit.source == "audit":
             audit_hits.append(hit)
-    return proximity, audit_hits
+        elif hit.source == "trajectory":
+            trajectory_hits.append(hit)
+    return proximity, audit_hits, trajectory_hits
 
 
 def _hydrate_audit_events(
@@ -789,6 +905,23 @@ def _hydrate_audit_events(
             }
         )
     return events
+
+
+def _hydrate_trajectory_hits(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    hits: Sequence[SemanticHit],
+) -> list[dict[str, object]]:
+    trajectories: list[dict[str, object]] = []
+    for hit in hits:
+        trajectory = store.find_trajectory(hit.source_id)
+        if trajectory is None or trajectory.project_id != project_id:
+            continue
+        payload = serialize_trajectory_detail(trajectory, max_steps=4)
+        payload["semantic_score"] = hit.score
+        trajectories.append(payload)
+    return trajectories
 
 
 def _semantic_search_candidates(
@@ -847,7 +980,7 @@ def _handle_semantic_search_mode(
         and status is not None
         and status.available
     ):
-        proximity, audit_hits = _semantic_hits(
+        proximity, audit_hits, trajectory_hits = _semantic_hits(
             index=semantic_index,
             provider=embedding_provider,
             query=statement,
@@ -860,6 +993,11 @@ def _handle_semantic_search_mode(
             proximity=proximity,
         )
         audit_events = _hydrate_audit_events(audit_db_path, audit_hits)
+        trajectories = _hydrate_trajectory_hits(
+            store,
+            project_id=project_id,
+            hits=trajectory_hits,
+        )
         semantic_block = _semantic_status_block(
             status,
             used=True,
@@ -870,6 +1008,7 @@ def _handle_semantic_search_mode(
         proximity = {}
         candidates = list(fts_records)
         audit_events = []
+        trajectories = []
         semantic_block = (
             _semantic_status_block(
                 status,
@@ -911,6 +1050,7 @@ def _handle_semantic_search_mode(
             truncated=truncated,
             include_drafts=include_drafts,
             audit_events=audit_events,
+            trajectories=trajectories,
         ),
     }
 
@@ -1000,10 +1140,32 @@ def query_engineering_memory(
             project_id=project_id,
             scope=scope,
         )
+    if mode == "trajectory_status":
+        return _handle_trajectory_status_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+        )
+    if mode == "trajectory_get":
+        return _handle_trajectory_get_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            record_id=record_id,
+        )
 
     filter_types, filter_statuses, filter_confidences, match_mode = _parse_filters(
         filters
     )
+    if mode == "trajectory_search":
+        return _handle_trajectory_search_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            query=query,
+            max_results=max_results,
+            match_mode=match_mode,
+        )
     statuses = _search_statuses_for_mode(
         mode,
         filter_statuses=filter_statuses,

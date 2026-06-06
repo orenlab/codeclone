@@ -78,6 +78,29 @@ def render_trajectory_list(
         console.print(f"  {item.summary}", markup=False)
 
 
+def render_trajectory_search_results(
+    *,
+    console: PrinterLike,
+    query: str,
+    trajectories: list[dict[str, object]],
+) -> None:
+    console.print(f"Trajectory matches for: {query}", markup=False)
+    if not trajectories:
+        console.print("  No matching trajectories.")
+        return
+    for item in trajectories:
+        trajectory_id = str(item.get("trajectory_id", ""))
+        outcome = str(item.get("outcome", ""))
+        tier = str(item.get("quality_tier", ""))
+        score = item.get("relevance_score")
+        score_text = f" score={score}" if score is not None else ""
+        console.print(
+            f"  {trajectory_id}  {outcome}/{tier}{score_text}",
+            markup=False,
+        )
+        console.print(f"    {item.get('summary', '')}", markup=False)
+
+
 def render_trajectory_detail(
     *,
     console: PrinterLike,
@@ -114,5 +137,6 @@ __all__ = [
     "render_projection_run",
     "render_trajectory_detail",
     "render_trajectory_list",
+    "render_trajectory_search_results",
     "render_trajectory_status",
 ]

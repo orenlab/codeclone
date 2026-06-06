@@ -10,7 +10,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-SemanticSource = Literal["memory", "audit"]
+SemanticSource = Literal["memory", "audit", "trajectory"]
 
 
 class SemanticProjection(BaseModel):

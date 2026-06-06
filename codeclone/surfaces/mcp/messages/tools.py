@@ -50,14 +50,18 @@ GET_RELEVANT_MEMORY: Final = (
     "symbols-only retrieval is also supported. Unscoped project-wide retrieval "
     "is rejected — use query_engineering_memory(mode=status|search) instead. "
     "List responses default to compact statement previews; pass detail_level=full "
-    "for complete statements. Read-only; does not mutate the memory database."
+    "for complete statements. Scoped responses may also include typed "
+    "trajectory precedents in trajectories[]; records[] remains memory records "
+    "only. Read-only; does not mutate the memory database."
 )
 
 QUERY_ENGINEERING_MEMORY: Final = (
     "Mode-based engineering memory inspection router. Modes: search, get, "
-    "for_path, for_symbol, stale, drafts, coverage, status. List modes default "
-    "to compact previews; mode=get and detail_level=full return complete "
-    "statements. Project root is not a valid path or coverage scope. Read-only."
+    "for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, "
+    "trajectory_search, and trajectory_get. List modes default to compact "
+    "previews; mode=get and detail_level=full return complete statements. "
+    "mode=trajectory_get uses record_id as the trajectory id. Project root is "
+    "not a valid path or coverage scope. Read-only."
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (

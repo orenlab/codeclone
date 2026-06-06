@@ -15,6 +15,12 @@ from .models import (
     TrajectorySubject,
 )
 from .projector import TrajectoryProjectionError, project_trajectory
+from .retrieval import (
+    rank_trajectories_for_query,
+    rank_trajectories_for_scope,
+    serialize_trajectory_detail,
+    serialize_trajectory_preview,
+)
 
 __all__ = [
     "TRAJECTORY_PROJECTION_VERSION",
@@ -25,4 +31,8 @@ __all__ = [
     "TrajectoryStep",
     "TrajectorySubject",
     "project_trajectory",
+    "rank_trajectories_for_query",
+    "rank_trajectories_for_scope",
+    "serialize_trajectory_detail",
+    "serialize_trajectory_preview",
 ]

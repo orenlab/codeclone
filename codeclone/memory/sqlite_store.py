@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -133,6 +133,40 @@ class SqliteEngineeringMemoryStore:
         from .trajectory.store import list_trajectories
 
         return list_trajectories(self._conn, project_id=project_id, limit=limit)
+
+    def list_trajectories_for_subjects(
+        self,
+        *,
+        project_id: str,
+        subjects: Mapping[str, Sequence[str]],
+        limit: int = 20,
+    ) -> list[Trajectory]:
+        from .trajectory.store import list_trajectories_for_subjects
+
+        return list_trajectories_for_subjects(
+            self._conn,
+            project_id=project_id,
+            subjects=subjects,
+            limit=limit,
+        )
+
+    def search_trajectories(
+        self,
+        *,
+        project_id: str,
+        query: str,
+        limit: int = 20,
+        match_mode: SearchMatchMode = "any",
+    ) -> list[Trajectory]:
+        from .trajectory.store import search_trajectories
+
+        return search_trajectories(
+            self._conn,
+            project_id=project_id,
+            query=query,
+            limit=limit,
+            match_mode=match_mode,
+        )
 
     def find_trajectory(self, trajectory_id: str) -> Trajectory | None:
         from .trajectory.store import find_trajectory

@@ -12,12 +12,14 @@ from pathlib import Path
 from typing import Protocol
 
 from ..models import MemoryQuery, MemoryRecord, MemorySubject
+from ..trajectory.models import Trajectory, TrajectoryListItem
 from .models import SemanticProjection
 from .projection import (
     INDEXED_AUDIT_EVENTS,
     is_indexed_memory_type,
     project_audit_event,
     project_memory_record,
+    project_trajectory,
 )
 
 # Live, retrievable statuses. rejected/archived/superseded are not surfaced by
@@ -46,6 +48,17 @@ class _MemoryReadStore(Protocol):
     def query_records(self, query: MemoryQuery) -> Sequence[MemoryRecord]: ...
 
     def list_subjects_for_memory(self, memory_id: str) -> list[MemorySubject]: ...
+
+
+class _TrajectoryReadStore(Protocol):
+    def list_trajectories(
+        self,
+        *,
+        project_id: str,
+        limit: int = 20,
+    ) -> list[TrajectoryListItem]: ...
+
+    def find_trajectory(self, trajectory_id: str) -> Trajectory | None: ...
 
 
 class MemoryIndexSource:
@@ -94,6 +107,40 @@ class MemoryIndexSource:
             if subject.subject_kind == "path":
                 return subject.subject_key
         return None
+
+
+class TrajectoryIndexSource:
+    """Trajectory memory as a semantic source.
+
+    Trajectories are derived projections over audit event core. The semantic
+    source embeds their deterministic, bounded projection text only.
+    """
+
+    def __init__(self, store: _TrajectoryReadStore, *, project_id: str) -> None:
+        self._store = store
+        self._project_id = project_id
+
+    def name(self) -> str:
+        return "trajectory"
+
+    def available(self) -> bool:
+        return True
+
+    def iter_projections(self) -> Iterator[SemanticProjection]:
+        offset = 0
+        while True:
+            items = self._store.list_trajectories(
+                project_id=self._project_id,
+                limit=_PAGE_SIZE + offset,
+            )
+            page = items[offset : offset + _PAGE_SIZE]
+            for item in page:
+                trajectory = self._store.find_trajectory(item.id)
+                if trajectory is not None:
+                    yield project_trajectory(trajectory)
+            if len(page) < _PAGE_SIZE:
+                return
+            offset += _PAGE_SIZE
 
 
 class AuditIndexSource:
@@ -153,4 +200,5 @@ __all__ = [
     "AuditIndexSource",
     "IndexSource",
     "MemoryIndexSource",
+    "TrajectoryIndexSource",
 ]

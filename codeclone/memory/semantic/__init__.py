@@ -24,6 +24,7 @@ from .projection import (
     is_indexed_memory_type,
     project_audit_event,
     project_memory_record,
+    project_trajectory,
     text_hash,
 )
 from .rebuild import RebuildReport, rebuild_semantic_index
@@ -31,7 +32,12 @@ from .rebuild_workflow import (
     build_semantic_index_sources,
     execute_semantic_index_rebuild,
 )
-from .sources import AuditIndexSource, IndexSource, MemoryIndexSource
+from .sources import (
+    AuditIndexSource,
+    IndexSource,
+    MemoryIndexSource,
+    TrajectoryIndexSource,
+)
 
 if TYPE_CHECKING:
     from ...config.memory import SemanticConfig
@@ -169,6 +175,7 @@ __all__ = [
     "SemanticProjection",
     "SemanticRow",
     "SemanticSource",
+    "TrajectoryIndexSource",
     "UnavailableSemanticIndex",
     "build_semantic_index_sources",
     "close_semantic_index",
@@ -177,6 +184,7 @@ __all__ = [
     "is_indexed_memory_type",
     "project_audit_event",
     "project_memory_record",
+    "project_trajectory",
     "rebuild_semantic_index",
     "resolve_semantic_index",
     "resolve_semantic_index_writer",

@@ -365,17 +365,23 @@ MemoryQueryModeParam = Annotated[
     str,
     Field(
         description=(
-            "search, get, for_path, for_symbol, stale, drafts, coverage, or status."
+            "search, get, for_path, for_symbol, stale, drafts, coverage, status, "
+            "trajectory_status, trajectory_search, or trajectory_get."
         ),
     ),
 ]
 MemorySearchQueryParam = Annotated[
     str | None,
-    Field(description="Keyword query for mode=search."),
+    Field(description="Keyword query for mode=search or mode=trajectory_search."),
 ]
 MemoryRecordIdParam = Annotated[
     str | None,
-    Field(description="Record id for mode=get or IDE governance actions."),
+    Field(
+        description=(
+            "Record id for mode=get or IDE governance actions; trajectory id for "
+            "mode=trajectory_get."
+        ),
+    ),
 ]
 MemoryPathParam = Annotated[
     str | None,
@@ -403,8 +409,9 @@ SemanticParam = Annotated[
     Field(
         description=(
             "Blend semantic recall into mode=search (FTS plus semantic, "
-            "re-ranked); audit incidents are returned typed-separate. Requires "
-            "the optional index; falls back to FTS-only when unavailable."
+            "re-ranked); audit incidents and trajectory precedents are returned "
+            "typed-separate. Requires the optional index; falls back to FTS-only "
+            "when unavailable."
         )
     ),
 ]

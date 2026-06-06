@@ -74,6 +74,9 @@ def test_memory_trajectory_cli_status_rebuild_list_show(tmp_path: Path) -> None:
     assert memory_main(["trajectory", "list", "--root", root_arg]) == int(
         ExitCode.SUCCESS
     )
+    assert memory_main(["trajectory", "search", "exercise", "--root", root_arg]) == int(
+        ExitCode.SUCCESS
+    )
 
     with cli_memory_repo(tmp_path / "lookup", with_draft=False) as (
         root2,

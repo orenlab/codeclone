@@ -11,7 +11,7 @@ import secrets
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Final, Literal, cast
 
 AuditSeverity = Literal["info", "warn", "error"]
@@ -80,6 +80,7 @@ PAYLOAD_MODES = frozenset({"off", "compact", "full"})
 
 # Compact mode keeps the intent description as a bounded forensic field.
 _COMPACT_TEXT_LIMIT = 500
+_EVENT_CORE_SCOPE_PATH_LIMIT = 50
 
 # The summary column stores the human-authored essence of an event,
 # independent of audit_payloads mode. Bounded to keep the column lean.
@@ -260,7 +261,12 @@ def _event_core_facts(
     if event_type in _INTENT_PAYLOAD_EVENTS:
         core = dict(_compact_intent_payload(payload))
         core.pop("intent_description", None)
-        return core, False
+        scope_paths, truncated = _bounded_scope_paths(payload)
+        if scope_paths:
+            core["scope_paths"] = list(scope_paths)
+        if truncated:
+            core["scope_paths_truncated"] = True
+        return core, truncated
     if event_type == EVENT_INTENT_QUEUE_BLOCKED:
         return {
             "intent_id": str(payload.get("intent_id", "")),
@@ -337,6 +343,38 @@ def _compact_intent_payload(payload: Mapping[str, object]) -> dict[str, object]:
         "ttl_seconds": _int_value(payload.get("ttl_seconds")),
         "lease_seconds": _int_value(payload.get("lease_seconds")),
     }
+
+
+def _bounded_scope_paths(payload: Mapping[str, object]) -> tuple[tuple[str, ...], bool]:
+    scope = _mapping(payload.get("scope"))
+    raw_paths = [
+        *_sequence(scope.get("allowed_files")),
+        *_sequence(scope.get("allowed_related")),
+    ]
+    normalized: list[str] = []
+    for raw_path in raw_paths:
+        path = _normalized_event_core_path(raw_path)
+        if path is not None:
+            normalized.append(path)
+    unique = tuple(sorted(set(normalized)))
+    return (
+        unique[:_EVENT_CORE_SCOPE_PATH_LIMIT],
+        len(unique) > _EVENT_CORE_SCOPE_PATH_LIMIT,
+    )
+
+
+def _normalized_event_core_path(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    if not text or text in {".", ".."} or text.startswith("/"):
+        return None
+    path = PurePosixPath(text)
+    if any(part in {"", ".", ".."} for part in path.parts):
+        return None
+    return path.as_posix()
 
 
 def event_summary(

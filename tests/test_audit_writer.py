@@ -175,6 +175,7 @@ def test_writer_stores_event_core_even_when_payloads_off(tmp_path: Path) -> None
     assert core["core_schema_version"] == AUDIT_EVENT_CORE_VERSION
     assert core["event_family"] == "intent"
     assert core["facts"]["scope_file_count"] == 2
+    assert core["facts"]["scope_paths"] == ["pkg/a.py", "tests/test_a.py"]
     assert core["facts"]["report_digest"] == "a" * 64
     assert "intent_description" not in core["facts"]
 
@@ -249,6 +250,47 @@ def test_event_core_for_event_uses_report_digest_as_proof(tmp_path: Path) -> Non
     assert isinstance(facts, dict)
     assert facts["run_id"] == "run12345"
     assert facts["report_digest"] == "a" * 64
+    assert facts["scope_paths"] == ["pkg/a.py", "tests/test_a.py"]
+
+
+def test_event_core_scope_paths_are_bounded_and_sanitized(tmp_path: Path) -> None:
+    paths = [f"pkg/{index}.py" for index in range(55)]
+    event = replace(
+        _event(tmp_path),
+        payload={
+            "scope": {
+                "allowed_files": ["../escape.py", "/abs.py", *paths],
+                "allowed_related": ["tests/test_z.py"],
+            }
+        },
+    )
+
+    core = event_core_for_event(event)
+    facts = core["facts"]
+
+    assert isinstance(facts, dict)
+    assert len(facts["scope_paths"]) == 50
+    assert facts["scope_paths_truncated"] is True
+    assert "../escape.py" not in facts["scope_paths"]
+    assert "/abs.py" not in facts["scope_paths"]
+
+
+def test_event_core_scope_paths_normalize_dot_prefix(tmp_path: Path) -> None:
+    event = replace(
+        _event(tmp_path),
+        payload={
+            "scope": {
+                "allowed_files": ["./pkg/z.py"],
+                "allowed_related": ["./tests/test_z.py"],
+            }
+        },
+    )
+
+    core = event_core_for_event(event)
+    facts = core["facts"]
+
+    assert isinstance(facts, dict)
+    assert facts["scope_paths"] == ["pkg/z.py", "tests/test_z.py"]
 
 
 def test_sqlite_writer_payload_modes(tmp_path: Path) -> None:

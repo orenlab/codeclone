@@ -100,6 +100,7 @@ def project_trajectory(
         intent_id=intent_id,
         run_ids=run_ids,
         report_digests=report_digests,
+        cores=cores,
     )
     evidence = (
         TrajectoryEvidence(
@@ -296,11 +297,13 @@ def _subjects(
     intent_id: str | None,
     run_ids: Sequence[str],
     report_digests: Sequence[str],
+    cores: Sequence[Mapping[str, object]],
 ) -> tuple[TrajectorySubject, ...]:
     subjects = {
         ("workflow", workflow_id, "about"),
         *{("run", run_id, "observed") for run_id in run_ids},
         *{("report_digest", digest, "evidence") for digest in report_digests},
+        *{("path", path, "about") for path in _scope_paths_from_cores(cores)},
     }
     if intent_id:
         subjects.add(("intent", intent_id, "about"))
@@ -308,6 +311,21 @@ def _subjects(
         TrajectorySubject(subject_kind=kind, subject_key=key, relation=relation)
         for kind, key, relation in sorted(subjects)
     )
+
+
+def _scope_paths_from_cores(cores: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
+    paths: set[str] = set()
+    for core in cores:
+        facts = core.get("facts")
+        if not isinstance(facts, Mapping):
+            continue
+        raw_paths = facts.get("scope_paths")
+        if not isinstance(raw_paths, list):
+            continue
+        for raw_path in raw_paths:
+            if isinstance(raw_path, str) and raw_path.strip():
+                paths.add(raw_path.strip())
+    return tuple(sorted(paths))
 
 
 def _summary(

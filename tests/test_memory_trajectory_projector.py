@@ -84,6 +84,7 @@ def test_project_trajectory_is_deterministic_and_canonicalizes_report_digest() -
             run_id="abcdef12",
             report_digest=digest,
             summary="implement phase",
+            scope_paths=["pkg/a.py", "tests/test_a.py"],
         ),
     )
 
@@ -109,6 +110,12 @@ def test_project_trajectory_is_deterministic_and_canonicalizes_report_digest() -
     assert first.quality_tier == "verified"
     assert first.report_digest == f"sha256:{digest.lower()}"
     assert [step.audit_sequence for step in first.steps] == [1, 2]
+    assert ("path", "pkg/a.py") in {
+        (subject.subject_kind, subject.subject_key) for subject in first.subjects
+    }
+    assert ("path", "tests/test_a.py") in {
+        (subject.subject_kind, subject.subject_key) for subject in first.subjects
+    }
 
 
 def test_project_trajectory_marks_incident_labels() -> None:

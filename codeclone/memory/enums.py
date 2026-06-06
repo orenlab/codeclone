@@ -89,6 +89,7 @@ EvidenceKind = Literal[
     "baseline",
     "cache",
     "audit_event",
+    "trajectory",
     "external_url",
 ]
 

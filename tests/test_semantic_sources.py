@@ -19,7 +19,18 @@ from codeclone.memory.models import (
     MemorySubject,
     generate_memory_id,
 )
-from codeclone.memory.semantic.sources import AuditIndexSource, MemoryIndexSource
+from codeclone.memory.semantic.sources import (
+    AuditIndexSource,
+    MemoryIndexSource,
+    TrajectoryIndexSource,
+)
+from codeclone.memory.trajectory.models import (
+    Trajectory,
+    TrajectoryEvidence,
+    TrajectoryListItem,
+    TrajectoryStep,
+    TrajectorySubject,
+)
 from tests.memory_fixtures import make_module_record
 
 
@@ -37,6 +48,36 @@ class _FakeStore:
 
     def list_subjects_for_memory(self, memory_id: str) -> list[MemorySubject]:
         return self._subjects.get(memory_id, [])
+
+
+class _FakeTrajectoryStore:
+    def __init__(self, trajectories: list[Trajectory]) -> None:
+        self._trajectories = {trajectory.id: trajectory for trajectory in trajectories}
+
+    def list_trajectories(
+        self,
+        *,
+        project_id: str,
+        limit: int = 20,
+    ) -> list[TrajectoryListItem]:
+        items = [
+            TrajectoryListItem(
+                id=trajectory.id,
+                workflow_id=trajectory.workflow_id,
+                outcome=trajectory.outcome,
+                quality_tier=trajectory.quality_tier,
+                event_count=trajectory.event_count,
+                started_at_utc=trajectory.started_at_utc,
+                finished_at_utc=trajectory.finished_at_utc,
+                summary=trajectory.summary,
+            )
+            for trajectory in self._trajectories.values()
+            if trajectory.project_id == project_id
+        ]
+        return items[:limit]
+
+    def find_trajectory(self, trajectory_id: str) -> Trajectory | None:
+        return self._trajectories.get(trajectory_id)
 
 
 def _prose(
@@ -181,3 +222,83 @@ def test_memory_index_source_paginates_records() -> None:
         MemoryIndexSource(store, project_id=project_id).iter_projections()
     )
     assert len(projections) == 250
+
+
+def test_trajectory_index_source_projects_bounded_text() -> None:
+    trajectory = _trajectory("proj-traj")
+    source = TrajectoryIndexSource(
+        _FakeTrajectoryStore([trajectory]),
+        project_id="proj-traj",
+    )
+
+    projections = list(source.iter_projections())
+
+    assert len(projections) == 1
+    projection = projections[0]
+    assert projection.source == "trajectory"
+    assert projection.source_id == trajectory.id
+    assert projection.subject_path == "pkg/service.py"
+    assert "recover stale intent" in projection.text
+    assert "pkg/service.py" in projection.text
+    assert "intent.declared" in projection.text
+    assert "event_core_json" not in projection.text
+    assert '{"secret"' not in projection.text
+
+
+def _trajectory(project_id: str) -> Trajectory:
+    return Trajectory(
+        id="traj-1",
+        project_id=project_id,
+        repo_root_digest="root",
+        workflow_id="intent:intent-1",
+        intent_id="intent-1",
+        primary_run_id="run-after",
+        first_run_id="run-before",
+        last_run_id="run-after",
+        report_digest="sha256:" + "a" * 64,
+        outcome="accepted",
+        quality_tier="verified",
+        labels=("recovered",),
+        summary="recover stale intent before editing service",
+        trajectory_digest="d" * 64,
+        source_event_stream_digest="e" * 64,
+        projection_version="trajectory-v1",
+        event_count=2,
+        step_count=2,
+        incident_count=0,
+        started_at_utc="2026-01-01T00:00:00Z",
+        finished_at_utc="2026-01-01T00:00:01Z",
+        projected_at_utc="2026-01-01T00:00:02Z",
+        updated_at_utc="2026-01-01T00:00:02Z",
+        steps=(
+            TrajectoryStep(
+                step_index=0,
+                audit_sequence=1,
+                event_id="evt-1",
+                event_type="intent.declared",
+                status="active",
+                run_id="run-before",
+                report_digest=None,
+                event_core_sha256="1" * 64,
+                event_core_json='{"secret":"not indexed"}',
+                summary="recover stale intent",
+                created_at_utc="2026-01-01T00:00:00Z",
+            ),
+        ),
+        subjects=(
+            TrajectorySubject(
+                subject_kind="path",
+                subject_key="pkg/service.py",
+                relation="about",
+            ),
+        ),
+        evidence=(
+            TrajectoryEvidence(
+                evidence_kind="audit_event_stream",
+                ref="intent:intent-1",
+                locator="1",
+                digest="e" * 64,
+                created_at_utc="2026-01-01T00:00:02Z",
+            ),
+        ),
+    )

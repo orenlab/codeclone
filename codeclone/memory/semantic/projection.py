@@ -10,6 +10,8 @@ import hashlib
 from collections.abc import Iterable
 
 from ..models import MemoryRecord
+from ..trajectory.models import Trajectory
+from ..trajectory.retrieval import trajectory_semantic_text_parts
 from .models import SemanticProjection
 
 # Prose/decision subset only. Structural records (module_role, test_anchor,
@@ -108,6 +110,35 @@ def project_audit_event(
     )
 
 
+def project_trajectory(
+    trajectory: Trajectory,
+) -> SemanticProjection:
+    """Build deterministic projection text for a stored trajectory.
+
+    Only bounded trajectory projection fields are embedded: summary, outcome,
+    quality tier, labels, path subjects, and compact step summaries. Raw audit
+    payloads and event-core JSON stay out of the semantic sidecar.
+    """
+    text = _join(trajectory_semantic_text_parts(trajectory))
+    return SemanticProjection(
+        source="trajectory",
+        source_id=trajectory.id,
+        project_id=trajectory.project_id,
+        kind="trajectory",
+        subject_path=_primary_trajectory_path(trajectory),
+        status=trajectory.outcome,
+        text=text,
+        text_hash=text_hash(text),
+    )
+
+
+def _primary_trajectory_path(trajectory: Trajectory) -> str | None:
+    for subject in trajectory.subjects:
+        if subject.subject_kind == "path":
+            return subject.subject_key
+    return None
+
+
 __all__ = [
     "INDEXED_AUDIT_EVENTS",
     "INDEXED_MEMORY_TYPES",
@@ -115,5 +146,6 @@ __all__ = [
     "is_indexed_memory_type",
     "project_audit_event",
     "project_memory_record",
+    "project_trajectory",
     "text_hash",
 ]

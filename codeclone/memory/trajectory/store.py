@@ -11,7 +11,7 @@ import json
 import sqlite3
 import uuid
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
 from ...audit.events import repo_root_digest
@@ -22,6 +22,7 @@ from ...audit.reader import (
 )
 from ...report.meta import current_report_timestamp_utc
 from ..models import MemoryProject
+from ..search_index import SearchMatchMode, tokenize_query
 from .models import (
     TRAJECTORY_PROJECTION_VERSION,
     Trajectory,
@@ -254,6 +255,90 @@ def list_trajectories(
     ]
 
 
+def list_trajectories_for_subjects(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    subjects: Mapping[str, Sequence[str]],
+    limit: int = 20,
+) -> list[Trajectory]:
+    pairs = tuple(
+        (kind, key)
+        for kind, keys in sorted(subjects.items())
+        for key in sorted(set(keys))
+        if key
+    )
+    if not pairs:
+        return []
+    clauses = " OR ".join(
+        "(s.subject_kind=? AND s.subject_key=?)" for _kind, _key in pairs
+    )
+    params: list[object] = [project_id]
+    for kind, key in pairs:
+        params.extend([kind, key])
+    rows = conn.execute(
+        f"""
+        SELECT DISTINCT t.id, t.finished_at_utc
+        FROM memory_trajectories t
+        JOIN memory_trajectory_subjects s ON s.trajectory_id = t.id
+        WHERE t.project_id=? AND ({clauses})
+        ORDER BY t.finished_at_utc DESC, t.id ASC
+        LIMIT ?
+        """,
+        (*params, max(1, int(limit))),
+    ).fetchall()
+    return _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
+
+
+def search_trajectories(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    query: str,
+    limit: int = 20,
+    match_mode: SearchMatchMode = "any",
+) -> list[Trajectory]:
+    tokens = tokenize_query(query)
+    if not tokens:
+        return []
+    token_clauses: list[str] = []
+    params: list[object] = [project_id]
+    for token in tokens:
+        escaped = _escape_like(token)
+        token_clauses.append(
+            "("
+            "LOWER(t.summary) LIKE ? ESCAPE '\\' OR "
+            "LOWER(t.workflow_id) LIKE ? ESCAPE '\\' OR "
+            "LOWER(t.labels_json) LIKE ? ESCAPE '\\' OR "
+            "EXISTS ("
+            "SELECT 1 FROM memory_trajectory_subjects s "
+            "WHERE s.trajectory_id=t.id AND "
+            "LOWER(s.subject_key) LIKE ? ESCAPE '\\'"
+            ") OR "
+            "EXISTS ("
+            "SELECT 1 FROM memory_trajectory_steps st "
+            "WHERE st.trajectory_id=t.id AND "
+            "(LOWER(st.event_type) LIKE ? ESCAPE '\\' OR "
+            "LOWER(COALESCE(st.summary, '')) LIKE ? ESCAPE '\\')"
+            ")"
+            ")"
+        )
+        needle = f"%{escaped}%"
+        params.extend([needle, needle, needle, needle, needle, needle])
+    joiner = " AND " if match_mode == "all" else " OR "
+    rows = conn.execute(
+        f"""
+        SELECT t.id
+        FROM memory_trajectories t
+        WHERE t.project_id=? AND ({joiner.join(token_clauses)})
+        ORDER BY t.finished_at_utc DESC, t.id ASC
+        LIMIT ?
+        """,
+        (*params, max(1, int(limit))),
+    ).fetchall()
+    return _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
+
+
 def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory | None:
     row = conn.execute(
         "SELECT * FROM memory_trajectories WHERE id=?",
@@ -292,6 +377,18 @@ def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory 
         subjects=tuple(subjects),
         evidence=tuple(evidence),
     )
+
+
+def _find_trajectories_by_ids(
+    conn: sqlite3.Connection,
+    ids: Sequence[str],
+) -> list[Trajectory]:
+    hydrated: list[Trajectory] = []
+    for trajectory_id in ids:
+        trajectory = find_trajectory(conn, trajectory_id)
+        if trajectory is not None:
+            hydrated.append(trajectory)
+    return hydrated
 
 
 def count_trajectories(conn: sqlite3.Connection, *, project_id: str) -> int:
@@ -520,12 +617,18 @@ def _optional_text(value: object) -> str | None:
     return text or None
 
 
+def _escape_like(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").lower()
+
+
 __all__ = [
     "count_trajectories",
     "find_trajectory",
     "latest_projection_run",
     "list_trajectories",
+    "list_trajectories_for_subjects",
     "rebuild_trajectories_from_audit",
+    "search_trajectories",
     "upsert_trajectory",
     "write_projection_run",
 ]

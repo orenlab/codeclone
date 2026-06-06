@@ -17,7 +17,12 @@ from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from .rebuild import rebuild_semantic_index
-from .sources import AuditIndexSource, IndexSource, MemoryIndexSource
+from .sources import (
+    AuditIndexSource,
+    IndexSource,
+    MemoryIndexSource,
+    TrajectoryIndexSource,
+)
 
 
 class RebuildSemanticIndexMeta(TypedDict):
@@ -79,6 +84,7 @@ def build_semantic_index_sources(
             enabled=config.semantic.index_audit,
             db_path=audit_db_path,
         ),
+        TrajectoryIndexSource(store, project_id=project.id),
     ]
 
 

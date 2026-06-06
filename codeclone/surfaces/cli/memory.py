@@ -40,6 +40,7 @@ from ...memory.trajectory.cli_render import (
     render_projection_run,
     render_trajectory_detail,
     render_trajectory_list,
+    render_trajectory_search_results,
     render_trajectory_status,
 )
 from ...memory.vacuum import run_memory_vacuum
@@ -267,6 +268,19 @@ def _build_parser() -> argparse.ArgumentParser:
     traj_list = trajectory_sub.add_parser("list", help="List stored trajectories.")
     _add_root(traj_list)
     traj_list.add_argument("--limit", type=int, default=20)
+    traj_search = trajectory_sub.add_parser(
+        "search",
+        help="Search stored trajectories by keyword.",
+    )
+    _add_root(traj_search)
+    traj_search.add_argument("query", help="Keyword query.")
+    traj_search.add_argument("--limit", type=int, default=10)
+    traj_search.add_argument(
+        "--match",
+        choices=("any", "all"),
+        default="any",
+        help="Match any token (default) or require all tokens.",
+    )
     traj_show = trajectory_sub.add_parser("show", help="Show one stored trajectory.")
     _add_root(traj_show)
     traj_show.add_argument("trajectory_id")
@@ -633,6 +647,8 @@ def _run_trajectory(
         return _run_trajectory_rebuild(console=console, root_path=root_path)
     if action == "list":
         return _run_trajectory_list(console=console, root_path=root_path, args=args)
+    if action == "search":
+        return _run_trajectory_search(console=console, root_path=root_path, args=args)
     return _run_trajectory_show(console=console, root_path=root_path, args=args)
 
 
@@ -698,6 +714,39 @@ def _run_trajectory_list(
     finally:
         store.close()
     render_trajectory_list(console=console, items=items)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_search(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root_path,
+            backend=config.backend,
+            db_path=resolve_memory_db_path(root_path, config),
+            mode="trajectory_search",
+            query=str(args.query),
+            filters={"match_mode": str(args.match)},
+            max_results=max(1, int(args.limit)),
+        )
+    finally:
+        store.close()
+    payload = result.get("payload")
+    trajectories = payload.get("trajectories") if isinstance(payload, dict) else None
+    typed = [item for item in (trajectories or []) if isinstance(item, dict)]
+    render_trajectory_search_results(
+        console=console,
+        query=str(args.query),
+        trajectories=typed,
+    )
     return int(ExitCode.SUCCESS)
 
 
