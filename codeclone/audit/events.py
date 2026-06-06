@@ -19,7 +19,7 @@ AuditPayloadMode = Literal["off", "compact", "full"]
 AnalysisSource = Literal["mcp", "cli"]
 AuditSurface = Literal["mcp", "cli", "hook", "ide", "ci", "unknown"]
 
-AUDIT_EVENT_CORE_VERSION: Final = "1"
+AUDIT_EVENT_CORE_VERSION: Final = "2"
 
 EVENT_INTENT_DECLARED = "intent.declared"
 EVENT_INTENT_QUEUED = "intent.queued"
@@ -277,7 +277,7 @@ def _event_core_facts(
         EVENT_INTENT_EXPANDED,
         EVENT_INTENT_VIOLATED,
     }:
-        return _compact_check_payload(payload), False
+        return _check_event_core_facts(payload)
     if event_type == EVENT_INTENT_CLEARED:
         return {
             "cleared": _int_value(payload.get("cleared")),
@@ -462,6 +462,60 @@ def _compact_check_payload(payload: Mapping[str, object]) -> dict[str, object]:
         "unexpected_files": len(_sequence(payload.get("unexpected_files"))),
         "forbidden_touched": len(_sequence(payload.get("forbidden_touched"))),
     }
+
+
+def _bounded_path_list(
+    value: object,
+) -> tuple[tuple[str, ...], bool]:
+    normalized: list[str] = []
+    for raw_path in _sequence(value):
+        path = _normalized_event_core_path(raw_path)
+        if path is not None:
+            normalized.append(path)
+    unique = tuple(sorted(set(normalized)))
+    return (
+        unique[:_EVENT_CORE_SCOPE_PATH_LIMIT],
+        len(unique) > _EVENT_CORE_SCOPE_PATH_LIMIT,
+    )
+
+
+def _check_event_core_facts(
+    payload: Mapping[str, object],
+) -> tuple[dict[str, object], bool]:
+    core = _compact_check_payload(payload)
+    truncated = False
+    changed, changed_truncated = _bounded_path_list(payload.get("actual_changed_files"))
+    declared, declared_truncated = _bounded_path_list(payload.get("declared_scope"))
+    unexpected, unexpected_truncated = _bounded_path_list(
+        payload.get("unexpected_files")
+    )
+    forbidden, forbidden_truncated = _bounded_path_list(
+        payload.get("forbidden_touched")
+    )
+    if changed:
+        core["changed_files"] = list(changed)
+    if declared:
+        core["declared_scope_paths"] = list(declared)
+    if unexpected:
+        core["unexpected_files_list"] = list(unexpected)
+    if forbidden:
+        core["forbidden_touched_list"] = list(forbidden)
+    untouched = tuple(sorted(set(declared) - set(changed)))
+    if untouched:
+        bounded = untouched[:_EVENT_CORE_SCOPE_PATH_LIMIT]
+        core["untouched_in_declared"] = list(bounded)
+        if len(untouched) > _EVENT_CORE_SCOPE_PATH_LIMIT:
+            truncated = True
+    truncated = (
+        truncated
+        or changed_truncated
+        or declared_truncated
+        or unexpected_truncated
+        or forbidden_truncated
+    )
+    if truncated:
+        core["paths_truncated"] = True
+    return core, truncated
 
 
 def _compact_analysis_completed_payload(

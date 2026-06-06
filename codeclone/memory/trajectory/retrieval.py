@@ -18,6 +18,33 @@ DEFAULT_TRAJECTORY_STEP_LIMIT = 12
 TRAJECTORY_PREVIEW_CHARS = 220
 
 
+def trajectory_excluded_from_default_retrieval(
+    trajectory: Trajectory,
+    *,
+    include_routine: bool,
+) -> bool:
+    if include_routine:
+        return False
+    if trajectory.workflow_id.startswith("run:"):
+        return True
+    return trajectory.quality_tier == "routine"
+
+
+def filter_trajectories_for_default_retrieval(
+    trajectories: Sequence[Trajectory],
+    *,
+    include_routine: bool,
+) -> tuple[Trajectory, ...]:
+    return tuple(
+        trajectory
+        for trajectory in trajectories
+        if not trajectory_excluded_from_default_retrieval(
+            trajectory,
+            include_routine=include_routine,
+        )
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class TrajectorySearchResult:
     trajectory: Trajectory
@@ -137,10 +164,15 @@ def rank_trajectories_for_scope(
     scope_paths: Sequence[str],
     symbols: Sequence[str],
     max_results: int = DEFAULT_TRAJECTORY_PREVIEW_LIMIT,
+    include_routine: bool = False,
 ) -> tuple[list[dict[str, object]], bool]:
     normalized_scope = tuple(normalize_memory_scope_path(path) for path in scope_paths)
-    scored = _score_trajectories(
+    visible = filter_trajectories_for_default_retrieval(
         trajectories,
+        include_routine=include_routine,
+    )
+    scored = _score_trajectories(
+        visible,
         scope_paths=normalized_scope,
         symbols=symbols,
         query_tokens=(),
@@ -154,12 +186,17 @@ def rank_trajectories_for_query(
     query: str,
     max_results: int,
     match_mode: SearchMatchMode,
+    include_routine: bool = False,
 ) -> tuple[list[dict[str, object]], bool]:
     tokens = tokenize_query(query)
     if not tokens:
         return [], False
-    scored = _score_trajectories(
+    visible = filter_trajectories_for_default_retrieval(
         trajectories,
+        include_routine=include_routine,
+    )
+    scored = _score_trajectories(
+        visible,
         scope_paths=(),
         symbols=(),
         query_tokens=tokens,
@@ -173,13 +210,18 @@ def filter_trajectories_for_query(
     *,
     query: str,
     match_mode: SearchMatchMode,
+    include_routine: bool = False,
 ) -> tuple[TrajectorySearchResult, ...]:
     tokens = tokenize_query(query)
     if not tokens:
         return ()
+    visible = filter_trajectories_for_default_retrieval(
+        trajectories,
+        include_routine=include_routine,
+    )
     return tuple(
         _score_trajectories(
-            trajectories,
+            visible,
             scope_paths=(),
             symbols=(),
             query_tokens=tokens,
@@ -342,11 +384,13 @@ __all__ = [
     "DEFAULT_TRAJECTORY_STEP_LIMIT",
     "TrajectorySearchResult",
     "compact_step_text",
+    "filter_trajectories_for_default_retrieval",
     "filter_trajectories_for_query",
     "rank_trajectories_for_query",
     "rank_trajectories_for_scope",
     "serialize_trajectory_detail",
     "serialize_trajectory_preview",
+    "trajectory_excluded_from_default_retrieval",
     "trajectory_list_item_to_preview",
     "trajectory_semantic_text_parts",
     "trajectory_status_payload",

@@ -10,82 +10,23 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.audit.events import AuditEvent, repo_root_digest
-from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.models import MemoryEvidence, generate_memory_id
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
 from codeclone.report.meta import current_report_timestamp_utc
 
-from .memory_fixtures import memory_store, seed_path_subject_record
-
-
-def _seed_trajectory(
-    *,
-    root: Path,
-    audit_db: Path,
-    intent_id: str = "intent-traj-001",
-    scope_path: str = "pkg/service.py",
-    description: str = "recover stale intent before editing service",
-) -> None:
-    root_digest = repo_root_digest(root.resolve())
-    writer = SqliteAuditWriter(
-        db_path=audit_db,
-        payloads="compact",
-        retention_days=30,
-    )
-    try:
-        writer.emit(
-            AuditEvent(
-                event_type="intent.declared",
-                severity="info",
-                repo_root_digest=root_digest,
-                agent_pid=123,
-                agent_label="test-agent",
-                intent_id=intent_id,
-                run_id="run-before",
-                report_digest="a" * 64,
-                status="active",
-                payload={
-                    "intent_description": description,
-                    "scope": {"allowed_files": [scope_path]},
-                    "workspace_registered": True,
-                    "ttl_seconds": 3600,
-                    "lease_seconds": 600,
-                },
-            )
-        )
-        writer.emit(
-            AuditEvent(
-                event_type="patch_contract.verified",
-                severity="info",
-                repo_root_digest=root_digest,
-                agent_pid=123,
-                agent_label="test-agent",
-                intent_id=intent_id,
-                run_id="run-after",
-                report_digest="b" * 64,
-                status="accepted",
-                payload={
-                    "status": "accepted",
-                    "structural_delta": {
-                        "regressions": [],
-                        "improvements": [],
-                        "health_delta": 0,
-                    },
-                    "contract_violations": [],
-                    "baseline_abuse": {"detected": False},
-                },
-            )
-        )
-    finally:
-        writer.close()
+from .memory_fixtures import (
+    memory_store,
+    seed_path_subject_record,
+    seed_routine_analysis_audit,
+    seed_trajectory_audit_workflow,
+)
 
 
 def test_get_relevant_memory_returns_scoped_trajectories(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (root, project, store, _db_path):
         audit_db = tmp_path / "audit.sqlite3"
-        _seed_trajectory(root=root, audit_db=audit_db)
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
         seed_path_subject_record(
             store,
             project_id=project.id,
@@ -120,7 +61,7 @@ def test_get_relevant_memory_returns_scoped_trajectories(tmp_path: Path) -> None
 def test_query_engineering_memory_trajectory_modes(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (root, project, store, db_path):
         audit_db = tmp_path / "audit.sqlite3"
-        _seed_trajectory(root=root, audit_db=audit_db)
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
         projection = store.rebuild_trajectories_from_audit(
             project=project,
             root_path=root,
@@ -188,7 +129,7 @@ def test_memory_evidence_can_cite_trajectory_without_digest_change(
 ) -> None:
     with memory_store(tmp_path) as (root, project, store, _db_path):
         audit_db = tmp_path / "audit.sqlite3"
-        _seed_trajectory(root=root, audit_db=audit_db)
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
         projection = store.rebuild_trajectories_from_audit(
             project=project,
             root_path=root,
@@ -225,3 +166,40 @@ def test_memory_evidence_can_cite_trajectory_without_digest_change(
     assert evidence[0].evidence_kind == "trajectory"
     assert evidence[0].ref == trajectory.id
     assert after_digest == before_digest
+
+
+def test_trajectory_search_excludes_run_only_routine_by_default(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_routine_analysis_audit(root=root, audit_db=audit_db)
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        default_search = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="trajectory_search",
+            query="analysis completed",
+        )
+        include_routine = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="trajectory_search",
+            query="analysis completed",
+            filters={"include_routine": True},
+        )
+
+    default_payload = default_search["payload"]
+    include_payload = include_routine["payload"]
+    assert isinstance(default_payload, dict)
+    assert isinstance(include_payload, dict)
+    assert default_payload.get("trajectory_count") == 0
+    assert (include_payload.get("trajectory_count") or 0) >= 1

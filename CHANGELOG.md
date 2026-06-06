@@ -28,6 +28,10 @@ site.
   `codeclone memory approve`). Scope coverage metrics and
   `finish_controlled_change(propose_memory=true)` for draft candidates on
   accepted patches.
+- **Trajectory memory** Deterministic audit-derived workflow
+  timelines in Engineering Memory SQLite (`memory trajectory rebuild`),
+  scoped MCP/CLI retrieval (`trajectories[]`, `trajectory_*` query modes),
+  optional semantic source, and disabled-by-default local JSONL export profiles.
 - **Semantic retrieval.** Opt-in `[tool.codeclone.memory.semantic]` with
   LanceDB sidecar. Local `fastembed` provider (`BAAI/bge-small-en-v1.5`) via
   `codeclone[semantic-local]`; `api` provider reserved for Team+; `local_model`

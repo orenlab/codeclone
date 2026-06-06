@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
@@ -19,6 +21,11 @@ from ...memory.exceptions import MemoryContractError, MemorySemanticUnavailableE
 from ...memory.governance import approve_record, archive_record, reject_record
 from ...memory.ingest import InitOptions
 from ...memory.ingest.runner import run_memory_init
+from ...memory.jobs import (
+    execute_enqueue_projection_rebuild,
+    execute_projection_rebuild_status,
+    execute_run_projection_jobs_once,
+)
 from ...memory.models import MemoryProject, MemoryQuery
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
@@ -42,6 +49,10 @@ from ...memory.trajectory.cli_render import (
     render_trajectory_list,
     render_trajectory_search_results,
     render_trajectory_status,
+)
+from ...memory.trajectory.export import (
+    export_trajectories_jsonl,
+    resolve_export_output_path,
 )
 from ...memory.vacuum import run_memory_vacuum
 from .memory_analysis import load_report_for_memory_init
@@ -115,6 +126,8 @@ def memory_main(argv: list[str]) -> int:
         return _run_semantic(console=console, root_path=root_path, args=args)
     if args.command == "trajectory":
         return _run_trajectory(console=console, root_path=root_path, args=args)
+    if args.command == "jobs":
+        return _run_jobs(console=console, root_path=root_path, args=args)
     parser.print_help()
     return int(ExitCode.CONTRACT_ERROR)
 
@@ -284,6 +297,67 @@ def _build_parser() -> argparse.ArgumentParser:
     traj_show = trajectory_sub.add_parser("show", help="Show one stored trajectory.")
     _add_root(traj_show)
     traj_show.add_argument("trajectory_id")
+    traj_export = trajectory_sub.add_parser(
+        "export",
+        help="Export trajectories to local JSONL (disabled by default).",
+    )
+    _add_root(traj_export)
+    traj_export.add_argument(
+        "--profile",
+        required=True,
+        help="Export profile name (for example agent-change-control-v1).",
+    )
+    traj_export.add_argument(
+        "--out",
+        required=True,
+        help="Output JSONL path (repo-relative or absolute with --allow-external-out).",
+    )
+    traj_export.add_argument(
+        "--allow-external-out",
+        action="store_true",
+        help="Allow writing outside the repository root.",
+    )
+    traj_export.add_argument(
+        "--force",
+        action="store_true",
+        help="Run export even when trajectory_export_enabled=false.",
+    )
+    traj_export.add_argument("--json", action="store_true", help="Emit manifest JSON.")
+
+    jobs_parser = subparsers.add_parser(
+        "jobs",
+        help="Projection rebuild jobs (status / enqueue / run-once / list).",
+    )
+    jobs_sub = jobs_parser.add_subparsers(dest="jobs_action", required=True)
+    jobs_status = jobs_sub.add_parser(
+        "status",
+        help="Show projection rebuild job status.",
+    )
+    _add_root(jobs_status)
+    jobs_enqueue = jobs_sub.add_parser(
+        "enqueue",
+        help="Enqueue a projection rebuild bundle job.",
+    )
+    _add_root(jobs_enqueue)
+    jobs_enqueue.add_argument(
+        "--force",
+        action="store_true",
+        help="Enqueue even when policy is off or stimulus unchanged.",
+    )
+    jobs_enqueue.add_argument(
+        "--no-spawn",
+        action="store_true",
+        help="Do not spawn a background worker process.",
+    )
+    jobs_run = jobs_sub.add_parser(
+        "run-once",
+        help="Claim and run one pending projection rebuild job.",
+    )
+    _add_root(jobs_run)
+    jobs_list = jobs_sub.add_parser("list", help="List recent projection jobs.")
+    _add_root(jobs_list)
+    jobs_list.add_argument("--limit", type=int, default=20)
+    jobs_list.add_argument("--json", action="store_true")
 
     return parser
 
@@ -649,6 +723,8 @@ def _run_trajectory(
         return _run_trajectory_list(console=console, root_path=root_path, args=args)
     if action == "search":
         return _run_trajectory_search(console=console, root_path=root_path, args=args)
+    if action == "export":
+        return _run_trajectory_export(console=console, root_path=root_path, args=args)
     return _run_trajectory_show(console=console, root_path=root_path, args=args)
 
 
@@ -766,6 +842,136 @@ def _run_trajectory_show(
         console.print(f"Trajectory not found: {args.trajectory_id}")
         return int(ExitCode.CONTRACT_ERROR)
     render_trajectory_detail(console=console, trajectory=trajectory)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_export(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        output_path = resolve_export_output_path(
+            root_path=root_path,
+            raw_path=str(args.out),
+            allow_external_out=bool(args.allow_external_out),
+        )
+        result = export_trajectories_jsonl(
+            store=store,
+            project=project,
+            root_path=root_path,
+            config=config,
+            profile_name=str(args.profile),
+            output_path=output_path,
+            force_enabled=bool(args.force),
+        )
+    except MemoryContractError as exc:
+        console.print(str(exc))
+        return int(ExitCode.CONTRACT_ERROR)
+    finally:
+        store.close()
+    if bool(args.json):
+        console.print(json.dumps(result.manifest, sort_keys=True, indent=2))
+    else:
+        console.print(
+            "Trajectory export complete: "
+            f"{result.records_written} record(s) -> {result.output_path}"
+        )
+    return int(ExitCode.SUCCESS)
+
+
+def _run_jobs(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    action = str(args.jobs_action)
+    if action == "status":
+        return _run_jobs_status(console=console, root_path=root_path)
+    if action == "enqueue":
+        return _run_jobs_enqueue(console=console, root_path=root_path, args=args)
+    if action == "run-once":
+        return _run_jobs_run_once(console=console, root_path=root_path, args=args)
+    return _run_jobs_list(console=console, root_path=root_path, args=args)
+
+
+def _run_jobs_json(
+    *,
+    console: PrinterLike,
+    root_path: Path,
+    action: Callable[[], dict[str, object]],
+    fail_on: frozenset[str] = frozenset({"failed"}),
+) -> int:
+    try:
+        payload = action()
+    except MemoryContractError as exc:
+        return _print_memory_contract_error(console, exc)
+    console.print(json.dumps(payload, sort_keys=True, indent=2))
+    if str(payload.get("status", "")) in fail_on:
+        return int(ExitCode.CONTRACT_ERROR)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_jobs_status(*, console: PrinterLike, root_path: Path) -> int:
+    return _run_jobs_json(
+        console=console,
+        root_path=root_path,
+        action=lambda: execute_projection_rebuild_status(root_path=root_path),
+    )
+
+
+def _run_jobs_enqueue(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    return _run_jobs_json(
+        console=console,
+        root_path=root_path,
+        action=lambda: execute_enqueue_projection_rebuild(
+            root_path=root_path,
+            trigger="cli",
+            force=bool(args.force),
+            spawn_worker=not bool(args.no_spawn),
+        ),
+    )
+
+
+def _run_jobs_run_once(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    del args
+    return _run_jobs_json(
+        console=console,
+        root_path=root_path,
+        action=lambda: execute_run_projection_jobs_once(root_path=root_path),
+        fail_on=frozenset({"failed"}),
+    )
+
+
+def _run_jobs_list(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        payload = execute_projection_rebuild_status(
+            root_path=root_path,
+            limit=max(1, int(args.limit)),
+        )
+    except MemoryContractError as exc:
+        return _print_memory_contract_error(console, exc)
+    if bool(args.json):
+        console.print(json.dumps(payload, sort_keys=True, indent=2))
+        return int(ExitCode.SUCCESS)
+    jobs = payload.get("jobs")
+    if not isinstance(jobs, list) or not jobs:
+        console.print("No projection rebuild jobs recorded.")
+        return int(ExitCode.SUCCESS)
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        console.print(
+            f"{job.get('id')} {job.get('status')} "
+            f"trigger={job.get('trigger')} requested={job.get('requested_at_utc')}"
+        )
     return int(ExitCode.SUCCESS)
 
 

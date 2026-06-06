@@ -31,6 +31,7 @@ from .memory_defaults import (
     DEFAULT_SEMANTIC_INDEX_PATH,
     DEFAULT_SEMANTIC_MAX_RESULTS,
     MEMORY_ENV_DB_PATH,
+    MEMORY_ENV_PROJECTION_REBUILD_POLICY,
     MEMORY_ENV_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
     MEMORY_ENV_SEMANTIC_EMBEDDING_CACHE_DIR,
     MEMORY_ENV_SEMANTIC_EMBEDDING_MODEL,
@@ -39,6 +40,7 @@ from .memory_defaults import (
     MEMORY_ENV_SEMANTIC_INDEX_PATH,
     MemoryBackend,
     MemoryMcpSyncPolicy,
+    MemoryProjectionRebuildPolicy,
     SemanticBackend,
     SemanticEmbeddingProvider,
 )
@@ -49,6 +51,7 @@ _VALID_BACKENDS = frozenset({"sqlite", "postgres"})
 _VALID_MCP_SYNC_POLICIES = frozenset(
     {"off", "bootstrap_if_missing", "refresh_when_stale"},
 )
+_VALID_PROJECTION_REBUILD_POLICIES = frozenset({"off", "enqueue_when_stale"})
 
 _SEMANTIC_ENV_OVERRIDES: dict[str, str] = {
     MEMORY_ENV_SEMANTIC_ENABLED: "enabled",
@@ -116,8 +119,15 @@ class MemoryConfig:
     git_hotspot_period_days: int
     git_hotspot_min_changes: int
     mcp_sync_policy: MemoryMcpSyncPolicy
+    projection_rebuild_policy: MemoryProjectionRebuildPolicy
+    projection_rebuild_running_timeout_seconds: int
+    projection_rebuild_spawn_worker: bool
     trajectories_enabled: bool
     trajectory_retention_days: int
+    trajectory_export_enabled: bool
+    trajectory_export_include_payloads: bool
+    trajectory_export_max_record_bytes: int
+    trajectory_export_max_file_bytes: int
     semantic: SemanticConfig = field(default_factory=SemanticConfig)
 
 
@@ -232,6 +242,19 @@ def resolve_memory_config(
         valid=_VALID_MCP_SYNC_POLICIES,
     )
 
+    projection_policy_raw = _memory_choice(
+        merged["projection_rebuild_policy"],
+        key="projection_rebuild_policy",
+        valid=_VALID_PROJECTION_REBUILD_POLICIES,
+    )
+    env_projection_policy = os.environ.get(MEMORY_ENV_PROJECTION_REBUILD_POLICY)
+    if env_projection_policy is not None:
+        projection_policy_raw = _memory_choice(
+            env_projection_policy,
+            key="projection_rebuild_policy",
+            valid=_VALID_PROJECTION_REBUILD_POLICIES,
+        )
+
     env_db_path = os.environ.get(MEMORY_ENV_DB_PATH)
     db_path_raw: object = env_db_path if env_db_path is not None else merged["db_path"]
     db_path_value = _resolve_memory_state_path(
@@ -282,11 +305,35 @@ def resolve_memory_config(
             key="git_hotspot_min_changes",
         ),
         mcp_sync_policy=policy_raw,  # type: ignore[arg-type]
+        projection_rebuild_policy=projection_policy_raw,  # type: ignore[arg-type]
+        projection_rebuild_running_timeout_seconds=_memory_int(
+            merged["projection_rebuild_running_timeout_seconds"],
+            key="projection_rebuild_running_timeout_seconds",
+        ),
+        projection_rebuild_spawn_worker=_memory_bool(
+            merged["projection_rebuild_spawn_worker"],
+            key="projection_rebuild_spawn_worker",
+        ),
         trajectories_enabled=_memory_bool(
             merged["trajectories_enabled"], key="trajectories_enabled"
         ),
         trajectory_retention_days=_memory_int(
             merged["trajectory_retention_days"], key="trajectory_retention_days"
+        ),
+        trajectory_export_enabled=_memory_bool(
+            merged["trajectory_export_enabled"], key="trajectory_export_enabled"
+        ),
+        trajectory_export_include_payloads=_memory_bool(
+            merged["trajectory_export_include_payloads"],
+            key="trajectory_export_include_payloads",
+        ),
+        trajectory_export_max_record_bytes=_memory_int(
+            merged["trajectory_export_max_record_bytes"],
+            key="trajectory_export_max_record_bytes",
+        ),
+        trajectory_export_max_file_bytes=_memory_int(
+            merged["trajectory_export_max_file_bytes"],
+            key="trajectory_export_max_file_bytes",
         ),
         semantic=_resolve_semantic_config(
             merged.get(SEMANTIC_NESTED_TABLE_KEY),

@@ -89,18 +89,21 @@ def test_record_visible_serialize_and_parse_filters_branches() -> None:
     payload = retrieval_service._serialize_evidence(evidence)
     assert payload["evidence_kind"] == "report"
 
-    types, statuses, confidences, mode = retrieval_service._parse_filters(
-        {
-            "types": ["contract_note"],
-            "statuses": ["active"],
-            "confidences": ["verified"],
-            "match_mode": "all",
-        }
+    types, statuses, confidences, mode, include_routine = (
+        retrieval_service._parse_filters(
+            {
+                "types": ["contract_note"],
+                "statuses": ["active"],
+                "confidences": ["verified"],
+                "match_mode": "all",
+            }
+        )
     )
     assert types == ("contract_note",)
     assert statuses == ("active",)
     assert confidences == ("verified",)
     assert mode == "all"
+    assert include_routine is False
 
 
 def test_retrieval_service_error_and_fallback_branches() -> None:

@@ -331,6 +331,7 @@ def get_relevant_memory(
     max_records: int = 20,
     include_stale: bool = False,
     include_drafts: bool = False,
+    include_routine: bool = False,
     detail_level: str = "compact",
 ) -> dict[str, object]:
     normalized_detail = _normalize_detail_level(detail_level)
@@ -385,6 +386,7 @@ def get_relevant_memory(
         scope_paths=normalized_scope,
         symbols=tuple(normalized_symbols),
         max_results=min(max_records, DEFAULT_TRAJECTORY_PREVIEW_LIMIT),
+        include_routine=include_routine,
     )
     coverage: dict[str, object]
     if normalized_scope:
@@ -422,13 +424,15 @@ def _parse_filters(
     tuple[MemoryStatus, ...],
     tuple[MemoryConfidence, ...],
     SearchMatchMode,
+    bool,
 ]:
     types: list[MemoryRecordType] = []
     statuses: list[MemoryStatus] = []
     confidences: list[MemoryConfidence] = []
     match_mode: SearchMatchMode = "any"
+    include_routine = False
     if filters is None:
-        return (), (), (), match_mode
+        return (), (), (), match_mode, include_routine
     raw_types = filters.get("types")
     if isinstance(raw_types, list):
         types.extend(cast(MemoryRecordType, str(item)) for item in raw_types)
@@ -443,7 +447,15 @@ def _parse_filters(
     raw_match = filters.get("match_mode")
     if raw_match in {"all", "any"}:
         match_mode = cast(SearchMatchMode, raw_match)
-    return tuple(types), tuple(statuses), tuple(confidences), match_mode
+    if bool(filters.get("include_routine")):
+        include_routine = True
+    return (
+        tuple(types),
+        tuple(statuses),
+        tuple(confidences),
+        match_mode,
+        include_routine,
+    )
 
 
 def _handle_status_mode(
@@ -628,6 +640,7 @@ def _handle_trajectory_search_mode(
     query: str | None,
     max_results: int,
     match_mode: SearchMatchMode,
+    include_routine: bool = False,
 ) -> dict[str, object]:
     statement = _require_query_field(query, mode=mode, field="query")
     candidates = store.search_trajectories(
@@ -641,6 +654,7 @@ def _handle_trajectory_search_mode(
         query=statement,
         max_results=max_results,
         match_mode=match_mode,
+        include_routine=include_routine,
     )
     return {
         "mode": mode,
@@ -1154,8 +1168,8 @@ def query_engineering_memory(
             record_id=record_id,
         )
 
-    filter_types, filter_statuses, filter_confidences, match_mode = _parse_filters(
-        filters
+    filter_types, filter_statuses, filter_confidences, match_mode, include_routine = (
+        _parse_filters(filters)
     )
     if mode == "trajectory_search":
         return _handle_trajectory_search_mode(
@@ -1165,6 +1179,7 @@ def query_engineering_memory(
             query=query,
             max_results=max_results,
             match_mode=match_mode,
+            include_routine=include_routine,
         )
     statuses = _search_statuses_for_mode(
         mode,

@@ -299,11 +299,14 @@ def _subjects(
     report_digests: Sequence[str],
     cores: Sequence[Mapping[str, object]],
 ) -> tuple[TrajectorySubject, ...]:
+    path_about, path_touched, path_untouched = _path_subjects_from_cores(cores)
     subjects = {
         ("workflow", workflow_id, "about"),
         *{("run", run_id, "observed") for run_id in run_ids},
         *{("report_digest", digest, "evidence") for digest in report_digests},
-        *{("path", path, "about") for path in _scope_paths_from_cores(cores)},
+        *{("path", path, "about") for path in path_about},
+        *{("path", path, "touched") for path in path_touched},
+        *{("path", path, "untouched") for path in path_untouched},
     }
     if intent_id:
         subjects.add(("intent", intent_id, "about"))
@@ -313,19 +316,36 @@ def _subjects(
     )
 
 
-def _scope_paths_from_cores(cores: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
-    paths: set[str] = set()
+def _path_subjects_from_cores(
+    cores: Sequence[Mapping[str, object]],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    about: set[str] = set()
+    touched: set[str] = set()
+    untouched: set[str] = set()
     for core in cores:
         facts = core.get("facts")
         if not isinstance(facts, Mapping):
             continue
-        raw_paths = facts.get("scope_paths")
-        if not isinstance(raw_paths, list):
-            continue
-        for raw_path in raw_paths:
-            if isinstance(raw_path, str) and raw_path.strip():
-                paths.add(raw_path.strip())
-    return tuple(sorted(paths))
+        about.update(_facts_path_list(facts, "scope_paths"))
+        touched.update(_facts_path_list(facts, "changed_files"))
+        untouched.update(_facts_path_list(facts, "untouched_in_declared"))
+    return (
+        tuple(sorted(about)),
+        tuple(sorted(touched)),
+        tuple(sorted(untouched)),
+    )
+
+
+def _facts_path_list(facts: Mapping[str, object], key: str) -> tuple[str, ...]:
+    raw_paths = facts.get(key)
+    if not isinstance(raw_paths, list):
+        return ()
+    paths = [
+        text.strip()
+        for item in raw_paths
+        if isinstance(item, str) and (text := item.strip())
+    ]
+    return tuple(sorted(set(paths)))
 
 
 def _summary(

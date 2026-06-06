@@ -37,9 +37,13 @@ controlled edits.
 | 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                                  |
 | 18.7  | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`           |
 | 20    | Optional semantic retrieval (LanceDB sidecar)                 | `[tool.codeclone.memory.semantic]`; CLI `memory semantic *`; MCP/CLI search `--semantic` |
+| 22    | Audit event core for trajectory replay                        | `AUDIT_EVENT_CORE_VERSION`; audit `event_core_json` / `workflow_id`                      |
+| 23    | Trajectory projection + SQLite storage                        | CLI `memory trajectory status\|rebuild\|list\|show\|search`                              |
+| 24    | Scoped trajectory retrieval + memory evidence                 | MCP `get_relevant_memory.trajectories[]`; `query_engineering_memory(mode=trajectory_*)`  |
+| 25    | Disabled-by-default local JSONL export profiles               | CLI `memory trajectory export --profile ... --out ...`                                   |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`1.1`**).
+`codeclone/contracts/__init__.py` (currently **`1.2`**).
 
 Semantic index format (separate contract): `SEMANTIC_INDEX_FORMAT_VERSION`
 (currently **`1`**) in the same module. The vector sidecar is independent of
@@ -738,6 +742,140 @@ Refs:
 - `codeclone/memory/semantic/__init__.py:resolve_semantic_index`
 - `tests/test_semantic_projection.py`, `tests/test_semantic_rebuild.py`,
   `tests/test_mcp_memory_semantic.py`, `tests/test_cli_memory_semantic.py`
+
+---
+
+## Trajectory memory (Phases 22–25)
+
+Trajectory memory is a **deterministic process narrative** derived from the audit
+event core. It complements governed memory cards: cards hold durable repository
+facts; trajectories hold bounded edit-cycle timelines (declare → check → verify →
+receipt).
+
+!!! note "Not authorization"
+    `trajectories[]` and export JSONL are **read-only forensics**. They do not
+    expand scope, approve memory records, override structural findings, or
+    substitute for `finish_controlled_change`.
+
+!!! note "Manual rebuild"
+    Trajectories are **not** projected automatically on finish. Rebuild after
+    audit-enabled workflows:
+
+    ```bash
+    codeclone memory trajectory rebuild --root .
+    ```
+
+    MCP agents: `manage_engineering_memory(action=rebuild_trajectories)`.
+
+### Projection rebuild jobs (schema 1.3)
+
+Trajectory + semantic projections can be rebuilt asynchronously via a
+coalesced job row in Engineering Memory SQLite (`memory_projection_jobs`).
+Default policy is **`off`**; opt in with:
+
+```toml
+[tool.codeclone.memory]
+projection_rebuild_policy = "enqueue_when_stale"  # off | enqueue_when_stale
+```
+
+| Surface           | Command / action                                                                  |
+|-------------------|-----------------------------------------------------------------------------------|
+| CLI status        | `codeclone memory jobs status --root .`                                           |
+| CLI enqueue       | `codeclone memory jobs enqueue --root . [--force] [--no-spawn]`                   |
+| CLI worker        | `codeclone memory jobs run-once --root .`                                         |
+| MCP enqueue       | `manage_engineering_memory(action=enqueue_projection_rebuild)`                    |
+| MCP status        | `manage_engineering_memory(action=projection_rebuild_status)`                     |
+| MCP worker        | `manage_engineering_memory(action=run_projection_jobs_once)`                      |
+| MCP auto (finish) | When policy ≠ `off`, accepted `finish_controlled_change` enqueues + spawns worker |
+
+Jobs never run in CI environments (`CI`, `GITHUB_ACTIONS`, …). Sync rebuild
+escape hatches remain: `rebuild_trajectories` / `rebuild_semantic_index`.
+
+### Architecture
+
+```mermaid
+graph LR
+    AUD[Audit SQLite event core] -->|rebuild| TRJ[memory_trajectories]
+    TRJ --> CLI[CLI list/show/search]
+    TRJ --> MCP[MCP trajectory_* modes]
+    TRJ --> GR[get_relevant_memory.trajectories]
+    TRJ --> EXP[JSONL export profiles]
+```
+
+Module ownership:
+
+| Module                                     | Role                                                   |
+|--------------------------------------------|--------------------------------------------------------|
+| `codeclone/audit/events.py`                | Bounded `event_core_json` (`AUDIT_EVENT_CORE_VERSION`) |
+| `codeclone/memory/trajectory/projector.py` | Deterministic projection                               |
+| `codeclone/memory/trajectory/store.py`     | SQLite persistence + rebuild                           |
+| `codeclone/memory/trajectory/retrieval.py` | Scoped ranking + semantic text                         |
+| `codeclone/memory/trajectory/export.py`    | Local JSONL export (Phase 25)                          |
+| `codeclone/memory/retrieval/service.py`    | MCP/CLI query router                                   |
+
+### Config (`[tool.codeclone.memory]`)
+
+| Key                                  | Default    | Meaning                                  |
+|--------------------------------------|------------|------------------------------------------|
+| `trajectories_enabled`               | `true`     | Gate rebuild/list/search                 |
+| `trajectory_retention_days`          | `365`      | Retention hint for vacuum tooling        |
+| `trajectory_export_enabled`          | `false`    | Gate JSONL export                        |
+| `trajectory_export_include_payloads` | `false`    | Include compact step text in export rows |
+| `trajectory_export_max_record_bytes` | `65536`    | Per-row cap                              |
+| `trajectory_export_max_file_bytes`   | `10485760` | Output file cap                          |
+
+Requires **`audit_enabled=true`** and a readable audit DB for rebuild input.
+
+### CLI
+
+```bash
+codeclone memory trajectory status --root .
+codeclone memory trajectory rebuild --root .
+codeclone memory trajectory list --root . --limit 20
+codeclone memory trajectory show TRAJ_ID --root .
+codeclone memory trajectory search "recover stale intent" --root .
+codeclone memory trajectory export \
+  --root . \
+  --profile agent-change-control-v1 \
+  --out .codeclone/trajectories.jsonl \
+  --force
+```
+
+Export profiles (schema contracts): `agent-change-control-v1`,
+`agent-memory-retrieval-v1`, `agent-recovery-v1`, `agent-security-hardening-v1`.
+Changing profile shape requires a profile version bump.
+
+### MCP retrieval
+
+`get_relevant_memory` adds **`trajectories[]`** beside **`records[]`** when path
+subjects match (declare `scope_paths`, check `changed_files`, or
+`untouched_in_declared`).
+
+`query_engineering_memory` modes:
+
+| Mode                | Scope         | Notes                                                 |
+|---------------------|---------------|-------------------------------------------------------|
+| `trajectory_status` | project       | Projection run manifest                               |
+| `trajectory_search` | query text    | Requires `query`; excludes `run:*` routine by default |
+| `trajectory_get`    | trajectory id | `record_id` = trajectory id                           |
+
+Filter: `filters.include_routine=true` on `trajectory_search` includes single-event
+`run:*` analysis workflows.
+
+Evidence kind **`trajectory`** links memory records to trajectories; human approve
+still required for agent drafts.
+
+### Enterprise boundary (export)
+
+Community CodeClone writes **local JSONL only** — no remote API, upload, or
+training pipeline. Corporate policy packs, signing, approval workflows, and dataset
+registry are out of scope unless explicitly requested.
+
+Refs:
+
+- `codeclone/memory/trajectory/rebuild_workflow.py:execute_trajectory_rebuild`
+- `codeclone/memory/trajectory/export.py:export_trajectories_jsonl`
+- `tests/test_memory_trajectory_*.py`, `tests/test_audit_event_core_v2.py`
 
 ---
 

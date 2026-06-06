@@ -113,6 +113,7 @@ packages = [
     "codeclone.core",
     "codeclone.findings",
     "codeclone.findings.clones",
+    "codeclone.findings.design",
     "codeclone.findings.structural",
     "codeclone.domain",
     "codeclone.meta_markers",
@@ -120,8 +121,10 @@ packages = [
     "codeclone.memory",
     "codeclone.memory.embedding",
     "codeclone.memory.ingest",
+    "codeclone.memory.jobs",
     "codeclone.memory.retrieval",
     "codeclone.memory.semantic",
+    "codeclone.memory.trajectory",
     "codeclone.paths",
     "codeclone.qualnames",
     "codeclone.report",
@@ -191,6 +194,11 @@ allow_model_download = true             # fastembed: download if cache is missin
 dimension = 384
 max_results = 20
 index_audit = true                       # project audit summaries when audit DB exists
+
+[tool.codeclone.memory]
+projection_rebuild_policy = "enqueue_when_stale"              # off | enqueue_when_stale
+projection_rebuild_running_timeout_seconds = 1800
+projection_rebuild_spawn_worker = true
 
 [tool.coverage.report]
 show_missing = true

@@ -118,6 +118,38 @@ def test_project_trajectory_is_deterministic_and_canonicalizes_report_digest() -
     }
 
 
+def test_project_trajectory_adds_touched_path_subjects_from_check_core() -> None:
+    trajectory = project_trajectory(
+        project_id="proj-test",
+        repo_root_digest="root-digest",
+        workflow_id="intent:intent-a-001",
+        records=(
+            _record(
+                1,
+                "intent.declared",
+                status="active",
+                scope_paths=["pkg/a.py"],
+            ),
+            _record(
+                2,
+                "intent.checked",
+                status="clean",
+                changed_files=["pkg/b.py"],
+                declared_scope_paths=["pkg/a.py", "pkg/b.py"],
+                untouched_in_declared=["pkg/a.py"],
+            ),
+            _record(3, "patch_contract.verified", status="accepted"),
+        ),
+        projected_at_utc="2026-01-01T00:00:10Z",
+    )
+    subject_map = {
+        (subject.subject_kind, subject.subject_key, subject.relation)
+        for subject in trajectory.subjects
+    }
+    assert ("path", "pkg/b.py", "touched") in subject_map
+    assert ("path", "pkg/a.py", "untouched") in subject_map
+
+
 def test_project_trajectory_marks_incident_labels() -> None:
     trajectory = project_trajectory(
         project_id="proj-test",

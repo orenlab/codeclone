@@ -21,47 +21,32 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return row is not None
 
 
-def test_fresh_memory_schema_contains_trajectory_tables(tmp_path: Path) -> None:
+def test_fresh_memory_schema_contains_projection_jobs_table(tmp_path: Path) -> None:
     db_path = tmp_path / "memory.sqlite3"
     conn = sqlite3.connect(db_path)
     try:
         create_schema_v1(conn)
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
-        for table in (
-            "memory_trajectories",
-            "memory_trajectory_steps",
-            "memory_trajectory_subjects",
-            "memory_trajectory_evidence",
-            "memory_trajectory_projection_runs",
-            "memory_projection_jobs",
-        ):
-            assert _table_exists(conn, table)
+        assert _table_exists(conn, "memory_projection_jobs")
     finally:
         conn.close()
 
 
-def test_memory_schema_migrates_1_1_to_1_2_trajectory_tables(tmp_path: Path) -> None:
+def test_memory_schema_migrates_1_2_to_1_3_projection_jobs(tmp_path: Path) -> None:
     db_path = tmp_path / "memory.sqlite3"
     conn = sqlite3.connect(db_path)
     try:
         create_schema_v1(conn)
-        for table in (
-            "memory_trajectory_projection_runs",
-            "memory_trajectory_evidence",
-            "memory_trajectory_subjects",
-            "memory_trajectory_steps",
-            "memory_trajectories",
-        ):
-            conn.execute(f"DROP TABLE {table}")
-        set_meta(conn, "schema_version", "1.1")
+        conn.execute("DROP TABLE IF EXISTS memory_projection_jobs")
+        set_meta(conn, "schema_version", "1.2")
         conn.commit()
 
         ensure_schema(conn)
 
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
-        assert _table_exists(conn, "memory_trajectories")
+        assert _table_exists(conn, "memory_projection_jobs")
         migration = conn.execute(
-            "SELECT version FROM memory_schema_migrations WHERE version='1.2'"
+            "SELECT version FROM memory_schema_migrations WHERE version='1.3'"
         ).fetchone()
         assert migration is not None
     finally:

@@ -515,6 +515,12 @@ class _MCPSessionWorkflowMixin:
             )
             if memory_hook:
                 result.update(memory_hook)
+        if verify_status in _ACCEPTED_STATUSES:
+            projection_hook = self.maybe_auto_enqueue_projection_rebuild(
+                root_path=record.root,
+            )
+            if projection_hook is not None:
+                result["projection_rebuild"] = projection_hook
         return result
 
     # ------------------------------------------------------------------

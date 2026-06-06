@@ -61,6 +61,7 @@ class _MCPSessionMemoryMixin:
         max_records: int = 20,
         include_stale: bool = False,
         include_drafts: bool = False,
+        include_routine: bool = False,
         detail_level: str = "compact",
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
@@ -92,6 +93,7 @@ class _MCPSessionMemoryMixin:
                 max_records=max_records,
                 include_stale=include_stale,
                 include_drafts=effective_include_drafts,
+                include_routine=include_routine,
                 detail_level=detail_level,
             )
             if memory_sync is not None:
@@ -264,6 +266,34 @@ class _MCPSessionMemoryMixin:
                         config=config,
                     ),
                 )
+            if normalized == "rebuild_trajectories":
+                config = resolve_memory_config(root_path)
+                from ...memory.trajectory.rebuild_workflow import (
+                    execute_trajectory_rebuild,
+                )
+
+                return cast(
+                    dict[str, object],
+                    execute_trajectory_rebuild(
+                        root_path=root_path,
+                        config=config,
+                    ),
+                )
+            if normalized == "enqueue_projection_rebuild":
+                from ...memory.jobs import execute_enqueue_projection_rebuild
+
+                return execute_enqueue_projection_rebuild(
+                    root_path=root_path,
+                    trigger="explicit",
+                )
+            if normalized == "projection_rebuild_status":
+                from ...memory.jobs import execute_projection_rebuild_status
+
+                return execute_projection_rebuild_status(root_path=root_path)
+            if normalized == "run_projection_jobs_once":
+                from ...memory.jobs import execute_run_projection_jobs_once
+
+                return execute_run_projection_jobs_once(root_path=root_path)
             if normalized == "refresh_from_run":
                 return self._manage_memory_refresh_from_run(
                     root_path,
@@ -310,6 +340,10 @@ class _MCPSessionMemoryMixin:
                 "propose_from_receipt",
                 "refresh_from_run",
                 "rebuild_semantic_index",
+                "rebuild_trajectories",
+                "enqueue_projection_rebuild",
+                "projection_rebuild_status",
+                "run_projection_jobs_once",
                 "register_ide_governance",
                 "prepare_governance",
                 "commit_governance",
@@ -523,6 +557,18 @@ class _MCPSessionMemoryMixin:
             }
         finally:
             store.close()
+
+    def maybe_auto_enqueue_projection_rebuild(
+        self,
+        *,
+        root_path: Path,
+    ) -> dict[str, object] | None:
+        from ...memory.jobs import maybe_auto_enqueue_projection_rebuild
+
+        return maybe_auto_enqueue_projection_rebuild(
+            root_path=root_path,
+            trigger="mcp_finish",
+        )
 
     def _open_memory_store(
         self,

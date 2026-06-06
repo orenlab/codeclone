@@ -13,7 +13,9 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 
+from codeclone.audit.events import AuditEvent, repo_root_digest
 from codeclone.audit.schema import open_audit_db
+from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
@@ -60,6 +62,131 @@ def insert_audit_event(
         conn.commit()
     finally:
         conn.close()
+
+
+def seed_trajectory_audit_workflow(
+    *,
+    audit_db: Path,
+    root: Path,
+    intent_id: str = "intent-traj-001",
+    scope_path: str = "pkg/service.py",
+    description: str = "recover stale intent before editing service",
+    include_scope_check: bool = True,
+) -> None:
+    """Emit a minimal intent workflow into audit for trajectory projection tests."""
+    root_digest = repo_root_digest(root.resolve())
+    writer = SqliteAuditWriter(
+        db_path=audit_db,
+        payloads="compact",
+        retention_days=30,
+    )
+    try:
+        writer.emit(
+            AuditEvent(
+                event_type="intent.declared",
+                severity="info",
+                repo_root_digest=root_digest,
+                agent_pid=123,
+                agent_label="test-agent",
+                intent_id=intent_id,
+                run_id="run-before",
+                report_digest="a" * 64,
+                status="active",
+                payload={
+                    "intent_description": description,
+                    "scope": {"allowed_files": [scope_path]},
+                    "workspace_registered": True,
+                    "ttl_seconds": 3600,
+                    "lease_seconds": 600,
+                },
+            )
+        )
+        if include_scope_check:
+            writer.emit(
+                AuditEvent(
+                    event_type="intent.checked",
+                    severity="info",
+                    repo_root_digest=root_digest,
+                    agent_pid=123,
+                    agent_label="test-agent",
+                    intent_id=intent_id,
+                    run_id="run-before",
+                    report_digest="a" * 64,
+                    status="clean",
+                    payload={
+                        "status": "clean",
+                        "declared_scope": [scope_path],
+                        "actual_changed_files": [scope_path],
+                        "unexpected_files": [],
+                        "forbidden_touched": [],
+                        "required_action": None,
+                        "message": "clean",
+                    },
+                )
+            )
+        writer.emit(
+            AuditEvent(
+                event_type="patch_contract.verified",
+                severity="info",
+                repo_root_digest=root_digest,
+                agent_pid=123,
+                agent_label="test-agent",
+                intent_id=intent_id,
+                run_id="run-after",
+                report_digest="b" * 64,
+                status="accepted",
+                payload={
+                    "status": "accepted",
+                    "structural_delta": {
+                        "regressions": [],
+                        "improvements": [],
+                        "health_delta": 0,
+                    },
+                    "contract_violations": [],
+                    "baseline_abuse": {"detected": False},
+                },
+            )
+        )
+    finally:
+        writer.close()
+
+
+def seed_routine_analysis_audit(
+    *,
+    audit_db: Path,
+    root: Path,
+    run_id: str = "run-routine",
+) -> None:
+    from codeclone.audit.events import EVENT_ANALYSIS_COMPLETED
+
+    writer = SqliteAuditWriter(
+        db_path=audit_db,
+        payloads="compact",
+        retention_days=30,
+    )
+    try:
+        writer.emit(
+            AuditEvent(
+                event_type=EVENT_ANALYSIS_COMPLETED,
+                severity="info",
+                repo_root_digest=repo_root_digest(root.resolve()),
+                agent_pid=123,
+                agent_label="test-agent",
+                run_id=run_id,
+                report_digest="c" * 64,
+                status="ok",
+                payload={
+                    "source": "mcp",
+                    "mode": "full",
+                    "focus": "repository",
+                    "health": {"score": 90, "grade": "A"},
+                    "findings": {"total": 0, "new": 0},
+                    "inventory": {"files": 1},
+                },
+            )
+        )
+    finally:
+        writer.close()
 
 
 def memory_project_db_paths(root: Path) -> tuple[MemoryProject, Path]:

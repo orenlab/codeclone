@@ -22,10 +22,17 @@ from .memory_defaults import (
     DEFAULT_MEMORY_MAX_RECORDS,
     DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
     DEFAULT_MEMORY_MCP_SYNC_POLICY,
+    DEFAULT_MEMORY_PROJECTION_REBUILD_POLICY,
+    DEFAULT_MEMORY_PROJECTION_REBUILD_RUNNING_TIMEOUT_SECONDS,
+    DEFAULT_MEMORY_PROJECTION_REBUILD_SPAWN_WORKER,
     DEFAULT_MEMORY_RECEIPT_RETENTION_DAYS,
     DEFAULT_MEMORY_REJECTED_RETENTION_DAYS,
     DEFAULT_MEMORY_STALE_RETENTION_DAYS,
     DEFAULT_MEMORY_TRAJECTORIES_ENABLED,
+    DEFAULT_MEMORY_TRAJECTORY_EXPORT_ENABLED,
+    DEFAULT_MEMORY_TRAJECTORY_EXPORT_INCLUDE_PAYLOADS,
+    DEFAULT_MEMORY_TRAJECTORY_EXPORT_MAX_FILE_BYTES,
+    DEFAULT_MEMORY_TRAJECTORY_EXPORT_MAX_RECORD_BYTES,
     DEFAULT_MEMORY_TRAJECTORY_RETENTION_DAYS,
 )
 from .spec import ConfigKeySpec
@@ -47,8 +54,15 @@ MEMORY_CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = {
     "git_hotspot_period_days": ConfigKeySpec(expected_type=int),
     "git_hotspot_min_changes": ConfigKeySpec(expected_type=int),
     "mcp_sync_policy": ConfigKeySpec(expected_type=str),
+    "projection_rebuild_policy": ConfigKeySpec(expected_type=str),
+    "projection_rebuild_running_timeout_seconds": ConfigKeySpec(expected_type=int),
+    "projection_rebuild_spawn_worker": ConfigKeySpec(expected_type=bool),
     "trajectories_enabled": ConfigKeySpec(expected_type=bool),
     "trajectory_retention_days": ConfigKeySpec(expected_type=int),
+    "trajectory_export_enabled": ConfigKeySpec(expected_type=bool),
+    "trajectory_export_include_payloads": ConfigKeySpec(expected_type=bool),
+    "trajectory_export_max_record_bytes": ConfigKeySpec(expected_type=int),
+    "trajectory_export_max_file_bytes": ConfigKeySpec(expected_type=int),
 }
 
 MEMORY_PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset({"db_path"})
@@ -70,8 +84,21 @@ MEMORY_CONFIG_DEFAULTS: Final[dict[str, object]] = {
     "git_hotspot_period_days": DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS,
     "git_hotspot_min_changes": DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES,
     "mcp_sync_policy": DEFAULT_MEMORY_MCP_SYNC_POLICY,
+    "projection_rebuild_policy": DEFAULT_MEMORY_PROJECTION_REBUILD_POLICY,
+    "projection_rebuild_running_timeout_seconds": (
+        DEFAULT_MEMORY_PROJECTION_REBUILD_RUNNING_TIMEOUT_SECONDS
+    ),
+    "projection_rebuild_spawn_worker": DEFAULT_MEMORY_PROJECTION_REBUILD_SPAWN_WORKER,
     "trajectories_enabled": DEFAULT_MEMORY_TRAJECTORIES_ENABLED,
     "trajectory_retention_days": DEFAULT_MEMORY_TRAJECTORY_RETENTION_DAYS,
+    "trajectory_export_enabled": DEFAULT_MEMORY_TRAJECTORY_EXPORT_ENABLED,
+    "trajectory_export_include_payloads": (
+        DEFAULT_MEMORY_TRAJECTORY_EXPORT_INCLUDE_PAYLOADS
+    ),
+    "trajectory_export_max_record_bytes": (
+        DEFAULT_MEMORY_TRAJECTORY_EXPORT_MAX_RECORD_BYTES
+    ),
+    "trajectory_export_max_file_bytes": DEFAULT_MEMORY_TRAJECTORY_EXPORT_MAX_FILE_BYTES,
 }
 
 MEMORY_NESTED_TABLE_KEY: Final = "memory"

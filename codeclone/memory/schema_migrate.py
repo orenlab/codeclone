@@ -25,8 +25,11 @@ def migrate_memory_schema(conn: sqlite3.Connection) -> None:
     if current == "1.0":
         _migrate_1_0_to_1_1(conn)
         current = "1.1"
-    if current == "1.1" and ENGINEERING_MEMORY_SCHEMA_VERSION == "1.2":
+    if current == "1.1":
         _migrate_1_1_to_1_2(conn)
+        current = "1.2"
+    if current == "1.2" and ENGINEERING_MEMORY_SCHEMA_VERSION == "1.3":
+        _migrate_1_2_to_1_3(conn)
         return
     msg = (
         f"Unsupported engineering memory schema migration: {current!r} "
@@ -57,6 +60,20 @@ def _migrate_1_1_to_1_2(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO memory_schema_migrations(version, applied_at_utc) "
         "VALUES (?, ?)",
         ("1.2", now),
+    )
+    conn.commit()
+
+
+def _migrate_1_2_to_1_3(conn: sqlite3.Connection) -> None:
+    from .schema_jobs import create_projection_jobs_schema
+
+    create_projection_jobs_schema(conn)
+    now = current_report_timestamp_utc()
+    set_meta(conn, "schema_version", "1.3")
+    conn.execute(
+        "INSERT OR IGNORE INTO memory_schema_migrations(version, applied_at_utc) "
+        "VALUES (?, ?)",
+        ("1.3", now),
     )
     conn.commit()
 

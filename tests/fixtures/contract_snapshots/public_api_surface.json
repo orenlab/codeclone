@@ -132,6 +132,10 @@
       "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "maybe_auto_enqueue_projection_rebuild",
+      "signature": "(self, *, root_path: 'Path') -> 'dict[str, object] | None'"
+    },
+    {
       "name": "query_engineering_memory",
       "signature": "(self, *, root: 'str', mode: 'str', record_id: 'str | None' = None, path: 'str | None' = None, symbol: 'str | None' = None, query: 'str | None' = None, scope: 'Sequence[str] | None' = None, filters: 'Mapping[str, object] | None' = None, max_results: 'int' = 20, include_stale: 'bool' = False, include_drafts: 'bool' = False) -> 'dict[str, object]'"
     },

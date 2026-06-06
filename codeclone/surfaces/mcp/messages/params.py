@@ -396,7 +396,8 @@ MemoryFiltersParam = Annotated[
     Field(
         description=(
             "Optional filters: types, statuses, confidences, match_mode "
-            "(any|all, search mode only)."
+            "(any|all, search mode only), include_routine (trajectory_search; "
+            "default false excludes run:* routine workflows)."
         ),
     ),
 ]
@@ -452,7 +453,10 @@ ManageMemoryActionParam = Annotated[
     Field(
         description=(
             "Agent: record_candidate, validate_claims, propose_from_receipt, "
-            "refresh_from_run, rebuild_semantic_index. IDE channel only (VS Code): "
+            "refresh_from_run, rebuild_semantic_index, rebuild_trajectories, "
+            "enqueue_projection_rebuild, projection_rebuild_status, "
+            "run_projection_jobs_once. "
+            "IDE channel only (VS Code): "
             "register_ide_governance, "
             "prepare_governance, commit_governance. approve/reject/archive are not "
             "available through MCP."

@@ -552,6 +552,17 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "manage_engineering_memory(action=rebuild_semantic_index) after "
             "refresh/init (requires codeclone[semantic-lancedb]); then "
             "query_engineering_memory(mode=search, semantic=true).",
+            "Trajectory precedents: after audit-enabled workflows, run "
+            "codeclone memory trajectory rebuild (CLI) or "
+            "manage_engineering_memory(action=rebuild_trajectories). Scoped "
+            "get_relevant_memory returns trajectories[] separate from records[]. "
+            "Drill down with query_engineering_memory(mode=trajectory_get|"
+            "trajectory_search|trajectory_status). trajectory_search excludes "
+            "run:* routine workflows unless filters.include_routine=true.",
+            "Trajectory export (Phase 25) is disabled by default: "
+            "codeclone memory trajectory export --profile ... --out ... "
+            "requires trajectory_export_enabled=true or CLI --force. "
+            "No remote upload; local JSONL only.",
             "Optional mcp_sync_policy=refresh_when_stale in pyproject for digest-based "
             "auto refresh.",
             "Drill down with query_engineering_memory(mode=for_path|search|get).",
@@ -595,6 +606,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         anti_patterns=(
             "Using memory to justify touching do-not-touch paths.",
             "Skipping get_relevant_memory because blast radius was already read.",
+            "Treating trajectories[] as edit authorization or verified patch proof.",
+            "Exporting trajectories without explicit enablement or --force.",
             "Calling get_relevant_memory without scope, intent_id, or symbols.",
             "Using scope=['.'], path='.', or project root for memory retrieval.",
             "Writing long chat transcripts into record_candidate statements.",
