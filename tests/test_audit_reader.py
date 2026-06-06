@@ -94,6 +94,21 @@ def test_read_latest_analysis_run_cli_source_label(tmp_path: Path) -> None:
     assert snapshot.files == 9
 
 
+def test_read_audit_summary_exposes_replay_identity_fields(tmp_path: Path) -> None:
+    db_path = _write_cli_analysis_event(tmp_path)
+    summary = read_audit_summary(db_path=db_path, limit=5)
+
+    record = summary.events[0]
+    assert record.audit_sequence == 1
+    assert record.workflow_id == "run:runcli1234567890"
+    assert record.surface == "cli"
+    assert record.tool_name == "cli:analysis"
+    assert record.report_digest == "c" * 64
+    assert record.event_core_json is not None
+    assert record.event_core_sha256 is not None
+    assert record.payload_sha256 is not None
+
+
 def test_analysis_payload_from_json_edge_cases() -> None:
     assert _analysis_payload_from_json(None) == {}
     assert _analysis_payload_from_json("") == {}

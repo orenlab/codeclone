@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS controller_events (
     run_id          TEXT,
     intent_id       TEXT,
     report_digest   TEXT,
+    workflow_id     TEXT,
+    surface         TEXT,
+    tool_name       TEXT,
+    event_core_json TEXT,
+    event_core_sha256 TEXT,
+    payload_sha256  TEXT,
     agent_label     TEXT    NOT NULL DEFAULT '',
     agent_pid       INTEGER NOT NULL,
 
@@ -56,6 +62,9 @@ CREATE TABLE IF NOT EXISTS audit_meta (
 _INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_events_intent ON controller_events(intent_id)",
     "CREATE INDEX IF NOT EXISTS idx_events_run ON controller_events(run_id)",
+    "CREATE INDEX IF NOT EXISTS idx_events_workflow ON controller_events(workflow_id)",
+    "CREATE INDEX IF NOT EXISTS idx_events_surface_tool "
+    "ON controller_events(surface, tool_name)",
     "CREATE INDEX IF NOT EXISTS idx_events_type_time "
     "ON controller_events(event_type, created_at_utc)",
     "CREATE INDEX IF NOT EXISTS idx_events_created "
@@ -68,13 +77,19 @@ _INDEX_SQL = (
 
 # Schema versions this build can open: the current version plus any older
 # version reachable by an idempotent in-place migration.
-_MIGRATABLE_VERSIONS = frozenset({"1", "2", "3"})
+_MIGRATABLE_VERSIONS = frozenset({"1", "2", "3", "4"})
 
 # Additive, nullable columns expected on controller_events. Declarative so a
 # single idempotent pass upgrades any older database (pre-token, token-only)
 # to the current shape. Order matches the CREATE TABLE tail and the ALTER
 # append order, so fresh and migrated databases converge on the same layout.
 _ADDITIVE_EVENT_COLUMNS = (
+    ("workflow_id", "TEXT"),
+    ("surface", "TEXT"),
+    ("tool_name", "TEXT"),
+    ("event_core_json", "TEXT"),
+    ("event_core_sha256", "TEXT"),
+    ("payload_sha256", "TEXT"),
     ("estimated_tokens", "INTEGER"),
     ("token_encoding", "TEXT"),
     ("payload_characters", "INTEGER"),

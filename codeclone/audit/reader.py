@@ -37,12 +37,20 @@ class AnalysisRunSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class AuditRecord:
+    audit_sequence: int | None
     event_id: str
     event_type: str
     severity: str
     created_at_utc: str
     run_id: str | None
     intent_id: str | None
+    report_digest: str | None
+    workflow_id: str | None
+    surface: str | None
+    tool_name: str | None
+    event_core_json: str | None
+    event_core_sha256: str | None
+    payload_sha256: str | None
     status: str | None
     agent_label: str
     summary: str | None = None
@@ -217,8 +225,10 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
         token_cols = _has_token_columns(conn)
         if token_cols:
             rows = conn.execute(
-                "SELECT event_id, event_type, severity, created_at_utc, run_id, "
-                "intent_id, status, agent_label, summary, "
+                "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
+                "intent_id, report_digest, workflow_id, surface, tool_name, "
+                "event_core_json, event_core_sha256, payload_sha256, "
+                "status, agent_label, summary, "
                 "estimated_tokens, token_encoding, payload_characters "
                 "FROM controller_events "
                 "ORDER BY created_at_utc DESC, id DESC "
@@ -228,8 +238,10 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
             token_summary = _token_summary(conn)
         else:
             rows = conn.execute(
-                "SELECT event_id, event_type, severity, created_at_utc, run_id, "
-                "intent_id, status, agent_label "
+                "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
+                "intent_id, report_digest, workflow_id, surface, tool_name, "
+                "event_core_json, event_core_sha256, payload_sha256, "
+                "status, agent_label "
                 "FROM controller_events "
                 "ORDER BY created_at_utc DESC, id DESC "
                 "LIMIT ?",
@@ -263,18 +275,26 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
 
 def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
     return AuditRecord(
-        event_id=_str_or_empty(row[0]),
-        event_type=_str_or_empty(row[1]),
-        severity=_str_or_empty(row[2]),
-        created_at_utc=_str_or_empty(row[3]),
-        run_id=_str_or_none(row[4]),
-        intent_id=_str_or_none(row[5]),
-        status=_str_or_none(row[6]),
-        agent_label=_str_or_empty(row[7]),
-        summary=_str_or_none(row[8]) if len(row) > 8 else None,
-        estimated_tokens=_int_or_none(row[9]) if len(row) > 9 else None,
-        token_encoding=_str_or_none(row[10]) if len(row) > 10 else None,
-        payload_characters=_int_or_none(row[11]) if len(row) > 11 else None,
+        audit_sequence=_int_or_none(row[0]),
+        event_id=_str_or_empty(row[1]),
+        event_type=_str_or_empty(row[2]),
+        severity=_str_or_empty(row[3]),
+        created_at_utc=_str_or_empty(row[4]),
+        run_id=_str_or_none(row[5]),
+        intent_id=_str_or_none(row[6]),
+        report_digest=_str_or_none(row[7]),
+        workflow_id=_str_or_none(row[8]),
+        surface=_str_or_none(row[9]),
+        tool_name=_str_or_none(row[10]),
+        event_core_json=_str_or_none(row[11]),
+        event_core_sha256=_str_or_none(row[12]),
+        payload_sha256=_str_or_none(row[13]),
+        status=_str_or_none(row[14]),
+        agent_label=_str_or_empty(row[15]),
+        summary=_str_or_none(row[16]) if len(row) > 16 else None,
+        estimated_tokens=_int_or_none(row[17]) if len(row) > 17 else None,
+        token_encoding=_str_or_none(row[18]) if len(row) > 18 else None,
+        payload_characters=_int_or_none(row[19]) if len(row) > 19 else None,
     )
 
 
@@ -441,15 +461,27 @@ def _read_top_workflows(
         """
         SELECT
             CASE
+                WHEN workflow_id IS NOT NULL
+                    AND workflow_id LIKE 'intent:%' THEN 'intent'
+                WHEN workflow_id IS NOT NULL AND workflow_id LIKE 'run:%' THEN 'run'
+                WHEN workflow_id IS NOT NULL AND workflow_id LIKE 'event:%' THEN 'event'
+                WHEN workflow_id IS NOT NULL AND workflow_id != '' THEN 'workflow'
                 WHEN intent_id IS NOT NULL AND intent_id != '' THEN 'intent'
                 WHEN run_id IS NOT NULL AND run_id != '' THEN 'run'
                 ELSE 'event'
             END AS workflow_kind,
             CASE
+                WHEN workflow_id IS NOT NULL
+                    AND workflow_id LIKE 'intent:%' THEN substr(workflow_id, 8)
+                WHEN workflow_id IS NOT NULL
+                    AND workflow_id LIKE 'run:%' THEN substr(workflow_id, 5)
+                WHEN workflow_id IS NOT NULL
+                    AND workflow_id LIKE 'event:%' THEN substr(workflow_id, 7)
+                WHEN workflow_id IS NOT NULL AND workflow_id != '' THEN workflow_id
                 WHEN intent_id IS NOT NULL AND intent_id != '' THEN intent_id
                 WHEN run_id IS NOT NULL AND run_id != '' THEN run_id
                 ELSE event_id
-            END AS workflow_id,
+            END AS workflow_group_id,
             COUNT(*) AS call_count,
             SUM(estimated_tokens) AS total_tokens,
             MAX(estimated_tokens) AS max_tokens,
@@ -458,8 +490,8 @@ def _read_top_workflows(
             MIN(agent_label) AS agent_label
         FROM controller_events
         WHERE estimated_tokens IS NOT NULL
-        GROUP BY workflow_kind, workflow_id
-        ORDER BY total_tokens DESC, max_tokens DESC, workflow_id ASC
+        GROUP BY workflow_kind, workflow_group_id
+        ORDER BY total_tokens DESC, max_tokens DESC, workflow_group_id ASC
         LIMIT 5
         """
     ).fetchall()

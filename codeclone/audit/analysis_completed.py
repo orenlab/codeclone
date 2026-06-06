@@ -136,6 +136,8 @@ def emit_analysis_completed(
             report_digest=report_digest,
             status=status,
             payload=payload,
+            surface=source,
+            tool_name=f"{source}:analysis",
         )
     )
 

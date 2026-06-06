@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from collections.abc import Mapping
@@ -15,11 +16,15 @@ from typing import TYPE_CHECKING, Protocol
 
 from ..report.meta import current_report_timestamp_utc
 from .events import (
+    AUDIT_EVENT_CORE_VERSION,
     AuditEvent,
     AuditPayloadMode,
     compact_payload_for_event,
+    derive_workflow_id,
+    event_core_for_event,
     event_summary,
     generate_event_id,
+    normalize_audit_surface,
 )
 from .schema import open_audit_db
 from .validation import EventRow, validate_event_row
@@ -37,6 +42,12 @@ INSERT INTO controller_events(
     run_id,
     intent_id,
     report_digest,
+    workflow_id,
+    surface,
+    tool_name,
+    event_core_json,
+    event_core_sha256,
+    payload_sha256,
     agent_label,
     agent_pid,
     status,
@@ -46,7 +57,7 @@ INSERT INTO controller_events(
     token_encoding,
     payload_characters,
     summary
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -135,13 +146,15 @@ def event_to_row(
     payloads: AuditPayloadMode,
     token_estimator: TokenEstimatorMode = "chars_approx",
 ) -> EventRow:
+    event_id = generate_event_id()
     payload_json = _payload_json(event=event, payloads=payloads)
+    event_core_json = _event_core_json(event)
     token_estimate = _estimate_payload_tokens(
         event.payload,
         token_estimator=token_estimator,
     )
     return EventRow(
-        event_id=generate_event_id(),
+        event_id=event_id,
         event_type=event.event_type,
         severity=event.severity,
         created_at_utc=current_report_timestamp_utc(),
@@ -149,6 +162,12 @@ def event_to_row(
         run_id=event.run_id,
         intent_id=event.intent_id,
         report_digest=event.report_digest,
+        workflow_id=derive_workflow_id(event, event_id),
+        surface=normalize_audit_surface(event.surface, payload=event.payload),
+        tool_name=_normalized_tool_name(event.tool_name),
+        event_core_json=event_core_json,
+        event_core_sha256=_sha256_text(event_core_json),
+        payload_sha256=None if payloads == "off" else _sha256_text(payload_json),
         agent_label=event.agent_label,
         agent_pid=event.agent_pid,
         status=event.status,
@@ -196,15 +215,46 @@ def _payload_json(*, event: AuditEvent, payloads: AuditPayloadMode) -> str:
     if payload is None:
         return "{}"
     try:
-        return json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=True,
-            default=str,
-        )
+        return _canonical_json(payload)
     except (TypeError, ValueError):
         return "{}"
+
+
+def _event_core_json(event: AuditEvent) -> str:
+    try:
+        return _canonical_json(event_core_for_event(event))
+    except (TypeError, ValueError):
+        return _canonical_json(
+            {
+                "core_schema_version": AUDIT_EVENT_CORE_VERSION,
+                "event_family": "unknown",
+                "event_type": event.event_type,
+                "status": event.status or "",
+                "facts": {},
+                "truncated": True,
+            }
+        )
+
+
+def _canonical_json(payload: Mapping[str, object]) -> str:
+    return json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=str,
+    )
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _normalized_tool_name(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = value.strip()
+    return text or None
 
 
 __all__ = [

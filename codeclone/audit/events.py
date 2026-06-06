@@ -12,11 +12,14 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Final, Literal, cast
 
 AuditSeverity = Literal["info", "warn", "error"]
 AuditPayloadMode = Literal["off", "compact", "full"]
 AnalysisSource = Literal["mcp", "cli"]
+AuditSurface = Literal["mcp", "cli", "hook", "ide", "ci", "unknown"]
+
+AUDIT_EVENT_CORE_VERSION: Final = "1"
 
 EVENT_INTENT_DECLARED = "intent.declared"
 EVENT_INTENT_QUEUED = "intent.queued"
@@ -43,6 +46,8 @@ EVENT_ANALYSIS_COMPLETED = "analysis.completed"
 
 ANALYSIS_SOURCE_MCP: AnalysisSource = "mcp"
 ANALYSIS_SOURCE_CLI: AnalysisSource = "cli"
+
+KNOWN_AUDIT_SURFACES = frozenset({"mcp", "cli", "hook", "ide", "ci", "unknown"})
 
 KNOWN_EVENT_TYPES = frozenset(
     {
@@ -107,6 +112,9 @@ class AuditEvent:
     report_digest: str | None = None
     status: str | None = None
     payload: Mapping[str, object] | None = None
+    workflow_id: str | None = None
+    surface: AuditSurface | None = None
+    tool_name: str | None = None
 
 
 def generate_event_id() -> str:
@@ -116,6 +124,61 @@ def generate_event_id() -> str:
 
 def repo_root_digest(root_path: Path) -> str:
     return hashlib.sha256(str(root_path).encode("utf-8")).hexdigest()[:16]
+
+
+def derive_workflow_id(event: AuditEvent, event_id: str) -> str:
+    """Return the deterministic workflow grouping id for an audit row.
+
+    Intent and run handles are grouping aids, not proof fields.  Report content
+    identity stays in ``report_digest`` and in event-core facts when present.
+    """
+    if event.intent_id:
+        return f"intent:{event.intent_id}"
+    if event.run_id:
+        return f"run:{event.run_id}"
+    explicit = _explicit_workflow_id(event)
+    if explicit:
+        return explicit
+    return f"event:{event_id}"
+
+
+def normalize_audit_surface(
+    surface: AuditSurface | str | None,
+    *,
+    payload: Mapping[str, object] | None = None,
+) -> AuditSurface:
+    if isinstance(surface, str):
+        normalized = surface.strip().lower()
+        if normalized in KNOWN_AUDIT_SURFACES:
+            return cast(AuditSurface, normalized)
+    payload_source = _payload_source(payload)
+    if payload_source in {ANALYSIS_SOURCE_MCP, ANALYSIS_SOURCE_CLI}:
+        return payload_source
+    return "unknown"
+
+
+def event_core_for_event(event: AuditEvent) -> dict[str, object]:
+    """Build bounded machine facts used by trajectory replay.
+
+    This is deliberately separate from compact/full audit payloads: compact
+    payloads are human-friendly forensics, while event core is deterministic
+    replay input.  It never copies unbounded payload lists or prose.
+    """
+    facts, truncated = _event_core_facts(event.event_type, event.payload)
+    if event.intent_id:
+        facts.setdefault("intent_id", event.intent_id)
+    if event.run_id:
+        facts.setdefault("run_id", event.run_id)
+    if event.report_digest:
+        facts.setdefault("report_digest", event.report_digest)
+    return {
+        "core_schema_version": AUDIT_EVENT_CORE_VERSION,
+        "event_family": _event_family(event.event_type),
+        "event_type": event.event_type,
+        "status": event.status or str(facts.get("status", "")),
+        "facts": facts,
+        "truncated": truncated,
+    }
 
 
 def compact_payload_for_event(
@@ -186,6 +249,77 @@ def compact_payload_for_event(
             ),
         }
     return _compact_identifiers(payload)
+
+
+def _event_core_facts(
+    event_type: str,
+    payload: Mapping[str, object] | None,
+) -> tuple[dict[str, object], bool]:
+    if payload is None:
+        return {}, False
+    if event_type in _INTENT_PAYLOAD_EVENTS:
+        core = dict(_compact_intent_payload(payload))
+        core.pop("intent_description", None)
+        return core, False
+    if event_type == EVENT_INTENT_QUEUE_BLOCKED:
+        return {
+            "intent_id": str(payload.get("intent_id", "")),
+            "blocking_count": _int_value(payload.get("blocking_count")),
+        }, False
+    if event_type in {
+        EVENT_INTENT_CHECKED,
+        EVENT_INTENT_EXPANDED,
+        EVENT_INTENT_VIOLATED,
+    }:
+        return _compact_check_payload(payload), False
+    if event_type == EVENT_INTENT_CLEARED:
+        return {
+            "cleared": _int_value(payload.get("cleared")),
+            "workspace_cleared": bool(payload.get("workspace_cleared")),
+        }, False
+    if event_type == EVENT_WORKSPACE_CONFLICT:
+        return {
+            "concurrent_intents": _sequence_field_count(
+                payload,
+                "concurrent_intents",
+            )
+        }, False
+    if event_type == EVENT_WORKSPACE_GC:
+        return {
+            "removed": _int_value(payload.get("removed")),
+            "stale_count": _int_value(payload.get("stale_count")),
+            "orphaned_count": _int_value(payload.get("orphaned_count")),
+        }, False
+    if event_type == EVENT_BLAST_RADIUS:
+        return _compact_blast_radius_payload(payload), False
+    if event_type == EVENT_ANALYSIS_COMPLETED:
+        return _compact_analysis_completed_payload(payload), False
+    if event_type == EVENT_PATCH_BUDGET:
+        return _compact_budget_payload(payload), False
+    if event_type in {
+        EVENT_PATCH_VERIFIED,
+        EVENT_PATCH_VIOLATED,
+        EVENT_PATCH_EXPIRED,
+        EVENT_BASELINE_ABUSE,
+    }:
+        return _verify_event_core_facts(payload), False
+    if event_type in {EVENT_CLAIM_COMPLETED, EVENT_CLAIM_VIOLATED}:
+        return {
+            "valid": bool(payload.get("valid")),
+            "violations": len(_sequence(payload.get("violations"))),
+            "warnings": len(_sequence(payload.get("warnings"))),
+        }, False
+    if event_type == EVENT_RECEIPT_CREATED:
+        receipt = _mapping(payload.get("receipt"))
+        return {
+            "format": str(payload.get("format", "")),
+            "verdict": str(receipt.get("verdict", "")),
+            "human_decisions": _sequence_field_count(
+                receipt,
+                "human_decision_points",
+            ),
+        }, False
+    return _compact_identifiers(payload), False
 
 
 def _compact_intent_payload(payload: Mapping[str, object]) -> dict[str, object]:
@@ -358,6 +492,19 @@ def _compact_verify_payload(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _verify_event_core_facts(payload: Mapping[str, object]) -> dict[str, object]:
+    delta = _mapping(payload.get("structural_delta"))
+    baseline_abuse = _mapping(payload.get("baseline_abuse"))
+    return {
+        "status": str(payload.get("status", "")),
+        "regressions": len(_sequence(delta.get("regressions"))),
+        "improvements": len(_sequence(delta.get("improvements"))),
+        "health_delta": _int_or_none(delta.get("health_delta")),
+        "contract_violation_count": len(_sequence(payload.get("contract_violations"))),
+        "baseline_abuse": bool(baseline_abuse.get("detected")),
+    }
+
+
 def _compact_identifiers(payload: Mapping[str, object]) -> dict[str, object]:
     keys = ("mode", "status", "reason", "run_id", "intent_id")
     return {key: payload[key] for key in keys if key in payload}
@@ -390,9 +537,30 @@ def _bounded_text(value: object, limit: int) -> str:
     return text[:limit]
 
 
+def _event_family(event_type: str) -> str:
+    head, _, _tail = event_type.partition(".")
+    return head or "unknown"
+
+
+def _explicit_workflow_id(event: AuditEvent) -> str:
+    candidates = (event.workflow_id, _mapping(event.payload).get("workflow_id"))
+    for candidate in candidates:
+        if isinstance(candidate, str):
+            stripped = candidate.strip()
+            if stripped:
+                return stripped
+    return ""
+
+
+def _payload_source(payload: Mapping[str, object] | None) -> str:
+    source = _mapping(payload).get("source")
+    return source.strip().lower() if isinstance(source, str) else ""
+
+
 __all__ = [
     "ANALYSIS_SOURCE_CLI",
     "ANALYSIS_SOURCE_MCP",
+    "AUDIT_EVENT_CORE_VERSION",
     "EVENT_ANALYSIS_COMPLETED",
     "EVENT_BASELINE_ABUSE",
     "EVENT_BLAST_RADIUS",
@@ -415,6 +583,7 @@ __all__ = [
     "EVENT_RECEIPT_CREATED",
     "EVENT_WORKSPACE_CONFLICT",
     "EVENT_WORKSPACE_GC",
+    "KNOWN_AUDIT_SURFACES",
     "KNOWN_EVENT_TYPES",
     "PAYLOAD_MODES",
     "SUMMARY_TEXT_LIMIT",
@@ -422,8 +591,12 @@ __all__ = [
     "AuditEvent",
     "AuditPayloadMode",
     "AuditSeverity",
+    "AuditSurface",
     "compact_payload_for_event",
+    "derive_workflow_id",
+    "event_core_for_event",
     "event_summary",
     "generate_event_id",
+    "normalize_audit_surface",
     "repo_root_digest",
 ]

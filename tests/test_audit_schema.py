@@ -20,6 +20,22 @@ from codeclone.audit.validation import (
     validate_retention_days,
 )
 
+_CURRENT_SCHEMA_COLUMNS = (
+    "summary",
+    "agent_start_epoch",
+    "workflow_id",
+    "surface",
+    "tool_name",
+    "event_core_json",
+    "event_core_sha256",
+    "payload_sha256",
+)
+
+
+def _assert_columns_present(columns: set[str], expected: tuple[str, ...]) -> None:
+    missing = [column for column in expected if column not in columns]
+    assert missing == []
+
 
 def test_open_audit_db_creates_schema_and_meta(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
@@ -90,7 +106,7 @@ def test_payload_mode_and_retention_validation() -> None:
         validate_retention_days(0)
 
 
-def test_fresh_database_is_v3_with_agent_start_epoch_column(tmp_path: Path) -> None:
+def test_fresh_database_is_v4_with_event_core_columns(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
 
     conn = open_audit_db(db_path)
@@ -105,13 +121,12 @@ def test_fresh_database_is_v3_with_agent_start_epoch_column(tmp_path: Path) -> N
     finally:
         conn.close()
 
-    assert "summary" in columns
-    assert "agent_start_epoch" in columns
+    _assert_columns_present(columns, _CURRENT_SCHEMA_COLUMNS)
     assert version == (AUDIT_SCHEMA_VERSION,)
-    assert AUDIT_SCHEMA_VERSION == "3"
+    assert AUDIT_SCHEMA_VERSION == "4"
 
 
-def test_v2_database_migrates_to_v3_preserving_rows(tmp_path: Path) -> None:
+def test_v2_database_migrates_to_v4_preserving_rows(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     conn = sqlite3.connect(db_path)
     try:
@@ -163,20 +178,24 @@ def test_v2_database_migrates_to_v3_preserving_rows(tmp_path: Path) -> None:
             "SELECT value FROM audit_meta WHERE key = 'schema_version'"
         ).fetchone()
         preserved = conn.execute(
-            "SELECT event_id, status, summary, agent_start_epoch "
+            "SELECT event_id, status, summary, agent_start_epoch, workflow_id, "
+            "event_core_json "
             "FROM controller_events WHERE event_id = 'evt_legacy'"
         ).fetchone()
     finally:
         conn.close()
 
-    assert "agent_start_epoch" in columns
+    _assert_columns_present(
+        columns,
+        ("agent_start_epoch", "workflow_id", "event_core_json", "payload_sha256"),
+    )
     assert version == (AUDIT_SCHEMA_VERSION,)
-    assert preserved == ("evt_legacy", "active", "declare", None)
+    assert preserved == ("evt_legacy", "active", "declare", None, None, None)
 
 
-def test_v1_database_migrates_to_v2_preserving_rows(tmp_path: Path) -> None:
-    # An existing v1 database (token columns, no summary) upgrades in place:
-    # the summary column is added, the recorded version advances, and the
+def test_v1_database_migrates_to_current_preserving_rows(tmp_path: Path) -> None:
+    # An existing v1 database (token columns, no summary/core columns) upgrades
+    # in place: missing columns are added, the recorded version advances, and
     # existing audit rows survive untouched.
     db_path = tmp_path / "audit.sqlite3"
     conn = sqlite3.connect(db_path)
@@ -240,8 +259,16 @@ def test_v1_database_migrates_to_v2_preserving_rows(tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    assert "summary" in columns_after
-    assert "agent_start_epoch" in columns_after
+    _assert_columns_present(
+        columns_after,
+        (
+            "summary",
+            "agent_start_epoch",
+            "workflow_id",
+            "event_core_json",
+            "payload_sha256",
+        ),
+    )
     assert version == (AUDIT_SCHEMA_VERSION,)
     assert AUDIT_SCHEMA_VERSION != "1"
     assert preserved == ("evt_legacy", "active", None)

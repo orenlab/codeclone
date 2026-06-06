@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -22,6 +24,8 @@ from ..utils.repo_paths import (
     resolve_under_repo_root,
 )
 from .events import (
+    AUDIT_EVENT_CORE_VERSION,
+    KNOWN_AUDIT_SURFACES,
     KNOWN_EVENT_TYPES,
     PAYLOAD_MODES,
     SUMMARY_TEXT_LIMIT,
@@ -29,7 +33,7 @@ from .events import (
     AuditSeverity,
 )
 
-AUDIT_SCHEMA_VERSION = "3"
+AUDIT_SCHEMA_VERSION = "4"
 DEFAULT_AUDIT_PATH = ".codeclone/db/audit.sqlite3"
 DEFAULT_AUDIT_PAYLOADS: AuditPayloadMode = "compact"
 DEFAULT_AUDIT_RETENTION_DAYS = 30
@@ -45,9 +49,13 @@ _MAX_TIMESTAMP_LEN = 40
 _MAX_DIGEST_LEN = 128
 _MAX_RUN_ID_LEN = 128
 _MAX_INTENT_ID_LEN = 128
+_MAX_WORKFLOW_ID_LEN = 192
+_MAX_SURFACE_LEN = 16
+_MAX_TOOL_NAME_LEN = 128
 _MAX_AGENT_LABEL_LEN = 128
 _MAX_STATUS_LEN = 32
 MAX_PAYLOAD_JSON_LEN = 262_144
+MAX_EVENT_CORE_JSON_LEN = 65_536
 
 
 class AuditConfigError(ValueError):
@@ -80,6 +88,12 @@ class EventRow:
     agent_pid: int
     status: str | None
     payload_json: str
+    workflow_id: str | None = None
+    surface: str | None = None
+    tool_name: str | None = None
+    event_core_json: str | None = None
+    event_core_sha256: str | None = None
+    payload_sha256: str | None = None
     agent_start_epoch: int | None = None
     estimated_tokens: int | None = None
     token_encoding: str | None = None
@@ -96,6 +110,12 @@ class EventRow:
             self.run_id,
             self.intent_id,
             self.report_digest,
+            self.workflow_id,
+            self.surface,
+            self.tool_name,
+            self.event_core_json,
+            self.event_core_sha256,
+            self.payload_sha256,
             self.agent_label,
             self.agent_pid,
             self.status,
@@ -165,6 +185,14 @@ def validate_token_estimator(value: object) -> TokenEstimatorMode:
 
 
 def validate_event_row(row: EventRow) -> None:
+    _validate_event_identity(row)
+    _validate_event_references(row)
+    _validate_surface(row.surface)
+    _validate_agent_identity(row)
+    _validate_payload_contract(row)
+
+
+def _validate_event_identity(row: EventRow) -> None:
     _validate_text(row.event_id, "event_id", max_len=_MAX_EVENT_ID_LEN)
     _validate_text(row.event_type, "event_type", max_len=_MAX_EVENT_TYPE_LEN)
     if row.event_type not in KNOWN_EVENT_TYPES:
@@ -174,24 +202,103 @@ def validate_event_row(row: EventRow) -> None:
         raise AuditValidationError(f"invalid severity: {row.severity}")
     _validate_text(row.created_at_utc, "created_at_utc", max_len=_MAX_TIMESTAMP_LEN)
     _validate_text(row.repo_root_digest, "repo_root_digest", max_len=_MAX_DIGEST_LEN)
+
+
+def _validate_event_references(row: EventRow) -> None:
     _validate_optional_text(row.run_id, "run_id", max_len=_MAX_RUN_ID_LEN)
     _validate_optional_text(row.intent_id, "intent_id", max_len=_MAX_INTENT_ID_LEN)
     _validate_optional_text(row.report_digest, "report_digest", max_len=_MAX_DIGEST_LEN)
+    _validate_optional_text(
+        row.workflow_id,
+        "workflow_id",
+        max_len=_MAX_WORKFLOW_ID_LEN,
+    )
+    _validate_optional_text(row.tool_name, "tool_name", max_len=_MAX_TOOL_NAME_LEN)
+    _validate_optional_event_core(row.event_core_json, row.event_core_sha256)
+
+
+def _validate_surface(surface: str | None) -> None:
+    _validate_optional_text(surface, "surface", max_len=_MAX_SURFACE_LEN)
+    if surface is not None and surface not in KNOWN_AUDIT_SURFACES:
+        raise AuditValidationError(f"invalid surface: {surface}")
+
+
+def _validate_agent_identity(row: EventRow) -> None:
     _validate_text(row.agent_label, "agent_label", max_len=_MAX_AGENT_LABEL_LEN)
     if not isinstance(row.agent_pid, int) or isinstance(row.agent_pid, bool):
         raise AuditValidationError("agent_pid must be an integer")
     if row.agent_pid <= 0:
         raise AuditValidationError("agent_pid must be positive")
-    if row.agent_start_epoch is not None:
-        if not isinstance(row.agent_start_epoch, int) or isinstance(
-            row.agent_start_epoch, bool
-        ):
-            raise AuditValidationError("agent_start_epoch must be an integer")
-        if row.agent_start_epoch < 0:
-            raise AuditValidationError("agent_start_epoch must be non-negative")
+    _validate_agent_start_epoch(row.agent_start_epoch)
+
+
+def _validate_agent_start_epoch(value: int | None) -> None:
+    if value is None:
+        return
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise AuditValidationError("agent_start_epoch must be an integer")
+    if value < 0:
+        raise AuditValidationError("agent_start_epoch must be non-negative")
+
+
+def _validate_payload_contract(row: EventRow) -> None:
     _validate_optional_text(row.status, "status", max_len=_MAX_STATUS_LEN)
     _validate_text(row.payload_json, "payload_json", max_len=MAX_PAYLOAD_JSON_LEN)
+    _validate_optional_payload_hash(row.payload_json, row.payload_sha256)
     _validate_optional_text(row.summary, "summary", max_len=SUMMARY_TEXT_LIMIT)
+
+
+def _validate_optional_event_core(
+    event_core_json: str | None,
+    event_core_sha256: str | None,
+) -> None:
+    if event_core_json is None:
+        if event_core_sha256 is not None:
+            raise AuditValidationError("event_core_sha256 requires event_core_json")
+        return
+    _validate_text(
+        event_core_json,
+        "event_core_json",
+        max_len=MAX_EVENT_CORE_JSON_LEN,
+    )
+    _validate_optional_sha256(event_core_sha256, "event_core_sha256")
+    if event_core_sha256 is None:
+        raise AuditValidationError("event_core_sha256 must not be empty")
+    try:
+        parsed = json.loads(event_core_json)
+    except json.JSONDecodeError as exc:
+        raise AuditValidationError("event_core_json must be JSON") from exc
+    if not isinstance(parsed, dict):
+        raise AuditValidationError("event_core_json must be a JSON object")
+    if parsed.get("core_schema_version") != AUDIT_EVENT_CORE_VERSION:
+        raise AuditValidationError(
+            "event_core_json has unsupported core_schema_version"
+        )
+    if _sha256_text(event_core_json) != event_core_sha256:
+        raise AuditValidationError("event_core_sha256 does not match event_core_json")
+
+
+def _validate_optional_payload_hash(
+    payload_json: str,
+    payload_sha256: str | None,
+) -> None:
+    _validate_optional_sha256(payload_sha256, "payload_sha256")
+    if payload_sha256 is None:
+        return
+    if _sha256_text(payload_json) != payload_sha256:
+        raise AuditValidationError("payload_sha256 does not match payload_json")
+
+
+def _validate_optional_sha256(value: str | None, field: str) -> None:
+    if value is None:
+        return
+    _validate_text(value, field, max_len=64)
+    if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+        raise AuditValidationError(f"{field} must be lowercase sha256 hex")
+
+
+def _sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _validate_optional_text(value: str | None, field: str, *, max_len: int) -> None:
@@ -212,11 +319,13 @@ def _validate_text(value: str, field: str, *, max_len: int) -> None:
 
 
 __all__ = [
+    "AUDIT_EVENT_CORE_VERSION",
     "AUDIT_SCHEMA_VERSION",
     "DEFAULT_AUDIT_PATH",
     "DEFAULT_AUDIT_PAYLOADS",
     "DEFAULT_AUDIT_RETENTION_DAYS",
     "DEFAULT_AUDIT_TOKEN_ESTIMATOR",
+    "MAX_EVENT_CORE_JSON_LEN",
     "MAX_PAYLOAD_JSON_LEN",
     "AuditConfigError",
     "AuditReadError",

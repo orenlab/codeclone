@@ -5,17 +5,22 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from codeclone.audit.events import (
+    AUDIT_EVENT_CORE_VERSION,
     EVENT_INTENT_DECLARED,
     EVENT_PATCH_VERIFIED,
     AuditEvent,
     AuditPayloadMode,
+    derive_workflow_id,
+    event_core_for_event,
     repo_root_digest,
 )
 from codeclone.audit.reader import read_audit_summary
@@ -79,6 +84,16 @@ def _token_fields(db_path: Path) -> tuple[object, object, object]:
     return row[0], row[1], row[2]
 
 
+def _first_row(db_path: Path, sql: str) -> tuple[object, ...]:
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(sql).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return tuple(row)
+
+
 def _assert_positive_token_fields(
     db_path: Path,
     *,
@@ -105,6 +120,135 @@ def test_sqlite_writer_creates_db_and_emits_compact_event(tmp_path: Path) -> Non
     assert summary.intent_events == 1
     assert summary.events[0].event_type == EVENT_INTENT_DECLARED
     assert _payloads(db_path)[0]["scope_file_count"] == 2
+
+
+def test_writer_stores_event_core_even_when_payloads_off(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="off", retention_days=30)
+    try:
+        writer.emit(
+            AuditEvent(
+                event_type=EVENT_INTENT_DECLARED,
+                severity="info",
+                repo_root_digest=repo_root_digest(tmp_path),
+                agent_pid=123,
+                agent_label="test-agent",
+                run_id="run12345",
+                intent_id="intent-run12345-001",
+                report_digest="a" * 64,
+                status="active",
+                payload={
+                    "intent_description": "human text stays out of event core",
+                    "scope": {"allowed_files": ["pkg/a.py", "tests/test_a.py"]},
+                    "ttl_seconds": 3600,
+                },
+                surface="mcp",
+                tool_name="mcp:start_controlled_change",
+            )
+        )
+    finally:
+        writer.close()
+
+    row = _first_row(
+        db_path,
+        "SELECT workflow_id, surface, tool_name, event_core_json, "
+        "event_core_sha256, payload_sha256, payload_json "
+        "FROM controller_events LIMIT 1",
+    )
+    (
+        workflow_id,
+        surface,
+        tool_name,
+        core_json,
+        core_hash,
+        payload_hash,
+        payload_json,
+    ) = row
+    assert workflow_id == "intent:intent-run12345-001"
+    assert surface == "mcp"
+    assert tool_name == "mcp:start_controlled_change"
+    assert payload_hash is None
+    assert payload_json == "{}"
+    assert isinstance(core_json, str)
+    assert hashlib.sha256(core_json.encode("utf-8")).hexdigest() == core_hash
+    core = json.loads(core_json)
+    assert core["core_schema_version"] == AUDIT_EVENT_CORE_VERSION
+    assert core["event_family"] == "intent"
+    assert core["facts"]["scope_file_count"] == 2
+    assert core["facts"]["report_digest"] == "a" * 64
+    assert "intent_description" not in core["facts"]
+
+
+def test_payload_hash_uses_exact_stored_payload_json(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
+    try:
+        writer.emit(_event(tmp_path))
+    finally:
+        writer.close()
+
+    payload_json, payload_hash = _first_row(
+        db_path,
+        "SELECT payload_json, payload_sha256 FROM controller_events LIMIT 1",
+    )
+    assert isinstance(payload_json, str)
+    assert hashlib.sha256(payload_json.encode("utf-8")).hexdigest() == payload_hash
+
+
+def test_workflow_id_derivation_prefers_intent_then_run_then_explicit() -> None:
+    base = AuditEvent(
+        event_type=EVENT_PATCH_VERIFIED,
+        severity="info",
+        repo_root_digest="digest",
+        agent_pid=1,
+        agent_label="agent",
+        payload={"workflow_id": "payload-workflow"},
+    )
+    assert (
+        derive_workflow_id(
+            replace(base, intent_id="intent-run-001", run_id="run123"),
+            "evt_test",
+        )
+        == "intent:intent-run-001"
+    )
+    assert (
+        derive_workflow_id(
+            replace(base, run_id="run123"),
+            "evt_test",
+        )
+        == "run:run123"
+    )
+    assert derive_workflow_id(base, "evt_test") == "payload-workflow"
+    assert derive_workflow_id(replace(base, payload={}), "evt_test") == "event:evt_test"
+
+
+def test_event_core_hash_changes_when_core_changes(tmp_path: Path) -> None:
+    from codeclone.audit.writer import event_to_row
+
+    accepted = _event(tmp_path, event_type=EVENT_PATCH_VERIFIED)
+    violated = AuditEvent(
+        event_type=EVENT_PATCH_VERIFIED,
+        severity="warn",
+        repo_root_digest=repo_root_digest(tmp_path),
+        agent_pid=123,
+        agent_label="test-agent",
+        run_id="run12345",
+        intent_id="intent-run12345-001",
+        report_digest="a" * 64,
+        status="violated",
+        payload={"status": "violated", "contract_violations": ["clone_regression"]},
+    )
+    row_a = event_to_row(event=accepted, payloads="compact")
+    row_b = event_to_row(event=violated, payloads="compact")
+    assert row_a.event_core_sha256 != row_b.event_core_sha256
+
+
+def test_event_core_for_event_uses_report_digest_as_proof(tmp_path: Path) -> None:
+    core = event_core_for_event(_event(tmp_path))
+    facts = core["facts"]
+    assert isinstance(facts, dict)
+    assert facts["run_id"] == "run12345"
+    assert facts["report_digest"] == "a" * 64
 
 
 def test_sqlite_writer_payload_modes(tmp_path: Path) -> None:
@@ -456,6 +600,51 @@ def test_event_validation_rejects_unknown_type() -> None:
     )
 
     with pytest.raises(AuditValidationError, match="unknown event_type"):
+        validate_event_row(row)
+
+
+def test_event_validation_rejects_mismatched_event_core_hash() -> None:
+    row = EventRow(
+        event_id="evt_1",
+        event_type="intent.declared",
+        severity="info",
+        created_at_utc="2026-05-25T00:00:00Z",
+        repo_root_digest="a" * 16,
+        run_id=None,
+        intent_id=None,
+        report_digest=None,
+        agent_label="agent",
+        agent_pid=1,
+        status=None,
+        payload_json="{}",
+        event_core_json=json.dumps(
+            {"core_schema_version": AUDIT_EVENT_CORE_VERSION},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        event_core_sha256="0" * 64,
+    )
+    with pytest.raises(AuditValidationError, match="event_core_sha256"):
+        validate_event_row(row)
+
+
+def test_event_validation_rejects_mismatched_payload_hash() -> None:
+    row = EventRow(
+        event_id="evt_1",
+        event_type="intent.declared",
+        severity="info",
+        created_at_utc="2026-05-25T00:00:00Z",
+        repo_root_digest="a" * 16,
+        run_id=None,
+        intent_id=None,
+        report_digest=None,
+        agent_label="agent",
+        agent_pid=1,
+        status=None,
+        payload_json="{}",
+        payload_sha256="0" * 64,
+    )
+    with pytest.raises(AuditValidationError, match="payload_sha256"):
         validate_event_row(row)
 
 
