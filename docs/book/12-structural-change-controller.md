@@ -294,13 +294,13 @@ applicable and whether `after_run_id` is required for verification.
 
 The classifier is a pure function with a deterministic priority chain:
 
-| Priority | Profile                 | When                                    | `after_run` required | Structural checks |
-|----------|-------------------------|-----------------------------------------|----------------------|-------------------|
-| 1        | `state_artifact_change` | Baseline or cache files touched         | no (violated)        | not applicable    |
-| 2        | `python_structural`     | Any `.py` / `.pyi` touched              | yes                  | all               |
-| 3        | `governance_config`     | Config files only (pyproject.toml, CI…) | yes                  | not applicable    |
-| 4        | `documentation_only`    | Only docs files (`.md`, `.rst`, …)      | no                   | not applicable    |
-| 5        | `non_python_patch`      | Other files, no Python or docs          | no                   | not applicable    |
+| Priority | Profile                 | When                                                                                                  | `after_run` required | Structural checks |
+|----------|-------------------------|-------------------------------------------------------------------------------------------------------|----------------------|-------------------|
+| 1        | `state_artifact_change` | CodeClone state artifacts touched (`codeclone.baseline.json`, `.codeclone/**`, `.cache/codeclone/**`) | no (violated)        | not applicable    |
+| 2        | `python_structural`     | Any `.py` / `.pyi` touched                                                                            | yes                  | all               |
+| 3        | `governance_config`     | Config files only (pyproject.toml, CI…)                                                               | yes                  | not applicable    |
+| 4        | `documentation_only`    | Only docs files (`.md`, `.rst`, …)                                                                    | no                   | not applicable    |
+| 5        | `non_python_patch`      | Other files, no Python or docs                                                                        | no                   | not applicable    |
 
 A single file from a higher-priority category overrides the entire patch.
 

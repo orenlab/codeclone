@@ -459,7 +459,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "Out-of-scope dirt is advisory — may yield "
                 "accepted_with_external_changes."
             ),
-            ("Optional STRICT_FINISH env may block own_unscoped_dirty."),
+            ("Optional CODECLONE_STRICT_FINISH env may block own_unscoped_dirty."),
             ("patch_trail + audit patch_trail.computed do not authorize edits."),
             (
                 "Atomic declare/check/verify/clear is legacy/debug only when "
@@ -601,7 +601,10 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "documentation_only and non_python_patch may verify from "
                 "changed_files without after_run."
             ),
-            "state_artifact_change (baseline/cache) is violated, not verified.",
+            (
+                "state_artifact_change (codeclone.baseline.json, .codeclone/**, "
+                ".cache/codeclone/**) is violated, not verified."
+            ),
             (
                 "after_run_not_new when before and after runs match for "
                 "structural profiles."

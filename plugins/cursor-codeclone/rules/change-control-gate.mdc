@@ -43,11 +43,11 @@ If the gate is ON and a required MCP call fails: respond **`BLOCKED`**, state th
 missing step and `intent_id` if any — **do not** edit “anyway”.
 
 `finish_controlled_change` is allowed to inspect the full git tree. It blocks
-only dirty paths that are missing from evidence, new/modified/unknown
-unattributed outside the declared scope, or still overlap a live foreign
-in-scope intent. Unchanged dirty paths that already existed at `start` are
-advisory (`preexisting_unscoped_dirty`), and legacy `own_unscoped_dirty` is only
-a compatibility alias for unattributed blocking dirt.
+finish on `missing_evidence`, `foreign_dirty_overlap`, or `own_unscoped_dirty`
+only when `CODECLONE_STRICT_FINISH` is truthy. New/modified/unknown
+unattributed out-of-scope dirt and unchanged preexisting unscoped dirty are
+advisory — report them; finish may return `accepted_with_external_changes`.
+Live foreign in-scope overlap still blocks.
 
 ## Before finish: incident / complexity memory
 

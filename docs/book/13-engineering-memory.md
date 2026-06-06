@@ -311,10 +311,10 @@ enabled = false                          # default: off, zero extra deps
 backend = "lancedb"
 index_path = ".codeclone/memory/semantic_index.lance"
 embedding_provider = "diagnostic"        # diagnostic | fastembed | local_model | api
-embedding_model = "BAAI/bge-small-en-v1.5"  # used by fastembed
+# When embedding_provider = "fastembed", defaults apply:
+# embedding_model = "BAAI/bge-small-en-v1.5", dimension = 384
 embedding_cache_dir = ".codeclone/memory/fastembed"  # used by fastembed
 allow_model_download = false             # fastembed: require pre-populated model cache
-dimension = 256
 max_results = 20
 index_audit = true                       # project audit summaries when audit DB exists
 ```
@@ -330,6 +330,7 @@ Environment overrides:
 | `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`  | Local embedding cache directory            |
 | `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`; opt in to model download |
 | `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | LanceDB directory path                     |
+| `CODECLONE_PROJECTION_REBUILD_POLICY`            | `off` or `enqueue_when_stale`              |
 
 Unknown keys under `[tool.codeclone.memory.semantic]` are contract errors
 (Pydantic `extra="forbid"` on `SemanticConfig`).
@@ -1023,8 +1024,10 @@ or project-wide dumps.
 
 - Memory store path defaults under `.codeclone/memory/` — not baseline or analysis cache.
 - Init ingest is deterministic given identical report + git inputs.
-- MCP memory tools are read-only except draft writes through governance actions.
-- MCP agents cannot approve/reject/archive; IDE channel + CLI only.
+- MCP memory tools do not mutate baselines, analysis cache, canonical reports, or source files. Agent-visible writes
+  create **draft** records only (`record_candidate`, finish `propose_memory`, atomic `propose_from_receipt`). System
+  actions include `refresh_from_run`, semantic/trajectory/projection rebuild jobs, and finish-side staleness updates.
+  Human approve/reject/archive stays IDE-only (VS Code Memory view).
 - Subject rows deduplicated in retrieval payloads (one row per logical subject key).
 - FTS rebuilt after init/refresh ingest completes.
 - Schema migration is forward-only through `schema_migrate.py`.

@@ -230,13 +230,14 @@ MANAGE_CHANGE_INTENT: Final = (
     "session and optional workspace registry. Actions: 'list_workspace' "
     "to inspect concurrent workspace intents, 'declare' to declare "
     "intended scope before editing, 'get' to retrieve active intent, "
-    "'check' to verify actual diff against declared scope, 'clear' to "
-    "remove intent, 'renew' to refresh the active lease before long "
-    "edits or test runs, 'gc_workspace' to clean stale registry files, "
-    "'recover' to explicitly reclaim a recoverable intent, and "
-    "'reset_workspace' for interrupted-session recovery. In-memory "
-    "intent state remains session-local; workspace coordination state "
-    "is ephemeral under .codeclone/intents/."
+    "'check' to verify actual diff against declared scope, 'promote' to "
+    "activate a queued intent, 'clear' to remove intent, 'renew' to "
+    "refresh the active lease before long edits or test runs, "
+    "'gc_workspace' to clean stale registry files, 'recover' to "
+    "explicitly reclaim a recoverable intent, and 'reset_workspace' for "
+    "interrupted-session recovery. In-memory intent state remains "
+    "session-local; workspace coordination state is ephemeral under "
+    ".codeclone/intents/."
 )
 
 CLEAR_SESSION_RUNS: Final = (

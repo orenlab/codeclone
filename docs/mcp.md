@@ -333,7 +333,7 @@ Atomic declare/check/verify/clear remains for legacy servers — see
 | `manage_change_intent`      | Queue/recovery: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace                                                                                                                                    |
 | `get_blast_radius`          | Advanced pre-edit boundary (also returned by start)                                                                                                                                                                                                   |
 | `get_relevant_memory`       | Scoped memory + optional `trajectories[]` / `patch_trail_summary`. **Requires `root`**                                                                                                                                                                |
-| `query_engineering_memory`  | Modes: search, get, for_path, for_symbol, stale, coverage, status, trajectory_status, trajectory_search, trajectory_get                                                                                                                               |
+| `query_engineering_memory`  | Modes: search, get, for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, trajectory_search, trajectory_get                                                                                                                       |
 | `manage_engineering_memory` | Agent: record_candidate, validate_claims, propose_from_receipt, refresh_from_run, rebuild_semantic_index, rebuild_trajectories, enqueue_projection_rebuild, projection_rebuild_status, run_projection_jobs_once. Approve via VS Code Memory view only |
 | `check_patch_contract`      | Advanced: budget or verify (finish orchestrates verify)                                                                                                                                                                                               |
 | `create_review_receipt`     | Advanced receipt (finish creates by default)                                                                                                                                                                                                          |
@@ -429,6 +429,7 @@ sequenceDiagram
 | Rebuild semantic sidecar    | `manage_engineering_memory(action=rebuild_semantic_index)`                            | LanceDB when semantic enabled                                                                                  |
 | Rebuild trajectories        | `manage_engineering_memory(action=rebuild_trajectories)`                              | After audit-enabled workflows                                                                                  |
 | Projection jobs             | `enqueue_projection_rebuild`, `projection_rebuild_status`, `run_projection_jobs_once` | Async rebuild when policy enabled                                                                              |
+| Draft listing               | `query_engineering_memory(mode=drafts)`                                               | Pending agent drafts                                                                                           |
 | Unclear semantics           | `help(topic="engineering_memory")` or `help(topic="change_control")`                  | Compact playbooks                                                                                              |
 
 Defaults exclude **stale** records. Keyword search excludes drafts unless
@@ -453,7 +454,8 @@ hits as deterministic proximity over projected text, not LLM recall. See
 `get_relevant_memory` is rejected (use `status`/`search` for orientation). List
 responses default to compact statement previews; use `mode=get` or
 `detail_level=full` for complete text. Agent `record_candidate` requires
-`subject_path` and rejects statements above `max_statement_chars` (default 1000).
+`subject_path`; target ≤300 chars (`validate_claims` warns above 500; hard reject
+above `max_statement_chars`, default 1000).
 
 #### Agent write path (draft only)
 
@@ -468,9 +470,8 @@ responses default to compact statement previews; use `mode=get` or
 | Post-edit proposals       | `finish_controlled_change(propose_memory=true)`                                         | draft candidates + staleness          |
 | Atomic fallback           | `manage_engineering_memory(action=propose_from_receipt, …)`                             | draft proposals                       |
 
-**Human promote:** CodeClone VS Code **Memory** view (approve with confirmation) — agents cannot activate records
-through MCP
-drafts via MCP.
+**Human promote:** CodeClone VS Code **Memory** view (approve with confirmation).
+Agents cannot approve/reject/archive records via MCP.
 
 #### Trust boundaries
 
@@ -479,7 +480,7 @@ Memory **cannot**:
 - expand declared edit scope or authorize `do_not_touch` edits
 - override CodeClone structural findings
 - mutate baselines, analysis cache, canonical reports, or source files
-- approve/reject/archive drafts (human CLI only)
+- approve/reject/archive drafts (VS Code Memory view — not MCP)
 
 MCP **can** bootstrap or refresh the memory store via `mcp_sync_policy` and
 `refresh_from_run` — system ingest only, not human governance.
@@ -493,7 +494,26 @@ Treat `draft`, `inferred`, and excluded stale records as **non-authoritative**.
 | `mark_finding_reviewed`  | Session-local review marker (in-memory)                                                               |
 | `list_reviewed_findings` | List reviewed findings for a run                                                                      |
 | `clear_session_runs`     | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process |
-| `help`                   | Bounded workflow and contract guidance                                                                |
+| `help`                   | Bounded workflow and contract guidance (`help(topic=…)` — see table below)                            |
+
+#### Help topics (`help(topic=…)`)
+
+| Topic                   | Use when                                            |
+|-------------------------|-----------------------------------------------------|
+| `workflow`              | First-pass MCP playbook and tool tiers              |
+| `analysis_profile`      | Threshold overrides and profile semantics           |
+| `suppressions`          | Inline `# codeclone: ignore[…]` behavior            |
+| `baseline`              | Baseline trust, schema, and compatibility           |
+| `coverage`              | External Cobertura join semantics                   |
+| `latest_runs`           | Session run history and pinning                     |
+| `review_state`          | Session-local reviewed findings                     |
+| `changed_scope`         | Changed-files analysis and git diff refs            |
+| `change_control`        | `start`/`finish` cycle, hygiene, queue/promote      |
+| `trust_boundaries`      | Report-only vs gating signals                       |
+| `engineering_memory`    | Memory bootstrap, drafts, semantic/trajectory modes |
+| `verification_profiles` | Profile derivation and `after_run_required`         |
+
+`detail` accepts `compact` (default) or `normal` only.
 
 ---
 
@@ -557,6 +577,8 @@ sequenceDiagram
     MCP -->> Agent: run_id
     Agent ->> MCP: start_controlled_change(scope, intent, dirty_scope_policy?)
     MCP -->> Agent: intent_id, blast_radius, budget, edit_allowed
+    Agent ->> MCP: get_relevant_memory(root, scope|intent_id)
+    MCP -->> Agent: ranked memory context
     Note over Agent: edit files
     opt Python structural / governance config
         Agent ->> MCP: analyze_repository

@@ -390,7 +390,12 @@ MemoryRecordIdParam = Annotated[
 ]
 MemoryPathParam = Annotated[
     str | None,
-    Field(description="Repo-relative path for mode=for_path."),
+    Field(
+        description=(
+            "Repo-relative subject path for manage_engineering_memory "
+            "action=record_candidate (required for record_candidate)."
+        ),
+    ),
 ]
 MemorySymbolParam = Annotated[
     str | None,

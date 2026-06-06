@@ -1303,6 +1303,13 @@ def test_mcp_service_help_covers_analysis_profiles() -> None:
     ]
 
 
+def test_help_topic_specs_match_valid_help_topics() -> None:
+    from codeclone.surfaces.mcp._session_shared import _VALID_HELP_TOPICS
+    from codeclone.surfaces.mcp.messages.help_topics import HELP_TOPIC_SPECS
+
+    assert set(HELP_TOPIC_SPECS) == set(_VALID_HELP_TOPICS)
+
+
 def test_mcp_service_help_validates_topic_and_detail() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
@@ -1313,6 +1320,7 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     )
     change_control = service.get_help(topic="change_control", detail="normal")
     assert "start_controlled_change" in str(change_control["key_points"])
+    assert "get_relevant_memory" in str(change_control["key_points"])
     assert "start_controlled_change" in cast(
         "list[str]",
         change_control["recommended_tools"],
@@ -1324,6 +1332,9 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     )
     assert verification_profiles["topic"] == "verification_profiles"
     assert "after_run_required" in str(verification_profiles["key_points"])
+    assert "CODECLONE_STRICT_FINISH" in str(
+        service.get_help(topic="change_control")["key_points"]
+    )
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
         service.get_help(topic="gates")

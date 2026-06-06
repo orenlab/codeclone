@@ -63,12 +63,14 @@ Before editing any repository files:
    — returns scope check, verification, receipt, and clears intent
    — finish **reconciles evidence with the start-time dirty snapshot and the
    full git tree**: under-reported in-scope dirty →
-   `finish_block_reason: missing_evidence`; new/modified/unknown unattributed
-   dirty outside declared scope → hygiene block; unchanged preexisting
-   unscoped dirty → advisory only; foreign active/stale dirty outside your scope
-   → `foreign_attributed_outside_scope` (ignored). **Recoverable** (dead PID)
-   intents do not grant foreign attribution. Legacy `own_unscoped_dirty` means
-   unattributed blocking dirt, not proven agent ownership
+   `finish_block_reason: missing_evidence`; live foreign in-scope overlap →
+   `foreign_dirty_overlap`; unattributed out-of-scope dirt blocks finish only
+   when `CODECLONE_STRICT_FINISH` is truthy (`finish_block_reason:
+   own_unscoped_dirty`). Otherwise new/modified/unknown unattributed out-of-scope
+   dirt and unchanged preexisting unscoped dirty are **advisory** — finish may
+   return `accepted_with_external_changes`. Foreign active/stale dirty outside
+   your scope → `foreign_attributed_outside_scope` (ignored). **Recoverable**
+   (dead PID) intents do not grant foreign attribution
    — if `status: "unverified"`, the intent stays active; follow `next_step`
    (e.g. run `analyze_repository` with a **new** run_id — identical before/after
    runs return `after_run_not_new` for Python structural patches), then call
@@ -129,11 +131,11 @@ compact previews — use `mode=get` or `detail_level=full` for complete text.
 If the edit cycle involved **any** of the following, you **must** write at least
 one durable note through MCP **before** step 7 (`finish`):
 
-| Trigger | Examples |
-|---------|----------|
-| **Incident** | verify/hygiene surprise, `unverified`/`violated` recovery, workaround, blocked step, foreign intent friction |
-| **Complexity** | non-obvious root cause, multi-file debug, near `do_not_touch`, acted on stale/contradiction memory |
-| **Decision** | tradeoff, integration quirk, “next agent must not repeat X” |
+| Trigger        | Examples                                                                                                     |
+|----------------|--------------------------------------------------------------------------------------------------------------|
+| **Incident**   | verify/hygiene surprise, `unverified`/`violated` recovery, workaround, blocked step, foreign intent friction |
+| **Complexity** | non-obvious root cause, multi-file debug, near `do_not_touch`, acted on stale/contradiction memory           |
+| **Decision**   | tradeoff, integration quirk, “next agent must not repeat X”                                                  |
 
 **Skip** only trivial edits (typo, one obvious line, nothing to relearn).
 
@@ -152,10 +154,10 @@ Or batch several notes with `finish_controlled_change(..., propose_memory=true)`
 Optional: `manage_engineering_memory(action=validate_claims, text=...)` on
 `claims_text` before finish.
 
-| Other writes | Tool |
-|--------------|------|
-| During edit (stable observation) | `record_candidate` (same as above) |
-| After accepted patch | `finish(..., propose_memory=true)` → `memory_candidates` |
+| Other writes                     | Tool                                                     |
+|----------------------------------|----------------------------------------------------------|
+| During edit (stable observation) | `record_candidate` (same as above)                       |
+| After accepted patch             | `finish(..., propose_memory=true)` → `memory_candidates` |
 
 Agents **cannot** call `approve` / `reject` / `archive` via MCP. Ask the user to
 use the CodeClone VS Code **Memory** view to promote drafts.
@@ -240,11 +242,12 @@ Routine controller work is automatic. Boundary decisions require the user.
 registry lifecycle — clear abandoned blocked intents via
 `manage_change_intent(action="clear")`. Finish `reason=workspace_hygiene` means
 evidence/scope/git/start snapshot disagree — read `finish_block_reason`
-(`missing_evidence`, `new_unattributed_unscoped_dirty`,
-`modified_unattributed_unscoped_dirty`, `unknown_unattributed_unscoped_dirty`,
-`foreign_dirty_overlap`; legacy `own_unscoped_dirty` may appear as an alias);
-widen scope, fix evidence, reconcile the tree, or coordinate foreign in-scope
-overlap. Do not bypass with atomic verify.
+(`missing_evidence`, `foreign_dirty_overlap`, or `own_unscoped_dirty` only
+under `CODECLONE_STRICT_FINISH`). Advisory hygiene fields such as
+`new_unattributed_unscoped_dirty` are not block reasons — they may appear in
+`external_changes` or `accepted_with_external_changes`. Widen scope, fix
+evidence, reconcile the tree, or coordinate foreign in-scope overlap. Do not
+bypass with atomic verify.
 
 ### Completion gate
 
@@ -282,13 +285,13 @@ the profile — it is computed by `finish_controlled_change` (through
 `check_patch_contract(mode="verify")` internally), or directly by
 `check_patch_contract(mode="verify")` in the atomic workflow.
 
-| Profile                 | When                                                | `after_run` required | Structural checks |
-|-------------------------|-----------------------------------------------------|----------------------|-------------------|
-| `python_structural`     | any `.py` / `.pyi` touched                          | yes                  | all               |
-| `governance_config`     | config files only (pyproject.toml, CI, Dockerfile…) | yes                  | not applicable    |
-| `documentation_only`    | only docs files (`.md`, `.rst`, LICENSE…)           | no                   | not applicable    |
-| `non_python_patch`      | other files, no Python / docs                       | no                   | not applicable    |
-| `state_artifact_change` | baseline or cache touched                           | no (violated)        | not applicable    |
+| Profile                 | When                                                                                                  | `after_run` required | Structural checks |
+|-------------------------|-------------------------------------------------------------------------------------------------------|----------------------|-------------------|
+| `python_structural`     | any `.py` / `.pyi` touched                                                                            | yes                  | all               |
+| `governance_config`     | config files only (pyproject.toml, CI, Dockerfile…)                                                   | yes                  | not applicable    |
+| `documentation_only`    | only docs files (`.md`, `.rst`, LICENSE…)                                                             | no                   | not applicable    |
+| `non_python_patch`      | other files, no Python / docs                                                                         | no                   | not applicable    |
+| `state_artifact_change` | CodeClone state artifacts touched (`codeclone.baseline.json`, `.codeclone/**`, `.cache/codeclone/**`) | no (violated)        | not applicable    |
 
 Key rules:
 
