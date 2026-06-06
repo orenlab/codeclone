@@ -3,6 +3,7 @@
        breaking-change criteria.
      does-not-own: baseline schema (→ 07), cache schema (→ 08),
        report schema (→ 05). -->
+
 # 24. Compatibility and Versioning
 
 ## Purpose
@@ -32,7 +33,9 @@ Current contract versions:
 - `CACHE_VERSION = "2.8"`
 - `REPORT_SCHEMA_VERSION = "2.11"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
-- `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.1"`
+- `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.4"`
+- `PATCH_TRAIL_SCHEMA_VERSION = "1"` (finish-time Patch Trail JSON; audit + SQLite sidecar)
+- `TRAJECTORY_EXPORT_SCHEMA_VERSION = "2"` (JSONL export rows; `codeclone/memory/trajectory/profiles.py`)
 - `SEMANTIC_INDEX_FORMAT_VERSION = "1"` (LanceDB sidecar; separate from SQLite memory schema)
 
 Refs:
@@ -49,7 +52,12 @@ Version bump rules:
 - bump **report schema** for canonical report document shape/meaning changes
 - bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
 - bump **engineering memory schema** for SQLite DDL / governed record-shape changes
-  (`codeclone/memory/schema_migrate.py`)
+  (`codeclone/memory/schema_migrate.py`) — e.g. **`1.4`** adds
+  `memory_trajectory_patch_trails`
+- bump **patch trail schema** (`PATCH_TRAIL_SCHEMA_VERSION`) when finish-time Patch
+  Trail JSON shape changes incompatibly
+- bump **trajectory export schema** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`) when JSONL
+  row shape changes incompatibly
 - bump **semantic index format** when LanceDB projection or stored row fields change
   incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory.md](13-engineering-memory.md))
 
@@ -98,15 +106,15 @@ Refs:
 
 ## Failure modes
 
-| Change type                  | User impact                                                    |
-|------------------------------|----------------------------------------------------------------|
-| Baseline schema bump         | Older unsupported baselines become untrusted until regenerated |
-| Fingerprint bump             | Clone IDs change; baseline regeneration required               |
-| Cache schema bump            | Old caches are ignored and rebuilt automatically               |
-| Report schema bump           | Downstream report consumers must update                        |
-| Metrics-baseline schema bump | Dedicated metrics-baseline files must be regenerated           |
-| Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`       |
-| Semantic index format bump   | LanceDB sidecar invalidated; run `memory semantic rebuild`   |
+| Change type                    | User impact                                                    |
+|--------------------------------|----------------------------------------------------------------|
+| Baseline schema bump           | Older unsupported baselines become untrusted until regenerated |
+| Fingerprint bump               | Clone IDs change; baseline regeneration required               |
+| Cache schema bump              | Old caches are ignored and rebuilt automatically               |
+| Report schema bump             | Downstream report consumers must update                        |
+| Metrics-baseline schema bump   | Dedicated metrics-baseline files must be regenerated           |
+| Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`           |
+| Semantic index format bump     | LanceDB sidecar invalidated; run `memory semantic rebuild`     |
 
 ## Determinism / canonicalization
 

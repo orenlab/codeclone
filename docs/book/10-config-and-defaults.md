@@ -2,6 +2,7 @@
      owns: all [tool.codeclone] keys, precedence rules, defaults, flag mapping.
      does-not-own: CLI behavior (→ 11), exit codes (→ 09), gate thresholds (→ 16).
      rule: stray flag docs from other chapters belong HERE. -->
+
 # 10. Config and Defaults
 
 ## Purpose
@@ -76,21 +77,21 @@ code path. Use `-` when the key has no special dependency contract.
 
 Analysis:
 
-| Key                    | Type          | Default                              | Meaning                                                                                                                                       | Requires / Implies                                                 |
-|------------------------|---------------|--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
-| `min_loc`              | `int`         | `10`                                 | Minimum function LOC for clone admission                                                                                                      | `-`                                                                |
-| `min_stmt`             | `int`         | `6`                                  | Minimum function statement count for clone admission                                                                                          | `-`                                                                |
-| `block_min_loc`        | `int`         | `20`                                 | Minimum function LOC for block-window analysis                                                                                                | `-`                                                                |
-| `block_min_stmt`       | `int`         | `8`                                  | Minimum function statements for block-window analysis                                                                                         | `-`                                                                |
-| `segment_min_loc`      | `int`         | `20`                                 | Minimum function LOC for segment analysis                                                                                                     | `-`                                                                |
-| `segment_min_stmt`     | `int`         | `10`                                 | Minimum function statements for segment analysis                                                                                              | `-`                                                                |
-| `processes`            | `int`         | `4`                                  | Worker process count                                                                                                                          | `-`                                                                |
+| Key                    | Type          | Default                        | Meaning                                                                                                                                       | Requires / Implies                                                 |
+|------------------------|---------------|--------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------|
+| `min_loc`              | `int`         | `10`                           | Minimum function LOC for clone admission                                                                                                      | `-`                                                                |
+| `min_stmt`             | `int`         | `6`                            | Minimum function statement count for clone admission                                                                                          | `-`                                                                |
+| `block_min_loc`        | `int`         | `20`                           | Minimum function LOC for block-window analysis                                                                                                | `-`                                                                |
+| `block_min_stmt`       | `int`         | `8`                            | Minimum function statements for block-window analysis                                                                                         | `-`                                                                |
+| `segment_min_loc`      | `int`         | `20`                           | Minimum function LOC for segment analysis                                                                                                     | `-`                                                                |
+| `segment_min_stmt`     | `int`         | `10`                           | Minimum function statements for segment analysis                                                                                              | `-`                                                                |
+| `processes`            | `int`         | `4`                            | Worker process count                                                                                                                          | `-`                                                                |
 | `cache_path`           | `str \| null` | `<root>/.codeclone/cache.json` | Cache file path                                                                                                                               | `-`                                                                |
-| `max_cache_size_mb`    | `int`         | `50`                                 | Maximum accepted cache size before fail-open ignore                                                                                           | `-`                                                                |
-| `skip_metrics`         | `bool`        | `false*`                             | Skip full metrics mode when allowed                                                                                                           | Incompatible with metrics gates/update; auto-enabled in some runs* |
-| `skip_dead_code`       | `bool`        | `false`                              | Skip dead-code analysis                                                                                                                       | Forced on by `skip_metrics`; overridden by `fail_dead_code`        |
-| `skip_dependencies`    | `bool`        | `false`                              | Skip dependency analysis                                                                                                                      | Forced on by `skip_metrics`; overridden by `fail_cycles`           |
-| `golden_fixture_paths` | `list[str]`   | `[]`                                 | Exclude clone groups fully contained in matching golden test fixtures from health/gates/active findings; keep them as suppressed report facts | Patterns must resolve under `tests/` or `tests/fixtures/`          |
+| `max_cache_size_mb`    | `int`         | `50`                           | Maximum accepted cache size before fail-open ignore                                                                                           | `-`                                                                |
+| `skip_metrics`         | `bool`        | `false*`                       | Skip full metrics mode when allowed                                                                                                           | Incompatible with metrics gates/update; auto-enabled in some runs* |
+| `skip_dead_code`       | `bool`        | `false`                        | Skip dead-code analysis                                                                                                                       | Forced on by `skip_metrics`; overridden by `fail_dead_code`        |
+| `skip_dependencies`    | `bool`        | `false`                        | Skip dependency analysis                                                                                                                      | Forced on by `skip_metrics`; overridden by `fail_cycles`           |
+| `golden_fixture_paths` | `list[str]`   | `[]`                           | Exclude clone groups fully contained in matching golden test fixtures from health/gates/active findings; keep them as suppressed report facts | Patterns must resolve under `tests/` or `tests/fixtures/`          |
 
 Baseline and CI:
 
@@ -143,21 +144,21 @@ Report outputs and local UX:
 
 Controller audit trail:
 
-| Key                    | Type   | Default                             | Meaning                                                                                                                                | Requires / Implies                  |
-|------------------------|--------|-------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
-| `audit_enabled`        | `bool` | `false`                             | Enable the optional local controller audit trail                                                                                       | Required for `--audit` output       |
-| `audit_path`           | `str`  | `.codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts | Used only when `audit_enabled=true` |
-| `audit_payloads`       | `str`  | `compact`                           | Audit payload mode: `off`, `compact`, or `full`. Compact omits large fields but keeps `intent_description` on `intent.declared`; row `summary` always stores a short essence | Used only when `audit_enabled=true` |
-| `audit_retention_days` | `int`  | `30`                                | Retention window for audit rows                                                                                                        | Used only when `audit_enabled=true` |
-| `audit_token_estimator` | `str` | `chars_approx`                      | Audit payload token estimator: default `chars_approx`, or explicit `tiktoken` opt-in with `codeclone[token-bench]`                    | Used only when `audit_enabled=true` |
+| Key                     | Type   | Default                       | Meaning                                                                                                                                                                      | Requires / Implies                  |
+|-------------------------|--------|-------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
+| `audit_enabled`         | `bool` | `false`                       | Enable the optional local controller audit trail                                                                                                                             | Required for `--audit` output       |
+| `audit_path`            | `str`  | `.codeclone/db/audit.sqlite3` | SQLite audit database path, relative to the analysis root; stored under `db/` to separate controller state from report/cache artifacts                                       | Used only when `audit_enabled=true` |
+| `audit_payloads`        | `str`  | `compact`                     | Audit payload mode: `off`, `compact`, or `full`. Compact omits large fields but keeps `intent_description` on `intent.declared`; row `summary` always stores a short essence | Used only when `audit_enabled=true` |
+| `audit_retention_days`  | `int`  | `30`                          | Retention window for audit rows                                                                                                                                              | Used only when `audit_enabled=true` |
+| `audit_token_estimator` | `str`  | `chars_approx`                | Audit payload token estimator: default `chars_approx`, or explicit `tiktoken` opt-in with `codeclone[token-bench]`                                                           | Used only when `audit_enabled=true` |
 
 Workspace intent registry:
 
-| Key                              | Type  | Default                               | Meaning                                                                  | Requires / Implies                              |
-|----------------------------------|-------|---------------------------------------|--------------------------------------------------------------------------|-------------------------------------------------|
-| `intent_registry_backend`        | `str` | `file`                                | Workspace intent storage backend: `file` or `sqlite`                     | MCP workspace coordination                      |
+| Key                              | Type  | Default                         | Meaning                                                                  | Requires / Implies                              |
+|----------------------------------|-------|---------------------------------|--------------------------------------------------------------------------|-------------------------------------------------|
+| `intent_registry_backend`        | `str` | `file`                          | Workspace intent storage backend: `file` or `sqlite`                     | MCP workspace coordination                      |
 | `intent_registry_path`           | `str` | `.codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root             | Used only when `intent_registry_backend=sqlite` |
-| `intent_registry_retention_days` | `int` | `7`                                   | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
+| `intent_registry_retention_days` | `int` | `7`                             | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
 
 Values above `14` are contract errors in the open-source edition. See
 [Plans and Retention](../plans-and-retention.md) for Team (up to 30 days) and
@@ -170,18 +171,32 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 `codeclone/config/memory.py` / `SemanticConfig` and documented in
 [Engineering Memory](13-engineering-memory.md).
 
-| Semantic field | Default | Meaning |
-|----------------|---------|---------|
-| enabled | `false` | Turn on LanceDB sidecar indexing and search blend |
-| backend | `lancedb` | Vector backend (only `lancedb` today) |
-| index_path | `.codeclone/memory/semantic_index.lance` | Sidecar directory |
-| embedding_provider | `diagnostic` | `diagnostic` (hash vectors, not semantic quality), `fastembed` (local semantic-quality provider), `local_model`, `api` |
-| embedding_model | `null` (`BAAI/bge-small-en-v1.5` for `fastembed`) | Optional provider model name |
-| embedding_cache_dir | `.codeclone/memory/fastembed` | Local model cache used by `fastembed` |
-| allow_model_download | `false` | Permit `fastembed` to download a missing model instead of requiring a pre-populated cache |
-| dimension | `256` (`384` for `fastembed`) | Vector size; must match the provider model |
-| max_results | `20` | Cap for vector `k` and merged search ranking |
-| index_audit | `true` | Index bounded audit `summary` rows when audit DB exists |
+Trajectory / projection keys (defaults from `codeclone/config/memory_defaults.py`):
+
+| Key                                          | Default    | Meaning                                                 |
+|----------------------------------------------|------------|---------------------------------------------------------|
+| `trajectories_enabled`                       | `true`     | Gate trajectory rebuild and retrieval                   |
+| `trajectory_retention_days`                  | `365`      | Retention hint for vacuum                               |
+| `projection_rebuild_policy`                  | `off`      | `enqueue_when_stale` enqueues worker on accepted finish |
+| `projection_rebuild_running_timeout_seconds` | `1800`     | Stale running job timeout                               |
+| `projection_rebuild_spawn_worker`            | `true`     | Spawn worker on enqueue                                 |
+| `trajectory_export_enabled`                  | `false`    | Gate CLI JSONL export                                   |
+| `trajectory_export_include_payloads`         | `false`    | Include step payloads in export rows                    |
+| `trajectory_export_max_record_bytes`         | `65536`    | Per export row cap                                      |
+| `trajectory_export_max_file_bytes`           | `10485760` | Output file cap                                         |
+
+| Semantic field       | Default                                           | Meaning                                                                                                                |
+|----------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| enabled              | `false`                                           | Turn on LanceDB sidecar indexing and search blend                                                                      |
+| backend              | `lancedb`                                         | Vector backend (only `lancedb` today)                                                                                  |
+| index_path           | `.codeclone/memory/semantic_index.lance`          | Sidecar directory                                                                                                      |
+| embedding_provider   | `diagnostic`                                      | `diagnostic` (hash vectors, not semantic quality), `fastembed` (local semantic-quality provider), `local_model`, `api` |
+| embedding_model      | `null` (`BAAI/bge-small-en-v1.5` for `fastembed`) | Optional provider model name                                                                                           |
+| embedding_cache_dir  | `.codeclone/memory/fastembed`                     | Local model cache used by `fastembed`                                                                                  |
+| allow_model_download | `false`                                           | Permit `fastembed` to download a missing model instead of requiring a pre-populated cache                              |
+| dimension            | `256` (`384` for `fastembed`)                     | Vector size; must match the provider model                                                                             |
+| max_results          | `20`                                              | Cap for vector `k` and merged search ranking                                                                           |
+| index_audit          | `true`                                            | Index bounded audit `summary` rows when audit DB exists                                                                |
 
 Semantic-quality local search requires both the LanceDB sidecar and FastEmbed:
 install `codeclone[semantic-local]` (or combine `semantic-lancedb` +

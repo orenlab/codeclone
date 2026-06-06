@@ -6,6 +6,7 @@
        MCP tool schemas (→ 25).
      rule: payload semantics block was moved here from docs/mcp.md.
        Do not move it back. -->
+
 # 12. Structural Change Controller
 
 CodeClone v2.1 adds structural change control for AI-assisted edits. The MCP
@@ -19,22 +20,23 @@ The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
 review receipts, workspace intent visibility, claim guard, and CLI controller
 queries:
 
-| Phase                     | Status            | Surface                                                   |
-|---------------------------|-------------------|-----------------------------------------------------------|
-| Declarative workflow      | Live in `2.1.0a1` | MCP `start_controlled_change`, `finish_controlled_change` |
-| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
-| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`              |
-| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify`          |
-| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                               |
-| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
-| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
-| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                              |
-| Scope-aware verification  | Live in `2.1.0a1` | MCP `check_patch_contract`                                |
-| Workspace relations       | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
-| Verification profiles     | Live in `2.1.0a1` | MCP `check_patch_contract`                                |
-| Intent queue              | Live in `2.1.0a1` | MCP `manage_change_intent`                                |
-| Verify ergonomics         | Live in `2.1.0a1` | MCP `check_patch_contract`                                |
-| MCP payload token budget  | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`             |
+| Phase                     | Status            | Surface                                                                            |
+|---------------------------|-------------------|------------------------------------------------------------------------------------|
+| Declarative workflow      | Live in `2.1.0a1` | MCP `start_controlled_change`, `finish_controlled_change`                          |
+| Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                                                         |
+| Blast radius              | Live in `2.1.0a1` | MCP `get_blast_radius`, CLI `--blast-radius`                                       |
+| Patch contract            | Live in `2.1.0a1` | MCP `check_patch_contract`, CLI `--patch-verify`                                   |
+| Review receipt            | Live in `2.1.0a1` | MCP `create_review_receipt`                                                        |
+| Workspace intent registry | Live in `2.1.0a1` | MCP `manage_change_intent`                                                         |
+| Lease and recovery        | Live in `2.1.0a1` | MCP `manage_change_intent`                                                         |
+| Claim guard               | Live in `2.1.0a1` | MCP `validate_review_claims`                                                       |
+| Scope-aware verification  | Live in `2.1.0a1` | MCP `check_patch_contract`                                                         |
+| Workspace relations       | Live in `2.1.0a1` | MCP `manage_change_intent`                                                         |
+| Verification profiles     | Live in `2.1.0a1` | MCP `check_patch_contract`                                                         |
+| Intent queue              | Live in `2.1.0a1` | MCP `manage_change_intent`                                                         |
+| Verify ergonomics         | Live in `2.1.0a1` | MCP `check_patch_contract`                                                         |
+| MCP payload token budget  | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`                                      |
+| Patch Trail               | Live in `2.1.0a1` | MCP `finish_controlled_change(patch_trail_detail=…)`; audit `patch_trail.computed` |
 
 ## Contract
 
@@ -654,6 +656,7 @@ resolve intent
   → finish_hygiene_check (git + start dirty snapshot)
   → manage_change_intent(check)  # uses files_for_scope_check = evidence only
   → check_patch_contract(verify) # before_run_id from intent when omitted
+  → compute Patch Trail + audit emit patch_trail.computed (when check/verify reached)
   → validate_review_claims (optional, if claims_text + recommended)
   → create_review_receipt (default true)
   → manage_change_intent(clear)  # auto_clear when accepted and receipt ok
@@ -743,11 +746,63 @@ non-empty, finish elevates the top-level status to
 | `summary`                       | Compact dashboard (`scope_status`, `verification_profile`, `receipt`, `intent_cleared`, dirty counts) |
 | `scope_check`                   | Declared vs actual files from check                                                                   |
 | `verification`                  | Full verify payload including `structural_delta`, `next_step`                                         |
-| `workspace_hygiene_after`       | Post-finish hygiene; `counts` always; `dirty_attribution` only when `detail_level="full"`           |
+| `workspace_hygiene_after`       | Post-finish hygiene; `counts` always; `dirty_attribution` only when `detail_level="full"`             |
 | `health_regression_advisory`    | On accepted verify when `health_delta < 0` — user-facing, not auto-fail                               |
 | `claims`                        | Claim Guard result when `claims_text` was validated                                                   |
 | `receipt` / `receipt_error`     | Receipt body; `receipt_error` prevents `auto_clear`                                                   |
 | `propose_memory` / memory hooks | When `propose_memory=true` on accept                                                                  |
+| `patch_trail`                   | Deterministic scope/verify forensics for this finish (see below); not authorization                   |
+
+### Patch Trail {#patch-trail}
+
+Patch Trail is a **bounded, deterministic snapshot** of declared scope, evidence
+files, hygiene counts, and verify outcome for one finish cycle. It complements
+patch verify — it does **not** authorize edits, expand scope, or override
+structural findings.
+
+```mermaid
+flowchart TD
+    FIN[finish_controlled_change] --> HY[finish_hygiene_check]
+    HY -->|blocks| STOP1[Early exit — no patch_trail]
+HY --> CHK[manage_change_intent check]
+CHK -->|expired|STOP2[Early exit — no patch_trail]
+CHK --> PT[compute_patch_trail]
+CHK -->|violated|PT
+CHK --> VER[check_patch_contract verify]
+VER --> PT
+PT --> AUD[audit patch_trail.computed]
+PT --> RES[patch_trail response field]
+VER --> RCPT[receipt / clear / projection hook]
+AUD --> TRJ[Trajectory rebuild persists memory_trajectory_patch_trails]
+```
+
+**When emitted:** after scope `check` succeeds or returns `violated`, and after
+`verify` when reached. Hygiene blocks and expired intents do **not** emit Patch
+Trail.
+
+**Parameters:**
+
+| Parameter            | Default   | Meaning                                                                |
+|----------------------|-----------|------------------------------------------------------------------------|
+| `patch_trail_detail` | `summary` | `summary`: counts, statuses, digest, evidence refs; `full`: path lists |
+
+**Response `patch_trail` (summary):** `schema_version` (`PATCH_TRAIL_SCHEMA_VERSION`,
+currently **`1`**), `intent_id`, compact `intent_description`, `scope_check_status`,
+`verification_status`, `counts`, `patch_trail_digest`, `evidence` (audit sequence
+refs), `retrieval_policy` (`patch_trail_does_not_authorize_edits`,
+`patch_trail_does_not_override_findings`).
+
+**Audit:** `patch_trail.computed` stores a compact event core (`patch_trail_digest`,
+counts, verification status) for trajectory projection. Requires `audit_enabled=true`.
+
+**Persistence:** manual or job-driven trajectory rebuild projects Patch Trail into
+`memory_trajectory_patch_trails` and bumps trajectory projection to
+`trajectory-v2` (digest includes `patch_trail_digest`). Scoped retrieval surfaces
+`patch_trail_summary` / full `patch_trail` — see
+[Engineering Memory — Trajectory memory](13-engineering-memory.md#trajectory-memory-phases-2226).
+
+Refs: `codeclone/memory/trajectory/patch_trail.py`, `codeclone/audit/events.py`,
+`codeclone/surfaces/mcp/_session_workflow_mixin.py:_finish_patch_trail`.
 
 ## Workspace hygiene and registry consistency
 
@@ -817,9 +872,9 @@ Verify compares the intent's **before-run** to the explicit **after-run** via
 "before": {"run_id": "14d82d39", "health": 90},
 "after": {"run_id": "74cb3c0e", "health": 88},
 "structural_delta": {
-  "verdict": "regressed",
-  "health_delta": -2,
-  "regressions": ["...new finding ids..."]
+"verdict": "regressed",
+"health_delta": -2,
+"regressions": ["...new finding ids..."]
 }
 ```
 

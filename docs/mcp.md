@@ -5,6 +5,7 @@
        (→ book/12), engineering memory contract (→ book/13).
      rule: this is the GUIDE. book/25 is the CONTRACT. Do not merge them.
        Normative tables live in book/12 — do not copy back. -->
+
 # MCP for AI Agents
 
 CodeClone MCP is a **read-only, baseline-aware** analysis server for AI agents
@@ -265,7 +266,7 @@ root `.gitignore` covers `.codeclone/` (or the broader `.cache/` tree).
 | `id`              | `gitignore-codeclone-cache` |
 | `severity`        | `info`                      |
 | `category`        | `workspace_hygiene`         |
-| `suggested_entry` | `.codeclone/`         |
+| `suggested_entry` | `.codeclone/`               |
 
 Tips are advisory only — not findings, gates, or failures. MCP never edits
 `.gitignore` automatically; agents must declare scope before changing it.
@@ -352,18 +353,18 @@ sequenceDiagram
     M ->> D: close intent (file: delete row; sqlite: status=clean)
 ```
 
-| Tool                        | Purpose                                                                                                                                                                                                                         |
-|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change`   | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for known WIP)                                                                                                                       |
-| `finish_controlled_change`  | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept)                                                                                                           |
-| `manage_change_intent`      | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace                                                                                                            |
-| `get_blast_radius`          | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                                                                                                                               |
-| `get_relevant_memory`       | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`                                                                                                                  |
-| `query_engineering_memory`  | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`)                                                                                                    |
+| Tool                        | Purpose                                                                                                                                                                                                                                                   |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change`   | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for known WIP)                                                                                                                                                 |
+| `finish_controlled_change`  | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept)                                                                                                                                     |
+| `manage_change_intent`      | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace                                                                                                                                      |
+| `get_blast_radius`          | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                                                                                                                                                         |
+| `get_relevant_memory`       | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`                                                                                                                                            |
+| `query_engineering_memory`  | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`)                                                                                                                              |
 | `manage_engineering_memory` | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`, `rebuild_semantic_index`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents). |
-| `check_patch_contract`      | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                                                                                                                                          |
-| `create_review_receipt`     | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile                                                                                                                          |
-| `validate_review_claims`    | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks                                                                                                                  |
+| `check_patch_contract`      | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                                                                                                                                                                    |
+| `create_review_receipt`     | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile                                                                                                                                                    |
+| `validate_review_claims`    | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks                                                                                                                                            |
 
 ??? info "Blast radius: do_not_touch vs review_context"
     Graph traversal core lives in `codeclone/analysis/blast_radius.py`; MCP and CLI
@@ -426,35 +427,34 @@ sequenceDiagram
     participant A as Agent
     participant M as MCP
     participant DB as Memory SQLite
-
-    A->>M: start_controlled_change
-    M-->>A: intent_id, edit_allowed=true
-    A->>M: get_relevant_memory(root, intent_id)
+    A ->> M: start_controlled_change
+    M -->> A: intent_id, edit_allowed=true
+    A ->> M: get_relevant_memory(root, intent_id)
     opt policy bootstrap / refresh
-        M->>M: sync from latest MCP run
-        M-->>A: memory_sync (when ingest ran)
+        M ->> M: sync from latest MCP run
+        M -->> A: memory_sync (when ingest ran)
     end
-    M->>DB: ranked scope query
-    DB-->>M: active records + warnings
-    M-->>A: contract notes, risks, contradictions
+    M ->> DB: ranked scope query
+    DB -->> M: active records + warnings
+    M -->> A: contract notes, risks, contradictions
     opt targeted lookup
-        A->>M: query_engineering_memory(mode=for_path, path=...)
-        M-->>A: path-linked records
+        A ->> M: query_engineering_memory(mode=for_path, path=...)
+        M -->> A: path-linked records
     end
     Note over A: Edit in declared scope
-    A->>M: finish_controlled_change(propose_memory=true)
-    M-->>A: memory_candidates, memory_staleness, memory_coverage_delta
+    A ->> M: finish_controlled_change(propose_memory=true)
+    M -->> A: memory_candidates, memory_staleness, memory_coverage_delta
 ```
 
-| When                       | Tool                                                                     | Why                       |
-|----------------------------|--------------------------------------------------------------------------|---------------------------|
-| After `start`, before edit | `get_relevant_memory(root, scope \| intent_id)`                          | Ranked scope context      |
-| One path / symbol          | `query_engineering_memory(mode=for_path\|for_symbol)`                    | Targeted lookup           |
-| Keyword discovery          | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search                |
-| Semantic discovery (opt-in) | `query_engineering_memory(mode=search, semantic=true, …)`              | FTS + LanceDB blend when `[tool.codeclone.memory.semantic] enabled` and index built; default config is **off** |
-| Refresh system facts       | `manage_engineering_memory(action=refresh_from_run, run_id?)`            | Force ingest from MCP run |
-| Rebuild semantic sidecar   | `manage_engineering_memory(action=rebuild_semantic_index)`               | LanceDB index when semantic enabled |
-| Unclear semantics          | `help(topic="engineering_memory")`                                       | Compact playbook          |
+| When                        | Tool                                                                     | Why                                                                                                            |
+|-----------------------------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| After `start`, before edit  | `get_relevant_memory(root, scope \| intent_id)`                          | Ranked scope context                                                                                           |
+| One path / symbol           | `query_engineering_memory(mode=for_path\|for_symbol)`                    | Targeted lookup                                                                                                |
+| Keyword discovery           | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search                                                                                                     |
+| Semantic discovery (opt-in) | `query_engineering_memory(mode=search, semantic=true, …)`                | FTS + LanceDB blend when `[tool.codeclone.memory.semantic] enabled` and index built; default config is **off** |
+| Refresh system facts        | `manage_engineering_memory(action=refresh_from_run, run_id?)`            | Force ingest from MCP run                                                                                      |
+| Rebuild semantic sidecar    | `manage_engineering_memory(action=rebuild_semantic_index)`               | LanceDB index when semantic enabled                                                                            |
+| Unclear semantics           | `help(topic="engineering_memory")`                                       | Compact playbook                                                                                               |
 
 Defaults exclude **stale** records. Keyword search excludes drafts unless
 `include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
@@ -482,14 +482,14 @@ responses default to compact statement previews; use `mode=get` or
 
 #### Agent write path (draft only)
 
-| Action                    | Tool                                                          | Result                        |
-|---------------------------|---------------------------------------------------------------|-------------------------------|
-| Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)` | System ingest from MCP report |
-| Rebuild semantic index    | `manage_engineering_memory(action=rebuild_semantic_index)`   | LanceDB sidecar from memory + audit |
-| Observation during edit   | `manage_engineering_memory(action=record_candidate, …)`       | `draft` record                |
-| Validate finish claims    | `manage_engineering_memory(action=validate_claims, text=…)`   | warnings/errors               |
-| Post-edit proposals       | `finish_controlled_change(propose_memory=true)`               | draft candidates + staleness  |
-| Atomic fallback           | `manage_engineering_memory(action=propose_from_receipt, …)`   | draft proposals               |
+| Action                    | Tool                                                          | Result                              |
+|---------------------------|---------------------------------------------------------------|-------------------------------------|
+| Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)` | System ingest from MCP report       |
+| Rebuild semantic index    | `manage_engineering_memory(action=rebuild_semantic_index)`    | LanceDB sidecar from memory + audit |
+| Observation during edit   | `manage_engineering_memory(action=record_candidate, …)`       | `draft` record                      |
+| Validate finish claims    | `manage_engineering_memory(action=validate_claims, text=…)`   | warnings/errors                     |
+| Post-edit proposals       | `finish_controlled_change(propose_memory=true)`               | draft candidates + staleness        |
+| Atomic fallback           | `manage_engineering_memory(action=propose_from_receipt, …)`   | draft proposals                     |
 
 **Human promote:** CodeClone VS Code **Memory** view (approve with confirmation) — agents cannot activate records
 through MCP
@@ -654,9 +654,11 @@ permission = edit_allowed (with status gate)
   Response includes `workspace.concurrent_intents`, `workspace_relations`, and
   optional scoped `workspace_hygiene`.
 - **`finish_controlled_change`:** fixed pipeline (hygiene → check → verify →
-  optional claims → receipt → clear). See
-  [Structural Change Controller — finish_controlled_change](book/12-structural-change-controller.md#finish_controlled_change).
-  Finish reconciles `changed_files` / `diff_ref` with **git** and the start-time
+  Patch Trail + audit → optional claims → receipt → clear). See
+  [Structural Change Controller — finish_controlled_change](book/12-structural-change-controller.md#finish_controlled_change)
+  and [Patch Trail](book/12-structural-change-controller.md#patch-trail).
+  Parameter `patch_trail_detail` (`summary` default, `full` for path lists) controls
+  the `patch_trail` response field. Finish reconciles `changed_files` / `diff_ref` with **git** and the start-time
   dirty snapshot. **Only** `missing_evidence` (in-scope dirty not listed) and
   `foreign_dirty_overlap` (live foreign intent on overlapping in-scope paths)
   block finish (`reason: workspace_hygiene`). Out-of-scope unattributed dirt
@@ -763,18 +765,18 @@ include `total`, `shown`, and `truncated` summaries.
 
 ## Security
 
-| Property          | Guarantee                                                                                                                                                                                                                                                   |
-|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Read-only         | Never mutates source, baseline, cache, or report artifacts                                                                                                                                                                                                  |
-| Default transport | Local `stdio`                                                                                                                                                                                                                                               |
-| Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                                                                                                         |
-| HTTP auth         | `CODECLONE_MCP_AUTH_TOKEN` Bearer check on `streamable-http` (stdlib `hmac`)                                                                                                                                                                                |
-| Artifact paths    | Under repo root by default; `allow_external_artifacts=true` for absolute/out-of-repo baseline/cache/coverage paths                                                                                                                                          |
-| Lazy loading      | Base `codeclone` install does not require MCP packages                                                                                                                                                                                                      |
-| Repository access | Limited to what the server process can read locally                                                                                                                                                                                                         |
-| Session state     | In-memory runs and review markers; do not survive restart                                                                                                                                                                                                   |
+| Property          | Guarantee                                                                                                                                                                                                                                       |
+|-------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Read-only         | Never mutates source, baseline, cache, or report artifacts                                                                                                                                                                                      |
+| Default transport | Local `stdio`                                                                                                                                                                                                                                   |
+| Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                                                                                             |
+| HTTP auth         | `CODECLONE_MCP_AUTH_TOKEN` Bearer check on `streamable-http` (stdlib `hmac`)                                                                                                                                                                    |
+| Artifact paths    | Under repo root by default; `allow_external_artifacts=true` for absolute/out-of-repo baseline/cache/coverage paths                                                                                                                              |
+| Lazy loading      | Base `codeclone` install does not require MCP packages                                                                                                                                                                                          |
+| Repository access | Limited to what the server process can read locally                                                                                                                                                                                             |
+| Session state     | In-memory runs and review markers; do not survive restart                                                                                                                                                                                       |
 | Workspace intents | File backend: ephemeral JSON under `.codeclone/intents/`; SQLite backend: auditable rows under `.codeclone/db/intents.sqlite3` with retention purge (default 7 days, max 14 in open source — see [Plans and Retention](plans-and-retention.md)) |
-| Audit trail       | Optional SQLite under `.codeclone/db/audit.sqlite3` when `audit_enabled=true`                                                                                                                                                                         |
+| Audit trail       | Optional SQLite under `.codeclone/db/audit.sqlite3` when `audit_enabled=true`                                                                                                                                                                   |
 
 ---
 

@@ -1,6 +1,7 @@
 <!-- doc-scope: APPENDIX — schema layouts (baseline / cache / report / memory).
      owns: JSON schema shape tables, field-level layout documentation.
      does-not-own: schema semantics (→ respective contract chapters). -->
+
 # Appendix B. Schema Layouts
 
 ## Purpose
@@ -804,21 +805,38 @@ DESIGN FINDINGS
 INTEGRITY
 ```
 
-## Engineering Memory schema (`1.1`)
+## Engineering Memory schema (`1.4`)
 
 SQLite database at `.codeclone/memory/engineering_memory.sqlite3` (default).
 Schema version stored in `memory_meta.schema_version`.
 
 Core tables:
 
-| Table                   | Role                                                      |
-|-------------------------|-----------------------------------------------------------|
-| `memory_records`        | Typed statements with status, confidence, origin, payload |
-| `memory_subjects`       | Path/symbol/module links (`subject_kind`, `subject_key`)  |
-| `memory_evidence`       | Deterministic evidence refs (report, git_commit, doc, …)  |
-| `memory_fts`            | FTS5 search index (schema 1.1+)                           |
-| `memory_revisions`      | Governance audit trail                                    |
-| `memory_ingestion_runs` | Init/refresh run metadata                                 |
+| Table                    | Role                                                      |
+|--------------------------|-----------------------------------------------------------|
+| `memory_records`         | Typed statements with status, confidence, origin, payload |
+| `memory_subjects`        | Path/symbol/module links (`subject_kind`, `subject_key`)  |
+| `memory_evidence`        | Deterministic evidence refs (report, git_commit, doc, …)  |
+| `memory_fts`             | FTS5 search index (schema 1.1+)                           |
+| `memory_revisions`       | Governance audit trail                                    |
+| `memory_ingestion_runs`  | Init/refresh run metadata                                 |
+| `memory_projection_jobs` | Coalesced trajectory/semantic rebuild jobs (schema 1.3+)  |
+
+Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection **`trajectory-v2`**):
+
+| Table                               | Role                                                                  |
+|-------------------------------------|-----------------------------------------------------------------------|
+| `memory_trajectories`               | One row per `(project_id, workflow_id, projection_version)`           |
+| `memory_trajectory_steps`           | Ordered audit steps with frozen `event_core_json`                     |
+| `memory_trajectory_subjects`        | Path/module subjects linked to a trajectory                           |
+| `memory_trajectory_evidence`        | Report/run/audit evidence refs                                        |
+| `memory_trajectory_patch_trails`    | Patch Trail JSON + digest per trajectory (schema **`1.4`**, Phase 26) |
+| `memory_trajectory_projection_runs` | Rebuild run manifest                                                  |
+
+Patch Trail JSON uses `PATCH_TRAIL_SCHEMA_VERSION` (currently **`1`**) in
+`codeclone/contracts/__init__.py`. Trajectory JSONL export rows use
+`TRAJECTORY_EXPORT_SCHEMA_VERSION` (**`2`**) in
+`codeclone/memory/trajectory/profiles.py` — separate from SQLite schema version.
 
 Record identity uses stable `identity_key` strings for upsert during refresh.
 Migration path: `codeclone/memory/schema_migrate.py`.
@@ -844,6 +862,7 @@ Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
 - `codeclone/baseline/clone_baseline.py`
 - `codeclone/cache/store.py`
 - `codeclone/memory/schema.py`
+- `codeclone/memory/schema_trajectory.py`
 - `codeclone/memory/schema_migrate.py`
 - `codeclone/memory/semantic/models.py`
 - `codeclone/contracts/__init__.py` (`SEMANTIC_INDEX_FORMAT_VERSION`)

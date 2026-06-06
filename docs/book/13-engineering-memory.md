@@ -101,6 +101,8 @@ Module ownership:
 | `codeclone/memory/embedding/*`                    | Embedding providers (`diagnostic` default)           |
 | `codeclone/memory/governance.py`                  | Draft candidates, approve/reject, claim validation   |
 | `codeclone/memory/staleness.py`                   | Refresh-time and scope-time staleness                |
+| `codeclone/memory/jobs/store.py`                  | Coalesced projection rebuild jobs (schema 1.3+)      |
+| `codeclone/memory/trajectory/*`                   | Audit → trajectory projection, Patch Trail, export   |
 | `codeclone/config/memory*.py`                     | `[tool.codeclone.memory]` resolution                 |
 | `codeclone/surfaces/cli/memory*.py`               | Human CLI + Rich rendering                           |
 | `codeclone/surfaces/mcp/_session_memory_mixin.py` | MCP memory tools + finish hook                       |
@@ -746,12 +748,12 @@ Refs:
 
 ---
 
-## Trajectory memory (Phases 22–25)
+## Trajectory memory (Phases 22–26) {#trajectory-memory-phases-2226}
 
 Trajectory memory is a **deterministic process narrative** derived from the audit
 event core. It complements governed memory cards: cards hold durable repository
 facts; trajectories hold bounded edit-cycle timelines (declare → check → verify →
-receipt).
+receipt → optional Patch Trail).
 
 !!! note "Not authorization"
     `trajectories[]` and export JSONL are **read-only forensics**. They do not
@@ -795,35 +797,79 @@ escape hatches remain: `rebuild_trajectories` / `rebuild_semantic_index`.
 ### Architecture
 
 ```mermaid
-graph LR
-    AUD[Audit SQLite event core] -->|rebuild| TRJ[memory_trajectories]
-    TRJ --> CLI[CLI list/show/search]
-    TRJ --> MCP[MCP trajectory_* modes]
-    TRJ --> GR[get_relevant_memory.trajectories]
-    TRJ --> EXP[JSONL export profiles]
+flowchart TB
+    subgraph Finish["Change controller (MCP finish)"]
+        FIN[finish_controlled_change]
+        PT[compute_patch_trail]
+        AUDE[patch_trail.computed audit event]
+        FIN --> PT --> AUDE
+    end
+
+    subgraph Audit["Audit SQLite"]
+        EC[event_core_json per workflow]
+    end
+
+    subgraph Project["Trajectory rebuild"]
+        PRJ[projector trajectory-v2]
+        PTP[patch_trail_projector]
+        SUP[supersede stale rows]
+    end
+
+    subgraph Store["Engineering Memory SQLite"]
+        TRJ[memory_trajectories + steps]
+        PTR[memory_trajectory_patch_trails]
+        JOB[memory_projection_jobs]
+    end
+
+    subgraph Read["Read surfaces"]
+        GR[get_relevant_memory.trajectories]
+        QEM[query_engineering_memory trajectory_*]
+        EXP[JSONL export v2]
+    end
+
+    AUDE --> EC
+    EC --> PRJ
+    EC --> PTP
+    PRJ --> TRJ
+    PTP --> PTR
+    PRJ --> SUP
+    TRJ --> GR
+    TRJ --> QEM
+    PTR --> GR
+    PTR --> QEM
+    TRJ --> EXP
+    PTR --> EXP
+    JOB -.->|enqueue_when_stale| Project
 ```
 
 Module ownership:
 
-| Module                                     | Role                                                   |
-|--------------------------------------------|--------------------------------------------------------|
-| `codeclone/audit/events.py`                | Bounded `event_core_json` (`AUDIT_EVENT_CORE_VERSION`) |
-| `codeclone/memory/trajectory/projector.py` | Deterministic projection                               |
-| `codeclone/memory/trajectory/store.py`     | SQLite persistence + rebuild                           |
-| `codeclone/memory/trajectory/retrieval.py` | Scoped ranking + semantic text                         |
-| `codeclone/memory/trajectory/export.py`    | Local JSONL export (Phase 25)                          |
-| `codeclone/memory/retrieval/service.py`    | MCP/CLI query router                                   |
+| Module                                                 | Role                                                           |
+|--------------------------------------------------------|----------------------------------------------------------------|
+| `codeclone/audit/events.py`                            | Bounded `event_core_json`; `patch_trail.computed` compaction   |
+| `codeclone/memory/trajectory/patch_trail.py`           | Finish-time Patch Trail compute (`PATCH_TRAIL_SCHEMA_VERSION`) |
+| `codeclone/memory/trajectory/patch_trail_projector.py` | Rebuild Patch Trail from audit event cores                     |
+| `codeclone/memory/trajectory/projector.py`             | Deterministic trajectory projection (`trajectory-v2`)          |
+| `codeclone/memory/trajectory/store.py`                 | SQLite persistence, supersede, rebuild orchestration           |
+| `codeclone/memory/trajectory/retrieval.py`             | Scoped ranking + `patch_trail_summary`                         |
+| `codeclone/memory/trajectory/export_context.py`        | Export v2 context: precedents, citations, scope paths          |
+| `codeclone/memory/trajectory/export.py`                | Local JSONL export (Phase 25+)                                 |
+| `codeclone/memory/jobs/store.py`                       | Projection job queue + worker claim                            |
+| `codeclone/memory/retrieval/service.py`                | MCP/CLI query router                                           |
 
 ### Config (`[tool.codeclone.memory]`)
 
-| Key                                  | Default    | Meaning                                  |
-|--------------------------------------|------------|------------------------------------------|
-| `trajectories_enabled`               | `true`     | Gate rebuild/list/search                 |
-| `trajectory_retention_days`          | `365`      | Retention hint for vacuum tooling        |
-| `trajectory_export_enabled`          | `false`    | Gate JSONL export                        |
-| `trajectory_export_include_payloads` | `false`    | Include compact step text in export rows |
-| `trajectory_export_max_record_bytes` | `65536`    | Per-row cap                              |
-| `trajectory_export_max_file_bytes`   | `10485760` | Output file cap                          |
+| Key                                          | Default    | Meaning                                            |
+|----------------------------------------------|------------|----------------------------------------------------|
+| `trajectories_enabled`                       | `true`     | Gate rebuild/list/search                           |
+| `trajectory_retention_days`                  | `365`      | Retention hint for vacuum tooling                  |
+| `projection_rebuild_policy`                  | `off`      | `off` \| `enqueue_when_stale` — async rebuild jobs |
+| `projection_rebuild_running_timeout_seconds` | `1800`     | Stale running job recovery                         |
+| `projection_rebuild_spawn_worker`            | `true`     | Spawn worker subprocess on finish enqueue          |
+| `trajectory_export_enabled`                  | `false`    | Gate JSONL export                                  |
+| `trajectory_export_include_payloads`         | `false`    | Include compact step text in export rows           |
+| `trajectory_export_max_record_bytes`         | `65536`    | Per-row cap                                        |
+| `trajectory_export_max_file_bytes`           | `10485760` | Output file cap                                    |
 
 Requires **`audit_enabled=true`** and a readable audit DB for rebuild input.
 
@@ -844,15 +890,32 @@ codeclone memory trajectory export \
 
 Export profiles (schema contracts): `agent-change-control-v1`,
 `agent-memory-retrieval-v1`, `agent-recovery-v1`, `agent-security-hardening-v1`.
-Export row schema version is **`2`**. Each row includes populated
-**`context.memory_precedents`** (trajectory-linked and path-overlap active memory),
-**`context.trajectory_precedents`** (prior workflows with path overlap),
-**`citations`** (claim-validation event core + report digests),
-**`patch_trail_summary`** when persisted, and **`projection_version`**. Rebuild
-supersedes older projection rows for the same workflow (one canonical trajectory
-per `workflow_id` in export). Legacy audit rows without path facts in frozen
-event core are supplemented deterministically from stored audit payloads during
-projection. Changing profile shape requires a profile version bump.
+Export row schema version is **`2`** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`). Each row
+includes:
+
+| Field                           | Source                                                                |
+|---------------------------------|-----------------------------------------------------------------------|
+| `context.memory_precedents`     | Active memory records overlapping trajectory/path scope               |
+| `context.trajectory_precedents` | Prior workflows with path overlap                                     |
+| `citations`                     | Claim-validation event cores + report digests                         |
+| `scope.paths`                   | Resolved from Patch Trail / declare / check event cores               |
+| `patch_trail_summary`           | When persisted in `memory_trajectory_patch_trails`                    |
+| `projection_version`            | `trajectory-v1` or `trajectory-v2` (v2 includes `patch_trail_digest`) |
+
+Rebuild supersedes older projection rows for the same workflow (one canonical
+trajectory per `workflow_id` in export). Legacy audit rows without path facts in
+frozen event core are supplemented deterministically from stored audit payloads
+during projection. Changing profile shape requires a profile version bump.
+
+```mermaid
+flowchart LR
+    CAN[Canonical trajectories] --> CTX[export_context.build_export_context]
+    CAN --> REC[build_export_record]
+    CTX --> REC
+    MEM[(memory_records FTS)] --> CTX
+    PTR[(patch_trails)] --> CTX
+    REC --> JSONL[JSONL file cap-enforced]
+```
 
 ### MCP retrieval
 
