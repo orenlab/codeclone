@@ -24,6 +24,8 @@ def test_load_pyproject_config_accepts_memory_nested_table(tmp_path: Path) -> No
 backend = "sqlite"
 db_path = ".codeclone/memory/engineering_memory.sqlite3"
 max_records = 5000
+trajectories_enabled = true
+trajectory_retention_days = 730
 """.strip()
         + "\n",
         encoding="utf-8",
@@ -33,6 +35,8 @@ max_records = 5000
     assert isinstance(memory, dict)
     assert memory["backend"] == "sqlite"
     assert memory["max_records"] == 5000
+    assert memory["trajectories_enabled"] is True
+    assert memory["trajectory_retention_days"] == 730
 
 
 def test_load_pyproject_config_rejects_unknown_memory_key(tmp_path: Path) -> None:

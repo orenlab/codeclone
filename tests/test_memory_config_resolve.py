@@ -60,3 +60,37 @@ def test_resolve_memory_config_rejects_invalid_max_records(
     (root / "pyproject.toml").write_text(pyproject_fragment, encoding="utf-8")
     with pytest.raises(ValueError, match="max_records"):
         resolve_memory_config(root)
+
+
+def test_resolve_memory_config_accepts_trajectory_keys(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text(
+        "\n".join(
+            [
+                "[tool.codeclone.memory]",
+                "trajectories_enabled = false",
+                "trajectory_retention_days = 42",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    config = resolve_memory_config(root)
+
+    assert config.trajectories_enabled is False
+    assert config.trajectory_retention_days == 42
+
+
+def test_resolve_memory_config_rejects_invalid_trajectory_enabled(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "pyproject.toml").write_text(
+        '[tool.codeclone.memory]\ntrajectories_enabled = "maybe"\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="trajectories_enabled"):
+        resolve_memory_config(root)

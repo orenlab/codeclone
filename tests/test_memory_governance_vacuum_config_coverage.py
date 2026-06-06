@@ -52,6 +52,8 @@ def _memory_config() -> MemoryConfig:
         git_hotspot_period_days=30,
         git_hotspot_min_changes=2,
         mcp_sync_policy="off",
+        trajectories_enabled=True,
+        trajectory_retention_days=365,
     )
 
 

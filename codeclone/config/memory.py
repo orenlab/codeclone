@@ -116,6 +116,8 @@ class MemoryConfig:
     git_hotspot_period_days: int
     git_hotspot_min_changes: int
     mcp_sync_policy: MemoryMcpSyncPolicy
+    trajectories_enabled: bool
+    trajectory_retention_days: int
     semantic: SemanticConfig = field(default_factory=SemanticConfig)
 
 
@@ -128,6 +130,19 @@ def _memory_int(value: object, *, key: str) -> int:
     if isinstance(value, str) and value.strip().isdigit():
         return int(value.strip())
     msg = f"Invalid tool.codeclone.memory.{key}: expected integer"
+    raise ValueError(msg)
+
+
+def _memory_bool(value: object, *, key: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        raw = value.strip().lower()
+        if raw in {"1", "true", "yes", "on"}:
+            return True
+        if raw in {"0", "false", "no", "off"}:
+            return False
+    msg = f"Invalid tool.codeclone.memory.{key}: expected boolean"
     raise ValueError(msg)
 
 
@@ -267,6 +282,12 @@ def resolve_memory_config(
             key="git_hotspot_min_changes",
         ),
         mcp_sync_policy=policy_raw,  # type: ignore[arg-type]
+        trajectories_enabled=_memory_bool(
+            merged["trajectories_enabled"], key="trajectories_enabled"
+        ),
+        trajectory_retention_days=_memory_int(
+            merged["trajectory_retention_days"], key="trajectory_retention_days"
+        ),
         semantic=_resolve_semantic_config(
             merged.get(SEMANTIC_NESTED_TABLE_KEY),
             root_path=root_path,

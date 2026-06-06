@@ -36,6 +36,12 @@ from .search_index import (
     fts_match_expression,
     tokenize_query,
 )
+from .trajectory.models import (
+    Trajectory,
+    TrajectoryListItem,
+    TrajectoryProjectionResult,
+    TrajectoryProjectionRun,
+)
 
 
 class SqliteEngineeringMemoryStore:
@@ -87,6 +93,51 @@ class SqliteEngineeringMemoryStore:
         set_meta(self._conn, key, value)
         set_meta(self._conn, "updated_at_utc", current_report_timestamp_utc())
         self._conn.commit()
+
+    def rebuild_trajectories_from_audit(
+        self,
+        *,
+        project: MemoryProject,
+        root_path: Path,
+        audit_db_path: Path,
+    ) -> TrajectoryProjectionResult:
+        from .trajectory.store import rebuild_trajectories_from_audit
+
+        return rebuild_trajectories_from_audit(
+            conn=self._conn,
+            project=project,
+            root_path=root_path,
+            audit_db_path=audit_db_path,
+        )
+
+    def count_trajectories(self, *, project_id: str) -> int:
+        from .trajectory.store import count_trajectories
+
+        return count_trajectories(self._conn, project_id=project_id)
+
+    def latest_trajectory_projection_run(
+        self,
+        *,
+        project_id: str,
+    ) -> TrajectoryProjectionRun | None:
+        from .trajectory.store import latest_projection_run
+
+        return latest_projection_run(self._conn, project_id=project_id)
+
+    def list_trajectories(
+        self,
+        *,
+        project_id: str,
+        limit: int = 20,
+    ) -> list[TrajectoryListItem]:
+        from .trajectory.store import list_trajectories
+
+        return list_trajectories(self._conn, project_id=project_id, limit=limit)
+
+    def find_trajectory(self, trajectory_id: str) -> Trajectory | None:
+        from .trajectory.store import find_trajectory
+
+        return find_trajectory(self._conn, trajectory_id)
 
     def write_record(self, record: MemoryRecord) -> None:
         self._insert_record(record)

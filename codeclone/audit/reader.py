@@ -273,6 +273,80 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
     )
 
 
+def read_audit_event_core_records(
+    *,
+    db_path: Path,
+    repo_root_digest: str,
+    workflow_id: str | None = None,
+) -> tuple[AuditRecord, ...]:
+    """Return deterministic audit event-core rows for trajectory projection."""
+
+    if not db_path.is_file():
+        raise AuditReadError("no audit data")
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.Error as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        ensure_schema(conn)
+        where = [
+            "repo_root_digest = ?",
+            "workflow_id IS NOT NULL",
+            "workflow_id != ''",
+            "event_core_json IS NOT NULL",
+            "event_core_sha256 IS NOT NULL",
+        ]
+        params: list[object] = [repo_root_digest]
+        if workflow_id is not None:
+            where.append("workflow_id = ?")
+            params.append(workflow_id)
+        rows = conn.execute(
+            "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
+            "intent_id, report_digest, workflow_id, surface, tool_name, "
+            "event_core_json, event_core_sha256, payload_sha256, "
+            "status, agent_label, summary, "
+            "estimated_tokens, token_encoding, payload_characters "
+            "FROM controller_events "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY workflow_id ASC, id ASC",
+            params,
+        ).fetchall()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+    return tuple(_record_from_row(row) for row in rows)
+
+
+def count_audit_event_core_gaps(
+    *,
+    db_path: Path,
+    repo_root_digest: str,
+) -> int:
+    """Count rows that cannot feed trajectory projection for this repository."""
+
+    if not db_path.is_file():
+        return 0
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.Error as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        ensure_schema(conn)
+        row = conn.execute(
+            "SELECT COUNT(*) FROM controller_events "
+            "WHERE repo_root_digest = ? "
+            "AND (workflow_id IS NULL OR workflow_id = '' "
+            "OR event_core_json IS NULL OR event_core_sha256 IS NULL)",
+            (repo_root_digest,),
+        ).fetchone()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+    return int(row[0]) if row is not None and isinstance(row[0], int) else 0
+
+
 def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
     return AuditRecord(
         audit_sequence=_int_or_none(row[0]),
@@ -595,7 +669,9 @@ __all__ = [
     "TopPayload",
     "TypeTokenProfile",
     "WorkflowTokenProfile",
+    "count_audit_event_core_gaps",
     "payload_footprint_to_dict",
+    "read_audit_event_core_records",
     "read_audit_summary",
     "read_latest_analysis_run",
 ]

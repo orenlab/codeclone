@@ -36,6 +36,12 @@ from ...memory.semantic.rebuild_workflow import (
 )
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
+from ...memory.trajectory.cli_render import (
+    render_projection_run,
+    render_trajectory_detail,
+    render_trajectory_list,
+    render_trajectory_status,
+)
 from ...memory.vacuum import run_memory_vacuum
 from .memory_analysis import load_report_for_memory_init
 from .memory_render import (
@@ -106,6 +112,8 @@ def memory_main(argv: list[str]) -> int:
         return _run_archive(console=console, root_path=root_path, args=args)
     if args.command == "semantic":
         return _run_semantic(console=console, root_path=root_path, args=args)
+    if args.command == "trajectory":
+        return _run_trajectory(console=console, root_path=root_path, args=args)
     parser.print_help()
     return int(ExitCode.CONTRACT_ERROR)
 
@@ -237,6 +245,31 @@ def _build_parser() -> argparse.ArgumentParser:
     sem_search.add_argument("query", help="Free-text query.")
     sem_search.add_argument("--limit", type=int, default=10)
     sem_search.add_argument("--json", action="store_true", help="Emit results as JSON.")
+
+    trajectory_parser = subparsers.add_parser(
+        "trajectory",
+        help="Trajectory projection storage (status / rebuild / list / show).",
+    )
+    trajectory_sub = trajectory_parser.add_subparsers(
+        dest="trajectory_action",
+        required=True,
+    )
+    traj_status = trajectory_sub.add_parser(
+        "status",
+        help="Show trajectory projection status.",
+    )
+    _add_root(traj_status)
+    traj_rebuild = trajectory_sub.add_parser(
+        "rebuild",
+        help="Rebuild trajectory projections from audit event core.",
+    )
+    _add_root(traj_rebuild)
+    traj_list = trajectory_sub.add_parser("list", help="List stored trajectories.")
+    _add_root(traj_list)
+    traj_list.add_argument("--limit", type=int, default=20)
+    traj_show = trajectory_sub.add_parser("show", help="Show one stored trajectory.")
+    _add_root(traj_show)
+    traj_show.add_argument("trajectory_id")
 
     return parser
 
@@ -587,6 +620,103 @@ def _run_archive(
         record_id=record.id,
         detail=f"Archived {record.id}",
     )
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    action = str(args.trajectory_action)
+    if action == "status":
+        return _run_trajectory_status(console=console, root_path=root_path)
+    if action == "rebuild":
+        return _run_trajectory_rebuild(console=console, root_path=root_path)
+    if action == "list":
+        return _run_trajectory_list(console=console, root_path=root_path, args=args)
+    return _run_trajectory_show(console=console, root_path=root_path, args=args)
+
+
+def _run_trajectory_status(*, console: PrinterLike, root_path: Path) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        count = store.count_trajectories(project_id=project.id)
+        latest = store.latest_trajectory_projection_run(project_id=project.id)
+    finally:
+        store.close()
+    render_trajectory_status(
+        console=console,
+        enabled=config.trajectories_enabled,
+        count=count,
+        latest_run=latest,
+    )
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_rebuild(*, console: PrinterLike, root_path: Path) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    if not config.trajectories_enabled:
+        store.close()
+        console.print("Trajectory projection is disabled.")
+        return int(ExitCode.CONTRACT_ERROR)
+    audit_db_path = resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
+    try:
+        result = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root_path,
+            audit_db_path=audit_db_path,
+        )
+    except Exception as exc:
+        console.print(f"Trajectory rebuild failed: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    finally:
+        store.close()
+    render_projection_run(console=console, run=result.run)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_list(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, _config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        items = store.list_trajectories(
+            project_id=project.id,
+            limit=max(1, int(args.limit)),
+        )
+    finally:
+        store.close()
+    render_trajectory_list(console=console, items=items)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_show(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, _config, _project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        trajectory = store.find_trajectory(str(args.trajectory_id))
+    finally:
+        store.close()
+    if trajectory is None:
+        console.print(f"Trajectory not found: {args.trajectory_id}")
+        return int(ExitCode.CONTRACT_ERROR)
+    render_trajectory_detail(console=console, trajectory=trajectory)
     return int(ExitCode.SUCCESS)
 
 

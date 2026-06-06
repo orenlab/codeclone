@@ -25,6 +25,8 @@ from .memory_defaults import (
     DEFAULT_MEMORY_RECEIPT_RETENTION_DAYS,
     DEFAULT_MEMORY_REJECTED_RETENTION_DAYS,
     DEFAULT_MEMORY_STALE_RETENTION_DAYS,
+    DEFAULT_MEMORY_TRAJECTORIES_ENABLED,
+    DEFAULT_MEMORY_TRAJECTORY_RETENTION_DAYS,
 )
 from .spec import ConfigKeySpec
 
@@ -45,6 +47,8 @@ MEMORY_CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = {
     "git_hotspot_period_days": ConfigKeySpec(expected_type=int),
     "git_hotspot_min_changes": ConfigKeySpec(expected_type=int),
     "mcp_sync_policy": ConfigKeySpec(expected_type=str),
+    "trajectories_enabled": ConfigKeySpec(expected_type=bool),
+    "trajectory_retention_days": ConfigKeySpec(expected_type=int),
 }
 
 MEMORY_PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset({"db_path"})
@@ -66,6 +70,8 @@ MEMORY_CONFIG_DEFAULTS: Final[dict[str, object]] = {
     "git_hotspot_period_days": DEFAULT_MEMORY_GIT_HOTSPOT_PERIOD_DAYS,
     "git_hotspot_min_changes": DEFAULT_MEMORY_GIT_HOTSPOT_MIN_CHANGES,
     "mcp_sync_policy": DEFAULT_MEMORY_MCP_SYNC_POLICY,
+    "trajectories_enabled": DEFAULT_MEMORY_TRAJECTORIES_ENABLED,
+    "trajectory_retention_days": DEFAULT_MEMORY_TRAJECTORY_RETENTION_DAYS,
 }
 
 MEMORY_NESTED_TABLE_KEY: Final = "memory"

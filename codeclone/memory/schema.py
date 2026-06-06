@@ -19,6 +19,11 @@ from ..utils.sqlite_store import (
 from .exceptions import MemorySchemaError
 from .schema_fts import CREATE_MEMORY_RECORDS_FTS_SQL
 from .schema_meta import MEMORY_META_TABLE, get_meta, set_meta
+from .schema_trajectory import (
+    TRAJECTORY_DDL_STATEMENTS,
+    TRAJECTORY_INDEX_SQL,
+    create_trajectory_schema,
+)
 
 _CREATE_META_SQL = f"""
 CREATE TABLE IF NOT EXISTS {MEMORY_META_TABLE} (
@@ -175,7 +180,6 @@ CREATE TABLE IF NOT EXISTS memory_blast_radius_cache (
 )
 """
 
-
 _DDL_STATEMENTS = (
     _CREATE_META_SQL,
     _CREATE_MIGRATIONS_SQL,
@@ -187,6 +191,7 @@ _DDL_STATEMENTS = (
     _CREATE_INGESTION_RUNS_SQL,
     _CREATE_REVISIONS_SQL,
     _CREATE_BLAST_CACHE_SQL,
+    *TRAJECTORY_DDL_STATEMENTS,
 )
 
 _INDEX_SQL = (
@@ -209,6 +214,7 @@ _INDEX_SQL = (
     "CREATE INDEX IF NOT EXISTS idx_revisions_memory ON memory_revisions(memory_id)",
     "CREATE INDEX IF NOT EXISTS idx_blast_cache_subject "
     "ON memory_blast_radius_cache(project_id, subject_kind, subject_key)",
+    *TRAJECTORY_INDEX_SQL,
 )
 
 
@@ -265,6 +271,7 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
 
 __all__ = [
     "create_schema_v1",
+    "create_trajectory_schema",
     "ensure_schema",
     "get_meta",
     "open_memory_db",
