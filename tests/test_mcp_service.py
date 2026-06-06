@@ -5592,6 +5592,7 @@ def test_intent_record_payload_includes_check_result() -> None:
         actual_changed_files=("pkg/a.py",),
         unexpected_files=(),
         forbidden_touched=(),
+        untouched_in_declared=(),
         required_action=None,
         message="clean",
     )

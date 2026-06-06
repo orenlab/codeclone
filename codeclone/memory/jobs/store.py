@@ -198,16 +198,15 @@ def claim_next_projection_job(
             "WHERE project_id=? AND status='running' LIMIT 1",
             (project_id,),
         ).fetchone()
-        if running is not None:
-            conn.execute("COMMIT")
-            return None
-        row = conn.execute(
-            "SELECT * FROM memory_projection_jobs "
-            "WHERE project_id=? AND status='pending' "
-            "ORDER BY requested_at_utc ASC, id ASC LIMIT 1",
-            (project_id,),
-        ).fetchone()
-        if row is None:
+        row: sqlite3.Row | None = None
+        if running is None:
+            row = conn.execute(
+                "SELECT * FROM memory_projection_jobs "
+                "WHERE project_id=? AND status='pending' "
+                "ORDER BY requested_at_utc ASC, id ASC LIMIT 1",
+                (project_id,),
+            ).fetchone()
+        if running is not None or row is None:
             conn.execute("COMMIT")
             return None
         now = current_report_timestamp_utc()

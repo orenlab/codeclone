@@ -41,9 +41,10 @@ controlled edits.
 | 23    | Trajectory projection + SQLite storage                        | CLI `memory trajectory status\|rebuild\|list\|show\|search`                              |
 | 24    | Scoped trajectory retrieval + memory evidence                 | MCP `get_relevant_memory.trajectories[]`; `query_engineering_memory(mode=trajectory_*)`  |
 | 25    | Disabled-by-default local JSONL export profiles               | CLI `memory trajectory export --profile ... --out ...`                                   |
+| 26    | Patch Trail persistence + scoped retrieval                    | `memory_trajectory_patch_trails`; `patch_trail_summary` on scoped retrieval              |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`1.2`**).
+`codeclone/contracts/__init__.py` (currently **`1.4`**).
 
 Semantic index format (separate contract): `SEMANTIC_INDEX_FORMAT_VERSION`
 (currently **`1`**) in the same module. The vector sidecar is independent of
@@ -843,13 +844,36 @@ codeclone memory trajectory export \
 
 Export profiles (schema contracts): `agent-change-control-v1`,
 `agent-memory-retrieval-v1`, `agent-recovery-v1`, `agent-security-hardening-v1`.
-Changing profile shape requires a profile version bump.
+Export row schema version is **`2`**. Each row includes populated
+**`context.memory_precedents`** (trajectory-linked and path-overlap active memory),
+**`context.trajectory_precedents`** (prior workflows with path overlap),
+**`citations`** (claim-validation event core + report digests),
+**`patch_trail_summary`** when persisted, and **`projection_version`**. Rebuild
+supersedes older projection rows for the same workflow (one canonical trajectory
+per `workflow_id` in export). Legacy audit rows without path facts in frozen
+event core are supplemented deterministically from stored audit payloads during
+projection. Changing profile shape requires a profile version bump.
 
 ### MCP retrieval
 
 `get_relevant_memory` adds **`trajectories[]`** beside **`records[]`** when path
 subjects match (declare `scope_paths`, check `changed_files`, or
-`untouched_in_declared`).
+`untouched_in_declared`). When a stored Patch Trail exists for a matched
+trajectory, each preview includes **`patch_trail_summary`** (counts, digest,
+verification status). The top-ranked trajectory also surfaces
+**`patch_trail_summary`** at the response root for quick scope context.
+
+`query_engineering_memory(mode=trajectory_get)` returns **`patch_trail`** on the
+trajectory payload when persisted for that workflow.
+
+Trajectory rebuild (`memory trajectory rebuild` / MCP
+`manage_engineering_memory(action=rebuild_trajectories)`) synthesizes Patch Trail
+from audit event cores (`intent.declared`, `intent.checked`, verify events) and
+stores it in **`memory_trajectory_patch_trails`**. Trajectory digest
+(`trajectory-v2`) incorporates **`patch_trail_digest`** when present.
+
+Scoped ranking adds a small boost when query scope paths intersect
+**`untouched_in_declared`** paths from the stored Patch Trail.
 
 `query_engineering_memory` modes:
 

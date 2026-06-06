@@ -381,13 +381,23 @@ def get_relevant_memory(
         ),
         limit=max(DEFAULT_TRAJECTORY_PREVIEW_LIMIT * 3, max_records),
     )
+    patch_trails = _load_patch_trails_for_trajectories(
+        store,
+        trajectory_ids=tuple(item.id for item in trajectory_candidates),
+    )
     trajectories_payload, trajectories_truncated = rank_trajectories_for_scope(
         trajectory_candidates,
         scope_paths=normalized_scope,
         symbols=tuple(normalized_symbols),
         max_results=min(max_records, DEFAULT_TRAJECTORY_PREVIEW_LIMIT),
         include_routine=include_routine,
+        patch_trails=patch_trails,
     )
+    patch_trail_summary = None
+    if trajectories_payload:
+        first_summary = trajectories_payload[0].get("patch_trail_summary")
+        if isinstance(first_summary, dict):
+            patch_trail_summary = first_summary
     coverage: dict[str, object]
     if normalized_scope:
         coverage = _coverage_summary(
@@ -407,6 +417,7 @@ def get_relevant_memory(
         "scope_resolved_from": scope_resolved_from,
         "records": records_payload,
         "trajectories": trajectories_payload,
+        "patch_trail_summary": patch_trail_summary,
         "record_count": len(records_payload),
         "trajectory_count": len(trajectories_payload),
         "truncated": truncated,
@@ -415,6 +426,19 @@ def get_relevant_memory(
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
+
+
+def _load_patch_trails_for_trajectories(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    trajectory_ids: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    trails: dict[str, dict[str, object]] = {}
+    for trajectory_id in trajectory_ids:
+        loaded = store.load_trajectory_patch_trail(trajectory_id)
+        if loaded is not None:
+            trails[trajectory_id] = loaded
+    return trails
 
 
 def _parse_filters(
@@ -624,11 +648,17 @@ def _handle_trajectory_get_mode(
             "status": "not_found",
             "payload": {"trajectory_id": trajectory_id},
         }
+    patch_trail_payload = store.load_trajectory_patch_trail(trajectory_id)
     return {
         "mode": mode,
         "status": "ok",
         "detail_level": "full",
-        "payload": {"trajectory": serialize_trajectory_detail(trajectory)},
+        "payload": {
+            "trajectory": serialize_trajectory_detail(
+                trajectory,
+                patch_trail_payload=patch_trail_payload,
+            )
+        },
     }
 
 

@@ -102,3 +102,17 @@ def test_rebuild_trajectories_from_audit_is_idempotent(tmp_path: Path) -> None:
             "patch_contract.verified",
         ]
         assert store.latest_trajectory_projection_run(project_id=project.id) is not None
+
+
+def test_rebuild_supersedes_duplicate_workflow_projection_rows(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        _write_workflow_events(root, audit_db)
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        assert store.count_trajectories(project_id=project.id) == 1
+        canonical = store.list_canonical_trajectories_for_export(project_id=project.id)
+        assert len(canonical) == 1

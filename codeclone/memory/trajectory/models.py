@@ -9,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-TRAJECTORY_PROJECTION_VERSION = "trajectory-v1"
+TRAJECTORY_PROJECTION_VERSION = "trajectory-v2"
+TRAJECTORY_PROJECTION_VERSION_V1 = "trajectory-v1"
 
 TrajectoryOutcome = Literal[
     "accepted",

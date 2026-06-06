@@ -958,21 +958,22 @@ def _run_jobs_list(
         )
     except MemoryContractError as exc:
         return _print_memory_contract_error(console, exc)
+    exit_code = int(ExitCode.SUCCESS)
     if bool(args.json):
         console.print(json.dumps(payload, sort_keys=True, indent=2))
-        return int(ExitCode.SUCCESS)
-    jobs = payload.get("jobs")
-    if not isinstance(jobs, list) or not jobs:
-        console.print("No projection rebuild jobs recorded.")
-        return int(ExitCode.SUCCESS)
-    for job in jobs:
-        if not isinstance(job, dict):
-            continue
-        console.print(
-            f"{job.get('id')} {job.get('status')} "
-            f"trigger={job.get('trigger')} requested={job.get('requested_at_utc')}"
-        )
-    return int(ExitCode.SUCCESS)
+    else:
+        jobs = payload.get("jobs")
+        if not isinstance(jobs, list) or not jobs:
+            console.print("No projection rebuild jobs recorded.")
+        else:
+            for job in jobs:
+                if isinstance(job, dict):
+                    console.print(
+                        f"{job.get('id')} {job.get('status')} "
+                        f"trigger={job.get('trigger')} "
+                        f"requested={job.get('requested_at_utc')}"
+                    )
+    return exit_code
 
 
 def _confirm_cli_governance_break_glass(

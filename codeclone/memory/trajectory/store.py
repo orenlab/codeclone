@@ -33,6 +33,7 @@ from .models import (
     TrajectoryStep,
     TrajectorySubject,
 )
+from .patch_trail_projector import project_patch_trail_from_audit
 from .projector import project_trajectory
 
 
@@ -58,6 +59,13 @@ def rebuild_trajectories_from_audit(
     created = updated = unchanged = 0
     trajectories: list[Trajectory] = []
     for workflow_id, records in grouped.items():
+        patch_trail = project_patch_trail_from_audit(
+            records=records,
+            repo_root_digest=root_digest,
+        )
+        patch_trail_digest = (
+            patch_trail.patch_trail_digest if patch_trail is not None else None
+        )
         trajectory = project_trajectory(
             project_id=project.id,
             repo_root_digest=root_digest,
@@ -65,8 +73,27 @@ def rebuild_trajectories_from_audit(
             records=records,
             projection_version=projection_version,
             projected_at_utc=started,
+            patch_trail_digest=patch_trail_digest,
         )
         action = upsert_trajectory(conn, trajectory)
+        if patch_trail is not None:
+            upsert_trajectory_patch_trail(
+                conn,
+                trajectory_id=trajectory.id,
+                patch_trail_json=_json_object(
+                    patch_trail._canonical_dict(include_digest=True)
+                ),
+                patch_trail_digest=patch_trail.patch_trail_digest,
+                schema_version=patch_trail.schema_version,
+                projected_at_utc=started,
+            )
+        supersede_stale_projection_trajectories(
+            conn,
+            project_id=project.id,
+            workflow_id=workflow_id,
+            keep_trajectory_id=trajectory.id,
+            keep_trajectory_digest=trajectory.trajectory_digest,
+        )
         if action == "created":
             created += 1
         elif action == "updated":
@@ -191,6 +218,58 @@ def upsert_trajectory(conn: sqlite3.Connection, trajectory: Trajectory) -> str:
     _insert_subjects(conn, trajectory.id, trajectory.subjects)
     _insert_evidence(conn, trajectory.id, trajectory.evidence)
     return action
+
+
+def supersede_stale_projection_trajectories(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    workflow_id: str,
+    keep_trajectory_id: str,
+    keep_trajectory_digest: str,
+) -> int:
+    stale_rows = conn.execute(
+        """
+        SELECT id FROM memory_trajectories
+        WHERE project_id=? AND workflow_id=? AND id != ?
+        """,
+        (project_id, workflow_id, keep_trajectory_id),
+    ).fetchall()
+    removed = 0
+    for row in stale_rows:
+        old_id = str(row["id"])
+        conn.execute(
+            """
+            UPDATE memory_evidence
+            SET ref=?, digest=?
+            WHERE evidence_kind='trajectory' AND ref=?
+            """,
+            (keep_trajectory_id, keep_trajectory_digest, old_id),
+        )
+        conn.execute("DELETE FROM memory_trajectories WHERE id=?", (old_id,))
+        removed += 1
+    return removed
+
+
+def list_canonical_trajectories_for_export(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    limit: int = 10_000,
+) -> list[Trajectory]:
+    rows = conn.execute(
+        """
+        SELECT id FROM memory_trajectories
+        WHERE project_id=?
+        ORDER BY finished_at_utc DESC, id ASC
+        LIMIT ?
+        """,
+        (project_id, max(1, int(limit))),
+    ).fetchall()
+    trajectories = _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
+    from .export_context import select_canonical_trajectories
+
+    return select_canonical_trajectories(trajectories)
 
 
 def write_projection_run(
@@ -610,6 +689,10 @@ def _json_array(values: Sequence[str]) -> str:
     return json.dumps(list(values), sort_keys=True, separators=(",", ":"))
 
 
+def _json_object(payload: Mapping[str, object]) -> str:
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+
+
 def _optional_text(value: object) -> str | None:
     if value is None:
         return None
@@ -621,14 +704,66 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").lower()
 
 
+def upsert_trajectory_patch_trail(
+    conn: sqlite3.Connection,
+    *,
+    trajectory_id: str,
+    patch_trail_json: str,
+    patch_trail_digest: str,
+    schema_version: str,
+    projected_at_utc: str,
+) -> None:
+    conn.execute(
+        """
+        INSERT INTO memory_trajectory_patch_trails(
+            trajectory_id, patch_trail_digest, patch_trail_json,
+            schema_version, projected_at_utc
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(trajectory_id) DO UPDATE SET
+            patch_trail_digest=excluded.patch_trail_digest,
+            patch_trail_json=excluded.patch_trail_json,
+            schema_version=excluded.schema_version,
+            projected_at_utc=excluded.projected_at_utc
+        """,
+        (
+            trajectory_id,
+            patch_trail_digest,
+            patch_trail_json,
+            schema_version,
+            projected_at_utc,
+        ),
+    )
+
+
+def load_trajectory_patch_trail(
+    conn: sqlite3.Connection,
+    *,
+    trajectory_id: str,
+) -> dict[str, object] | None:
+    row = conn.execute(
+        """
+        SELECT patch_trail_json
+        FROM memory_trajectory_patch_trails
+        WHERE trajectory_id=?
+        """,
+        (trajectory_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    loaded = json.loads(str(row["patch_trail_json"]))
+    return loaded if isinstance(loaded, dict) else None
+
+
 __all__ = [
     "count_trajectories",
     "find_trajectory",
     "latest_projection_run",
     "list_trajectories",
     "list_trajectories_for_subjects",
+    "load_trajectory_patch_trail",
     "rebuild_trajectories_from_audit",
     "search_trajectories",
     "upsert_trajectory",
+    "upsert_trajectory_patch_trail",
     "write_projection_run",
 ]

@@ -62,12 +62,12 @@ INSERT INTO controller_events(
 
 
 class AuditWriter(Protocol):
-    def emit(self, event: AuditEvent) -> None: ...
+    def emit(self, event: AuditEvent) -> int | None: ...
     def close(self) -> None: ...
 
 
 class NullAuditWriter:
-    def emit(self, event: AuditEvent) -> None:
+    def emit(self, event: AuditEvent) -> int | None:
         return None
 
     def close(self) -> None:
@@ -97,9 +97,9 @@ class SqliteAuditWriter:
         )
         self._conn.commit()
 
-    def emit(self, event: AuditEvent) -> None:
+    def emit(self, event: AuditEvent) -> int | None:
         try:
-            self._emit_impl(event)
+            return self._emit_impl(event)
         except Exception:
             return None
 
@@ -113,7 +113,7 @@ class SqliteAuditWriter:
                 self._conn.close()
                 self._closed = True
 
-    def _emit_impl(self, event: AuditEvent) -> None:
+    def _emit_impl(self, event: AuditEvent) -> int | None:
         row = event_to_row(
             event=event,
             payloads=self._payloads,
@@ -122,13 +122,14 @@ class SqliteAuditWriter:
         validate_event_row(row)
         with self._lock:
             if self._closed:
-                return
-            self._conn.execute(_INSERT_SQL, row.as_tuple())
+                return None
+            cursor = self._conn.execute(_INSERT_SQL, row.as_tuple())
             self._conn.commit()
             self._gc_counter += 1
             if self._gc_counter >= self._gc_interval:
                 self._run_retention_gc()
                 self._gc_counter = 0
+            return cursor.lastrowid
 
     def _run_retention_gc(self) -> None:
         cutoff = datetime.now(timezone.utc) - timedelta(days=self._retention_days)

@@ -75,7 +75,10 @@ def test_export_writes_deterministic_jsonl(tmp_path: Path) -> None:
     line = out.read_text(encoding="utf-8").strip().splitlines()[0]
     payload = json.loads(line)
     assert payload["profile"] == "agent-change-control-v1"
+    assert payload["schema_version"] == "2"
     assert "digests" in payload
+    assert "context" in payload
+    assert "citations" in payload
     assert "/Users/" not in json.dumps(payload)
 
 

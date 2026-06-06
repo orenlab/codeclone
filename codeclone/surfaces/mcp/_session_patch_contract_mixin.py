@@ -796,7 +796,7 @@ class _MCPSessionPatchContractMixin:
             if status == PatchContractStatus.VIOLATED.value
             else EVENT_PATCH_VERIFIED
         )
-        self._audit_emit(
+        audit_sequence = self._audit_emit(
             root=after.root,
             event_type=event_type,
             severity="warn" if blocking_violations else "info",
@@ -806,6 +806,8 @@ class _MCPSessionPatchContractMixin:
             status=status,
             payload=payload,
         )
+        if audit_sequence is not None:
+            payload["_audit_sequence"] = audit_sequence
         if bool(baseline_abuse.get("detected")):
             self._audit_emit(
                 root=after.root,

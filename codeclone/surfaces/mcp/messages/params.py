@@ -214,6 +214,10 @@ DetailLevelParam = Annotated[
     str,
     Field(description="summary, normal, or full detail level."),
 ]
+PatchTrailDetailParam = Annotated[
+    str,
+    Field(description="summary or full patch_trail payload on finish."),
+]
 ExcludeReviewedParam = Annotated[
     bool,
     Field(description="Omit session-marked reviewed findings when true."),

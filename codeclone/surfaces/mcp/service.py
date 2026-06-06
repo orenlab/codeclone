@@ -491,6 +491,8 @@ def _apply_public_method_signatures() -> None:
             _kwonly("auto_clear", "bool", True),
             _kwonly("strictness", "str", "ci"),
             _kwonly("propose_memory", "bool", False),
+            _kwonly("detail_level", "str", "summary"),
+            _kwonly("patch_trail_detail", "str", "summary"),
         ),
     }
     self_param = inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)

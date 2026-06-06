@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from ...audit import EVENT_RECEIPT_CREATED
 from ...contracts import REPORT_SCHEMA_VERSION
@@ -225,7 +225,7 @@ class _MCPSessionReviewReceiptMixin:
         if intent is None:
             return None
         check = intent.check_result
-        return {
+        scope_payload: dict[str, object] = {
             "intent_id": intent.intent_id,
             "intent_status": self._intent_status(intent),
             "intent_description": intent.intent_description,
@@ -233,7 +233,16 @@ class _MCPSessionReviewReceiptMixin:
             "changed_files": list(check.actual_changed_files) if check else [],
             "unexpected_files": list(check.unexpected_files) if check else [],
             "forbidden_touched": list(check.forbidden_touched) if check else [],
+            "untouched_files": list(check.untouched_in_declared) if check else [],
         }
+        if check and intent.blast_radius_summary:
+            summary = intent.blast_radius_summary
+            changed = set(check.actual_changed_files)
+            do_not_touch = _coerce_str_list(summary.get("do_not_touch_declared"))
+            scope_payload["do_not_touch_held"] = [
+                path for path in do_not_touch if path not in changed
+            ]
+        return scope_payload
 
     def _intent_status(self, intent: IntentRecord | None) -> str | None:
         if intent is None:
@@ -424,6 +433,12 @@ class _MCPSessionReviewReceiptMixin:
             "grade": health.get("grade"),
             "delta": _helpers._summary_health_delta(record.summary),
         }
+
+
+def _coerce_str_list(value: object) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
+        return []
+    return [str(item) for item in value if str(item).strip()]
 
 
 __all__ = ["_MCPSessionReviewReceiptMixin"]

@@ -70,11 +70,16 @@ def seed_trajectory_audit_workflow(
     root: Path,
     intent_id: str = "intent-traj-001",
     scope_path: str = "pkg/service.py",
+    untouched_path: str | None = "pkg/helper.py",
     description: str = "recover stale intent before editing service",
     include_scope_check: bool = True,
 ) -> None:
     """Emit a minimal intent workflow into audit for trajectory projection tests."""
     root_digest = repo_root_digest(root.resolve())
+    declared = [scope_path]
+    if untouched_path:
+        declared.append(untouched_path)
+    changed = [scope_path]
     writer = SqliteAuditWriter(
         db_path=audit_db,
         payloads="compact",
@@ -94,7 +99,7 @@ def seed_trajectory_audit_workflow(
                 status="active",
                 payload={
                     "intent_description": description,
-                    "scope": {"allowed_files": [scope_path]},
+                    "scope": {"allowed_files": declared},
                     "workspace_registered": True,
                     "ttl_seconds": 3600,
                     "lease_seconds": 600,
@@ -115,8 +120,8 @@ def seed_trajectory_audit_workflow(
                     status="clean",
                     payload={
                         "status": "clean",
-                        "declared_scope": [scope_path],
-                        "actual_changed_files": [scope_path],
+                        "declared_scope": declared,
+                        "actual_changed_files": changed,
                         "unexpected_files": [],
                         "forbidden_touched": [],
                         "required_action": None,

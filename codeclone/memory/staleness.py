@@ -269,6 +269,61 @@ def _refresh_stale_primary_reason(
     return reasons[0] if reasons else None
 
 
+@dataclass(frozen=True, slots=True)
+class _RefreshStalenessDelta:
+    marked_stale: int = 0
+    marked_historical: int = 0
+    reactivated: int = 0
+    reason_counts: tuple[tuple[str, int], ...] = ()
+
+
+def _refresh_staleness_for_record(
+    store: SqliteEngineeringMemoryStore,
+    record: MemoryRecord,
+    *,
+    resolved_root: Path,
+    batch_identity_keys: frozenset[str],
+    batch_by_identity: Mapping[str, MemoryRecord],
+    batch_evidence: dict[tuple[str, str, str], str | None],
+    report_digest: str | None,
+) -> _RefreshStalenessDelta:
+    if _skip_refresh_candidate(record):
+        return _RefreshStalenessDelta()
+
+    subjects = store.list_subjects_for_memory(record.id)
+    anchor_subject = _primary_anchor_subject(subjects)
+    if anchor_subject is not None:
+        drift_outcome = _apply_anchor_drift_for_record(
+            store,
+            record,
+            anchor_subject=anchor_subject,
+            root_path=resolved_root,
+        )
+        if drift_outcome.handled:
+            reason_counts: tuple[tuple[str, int], ...] = ()
+            if drift_outcome.counter_key is not None:
+                reason_counts = ((drift_outcome.counter_key, 1),)
+            return _RefreshStalenessDelta(
+                marked_stale=drift_outcome.marked_stale,
+                marked_historical=drift_outcome.marked_historical,
+                reactivated=drift_outcome.reactivated,
+                reason_counts=reason_counts,
+            )
+
+    primary = _refresh_stale_primary_reason(
+        store,
+        record,
+        batch_identity_keys=batch_identity_keys,
+        batch_by_identity=batch_by_identity,
+        batch_evidence=batch_evidence,
+        report_digest=report_digest,
+    )
+    if primary is None:
+        return _RefreshStalenessDelta()
+    store.mark_stale(record.id, primary, commit=False)
+    return _RefreshStalenessDelta(marked_stale=1, reason_counts=((primary, 1),))
+
+
 def apply_refresh_staleness(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -297,40 +352,20 @@ def apply_refresh_staleness(
         statuses=("active", "historical", "stale"),
     )
     for record in candidates:
-        if _skip_refresh_candidate(record):
-            continue
-
-        subjects = store.list_subjects_for_memory(record.id)
-        anchor_subject = _primary_anchor_subject(subjects)
-        if anchor_subject is not None:
-            drift_outcome = _apply_anchor_drift_for_record(
-                store,
-                record,
-                anchor_subject=anchor_subject,
-                root_path=resolved_root,
-            )
-            if drift_outcome.handled:
-                marked_stale += drift_outcome.marked_stale
-                marked_historical += drift_outcome.marked_historical
-                reactivated += drift_outcome.reactivated
-                if drift_outcome.counter_key is not None:
-                    key = drift_outcome.counter_key
-                    reason_counts[key] = reason_counts.get(key, 0) + 1
-                continue
-
-        primary = _refresh_stale_primary_reason(
+        delta = _refresh_staleness_for_record(
             store,
             record,
+            resolved_root=resolved_root,
             batch_identity_keys=batch_identity_keys,
             batch_by_identity=batch_by_identity,
             batch_evidence=batch_evidence,
             report_digest=report_digest,
         )
-        if primary is None:
-            continue
-        store.mark_stale(record.id, primary, commit=False)
-        marked_stale += 1
-        reason_counts[primary] = reason_counts.get(primary, 0) + 1
+        marked_stale += delta.marked_stale
+        marked_historical += delta.marked_historical
+        reactivated += delta.reactivated
+        for key, count in delta.reason_counts:
+            reason_counts[key] = reason_counts.get(key, 0) + count
 
     if commit:
         store.commit()

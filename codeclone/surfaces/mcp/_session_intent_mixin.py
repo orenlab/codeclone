@@ -110,7 +110,7 @@ class _MCPSessionIntentMixin:
         report_digest: str | None = None,
         status: str | None = None,
         payload: Mapping[str, object] | None = None,
-    ) -> None:
+    ) -> int | None:
         raise NotImplementedError
 
     def get_blast_radius(
@@ -650,7 +650,7 @@ class _MCPSessionIntentMixin:
             IntentStatus.EXPANDED: EVENT_INTENT_EXPANDED,
             IntentStatus.VIOLATED: EVENT_INTENT_VIOLATED,
         }.get(check_result.status, EVENT_INTENT_CHECKED)
-        self._audit_emit(
+        audit_sequence = self._audit_emit(
             root=record.root,
             event_type=event_type,
             severity="warn" if check_result.status != IntentStatus.CLEAN else "info",
@@ -660,6 +660,8 @@ class _MCPSessionIntentMixin:
             status=check_result.status.value,
             payload=payload,
         )
+        if audit_sequence is not None:
+            payload["_audit_sequence"] = audit_sequence
         return payload
 
     def _clear_change_intent(self, *, intent_id: str | None) -> dict[str, object]:
@@ -1434,6 +1436,14 @@ class _MCPSessionIntentMixin:
                 }
             )
         )
+        do_not_touch_paths = _blast_boundary_paths(
+            blast_payload.get("do_not_touch"),
+            limit=200,
+        )
+        review_context_paths = _blast_boundary_paths(
+            blast_payload.get("review_context"),
+            limit=200,
+        )
         return {
             "radius_level": str(blast_payload.get("radius_level", "low")),
             "direct_dependents_count": len(
@@ -1452,6 +1462,8 @@ class _MCPSessionIntentMixin:
             "review_context_count": len(
                 _as_sequence(blast_payload.get("review_context"))
             ),
+            "do_not_touch_declared": list(do_not_touch_paths),
+            "review_context_declared": list(review_context_paths),
         }
 
     def _intent_check_result(
@@ -1490,12 +1502,14 @@ class _MCPSessionIntentMixin:
             status = IntentStatus.CLEAN
             required_action = None
             message = intent_msgs.SCOPE_CHECK_CLEAN
+        untouched_in_declared = tuple(sorted(set(declared_scope) - set(actual_files)))
         return IntentCheckResult(
             status=status,
             declared_scope=declared_scope,
             actual_changed_files=actual_files,
             unexpected_files=unexpected,
             forbidden_touched=forbidden,
+            untouched_in_declared=untouched_in_declared,
             required_action=required_action,
             message=message,
         )
@@ -1527,6 +1541,19 @@ def _as_sequence(value: object) -> Sequence[object]:
 
 def _as_str_sequence(value: object) -> tuple[str, ...]:
     return tuple(str(item) for item in _as_sequence(value))
+
+
+def _blast_boundary_paths(value: object, *, limit: int) -> tuple[str, ...]:
+    paths: list[str] = []
+    for item in _as_sequence(value):
+        if isinstance(item, Mapping):
+            path = str(item.get("path", "")).strip()
+        else:
+            path = str(item).strip()
+        if path:
+            paths.append(path.replace("\\", "/"))
+    unique = tuple(sorted(set(paths)))
+    return unique[:limit]
 
 
 def _utc_now() -> str:

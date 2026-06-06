@@ -42,6 +42,7 @@ def _record(
     report_digest: str | None = None,
     severity: str = "info",
     summary: str | None = None,
+    payload_json: str | None = None,
     **facts: object,
 ) -> AuditRecord:
     core_json, core_sha = _core(event_type, status=status or "", **facts)
@@ -60,10 +61,47 @@ def _record(
         event_core_json=core_json,
         event_core_sha256=core_sha,
         payload_sha256=None,
+        payload_json=payload_json,
         status=status,
         agent_label="agent",
         summary=summary,
     )
+
+
+def test_project_trajectory_uses_payload_paths_when_event_core_lacks_them() -> None:
+    core_json, core_sha = _core("intent.declared", status="active")
+    payload = json.dumps(
+        {
+            "intent_description": "legacy declare without core paths",
+            "scope": {"allowed_files": ["pkg/legacy.py"]},
+            "workspace_registered": True,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    record = replace(
+        _record(
+            1,
+            "intent.declared",
+            status="active",
+            summary="legacy declare without core paths",
+        ),
+        event_core_json=core_json,
+        event_core_sha256=core_sha,
+        payload_json=payload,
+    )
+    trajectory = project_trajectory(
+        project_id="proj-test",
+        repo_root_digest="digest",
+        workflow_id="intent:intent-a-001",
+        records=(record,),
+    )
+    path_subjects = [
+        subject.subject_key
+        for subject in trajectory.subjects
+        if subject.subject_kind == "path"
+    ]
+    assert "pkg/legacy.py" in path_subjects
 
 
 def test_project_trajectory_is_deterministic_and_canonicalizes_report_digest() -> None:

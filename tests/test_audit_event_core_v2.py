@@ -64,3 +64,37 @@ def test_check_event_core_compact_payload_stays_count_only() -> None:
     )
     assert compact["unexpected_files"] == 1
     assert "changed_files" not in compact
+
+
+def test_patch_trail_event_core_uses_counts() -> None:
+    from codeclone.audit.events import (
+        EVENT_PATCH_TRAIL_COMPUTED,
+        event_core_for_event,
+    )
+
+    core = event_core_for_event(
+        AuditEvent(
+            event_type=EVENT_PATCH_TRAIL_COMPUTED,
+            severity="info",
+            repo_root_digest="digest",
+            agent_pid=1,
+            agent_label="agent",
+            status="clean",
+            payload={
+                "schema_version": "1",
+                "scope_check_status": "clean",
+                "verification_status": "accepted",
+                "declared_files": ["a.py", "b.py"],
+                "changed_files": ["a.py"],
+                "untouched_in_declared": ["b.py"],
+                "unexpected_files": [],
+                "forbidden_touched": [],
+                "truncation": {},
+                "patch_trail_digest": "abc",
+            },
+        )
+    )
+    facts = core["facts"]
+    assert isinstance(facts, dict)
+    assert facts["untouched_in_declared"] == 1
+    assert facts["patch_trail_digest"] == "abc"

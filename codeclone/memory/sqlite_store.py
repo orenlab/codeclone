@@ -173,6 +173,32 @@ class SqliteEngineeringMemoryStore:
 
         return find_trajectory(self._conn, trajectory_id)
 
+    def load_trajectory_patch_trail(
+        self,
+        trajectory_id: str,
+    ) -> dict[str, object] | None:
+        from .trajectory.store import load_trajectory_patch_trail
+
+        return load_trajectory_patch_trail(self._conn, trajectory_id=trajectory_id)
+
+    def list_canonical_trajectories_for_export(
+        self,
+        *,
+        project_id: str,
+        limit: int = 10_000,
+    ) -> list[Trajectory]:
+        from .trajectory.store import list_canonical_trajectories_for_export
+
+        return list_canonical_trajectories_for_export(
+            self._conn,
+            project_id=project_id,
+            limit=limit,
+        )
+
+    @property
+    def connection(self) -> sqlite3.Connection:
+        return self._conn
+
     def write_record(self, record: MemoryRecord) -> None:
         self._insert_record(record)
         self._conn.commit()

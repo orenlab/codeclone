@@ -11,7 +11,7 @@ from typing import Final, Literal
 
 from .models import Trajectory, TrajectoryQualityTier
 
-TRAJECTORY_EXPORT_SCHEMA_VERSION: Final = "1"
+TRAJECTORY_EXPORT_SCHEMA_VERSION: Final = "2"
 
 ExportProfileName = Literal[
     "agent-change-control-v1",

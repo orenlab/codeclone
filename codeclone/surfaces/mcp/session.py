@@ -188,10 +188,10 @@ class MCPSession(
         report_digest: str | None = None,
         status: str | None = None,
         payload: Mapping[str, object] | None = None,
-    ) -> None:
+    ) -> int | None:
         try:
             writer = self._audit_writer_for_root(root)
-            writer.emit(
+            return writer.emit(
                 AuditEvent(
                     event_type=event_type,
                     severity="error"

@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from codeclone.audit.events import repo_root_digest
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.models import MemoryEvidence, generate_memory_id
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
@@ -56,6 +57,116 @@ def test_get_relevant_memory_returns_scoped_trajectories(tmp_path: Path) -> None
     assert trajectories[0]["type"] == "trajectory"
     assert trajectories[0]["trajectory_id"].startswith("traj-")
     assert trajectories[0]["relevance_score"] > 1.0
+
+
+def test_get_relevant_memory_returns_patch_trail_summary(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        root_digest = repo_root_digest(root.resolve())
+        writer = __import__(
+            "codeclone.audit.writer", fromlist=["SqliteAuditWriter"]
+        ).SqliteAuditWriter(
+            db_path=audit_db,
+            payloads="compact",
+            retention_days=30,
+        )
+        from codeclone.audit.events import (
+            EVENT_INTENT_CHECKED,
+            EVENT_INTENT_DECLARED,
+            EVENT_PATCH_VERIFIED,
+            AuditEvent,
+        )
+
+        try:
+            writer.emit(
+                AuditEvent(
+                    event_type=EVENT_INTENT_DECLARED,
+                    severity="info",
+                    repo_root_digest=root_digest,
+                    agent_pid=123,
+                    agent_label="test-agent",
+                    intent_id="intent-traj-001",
+                    run_id="run-before",
+                    report_digest="a" * 64,
+                    status="active",
+                    payload={
+                        "intent_description": "recover service",
+                        "scope": {"allowed_files": ["pkg/service.py", "pkg/helper.py"]},
+                        "workspace_registered": True,
+                        "ttl_seconds": 3600,
+                        "lease_seconds": 600,
+                    },
+                )
+            )
+            writer.emit(
+                AuditEvent(
+                    event_type=EVENT_INTENT_CHECKED,
+                    severity="info",
+                    repo_root_digest=root_digest,
+                    agent_pid=123,
+                    agent_label="test-agent",
+                    intent_id="intent-traj-001",
+                    run_id="run-before",
+                    report_digest="a" * 64,
+                    status="clean",
+                    payload={
+                        "status": "clean",
+                        "declared_scope": ["pkg/service.py", "pkg/helper.py"],
+                        "actual_changed_files": ["pkg/service.py"],
+                        "unexpected_files": [],
+                        "forbidden_touched": [],
+                        "required_action": None,
+                        "message": "clean",
+                    },
+                )
+            )
+            writer.emit(
+                AuditEvent(
+                    event_type=EVENT_PATCH_VERIFIED,
+                    severity="info",
+                    repo_root_digest=root_digest,
+                    agent_pid=123,
+                    agent_label="test-agent",
+                    intent_id="intent-traj-001",
+                    run_id="run-after",
+                    report_digest="b" * 64,
+                    status="accepted",
+                    payload={
+                        "status": "accepted",
+                        "structural_delta": {
+                            "regressions": [],
+                            "improvements": [],
+                            "health_delta": 0,
+                        },
+                        "contract_violations": [],
+                        "baseline_abuse": {"detected": False},
+                    },
+                )
+            )
+        finally:
+            writer.close()
+
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+
+        result = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/helper.py",),
+            scope_resolved_from="explicit",
+            max_records=5,
+        )
+
+    trajectories = result["trajectories"]
+    assert isinstance(trajectories, list)
+    assert trajectories
+    assert trajectories[0].get("patch_trail_summary") is not None
+    summary = result.get("patch_trail_summary")
+    assert isinstance(summary, dict)
+    assert summary.get("counts", {}).get("untouched_in_declared") == 1
 
 
 def test_query_engineering_memory_trajectory_modes(tmp_path: Path) -> None:
@@ -107,6 +218,7 @@ def test_query_engineering_memory_trajectory_modes(tmp_path: Path) -> None:
     assert isinstance(trajectory, dict)
     assert trajectory["trajectory_id"] == trajectory_id
     assert "event_core_json" not in str(trajectory)
+    assert trajectory.get("patch_trail") is not None
 
 
 def test_trajectory_search_requires_query(tmp_path: Path) -> None:

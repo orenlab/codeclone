@@ -32,6 +32,7 @@ def test_fresh_memory_schema_contains_trajectory_tables(tmp_path: Path) -> None:
             "memory_trajectory_steps",
             "memory_trajectory_subjects",
             "memory_trajectory_evidence",
+            "memory_trajectory_patch_trails",
             "memory_trajectory_projection_runs",
             "memory_projection_jobs",
         ):
@@ -62,6 +63,27 @@ def test_memory_schema_migrates_1_1_to_1_2_trajectory_tables(tmp_path: Path) -> 
         assert _table_exists(conn, "memory_trajectories")
         migration = conn.execute(
             "SELECT version FROM memory_schema_migrations WHERE version='1.2'"
+        ).fetchone()
+        assert migration is not None
+    finally:
+        conn.close()
+
+
+def test_memory_schema_migrates_1_3_to_1_4_patch_trails(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        conn.execute("DROP TABLE IF EXISTS memory_trajectory_patch_trails")
+        set_meta(conn, "schema_version", "1.3")
+        conn.commit()
+
+        ensure_schema(conn)
+
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+        assert _table_exists(conn, "memory_trajectory_patch_trails")
+        migration = conn.execute(
+            "SELECT version FROM memory_schema_migrations WHERE version='1.4'"
         ).fetchone()
         assert migration is not None
     finally:

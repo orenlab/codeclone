@@ -66,6 +66,7 @@ class IntentCheckResult:
     actual_changed_files: tuple[str, ...]
     unexpected_files: tuple[str, ...]
     forbidden_touched: tuple[str, ...]
+    untouched_in_declared: tuple[str, ...]
     required_action: str | None
     message: str
 
@@ -76,6 +77,7 @@ class IntentCheckResult:
             "actual_changed_files": list(self.actual_changed_files),
             "unexpected_files": list(self.unexpected_files),
             "forbidden_touched": list(self.forbidden_touched),
+            "untouched_in_declared": list(self.untouched_in_declared),
             "required_action": self.required_action,
             "message": self.message,
         }

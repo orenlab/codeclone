@@ -37,6 +37,20 @@ site.
   `codeclone[semantic-local]`; `api` provider reserved for Team+; `local_model`
   reserved for Enterprise. CLI `codeclone memory semantic status|rebuild|search`,
   MCP `query_engineering_memory(mode=search, semantic=true)`.
+- **Patch Trail** Deterministic scope narrative at
+  `finish_controlled_change`: declared/changed/untouched-in-declared,
+  boundary-held paths, verification outcome, and audit anchors
+  (`patch_trail.computed`). Engineering Memory schema **1.4** adds
+  `memory_trajectory_patch_trails`; trajectory projection version
+  **`trajectory-v2`**. Rebuild persists Patch Trail from audit; scoped retrieval
+  exposes `patch_trail_summary`. MCP finish accepts optional `patch_trail_detail`.
+- **Trajectory export enrichment (schema 2).** JSONL export rows now populate
+  `memory_precedents`, `trajectory_precedents`, `citations`, and
+  `patch_trail_summary`; export deduplicates superseded projection versions;
+  rebuild repoints trajectory memory evidence and deletes stale workflow rows.
+  Claim-validation event core stores bounded `validated_citations`; projection
+  supplements legacy path facts from stored audit payloads when event core lacks
+  them.
 - **IDE surfaces.** VS Code extension Memory view: draft inbox, approve/reject
   UX, QuickPick search, memory-for-active-file, search results webview. IDE
   governance channel (`--ide-governance-channel`) with session HMAC attestation.

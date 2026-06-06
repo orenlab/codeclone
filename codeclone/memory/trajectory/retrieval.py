@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from ..paths import normalize_memory_scope_path, repo_path_to_module_key
 from ..search_index import SearchMatchMode, tokenize_query
 from .models import Trajectory, TrajectoryListItem
+from .patch_trail import patch_trail_from_mapping, patch_trail_summary_line
 
 DEFAULT_TRAJECTORY_PREVIEW_LIMIT = 5
 DEFAULT_TRAJECTORY_STEP_LIMIT = 12
@@ -92,6 +93,7 @@ def serialize_trajectory_preview(
     trajectory: Trajectory,
     *,
     relevance_score: float | None = None,
+    patch_trail_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {
         "type": "trajectory",
@@ -111,17 +113,42 @@ def serialize_trajectory_preview(
     }
     if relevance_score is not None:
         payload["relevance_score"] = round(relevance_score, 3)
+    summary = serialize_patch_trail_summary(patch_trail_payload)
+    if summary is not None:
+        payload["patch_trail_summary"] = summary
     return payload
+
+
+def serialize_patch_trail_summary(
+    payload: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    if payload is None:
+        return None
+    trail = patch_trail_from_mapping(payload)
+    if trail is None:
+        return None
+    summary_payload = trail.to_payload(detail_level="summary")
+    return {
+        "summary_line": patch_trail_summary_line(trail),
+        "patch_trail_digest": trail.patch_trail_digest,
+        "counts": summary_payload.get("counts", {}),
+        "scope_check_status": trail.scope_check_status,
+        "verification_status": trail.verification_status,
+    }
 
 
 def serialize_trajectory_detail(
     trajectory: Trajectory,
     *,
     max_steps: int = DEFAULT_TRAJECTORY_STEP_LIMIT,
+    patch_trail_payload: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     steps = trajectory.steps[: max(1, int(max_steps))]
-    return {
-        **serialize_trajectory_preview(trajectory),
+    detail = {
+        **serialize_trajectory_preview(
+            trajectory,
+            patch_trail_payload=patch_trail_payload,
+        ),
         "trajectory_digest": trajectory.trajectory_digest,
         "source_event_stream_digest": trajectory.source_event_stream_digest,
         "projection_version": trajectory.projection_version,
@@ -156,6 +183,11 @@ def serialize_trajectory_detail(
             for item in trajectory.evidence
         ],
     }
+    if patch_trail_payload is not None:
+        trail = patch_trail_from_mapping(patch_trail_payload)
+        if trail is not None:
+            detail["patch_trail"] = trail.to_payload(detail_level="summary")
+    return detail
 
 
 def rank_trajectories_for_scope(
@@ -165,6 +197,7 @@ def rank_trajectories_for_scope(
     symbols: Sequence[str],
     max_results: int = DEFAULT_TRAJECTORY_PREVIEW_LIMIT,
     include_routine: bool = False,
+    patch_trails: Mapping[str, Mapping[str, object]] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
     normalized_scope = tuple(normalize_memory_scope_path(path) for path in scope_paths)
     visible = filter_trajectories_for_default_retrieval(
@@ -176,8 +209,13 @@ def rank_trajectories_for_scope(
         scope_paths=normalized_scope,
         symbols=symbols,
         query_tokens=(),
+        patch_trails=patch_trails or {},
     )
-    return _preview_results(scored, max_results=max_results)
+    return _preview_results(
+        scored,
+        max_results=max_results,
+        patch_trails=patch_trails or {},
+    )
 
 
 def rank_trajectories_for_query(
@@ -251,7 +289,9 @@ def _score_trajectories(
     symbols: Sequence[str],
     query_tokens: Sequence[str],
     match_mode: SearchMatchMode = "any",
+    patch_trails: Mapping[str, Mapping[str, object]] | None = None,
 ) -> list[TrajectorySearchResult]:
+    trails = patch_trails or {}
     scored: list[TrajectorySearchResult] = []
     for trajectory in trajectories:
         score = _trajectory_relevance(
@@ -260,6 +300,7 @@ def _score_trajectories(
             symbols=symbols,
             query_tokens=query_tokens,
             match_mode=match_mode,
+            patch_trail_payload=trails.get(trajectory.id),
         )
         if score <= 0.0:
             continue
@@ -280,17 +321,31 @@ def _trajectory_relevance(
     symbols: Sequence[str],
     query_tokens: Sequence[str],
     match_mode: SearchMatchMode,
+    patch_trail_payload: Mapping[str, object] | None = None,
 ) -> float:
     score = 0.0
-    subjects = {(item.subject_kind, item.subject_key) for item in trajectory.subjects}
+    subjects = {
+        (item.subject_kind, item.subject_key, item.relation)
+        for item in trajectory.subjects
+    }
+    subject_pairs = {(kind, key) for kind, key, _relation in subjects}
     for path in scope_paths:
-        if ("path", path) in subjects:
+        if ("path", path) in subject_pairs:
             score += 1.4
+        if ("path", path, "untouched") in subjects:
+            score += 0.45
         module_key = repo_path_to_module_key(path)
-        if ("module", module_key) in subjects:
+        if ("module", module_key) in subject_pairs:
             score += 0.8
+    untouched_overlap = _patch_trail_untouched_overlap(
+        scope_paths=scope_paths,
+        patch_trail_payload=patch_trail_payload,
+        subjects=subjects,
+    )
+    if untouched_overlap:
+        score += 0.25 * untouched_overlap
     for symbol in symbols:
-        if ("symbol", symbol) in subjects:
+        if ("symbol", symbol) in subject_pairs:
             score += 1.2
     if query_tokens:
         haystack = _trajectory_search_text(trajectory)
@@ -309,17 +364,39 @@ def _preview_results(
     results: Sequence[TrajectorySearchResult],
     *,
     max_results: int,
+    patch_trails: Mapping[str, Mapping[str, object]] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
     limit = max(1, int(max_results))
     truncated = len(results) > limit
     selected = results[:limit]
+    trails = patch_trails or {}
     return [
         serialize_trajectory_preview(
             item.trajectory,
             relevance_score=item.relevance_score,
+            patch_trail_payload=trails.get(item.trajectory.id),
         )
         for item in selected
     ], truncated
+
+
+def _patch_trail_untouched_overlap(
+    *,
+    scope_paths: Sequence[str],
+    patch_trail_payload: Mapping[str, object] | None,
+    subjects: set[tuple[str, str, str]],
+) -> int:
+    scope = set(scope_paths)
+    if patch_trail_payload is not None:
+        trail = patch_trail_from_mapping(patch_trail_payload)
+        if trail is not None:
+            return len(scope & set(trail.untouched_in_declared))
+    untouched = {
+        key
+        for kind, key, relation in subjects
+        if kind == "path" and relation == "untouched"
+    }
+    return len(scope & untouched)
 
 
 def _trajectory_search_text(trajectory: Trajectory) -> str:
@@ -388,6 +465,7 @@ __all__ = [
     "filter_trajectories_for_query",
     "rank_trajectories_for_query",
     "rank_trajectories_for_scope",
+    "serialize_patch_trail_summary",
     "serialize_trajectory_detail",
     "serialize_trajectory_preview",
     "trajectory_excluded_from_default_retrieval",

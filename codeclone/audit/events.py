@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -41,6 +42,7 @@ EVENT_PATCH_EXPIRED = "patch_contract.expired"
 EVENT_CLAIM_COMPLETED = "claim_validation.completed"
 EVENT_CLAIM_VIOLATED = "claim_validation.violated"
 EVENT_RECEIPT_CREATED = "review_receipt.created"
+EVENT_PATCH_TRAIL_COMPUTED = "patch_trail.computed"
 EVENT_BASELINE_ABUSE = "baseline_abuse.detected"
 EVENT_ANALYSIS_COMPLETED = "analysis.completed"
 
@@ -71,6 +73,7 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_CLAIM_COMPLETED,
         EVENT_CLAIM_VIOLATED,
         EVENT_RECEIPT_CREATED,
+        EVENT_PATCH_TRAIL_COMPUTED,
         EVENT_BASELINE_ABUSE,
         EVENT_ANALYSIS_COMPLETED,
     }
@@ -81,6 +84,16 @@ PAYLOAD_MODES = frozenset({"off", "compact", "full"})
 # Compact mode keeps the intent description as a bounded forensic field.
 _COMPACT_TEXT_LIMIT = 500
 _EVENT_CORE_SCOPE_PATH_LIMIT = 50
+_EVENT_CORE_CITATION_LIMIT = 32
+_PROJECTION_SUPPLEMENT_FACT_KEYS = frozenset(
+    {
+        "scope_paths",
+        "declared_scope_paths",
+        "changed_files",
+        "untouched_in_declared",
+        "citations",
+    }
+)
 
 # The summary column stores the human-authored essence of an event,
 # independent of audit_payloads mode. Bounded to keep the column lean.
@@ -249,6 +262,8 @@ def compact_payload_for_event(
                 "human_decision_points",
             ),
         }
+    if event_type == EVENT_PATCH_TRAIL_COMPUTED:
+        return _compact_patch_trail_payload(payload)
     return _compact_identifiers(payload)
 
 
@@ -310,11 +325,7 @@ def _event_core_facts(
     }:
         return _verify_event_core_facts(payload), False
     if event_type in {EVENT_CLAIM_COMPLETED, EVENT_CLAIM_VIOLATED}:
-        return {
-            "valid": bool(payload.get("valid")),
-            "violations": len(_sequence(payload.get("violations"))),
-            "warnings": len(_sequence(payload.get("warnings"))),
-        }, False
+        return _claim_event_core_facts(payload)
     if event_type == EVENT_RECEIPT_CREATED:
         receipt = _mapping(payload.get("receipt"))
         return {
@@ -325,6 +336,8 @@ def _event_core_facts(
                 "human_decision_points",
             ),
         }, False
+    if event_type == EVENT_PATCH_TRAIL_COMPUTED:
+        return _patch_trail_event_core_facts(payload)
     return _compact_identifiers(payload), False
 
 
@@ -569,6 +582,54 @@ def _compact_budget_payload(payload: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _compact_patch_trail_payload(payload: Mapping[str, object]) -> dict[str, object]:
+    counts = _patch_trail_counts(payload)
+    truncation = _mapping(payload.get("truncation"))
+    return {
+        "patch_trail_digest": str(payload.get("patch_trail_digest", "")),
+        "scope_check_status": str(payload.get("scope_check_status", "")),
+        "verification_status": str(payload.get("verification_status", "")),
+        "declared": _int_value(counts.get("declared")),
+        "changed": _int_value(counts.get("changed")),
+        "untouched_in_declared": _int_value(counts.get("untouched_in_declared")),
+        "unexpected": _int_value(counts.get("unexpected")),
+        "forbidden_touched": _int_value(counts.get("forbidden_touched")),
+        "truncation": bool(any(bool(value) for value in truncation.values())),
+    }
+
+
+def _patch_trail_event_core_facts(
+    payload: Mapping[str, object],
+) -> tuple[dict[str, object], bool]:
+    counts = _patch_trail_counts(payload)
+    truncation = _mapping(payload.get("truncation"))
+    truncated = bool(any(bool(value) for value in truncation.values()))
+    return {
+        "patch_trail_digest": str(payload.get("patch_trail_digest", "")),
+        "scope_check_status": str(payload.get("scope_check_status", "")),
+        "verification_status": str(payload.get("verification_status", "")),
+        "declared": _int_value(counts.get("declared")),
+        "changed": _int_value(counts.get("changed")),
+        "untouched_in_declared": _int_value(counts.get("untouched_in_declared")),
+        "unexpected": _int_value(counts.get("unexpected")),
+        "forbidden_touched": _int_value(counts.get("forbidden_touched")),
+        "truncation": truncated,
+    }, truncated
+
+
+def _patch_trail_counts(payload: Mapping[str, object]) -> Mapping[str, object]:
+    counts = payload.get("counts")
+    if isinstance(counts, Mapping):
+        return counts
+    return {
+        "declared": len(_sequence(payload.get("declared_files"))),
+        "changed": len(_sequence(payload.get("changed_files"))),
+        "untouched_in_declared": len(_sequence(payload.get("untouched_in_declared"))),
+        "unexpected": len(_sequence(payload.get("unexpected_files"))),
+        "forbidden_touched": len(_sequence(payload.get("forbidden_touched"))),
+    }
+
+
 def _compact_verify_payload(payload: Mapping[str, object]) -> dict[str, object]:
     delta = _mapping(payload.get("structural_delta"))
     baseline_abuse = _mapping(payload.get("baseline_abuse"))
@@ -581,6 +642,64 @@ def _compact_verify_payload(payload: Mapping[str, object]) -> dict[str, object]:
             str(item) for item in _sequence(payload.get("contract_violations"))
         ],
         "baseline_abuse": bool(baseline_abuse.get("detected")),
+    }
+
+
+def _claim_event_core_facts(
+    payload: Mapping[str, object],
+) -> tuple[dict[str, object], bool]:
+    core: dict[str, object] = {
+        "valid": bool(payload.get("valid")),
+        "violations": len(_sequence(payload.get("violations"))),
+        "warnings": len(_sequence(payload.get("warnings"))),
+        "citations_found": _int_value(payload.get("citations_found")),
+    }
+    truncated = False
+    citations: list[dict[str, object]] = []
+    for raw in _sequence(payload.get("validated_citations")):
+        if isinstance(raw, Mapping):
+            entry = _validated_citation_entry(raw)
+            if entry is not None:
+                citations.append(entry)
+    if citations:
+        bounded = citations[:_EVENT_CORE_CITATION_LIMIT]
+        core["citations"] = bounded
+        if len(citations) > _EVENT_CORE_CITATION_LIMIT:
+            truncated = True
+            core["citations_truncated"] = True
+    return core, truncated
+
+
+def _validated_citation_entry(raw: Mapping[str, object]) -> dict[str, object] | None:
+    cited_id = str(raw.get("cited_id", "")).strip()
+    kind = str(raw.get("kind", "")).strip()
+    if not cited_id or not kind:
+        return None
+    return {
+        "cited_id": cited_id,
+        "kind": kind,
+        "valid": bool(raw.get("valid")),
+    }
+
+
+def projection_supplement_facts_from_payload(
+    event_type: str,
+    payload_json: str | None,
+) -> dict[str, object]:
+    """Re-derive bounded replay facts from stored audit payload for projection."""
+    if not payload_json or payload_json == "{}":
+        return {}
+    try:
+        parsed = json.loads(payload_json)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, Mapping):
+        return {}
+    facts, _ = _event_core_facts(event_type, parsed)
+    return {
+        key: value
+        for key in sorted(_PROJECTION_SUPPLEMENT_FACT_KEYS)
+        if (value := facts.get(key))
     }
 
 
@@ -690,5 +809,6 @@ __all__ = [
     "event_summary",
     "generate_event_id",
     "normalize_audit_surface",
+    "projection_supplement_facts_from_payload",
     "repo_root_digest",
 ]

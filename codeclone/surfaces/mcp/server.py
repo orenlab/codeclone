@@ -113,6 +113,7 @@ from .messages.params import (
     OptionalScopeParam,
     PatchHealthDeltaParam,
     PatchModeParam,
+    PatchTrailDetailParam,
     PathFilterParam,
     PrFormatParam,
     ProcessesParam,
@@ -1058,6 +1059,7 @@ def build_mcp_server(
         strictness: StrictnessParam = "ci",
         propose_memory: ProposeMemoryParam = False,
         detail_level: DetailLevelParam = "summary",
+        patch_trail_detail: PatchTrailDetailParam = "summary",
     ) -> dict[str, object]:
         return service.finish_controlled_change(
             intent_id=intent_id,
@@ -1071,6 +1073,7 @@ def build_mcp_server(
             strictness=strictness,
             propose_memory=propose_memory,
             detail_level=detail_level,
+            patch_trail_detail=patch_trail_detail,
         )
 
     @tool(

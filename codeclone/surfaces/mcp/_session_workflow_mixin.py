@@ -21,19 +21,23 @@ Design invariants (phase-16 spec):
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
+from ...audit.events import EVENT_PATCH_TRAIL_COMPUTED
+from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
 from ._intent import IntentRecord, IntentStatus
 from ._patch_contract import PatchContractStatus
+from ._patch_trail_bridge import build_patch_trail_inputs
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunRecord,
     MCPServiceContractError,
 )
+from ._workspace_hygiene import WorkspaceHygieneResult
 from .messages import errors as err_msgs
 from .messages import workflow as workflow_msgs
 
@@ -265,6 +269,7 @@ class _MCPSessionWorkflowMixin:
         strictness: str = "ci",
         propose_memory: bool = False,
         detail_level: str = "summary",
+        patch_trail_detail: str = "summary",
     ) -> dict[str, object]:
         # 1. Resolve intent
         record, active_intent = self._resolve_intent(
@@ -360,6 +365,7 @@ class _MCPSessionWorkflowMixin:
             changed_files=scope_files,
         )
         check_status = str(check_payload.get("status", ""))
+        scope_check_audit_sequence = _pop_audit_sequence(check_payload)
 
         # Expired intent
         if check_status == IntentStatus.EXPIRED.value:
@@ -379,6 +385,16 @@ class _MCPSessionWorkflowMixin:
 
         # 4. Scope violation — early exit
         if check_status == IntentStatus.VIOLATED.value:
+            patch_trail_payload = self._finish_patch_trail(
+                record=record,
+                intent=active_intent,
+                check_payload=check_payload,
+                verify_payload=_NOT_REACHED_VERIFY_PAYLOAD,
+                finish_hygiene=finish_hygiene,
+                scope_check_audit_sequence=scope_check_audit_sequence,
+                patch_verify_audit_sequence=None,
+                patch_trail_detail=patch_trail_detail,
+            )
             return {
                 "intent_id": intent_id,
                 "status": "violated",
@@ -387,6 +403,7 @@ class _MCPSessionWorkflowMixin:
                 "verification": None,
                 "claims": None,
                 "receipt": None,
+                "patch_trail": patch_trail_payload,
                 "intent_cleared": False,
                 "user_action_required": True,
                 "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
@@ -403,6 +420,17 @@ class _MCPSessionWorkflowMixin:
             changed_files=scope_files,
         )
         verify_status = str(verify_payload.get("status", ""))
+        patch_verify_audit_sequence = _pop_audit_sequence(verify_payload)
+        patch_trail_payload = self._finish_patch_trail(
+            record=record,
+            intent=active_intent,
+            check_payload=check_payload,
+            verify_payload=verify_payload,
+            finish_hygiene=finish_hygiene,
+            scope_check_audit_sequence=scope_check_audit_sequence,
+            patch_verify_audit_sequence=patch_verify_audit_sequence,
+            patch_trail_detail=patch_trail_detail,
+        )
 
         # 6. Non-accepted verification — return without receipt/clear
         if verify_status not in _ACCEPTED_STATUSES:
@@ -415,6 +443,7 @@ class _MCPSessionWorkflowMixin:
                 "verification": verify_payload,
                 "claims": None,
                 "receipt": None,
+                "patch_trail": patch_trail_payload,
                 "intent_cleared": False,
                 "workspace_hygiene_after": workspace_hygiene_after,
                 "summary": _finish_summary(
@@ -477,6 +506,7 @@ class _MCPSessionWorkflowMixin:
             "verification": verify_payload,
             "claims": claims_payload,
             "receipt": receipt_payload,
+            "patch_trail": patch_trail_payload,
             "intent_cleared": intent_cleared,
             "workspace_hygiene_after": workspace_hygiene_after,
             "summary": _finish_summary(
@@ -522,6 +552,59 @@ class _MCPSessionWorkflowMixin:
             if projection_hook is not None:
                 result["projection_rebuild"] = projection_hook
         return result
+
+    def _finish_patch_trail(
+        self,
+        *,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+        check_payload: dict[str, object],
+        verify_payload: dict[str, object],
+        finish_hygiene: WorkspaceHygieneResult,
+        scope_check_audit_sequence: int | None,
+        patch_verify_audit_sequence: int | None,
+        patch_trail_detail: str,
+    ) -> dict[str, object]:
+        detail = "full" if patch_trail_detail == "full" else "summary"
+        inputs = build_patch_trail_inputs(
+            root_path=record.root,
+            intent=intent,
+            check_payload=check_payload,
+            verify_payload=verify_payload,
+            hygiene=finish_hygiene,
+            report_digest=intent.report_digest,
+            scope_check_audit_sequence=scope_check_audit_sequence,
+            patch_verify_audit_sequence=patch_verify_audit_sequence,
+        )
+        trail = compute_patch_trail(inputs)
+        severity = (
+            "warn"
+            if trail.scope_check_status == IntentStatus.VIOLATED.value
+            or trail.verification_status
+            not in {
+                *_ACCEPTED_STATUSES,
+                "not_reached",
+            }
+            else "info"
+        )
+        patch_trail_audit_sequence = self._audit_emit(
+            root=record.root,
+            event_type=EVENT_PATCH_TRAIL_COMPUTED,
+            severity=severity,
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent.intent_id,
+            report_digest=intent.report_digest,
+            status=trail.scope_check_status,
+            payload=trail.audit_payload(),
+        )
+        payload = trail.to_payload(detail_level=detail)
+        if patch_trail_audit_sequence is not None:
+            evidence_raw = payload.get("evidence", {})
+            if isinstance(evidence_raw, Mapping):
+                evidence = dict(evidence_raw)
+                evidence["patch_trail_audit_sequence"] = patch_trail_audit_sequence
+                payload["evidence"] = evidence
+        return payload
 
     # ------------------------------------------------------------------
     # Internal helpers (no new engine logic)
@@ -886,6 +969,19 @@ def _start_next_step(
         else:
             parts.append(workflow_msgs.START_DIRTY_SCOPE)
     return " ".join(parts)
+
+
+_NOT_REACHED_VERIFY_PAYLOAD: Final[dict[str, object]] = {
+    "status": "not_reached",
+    "verification_profile": "unknown",
+    "checks_not_applicable": [],
+    "contract_violations": [],
+}
+
+
+def _pop_audit_sequence(payload: dict[str, object]) -> int | None:
+    value = payload.pop("_audit_sequence", None)
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
 
 
 def _budget_summary(budget_payload: dict[str, object]) -> dict[str, object]:

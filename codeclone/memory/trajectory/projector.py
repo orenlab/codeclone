@@ -21,6 +21,7 @@ from ...audit.events import (
     EVENT_PATCH_VERIFIED,
     EVENT_PATCH_VIOLATED,
     EVENT_WORKSPACE_CONFLICT,
+    projection_supplement_facts_from_payload,
 )
 from ...audit.reader import AuditRecord
 from ...report.meta import current_report_timestamp_utc
@@ -48,6 +49,7 @@ def project_trajectory(
     records: Sequence[AuditRecord],
     projection_version: str = TRAJECTORY_PROJECTION_VERSION,
     projected_at_utc: str | None = None,
+    patch_trail_digest: str | None = None,
 ) -> Trajectory:
     if not records:
         raise TrajectoryProjectionError("trajectory projection requires events")
@@ -100,7 +102,7 @@ def project_trajectory(
         intent_id=intent_id,
         run_ids=run_ids,
         report_digests=report_digests,
-        cores=cores,
+        cores=_cores_with_payload_supplements(cores, ordered),
     )
     evidence = (
         TrajectoryEvidence(
@@ -121,6 +123,7 @@ def project_trajectory(
         summary=summary,
         source_event_stream_digest=source_stream_digest,
         steps=steps,
+        patch_trail_digest=patch_trail_digest,
     )
     return Trajectory(
         id=trajectory_id,
@@ -291,6 +294,23 @@ def _quality_tier(
     return "routine"
 
 
+def _cores_with_payload_supplements(
+    cores: Sequence[Mapping[str, object]],
+    records: Sequence[AuditRecord],
+) -> tuple[Mapping[str, object], ...]:
+    if not any(record.payload_json for record in records):
+        return tuple(cores)
+    supplemented: list[Mapping[str, object]] = list(cores)
+    for record in records:
+        facts = projection_supplement_facts_from_payload(
+            record.event_type,
+            record.payload_json,
+        )
+        if facts:
+            supplemented.append({"facts": facts})
+    return tuple(supplemented)
+
+
 def _subjects(
     *,
     workflow_id: str,
@@ -327,6 +347,7 @@ def _path_subjects_from_cores(
         if not isinstance(facts, Mapping):
             continue
         about.update(_facts_path_list(facts, "scope_paths"))
+        about.update(_facts_path_list(facts, "declared_scope_paths"))
         touched.update(_facts_path_list(facts, "changed_files"))
         untouched.update(_facts_path_list(facts, "untouched_in_declared"))
     return (
@@ -406,8 +427,9 @@ def _trajectory_digest(
     summary: str,
     source_event_stream_digest: str,
     steps: Sequence[TrajectoryStep],
+    patch_trail_digest: str | None = None,
 ) -> str:
-    payload = {
+    payload: dict[str, object] = {
         "projection_version": projection_version,
         "repo_root_digest": repo_root_digest,
         "workflow_id": workflow_id,
@@ -428,6 +450,8 @@ def _trajectory_digest(
             for step in steps
         ],
     }
+    if patch_trail_digest:
+        payload["patch_trail_digest"] = patch_trail_digest
     return _sha256(_canonical_json(payload))
 
 

@@ -57,6 +57,7 @@ class AuditRecord:
     estimated_tokens: int | None = None
     token_encoding: str | None = None
     payload_characters: int | None = None
+    payload_json: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,7 +306,7 @@ def read_audit_event_core_records(
             "intent_id, report_digest, workflow_id, surface, tool_name, "
             "event_core_json, event_core_sha256, payload_sha256, "
             "status, agent_label, summary, "
-            "estimated_tokens, token_encoding, payload_characters "
+            "estimated_tokens, token_encoding, payload_characters, payload_json "
             "FROM controller_events "
             f"WHERE {' AND '.join(where)} "
             "ORDER BY workflow_id ASC, id ASC",
@@ -369,6 +370,7 @@ def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
         estimated_tokens=_int_or_none(row[17]) if len(row) > 17 else None,
         token_encoding=_str_or_none(row[18]) if len(row) > 18 else None,
         payload_characters=_int_or_none(row[19]) if len(row) > 19 else None,
+        payload_json=_str_or_none(row[20]) if len(row) > 20 else None,
     )
 
 

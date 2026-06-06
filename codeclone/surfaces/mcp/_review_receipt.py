@@ -218,9 +218,16 @@ def render_receipt_markdown(receipt: Mapping[str, object]) -> str:
                 f"**Status:** {scope.get('intent_status') or 'unknown'}",
                 f"**Declared files:** {_inline_paths(scope.get('declared_files'))}",
                 f"**Changed files:** {_inline_paths(scope.get('changed_files'))}",
+                f"**Untouched in declared:** "
+                f"{_inline_paths(scope.get('untouched_files'))}",
                 f"**Unexpected files:** {_inline_paths(scope.get('unexpected_files'))}",
+                f"**Forbidden touched:** "
+                f"{_inline_paths(scope.get('forbidden_touched'))}",
             ]
         )
+        held = scope.get("do_not_touch_held")
+        if held:
+            lines.append(f"**Do-not-touch held:** {_inline_paths(held)}")
     lines.extend(["", receipt_msgs.RECEIPT_MD_SECTION_BLAST_RADIUS])
     if blast_radius is None:
         lines.append(receipt_msgs.RECEIPT_MD_NOT_AVAILABLE)
