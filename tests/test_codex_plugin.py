@@ -139,15 +139,14 @@ def test_codex_plugin_skill_exists() -> None:
             "Completion gate",
             "Advisory acceptance",
             "health_delta",
-            "patch contract passed",
+            "verification_profiles",
+            "patch_trail",
         ),
     )
 
     assert "Use MCP tools only." in manifest["instructions"]
-    assert 'get_report_section(section="metrics")' in manifest["instructions"]
-    assert 'help(topic="coverage")' in manifest["instructions"]
-    assert "never fall back to CLI, local report files" in manifest["instructions"]
-    assert "codeclone-change-control skill" in manifest["instructions"]
+    assert "help(topic=change_control" in manifest["instructions"]
+    assert "get_relevant_memory" in manifest["instructions"]
     assert "start_controlled_change" in manifest["instructions"]
     assert "finish_controlled_change" in manifest["instructions"]
     assert "structural_delta" in manifest["instructions"]

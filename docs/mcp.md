@@ -308,63 +308,36 @@ runs and session state without running analysis or mutating the repository.
 sequenceDiagram
     participant A as Agent
     participant M as MCP Server
-    participant D as Intent Registry
-    A ->> M: manage_change_intent(action="list_workspace", root)
-    M ->> D: read active intents (file or sqlite backend)
-    D -->> M: active intents
-    M -->> A: workspace state
     A ->> M: analyze_repository(root)
-    M -->> A: run registered
-    A ->> M: manage_change_intent(action="declare", scope, intent)
-    M ->> D: write intent record
-    M -->> A: intent_id, blast_radius, concurrent_intents
-    alt Scope conflict with on_conflict="queue"
-        A ->> M: manage_change_intent(action="declare", scope, intent, on_conflict="queue")
-        M ->> D: write queued intent record
-        M -->> A: status=queued, blocked_by, queue_position
-        Note over A: Wait for foreign intent to clear
-        A ->> M: manage_change_intent(action="promote", intent_id)
-        M ->> D: re-check conflicts, update to active
-        M -->> A: status=active
+    M -->> A: run_id
+    A ->> M: start_controlled_change(scope, intent)
+    M -->> A: intent_id, blast_radius, budget, edit_allowed
+    A ->> M: get_relevant_memory(root, intent_id)
+    Note over A: Edit in declared scope
+    opt after_run required
+        A ->> M: analyze_repository(root)
+        M -->> A: after_run_id
     end
-    A ->> M: get_blast_radius(files)
-    M -->> A: do_not_touch, review_context
-    A ->> M: check_patch_contract(mode=budget)
-    M -->> A: regression budget, headroom
-    Note over A: Edit files within scope
-    opt Long edit or test run
-        A ->> M: manage_change_intent(action="renew", intent_id, lease_seconds)
-        M ->> D: update lease timestamp
-        M -->> A: lease_renewed
-    end
-
-    A ->> M: analyze_repository(root)
-    M -->> A: after_run_id registered
-    A ->> M: manage_change_intent(action="check", intent_id, changed_files or diff_ref)
-    Note right of M: intent stays on before-run, changed scope is explicit
-    M -->> A: clean / expanded / violated
-    A ->> M: check_patch_contract(mode=verify, before_run_id, after_run_id, intent_id)
-    M -->> A: accepted / violated
-    A ->> M: validate_review_claims(text, patch_health_delta?)
-    M -->> A: valid / violations
-    A ->> M: create_review_receipt
-    M -->> A: audit artifact
-    A ->> M: manage_change_intent(action="clear", intent_id)
-    M ->> D: close intent (file: delete row; sqlite: status=clean)
+    A ->> M: finish_controlled_change(intent_id, changed_files|diff_ref)
+    M -->> A: status, patch_trail, intent_cleared
 ```
 
-| Tool                        | Purpose                                                                                                                                                                                                                                                   |
-|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `start_controlled_change`   | Pre-edit workflow: workspace check + declare + blast radius + budget (`dirty_scope_policy` for known WIP)                                                                                                                                                 |
-| `finish_controlled_change`  | Post-edit workflow: scope check + verify + claims + receipt + clear (`propose_memory` for draft candidates on accept)                                                                                                                                     |
-| `manage_change_intent`      | Intent lifecycle: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace                                                                                                                                      |
-| `get_blast_radius`          | Pre-change risk boundary: dependents, clone cohorts, do-not-touch, review context                                                                                                                                                                         |
-| `get_relevant_memory`       | Ranked engineering memory for declared edit scope. **Requires `root`**; pass `scope` and/or active `intent_id`                                                                                                                                            |
-| `query_engineering_memory`  | Mode router: search, get, for_path, for_symbol, stale, coverage, status. Search supports `filters.match_mode` (`any`\|`all`)                                                                                                                              |
-| `manage_engineering_memory` | Agent memory governance: `record_candidate`, `validate_claims`, `propose_from_receipt`, `refresh_from_run`, `rebuild_semantic_index`. Human approve/reject/archive use the CodeClone VS Code **Memory** view (IDE channel only; not available to agents). |
-| `check_patch_contract`      | Budget query (`mode=budget`) or post-edit verification (`mode=verify`)                                                                                                                                                                                    |
-| `create_review_receipt`     | Deterministic audit artifact: provenance, scope, reviewed findings, patch status, verification profile                                                                                                                                                    |
-| `validate_review_claims`    | Citation-based overclaim detection; optional `patch_health_delta` from verify for regression-free claim checks                                                                                                                                            |
+Primary workflow uses `start_controlled_change` / `finish_controlled_change`.
+Atomic declare/check/verify/clear remains for legacy servers — see
+[Detailed atomic workflow](#detailed-atomic-workflow) below.
+
+| Tool                        | Purpose                                                                                                                                                                                                                                               |
+|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `start_controlled_change`   | Pre-edit: workspace + declare + blast radius + budget (`dirty_scope_policy` for known WIP)                                                                                                                                                            |
+| `finish_controlled_change`  | Post-edit: hygiene → verify → patch_trail → claims → receipt → clear (`detail_level`, `patch_trail_detail`, `propose_memory`)                                                                                                                         |
+| `manage_change_intent`      | Queue/recovery: declare, get, check, clear, renew, promote, list_workspace, gc_workspace, recover, reset_workspace                                                                                                                                    |
+| `get_blast_radius`          | Advanced pre-edit boundary (also returned by start)                                                                                                                                                                                                   |
+| `get_relevant_memory`       | Scoped memory + optional `trajectories[]` / `patch_trail_summary`. **Requires `root`**                                                                                                                                                                |
+| `query_engineering_memory`  | Modes: search, get, for_path, for_symbol, stale, coverage, status, trajectory_status, trajectory_search, trajectory_get                                                                                                                               |
+| `manage_engineering_memory` | Agent: record_candidate, validate_claims, propose_from_receipt, refresh_from_run, rebuild_semantic_index, rebuild_trajectories, enqueue_projection_rebuild, projection_rebuild_status, run_projection_jobs_once. Approve via VS Code Memory view only |
+| `check_patch_contract`      | Advanced: budget or verify (finish orchestrates verify)                                                                                                                                                                                               |
+| `create_review_receipt`     | Advanced receipt (finish creates by default)                                                                                                                                                                                                          |
+| `validate_review_claims`    | Claim guard (`claims_text` on finish when recommended)                                                                                                                                                                                                |
 
 ??? info "Blast radius: do_not_touch vs review_context"
     Graph traversal core lives in `codeclone/analysis/blast_radius.py`; MCP and CLI
@@ -446,15 +419,17 @@ sequenceDiagram
     M -->> A: memory_candidates, memory_staleness, memory_coverage_delta
 ```
 
-| When                        | Tool                                                                     | Why                                                                                                            |
-|-----------------------------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
-| After `start`, before edit  | `get_relevant_memory(root, scope \| intent_id)`                          | Ranked scope context                                                                                           |
-| One path / symbol           | `query_engineering_memory(mode=for_path\|for_symbol)`                    | Targeted lookup                                                                                                |
-| Keyword discovery           | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})` | FTS search                                                                                                     |
-| Semantic discovery (opt-in) | `query_engineering_memory(mode=search, semantic=true, …)`                | FTS + LanceDB blend when `[tool.codeclone.memory.semantic] enabled` and index built; default config is **off** |
-| Refresh system facts        | `manage_engineering_memory(action=refresh_from_run, run_id?)`            | Force ingest from MCP run                                                                                      |
-| Rebuild semantic sidecar    | `manage_engineering_memory(action=rebuild_semantic_index)`               | LanceDB index when semantic enabled                                                                            |
-| Unclear semantics           | `help(topic="engineering_memory")`                                       | Compact playbook                                                                                               |
+| When                        | Tool                                                                                  | Why                                                                                                            |
+|-----------------------------|---------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------|
+| After `start`, before edit  | `get_relevant_memory(root, scope \| intent_id)`                                       | Ranked scope context                                                                                           |
+| One path / symbol           | `query_engineering_memory(mode=for_path\|for_symbol)`                                 | Targeted lookup                                                                                                |
+| Keyword discovery           | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})`              | FTS search                                                                                                     |
+| Semantic discovery (opt-in) | `query_engineering_memory(mode=search, semantic=true, …)`                             | FTS + LanceDB blend when `[tool.codeclone.memory.semantic] enabled` and index built; default config is **off** |
+| Refresh system facts        | `manage_engineering_memory(action=refresh_from_run, run_id?)`                         | Force ingest from MCP run                                                                                      |
+| Rebuild semantic sidecar    | `manage_engineering_memory(action=rebuild_semantic_index)`                            | LanceDB when semantic enabled                                                                                  |
+| Rebuild trajectories        | `manage_engineering_memory(action=rebuild_trajectories)`                              | After audit-enabled workflows                                                                                  |
+| Projection jobs             | `enqueue_projection_rebuild`, `projection_rebuild_status`, `run_projection_jobs_once` | Async rebuild when policy enabled                                                                              |
+| Unclear semantics           | `help(topic="engineering_memory")` or `help(topic="change_control")`                  | Compact playbooks                                                                                              |
 
 Defaults exclude **stale** records. Keyword search excludes drafts unless
 `include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
@@ -482,14 +457,16 @@ responses default to compact statement previews; use `mode=get` or
 
 #### Agent write path (draft only)
 
-| Action                    | Tool                                                          | Result                              |
-|---------------------------|---------------------------------------------------------------|-------------------------------------|
-| Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)` | System ingest from MCP report       |
-| Rebuild semantic index    | `manage_engineering_memory(action=rebuild_semantic_index)`    | LanceDB sidecar from memory + audit |
-| Observation during edit   | `manage_engineering_memory(action=record_candidate, …)`       | `draft` record                      |
-| Validate finish claims    | `manage_engineering_memory(action=validate_claims, text=…)`   | warnings/errors                     |
-| Post-edit proposals       | `finish_controlled_change(propose_memory=true)`               | draft candidates + staleness        |
-| Atomic fallback           | `manage_engineering_memory(action=propose_from_receipt, …)`   | draft proposals                     |
+| Action                    | Tool                                                                                    | Result                                |
+|---------------------------|-----------------------------------------------------------------------------------------|---------------------------------------|
+| Refresh from analysis run | `manage_engineering_memory(action=refresh_from_run, run_id?)`                           | System ingest from MCP report         |
+| Rebuild semantic index    | `manage_engineering_memory(action=rebuild_semantic_index)`                              | LanceDB sidecar when semantic enabled |
+| Rebuild trajectories      | `manage_engineering_memory(action=rebuild_trajectories)`                                | Audit → trajectory projection         |
+| Projection jobs           | `enqueue_projection_rebuild` / `projection_rebuild_status` / `run_projection_jobs_once` | Optional async rebuild                |
+| Observation during edit   | `manage_engineering_memory(action=record_candidate, …)`                                 | `draft` record                        |
+| Validate finish claims    | `manage_engineering_memory(action=validate_claims, text=…)`                             | warnings/errors                       |
+| Post-edit proposals       | `finish_controlled_change(propose_memory=true)`                                         | draft candidates + staleness          |
+| Atomic fallback           | `manage_engineering_memory(action=propose_from_receipt, …)`                             | draft proposals                       |
 
 **Human promote:** CodeClone VS Code **Memory** view (approve with confirmation) — agents cannot activate records
 through MCP

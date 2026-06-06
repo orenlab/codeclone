@@ -228,7 +228,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
-    assert "claims_text" in str(tools["finish_controlled_change"].description)
+    assert "optional claims" in str(tools["finish_controlled_change"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
     assert "claims-not-made" in str(tools["create_review_receipt"].description)
     assert "Structural citation matching" in str(
@@ -238,8 +238,8 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "list_workspace" in str(tools["manage_change_intent"].description)
     assert "recover" in str(tools["manage_change_intent"].description)
     assert ".codeclone/intents/" in str(tools["manage_change_intent"].description)
-    assert "compact includes anti_patterns" in str(tools["help"].description)
-    assert "workflow, change_control, trust_boundaries" in str(
+    assert "compact adds anti_patterns" in str(tools["help"].description)
+    assert "change_control, trust_boundaries, engineering_memory" in str(
         tools["help"].description
     )
     assert init_options.server_version == CODECLONE_VERSION

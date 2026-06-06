@@ -36,6 +36,7 @@ Do not invent memory from local files or report dumps.
 | Keyword discovery                | `query_engineering_memory` | `mode=search`, `query`, `filters={match_mode:"any"\|"all"}`; optional `semantic=true` when index built |
 | Store health                     | `query_engineering_memory` | `mode=status`                                               |
 | Stale inventory                  | `query_engineering_memory` | `mode=stale`                                                |
+| Trajectory forensics             | `query_engineering_memory` | `mode=trajectory_get\|trajectory_search\|trajectory_status` |
 
 Defaults exclude **stale**. Keyword `search` excludes drafts unless
 `include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
@@ -72,6 +73,8 @@ semantic-quality embeddings — do not present hits as LLM recall.
 | Post-edit batch proposal        | `finish_controlled_change(..., propose_memory=true)`                                        | On **accept** only           |
 | Refresh system facts from run   | `manage_engineering_memory(action=refresh_from_run, run_id?)`                               | Force ingest                 |
 | Rebuild semantic LanceDB sidecar | `manage_engineering_memory(action=rebuild_semantic_index)`                                 | After semantic enabled + extras |
+| Rebuild trajectories             | `manage_engineering_memory(action=rebuild_trajectories)`                                   | After audit-enabled workflows   |
+| Projection jobs                  | `enqueue_projection_rebuild` / `projection_rebuild_status` / `run_projection_jobs_once`    | When policy enabled             |
 | Atomic fallback                 | `manage_engineering_memory(action=propose_from_receipt, text=…, intent_id?)`                | When finish hook unavailable |
 
 ### Write rules
@@ -100,6 +103,7 @@ semantic-quality embeddings — do not present hits as LLM recall.
 - Overriding CodeClone findings
 - Substituting for `analyze_repository` or `get_blast_radius`
 - Treating draft/stale as verified project policy
+- Treating `trajectories[]` or `patch_trail_summary` as edit authorization
 
 ## Integration with change control
 

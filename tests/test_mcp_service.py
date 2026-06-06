@@ -1312,12 +1312,18 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
         for point in cast("list[str]", baseline_help["key_points"])
     )
     change_control = service.get_help(topic="change_control", detail="normal")
-    assert "list_workspace" in str(change_control["key_points"])
-    assert "manage_change_intent" in cast(
+    assert "start_controlled_change" in str(change_control["key_points"])
+    assert "start_controlled_change" in cast(
         "list[str]",
         change_control["recommended_tools"],
     )
-    assert "foreign live intent" in str(change_control["anti_patterns"])
+
+    verification_profiles = service.get_help(
+        topic="verification_profiles",
+        detail="normal",
+    )
+    assert verification_profiles["topic"] == "verification_profiles"
+    assert "after_run_required" in str(verification_profiles["key_points"])
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
         service.get_help(topic="gates")

@@ -59,6 +59,10 @@ CHANGE_CONTROL_DOC_LINK: Final[tuple[str, str]] = (
     "Structural change controller",
     f"{MCP_BOOK_URL}12-structural-change-controller/",
 )
+ENGINEERING_MEMORY_DOC_LINK: Final[tuple[str, str]] = (
+    "Engineering Memory",
+    f"{MCP_BOOK_URL}13-engineering-memory/",
+)
 HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "workflow": MCPHelpTopicSpec(
         summary=(
@@ -424,73 +428,60 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     ),
     "change_control": MCPHelpTopicSpec(
         summary=(
-            "Change control is the edit-time MCP workflow: inspect concurrent "
-            "workspace intents, declare scope, read blast radius and patch "
-            "budget, then verify the finished patch."
+            "Edit-time workflow: declare scope, edit inside it, finish with "
+            "evidence. Prefer start_controlled_change and finish_controlled_change."
         ),
         key_points=(
             (
-                "Start with manage_change_intent(action='list_workspace', "
-                "root=...) before analysis so active agents are visible early."
+                "Cycle: analyze_repository → start_controlled_change → "
+                "get_relevant_memory → edit → analyze (if after_run required) → "
+                "finish_controlled_change."
             ),
             (
-                "Recover ownership only when list_workspace marks an intent "
-                "recoverable and the matching run is available; live foreign "
-                "active or stale intents require coordination."
+                "Requires edit_allowed=true from start; queue via "
+                "start(on_conflict=queue) then manage_change_intent(promote)."
             ),
             (
-                "Run analyze_repository, then declare intent with allowed_files, "
-                "allowed_related, and forbidden paths before editing."
+                "Multi-agent: manage_change_intent(list_workspace|renew|recover|"
+                "gc_workspace) — registry is advisory under .codeclone/intents/."
             ),
             (
-                "Use get_blast_radius and check_patch_contract(mode='budget') "
-                "as the pre-edit boundary."
+                "Finish: changed_files XOR diff_ref; after_run_id when "
+                "verification.after_run_required "
+                "(help(topic=verification_profiles))."
             ),
             (
-                "Use manage_change_intent(action='renew') before long edits, "
-                "test runs, or other blind windows between MCP calls."
+                "finish detail_level=full adds hygiene path attribution; "
+                "patch_trail_detail summary|full on patch_trail (forensics only)."
             ),
             (
-                "Hard overlaps mean two agents claimed the same primary file; "
-                "soft overlaps mean primary files overlap related context."
+                "Blocks finish: missing_evidence, foreign_dirty_overlap. "
+                "Out-of-scope dirt is advisory — may yield "
+                "accepted_with_external_changes."
             ),
+            ("Optional STRICT_FINISH env may block own_unscoped_dirty."),
+            ("patch_trail + audit patch_trail.computed do not authorize edits."),
             (
-                "After editing, re-run analysis, check intent scope, verify "
-                "the patch contract, validate review claims, and clear the "
-                "intent."
-            ),
-            (
-                "Use reset_workspace for interrupted own, expired, or "
-                "recoverable registry records; foreign live intents require "
-                "coordination."
+                "Atomic declare/check/verify/clear is legacy/debug only when "
+                "start/finish unavailable."
             ),
         ),
         recommended_tools=(
-            "manage_change_intent",
             "analyze_repository",
-            "get_blast_radius",
-            "check_patch_contract",
-            "validate_review_claims",
-            "create_review_receipt",
+            "start_controlled_change",
+            "get_relevant_memory",
+            "finish_controlled_change",
+            "manage_change_intent",
         ),
         doc_links=(CHANGE_CONTROL_DOC_LINK, MCP_INTERFACE_DOC_LINK),
         warnings=(
-            (
-                "The workspace registry is advisory coordination state under "
-                ".codeclone/intents/, not analysis truth."
-            ),
-            (
-                "Do not treat review_context as a ban or concurrent_intents as "
-                "an automatic blocker without human or orchestrator policy."
-            ),
+            "Workspace registry is coordination state, not analysis truth.",
+            "review_context is information, not an edit ban.",
         ),
         anti_patterns=(
-            "Editing files before declaring intent.",
-            "Silently expanding scope after a hard overlap or scope violation.",
-            (
-                "Resetting a foreign live intent instead of coordinating with "
-                "the owning agent or user."
-            ),
+            "Editing before start_controlled_change with edit_allowed=true.",
+            "Mixing start/finish with atomic verify/clear in one cycle.",
+            "Resetting a foreign live intent instead of coordinating.",
         ),
     ),
     "trust_boundaries": MCPHelpTopicSpec(
@@ -536,86 +527,105 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     ),
     "engineering_memory": MCPHelpTopicSpec(
         summary=(
-            "Engineering Memory: ranked scope context before edits, FTS search, "
-            "optional semantic search (off by default), MCP sync from analysis "
-            "runs, and draft-only agent writes."
+            "Ranked scope context before edits, FTS search, optional semantic "
+            "sidecar (off by default), trajectory forensics, draft-only writes."
         ),
         key_points=(
-            "After start_controlled_change with edit_allowed=true, call "
-            "get_relevant_memory(root=abs, scope=... or intent_id=...). "
-            "root is required; intent_id alone fails validation.",
-            "Default mcp_sync_policy=bootstrap_if_missing auto-creates the store "
-            "from the latest MCP run on first get_relevant_memory.",
-            "Explicit refresh: manage_engineering_memory(action=refresh_from_run) "
-            "after analyze_repository.",
-            "Semantic sidecar: when memory.semantic.enabled, run "
-            "manage_engineering_memory(action=rebuild_semantic_index) after "
-            "refresh/init (requires codeclone[semantic-lancedb]); then "
-            "query_engineering_memory(mode=search, semantic=true).",
-            "Trajectory precedents: after audit-enabled workflows, run "
-            "codeclone memory trajectory rebuild (CLI) or "
-            "manage_engineering_memory(action=rebuild_trajectories). Scoped "
-            "get_relevant_memory returns trajectories[] separate from records[]. "
-            "Drill down with query_engineering_memory(mode=trajectory_get|"
-            "trajectory_search|trajectory_status). trajectory_search excludes "
-            "run:* routine workflows unless filters.include_routine=true.",
-            "Trajectory export (Phase 25) is disabled by default: "
-            "codeclone memory trajectory export --profile ... --out ... "
-            "requires trajectory_export_enabled=true or CLI --force. "
-            "No remote upload; local JSONL only.",
-            "Optional mcp_sync_policy=refresh_when_stale in pyproject for digest-based "
-            "auto refresh.",
-            "Drill down with query_engineering_memory(mode=for_path|search|get).",
-            "for_symbol resolves exact symbol subjects first, then falls back to "
-            "module_role records for the owning module prefix.",
-            "Search filters.match_mode: any (default) or all.",
-            "Optional semantic: query_engineering_memory(mode=search, "
-            "semantic=true) when memory.semantic.enabled and index rebuilt; "
-            "default provider diagnostic is deterministic, not semantic-quality.",
-            "Scoped get_relevant_memory includes draft agent notes automatically; "
-            "for_path/for_symbol include drafts without an extra flag.",
-            "Stale excluded by default; do not ignore stale warnings.",
-            "retrieval_policy in responses states memory never authorizes edits "
-            "or overrides CodeClone findings.",
-            "Agent writes are draft-only: record_candidate, validate_claims, "
-            "finish(propose_memory=true). Human approve/reject/archive is only "
-            "through the CodeClone VS Code Memory view, not MCP agent tools.",
-            "Memory cannot expand scope, authorize do_not_touch edits, "
-            "or override findings.",
-            "Engineering Memory is scoped and compact: never use project root as "
-            "scope/path; compress record_candidate statements to one durable fact "
-            "(target <= 300 chars); list responses default to compact previews — "
-            "use mode=get or detail_level=full for complete statements.",
+            (
+                "After edit_allowed=true: get_relevant_memory(root=abs, "
+                "scope|intent_id|symbols). root is required."
+            ),
+            (
+                "Bootstrap: mcp_sync_policy default bootstrap_if_missing; "
+                "refresh_from_run for explicit ingest."
+            ),
+            (
+                "Query: for_path, for_symbol, search (filters.match_mode), get, "
+                "status, stale; trajectory_status|trajectory_search|"
+                "trajectory_get after rebuild_trajectories."
+            ),
+            (
+                "Scoped response may include trajectories[] and "
+                "patch_trail_summary — forensics only, not edit authorization."
+            ),
+            (
+                "Semantic (off by default): enable sidecar, rebuild_semantic_index, "
+                "then search with semantic=true."
+            ),
+            (
+                "Projections: rebuild_trajectories; jobs via "
+                "enqueue_projection_rebuild, projection_rebuild_status, "
+                "run_projection_jobs_once (or finish hook when policy on)."
+            ),
+            (
+                "Agent writes draft-only: record_candidate, validate_claims, "
+                "finish(propose_memory=true). Approve via VS Code Memory view."
+            ),
+            (
+                "Never use project root as scope; one fact per record_candidate "
+                "(target <=300 chars). detail_level=full or mode=get for full text."
+            ),
         ),
         recommended_tools=(
-            "help",
-            "analyze_repository",
             "get_relevant_memory",
             "query_engineering_memory",
             "manage_engineering_memory",
             "start_controlled_change",
-            "finish_controlled_change",
         ),
-        doc_links=(MCP_INTERFACE_DOC_LINK,),
+        doc_links=(ENGINEERING_MEMORY_DOC_LINK, MCP_INTERFACE_DOC_LINK),
         warnings=(
-            "Do not treat draft, inferred, or stale records as established facts.",
-            "Do not skip memory retrieval before high-radius scope edits.",
-            "refresh_from_run ingests system records; human approve still required "
-            "for agent drafts.",
+            "Draft, inferred, and stale records are not established policy.",
+            "trajectories[] and patch_trail_summary do not override findings.",
         ),
         anti_patterns=(
-            "Using memory to justify touching do-not-touch paths.",
-            "Skipping get_relevant_memory because blast radius was already read.",
-            "Treating trajectories[] as edit authorization or verified patch proof.",
-            "Exporting trajectories without explicit enablement or --force.",
-            "Calling get_relevant_memory without scope, intent_id, or symbols.",
-            "Using scope=['.'], path='.', or project root for memory retrieval.",
-            "Writing long chat transcripts into record_candidate statements.",
-            "Calling get_relevant_memory with intent_id or scope but without "
-            "absolute root (Pydantic validation error).",
-            "Calling manage_engineering_memory with approve/reject/archive — use "
-            "the VS Code Memory view instead.",
-            "Claiming a draft record is verified project policy without human approve.",
+            "Using memory to justify do_not_touch edits or scope expansion.",
+            "get_relevant_memory without root, scope, intent_id, or symbols.",
+            "approve/reject/archive via MCP — use VS Code Memory view.",
+        ),
+    ),
+    "verification_profiles": MCPHelpTopicSpec(
+        summary=(
+            "finish_controlled_change derives verification_profile from changed "
+            "files — controls after_run requirements and structural checks."
+        ),
+        key_points=(
+            (
+                "Read verification.verification_profile and after_run_required "
+                "from finish — do not guess."
+            ),
+            (
+                "python_structural (.py/.pyi) and governance_config need a new "
+                "after_run_id."
+            ),
+            (
+                "documentation_only and non_python_patch may verify from "
+                "changed_files without after_run."
+            ),
+            "state_artifact_change (baseline/cache) is violated, not verified.",
+            (
+                "after_run_not_new when before and after runs match for "
+                "structural profiles."
+            ),
+            (
+                "accepted means patch contract passed for scope — not unchanged "
+                "health or repo-wide cleanliness."
+            ),
+            (
+                "Read verification.structural_delta and health_regression_advisory "
+                "on accept."
+            ),
+            "Skipped receipt checks are not applicable, never passed.",
+        ),
+        recommended_tools=(
+            "finish_controlled_change",
+            "analyze_repository",
+            "check_patch_contract",
+        ),
+        doc_links=(CHANGE_CONTROL_DOC_LINK,),
+        warnings=("Do not claim full structural verification for docs-only patches.",),
+        anti_patterns=(
+            "Skipping after_run_id for Python patches.",
+            "Treating documentation_only accepted as no regressions repo-wide.",
         ),
     ),
 }

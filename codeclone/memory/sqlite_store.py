@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from ..report.meta import current_report_timestamp_utc
@@ -47,6 +47,7 @@ from .trajectory.models import (
 class SqliteEngineeringMemoryStore:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
+        self._closed = False
         self._conn = open_memory_db(db_path)
         self._conn.row_factory = sqlite3.Row
 
@@ -922,7 +923,14 @@ class SqliteEngineeringMemoryStore:
         return stats
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self._conn.close()
+
+    def __del__(self) -> None:
+        with suppress(Exception):
+            self.close()
 
     def commit(self) -> None:
         self._conn.commit()

@@ -129,6 +129,9 @@ HelpTopic = Literal[
     "review_state",
     "changed_scope",
     "change_control",
+    "trust_boundaries",
+    "engineering_memory",
+    "verification_profiles",
 ]
 HelpDetail = Literal["compact", "normal"]
 MetricsDetailFamily = Literal[
@@ -244,6 +247,7 @@ _VALID_HELP_TOPICS = frozenset(
         "change_control",
         "trust_boundaries",
         "engineering_memory",
+        "verification_profiles",
     }
 )
 _VALID_HELP_DETAILS = frozenset({"compact", "normal"})

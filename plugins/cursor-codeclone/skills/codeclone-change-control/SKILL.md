@@ -141,41 +141,30 @@ honor-system. List every path you touched in `changed_files` when possible; the
 controller also reads git and blocks under-reporting or silent out-of-scope
 edits. You **must** declare scope wide enough at `start`.
 
-| `finish_block_reason` | Meaning | Agent action |
+| `finish_block_reason` | Blocks? | Action |
 |---|---|---|
-| `missing_evidence` | Git dirty inside `allowed_files` / `allowed_related` but missing from evidence | Add paths to `changed_files` / `diff_ref` or revert |
-| `new_unattributed_unscoped_dirty` | Out-of-scope dirty path appeared after `start` and is not foreign-attributed | Redeclare wider scope or revert |
-| `modified_unattributed_unscoped_dirty` | Out-of-scope dirty path existed at `start` but changed after `start` and is not foreign-attributed | Redeclare wider scope or reconcile |
-| `unknown_unattributed_unscoped_dirty` | Out-of-scope dirty path cannot be compared to a start snapshot; legacy/missing snapshot is conservative | Reconcile tree, restart with fresh intent, or redeclare |
-| `foreign_dirty_overlap` | Foreign **active/stale** intent previously declared same in-scope path | Coordinate with user |
+| `missing_evidence` | yes | Add in-scope dirty paths to evidence or revert |
+| `foreign_dirty_overlap` | yes | Coordinate foreign intent on overlapping in-scope paths |
+| `own_unscoped_dirty` | only if `STRICT_FINISH` env | Reconcile out-of-scope dirt or widen scope |
 
-- Dirty paths outside your scope owned by a **foreign active/stale** intent →
-  listed in `foreign_attributed_outside_scope`, **does not block** your finish.
-- Dirty paths outside your scope that were already dirty at `start` and did not
-  change are listed in `preexisting_unscoped_dirty`, **does not block** your
-  finish.
-- **`recoverable`** intents (dead owning PID) do **not** grant foreign
-  attribution — their dirty paths count as normal workspace dirt unless you
-  declare scope or revert.
-- Legacy `own_unscoped_dirty` may appear as a compatibility alias for
-  unattributed blocking dirt. Treat it as **unattributed**, not proof that the
-  current agent owns the edit.
-- On hygiene pass, scope check may use `files_for_scope_check` (evidence ∪
-  unattributed blocking dirt) instead of evidence alone.
+Out-of-scope unattributed dirt (`new_` / `modified_` / `unknown_unattributed_*`) and
+`preexisting_unscoped_dirty` are **advisory** — report them; they may elevate status to
+`accepted_with_external_changes` without blocking.
 
 ```
 finish_controlled_change(
   intent_id=...,
   changed_files=[...] | diff_ref=...,     # XOR
   after_run_id=...,                       # when verification.after_run_required
-  claims_text=...,                        # optional; validated when recommended
-  review_text=...,                        # optional human note; not claim-validated
+  detail_level=summary|full,              # hygiene attribution
+  patch_trail_detail=summary|full,        # patch_trail forensics
+  claims_text=...,                        # optional
+  propose_memory=...,                     # optional draft batch on accept
 )
 ```
 
-Internal order (do not replicate manually): hygiene **gate** → scope **check** →
-**verify** → claims (if `claims_text` + `claim_validation_recommended`) → receipt
-→ clear.
+Pipeline (do not replicate manually): hygiene → check → verify → patch_trail →
+claims → receipt → clear. `patch_trail` does not authorize edits.
 
 ### After `finish`
 
@@ -230,21 +219,11 @@ user-facing advisory.
 `health_delta: -2`, `verdict: regressed` → tell the user health fell; do not stop
 at "patch accepted".
 
-## Verify profiles (controller decides)
+## Verify profiles
 
-**`start` always required.** Profile affects after-run and structural checks only.
-
-| Priority | Profile                 | Trigger                         | After-run |
-|----------|-------------------------|---------------------------------|-----------|
-| 1        | `state_artifact_change` | baseline/cache touched          | violated  |
-| 2        | `python_structural`     | any `.py`/`.pyi` incl. tests    | yes       |
-| 3        | `governance_config`     | pyproject, CI, Dockerfile… only | yes       |
-| 4        | `documentation_only`    | docs only                       | no        |
-| 5        | `non_python_patch`      | other non-py, non-docs          | no        |
-
-Read `verification.verification_profile` and `after_run_required` from `finish` —
-do not guess. Docs/non-python may verify without after-run when diff evidence
-exists. Receipts: skipped checks = "not applicable", never "passed".
+Controller derives profile from changed files — read
+`verification.verification_profile` and `after_run_required` from finish.
+Do not guess. Details: `help(topic="verification_profiles")`.
 
 ## Atomic fallback (legacy / debug only)
 

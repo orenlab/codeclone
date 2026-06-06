@@ -173,17 +173,17 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 
 Trajectory / projection keys (defaults from `codeclone/config/memory_defaults.py`):
 
-| Key                                          | Default    | Meaning                                                 |
-|----------------------------------------------|------------|---------------------------------------------------------|
-| `trajectories_enabled`                       | `true`     | Gate trajectory rebuild and retrieval                   |
-| `trajectory_retention_days`                  | `365`      | Retention hint for vacuum                               |
-| `projection_rebuild_policy`                  | `off`      | `enqueue_when_stale` enqueues worker on accepted finish |
-| `projection_rebuild_running_timeout_seconds` | `1800`     | Stale running job timeout                               |
-| `projection_rebuild_spawn_worker`            | `true`     | Spawn worker on enqueue                                 |
-| `trajectory_export_enabled`                  | `false`    | Gate CLI JSONL export                                   |
-| `trajectory_export_include_payloads`         | `false`    | Include step payloads in export rows                    |
-| `trajectory_export_max_record_bytes`         | `65536`    | Per export row cap                                      |
-| `trajectory_export_max_file_bytes`           | `10485760` | Output file cap                                         |
+| Key                                      | Default    | Meaning                                                 |
+|------------------------------------------|------------|---------------------------------------------------------|
+| trajectories_enabled                     | `true`     | Gate trajectory rebuild and retrieval                   |
+| trajectory_retention_days                | `365`      | Retention hint for vacuum                               |
+| projection_rebuild_policy                | `off`      | `enqueue_when_stale` enqueues worker on accepted finish |
+| projection_rebuild_running_timeout_seconds | `1800`   | Stale running job timeout                               |
+| projection_rebuild_spawn_worker        | `true`     | Spawn worker on enqueue                                 |
+| trajectory_export_enabled              | `false`    | Gate CLI JSONL export                                   |
+| trajectory_export_include_payloads     | `false`    | Include step payloads in export rows                    |
+| trajectory_export_max_record_bytes     | `65536`    | Per export row cap                                      |
+| trajectory_export_max_file_bytes       | `10485760` | Output file cap                                         |
 
 | Semantic field       | Default                                           | Meaning                                                                                                                |
 |----------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|

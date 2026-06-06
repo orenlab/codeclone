@@ -49,8 +49,14 @@ def test_load_report_trusted_cache(tmp_path: Path) -> None:
     target = root / DEFAULT_JSON_REPORT_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(document), encoding="utf-8")
-    loaded = load_report_for_memory_init(root_path=root, from_report=None)
-    assert loaded.source in {"trusted_cache", "fresh_analysis"}
+    with patch(
+        "codeclone.surfaces.cli.memory_analysis.assess_cached_report_trust",
+        return_value=CachedReportTrust(trusted=True, reason=None),
+    ):
+        loaded = load_report_for_memory_init(root_path=root, from_report=None)
+    assert loaded.source == "trusted_cache"
+    assert loaded.rejected_cache_reason is None
+    assert isinstance(loaded.document, dict)
 
 
 def test_load_report_rejected_cache_runs_fresh(tmp_path: Path) -> None:

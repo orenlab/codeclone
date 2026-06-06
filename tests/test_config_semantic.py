@@ -286,3 +286,47 @@ def test_memory_int_accepts_digit_strings() -> None:
     from codeclone.config.memory import _memory_int
 
     assert _memory_int(" 42 ", key="max_records") == 42
+
+
+def test_memory_bool_accepts_common_string_literals() -> None:
+    from codeclone.config.memory import _memory_bool
+
+    assert _memory_bool(True, key="trajectories_enabled") is True
+    assert _memory_bool("yes", key="trajectories_enabled") is True
+    assert _memory_bool("off", key="trajectories_enabled") is False
+
+
+def test_memory_bool_rejects_invalid_values() -> None:
+    from codeclone.config.memory import _memory_bool
+
+    with pytest.raises(ValueError, match="trajectories_enabled"):
+        _memory_bool("maybe", key="trajectories_enabled")
+
+
+def test_resolve_memory_config_honors_projection_rebuild_env_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.memory import resolve_memory_config
+    from codeclone.config.memory_defaults import MEMORY_ENV_PROJECTION_REBUILD_POLICY
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    monkeypatch.setenv(MEMORY_ENV_PROJECTION_REBUILD_POLICY, "enqueue_when_stale")
+    config = resolve_memory_config(root)
+    assert config.projection_rebuild_policy == "enqueue_when_stale"
+
+
+def test_resolve_memory_config_rejects_path_outside_repo(tmp_path: Path) -> None:
+    from codeclone.config.memory import resolve_memory_config
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = tmp_path / "outside.sqlite3"
+    outside.write_text("", encoding="utf-8")
+    (root / "pyproject.toml").write_text(
+        f'[tool.codeclone.memory]\ndb_path = "{outside}"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="must stay under the repository root"):
+        resolve_memory_config(root)

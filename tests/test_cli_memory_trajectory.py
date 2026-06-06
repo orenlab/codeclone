@@ -95,6 +95,37 @@ def test_memory_trajectory_cli_status_rebuild_list_show(tmp_path: Path) -> None:
     assert memory_main(
         ["trajectory", "show", trajectory_id, "--root", str(root2.resolve())]
     ) == int(ExitCode.SUCCESS)
+
+
+def test_memory_trajectory_cli_export_and_missing_db(tmp_path: Path) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        _seed_cli_audit(root)
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=resolve_audit_path(root_path=root, value=DEFAULT_AUDIT_PATH),
+        )
+        store.close()
+
+    root_arg = str(root.resolve())
+    out_path = root / "exports" / "trajectories.jsonl"
     assert memory_main(
-        ["trajectory", "show", "traj-missing", "--root", str(root2.resolve())]
-    ) == int(ExitCode.CONTRACT_ERROR)
+        [
+            "trajectory",
+            "export",
+            "--root",
+            root_arg,
+            "--profile",
+            "agent-memory-retrieval-v1",
+            "--out",
+            str(out_path),
+            "--force",
+        ]
+    ) == int(ExitCode.SUCCESS)
+    assert out_path.is_file()
+
+    missing_root = tmp_path / "missing"
+    missing_root.mkdir()
+    assert memory_main(["trajectory", "status", "--root", str(missing_root)]) == int(
+        ExitCode.CONTRACT_ERROR
+    )

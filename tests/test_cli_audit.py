@@ -1066,18 +1066,15 @@ def test_reader_connect_error(tmp_path: Path) -> None:
 
 def test_reader_count_none_result() -> None:
     """_count returns 0 when fetchone yields None (reader.py:320)."""
-    from codeclone.audit.reader import _count
-
-    conn = sqlite3.connect(":memory:")
-    # Empty table → COUNT(*) always returns a value, so we use a mock
     from unittest.mock import MagicMock
+
+    from codeclone.audit.reader import _count
 
     mock_conn = MagicMock()
     mock_result = MagicMock()
     mock_result.fetchone.return_value = None
     mock_conn.execute.return_value = mock_result
     assert _count(mock_conn, "SELECT COUNT(*) FROM t") == 0
-    conn.close()
 
 
 def test_reader_text_scalar_none_row() -> None:

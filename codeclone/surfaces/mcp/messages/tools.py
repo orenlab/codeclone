@@ -65,14 +65,11 @@ QUERY_ENGINEERING_MEMORY: Final = (
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (
-    "Governance router for engineering memory. Agent actions: refresh_from_run "
-    "(ingest from MCP run report), rebuild_semantic_index (LanceDB sidecar when "
-    "memory.semantic.enabled), record_candidate (draft agent memory), "
-    "validate_claims (memory-layer claim guard), propose_from_receipt "
-    "(atomic fallback for finish hook). Human approve/reject/archive use the "
-    "CodeClone VS Code Memory view (IDE channel: register_ide_governance, "
-    "prepare_governance, commit_governance when the server is launched with "
-    "--ide-governance-channel). Agents cannot approve records through this tool."
+    "Engineering memory governance. Agent actions: refresh_from_run, "
+    "record_candidate, validate_claims, propose_from_receipt, "
+    "rebuild_semantic_index, rebuild_trajectories, enqueue_projection_rebuild, "
+    "projection_rebuild_status, run_projection_jobs_once. "
+    "approve/reject/archive are not available to agents — use VS Code Memory view."
 )
 
 CHECK_PATCH_CONTRACT: Final = (
@@ -104,9 +101,11 @@ VALIDATE_REVIEW_CLAIMS: Final = (
 )
 
 HELP: Final = (
-    "Bounded workflow/contract guidance with doc links. compact "
-    "includes anti_patterns; normal adds warnings. Topics include "
-    "workflow, change_control, trust_boundaries."
+    "Bounded workflow/contract guidance with doc links. compact adds "
+    "anti_patterns; normal adds warnings. Topics: workflow, analysis_profile, "
+    "suppressions, baseline, coverage, latest_runs, review_state, "
+    "changed_scope, change_control, trust_boundaries, engineering_memory, "
+    "verification_profiles."
 )
 
 EVALUATE_GATES: Final = (
@@ -219,11 +218,11 @@ START_CONTROLLED_CHANGE: Final = (
 )
 
 FINISH_CONTROLLED_CHANGE: Final = (
-    "Post-edit verify, receipt, and intent clear. Pass after_run_id "
-    "when verification.verification_profile requires it. Read "
-    "verification.verification_profile for applied checks. Use claims_text "
-    "for claim validation; review_text is an optional human note. "
-    "Set propose_memory=true to attach draft memory candidates on accept."
+    "Post-edit pipeline: hygiene, scope check, verify, patch_trail, optional "
+    "claims, receipt, clear. Pass after_run_id when "
+    "verification.after_run_required. Use detail_level=full for hygiene path "
+    "attribution; patch_trail_detail summary|full. Set propose_memory=true "
+    "for draft memory candidates on accept."
 )
 
 MANAGE_CHANGE_INTENT: Final = (
