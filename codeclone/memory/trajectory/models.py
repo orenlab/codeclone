@@ -28,13 +28,22 @@ TrajectoryQualityTier = Literal[
     "routine",
 ]
 TrajectoryLabel = Literal[
+    "analysis_observed",
     "baseline_abuse_detected",
+    "change_control_workflow",
     "claim_guard_failed",
+    "claim_validated",
     "external_changes_accepted",
     "foreign_conflict_seen",
     "hook_blocked",
     "memory_used",
+    "patch_trail_recorded",
+    "queue_used",
+    "receipt_issued",
     "recovered",
+    "scope_clean",
+    "scope_expanded",
+    "verified_finish",
 ]
 
 

@@ -146,6 +146,8 @@ def test_project_trajectory_is_deterministic_and_canonicalizes_report_digest() -
     assert first.source_event_stream_digest == second.source_event_stream_digest
     assert first.outcome == "accepted"
     assert first.quality_tier == "verified"
+    assert "change_control_workflow" in first.labels
+    assert "verified_finish" in first.labels
     assert first.report_digest == f"sha256:{digest.lower()}"
     assert [step.audit_sequence for step in first.steps] == [1, 2]
     assert ("path", "pkg/a.py") in {
@@ -186,6 +188,35 @@ def test_project_trajectory_adds_touched_path_subjects_from_check_core() -> None
     }
     assert ("path", "pkg/b.py", "touched") in subject_map
     assert ("path", "pkg/a.py", "untouched") in subject_map
+
+
+def test_project_trajectory_labels_routine_change_control_cycle() -> None:
+    trajectory = project_trajectory(
+        project_id="proj-test",
+        repo_root_digest="root-digest",
+        workflow_id="intent:intent-a-001",
+        records=(
+            _record(1, "intent.declared", status="active"),
+            _record(
+                2,
+                "intent.checked",
+                status="clean",
+                changed_files=["pkg/a.py"],
+            ),
+            _record(3, "patch_trail.computed", status="computed"),
+            _record(4, "patch_contract.verified", status="accepted"),
+            _record(5, "review_receipt.created", status="created"),
+            _record(6, "claim_validation.completed", status="accepted"),
+        ),
+        projected_at_utc="2026-01-01T00:00:10Z",
+    )
+    assert trajectory.labels
+    assert "change_control_workflow" in trajectory.labels
+    assert "verified_finish" in trajectory.labels
+    assert "scope_clean" in trajectory.labels
+    assert "patch_trail_recorded" in trajectory.labels
+    assert "receipt_issued" in trajectory.labels
+    assert "claim_validated" in trajectory.labels
 
 
 def test_project_trajectory_marks_incident_labels() -> None:

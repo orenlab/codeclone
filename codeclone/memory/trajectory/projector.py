@@ -11,15 +11,23 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 
 from ...audit.events import (
+    EVENT_ANALYSIS_COMPLETED,
     EVENT_BASELINE_ABUSE,
+    EVENT_CLAIM_COMPLETED,
     EVENT_CLAIM_VIOLATED,
+    EVENT_INTENT_CHECKED,
+    EVENT_INTENT_DECLARED,
+    EVENT_INTENT_EXPANDED,
     EVENT_INTENT_EXPIRED,
     EVENT_INTENT_PROMOTED,
     EVENT_INTENT_QUEUE_BLOCKED,
+    EVENT_INTENT_QUEUED,
     EVENT_INTENT_VIOLATED,
     EVENT_PATCH_EXPIRED,
+    EVENT_PATCH_TRAIL_COMPUTED,
     EVENT_PATCH_VERIFIED,
     EVENT_PATCH_VIOLATED,
+    EVENT_RECEIPT_CREATED,
     EVENT_WORKSPACE_CONFLICT,
     projection_supplement_facts_from_payload,
 )
@@ -59,8 +67,8 @@ def project_trajectory(
     steps = tuple(
         _step_from_record(index, record) for index, record in enumerate(ordered)
     )
-    labels = _labels(ordered, cores)
     outcome = _outcome(ordered, cores)
+    labels = _labels(ordered, cores, outcome=outcome)
     quality_tier = _quality_tier(outcome=outcome, records=ordered, labels=labels)
     run_ids = tuple(
         value for value in (_clean_text(record.run_id) for record in ordered) if value
@@ -240,12 +248,59 @@ def _outcome(
     return "partial"
 
 
+_CHANGE_CONTROL_EVENT_TYPES = frozenset(
+    {
+        EVENT_INTENT_DECLARED,
+        EVENT_INTENT_CHECKED,
+        EVENT_INTENT_EXPANDED,
+        EVENT_INTENT_QUEUED,
+        EVENT_INTENT_PROMOTED,
+        EVENT_INTENT_QUEUE_BLOCKED,
+        EVENT_INTENT_VIOLATED,
+        EVENT_INTENT_EXPIRED,
+        EVENT_PATCH_VERIFIED,
+        EVENT_PATCH_VIOLATED,
+        EVENT_PATCH_EXPIRED,
+        EVENT_PATCH_TRAIL_COMPUTED,
+        EVENT_CLAIM_COMPLETED,
+        EVENT_CLAIM_VIOLATED,
+        EVENT_RECEIPT_CREATED,
+    }
+)
+
+
 def _labels(
     records: Sequence[AuditRecord],
     cores: Sequence[Mapping[str, object]],
+    *,
+    outcome: TrajectoryOutcome,
 ) -> tuple[TrajectoryLabel, ...]:
     labels: set[TrajectoryLabel] = set()
     event_types = {record.event_type for record in records}
+    if event_types & _CHANGE_CONTROL_EVENT_TYPES:
+        labels.add("change_control_workflow")
+    elif EVENT_ANALYSIS_COMPLETED in event_types:
+        labels.add("analysis_observed")
+    if outcome in {"accepted", "accepted_with_external_changes"} and (
+        EVENT_PATCH_VERIFIED in event_types
+    ):
+        labels.add("verified_finish")
+    if any(
+        record.event_type == EVENT_INTENT_CHECKED
+        and _clean_text(record.status) in {"clean", "expanded"}
+        for record in records
+    ):
+        labels.add("scope_clean")
+    if EVENT_INTENT_EXPANDED in event_types:
+        labels.add("scope_expanded")
+    if EVENT_INTENT_QUEUED in event_types:
+        labels.add("queue_used")
+    if EVENT_PATCH_TRAIL_COMPUTED in event_types:
+        labels.add("patch_trail_recorded")
+    if EVENT_RECEIPT_CREATED in event_types:
+        labels.add("receipt_issued")
+    if EVENT_CLAIM_COMPLETED in event_types:
+        labels.add("claim_validated")
     if EVENT_BASELINE_ABUSE in event_types or any(
         _core_fact_bool(core, "baseline_abuse") for core in cores
     ):

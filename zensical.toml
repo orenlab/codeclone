@@ -104,6 +104,7 @@ nav = [
             { "FTS search" = "book/13-engineering-memory/search-fts.md" },
             { "Semantic search" = "book/13-engineering-memory/search-semantic.md" },
             { "Trajectory" = "book/13-engineering-memory/trajectory-and-patch-trail.md" },
+            { "Trajectory labels" = "book/13-engineering-memory/trajectory-labels.md" },
             { "Projection jobs" = "book/13-engineering-memory/projection-jobs.md" },
             { "Scope & invariants" = "book/13-engineering-memory/scope-and-invariants.md" },
         ] },

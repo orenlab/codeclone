@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from .models import Trajectory, TrajectoryListItem, TrajectoryProjectionRun
+from .step_labels import step_display_name
 
 
 class PrinterLike(Protocol):
@@ -110,6 +111,8 @@ def render_trajectory_detail(
     console.print(f"  workflow: {trajectory.workflow_id}")
     console.print(f"  outcome: {trajectory.outcome}")
     console.print(f"  quality: {trajectory.quality_tier}")
+    if trajectory.labels:
+        console.print(f"  labels: {', '.join(trajectory.labels)}", markup=False)
     console.print(f"  digest: {trajectory.trajectory_digest}")
     console.print(f"  source stream: {trajectory.source_event_stream_digest}")
     if trajectory.report_digest:
@@ -117,12 +120,13 @@ def render_trajectory_detail(
     console.print(f"  summary: {trajectory.summary}", markup=False)
     console.print("  steps:")
     for step in trajectory.steps:
-        status = f" status={step.status}" if step.status else ""
+        label = step_display_name(event_type=step.event_type, status=step.status)
         console.print(
-            f"    {step.step_index + 1}. #{step.audit_sequence} "
-            f"{step.event_type}{status}",
+            f"    {step.step_index + 1}. #{step.audit_sequence} {label}",
             markup=False,
         )
+        if step.summary:
+            console.print(f"       {step.summary[:120]}", markup=False)
     if trajectory.subjects:
         console.print("  subjects:")
         for subject in trajectory.subjects:

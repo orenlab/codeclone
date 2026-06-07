@@ -182,6 +182,9 @@ Filter: `filters.include_routine=true` on `trajectory_search` includes single-ev
 Evidence kind **`trajectory`** links memory records to trajectories; human approve
 still required for agent drafts.
 
+Label taxonomy and **`step_label`** display names:
+[Trajectory labels](trajectory-labels.md).
+
 ### Enterprise boundary (export)
 
 Community CodeClone writes **local JSONL only** — no remote API, upload, or

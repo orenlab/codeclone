@@ -13,6 +13,7 @@ from ..paths import normalize_memory_scope_path, repo_path_to_module_key
 from ..search_index import SearchMatchMode, tokenize_query
 from .models import Trajectory, TrajectoryListItem
 from .patch_trail import patch_trail_from_mapping, patch_trail_summary_line
+from .step_labels import step_display_name
 
 DEFAULT_TRAJECTORY_PREVIEW_LIMIT = 5
 DEFAULT_TRAJECTORY_STEP_LIMIT = 12
@@ -163,6 +164,10 @@ def serialize_trajectory_detail(
                 "audit_sequence": step.audit_sequence,
                 "event_id": step.event_id,
                 "event_type": step.event_type,
+                "step_label": step_display_name(
+                    event_type=step.event_type,
+                    status=step.status,
+                ),
                 "status": step.status,
                 "run_id": step.run_id,
                 "report_digest": step.report_digest,
