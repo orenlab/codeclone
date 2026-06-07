@@ -1,6 +1,7 @@
-<!-- doc-scope: NARRATIVE PIPELINE OVERVIEW — how CodeClone works.
+<!-- doc-scope: HOW IT WORKS. class: explanation max-lines: 120
+      NARRATIVE PIPELINE OVERVIEW — how CodeClone works.
      owns: pipeline stage descriptions, surfaces table, design principles.
-     does-not-own: contract details (→ book/ chapters), MCP tools (→ mcp.md),
+     does-not-own: contract details (→ book/ chapters), MCP tools (→ guide/mcp/README.md),
        CFG semantics (→ book/04), report schema (→ book/05).
      rule: this is a MAP — 1-2 sentences per topic + link into Reference.
        Do not shadow-copy book chapters here. -->
@@ -8,7 +9,7 @@
 
 > This page is a narrative architecture overview.
 > Contract-level guarantees are defined in the
-> [Contracts Book](book/README.md).
+> [Contracts Book](../../book/README.md).
 
 ---
 
@@ -23,9 +24,11 @@ CodeClone processes Python projects in the following stages:
 5. **Fingerprinting**
 6. **Segment window extraction**
 7. **Clone grouping**
-8. **Reporting / CI decision**
+8. **Project metrics** (complexity, coupling, health, dead code, …)
+9. **Canonical report assembly**
+10. **Baseline diff and metric gating** (CI exit decision)
 
-Full contract: [Core pipeline](book/03-core-pipeline.md).
+Full contract: [Core pipeline](../../book/03-core-pipeline.md).
 
 ---
 
@@ -36,7 +39,7 @@ Full contract: [Core pipeline](book/03-core-pipeline.md).
 - Skips paths that resolve outside the root (symlink traversal guard).
 - Applies cache-based skipping using file stat signatures.
 
-Cache contract: [Cache](book/08-cache.md).
+Cache contract: [Cache](../../book/08-cache.md).
 
 ---
 
@@ -76,7 +79,7 @@ This ensures structural stability across refactors.
 - Models `break` / `continue` as terminating loop transitions.
 - Preserves `for/while ... else` semantics.
 
-Full semantics: [CFG Semantics](book/04-cfg-semantics.md).
+Full semantics: [CFG Semantics](../../book/04-cfg-semantics.md).
 
 ---
 
@@ -139,10 +142,25 @@ gating decisions.
 ## 8. Reporting
 
 Detected findings can be rendered as interactive HTML, canonical JSON (schema
-`2.11`), deterministic text, Markdown, or SARIF projections.
+`2.11`), deterministic text, Markdown, or SARIF projections. Reporting is
+separate from CI gating: report-only structural findings and segment clones do
+not change baseline diff or gate evaluation.
 
-Report contract: [Report](book/05-report.md).
-HTML rendering: [HTML Render](book/06-html-render.md).
+Report contract: [Report](../../book/05-report.md).
+HTML rendering: [HTML Render](../../book/06-html-render.md).
+
+---
+
+## 9. CI gating
+
+After the canonical report is built, clone baseline diff and configured metric
+gates decide exit code `3` when policy fails. Gating mode is active when any
+`--fail-*`, `--ci`, or minimum-coverage threshold is set (see
+[CLI](../../book/11-cli.md)). Unreadable source in gating mode is a contract
+error (exit `2`, marker `CONTRACT ERROR:`) and takes priority over clone/metric
+gate failure.
+
+Exit codes: [09-exit-codes](../../book/09-exit-codes.md).
 
 ---
 
@@ -153,13 +171,13 @@ canonical report. No surface adds a second analysis engine.
 
 | Surface | Role | Contract |
 |---------|------|----------|
-| CLI | Scripting and CI | [CLI](book/11-cli.md) |
-| MCP | Read-only agent/client integration | [MCP interface](book/25-mcp-interface.md) |
-| VS Code | Guided IDE review | [VS Code](vscode-extension.md) |
-| Claude Desktop | Local `.mcpb` bundle | [Claude Desktop](claude-desktop-bundle.md) |
-| Codex | Marketplace plugin with skills | [Codex](codex-plugin.md) |
-| Cursor | Plugin with skills, rules, hooks | [Cursor](cursor-plugin.md) |
-| SARIF | IDE code scanning | [SARIF](sarif.md) |
+| CLI | Scripting and CI | [CLI](../../book/11-cli.md) |
+| MCP | Read-only agent/client integration | [MCP interface](../../book/25-mcp-interface/index.md) |
+| VS Code | Guided IDE review | [VS Code](../integrations/vscode/setup.md) |
+| Claude Desktop | Local `.mcpb` bundle | [Claude Desktop](../integrations/claude-desktop/setup.md) |
+| Codex | Marketplace plugin with skills | [Codex](../integrations/codex/setup.md) |
+| Cursor | Plugin with skills, rules, hooks | [Cursor](../integrations/cursor/install-and-skills.md) |
+| SARIF | IDE code scanning | [SARIF](../integrations/sarif/export.md) |
 
 ---
 
@@ -170,4 +188,4 @@ canonical report. No surface adds a second analysis engine.
 - Low-noise > completeness
 - CI-first design
 
-Module map: [Architecture Map](book/02-architecture-map.md).
+Module map: [Architecture Map](../../book/02-architecture-map.md).
