@@ -344,3 +344,23 @@
     box-shadow: none !important;
     border-width: 1px;
 }
+
+/* ---------------------------------------------------------
+   Home / hub goal tables
+   --------------------------------------------------------- */
+
+.md-typeset table:not([class]) thead th {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--md-default-fg-color--light);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tbody tr:hover {
+    background: rgba(129, 140, 248, 0.06);
+}
+
+[data-md-color-scheme="default"] .md-typeset table:not([class]) tbody tr:hover {
+    background: rgba(79, 70, 229, 0.04);
+}

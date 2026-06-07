@@ -95,7 +95,7 @@ Workflow profiles determine which steps are needed:
 ### Memory-aware workflow
 
 Engineering Memory is a local SQLite store of evidence-linked repository facts.
-Full playbook: `docs/book/13-engineering-memory.md`. MCP help:
+Full playbook: `docs/book/13-engineering-memory/index.md`. MCP help:
 `help(topic="engineering_memory")`.
 
 **Chat is not memory.** Text in this conversation is ephemeral (context shrink,

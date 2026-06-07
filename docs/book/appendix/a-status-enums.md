@@ -61,7 +61,21 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 - `3` gating failure
 - `5` internal error
 
-### IntentStatus
+### WorkspaceIntentStatus
+
+- `active`
+- `queued`
+- `clean`
+- `expanded`
+- `violated`
+- `expired`
+- `orphaned`
+
+Persisted workspace registry records use these lifecycle values. Terminal GC
+statuses are `clean`, `expired`, and `orphaned`. Semantics:
+[Intent registry & queue](../12-structural-change-controller/intent-registry-and-queue.md).
+
+### IntentStatus (scope check / session lifecycle)
 
 - `active`
 - `queued`
@@ -71,9 +85,8 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 - `unverified`
 - `expired`
 
-Semantics are defined in
-[Structural Change Controller § Pre-Change Workflow](../12-structural-change-controller.md#pre-change-workflow)
-and [§ Intent Queue](../12-structural-change-controller.md#intent-queue).
+Used by `manage_change_intent(check)` and session intent records. Finish
+top-level `status: "unverified"` is a **response string**, not this enum value.
 
 ### IntentOwnership
 
@@ -84,8 +97,8 @@ and [§ Intent Queue](../12-structural-change-controller.md#intent-queue).
 - `recoverable`
 - `expired`
 
-Semantics are defined in
-[Structural Change Controller § Workspace Intent Registry](../12-structural-change-controller.md#workspace-intent-registry).
+Semantics:
+[Intent registry & queue](../12-structural-change-controller/intent-registry-and-queue.md).
 
 ### PatchContractStatus
 
@@ -95,17 +108,8 @@ Semantics are defined in
 - `unverified`
 - `expired`
 
-Semantics are defined in
-[Structural Change Controller § Scope-Aware Patch Contract Verification](../12-structural-change-controller.md#scope-aware-patch-contract-verification).
-
-### WorkspaceIntentStatus
-
-- `active`
-- `queued`
-
-Workspace registry records mirror the session-local `IntentStatus` for `active`
-and `queued`. Other session-local statuses (`clean`, `expanded`, etc.) are not
-persisted to the workspace registry.
+Semantics:
+[Patch contract verification](../12-structural-change-controller/patch-contract-verify.md).
 
 ### VerificationProfile
 
@@ -117,12 +121,12 @@ persisted to the workspace registry.
 
 Priority-ordered. A single file from a higher-priority category overrides
 the entire patch. Semantics are defined in
-[Structural Change Controller § Verification Profiles](../12-structural-change-controller.md#verification-profiles).
+[Structural Change Controller § Verification Profiles](../12-structural-change-controller/verification-profiles.md).
 
 ### MemoryStatus
 
 Defined by `codeclone/memory/enums.py:MemoryStatus`. Semantics are defined in
-[Engineering Memory § Staleness and anchor durability](../13-engineering-memory.md#staleness-and-anchor-durability).
+[Engineering Memory § Staleness and anchor durability](../13-engineering-memory/staleness-and-anchors.md).
 
 - `draft` — unapproved agent candidate
 - `active` — trusted or system fact; default retrieval includes

@@ -46,8 +46,11 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 
 ### Change control
 
-- [12-structural-change-controller.md](12-structural-change-controller.md) — intent, blast radius, patch contract, receipt
-- [13-engineering-memory.md](13-engineering-memory.md) — evidence-linked repository memory
+- [12-structural-change-controller/index.md](12-structural-change-controller/index.md) — overview
+- [12-structural-change-controller/finish-controlled-change.md](12-structural-change-controller/finish-controlled-change.md) — finish pipeline
+- [12-structural-change-controller/finish-hygiene.md](12-structural-change-controller/finish-hygiene.md) — hygiene blocking vs advisory
+- [12-structural-change-controller/patch-trail.md](12-structural-change-controller/patch-trail.md) — Patch Trail
+- [13-engineering-memory/index.md](13-engineering-memory/index.md) — evidence-linked repository memory
 - [14-claim-guard.md](14-claim-guard.md) — review claim validation
 
 ### Quality signals
@@ -68,7 +71,9 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 
 ### MCP interface
 
-- [25-mcp-interface.md](25-mcp-interface.md) — MCP interface contract
+- [25-mcp-interface/index.md](25-mcp-interface/index.md) — MCP interface contract
+- [25-mcp-interface/tools/workflow.md](25-mcp-interface/tools/workflow.md) — workflow tools
+- [25-mcp-interface/resources.md](25-mcp-interface/resources.md) — resource URIs
 
 ### Appendix
 

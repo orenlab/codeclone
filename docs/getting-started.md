@@ -1,7 +1,7 @@
 <!-- doc-scope: SOLE OWNER of install, first-run, CI setup, and MCP registration.
      owns: install snippets, first-run walkthrough, CI pipeline, MCP quick-start.
-     does-not-own: contract details (→ book/), architecture (→ architecture.md),
-       MCP tool reference (→ mcp.md).
+     does-not-own: contract details (→ book/), architecture (→ guide/explanation/how-it-works.md),
+       MCP tool reference (→ guide/mcp/README.md).
      rule: other pages link HERE for install — never duplicate install blocks. -->
 # Getting Started
 
@@ -176,14 +176,14 @@ codeclone-mcp --transport streamable-http   # remote / HTTP clients
     [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone).
     The extension connects to `codeclone-mcp` automatically.
 
-    See [VS Code extension guide](vscode-extension.md).
+    See [VS Code extension guide](guide/integrations/vscode/setup.md).
 
 === "Claude Desktop"
 
     Use the pre-built bundle in
     [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone).
 
-    See [Claude Desktop guide](claude-desktop-bundle.md).
+    See [Claude Desktop guide](guide/integrations/claude-desktop/setup.md).
 
 === "Codex"
 
@@ -195,7 +195,7 @@ codeclone-mcp --transport streamable-http   # remote / HTTP clients
     [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone);
     the marketplace distribution is `orenlab/codeclone-codex`.
 
-    See [Codex plugin guide](codex-plugin.md).
+    See [Codex plugin guide](guide/integrations/codex/setup.md).
 
 === "Cursor"
 
@@ -206,7 +206,7 @@ codeclone-mcp --transport streamable-http   # remote / HTTP clients
     The Cursor plugin is **not** listed in `.agents/plugins/marketplace.json`;
     that file is Codex-only for local monorepo development.
 
-    See [Cursor plugin guide](cursor-plugin.md).
+    See [Cursor plugin guide](guide/integrations/cursor/install-and-skills.md).
 
 === "Manual registration"
 
@@ -229,7 +229,7 @@ boundary:
 4. **Generate receipt** — auditable artifact
 5. **Validate claims** — cross-check review text against report
 
-See [Structural Change Controller](book/12-structural-change-controller.md).
+See [Structural Change Controller](book/12-structural-change-controller/index.md).
 
 ## Configuration
 
@@ -250,7 +250,7 @@ See [Config and defaults](book/10-config-and-defaults.md).
 
 ## Next Steps
 
-- [Architecture narrative](architecture.md) — how the pipeline works
+- [Architecture narrative](guide/explanation/how-it-works.md) — how the pipeline works
 - [Baseline contract](book/07-baseline.md) — trust model and schema
-- [MCP interface contract](book/25-mcp-interface.md) — tool surface and guarantees
+- [MCP interface contract](book/25-mcp-interface/index.md) — tool surface and guarantees
 - [Report contract](book/05-report.md) — canonical JSON schema

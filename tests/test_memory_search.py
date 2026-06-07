@@ -24,9 +24,11 @@ def test_fts_search_matches_any_token(tmp_path: Path) -> None:
         seed_document_link(
             store,
             project_id=project.id,
-            doc_file="docs/mcp.md",
+            doc_file="docs/guide/mcp/workflows/change-control.md",
             ref_path="codeclone/surfaces/mcp/server.py",
-            statement="docs/mcp.md (Phase 5: Change control) references MCP workflow.",
+            statement=(
+                "docs/guide/mcp/workflows/change-control.md references MCP workflow."
+            ),
             heading="Phase 5: Change control",
         )
         store.rebuild_project_fts(project.id)

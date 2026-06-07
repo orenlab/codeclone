@@ -183,4 +183,4 @@ Local/self-repo validation:
 
 - [CodeClone repository](https://github.com/orenlab/codeclone)
 - [Documentation](https://orenlab.github.io/codeclone/)
-- [SARIF integration](https://orenlab.github.io/codeclone/sarif/)
+- [SARIF integration](https://orenlab.github.io/codeclone/guide/integrations/sarif/export/)

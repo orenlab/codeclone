@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from codeclone.config.memory import IngestConfig
 from codeclone.memory.ingest.extractors import (
     extract_contradictions,
     extract_git_hotspots,
@@ -111,6 +112,11 @@ def test_extract_public_surfaces_skips_empty_symbol_and_reads_mcp_snapshot(
         git=git,
         report_digest="r1",
         analysis_fingerprint="f1",
+        ingest=IngestConfig(
+            mcp_tool_schema_snapshot_path=(
+                "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
+            ),
+        ),
     )
 
     api_surface_names: set[str] = set()
@@ -281,6 +287,12 @@ def test_extract_contradictions_tools_must_be_dict_and_claim_mismatch(
 ) -> None:
     project = _project(tmp_path)
     git = GitProvenance(remote=None, branch="main", head=None, available=True)
+    ingest = IngestConfig(
+        mcp_tool_schema_snapshot_path=(
+            "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
+        ),
+        mcp_tool_count_doc_paths=("docs/book/25-mcp-interface/index.md",),
+    )
 
     # tools must be a dict
     _write_json(
@@ -291,8 +303,8 @@ def test_extract_contradictions_tools_must_be_dict_and_claim_mismatch(
         / "mcp_tool_schemas.json",
         {"tools": ["not-a-dict"]},
     )
-    (tmp_path / "docs").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "docs" / "mcp.md").write_text(
+    (tmp_path / "docs" / "book" / "25-mcp-interface").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "docs" / "book" / "25-mcp-interface" / "index.md").write_text(
         "1 MCP tools\n2 MCP tools\n", encoding="utf-8"
     )
     batch = extract_contradictions(
@@ -301,6 +313,7 @@ def test_extract_contradictions_tools_must_be_dict_and_claim_mismatch(
         git=git,
         report_digest="r1",
         analysis_fingerprint="f1",
+        ingest=ingest,
     )
     assert batch.records == []
 
@@ -319,6 +332,7 @@ def test_extract_contradictions_tools_must_be_dict_and_claim_mismatch(
         git=git,
         report_digest="r1",
         analysis_fingerprint="f1",
+        ingest=ingest,
     )
     assert len(batch.records) == 1
     record = batch.records[0]

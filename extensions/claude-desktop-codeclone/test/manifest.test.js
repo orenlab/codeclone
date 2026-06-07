@@ -39,7 +39,7 @@ test("manifest keeps the setup surface bounded and local", () => {
     assert.deepEqual(manifest.privacy_policies, [
         "https://orenlab.github.io/codeclone/privacy-policy/",
     ]);
-    assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/claude-desktop-bundle/");
+    assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/");
     assert.equal(manifest.tools_generated, true);
     // Derive the expected count from the canonical MCP contract snapshot so the
     // bundle stays in lockstep with the server surface instead of drifting

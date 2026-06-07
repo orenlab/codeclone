@@ -200,6 +200,16 @@ projection_rebuild_policy = "enqueue_when_stale"              # off | enqueue_wh
 projection_rebuild_running_timeout_seconds = 1800
 projection_rebuild_spawn_worker = true
 
+[tool.codeclone.memory.ingest]
+contract_constants_paths = ["codeclone/contracts/__init__.py"]
+document_link_paths = [
+    "docs/guide/mcp/README.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+]
+mcp_tool_schema_snapshot_path = "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
+mcp_tool_count_doc_paths = ["docs/book/25-mcp-interface/index.md"]
+
 [tool.coverage.report]
 show_missing = true
 precision = 2

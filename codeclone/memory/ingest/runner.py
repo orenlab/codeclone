@@ -10,7 +10,7 @@ from collections import Counter
 from collections.abc import Mapping
 from pathlib import Path
 
-from ...config.memory import resolve_memory_config
+from ...config.memory import IngestConfig, resolve_memory_config
 from ...report.meta import current_report_timestamp_utc
 from ..models import IngestionRun, MemoryProject, RecordBatch, generate_memory_id
 from ..project import (
@@ -85,11 +85,15 @@ def build_init_batch(
     options: InitOptions,
     git_hotspot_period_days: int = 90,
     git_hotspot_min_changes: int = 5,
+    ingest: IngestConfig | None = None,
 ) -> RecordBatch:
     if not isinstance(project, MemoryProject):
         raise TypeError("project must be MemoryProject")
     if not isinstance(git, GitProvenance):
         raise TypeError("git must be GitProvenance")
+
+    ingest_config = ingest or resolve_memory_config(root_path).ingest
+    registry = _registry_paths(report_document)
 
     batches = [
         extract_module_roles(
@@ -106,6 +110,8 @@ def build_init_batch(
             git=git,
             report_digest=report_digest,
             analysis_fingerprint=analysis_fingerprint,
+            registry_paths=registry,
+            ingest=ingest_config,
         ),
         extract_public_surfaces(
             project=project,
@@ -114,6 +120,7 @@ def build_init_batch(
             git=git,
             report_digest=report_digest,
             analysis_fingerprint=analysis_fingerprint,
+            ingest=ingest_config,
         ),
         extract_risk_notes(
             project=project,
@@ -138,6 +145,7 @@ def build_init_batch(
             git=git,
             report_digest=report_digest,
             analysis_fingerprint=analysis_fingerprint,
+            ingest=ingest_config,
         ),
     ]
     if options.include_tests:
@@ -158,7 +166,8 @@ def build_init_batch(
                 git=git,
                 report_digest=report_digest,
                 analysis_fingerprint=analysis_fingerprint,
-                registry_paths=_registry_paths(report_document),
+                registry_paths=registry,
+                ingest=ingest_config,
             )
         )
     merged = merge_batches(batches)

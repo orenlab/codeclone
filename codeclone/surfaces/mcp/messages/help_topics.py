@@ -25,7 +25,7 @@ class MCPHelpTopicSpec:
 
 
 MCP_BOOK_URL: Final = f"{DOCS_URL}book/"
-MCP_GUIDE_URL: Final = f"{DOCS_URL}mcp/"
+MCP_GUIDE_URL: Final = f"{DOCS_URL}guide/mcp/"
 MCP_INTERFACE_DOC_LINK: Final[tuple[str, str]] = (
     "MCP interface contract",
     f"{MCP_BOOK_URL}25-mcp-interface/",

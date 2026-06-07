@@ -140,7 +140,7 @@ MCP, IDE extensions, GitHub Action, CI. The same deterministic facts drive human
 agent workflows. The canonical report is the source of truth; surfaces render, filter, and explain it — there is
 never a second analysis engine.
 
-[Architecture narrative](https://orenlab.github.io/codeclone/architecture/) &middot;
+[Architecture narrative](https://orenlab.github.io/codeclone/guide/explanation/how-it-works/) &middot;
 [CFG semantics](https://orenlab.github.io/codeclone/book/04-cfg-semantics/)
 
 ## Structural Change Controller
@@ -198,8 +198,8 @@ deterministic projections, and run identity is derived from the canonical report
 > Analysis tools require an absolute repository root; relative roots such as `.` are rejected. Keep `stdio` as the
 > default transport for local clients — HTTP exposure beyond loopback requires explicit `--allow-remote`.
 
-[MCP usage guide](https://orenlab.github.io/codeclone/mcp/) &middot;
-[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/)
+[MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/) &middot;
+[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/) &middot;
 
 ### Engineering Memory
 
@@ -220,10 +220,10 @@ codeclone memory approve mem-…   # human-only governance
 
 | Surface                   | Install                                                                                                                       | Docs                                                                        |
 |---------------------------|------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | [Guide](https://orenlab.github.io/codeclone/vscode-extension/)      |
-| **Claude Desktop bundle** | [`orenlab/codeclone-claude-desktop`](https://github.com/orenlab/codeclone-claude-desktop) | [Guide](https://orenlab.github.io/codeclone/claude-desktop-bundle/) |
-| **Codex plugin**          | [`orenlab/codeclone-codex`](https://github.com/orenlab/codeclone-codex)                                                      | [Guide](https://orenlab.github.io/codeclone/codex-plugin/)          |
-| **Cursor plugin**         | [`orenlab/codeclone-cursor`](https://github.com/orenlab/codeclone-cursor)                       | [Guide](https://orenlab.github.io/codeclone/cursor-plugin/)         |
+| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | [Guide](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)      |
+| **Claude Desktop bundle** | [`orenlab/codeclone-claude-desktop`](https://github.com/orenlab/codeclone-claude-desktop) | [Guide](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/) |
+| **Codex plugin**          | [`orenlab/codeclone-codex`](https://github.com/orenlab/codeclone-codex)                                                      | [Guide](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)          |
+| **Cursor plugin**         | [`orenlab/codeclone-cursor`](https://github.com/orenlab/codeclone-cursor)                       | [Guide](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/)         |
 
 All clients connect to the same `codeclone-mcp` contract — no second analysis engine.
 
@@ -338,7 +338,7 @@ Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.githu
 [Baseline](https://orenlab.github.io/codeclone/book/07-baseline/) &middot;
 [Report](https://orenlab.github.io/codeclone/book/05-report/) &middot;
 [Metrics & gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) &middot;
-[MCP](https://orenlab.github.io/codeclone/book/25-mcp-interface/) &middot;
+[MCP guide](https://orenlab.github.io/codeclone/guide/mcp/) &middot;
 [Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/) &middot;
 [Engineering Memory](https://orenlab.github.io/codeclone/book/13-engineering-memory/) &middot;
 [CLI](https://orenlab.github.io/codeclone/book/11-cli/) &middot;

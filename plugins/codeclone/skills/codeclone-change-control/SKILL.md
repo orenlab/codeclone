@@ -66,7 +66,7 @@ auto-bootstraps when the store is missing and a session run exists; explicit
 | Post-edit proposals  | `finish(..., propose_memory=true)`                                                                                  |
 
 Full playbook: `codeclone-engineering-memory` skill and
-`docs/book/13-engineering-memory.md`. Human approval via VS Code Memory view (not
+`docs/book/13-engineering-memory/index.md`. Human approval via VS Code Memory view (not
 MCP) required to promote drafts — agents cannot activate records via MCP.
 
 Do not use memory to expand scope, override findings, or justify `do_not_touch`

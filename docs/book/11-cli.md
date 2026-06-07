@@ -117,11 +117,15 @@ Refs:
       and configure `embedding_provider = "fastembed"`; `semantic-lancedb`
       alone can still run the deterministic diagnostic provider.
     - `review-candidates`, `approve`, `reject`, `archive` — human governance
-      for draft records (not available on MCP).
+      for draft records (CLI and VS Code Memory; not MCP agent tools).
+    - `trajectory status|rebuild|list|search|show|export` — audit-derived process
+      narratives and Patch Trail export (requires audit + rebuild).
+    - `jobs status|enqueue|run-once|list` — projection rebuild queue (semantic +
+      trajectory sidecars).
     - `search` accepts `--match any|all` for FTS token matching (default `any`)
       and `--semantic` to blend vector proximity when the index is available.
     - Requires a prior normal analysis run or cached report for `init`.
-    - Full contract: [Engineering Memory](13-engineering-memory.md).
+    - Full contract: [Engineering Memory](13-engineering-memory/index.md).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.

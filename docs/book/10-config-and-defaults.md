@@ -169,7 +169,7 @@ Enterprise (up to 90 days, PostgreSQL backend) options.
 Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 **not** part of the root `[tool.codeclone]` table above. They are validated by
 `codeclone/config/memory.py` / `SemanticConfig` and documented in
-[Engineering Memory](13-engineering-memory.md).
+[Engineering Memory](13-engineering-memory/index.md).
 
 Trajectory / projection keys (defaults from `codeclone/config/memory_defaults.py`):
 

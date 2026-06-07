@@ -1228,7 +1228,7 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
             },
             {
                 "title": "MCP usage guide",
-                "url": "https://orenlab.github.io/codeclone/mcp/",
+                "url": "https://orenlab.github.io/codeclone/guide/mcp/",
             },
         ],
         "anti_patterns": [

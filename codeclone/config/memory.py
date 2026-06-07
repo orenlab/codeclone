@@ -19,6 +19,10 @@ from ..utils.repo_paths import (
     resolve_under_repo_root,
 )
 from .memory_defaults import (
+    DEFAULT_INGEST_CONTRACT_CONSTANTS_PATHS,
+    DEFAULT_INGEST_DOCUMENT_LINK_PATHS,
+    DEFAULT_INGEST_MCP_TOOL_COUNT_DOC_PATHS,
+    DEFAULT_INGEST_MCP_TOOL_SCHEMA_SNAPSHOT_PATH,
     DEFAULT_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
     DEFAULT_SEMANTIC_BACKEND,
     DEFAULT_SEMANTIC_DIMENSION,
@@ -44,7 +48,11 @@ from .memory_defaults import (
     SemanticBackend,
     SemanticEmbeddingProvider,
 )
-from .memory_specs import MEMORY_CONFIG_DEFAULTS, SEMANTIC_NESTED_TABLE_KEY
+from .memory_specs import (
+    INGEST_NESTED_TABLE_KEY,
+    MEMORY_CONFIG_DEFAULTS,
+    SEMANTIC_NESTED_TABLE_KEY,
+)
 from .pyproject_loader import load_pyproject_config
 
 _VALID_BACKENDS = frozenset({"sqlite", "postgres"})
@@ -101,6 +109,48 @@ class SemanticConfig(BaseModel):
         return normalized
 
 
+class IngestConfig(BaseModel):
+    """Validated memory ingest path config (Phase 18+).
+
+    Empty ``contract_constants_paths`` / ``document_link_paths`` enable
+    registry-aware auto-discovery. MCP tool-count contradiction checks run
+    only when both ``mcp_tool_schema_snapshot_path`` and
+    ``mcp_tool_count_doc_paths`` are configured.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    contract_constants_paths: tuple[str, ...] = DEFAULT_INGEST_CONTRACT_CONSTANTS_PATHS
+    document_link_paths: tuple[str, ...] = DEFAULT_INGEST_DOCUMENT_LINK_PATHS
+    mcp_tool_schema_snapshot_path: str | None = (
+        DEFAULT_INGEST_MCP_TOOL_SCHEMA_SNAPSHOT_PATH
+    )
+    mcp_tool_count_doc_paths: tuple[str, ...] = DEFAULT_INGEST_MCP_TOOL_COUNT_DOC_PATHS
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_path_lists(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        for key in (
+            "contract_constants_paths",
+            "document_link_paths",
+            "mcp_tool_count_doc_paths",
+        ):
+            raw = normalized.get(key)
+            if raw is None:
+                continue
+            if isinstance(raw, str):
+                normalized[key] = (raw,)
+            elif isinstance(raw, list):
+                normalized[key] = tuple(str(item) for item in raw)
+        snapshot = normalized.get("mcp_tool_schema_snapshot_path")
+        if snapshot == "":
+            normalized["mcp_tool_schema_snapshot_path"] = None
+        return normalized
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryConfig:
     backend: MemoryBackend
@@ -129,6 +179,7 @@ class MemoryConfig:
     trajectory_export_max_record_bytes: int
     trajectory_export_max_file_bytes: int
     semantic: SemanticConfig = field(default_factory=SemanticConfig)
+    ingest: IngestConfig = field(default_factory=IngestConfig)
 
 
 def _memory_int(value: object, *, key: str) -> int:
@@ -164,15 +215,29 @@ def _memory_choice(value: object, *, key: str, valid: frozenset[str]) -> str:
     return raw
 
 
-def _format_semantic_error(exc: ValidationError) -> str:
+def _format_nested_memory_config_error(
+    *,
+    section: str,
+    exc: ValidationError,
+) -> str:
     errors = exc.errors()
     if not errors:
-        return "Invalid tool.codeclone.memory.semantic configuration"
+        return f"Invalid tool.codeclone.memory.{section} configuration"
     first = errors[0]
     loc = ".".join(str(part) for part in first.get("loc", ()))
     message = first.get("msg", "invalid value")
     suffix = f".{loc}" if loc else ""
-    return f"Invalid tool.codeclone.memory.semantic{suffix}: {message}"
+    return f"Invalid tool.codeclone.memory.{section}{suffix}: {message}"
+
+
+def _resolve_ingest_config(raw: object) -> IngestConfig:
+    data: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+    try:
+        return IngestConfig.model_validate(data)
+    except ValidationError as exc:
+        raise ValueError(
+            _format_nested_memory_config_error(section="ingest", exc=exc)
+        ) from exc
 
 
 def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
@@ -184,7 +249,9 @@ def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
     try:
         config = SemanticConfig.model_validate(data)
     except ValidationError as exc:
-        raise ValueError(_format_semantic_error(exc)) from exc
+        raise ValueError(
+            _format_nested_memory_config_error(section="semantic", exc=exc)
+        ) from exc
     index_path = _resolve_memory_state_path(
         key="memory.semantic.index_path",
         value=config.index_path,
@@ -339,7 +406,8 @@ def resolve_memory_config(
             merged.get(SEMANTIC_NESTED_TABLE_KEY),
             root_path=root_path,
         ),
+        ingest=_resolve_ingest_config(merged.get(INGEST_NESTED_TABLE_KEY)),
     )
 
 
-__all__ = ["MemoryConfig", "SemanticConfig", "resolve_memory_config"]
+__all__ = ["IngestConfig", "MemoryConfig", "SemanticConfig", "resolve_memory_config"]

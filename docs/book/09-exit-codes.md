@@ -48,7 +48,15 @@ Refs:
 ## Invariants (MUST)
 
 - Only non-`SystemExit` exceptions in `main()` become exit `5`.
-- In gating mode, unreadable source files win over clone/metric gate failure and force exit `2`.
+- **Gating mode** is enabled when any of `--ci`, `--fail-on-new`, `--fail-threshold`,
+  `--fail-complexity`, `--fail-coupling`, `--fail-cohesion`, `--fail-cycles`,
+  `--fail-dead-code`, `--fail-health`, `--fail-on-new-metrics`,
+  `--fail-on-typing-regression`, `--fail-on-docstring-regression`,
+  `--fail-on-api-break`, `--min-typing-coverage`, or `--min-docstring-coverage`
+  is active (`codeclone/surfaces/cli/runtime.py:gating_mode_enabled`).
+- In gating mode, unreadable source files produce `CONTRACT ERROR:` and exit `2`
+  **before** clone/metric gate evaluation (`GATING FAILURE:` is suppressed when
+  both would apply).
 
 Refs:
 

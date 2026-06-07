@@ -59,7 +59,7 @@ Version bump rules:
 - bump **trajectory export schema** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`) when JSONL
   row shape changes incompatibly
 - bump **semantic index format** when LanceDB projection or stored row fields change
-  incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory.md](13-engineering-memory.md))
+  incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory/index.md](13-engineering-memory/index.md))
 
 Operational compatibility rules:
 

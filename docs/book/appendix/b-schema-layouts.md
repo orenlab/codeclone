@@ -841,7 +841,7 @@ Patch Trail JSON uses `PATCH_TRAIL_SCHEMA_VERSION` (currently **`1`**) in
 Record identity uses stable `identity_key` strings for upsert during refresh.
 Migration path: `codeclone/memory/schema_migrate.py`.
 
-See [Engineering Memory](../13-engineering-memory.md) for lifecycle and agent
+See [Engineering Memory](../13-engineering-memory/index.md) for lifecycle and agent
 surfaces.
 
 ## Semantic index sidecar (format `1`)
@@ -854,7 +854,7 @@ Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
   schema does not automatically invalidate the vector sidecar.
 - **Rebuild** on incompatible format bumps (`codeclone memory semantic rebuild`);
   no SQLite migration path for the sidecar.
-- Row/projection semantics: [Engineering Memory](../13-engineering-memory.md);
+- Row/projection semantics: [Engineering Memory](../13-engineering-memory/index.md);
   bump rules: [24-compatibility-and-versioning.md](../24-compatibility-and-versioning.md).
 
 ## Refs

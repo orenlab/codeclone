@@ -16,6 +16,7 @@ from ..findings.clones.golden_fixtures import (
     normalize_golden_fixture_patterns,
 )
 from .memory_specs import (
+    INGEST_NESTED_TABLE_KEY,
     MEMORY_CONFIG_KEY_SPECS,
     MEMORY_NESTED_TABLE_KEY,
     MEMORY_PATH_CONFIG_KEYS,
@@ -175,7 +176,7 @@ def _validate_nested_memory_table(
     unknown = sorted(
         set(memory_obj.keys())
         - set(MEMORY_CONFIG_KEY_SPECS)
-        - {SEMANTIC_NESTED_TABLE_KEY}
+        - {SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY}
     )
     if unknown:
         raise ConfigValidationError(
@@ -183,7 +184,7 @@ def _validate_nested_memory_table(
         )
     validated: dict[str, object] = {}
     for key in sorted(memory_obj.keys()):
-        if key == SEMANTIC_NESTED_TABLE_KEY:
+        if key in {SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY}:
             continue
         value = validate_config_value(
             key=key,
@@ -202,7 +203,26 @@ def _validate_nested_memory_table(
             semantic_obj=semantic_obj,
             config_path=config_path,
         )
+    ingest_obj = memory_obj.get(INGEST_NESTED_TABLE_KEY)
+    if ingest_obj is not None:
+        validated[INGEST_NESTED_TABLE_KEY] = _validate_nested_ingest_table(
+            ingest_obj=ingest_obj,
+            config_path=config_path,
+        )
     return validated
+
+
+def _validate_nested_ingest_table(
+    *,
+    ingest_obj: object,
+    config_path: Path,
+) -> dict[str, object]:
+    if not isinstance(ingest_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.memory.ingest' must be object"
+        )
+    return dict(ingest_obj)
 
 
 def _validate_nested_semantic_table(

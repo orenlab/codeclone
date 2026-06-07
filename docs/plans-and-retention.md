@@ -176,7 +176,7 @@ PostgreSQL rollout, or premium support details:
 ## Related configuration
 
 See [Config and Defaults — workspace intent registry](book/10-config-and-defaults.md)
-and [Structural Change Controller — workspace intent registry](book/12-structural-change-controller.md).
+and [Structural Change Controller — workspace intent registry](book/12-structural-change-controller/index.md).
 
 Open-source keys:
 

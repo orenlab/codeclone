@@ -29,6 +29,6 @@ can resolve `codeclone-mcp`. Step-by-step setup, skills, and boundaries:
 
 ## Documentation
 
-- [Codex plugin guide](https://orenlab.github.io/codeclone/codex-plugin/)
-- [MCP interface](https://orenlab.github.io/codeclone/mcp/)
+- [Codex plugin guide](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)
+- [MCP interface](https://orenlab.github.io/codeclone/guide/mcp/)
 - [Publishing / sync](https://github.com/orenlab/codeclone/blob/main/docs/publishing.md)

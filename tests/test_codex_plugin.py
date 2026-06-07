@@ -36,7 +36,10 @@ def test_codex_plugin_manifest_is_consistent() -> None:
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
     assert manifest["license"] == "MPL-2.0"
-    assert manifest["homepage"] == "https://orenlab.github.io/codeclone/codex-plugin/"
+    assert (
+        manifest["homepage"]
+        == "https://orenlab.github.io/codeclone/guide/integrations/codex/setup/"
+    )
     assert isinstance(marketplace, dict)
     assert marketplace["plugins"][0]["name"] == manifest["name"]
 
@@ -168,5 +171,5 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     assert "codeclone-change-control" in readme_text
     assert "Structural Change Controller for AI-assisted Python" in readme_text
 
-    assert (root / "docs" / "codex-plugin.md").is_file()
+    assert (root / "docs" / "guide" / "integrations" / "codex" / "setup.md").is_file()
     assert (root / "docs" / "terms-of-use.md").is_file()

@@ -175,5 +175,5 @@ non-empty unless the user explicitly scoped to ignore peer WIP.
 
 ## See also
 
-- [25-mcp-interface.md](25-mcp-interface.md) — full MCP tool and resource contract
-- [MCP deep dive](../mcp.md) — architecture, workflows, prompt patterns
+- [25-mcp-interface/index.md](25-mcp-interface/index.md) — full MCP tool and resource contract
+- [MCP deep dive](../guide/mcp/README.md) — architecture, workflows, prompt patterns

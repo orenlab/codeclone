@@ -2,7 +2,7 @@
      owns: intro paragraph, goal→link routing tables.
      does-not-own: full book TOC (book/README.md), install instructions
        (getting-started.md), local preview commands (publishing.md).
-     rule: keep under 80 lines. Add links, not content. -->
+     rule: keep under 90 lines. Add links, not content. -->
 # CodeClone Docs
 
 > Structural Change Controller for AI-assisted Python development —
@@ -16,6 +16,13 @@ The v2.1 change controller starts before the first edit: an agent declares what
 it intends to change, CodeClone maps the structural blast radius, verifies the
 patch against the declared boundary, and generates an auditable review receipt.
 
+!!! tip "Two tabs — pick one mental model"
+    **Guide** — install, run, MCP workflows, IDE setup, recipes.
+    Start at the [Guide hub](guide/README.md).
+
+    **Contracts** — normative guarantees, schemas, enums, payload semantics.
+    Start at the [Contracts book](book/README.md).
+
 !!! note "Licensing"
     Source code: MPL-2.0. Documentation and docs-site content: MIT.
 
@@ -26,7 +33,7 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Goal                  | Start here                                   |
 |-----------------------|----------------------------------------------|
 | First install and run | [Getting started](getting-started.md)        |
-| Understand the model  | [Contracts and guarantees](book/00-intro.md) |
+| Understand the model  | [How it works](guide/explanation/how-it-works.md) |
 | Terminology lookup    | [Terminology](book/01-terminology.md)        |
 
 ## CI and Gating
@@ -42,20 +49,20 @@ patch against the declared boundary, and generates an auditable review receipt.
 
 | Goal                               | Start here                                                              |
 |------------------------------------|-------------------------------------------------------------------------|
-| Change controller workflow         | [Structural Change Controller](book/12-structural-change-controller.md) |
-| Engineering Memory (scope context) | [Engineering Memory](book/13-engineering-memory.md)                     |
-| MCP interface contract             | [MCP interface](book/25-mcp-interface.md)                               |
-| MCP usage guide                    | [MCP guide](mcp.md)                                                     |
+| MCP usage (workflows, setup)       | [MCP guide](guide/mcp/README.md)                                        |
+| Change controller workflow         | [Structural Change Controller](book/12-structural-change-controller/index.md) |
+| Engineering Memory (scope context) | [Engineering Memory](book/13-engineering-memory/index.md)                     |
+| MCP interface contract             | [MCP interface](book/25-mcp-interface/index.md)                               |
 
 ## IDE and Agent Clients
 
-| Surface               | Page                                       |
-|-----------------------|--------------------------------------------|
-| VS Code extension     | [VS Code](vscode-extension.md)             |
-| Claude Desktop bundle | [Claude Desktop](claude-desktop-bundle.md) |
-| Codex plugin          | [Codex](codex-plugin.md)                   |
-| Cursor plugin         | [Cursor](cursor-plugin.md)                 |
-| SARIF & code scanning | [SARIF](sarif.md)                          |
+| Surface               | Guide (how to) | Contract (guarantees) |
+|-----------------------|----------------|------------------------|
+| VS Code extension     | [Setup](guide/integrations/vscode/setup.md) | [VS Code contract](book/integrations/vs-code-extension.md) |
+| Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md) | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
+| Codex plugin          | [Setup](guide/integrations/codex/setup.md) | [Codex contract](book/integrations/codex-plugin.md) |
+| Cursor plugin         | [Install & skills](guide/integrations/cursor/install-and-skills.md) | [Cursor contract](book/integrations/cursor-plugin.md) |
+| SARIF & code scanning | [Export](guide/integrations/sarif/export.md) | [SARIF contract](book/integrations/sarif.md) |
 
 ## Reports
 

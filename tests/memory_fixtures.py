@@ -343,6 +343,7 @@ def run_memory_extractor_smoke(
     extractor: Callable[..., RecordBatch],
     report_document: Mapping[str, object],
 ) -> dict[str, int]:
+    from codeclone.config.memory import resolve_memory_config
     from codeclone.memory.ingest.extractors import (
         extract_contract_notes,
         extract_contradictions,
@@ -367,6 +368,8 @@ def run_memory_extractor_smoke(
     report_dict = dict(report_document)
     digest = report_digest_from_report(report_dict)
     fingerprint = analysis_fingerprint_from_report(report_dict)
+    ingest = resolve_memory_config(root).ingest
+    registry = frozenset(registry_items_from_report(report_document))
     kwargs: dict[str, object] = {
         "project": project,
         "git": git,
@@ -375,9 +378,13 @@ def run_memory_extractor_smoke(
     }
     if extractor in {extract_contract_notes, extract_contradictions}:
         kwargs["root_path"] = root
+        kwargs["ingest"] = ingest
+        if extractor is extract_contract_notes:
+            kwargs["registry_paths"] = registry
     elif extractor is extract_public_surfaces:
         kwargs["root_path"] = root
         kwargs["report_document"] = report_document
+        kwargs["ingest"] = ingest
     elif extractor in {
         extract_git_hotspots,
         extract_test_anchors,
@@ -387,9 +394,8 @@ def run_memory_extractor_smoke(
     }:
         kwargs["root_path"] = root
         if extractor is extract_document_links:
-            kwargs["registry_paths"] = frozenset(
-                registry_items_from_report(report_document)
-            )
+            kwargs["registry_paths"] = registry
+            kwargs["ingest"] = ingest
         if extractor in {extract_module_roles, extract_risk_notes}:
             kwargs["report_document"] = report_document
     else:

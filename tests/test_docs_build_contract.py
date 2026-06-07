@@ -6,29 +6,21 @@
 
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-import types
 from pathlib import Path
+
+from tests.docs_script_loader import load_script_module
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DOCS_ROOT = _REPO_ROOT / "docs"
 _LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint_admonitions.py"
 
 
-def _load_lint_module() -> types.ModuleType:
-    spec = importlib.util.spec_from_file_location(
-        "lint_admonitions",
-        _LINT_SCRIPT,
-    )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def test_docs_admonition_indentation_is_valid() -> None:
-    lint = _load_lint_module()
+    lint = load_script_module(
+        module_name="lint_admonitions",
+        script_path=_LINT_SCRIPT,
+    )
     violations: list[str] = []
     for path in lint.iter_doc_files(_DOCS_ROOT):
         text = path.read_text(encoding="utf-8")

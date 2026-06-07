@@ -91,6 +91,6 @@ Memory view.
 
 ## Links
 
-- [Codex plugin guide](https://orenlab.github.io/codeclone/codex-plugin/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+- [Codex plugin guide](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
 - [Privacy Policy](https://orenlab.github.io/codeclone/privacy-policy/)

@@ -247,11 +247,11 @@ def test_memory_db_path_rejects_external_env_absolute_path(
 def test_format_semantic_error_fallback_when_validation_has_no_entries() -> None:
     from pydantic import ValidationError
 
-    from codeclone.config.memory import _format_semantic_error
+    from codeclone.config.memory import _format_nested_memory_config_error
 
     exc = ValidationError.from_exception_data("SemanticConfig", [])
     assert (
-        _format_semantic_error(exc)
+        _format_nested_memory_config_error(section="semantic", exc=exc)
         == "Invalid tool.codeclone.memory.semantic configuration"
     )
 
@@ -259,11 +259,14 @@ def test_format_semantic_error_fallback_when_validation_has_no_entries() -> None
 def test_format_semantic_error_includes_field_path() -> None:
     from pydantic import ValidationError
 
-    from codeclone.config.memory import SemanticConfig, _format_semantic_error
+    from codeclone.config.memory import (
+        SemanticConfig,
+        _format_nested_memory_config_error,
+    )
 
     with pytest.raises(ValidationError) as exc_info:
         SemanticConfig.model_validate({"dimension": 0})
-    message = _format_semantic_error(exc_info.value)
+    message = _format_nested_memory_config_error(section="semantic", exc=exc_info.value)
     assert "dimension" in message
     assert "greater than" in message.lower() or "greater_than" in message
 

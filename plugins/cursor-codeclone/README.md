@@ -160,5 +160,5 @@ ln -s /path/to/codeclone/plugins/cursor-codeclone ~/.cursor/plugins/local/codecl
 ## Documentation
 
 - [CodeClone documentation](https://orenlab.github.io/codeclone/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
 - [MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/)

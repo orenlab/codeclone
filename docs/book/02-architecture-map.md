@@ -1,7 +1,7 @@
 <!-- doc-scope: AUTHORITATIVE MODULE TABLE — maps source paths to chapters/tests.
      owns: module-to-chapter routing table.
-     does-not-own: narrative architecture (→ ../architecture.md), module internals.
-     rule: this is the MAP. architecture.md is the NARRATIVE. Do not merge. -->
+     does-not-own: narrative architecture (→ ../guide/explanation/how-it-works.md), module internals.
+     rule: this is the MAP. guide/explanation/how-it-works.md is the NARRATIVE. Do not merge. -->
 
 # 02. Architecture Map
 
@@ -143,7 +143,7 @@ Refs:
 | Clone baseline trust/compat/integrity | [07-baseline.md](07-baseline.md)                                                                                 |
 | Cache trust and fail-open behavior    | [08-cache.md](08-cache.md)                                                                                       |
 | Report schema and provenance          | [05-report.md](05-report.md), [06-html-render.md](06-html-render.md)                                             |
-| MCP agent surface                     | [25-mcp-interface.md](25-mcp-interface.md), [14-claim-guard.md](14-claim-guard.md)                               |
+| MCP agent surface                     | [25-mcp-interface/index.md](25-mcp-interface/index.md), [14-claim-guard.md](14-claim-guard.md)                               |
 | Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
 | Metrics gates and metrics baseline    | [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [17-dead-code-contract.md](17-dead-code-contract.md)                                                             |

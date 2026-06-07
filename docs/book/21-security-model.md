@@ -79,7 +79,7 @@ Refs:
 **Opt-in:** set `allow_external_artifacts=true` on the analysis tool call when
 shared monorepo artifacts live outside the scan root (privileged input).
 
-Parameter details: [25-mcp-interface.md](25-mcp-interface.md). Tool copy:
+Parameter details: [25-mcp-interface/index.md](25-mcp-interface/index.md). Tool copy:
 `help(topic="trust_boundaries")`.
 
 Refs:

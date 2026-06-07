@@ -8,7 +8,7 @@ description: Use CodeClone Engineering Memory via MCP — scope context before e
 Local SQLite store of evidence-linked repository facts. Complements change
 control — does **not** replace analysis, blast radius, or patch verify.
 
-Full contract: `docs/book/13-engineering-memory.md`. MCP help:
+Full contract: `docs/book/13-engineering-memory/index.md`. MCP help:
 `help(topic="engineering_memory")`.
 
 ## Prerequisites

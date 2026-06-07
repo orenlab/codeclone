@@ -14,11 +14,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
 
-from ...contracts import (
-    BASELINE_SCHEMA_VERSION,
-    CACHE_VERSION,
-    REPORT_SCHEMA_VERSION,
-)
+from ...config.memory import IngestConfig
 from ...report.meta import current_report_timestamp_utc
 from ...utils.coerce import as_mapping, as_sequence
 from ..display import format_document_link_statement
@@ -32,9 +28,48 @@ from ..models import (
     generate_memory_id,
 )
 from ..project import GitProvenance, code_fingerprint_for_memory_subject
+from .paths import (
+    resolve_contract_constants_paths,
+    resolve_document_link_paths,
+    resolve_mcp_tool_contradiction_sources,
+    resolve_mcp_tool_schema_snapshot_path,
+)
 
 _CODE_PATH_RE = re.compile(r"`([a-zA-Z0-9_./-]+\.(?:py|md|json|toml|yml))`")
-_MCP_TOOL_SCHEMAS = "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
+_CONTRACT_CONSTANT_SUFFIX = "_VERSION"
+
+
+def _literal_constant_value(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float)):
+        return repr(node.value)
+    return None
+
+
+def _parse_contract_constants(path: Path) -> dict[str, str]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeDecodeError):
+        return {}
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            value = _literal_constant_value(node.value)
+            if value is None:
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id.endswith(
+                    _CONTRACT_CONSTANT_SUFFIX
+                ):
+                    constants[target.id] = value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            if not node.target.id.endswith(_CONTRACT_CONSTANT_SUFFIX):
+                continue
+            if node.value is None:
+                continue
+            value = _literal_constant_value(node.value)
+            if value is not None:
+                constants[node.target.id] = value
+    return dict(sorted(constants.items()))
 
 
 def _new_metrics_batch(
@@ -238,80 +273,89 @@ def extract_contract_notes(
     git: GitProvenance,
     report_digest: str | None,
     analysis_fingerprint: str | None,
+    registry_paths: frozenset[str] | None = None,
+    ingest: IngestConfig | None = None,
 ) -> RecordBatch:
     batch = RecordBatch()
-    contracts_path = root_path / "codeclone" / "contracts" / "__init__.py"
-    if not contracts_path.is_file():
+    ingest_config = ingest or IngestConfig()
+    registry = registry_paths or frozenset()
+    contract_paths = resolve_contract_constants_paths(
+        root_path=root_path,
+        registry_paths=registry,
+        ingest=ingest_config,
+    )
+    if not contract_paths:
         return batch
     now = current_report_timestamp_utc()
-    constants = {
-        "BASELINE_SCHEMA_VERSION": BASELINE_SCHEMA_VERSION,
-        "CACHE_VERSION": CACHE_VERSION,
-        "REPORT_SCHEMA_VERSION": REPORT_SCHEMA_VERSION,
-    }
-    for name, value in sorted(constants.items()):
-        identity = make_identity_key(
-            type="contract_note",
-            subject_kind="contract",
-            subject_key=name,
-            discriminator="schema_constant",
-        )
-        record_id = generate_memory_id()
-        batch.records.append(
-            MemoryRecord(
-                id=record_id,
-                project_id=project.id,
-                identity_key=identity,
+    for contracts_path in contract_paths:
+        rel_path = str(contracts_path.relative_to(root_path)).replace("\\", "/")
+        constants = _parse_contract_constants(contracts_path)
+        for name, value in constants.items():
+            identity = make_identity_key(
                 type="contract_note",
-                status="active",
-                confidence="verified",
-                origin="system",
-                ingest_source="contract",
-                statement=f"{name} = {value!r} in codeclone/contracts/__init__.py.",
-                summary=None,
-                payload={
-                    "contract_kind": "schema_constant",
-                    "schema_version": value,
-                    "constant_name": name,
-                },
-                created_at_utc=now,
-                updated_at_utc=now,
-                last_verified_at_utc=now,
-                expires_at_utc=None,
-                created_by="memory_init",
-                verified_by=None,
-                approved_by=None,
-                approved_at_utc=None,
-                report_digest=report_digest,
-                code_fingerprint=analysis_fingerprint,
-                stale_reason=None,
-                created_on_branch=git.branch,
-                created_at_commit=git.head,
-                verified_on_branch=git.branch,
-                verified_at_commit=git.head,
-            )
-        )
-        batch.subjects.append(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record_id,
                 subject_kind="contract",
                 subject_key=name,
-                relation="about",
+                discriminator=f"{rel_path}:schema_constant",
             )
-        )
-        batch.evidence.append(
-            MemoryEvidence(
-                id=generate_memory_id(prefix="evid"),
-                memory_id=record_id,
-                evidence_kind="code",
-                ref=str(contracts_path.relative_to(root_path)),
-                locator=f"{contracts_path.name}",
-                quote=f"{name} = {value!r}",
-                digest=None,
-                created_at_utc=now,
+            record_id = generate_memory_id()
+            batch.records.append(
+                MemoryRecord(
+                    id=record_id,
+                    project_id=project.id,
+                    identity_key=identity,
+                    type="contract_note",
+                    status="active",
+                    confidence="verified",
+                    origin="system",
+                    ingest_source="contract",
+                    statement=f"{name} = {value} in {rel_path}.",
+                    summary=None,
+                    payload={
+                        "contract_kind": "schema_constant",
+                        "schema_version": value.strip("'\"")
+                        if value.startswith(("'", '"'))
+                        else value,
+                        "constant_name": name,
+                        "source_path": rel_path,
+                    },
+                    created_at_utc=now,
+                    updated_at_utc=now,
+                    last_verified_at_utc=now,
+                    expires_at_utc=None,
+                    created_by="memory_init",
+                    verified_by=None,
+                    approved_by=None,
+                    approved_at_utc=None,
+                    report_digest=report_digest,
+                    code_fingerprint=analysis_fingerprint,
+                    stale_reason=None,
+                    created_on_branch=git.branch,
+                    created_at_commit=git.head,
+                    verified_on_branch=git.branch,
+                    verified_at_commit=git.head,
+                )
             )
-        )
+            batch.subjects.append(
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=record_id,
+                    subject_kind="contract",
+                    subject_key=name,
+                    relation="about",
+                )
+            )
+            batch.evidence.append(
+                MemoryEvidence(
+                    id=generate_memory_id(prefix="evid"),
+                    memory_id=record_id,
+                    evidence_kind="code",
+                    ref=rel_path,
+                    locator=contracts_path.name,
+                    quote=f"{name} = {value}",
+                    digest=None,
+                    created_at_utc=now,
+                )
+            )
     return batch
 
 
@@ -323,6 +367,7 @@ def extract_public_surfaces(
     git: GitProvenance,
     report_digest: str | None,
     analysis_fingerprint: str | None,
+    ingest: IngestConfig | None = None,
 ) -> RecordBatch:
     batch, now, metrics = _new_metrics_batch(report_document)
     api_surface = as_mapping(metrics.get("api_surface"))
@@ -383,9 +428,15 @@ def extract_public_surfaces(
             )
         )
 
-    snapshot_path = root_path / _MCP_TOOL_SCHEMAS
-    if snapshot_path.is_file():
-        payload = json.loads(snapshot_path.read_text("utf-8"))
+    snapshot_path = resolve_mcp_tool_schema_snapshot_path(
+        root_path=root_path,
+        ingest=ingest or IngestConfig(),
+    )
+    if snapshot_path is not None:
+        try:
+            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = {}
         tools_obj = payload.get("tools") if isinstance(payload, dict) else None
         if isinstance(tools_obj, dict):
             for tool_name in sorted(tools_obj.keys()):
@@ -629,18 +680,18 @@ def extract_document_links(
     report_digest: str | None,
     analysis_fingerprint: str | None,
     registry_paths: frozenset[str] | None = None,
+    ingest: IngestConfig | None = None,
 ) -> RecordBatch:
     batch = RecordBatch()
     now = current_report_timestamp_utc()
     registry = registry_paths or frozenset()
-    doc_paths = [
-        root_path / "docs" / "mcp.md",
-        root_path / "AGENTS.md",
-        root_path / "CLAUDE.md",
-    ]
+    ingest_config = ingest or IngestConfig()
+    doc_paths = resolve_document_link_paths(
+        root_path=root_path,
+        registry_paths=registry,
+        ingest=ingest_config,
+    )
     for doc_path in doc_paths:
-        if not doc_path.is_file():
-            continue
         rel = str(doc_path.relative_to(root_path)).replace("\\", "/")
         text = doc_path.read_text("utf-8", errors="replace")
         heading = "root"
@@ -849,81 +900,95 @@ def extract_contradictions(
     git: GitProvenance,
     report_digest: str | None,
     analysis_fingerprint: str | None,
+    ingest: IngestConfig | None = None,
 ) -> RecordBatch:
     batch = RecordBatch()
-    snapshot_path = root_path / _MCP_TOOL_SCHEMAS
-    docs_path = root_path / "docs" / "mcp.md"
-    if not snapshot_path.is_file() or not docs_path.is_file():
+    ingest_config = ingest or IngestConfig()
+    sources = resolve_mcp_tool_contradiction_sources(
+        root_path=root_path,
+        ingest=ingest_config,
+    )
+    if sources is None:
         return batch
-    tools_payload = json.loads(snapshot_path.read_text("utf-8"))
+    snapshot_path, doc_paths = sources
+    try:
+        tools_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return batch
     tools_obj = tools_payload.get("tools") if isinstance(tools_payload, dict) else None
     if not isinstance(tools_obj, dict):
         return batch
     actual_count = len(tools_obj)
-    doc_text = docs_path.read_text("utf-8", errors="replace")
-    claimed_counts = [
-        int(match.group(1))
-        for match in re.finditer(r"(\d+)\s+(?:MCP\s+)?tools?", doc_text, re.I)
-    ]
     now = current_report_timestamp_utc()
-    for claimed in sorted(set(claimed_counts)):
-        if claimed == actual_count:
+    for docs_path in doc_paths:
+        try:
+            doc_text = docs_path.read_text("utf-8", errors="replace")
+        except OSError:
             continue
-        identity = make_identity_key(
-            type="contradiction_note",
-            subject_kind="doc",
-            subject_key=str(docs_path.relative_to(root_path)),
-            discriminator=f"tool_count:{claimed}_vs_{actual_count}",
-        )
-        record_id = generate_memory_id()
-        rel_doc = str(docs_path.relative_to(root_path)).replace("\\", "/")
-        batch.records.append(
-            MemoryRecord(
-                id=record_id,
-                project_id=project.id,
-                identity_key=identity,
+        claimed_counts = [
+            int(match.group(1))
+            for match in re.finditer(r"(\d+)\s+(?:MCP\s+)?tools?", doc_text, re.I)
+        ]
+        for claimed in sorted(set(claimed_counts)):
+            if claimed == actual_count:
+                continue
+            identity = make_identity_key(
                 type="contradiction_note",
-                status="draft",
-                confidence="supported",
-                origin="system",
-                ingest_source="doc",
-                statement=(
-                    f"{rel_doc} claims {claimed} MCP tools but contract snapshot "
-                    f"registers {actual_count}."
-                ),
-                summary=None,
-                payload={
-                    "source_a": rel_doc,
-                    "source_b": str(snapshot_path.relative_to(root_path)),
-                    "claim_a": str(claimed),
-                    "claim_b": str(actual_count),
-                },
-                created_at_utc=now,
-                updated_at_utc=now,
-                last_verified_at_utc=now,
-                expires_at_utc=None,
-                created_by="memory_init",
-                verified_by=None,
-                approved_by=None,
-                approved_at_utc=None,
-                report_digest=report_digest,
-                code_fingerprint=analysis_fingerprint,
-                stale_reason=None,
-                created_on_branch=git.branch,
-                created_at_commit=git.head,
-                verified_on_branch=git.branch,
-                verified_at_commit=git.head,
-            )
-        )
-        batch.subjects.append(
-            MemorySubject(
-                id=generate_memory_id(prefix="subj"),
-                memory_id=record_id,
                 subject_kind="doc",
-                subject_key=rel_doc,
-                relation="about",
+                subject_key=str(docs_path.relative_to(root_path)),
+                discriminator=f"tool_count:{claimed}_vs_{actual_count}",
             )
-        )
+            record_id = generate_memory_id()
+            rel_doc = str(docs_path.relative_to(root_path)).replace("\\", "/")
+            batch.records.append(
+                MemoryRecord(
+                    id=record_id,
+                    project_id=project.id,
+                    identity_key=identity,
+                    type="contradiction_note",
+                    status="draft",
+                    confidence="supported",
+                    origin="system",
+                    ingest_source="doc",
+                    statement=(
+                        f"{rel_doc} claims {claimed} MCP tools but contract snapshot "
+                        f"registers {actual_count}."
+                    ),
+                    summary=None,
+                    payload={
+                        "source_a": rel_doc,
+                        "source_b": str(snapshot_path.relative_to(root_path)).replace(
+                            "\\", "/"
+                        ),
+                        "claim_a": str(claimed),
+                        "claim_b": str(actual_count),
+                    },
+                    created_at_utc=now,
+                    updated_at_utc=now,
+                    last_verified_at_utc=now,
+                    expires_at_utc=None,
+                    created_by="memory_init",
+                    verified_by=None,
+                    approved_by=None,
+                    approved_at_utc=None,
+                    report_digest=report_digest,
+                    code_fingerprint=analysis_fingerprint,
+                    stale_reason=None,
+                    created_on_branch=git.branch,
+                    created_at_commit=git.head,
+                    verified_on_branch=git.branch,
+                    verified_at_commit=git.head,
+                )
+            )
+            batch.subjects.append(
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=record_id,
+                    subject_kind="doc",
+                    subject_key=rel_doc,
+                    relation="about",
+                )
+            )
     return batch
 
 
