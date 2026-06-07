@@ -48,7 +48,7 @@
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc -p jsconfig.json --noEmit",
-    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/memoryGovernance.js && node --check src/memoryBulkSelection.js && node --check src/memoryController.js && node --check src/memorySearch.js && node --check src/memorySearchRenderer.js && node --check src/workspaceInsightsRenderer.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/memoryGovernance.js && node --check src/memoryBulkSelection.js && node --check src/memoryController.js && node --check src/memorySearch.js && node --check src/memorySearchRenderer.js && node --check src/workspaceInsightsRenderer.js && node --check src/trajectoryViewerRenderer.js && node --check src/mcpClient.js && node --check src/extension.js",
     "test": "node --test test/*.test.js",
     "test:host": "npm run build && node test/runExtensionHost.js",
     "vscode:prepublish": "npm run build"
@@ -105,6 +105,9 @@
     "onCommand:codeclone.configureMemorySearch",
     "onCommand:codeclone.showWorkspaceSessionStats",
     "onCommand:codeclone.showControllerAuditTrail",
+    "onCommand:codeclone.showTrajectoryDashboard",
+    "onCommand:codeclone.showTrajectoryDetail",
+    "onCommand:codeclone.copyTrajectoryDashboardBrief",
     "onCommand:codeclone.copyWorkspaceSessionStatsBrief",
     "onCommand:codeclone.copyControllerAuditTrailBrief"
   ],
@@ -436,6 +439,24 @@
       {
         "command": "codeclone.copyControllerAuditTrailBrief",
         "title": "Copy Controller Audit Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.showTrajectoryDashboard",
+        "title": "Show Trajectory Dashboard",
+        "category": "CodeClone",
+        "icon": "$(history)"
+      },
+      {
+        "command": "codeclone.showTrajectoryDetail",
+        "title": "Show Trajectory Detail",
+        "category": "CodeClone",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "codeclone.copyTrajectoryDashboardBrief",
+        "title": "Copy Trajectory Dashboard Brief",
         "category": "CodeClone",
         "icon": "$(copy)"
       },
@@ -790,6 +811,21 @@
           "command": "codeclone.refreshMemory",
           "when": "view == codeclone.memory && isWorkspaceTrusted",
           "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.showTrajectoryDashboard",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.showTrajectoryDetail",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@6"
+        },
+        {
+          "command": "codeclone.copyTrajectoryDashboardBrief",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "secondary@1"
         },
         {
           "command": "codeclone.syncMemoryFromRun",

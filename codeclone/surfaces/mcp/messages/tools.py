@@ -58,7 +58,8 @@ GET_RELEVANT_MEMORY: Final = (
 QUERY_ENGINEERING_MEMORY: Final = (
     "Mode-based engineering memory inspection router. Modes: search, get, "
     "for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, "
-    "trajectory_search, and trajectory_get. List modes default to compact "
+    "trajectory_search, trajectory_get, trajectory_anomalies, trajectory_agents, "
+    "and trajectory_dashboard. List modes default to compact "
     "previews; mode=get and detail_level=full return complete statements. "
     "mode=trajectory_get uses record_id as the trajectory id. Project root is "
     "not a valid path or coverage scope. Read-only."

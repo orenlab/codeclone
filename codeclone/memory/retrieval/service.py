@@ -25,6 +25,11 @@ from ..paths import (
 from ..search_index import SearchMatchMode
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
+from ..trajectory.analytics import (
+    build_trajectory_agent_stats_payload,
+    build_trajectory_anomalies_payload,
+    build_trajectory_dashboard_payload,
+)
 from ..trajectory.retrieval import (
     DEFAULT_TRAJECTORY_PREVIEW_LIMIT,
     rank_trajectories_for_query,
@@ -55,6 +60,9 @@ QueryMode = Literal[
     "trajectory_status",
     "trajectory_search",
     "trajectory_get",
+    "trajectory_anomalies",
+    "trajectory_agents",
+    "trajectory_dashboard",
 ]
 
 QUERY_MODES: tuple[str, ...] = (
@@ -69,6 +77,9 @@ QUERY_MODES: tuple[str, ...] = (
     "trajectory_status",
     "trajectory_search",
     "trajectory_get",
+    "trajectory_anomalies",
+    "trajectory_agents",
+    "trajectory_dashboard",
 )
 
 MemoryDetailLevel = Literal["compact", "full"]
@@ -699,6 +710,67 @@ def _handle_trajectory_search_mode(
     }
 
 
+def _handle_trajectory_anomalies_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    max_results: int,
+    include_routine: bool = False,
+) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "status": "ok",
+        "detail_level": "compact",
+        "payload": build_trajectory_anomalies_payload(
+            store,
+            project_id=project_id,
+            max_results=max_results,
+            include_routine=include_routine,
+        ),
+    }
+
+
+def _handle_trajectory_agents_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    include_routine: bool = False,
+) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "status": "ok",
+        "detail_level": "compact",
+        "payload": build_trajectory_agent_stats_payload(
+            store,
+            project_id=project_id,
+            include_routine=include_routine,
+        ),
+    }
+
+
+def _handle_trajectory_dashboard_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    max_results: int,
+    include_routine: bool = False,
+) -> dict[str, object]:
+    return {
+        "mode": mode,
+        "status": "ok",
+        "detail_level": "compact",
+        "payload": build_trajectory_dashboard_payload(
+            store,
+            project_id=project_id,
+            max_results=max_results,
+            include_routine=include_routine,
+        ),
+    }
+
+
 def _search_statuses_for_mode(
     mode: str,
     *,
@@ -1201,6 +1273,29 @@ def query_engineering_memory(
     filter_types, filter_statuses, filter_confidences, match_mode, include_routine = (
         _parse_filters(filters)
     )
+    if mode == "trajectory_anomalies":
+        return _handle_trajectory_anomalies_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            max_results=max_results,
+            include_routine=include_routine,
+        )
+    if mode == "trajectory_agents":
+        return _handle_trajectory_agents_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            include_routine=include_routine,
+        )
+    if mode == "trajectory_dashboard":
+        return _handle_trajectory_dashboard_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            max_results=max_results,
+            include_routine=include_routine,
+        )
     if mode == "trajectory_search":
         return _handle_trajectory_search_mode(
             store,

@@ -542,7 +542,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "Query: for_path, for_symbol, search (filters.match_mode), get, "
                 "status, stale; trajectory_status|trajectory_search|"
-                "trajectory_get after rebuild_trajectories."
+                "trajectory_get|trajectory_anomalies|trajectory_agents|"
+                "trajectory_dashboard after rebuild_trajectories."
             ),
             (
                 "Scoped response may include trajectories[] and "

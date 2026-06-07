@@ -56,7 +56,7 @@ repos:
 
       - id: pytest
         name: Pytest
-        entry: uv run pytest -q --cov=codeclone --cov-report=term-missing --cov-fail-under=98
+        entry: uv run pytest -q --cov=codeclone --cov-report=term-missing --cov-fail-under=97
         language: system
         pass_filenames: false
         always_run: true

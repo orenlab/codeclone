@@ -35,6 +35,7 @@ from .models import (
 )
 from .patch_trail_projector import project_patch_trail_from_audit
 from .projector import project_trajectory
+from .quality import apply_trajectory_quality_score
 
 
 def rebuild_trajectories_from_audit(
@@ -73,6 +74,16 @@ def rebuild_trajectories_from_audit(
             records=records,
             projection_version=projection_version,
             projected_at_utc=started,
+            patch_trail_digest=patch_trail_digest,
+        )
+        patch_payload = (
+            patch_trail._canonical_dict(include_digest=True)
+            if patch_trail is not None
+            else None
+        )
+        trajectory = apply_trajectory_quality_score(
+            trajectory,
+            patch_trail_payload=patch_payload,
             patch_trail_digest=patch_trail_digest,
         )
         action = upsert_trajectory(conn, trajectory)
@@ -152,11 +163,14 @@ def upsert_trajectory(conn: sqlite3.Connection, trajectory: Trajectory) -> str:
         INSERT INTO memory_trajectories(
             id, project_id, repo_root_digest, workflow_id, intent_id,
             primary_run_id, first_run_id, last_run_id, report_digest,
-            outcome, quality_tier, labels_json, summary, trajectory_digest,
+            outcome, quality_tier, quality_score, labels_json, summary,
+            trajectory_digest,
             source_event_stream_digest, projection_version, event_count,
             step_count, incident_count, started_at_utc, finished_at_utc,
             projected_at_utc, updated_at_utc
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        )
         ON CONFLICT(id) DO UPDATE SET
             intent_id=excluded.intent_id,
             primary_run_id=excluded.primary_run_id,
@@ -165,6 +179,7 @@ def upsert_trajectory(conn: sqlite3.Connection, trajectory: Trajectory) -> str:
             report_digest=excluded.report_digest,
             outcome=excluded.outcome,
             quality_tier=excluded.quality_tier,
+            quality_score=excluded.quality_score,
             labels_json=excluded.labels_json,
             summary=excluded.summary,
             trajectory_digest=excluded.trajectory_digest,
@@ -189,6 +204,7 @@ def upsert_trajectory(conn: sqlite3.Connection, trajectory: Trajectory) -> str:
             trajectory.report_digest,
             trajectory.outcome,
             trajectory.quality_tier,
+            trajectory.quality_score,
             _json_array(trajectory.labels),
             trajectory.summary,
             trajectory.trajectory_digest,
@@ -310,8 +326,8 @@ def list_trajectories(
 ) -> list[TrajectoryListItem]:
     rows = conn.execute(
         """
-        SELECT id, workflow_id, outcome, quality_tier, event_count, started_at_utc,
-               finished_at_utc, summary
+        SELECT id, workflow_id, outcome, quality_tier, quality_score, event_count,
+               started_at_utc, finished_at_utc, summary
         FROM memory_trajectories
         WHERE project_id=?
         ORDER BY finished_at_utc DESC, id ASC
@@ -325,6 +341,7 @@ def list_trajectories(
             workflow_id=str(row["workflow_id"]),
             outcome=str(row["outcome"]),
             quality_tier=str(row["quality_tier"]),
+            quality_score=int(row["quality_score"]),
             event_count=int(row["event_count"]),
             started_at_utc=str(row["started_at_utc"]),
             finished_at_utc=str(row["finished_at_utc"]),
@@ -440,6 +457,7 @@ def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory 
         report_digest=_optional_text(row["report_digest"]),
         outcome=str(row["outcome"]),  # type: ignore[arg-type]
         quality_tier=str(row["quality_tier"]),  # type: ignore[arg-type]
+        quality_score=int(row["quality_score"]),
         labels=tuple(json.loads(str(row["labels_json"]))),
         summary=str(row["summary"]),
         trajectory_digest=str(row["trajectory_digest"]),

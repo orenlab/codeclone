@@ -586,6 +586,7 @@ function renderAuditTrailMarkdown(payload) {
 }
 
 module.exports = {
+    SHARED_STYLES,
     escapeHtml,
     workflowMetric,
     footprintAggregateBanner,

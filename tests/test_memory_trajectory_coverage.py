@@ -199,6 +199,7 @@ def test_cli_render_helpers_cover_empty_and_populated_states(tmp_path: Path) -> 
                     workflow_id=trajectory.workflow_id,
                     outcome=trajectory.outcome,
                     quality_tier=trajectory.quality_tier,
+                    quality_score=trajectory.quality_score,
                     summary=trajectory.summary,
                     event_count=trajectory.event_count,
                     finished_at_utc=trajectory.finished_at_utc,

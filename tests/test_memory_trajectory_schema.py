@@ -88,3 +88,27 @@ def test_memory_schema_migrates_1_3_to_1_4_patch_trails(tmp_path: Path) -> None:
         assert migration is not None
     finally:
         conn.close()
+
+
+def test_memory_schema_migrates_1_4_to_1_5_quality_score(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        set_meta(conn, "schema_version", "1.4")
+        conn.commit()
+
+        ensure_schema(conn)
+
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+        columns = {
+            str(row[1])
+            for row in conn.execute("PRAGMA table_info(memory_trajectories)").fetchall()
+        }
+        assert "quality_score" in columns
+        migration = conn.execute(
+            "SELECT version FROM memory_schema_migrations WHERE version='1.5'"
+        ).fetchone()
+        assert migration is not None
+    finally:
+        conn.close()

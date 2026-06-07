@@ -45,6 +45,8 @@ from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
 from ...memory.trajectory.cli_render import (
     render_projection_run,
+    render_trajectory_agents,
+    render_trajectory_anomalies,
     render_trajectory_detail,
     render_trajectory_list,
     render_trajectory_search_results,
@@ -297,6 +299,41 @@ def _build_parser() -> argparse.ArgumentParser:
     traj_show = trajectory_sub.add_parser("show", help="Show one stored trajectory.")
     _add_root(traj_show)
     traj_show.add_argument("trajectory_id")
+    traj_agents = trajectory_sub.add_parser(
+        "agents",
+        help="Aggregate trajectories by agent label.",
+    )
+    _add_root(traj_agents)
+    traj_agents.add_argument(
+        "--include-routine",
+        action="store_true",
+        help="Include routine analysis-only trajectories.",
+    )
+    traj_agents.add_argument("--json", action="store_true")
+    traj_anomalies = trajectory_sub.add_parser(
+        "anomalies",
+        help="List trajectories with detected anomalies.",
+    )
+    _add_root(traj_anomalies)
+    traj_anomalies.add_argument("--limit", type=int, default=25)
+    traj_anomalies.add_argument(
+        "--include-routine",
+        action="store_true",
+        help="Include routine analysis-only trajectories.",
+    )
+    traj_anomalies.add_argument("--json", action="store_true")
+    traj_dashboard = trajectory_sub.add_parser(
+        "dashboard",
+        help="Combined trajectory status, agents, and anomalies summary.",
+    )
+    _add_root(traj_dashboard)
+    traj_dashboard.add_argument("--limit", type=int, default=25)
+    traj_dashboard.add_argument(
+        "--include-routine",
+        action="store_true",
+        help="Include routine analysis-only trajectories.",
+    )
+    traj_dashboard.add_argument("--json", action="store_true")
     traj_export = trajectory_sub.add_parser(
         "export",
         help="Export trajectories to local JSONL (disabled by default).",
@@ -723,6 +760,16 @@ def _run_trajectory(
         return _run_trajectory_list(console=console, root_path=root_path, args=args)
     if action == "search":
         return _run_trajectory_search(console=console, root_path=root_path, args=args)
+    if action == "agents":
+        return _run_trajectory_agents(console=console, root_path=root_path, args=args)
+    if action == "anomalies":
+        return _run_trajectory_anomalies(
+            console=console, root_path=root_path, args=args
+        )
+    if action == "dashboard":
+        return _run_trajectory_dashboard(
+            console=console, root_path=root_path, args=args
+        )
     if action == "export":
         return _run_trajectory_export(console=console, root_path=root_path, args=args)
     return _run_trajectory_show(console=console, root_path=root_path, args=args)
@@ -823,6 +870,128 @@ def _run_trajectory_search(
         query=str(args.query),
         trajectories=typed,
     )
+    return int(ExitCode.SUCCESS)
+
+
+def _trajectory_query_filters(args: argparse.Namespace) -> dict[str, object] | None:
+    if bool(getattr(args, "include_routine", False)):
+        return {"include_routine": True}
+    return None
+
+
+def _run_trajectory_agents(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root_path,
+            backend=config.backend,
+            db_path=resolve_memory_db_path(root_path, config),
+            mode="trajectory_agents",
+            filters=_trajectory_query_filters(args),
+        )
+    finally:
+        store.close()
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        console.print("Unexpected trajectory agents payload.")
+        return int(ExitCode.INTERNAL_ERROR)
+    if bool(getattr(args, "json", False)):
+        console.print(json.dumps(payload, indent=2, sort_keys=True))
+        return int(ExitCode.SUCCESS)
+    render_trajectory_agents(console=console, payload=payload)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_anomalies(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root_path,
+            backend=config.backend,
+            db_path=resolve_memory_db_path(root_path, config),
+            mode="trajectory_anomalies",
+            filters=_trajectory_query_filters(args),
+            max_results=max(1, int(args.limit)),
+        )
+    finally:
+        store.close()
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        console.print("Unexpected trajectory anomalies payload.")
+        return int(ExitCode.INTERNAL_ERROR)
+    if bool(getattr(args, "json", False)):
+        console.print(json.dumps(payload, indent=2, sort_keys=True))
+        return int(ExitCode.SUCCESS)
+    render_trajectory_anomalies(console=console, payload=payload)
+    return int(ExitCode.SUCCESS)
+
+
+def _run_trajectory_dashboard(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    try:
+        store, config, project = _open_store(root_path)
+    except FileNotFoundError as exc:
+        console.print(f"Engineering memory database not found: {exc}")
+        return int(ExitCode.CONTRACT_ERROR)
+    try:
+        result = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root_path,
+            backend=config.backend,
+            db_path=resolve_memory_db_path(root_path, config),
+            mode="trajectory_dashboard",
+            filters=_trajectory_query_filters(args),
+            max_results=max(1, int(args.limit)),
+        )
+    finally:
+        store.close()
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        console.print("Unexpected trajectory dashboard payload.")
+        return int(ExitCode.INTERNAL_ERROR)
+    if bool(getattr(args, "json", False)):
+        console.print(json.dumps(payload, indent=2, sort_keys=True))
+        return int(ExitCode.SUCCESS)
+    status = payload.get("status")
+    if isinstance(status, dict):
+        latest = status.get("latest_projection")
+        render_trajectory_status(
+            console=console,
+            enabled=config.trajectories_enabled,
+            count=int(status.get("trajectory_count", 0)),
+            latest_run=None,
+        )
+        if isinstance(latest, dict) and latest.get("finished_at_utc"):
+            console.print(
+                f"  latest projection finished: {latest.get('finished_at_utc')}",
+                markup=False,
+            )
+    agents = payload.get("agents")
+    if isinstance(agents, dict):
+        console.print("")
+        render_trajectory_agents(console=console, payload=agents)
+    anomalies = payload.get("anomalies")
+    if isinstance(anomalies, dict):
+        console.print("")
+        render_trajectory_anomalies(console=console, payload=anomalies)
     return int(ExitCode.SUCCESS)
 
 

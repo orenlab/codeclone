@@ -2,6 +2,24 @@
 
 ## 0.3.0
 
+- add **Show Trajectory Dashboard** — secure read-only webview over MCP
+  `query_engineering_memory(mode=trajectory_dashboard)` with stored trajectory
+  counts, per-agent aggregation, and anomaly highlights
+- add **Show Trajectory Detail** — step timeline webview via
+  `query_engineering_memory(mode=trajectory_get)` QuickPick over recent trajectories
+- add **Copy Trajectory Dashboard Brief** — Markdown summary for review notes
+- Memory view toolbar entries when the workspace is trusted and MCP is connected
+- webviews use `enableScripts: false`, nonce CSP, and theme-native styling
+- trajectory detail webview uses a compact **Trajectory Passport** layout: full-width
+  KPI rail (contract quality, complexity band, duration, events, steps, incidents,
+  evidence), compact patch-trail row, and a two-column analysis grid (contract
+  gates | complexity factors) with expandable **Show calculation** for both
+  scores
+- event timeline markers use green/yellow/red tone from step status; titles drop
+  redundant `(status)` suffix; status remains in marker tooltip
+- show **Trajectory duration** in the KPI rail (hover for time range); deterministic
+  contract-quality and complexity scores from contract breakdown (rebuild
+  trajectories after Engineering Memory schema 1.5 upgrade)
 - add **Show Blast Radius** command — concentric SVG diagram of structural
   impact for the active file, rendered in a secure WebviewPanel with no scripts
   and nonce-scoped CSP

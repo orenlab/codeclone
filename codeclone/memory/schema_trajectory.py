@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS memory_trajectories (
     report_digest              TEXT,
     outcome                    TEXT NOT NULL,
     quality_tier               TEXT NOT NULL,
+    quality_score              INTEGER NOT NULL,
     labels_json                TEXT NOT NULL,
     summary                    TEXT NOT NULL,
     trajectory_digest          TEXT NOT NULL,

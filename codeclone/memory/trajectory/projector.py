@@ -111,6 +111,7 @@ def project_trajectory(
         run_ids=run_ids,
         report_digests=report_digests,
         cores=_cores_with_payload_supplements(cores, ordered),
+        agent_label=_primary_agent_label(ordered),
     )
     evidence = (
         TrajectoryEvidence(
@@ -127,6 +128,7 @@ def project_trajectory(
         workflow_id=workflow_id,
         outcome=outcome,
         quality_tier=quality_tier,
+        quality_score=0,
         labels=labels,
         summary=summary,
         source_event_stream_digest=source_stream_digest,
@@ -145,6 +147,7 @@ def project_trajectory(
         report_digest=report_digest,
         outcome=outcome,
         quality_tier=quality_tier,
+        quality_score=0,
         labels=labels,
         summary=summary,
         trajectory_digest=trajectory_digest,
@@ -366,6 +369,19 @@ def _cores_with_payload_supplements(
     return tuple(supplemented)
 
 
+def _primary_agent_label(records: Sequence[AuditRecord]) -> str | None:
+    for record in records:
+        if record.event_type == EVENT_INTENT_DECLARED:
+            label = _clean_text(record.agent_label)
+            if label:
+                return label
+    for record in records:
+        label = _clean_text(record.agent_label)
+        if label:
+            return label
+    return None
+
+
 def _subjects(
     *,
     workflow_id: str,
@@ -373,6 +389,7 @@ def _subjects(
     run_ids: Sequence[str],
     report_digests: Sequence[str],
     cores: Sequence[Mapping[str, object]],
+    agent_label: str | None = None,
 ) -> tuple[TrajectorySubject, ...]:
     path_about, path_touched, path_untouched = _path_subjects_from_cores(cores)
     subjects = {
@@ -385,6 +402,8 @@ def _subjects(
     }
     if intent_id:
         subjects.add(("intent", intent_id, "about"))
+    if agent_label:
+        subjects.add(("agent", agent_label, "actor"))
     return tuple(
         TrajectorySubject(subject_kind=kind, subject_key=key, relation=relation)
         for kind, key, relation in sorted(subjects)
@@ -471,6 +490,27 @@ def _source_event_stream_digest(records: Sequence[AuditRecord]) -> str:
     return _sha256(_canonical_json({"events": items}))
 
 
+def trajectory_digest_for(
+    trajectory: Trajectory,
+    *,
+    quality_score: int,
+    patch_trail_digest: str | None = None,
+) -> str:
+    return _trajectory_digest(
+        projection_version=trajectory.projection_version,
+        repo_root_digest=trajectory.repo_root_digest,
+        workflow_id=trajectory.workflow_id,
+        outcome=trajectory.outcome,
+        quality_tier=trajectory.quality_tier,
+        quality_score=quality_score,
+        labels=trajectory.labels,
+        summary=trajectory.summary,
+        source_event_stream_digest=trajectory.source_event_stream_digest,
+        steps=trajectory.steps,
+        patch_trail_digest=patch_trail_digest,
+    )
+
+
 def _trajectory_digest(
     *,
     projection_version: str,
@@ -478,6 +518,7 @@ def _trajectory_digest(
     workflow_id: str,
     outcome: TrajectoryOutcome,
     quality_tier: TrajectoryQualityTier,
+    quality_score: int,
     labels: Sequence[TrajectoryLabel],
     summary: str,
     source_event_stream_digest: str,
@@ -490,6 +531,7 @@ def _trajectory_digest(
         "workflow_id": workflow_id,
         "outcome": outcome,
         "quality_tier": quality_tier,
+        "quality_score": quality_score,
         "labels": list(labels),
         "summary": summary,
         "source_event_stream_digest": source_event_stream_digest,

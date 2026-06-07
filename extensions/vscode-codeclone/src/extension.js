@@ -87,6 +87,12 @@ const {
     renderSessionStatsHtml,
     renderSessionStatsMarkdown,
 } = require("./workspaceInsightsRenderer");
+const {
+    renderTrajectoryDashboardHtml,
+    renderTrajectoryDetailHtml,
+    renderTrajectoryDashboardMarkdown,
+    formatTrajectoryPickDescription,
+} = require("./trajectoryViewerRenderer");
 const {fetchProductionTriage, loadRunArtifacts, shouldUseCachedTriage} = require("./runArtifacts");
 const {MemoryController, recordStatement} = require("./memoryController");
 const {
@@ -453,6 +459,15 @@ class CodeCloneController {
             ),
             vscode.commands.registerCommand("codeclone.copyControllerAuditTrailBrief", () =>
                 this.copyControllerAuditTrailBrief()
+            ),
+            vscode.commands.registerCommand("codeclone.showTrajectoryDashboard", () =>
+                this.showTrajectoryDashboard()
+            ),
+            vscode.commands.registerCommand("codeclone.showTrajectoryDetail", () =>
+                this.showTrajectoryDetail()
+            ),
+            vscode.commands.registerCommand("codeclone.copyTrajectoryDashboardBrief", () =>
+                this.copyTrajectoryDashboardBrief()
             ),
             vscode.commands.registerCommand("codeclone.refreshMemory", () =>
                 this.refreshMemoryView()
@@ -3188,6 +3203,148 @@ class CodeCloneController {
             panel.webview.html = renderAuditTrailHtml(payload, folder.name, nonce);
         } catch (error) {
             this.handleError(error, "Could not load controller audit trail.");
+        }
+    }
+
+    async showTrajectoryDashboard() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const result = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_dashboard",
+                max_results: 25,
+            });
+            const payload =
+                result && typeof result.payload === "object" && result.payload
+                    ? result.payload
+                    : result;
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.trajectoryDashboard",
+                `Trajectories: ${folder.name}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                    retainContextWhenHidden: true,
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("history");
+            panel.webview.html = renderTrajectoryDashboardHtml(payload, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load trajectory dashboard.");
+        }
+    }
+
+    async showTrajectoryDetail() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const listResult = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_dashboard",
+                max_results: 25,
+            });
+            const listPayload =
+                listResult && typeof listResult.payload === "object" && listResult.payload
+                    ? listResult.payload
+                    : listResult;
+            const recent = Array.isArray(listPayload?.recent_trajectories)
+                ? listPayload.recent_trajectories
+                : [];
+            if (recent.length === 0) {
+                await vscode.window.showInformationMessage(
+                    "No stored trajectories. Run `codeclone memory trajectory rebuild` first."
+                );
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(
+                recent.map((item) => ({
+                    label: String(item.trajectory_id || "?"),
+                    description: `${item.outcome}/${item.quality_tier} · ${item.workflow_id || ""}`,
+                    detail: formatTrajectoryPickDescription(item),
+                    trajectoryId: String(item.trajectory_id || ""),
+                })),
+                {
+                    title: "Open trajectory detail",
+                    placeHolder: "Select a stored trajectory",
+                }
+            );
+            if (!picked?.trajectoryId) {
+                return;
+            }
+            const detailResult = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_get",
+                record_id: picked.trajectoryId,
+            });
+            const detailPayload =
+                detailResult && typeof detailResult.payload === "object" && detailResult.payload
+                    ? detailResult.payload
+                    : detailResult;
+            const trajectory =
+                detailPayload && typeof detailPayload.trajectory === "object"
+                    ? detailPayload.trajectory
+                    : null;
+            if (!trajectory) {
+                await vscode.window.showWarningMessage("Trajectory detail not found.");
+                return;
+            }
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.trajectoryDetail",
+                `Trajectory: ${picked.trajectoryId.slice(0, 18)}…`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                    retainContextWhenHidden: true,
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("list-tree");
+            panel.webview.html = renderTrajectoryDetailHtml(trajectory, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load trajectory detail.");
+        }
+    }
+
+    async copyTrajectoryDashboardBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const result = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_dashboard",
+                max_results: 25,
+            });
+            const payload =
+                result && typeof result.payload === "object" && result.payload
+                    ? result.payload
+                    : result;
+            const brief = renderTrajectoryDashboardMarkdown(payload);
+            await vscode.env.clipboard.writeText(brief);
+            await vscode.window.showInformationMessage("Copied trajectory dashboard brief.");
+        } catch (error) {
+            this.handleError(error, "Could not copy trajectory dashboard brief.");
         }
     }
 

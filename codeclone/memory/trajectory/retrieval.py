@@ -11,8 +11,13 @@ from dataclasses import dataclass
 
 from ..paths import normalize_memory_scope_path, repo_path_to_module_key
 from ..search_index import SearchMatchMode, tokenize_query
+from .agents import trajectory_agent_label
 from .models import Trajectory, TrajectoryListItem
 from .patch_trail import patch_trail_from_mapping, patch_trail_summary_line
+from .quality import (
+    compute_trajectory_quality_contract,
+    serialize_trajectory_quality_contract,
+)
 from .step_labels import step_display_name
 
 DEFAULT_TRAJECTORY_PREVIEW_LIMIT = 5
@@ -83,6 +88,7 @@ def trajectory_list_item_to_preview(item: TrajectoryListItem) -> dict[str, objec
         "workflow_id": item.workflow_id,
         "outcome": item.outcome,
         "quality_tier": item.quality_tier,
+        "quality_score": item.quality_score,
         "summary": _preview_text(item.summary),
         "event_count": item.event_count,
         "started_at_utc": item.started_at_utc,
@@ -102,8 +108,10 @@ def serialize_trajectory_preview(
         "workflow_id": trajectory.workflow_id,
         "outcome": trajectory.outcome,
         "quality_tier": trajectory.quality_tier,
+        "quality_score": trajectory.quality_score,
         "summary": _preview_text(trajectory.summary),
         "labels": list(trajectory.labels),
+        "agent_label": trajectory_agent_label(trajectory),
         "subjects": [_serialize_subject(subject) for subject in trajectory.subjects],
         "evidence_count": len(trajectory.evidence),
         "event_count": trajectory.event_count,
@@ -117,6 +125,19 @@ def serialize_trajectory_preview(
     summary = serialize_patch_trail_summary(patch_trail_payload)
     if summary is not None:
         payload["patch_trail_summary"] = summary
+    contract = compute_trajectory_quality_contract(
+        trajectory,
+        patch_trail_payload=patch_trail_payload,
+    )
+    payload["quality_contract"] = serialize_trajectory_quality_contract(
+        contract,
+        trajectory=trajectory,
+        patch_trail_payload=patch_trail_payload,
+    )
+    payload["complexity_score"] = contract.complexity_score
+    payload["scope_accuracy"] = contract.scope_accuracy
+    payload["duration_seconds"] = contract.duration_seconds
+    payload["anomaly_count"] = contract.anomaly_count
     return payload
 
 

@@ -371,7 +371,8 @@ MemoryQueryModeParam = Annotated[
     Field(
         description=(
             "search, get, for_path, for_symbol, stale, drafts, coverage, status, "
-            "trajectory_status, trajectory_search, or trajectory_get."
+            "trajectory_status, trajectory_search, trajectory_get, "
+            "trajectory_anomalies, trajectory_agents, or trajectory_dashboard."
         ),
     ),
 ]
@@ -406,7 +407,8 @@ MemoryFiltersParam = Annotated[
     Field(
         description=(
             "Optional filters: types, statuses, confidences, match_mode "
-            "(any|all, search mode only), include_routine (trajectory_search; "
+            "(any|all, search mode only), include_routine (trajectory_search, "
+            "trajectory_anomalies, trajectory_agents, trajectory_dashboard; "
             "default false excludes run:* routine workflows)."
         ),
     ),

@@ -91,6 +91,7 @@ class Trajectory:
     report_digest: str | None
     outcome: TrajectoryOutcome
     quality_tier: TrajectoryQualityTier
+    quality_score: int
     labels: tuple[TrajectoryLabel, ...]
     summary: str
     trajectory_digest: str
@@ -137,6 +138,7 @@ class TrajectoryListItem:
     workflow_id: str
     outcome: str
     quality_tier: str
+    quality_score: int
     event_count: int
     started_at_utc: str
     finished_at_utc: str
