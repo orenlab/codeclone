@@ -37,8 +37,9 @@ Finish must still prove all declared-scope dirty paths via `changed_files` or
 
 **Finish hygiene gate:** see [finish_controlled_change](finish-controlled-change.md)
 for the full pipeline. By default only `missing_evidence` and
-`foreign_dirty_overlap` set `blocks_finish`. With `CODECLONE_STRICT_FINISH`
-truthy, `own_unscoped_dirty` may also block. Out-of-scope unattributed dirt is
+`foreign_dirty_overlap` set `blocks_finish`. With
+[strict finish mode](../10-config-and-defaults.md#mcp-session-and-change-control-hygiene)
+enabled, `own_unscoped_dirty` may also block. Out-of-scope unattributed dirt is
 advisory and may elevate the top-level status to `accepted_with_external_changes`
 without failing verify.
 **Queued** foreign intents do not populate `foreign_dirty_overlaps`.
@@ -53,6 +54,7 @@ repo-level `workspace_dirty_summary` only (bounded dirty path sample). Scoped
 `workspace_hygiene.blocks_edit` applies only to start/finish. When recoverable
 intents exist, the response includes `recovery_available` (each entry may show
 `run_available: false` after MCP restart) and top-level `recovery_next_step`.
+
 ### Finish hygiene: what blocks vs what informs
 
 Finish hygiene reconciles **agent evidence with git** and the **start-time dirty
@@ -65,7 +67,7 @@ snapshot**. It is not honor-system.
 |-------------------------|----------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------|
 | `missing_evidence`      | Git is dirty inside declared scope but the path is missing from `changed_files` / `diff_ref` | Add every in-scope dirty path to evidence or revert                                        |
 | `foreign_dirty_overlap` | A **live** foreign active/stale intent previously declared the same **in-scope** path        | Coordinate (queue/promote/clear foreign intent), stash/commit foreign WIP, or narrow scope |
-| `own_unscoped_dirty`    | Unattributed out-of-scope dirty when `CODECLONE_STRICT_FINISH` is truthy                      | Reconcile out-of-scope dirt, widen scope, or unset strict mode                            |
+| `own_unscoped_dirty`    | Unattributed out-of-scope dirty when strict finish mode is enabled (see env overrides)       | Reconcile out-of-scope dirt, widen scope, or unset strict mode                             |
 
 **Non-blocking (advisory)** — surfaced on `workspace_hygiene_after` (path lists in
 `dirty_attribution` when `detail_level="full"`), but **do not** set

@@ -199,8 +199,5 @@ embedding_provider = "fastembed"      # or "api" (Team+), "local_model" (Enterpr
 allow_model_download = true
 ```
 
-Environment overrides: `CODECLONE_INTENT_REGISTRY_BACKEND`,
-`CODECLONE_INTENT_REGISTRY_PATH`, `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS`.
-
-Memory environment overrides: `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER`,
-`CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD`.
+Environment overrides for registry and memory fields:
+[10-config Environment variable overrides](book/10-config-and-defaults.md#environment-variable-overrides).

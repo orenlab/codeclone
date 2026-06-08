@@ -79,15 +79,15 @@ error pointing to `refresh_from_run` or CLI init.
 
 Ingest sources (non-exhaustive):
 
-| Record type          | Typical ingest source                       |
-|----------------------|---------------------------------------------|
-| `module_role`        | Report file inventory                       |
-| `contract_note`      | `contracts/__init__.py` paths (auto or configured) |
+| Record type          | Typical ingest source                                |
+|----------------------|------------------------------------------------------|
+| `module_role`        | Report file inventory                                |
+| `contract_note`      | `contracts/__init__.py` paths (auto or configured)   |
 | `document_link`      | Configured docs and/or `docs/**/*.md` from inventory |
-| `test_anchor`        | Test file inventory                         |
-| `risk_note`          | Complexity / security surfaces from metrics |
-| `public_surface`     | MCP / CLI public API inventory              |
-| `contradiction_note` | Optional MCP tool-count doc vs snapshot     |
+| `test_anchor`        | Test file inventory                                  |
+| `risk_note`          | Complexity / security surfaces from metrics          |
+| `public_surface`     | MCP / CLI public API inventory                       |
+| `contradiction_note` | Optional MCP tool-count doc vs snapshot              |
 
 Git provenance (Phase 18.6): init attaches `git_commit` evidence when git is
 available; optional git hotspot records use
@@ -134,18 +134,9 @@ max_results = 20
 index_audit = true                       # project audit summaries when audit DB exists
 ```
 
-Environment overrides:
-
-| Variable                                         | Effect                                     |
-|--------------------------------------------------|--------------------------------------------|
-| `CODECLONE_MEMORY_DB_PATH`                       | SQLite store path                          |
-| `CODECLONE_MEMORY_SEMANTIC_ENABLED`              | `true` / `false` for `semantic.enabled`    |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER`   | Provider literal                           |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL`      | Provider model name                        |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`  | Local embedding cache directory            |
-| `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`; opt in to model download |
-| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | LanceDB directory path                     |
-| `CODECLONE_PROJECTION_REBUILD_POLICY`            | `off` or `enqueue_when_stale`              |
+Environment overrides for memory and semantic fields:
+[10-config Environment variable overrides](../10-config-and-defaults.md#environment-variable-overrides)
+(Engineering Memory table).
 
 Unknown keys under `[tool.codeclone.memory.semantic]` are contract errors
 (Pydantic `extra="forbid"` on `SemanticConfig`).

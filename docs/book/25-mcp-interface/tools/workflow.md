@@ -21,7 +21,7 @@ payloads. When `create_receipt` fails, verify may still be `accepted` but
     `detail_level="full"`; `summary`/`normal` return counts and blocking fields only.
     **Blocking finish** (`reason: workspace_hygiene`, `blocks_finish: true`) happens
     for `finish_block_reason` `missing_evidence`, `foreign_dirty_overlap`, and
-    (when `CODECLONE_STRICT_FINISH` is truthy) `own_unscoped_dirty`. Out-of-scope
+    (when strict finish mode is enabled) `own_unscoped_dirty`. Out-of-scope
     unattributed dirt is **advisory** — it may surface as `external_changes` and
     elevate top-level status to `accepted_with_external_changes` without failing
     verify. Unchanged preexisting out-of-scope dirty is informational. Foreign

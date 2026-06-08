@@ -1,4 +1,5 @@
 <!-- doc-scope: Queue and recovery recipe. class: guide max-lines: 120 -->
+
 # Queue & recovery
 
 ## Multi-agent queue
@@ -20,7 +21,8 @@ Three contours: **status** (registry lifecycle), **ownership** (PID/TTL),
   foreign overlap; finish still needs evidence.
 - **`gc_workspace`:** explicit GC vs lazy close on read — different predicates.
 - **Blocking finish:** `missing_evidence`, `foreign_dirty_overlap`, and (when
-  `CODECLONE_STRICT_FINISH` is truthy) `own_unscoped_dirty`.
+  [strict finish mode](../../book/10-config-and-defaults.md#mcp-session-and-change-control-hygiene)
+  is enabled) `own_unscoped_dirty`.
 
 Normative tables: [Finish hygiene](../../book/12-structural-change-controller/finish-hygiene.md),
 [payload semantics](../../book/12-structural-change-controller/payload-semantics.md).

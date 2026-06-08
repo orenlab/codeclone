@@ -24,8 +24,10 @@ intent_registry_backend = "sqlite"
 intent_registry_path = ".codeclone/db/intents.sqlite3"
 ```
 
-Environment overrides: `CODECLONE_INTENT_REGISTRY_BACKEND`,
-`CODECLONE_INTENT_REGISTRY_PATH`, `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS`.
+Environment overrides for registry keys:
+[10-config Environment variable overrides](../10-config-and-defaults.md#environment-variable-overrides)
+(workspace intent registry table).
+
 The SQLite backend stores the same signed JSON payloads in WAL mode; integrity
 and validation rules are unchanged. Unlike the file backend, SQLite keeps
 closed intents (`clean`, `expired`, `orphaned`) for audit and purges them only
@@ -81,6 +83,7 @@ Hooks require `codeclone` in the Python interpreter referenced by
 `plugins/cursor-codeclone/scripts/install-project-hooks.py`. See
 [Cursor plugin guide](../../guide/integrations/cursor/install-and-skills.md) and
 [Cursor plugin contract](../integrations/cursor-plugin.md).
+
 ## Workspace Relations
 
 `detect_conflicts` classifies the relationship between a new intent and existing
@@ -109,6 +112,7 @@ indistinguishable:
    signal.
 3. No edit overlap, but the current agent explicitly excludes the foreign
    agent's target files (`target_excludes_foreign`).
+
 ## Intent Queue
 
 When multiple agents target overlapping scope, `manage_change_intent` supports

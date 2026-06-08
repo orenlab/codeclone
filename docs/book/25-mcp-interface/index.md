@@ -68,9 +68,10 @@ Current server characteristics:
 
 !!! warning "Absolute roots and remote exposure"
     Analysis tools require an absolute repository root. HTTP exposure beyond
-    loopback requires explicit `--allow-remote`. For `streamable-http`, set
-    `CODECLONE_MCP_AUTH_TOKEN` (≥32 characters) for Bearer auth; see
-    [Security Model](../21-security-model.md).
+    loopback requires explicit `--allow-remote`. For authenticated
+    `streamable-http`, set `CODECLONE_MCP_AUTH_TOKEN` — see
+    [Environment variable overrides](../10-config-and-defaults.md#mcp-http-authentication)
+    and [Security Model](../21-security-model.md).
 
 ---
 

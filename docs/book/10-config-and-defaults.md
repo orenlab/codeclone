@@ -1,5 +1,6 @@
 <!-- doc-scope: CONFIGURATION REFERENCE — single home for all config keys.
-     owns: all [tool.codeclone] keys, precedence rules, defaults, flag mapping.
+     owns: all [tool.codeclone] keys, precedence rules, defaults, flag mapping,
+     and all CODECLONE_* environment variable overrides.
      does-not-own: CLI behavior (→ 11), exit codes (→ 09), gate thresholds (→ 16).
      rule: stray flag docs from other chapters belong HERE. -->
 
@@ -21,14 +22,16 @@ Describe effective runtime configuration and defaults that affect behavior.
 
 ## Data model
 
-Configuration sources, in precedence order:
+Configuration sources for the main `codeclone` CLI scan, in precedence order:
 
 1. CLI flags (`argparse`, explicit options only)
 2. `pyproject.toml` section `[tool.codeclone]`
 3. Code defaults in parser and runtime
 
-`CODECLONE_DEBUG=1` affects debug diagnostics only and is not part of analysis
-or gating configuration precedence.
+Engineering Memory, the workspace intent registry, MCP session TTL/lease, and
+other subsystems listed in [Environment variable overrides](#environment-variable-overrides)
+may also read `CODECLONE_*` variables. Those overrides apply only to the
+documented fields and do not change main CLI precedence unless noted.
 
 Key defaults:
 
@@ -129,18 +132,18 @@ Quality gates and metric collection:
 
 Report outputs and local UX:
 
-| Key           | Type          | Default | Meaning                        | Requires / Implies                     |
-|---------------|---------------|---------|--------------------------------|----------------------------------------|
-| `html_out`    | `str \| null` | `null`  | HTML report output path        | `-`                                    |
-| `json_out`    | `str \| null` | `null`  | JSON report output path        | `-`                                    |
-| `md_out`      | `str \| null` | `null`  | Markdown report output path    | `-`                                    |
-| `sarif_out`   | `str \| null` | `null`  | SARIF report output path       | `-`                                    |
-| `text_out`    | `str \| null` | `null`  | Plain-text report output path  | `-`                                    |
-| `no_progress` | `bool`        | `false` | Disable progress UI            | Implied by `quiet`                     |
-| `no_color`    | `bool`        | `false` | Disable colored CLI output     | Enabled by `ci`                        |
-| `quiet`       | `bool`        | `false` | Use compact CLI output         | Implies `no_progress`; enabled by `ci` |
-| `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                    |
-| `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG=1`    |
+| Key           | Type          | Default | Meaning                        | Requires / Implies                                                                      |
+|---------------|---------------|---------|--------------------------------|-----------------------------------------------------------------------------------------|
+| `html_out`    | `str \| null` | `null`  | HTML report output path        | `-`                                                                                     |
+| `json_out`    | `str \| null` | `null`  | JSON report output path        | `-`                                                                                     |
+| `md_out`      | `str \| null` | `null`  | Markdown report output path    | `-`                                                                                     |
+| `sarif_out`   | `str \| null` | `null`  | SARIF report output path       | `-`                                                                                     |
+| `text_out`    | `str \| null` | `null`  | Plain-text report output path  | `-`                                                                                     |
+| `no_progress` | `bool`        | `false` | Disable progress UI            | Implied by `quiet`                                                                      |
+| `no_color`    | `bool`        | `false` | Disable colored CLI output     | Enabled by `ci`                                                                         |
+| `quiet`       | `bool`        | `false` | Use compact CLI output         | Implies `no_progress`; enabled by `ci`                                                  |
+| `verbose`     | `bool`        | `false` | Enable more verbose CLI output | `-`                                                                                     |
+| `debug`       | `bool`        | `false` | Enable debug diagnostics       | Also enabled by `CODECLONE_DEBUG`; see [env overrides](#environment-variable-overrides) |
 
 Controller audit trail:
 
@@ -173,17 +176,17 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 
 Trajectory / projection keys (defaults from `codeclone/config/memory_defaults.py`):
 
-| Key                                      | Default    | Meaning                                                 |
-|------------------------------------------|------------|---------------------------------------------------------|
-| trajectories_enabled                     | `true`     | Gate trajectory rebuild and retrieval                   |
-| trajectory_retention_days                | `365`      | Retention hint for vacuum                               |
-| projection_rebuild_policy                | `off`      | `enqueue_when_stale` enqueues worker on accepted finish |
-| projection_rebuild_running_timeout_seconds | `1800`   | Stale running job timeout                               |
-| projection_rebuild_spawn_worker        | `true`     | Spawn worker on enqueue                                 |
-| trajectory_export_enabled              | `false`    | Gate CLI JSONL export                                   |
-| trajectory_export_include_payloads     | `false`    | Include step payloads in export rows                    |
-| trajectory_export_max_record_bytes     | `65536`    | Per export row cap                                      |
-| trajectory_export_max_file_bytes       | `10485760` | Output file cap                                         |
+| Key                                        | Default    | Meaning                                                 |
+|--------------------------------------------|------------|---------------------------------------------------------|
+| trajectories_enabled                       | `true`     | Gate trajectory rebuild and retrieval                   |
+| trajectory_retention_days                  | `365`      | Retention hint for vacuum                               |
+| projection_rebuild_policy                  | `off`      | `enqueue_when_stale` enqueues worker on accepted finish |
+| projection_rebuild_running_timeout_seconds | `1800`     | Stale running job timeout                               |
+| projection_rebuild_spawn_worker            | `true`     | Spawn worker on enqueue                                 |
+| trajectory_export_enabled                  | `false`    | Gate CLI JSONL export                                   |
+| trajectory_export_include_payloads         | `false`    | Include step payloads in export rows                    |
+| trajectory_export_max_record_bytes         | `65536`    | Per export row cap                                      |
+| trajectory_export_max_file_bytes           | `10485760` | Output file cap                                         |
 
 | Semantic field       | Default                                           | Meaning                                                                                                                |
 |----------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
@@ -305,6 +308,126 @@ keys are contract errors.
     - `codeclone/surfaces/cli/workflow.py:_main_impl`
     - `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
 
+## Environment variable overrides
+
+Single home for all `CODECLONE_*` environment variables. Other chapters link here
+instead of duplicating tables.
+
+**Truthy values** (where noted): `1`, `true`, `yes`, `on` (case-insensitive).
+**Falsy values** (where noted): `0`, `false`, `no`, `off`.
+
+### Precedence by subsystem
+
+| Subsystem                        | Resolver                                         | Precedence when an env var is set                                                          |
+|----------------------------------|--------------------------------------------------|--------------------------------------------------------------------------------------------|
+| Main CLI scan                    | `resolve_config`                                 | CLI > pyproject > defaults; only `CODECLONE_DEBUG` applies from env                        |
+| Engineering Memory               | `resolve_memory_config`                          | Documented env > `[tool.codeclone.memory]` / `[tool.codeclone.memory.semantic]` > defaults |
+| Workspace intent registry        | `resolve_intent_registry_config`                 | Documented env > `[tool.codeclone]` registry keys > defaults                               |
+| MCP workspace intent TTL / lease | `resolved_ttl_seconds`, `resolved_lease_seconds` | Explicit MCP tool parameter > env > built-in default                                       |
+| Finish hygiene strict mode       | `_strict_finish_enabled`                         | Env only (no pyproject key)                                                                |
+| Cursor / IDE hooks               | hook helpers                                     | Env > repo config file (where noted) > built-in default                                    |
+
+There is no generic `CODECLONE_MEMORY__*` nested env convention. Each variable
+name is flat and listed below.
+
+### Diagnostics
+
+| Variable          | Values      | Effect                                                                                                                               |
+|-------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_DEBUG` | `1` enables | Turns on CLI debug diagnostics (`codeclone/surfaces/cli/console.py`). Independent of analysis, gating, and `[tool.codeclone] debug`. |
+
+### Engineering Memory
+
+Overrides `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` for the
+listed field only. Paths resolve under the repository root like pyproject paths.
+
+| Variable                                         | Values                                          | Overrides                              | Effect                                                                         |
+|--------------------------------------------------|-------------------------------------------------|----------------------------------------|--------------------------------------------------------------------------------|
+| `CODECLONE_MEMORY_DB_PATH`                       | repo-relative or absolute path under root       | `memory.db_path`                       | SQLite Engineering Memory store location                                       |
+| `CODECLONE_PROJECTION_REBUILD_POLICY`            | `off`, `enqueue_when_stale`                     | `memory.projection_rebuild_policy`     | When accepted MCP finish may enqueue async trajectory/semantic projection jobs |
+| `CODECLONE_MEMORY_SEMANTIC_ENABLED`              | `true` / `false`                                | `memory.semantic.enabled`              | Turn semantic index sidecar on or off                                          |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER`   | `diagnostic`, `fastembed`, `local_model`, `api` | `memory.semantic.embedding_provider`   | Embedding backend for semantic rebuild/search                                  |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL`      | model name string                               | `memory.semantic.embedding_model`      | Provider model id (for example FastEmbed model name)                           |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`  | path                                            | `memory.semantic.embedding_cache_dir`  | Local ONNX/model cache directory for FastEmbed                                 |
+| `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`                                | `memory.semantic.allow_model_download` | When `false`, FastEmbed requires a pre-populated cache                         |
+| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | path                                            | `memory.semantic.index_path`           | LanceDB semantic sidecar directory                                             |
+
+Memory keys without a documented env override (for example
+`projection_rebuild_spawn_worker`) are pyproject-only.
+
+Refs: `codeclone/config/memory.py`, `codeclone/config/memory_defaults.py`.
+
+### Workspace intent registry
+
+Overrides `[tool.codeclone]` registry keys. Used by MCP workspace coordination
+and local hook gate reads.
+
+| Variable                                   | Values                                  | Overrides                        | Effect                                                                 |
+|--------------------------------------------|-----------------------------------------|----------------------------------|------------------------------------------------------------------------|
+| `CODECLONE_INTENT_REGISTRY_BACKEND`        | `file`, `sqlite`                        | `intent_registry_backend`        | File-per-intent JSON under `.codeclone/intents/` vs SQLite WAL backend |
+| `CODECLONE_INTENT_REGISTRY_PATH`           | `.sqlite3` / `.db` path under repo root | `intent_registry_path`           | SQLite database path when backend is `sqlite`                          |
+| `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS` | integer `1`–`14` (open source)          | `intent_registry_retention_days` | Closed-row retention for SQLite backend purge                          |
+
+Refs: `codeclone/config/intent_registry.py`.
+
+### MCP session and change-control hygiene
+
+| Variable                         | Values         | Applies when                                                                         | Effect                                                                                                                                    |
+|----------------------------------|----------------|--------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_INTENT_TTL_SECONDS`   | `60`–`86400`   | `start_controlled_change` / workspace registry write when tool `ttl_seconds` omitted | Hard maximum lifetime of a workspace intent record (default `3600`)                                                                       |
+| `CODECLONE_INTENT_LEASE_SECONDS` | `60`–`600`     | Workspace registry lease renewal when tool `lease_seconds` omitted                   | Ownership freshness window renewed by active MCP use (default `300`)                                                                      |
+| `CODECLONE_STRICT_FINISH`        | truthy / falsy | `finish_controlled_change` hygiene                                                   | When truthy, unattributed out-of-scope dirty may set `finish_block_reason: own_unscoped_dirty` and block finish; default is advisory only |
+
+Explicit `ttl_seconds` / `lease_seconds` on MCP tools take precedence over the
+matching env var.
+
+Refs: `codeclone/surfaces/mcp/_workspace_intents.py`,
+`codeclone/surfaces/mcp/_workspace_hygiene.py`.
+
+### MCP HTTP authentication
+
+| Variable                   | Values                        | Effect                                                                                                                                                                                      |
+|----------------------------|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_MCP_AUTH_TOKEN` | string, minimum 32 characters | Bearer token for `streamable-http` transport. Required for authenticated remote HTTP; validated with constant-time compare. Without it, HTTP MCP is an unauthenticated local-trust surface. |
+
+Refs: `codeclone/surfaces/mcp/auth.py`, [21-security-model.md](21-security-model.md).
+
+### Workspace edit gate (hooks)
+
+Read by `codeclone/workspace_intent/gate.py` for Cursor/IDE pre-edit enforcement.
+
+| Variable                               | Values                | Default when unset               | Effect                                                                                         |
+|----------------------------------------|-----------------------|----------------------------------|------------------------------------------------------------------------------------------------|
+| `CODECLONE_HOOK_AUTHORIZE_FOREIGN`     | truthy / falsy        | authorize foreign active intents | When `0`/`false`/`no`/`off`, a live foreign active intent does not authorize local hook writes |
+| `CODECLONE_HOOK_OWN_AGENT_PID`         | integer PID           | hook argument only               | Limits stop-hook cleanup to recoverable intents owned by this process                          |
+| `CODECLONE_HOOK_OWN_AGENT_START_EPOCH` | integer epoch seconds | hook argument only               | Pairs with own-agent PID for recoverable intent matching                                       |
+
+### Cursor plugin hooks
+
+| Variable                        | Values           | Precedence                                              | Effect                                                                                                                        |
+|---------------------------------|------------------|---------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_HOOKS_ENFORCE_SCOPE` | `python`, `repo` | env > `.cursor/codeclone-hooks.json` > default `python` | `python`: gate `.py`/`.pyi` edits and matching shell commands. `repo`: gate any path under workspace root including `.git/**` |
+
+Refs: `plugins/cursor-codeclone/hooks/_hook_io.py`, [integrations/cursor-plugin.md](integrations/cursor-plugin.md).
+
+### IDE and MCP launcher passthrough
+
+Set by VS Code, Claude Desktop, Codex/Cursor plugin launchers — not usually edited
+in `pyproject.toml`. Launchers forward variables prefixed with `CODECLONE_` to the
+child `codeclone-mcp` process.
+
+| Variable                          | Values              | Effect                                                                                                                        |
+|-----------------------------------|---------------------|-------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_WORKSPACE_ROOT`        | absolute path       | Preferred repository root for launcher workspace discovery and MCP child env when cwd/PWD disagree with the trusted workspace |
+| `CODECLONE_MCP_COMMAND`           | command path        | Claude Desktop bundle: override MCP server executable                                                                         |
+| `CODECLONE_MCP_ARGS_JSON`         | JSON string array   | Claude Desktop bundle: extra launcher argv (stdio transport locked by IDE clients)                                            |
+| `CODECLONE_MCP_SHUTDOWN_GRACE_MS` | positive integer ms | Grace period before SIGTERM when stopping MCP child (default `5000`)                                                          |
+| `CODECLONE_MCP_KILL_GRACE_MS`     | positive integer ms | Grace period before SIGKILL after SIGTERM (default `2000`)                                                                    |
+
+Refs: `plugins/codeclone/scripts/launch_mcp.py`,
+`extensions/vscode-codeclone/src/support.js`,
+`extensions/claude-desktop-codeclone/src/launcher.js`.
+
 ## Contracts
 
 - `--ci` is a preset: enables `fail_on_new`, `no_color`, `quiet`.
@@ -376,3 +499,5 @@ Refs:
 
 - [11-cli.md](11-cli.md)
 - [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)
+- [13-engineering-memory/bootstrap-and-config.md](13-engineering-memory/bootstrap-and-config.md) — memory pyproject
+  tables (env overrides live here)

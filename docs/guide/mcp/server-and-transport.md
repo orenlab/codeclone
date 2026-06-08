@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP server transports. class: guide max-lines: 120 -->
+
 # MCP server & transport
 
 ## Server
@@ -19,10 +20,11 @@ codeclone-mcp --transport streamable-http --host 127.0.0.1 --port 8000
 ```
 
 !!! warning "Remote exposure is opt-in"
-    Non-loopback hosts require `--allow-remote`. For `streamable-http`, set
-    `CODECLONE_MCP_AUTH_TOKEN` (≥32 chars) so clients must send
-    `Authorization: Bearer …`. Without a token, HTTP MCP is unauthenticated —
-    use only on trusted networks or behind a reverse proxy.
+    Non-loopback hosts require `--allow-remote`. For authenticated
+    `streamable-http`, set `CODECLONE_MCP_AUTH_TOKEN` — see
+    [Environment variable overrides](../../book/10-config-and-defaults.md#mcp-http-authentication).
+    Without a token, HTTP MCP is unauthenticated — use only on trusted networks
+    or behind a reverse proxy.
 
 ### Run retention
 

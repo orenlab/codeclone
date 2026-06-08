@@ -1,6 +1,7 @@
 <!-- doc-scope: SECURITY MODEL AND THREAT BOUNDARIES.
      owns: trust boundaries, read-only invariant, allowed writes, transport security.
      does-not-own: MCP tool surface (→ 25), change controller (→ 12). -->
+
 # 21. Security Model
 
 ## Purpose
@@ -126,11 +127,14 @@ Refs:
 Loopback binding is the default. `--allow-remote` removes the loopback-only
 transport guard so HTTP MCP can bind on non-local interfaces.
 
-For `streamable-http`, set environment variable `CODECLONE_MCP_AUTH_TOKEN` (min
-32 characters). The server validates `Authorization: Bearer …` with
+For `streamable-http`, configure Bearer auth via `CODECLONE_MCP_AUTH_TOKEN`
+(minimum 32 characters). The server validates `Authorization: Bearer …` with
 `hmac.compare_digest` (stdlib only). Without a token, HTTP MCP is an
 unauthenticated local-trust surface. CodeClone does not ship TLS or multi-tenant
 session management — use a reverse proxy when exposing beyond loopback.
+
+Variable semantics and precedence:
+[10-config Environment variable overrides](10-config-and-defaults.md#mcp-http-authentication).
 
 Refs:
 
@@ -206,5 +210,5 @@ Refs:
 - Workspace intent files are not signed and must not be treated as proof of which agent declared a change.
 - MCP optional artifact paths outside the scan root require explicit
   `allow_external_artifacts=true`; default resolution stays under the repo root.
-- Remote MCP without `CODECLONE_MCP_AUTH_TOKEN` is not authenticated; with
+- Remote MCP without the auth token env var is not authenticated; with
   `--allow-remote` it is not a hardened multi-tenant network service.

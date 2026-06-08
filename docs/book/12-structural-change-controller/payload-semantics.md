@@ -9,12 +9,12 @@ Declare **repo-relative file paths** in `allowed_files` and `allowed_related`.
 Glob patterns such as `docs/**` are **not** valid scope entries for scope
 `check` — each changed path must appear literally in the declared lists.
 
-| Mechanism | Matching rule |
-|-----------|---------------|
-| Scope `check` (`unexpected_files`) | Exact membership in `allowed_files` or `allowed_related` |
+| Mechanism                             | Matching rule                                                              |
+|---------------------------------------|----------------------------------------------------------------------------|
+| Scope `check` (`unexpected_files`)    | Exact membership in `allowed_files` or `allowed_related`                   |
 | Start/finish hygiene (in-scope dirty) | Exact path **or** directory prefix (`docs/book` covers `docs/book/foo.md`) |
-| Verify regression attribution | `fnmatchcase` on declared patterns (may differ from scope check) |
-| `forbidden` | `fnmatchcase` on declared patterns |
+| Verify regression attribution         | `fnmatchcase` on declared patterns (may differ from scope check)           |
+| `forbidden`                           | `fnmatchcase` on declared patterns                                         |
 
 List every path you create, modify, or delete in finish evidence
 (`changed_files` or `diff_ref`).
@@ -93,21 +93,21 @@ For hygiene, `detail_level` is effectively binary: `summary` and `normal` return
 `counts`, overlap lists, and blocking fields only; pass `detail_level="full"` for
 `dirty_attribution`, path classification arrays, and expanded `dirty_snapshot`.
 
-| Field                                      | Meaning                                                                                                                                 |
-|--------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| `unacknowledged_dirty_in_scope`            | In-scope git dirty missing from finish evidence                                                                                         |
-| `preexisting_unscoped_dirty`               | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking                                         |
-| `unattributed_unscoped_dirty`              | Union of unattributed out-of-scope paths — **advisory**, not blocking                                                                   |
-| `own_unscoped_dirty`                       | Legacy alias for `unattributed_unscoped_dirty`; not proof of ownership                                                                  |
-| `new_unattributed_unscoped_dirty`          | Out-of-scope dirty path appeared after `start`                                                                                          |
-| `modified_unattributed_unscoped_dirty`     | Out-of-scope dirty path existed at `start` but changed afterward                                                                        |
-| `unknown_unattributed_unscoped_dirty`      | Out-of-scope dirty path cannot be compared with a start snapshot                                                                        |
-| `foreign_attributed_outside_scope`         | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking                                               |
-| `dirty_attribution`                        | Per-path attribution (`detail_level="full"` only)                                                                                       |
-| `dirty_snapshot` / `dirty_snapshot_status` | Snapshot summary; expanded detail with `detail_level="full"`                                                                            |
-| `files_for_scope_check`                    | Agent evidence only — paths passed to scope `check` (out-of-scope dirt does not expand scope)                                           |
-| `finish_block_reason`                      | `missing_evidence`, `foreign_dirty_overlap`, or (when `CODECLONE_STRICT_FINISH` is truthy) `own_unscoped_dirty` when `blocks_finish` is true |
-| `external_changes`                         | On finish response when verify is `accepted` but out-of-scope dirty remains — top-level status becomes `accepted_with_external_changes` |
+| Field                                      | Meaning                                                                                                                                                                                                                           |
+|--------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `unacknowledged_dirty_in_scope`            | In-scope git dirty missing from finish evidence                                                                                                                                                                                   |
+| `preexisting_unscoped_dirty`               | Out-of-scope git dirty that existed at `start` and did not change — informational, non-blocking                                                                                                                                   |
+| `unattributed_unscoped_dirty`              | Union of unattributed out-of-scope paths — **advisory**, not blocking                                                                                                                                                             |
+| `own_unscoped_dirty`                       | Legacy alias for `unattributed_unscoped_dirty`; not proof of ownership                                                                                                                                                            |
+| `new_unattributed_unscoped_dirty`          | Out-of-scope dirty path appeared after `start`                                                                                                                                                                                    |
+| `modified_unattributed_unscoped_dirty`     | Out-of-scope dirty path existed at `start` but changed afterward                                                                                                                                                                  |
+| `unknown_unattributed_unscoped_dirty`      | Out-of-scope dirty path cannot be compared with a start snapshot                                                                                                                                                                  |
+| `foreign_attributed_outside_scope`         | Out-of-scope git dirty owned by foreign active/stale intent — informational, non-blocking                                                                                                                                         |
+| `dirty_attribution`                        | Per-path attribution (`detail_level="full"` only)                                                                                                                                                                                 |
+| `dirty_snapshot` / `dirty_snapshot_status` | Snapshot summary; expanded detail with `detail_level="full"`                                                                                                                                                                      |
+| `files_for_scope_check`                    | Agent evidence only — paths passed to scope `check` (out-of-scope dirt does not expand scope)                                                                                                                                     |
+| `finish_block_reason`                      | `missing_evidence`, `foreign_dirty_overlap`, or (when strict finish mode is enabled) `own_unscoped_dirty` when `blocks_finish` is true — see [env overrides](../10-config-and-defaults.md#mcp-session-and-change-control-hygiene) |
+| `external_changes`                         | On finish response when verify is `accepted` but out-of-scope dirty remains — top-level status becomes `accepted_with_external_changes`                                                                                           |
 
 **Typical two-agent overlap on `pkg/a.py`:**
 
@@ -126,14 +126,14 @@ For hygiene, `detail_level` is effectively binary: `summary` and `normal` return
 
 Workflow `status` values are **not** persisted registry lifecycle states.
 
-| Tool response                                 | `edit_allowed` | Agent action                                                                                                      |
-|-----------------------------------------------|----------------|-------------------------------------------------------------------------------------------------------------------|
-| `start` → `needs_analysis`                    | `false`        | `analyze_repository` → `start` again                                                                              |
-| `start` → `queued`                            | `false`        | Wait → `promote`; re-analyze if `before_run_evicted`                                                              |
-| `start` → `blocked`                           | `false`        | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active` |
-| `start` → `active`                            | `true`         | Edit inside declared scope only; read `budget.gate_preview` as advisory                                           |
-| `finish` → `accepted`                         | —              | Intent cleared (if receipt ok); no out-of-scope dirty in hygiene view                                             |
-| `finish` → `accepted_with_external_changes`   | —              | Patch accepted; report `external_changes` — other paths dirty outside declared scope                              |
-| `finish` → `unverified` / `workspace_hygiene` | —              | Fix `missing_evidence`, coordinate `foreign_dirty_overlap`, or (under `CODECLONE_STRICT_FINISH`) reconcile `own_unscoped_dirty` |
-| `finish` → `violated`                         | —              | Fix regressions or widen scope via new `start`                                                                    |
-| `finish` → `expired`                          | —              | Re-analyze → new `start` (digest mismatch)                                                                        |
+| Tool response                                 | `edit_allowed` | Agent action                                                                                                             |
+|-----------------------------------------------|----------------|--------------------------------------------------------------------------------------------------------------------------|
+| `start` → `needs_analysis`                    | `false`        | `analyze_repository` → `start` again                                                                                     |
+| `start` → `queued`                            | `false`        | Wait → `promote`; re-analyze if `before_run_evicted`                                                                     |
+| `start` → `blocked`                           | `false`        | Follow `next_step` (`message` matches); do not edit unless `continue_own_wip` was requested and returned `active`        |
+| `start` → `active`                            | `true`         | Edit inside declared scope only; read `budget.gate_preview` as advisory                                                  |
+| `finish` → `accepted`                         | —              | Intent cleared (if receipt ok); no out-of-scope dirty in hygiene view                                                    |
+| `finish` → `accepted_with_external_changes`   | —              | Patch accepted; report `external_changes` — other paths dirty outside declared scope                                     |
+| `finish` → `unverified` / `workspace_hygiene` | —              | Fix `missing_evidence`, coordinate `foreign_dirty_overlap`, or (under strict finish mode) reconcile `own_unscoped_dirty` |
+| `finish` → `violated`                         | —              | Fix regressions or widen scope via new `start`                                                                           |
+| `finish` → `expired`                          | —              | Re-analyze → new `start` (digest mismatch)                                                                               |
