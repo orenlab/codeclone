@@ -120,6 +120,7 @@ packages = [
     "codeclone.metrics",
     "codeclone.memory",
     "codeclone.memory.embedding",
+    "codeclone.memory.experience",
     "codeclone.memory.ingest",
     "codeclone.memory.jobs",
     "codeclone.memory.retrieval",
