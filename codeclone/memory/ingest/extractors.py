@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import ast
-import json
 import re
 import subprocess
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from pathlib import Path, PurePosixPath
+
+import orjson
 
 from ...config.memory import IngestConfig
 from ...report.meta import current_report_timestamp_utc
@@ -434,8 +435,8 @@ def extract_public_surfaces(
     )
     if snapshot_path is not None:
         try:
-            payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = orjson.loads(snapshot_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, orjson.JSONDecodeError):
             payload = {}
         tools_obj = payload.get("tools") if isinstance(payload, dict) else None
         if isinstance(tools_obj, dict):
@@ -912,8 +913,8 @@ def extract_contradictions(
         return batch
     snapshot_path, doc_paths = sources
     try:
-        tools_payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        tools_payload = orjson.loads(snapshot_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, orjson.JSONDecodeError):
         return batch
     tools_obj = tools_payload.get("tools") if isinstance(tools_payload, dict) else None
     if not isinstance(tools_obj, dict):

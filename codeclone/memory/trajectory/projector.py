@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Iterable, Mapping, Sequence
+
+import orjson
 
 from ...audit.events import (
     EVENT_ANALYSIS_COMPLETED,
@@ -33,6 +34,7 @@ from ...audit.events import (
 )
 from ...audit.reader import AuditRecord
 from ...report.meta import current_report_timestamp_utc
+from ...utils.json_io import json_text
 from .models import (
     TRAJECTORY_PROJECTION_VERSION,
     Trajectory,
@@ -188,7 +190,7 @@ def _validated_event_core(record: AuditRecord) -> Mapping[str, object]:
     actual = hashlib.sha256(record.event_core_json.encode("utf-8")).hexdigest()
     if actual != record.event_core_sha256:
         raise TrajectoryProjectionError("event core digest mismatch")
-    loaded = json.loads(record.event_core_json)
+    loaded = orjson.loads(record.event_core_json)
     if not isinstance(loaded, dict):
         raise TrajectoryProjectionError("event core must be a JSON object")
     return loaded
@@ -584,7 +586,7 @@ def _canonical_report_digest(value: str | None) -> str | None:
 
 
 def _canonical_json(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json_text(payload, sort_keys=True)
 
 
 def _sha256(value: str) -> str:

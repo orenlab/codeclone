@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import socket
 import sqlite3
@@ -16,6 +15,7 @@ from dataclasses import dataclass
 from typing import cast
 
 from ...report.meta import current_report_timestamp_utc
+from ...utils.json_io import json_text
 from ..models import MemoryProject
 from .models import (
     ProjectionJobKind,
@@ -67,7 +67,7 @@ def _row_to_record(row: sqlite3.Row) -> ProjectionJobRecord:
 
 
 def canonical_stimulus_json(stimulus: Mapping[str, object]) -> str:
-    return json.dumps(stimulus, sort_keys=True, separators=(",", ":"))
+    return json_text(stimulus, sort_keys=True)
 
 
 def _use_row_factory(conn: sqlite3.Connection) -> None:
@@ -238,11 +238,7 @@ def complete_projection_job(
     error_message: str | None = None,
 ) -> None:
     now = current_report_timestamp_utc()
-    result_json = (
-        json.dumps(result, sort_keys=True, separators=(",", ":"))
-        if result is not None
-        else None
-    )
+    result_json = json_text(result, sort_keys=True) if result is not None else None
     conn.execute(
         "UPDATE memory_projection_jobs "
         "SET status=?, finished_at_utc=?, result_json=?, error_message=? "

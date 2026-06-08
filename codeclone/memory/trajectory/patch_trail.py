@@ -7,11 +7,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from ...contracts import PATCH_TRAIL_SCHEMA_VERSION
+from ...utils.json_io import json_text
 from ..paths import normalize_memory_scope_paths
 from .dto import PatchTrailInputs
 
@@ -365,7 +365,7 @@ def _patch_trail_digest(payload: Mapping[str, object]) -> str:
 
 
 def _canonical_json(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json_text(payload, sort_keys=True)
 
 
 def _path_tuple(value: object) -> tuple[str, ...]:

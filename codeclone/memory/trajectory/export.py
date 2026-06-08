@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +14,7 @@ from typing import TypedDict
 from ...audit.events import repo_root_digest
 from ...config.memory import MemoryConfig
 from ...report.meta import current_report_timestamp_utc
+from ...utils.json_io import json_text
 from ...utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathPolicy,
@@ -209,7 +209,7 @@ def _trajectory_sort_key(trajectory: Trajectory) -> tuple[str, str]:
 
 
 def _canonical_json_line(payload: dict[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json_text(payload, sort_keys=True)
 
 
 __all__ = [

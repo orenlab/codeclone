@@ -6,12 +6,14 @@
 
 from __future__ import annotations
 
-import json
 import uuid
 from dataclasses import dataclass, field
 from typing import Literal
 
+import orjson
+
 from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
+from ..utils.json_io import json_text
 from .enums import (
     EvidenceKind,
     IngestionMode,
@@ -182,13 +184,13 @@ class RecordBatch:
 def payload_json_text(payload: dict[str, object] | None) -> str | None:
     if payload is None:
         return None
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return json_text(payload, sort_keys=True)
 
 
 def parse_payload_json(text: str | None) -> dict[str, object] | None:
     if text is None or not text.strip():
         return None
-    loaded = json.loads(text)
+    loaded = orjson.loads(text)
     if not isinstance(loaded, dict):
         msg = "payload_json must decode to an object"
         raise TypeError(msg)

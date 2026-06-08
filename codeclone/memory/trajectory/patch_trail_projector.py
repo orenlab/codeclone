@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+
+import orjson
 
 from ...audit.events import (
     EVENT_INTENT_CHECKED,
@@ -173,7 +174,7 @@ def _event_core(record: AuditRecord) -> Mapping[str, object]:
     actual = hashlib.sha256(record.event_core_json.encode("utf-8")).hexdigest()
     if actual != record.event_core_sha256:
         raise TrajectoryProjectionError("event core digest mismatch")
-    loaded = json.loads(record.event_core_json)
+    loaded = orjson.loads(record.event_core_json)
     return loaded if isinstance(loaded, dict) else {}
 
 

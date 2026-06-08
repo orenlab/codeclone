@@ -7,12 +7,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 import uuid
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
+
+import orjson
 
 from ...audit.events import repo_root_digest
 from ...audit.reader import (
@@ -21,6 +22,7 @@ from ...audit.reader import (
     read_audit_event_core_records,
 )
 from ...report.meta import current_report_timestamp_utc
+from ...utils.json_io import json_text
 from ..models import MemoryProject
 from ..search_index import SearchMatchMode, tokenize_query
 from .models import (
@@ -458,7 +460,7 @@ def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory 
         outcome=str(row["outcome"]),  # type: ignore[arg-type]
         quality_tier=str(row["quality_tier"]),  # type: ignore[arg-type]
         quality_score=int(row["quality_score"]),
-        labels=tuple(json.loads(str(row["labels_json"]))),
+        labels=tuple(orjson.loads(str(row["labels_json"]))),
         summary=str(row["summary"]),
         trajectory_digest=str(row["trajectory_digest"]),
         source_event_stream_digest=str(row["source_event_stream_digest"]),
@@ -688,7 +690,7 @@ def _projection_run_id(
     started_at_utc: str,
     workflow_count: int,
 ) -> str:
-    payload = json.dumps(
+    payload = json_text(
         {
             "project_id": project_id,
             "repo_root_digest": repo_root_digest,
@@ -698,17 +700,16 @@ def _projection_run_id(
             "nonce": uuid.uuid4().hex,
         },
         sort_keys=True,
-        separators=(",", ":"),
     )
     return f"trajrun-{hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]}"
 
 
 def _json_array(values: Sequence[str]) -> str:
-    return json.dumps(list(values), sort_keys=True, separators=(",", ":"))
+    return json_text(list(values), sort_keys=True)
 
 
 def _json_object(payload: Mapping[str, object]) -> str:
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+    return json_text(payload, sort_keys=True)
 
 
 def _optional_text(value: object) -> str | None:
@@ -768,7 +769,7 @@ def load_trajectory_patch_trail(
     ).fetchone()
     if row is None:
         return None
-    loaded = json.loads(str(row["patch_trail_json"]))
+    loaded = orjson.loads(str(row["patch_trail_json"]))
     return loaded if isinstance(loaded, dict) else None
 
 

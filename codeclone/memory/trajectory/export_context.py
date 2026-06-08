@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
-import json
 import re
 import sqlite3
 from collections.abc import Mapping, Sequence
+
+import orjson
 
 from ..models import MemoryProject
 from ..paths import normalize_memory_scope_path
@@ -26,14 +27,17 @@ MAX_CITATIONS = 32
 MAX_OVERLAP_PATHS = 12
 MAX_STATEMENT_PREVIEW = 220
 
-_PROJECTION_VERSION_RANK = {
-    "trajectory-v1": 1,
-    "trajectory-v2": 2,
-}
+_PROJECTION_VERSION_PREFIX = "trajectory-v"
 
 
 def projection_version_rank(version: str) -> int:
-    return _PROJECTION_VERSION_RANK.get(version, 0)
+    """Rank trajectory projection versions by numeric suffix so newer
+    projections supersede older ones; unknown formats rank 0."""
+    if version.startswith(_PROJECTION_VERSION_PREFIX):
+        suffix = version[len(_PROJECTION_VERSION_PREFIX) :]
+        if suffix.isdigit():
+            return int(suffix)
+    return 0
 
 
 def select_canonical_trajectories(
@@ -459,8 +463,8 @@ def _prefer_trajectory_projection(
 
 def _load_event_core(event_core_json: str) -> Mapping[str, object]:
     try:
-        loaded = json.loads(event_core_json)
-    except json.JSONDecodeError:
+        loaded = orjson.loads(event_core_json)
+    except orjson.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, Mapping) else {}
 

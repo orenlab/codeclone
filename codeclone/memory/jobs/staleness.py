@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import sqlite3
 from collections.abc import Mapping
 from pathlib import Path
+
+import orjson
 
 from ...audit.events import repo_root_digest
 from ...audit.reader import count_audit_event_core_gaps
@@ -121,8 +122,8 @@ def parse_stimulus_json(raw: str | None) -> dict[str, object]:
     if not raw:
         return {}
     try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
+        parsed = orjson.loads(raw)
+    except orjson.JSONDecodeError:
         return {}
     return dict(parsed) if isinstance(parsed, dict) else {}
 
