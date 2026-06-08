@@ -9,6 +9,13 @@ from the trajectory corpus (advisory, machine-owned, human-promotable)."""
 
 from __future__ import annotations
 
+from .distiller import (
+    EXPERIENCE_MIN_SUPPORT,
+    MIN_INFORMATION_VALUE,
+    distill_experiences,
+    information_value,
+    pattern_keys,
+)
 from .models import (
     EXPERIENCE_DISTILLATION_VERSION,
     Experience,
@@ -18,13 +25,28 @@ from .models import (
     ExperienceStatus,
     PatternKey,
 )
+from .store import (
+    count_experiences,
+    list_experiences,
+    list_experiences_for_subject_family,
+    replace_experiences,
+)
 
 __all__ = [
     "EXPERIENCE_DISTILLATION_VERSION",
+    "EXPERIENCE_MIN_SUPPORT",
+    "MIN_INFORMATION_VALUE",
     "Experience",
     "ExperienceEvidence",
     "ExperienceFacet",
     "ExperienceFacetKind",
     "ExperienceStatus",
     "PatternKey",
+    "count_experiences",
+    "distill_experiences",
+    "information_value",
+    "list_experiences",
+    "list_experiences_for_subject_family",
+    "pattern_keys",
+    "replace_experiences",
 ]

@@ -17,6 +17,10 @@ from ..utils.sqlite_store import (
     open_sqlite_db,
 )
 from .exceptions import MemorySchemaError
+from .schema_experience import (
+    EXPERIENCE_DDL_STATEMENTS,
+    EXPERIENCE_INDEX_SQL,
+)
 from .schema_fts import CREATE_MEMORY_RECORDS_FTS_SQL
 from .schema_jobs import (
     PROJECTION_JOBS_DDL_STATEMENTS,
@@ -197,6 +201,7 @@ _DDL_STATEMENTS = (
     _CREATE_BLAST_CACHE_SQL,
     *TRAJECTORY_DDL_STATEMENTS,
     *PROJECTION_JOBS_DDL_STATEMENTS,
+    *EXPERIENCE_DDL_STATEMENTS,
 )
 
 _INDEX_SQL = (
@@ -221,6 +226,7 @@ _INDEX_SQL = (
     "ON memory_blast_radius_cache(project_id, subject_kind, subject_key)",
     *TRAJECTORY_INDEX_SQL,
     *PROJECTION_JOBS_INDEX_SQL,
+    *EXPERIENCE_INDEX_SQL,
 )
 
 
