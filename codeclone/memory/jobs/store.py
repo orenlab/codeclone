@@ -178,6 +178,32 @@ def _reclaim_stale_running_jobs(
         )
 
 
+def has_live_running_job(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    running_timeout_seconds: int,
+) -> bool:
+    """True if a worker is actively processing a job for this project.
+
+    Stale (dead-PID / timed-out) running jobs are reclaimed first, so a crashed
+    worker never blocks future spawns. Used by the spawn guard to avoid
+    launching a second worker while one is already running.
+    """
+    _reclaim_stale_running_jobs(
+        conn,
+        project_id=project_id,
+        running_timeout_seconds=running_timeout_seconds,
+    )
+    conn.commit()
+    row = conn.execute(
+        "SELECT 1 FROM memory_projection_jobs "
+        "WHERE project_id=? AND status='running' LIMIT 1",
+        (project_id,),
+    ).fetchone()
+    return row is not None
+
+
 def claim_next_projection_job(
     conn: sqlite3.Connection,
     *,
@@ -318,6 +344,7 @@ __all__ = [
     "claim_next_projection_job",
     "complete_projection_job",
     "enqueue_projection_job",
+    "has_live_running_job",
     "latest_done_projection_job",
     "list_projection_jobs",
     "new_projection_job_id",

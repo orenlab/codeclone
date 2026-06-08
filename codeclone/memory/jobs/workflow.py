@@ -26,6 +26,7 @@ from .staleness import (
 )
 from .store import (
     enqueue_projection_job,
+    has_live_running_job,
     list_projection_jobs,
     pending_projection_job,
 )
@@ -153,19 +154,33 @@ def execute_enqueue_projection_rebuild(
             trigger=trigger,
             stimulus=stimulus,
         )
+        worker_running = has_live_running_job(
+            conn,
+            project_id=project.id,
+            running_timeout_seconds=(
+                resolved_config.projection_rebuild_running_timeout_seconds
+            ),
+        )
     finally:
         conn.close()
-    should_spawn = (
+    base_should_spawn = (
         resolved_config.projection_rebuild_spawn_worker
         if spawn_worker is None
         else spawn_worker
     )
     spawned = False
     worker_pid: int | None = None
-    if should_spawn:
-        spawn_result = spawn_projection_jobs_worker(root_path=resolved_root)
-        spawned = spawn_result.spawned
-        worker_pid = spawn_result.pid
+    spawn_skipped_reason: str | None = None
+    if base_should_spawn:
+        if worker_running:
+            # A worker is already processing; the pending job it leaves behind is
+            # picked up by the next spawn when none is running. Avoid the
+            # redundant overlapping process.
+            spawn_skipped_reason = "worker_already_running"
+        else:
+            spawn_result = spawn_projection_jobs_worker(root_path=resolved_root)
+            spawned = spawn_result.spawned
+            worker_pid = spawn_result.pid
     return {
         "action": "enqueue_projection_rebuild",
         "status": "enqueued",
@@ -174,6 +189,7 @@ def execute_enqueue_projection_rebuild(
         "coalesced": enqueue_result.coalesced,
         "spawned": spawned,
         "worker_pid": worker_pid,
+        "spawn_skipped_reason": spawn_skipped_reason,
     }
 
 
