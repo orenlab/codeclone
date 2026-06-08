@@ -14,13 +14,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, NoReturn
 
+from ..contracts import IDE_GOVERNANCE_PROTOCOL_VERSION
 from .exceptions import MemoryContractError
 from .governance import approve_record, archive_record, reject_record
 from .models import MemoryRecord
 from .project import compute_project_id
 from .sqlite_store import SqliteEngineeringMemoryStore
 
-IDE_GOVERNANCE_PROTOCOL_VERSION = 2
 IDE_GOVERNANCE_TICKET_TTL_SECONDS = 120
 IDE_GOVERNANCE_MIN_KEY_BYTES = 32
 IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS = 100

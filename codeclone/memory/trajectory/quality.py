@@ -11,12 +11,11 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Literal, overload
 
+from ...contracts import TRAJECTORY_QUALITY_SCORE_VERSION
 from .anomalies import detect_trajectory_anomalies
 from .models import Trajectory, TrajectoryOutcome, TrajectoryQualityTier
 from .patch_trail import PatchTrail, patch_trail_from_mapping
 from .projector import trajectory_digest_for
-
-TRAJECTORY_QUALITY_SCORE_VERSION = "2"
 
 _ANOMALY_ERROR_PENALTY = 12
 _ANOMALY_WARN_PENALTY = 5

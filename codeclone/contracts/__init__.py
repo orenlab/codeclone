@@ -23,6 +23,18 @@ ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.5"
 SEMANTIC_INDEX_FORMAT_VERSION: Final = "1"
 PATCH_TRAIL_SCHEMA_VERSION: Final = "1"
 
+# Memory-derived projection/derivation versions. NOT persistence schema
+# versions: bump to supersede previously derived rows on an incompatible
+# projection/scoring/distillation change (re-projection, not a SQLite
+# migration). Defined here so all version constants live in one place; the
+# owning modules re-export these names.
+TRAJECTORY_PROJECTION_VERSION: Final = "trajectory-v3"
+TRAJECTORY_PROJECTION_VERSION_V1: Final = "trajectory-v1"
+TRAJECTORY_QUALITY_SCORE_VERSION: Final = "2"
+EXPERIENCE_DISTILLATION_VERSION: Final = "experience-v1"
+# IDE governance HMAC attestation protocol version (VS Code Memory channel).
+IDE_GOVERNANCE_PROTOCOL_VERSION: Final = 2
+
 DEFAULT_COMPLEXITY_THRESHOLD: Final = 20
 DEFAULT_COUPLING_THRESHOLD: Final = 10
 DEFAULT_COHESION_THRESHOLD: Final = 4
@@ -135,16 +147,22 @@ __all__ = [
     "DEFAULT_TEXT_REPORT_PATH",
     "DOCS_URL",
     "ENGINEERING_MEMORY_SCHEMA_VERSION",
+    "EXPERIENCE_DISTILLATION_VERSION",
     "HEALTH_DEPENDENCY_CYCLE_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER",
     "HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_P95_MARGIN",
     "HEALTH_WEIGHTS",
+    "IDE_GOVERNANCE_PROTOCOL_VERSION",
     "ISSUES_URL",
     "METRICS_BASELINE_SCHEMA_VERSION",
+    "PATCH_TRAIL_SCHEMA_VERSION",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
     "SEMANTIC_INDEX_FORMAT_VERSION",
+    "TRAJECTORY_PROJECTION_VERSION",
+    "TRAJECTORY_PROJECTION_VERSION_V1",
+    "TRAJECTORY_QUALITY_SCORE_VERSION",
     "ExitCode",
     "cli_help_epilog",
 ]

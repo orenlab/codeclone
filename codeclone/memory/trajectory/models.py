@@ -9,8 +9,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-TRAJECTORY_PROJECTION_VERSION = "trajectory-v2"
-TRAJECTORY_PROJECTION_VERSION_V1 = "trajectory-v1"
+from ...contracts import (
+    TRAJECTORY_PROJECTION_VERSION,
+    TRAJECTORY_PROJECTION_VERSION_V1,
+)
 
 TrajectoryOutcome = Literal[
     "accepted",
@@ -147,6 +149,7 @@ class TrajectoryListItem:
 
 __all__ = [
     "TRAJECTORY_PROJECTION_VERSION",
+    "TRAJECTORY_PROJECTION_VERSION_V1",
     "Trajectory",
     "TrajectoryEvidence",
     "TrajectoryLabel",
