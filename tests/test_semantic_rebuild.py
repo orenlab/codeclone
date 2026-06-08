@@ -14,6 +14,7 @@ from codeclone.memory.semantic.models import (
     SemanticIndexStatus,
     SemanticProjection,
     SemanticRow,
+    SemanticRowFingerprint,
 )
 from codeclone.memory.semantic.projection import text_hash
 
@@ -42,6 +43,18 @@ class _FakeWriter:
 
     def known_ids(self) -> set[str]:
         return {row.id for row in self.rows}
+
+    def row_fingerprints(self, ids: Sequence[str]) -> dict[str, SemanticRowFingerprint]:
+        by_id = {row.id: row for row in self.rows}
+        return {
+            row_id: SemanticRowFingerprint(
+                id=row_id,
+                text_hash=by_id[row_id].text_hash,
+                embedding_model=by_id[row_id].embedding_model,
+            )
+            for row_id in ids
+            if row_id in by_id
+        }
 
 
 class _FakeSource:

@@ -52,6 +52,20 @@ class SemanticRow(BaseModel):
     vector: tuple[float, ...]
 
 
+class SemanticRowFingerprint(BaseModel):
+    """Identity of a stored row without its vector.
+
+    The incremental rebuild fetches these (id + ``text_hash`` + model) to decide
+    what to re-embed, so it never loads vectors to check freshness.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    id: str = Field(min_length=1)
+    text_hash: str = Field(min_length=1)
+    embedding_model: str = Field(min_length=1)
+
+
 class SemanticHit(BaseModel):
     """A semantic search candidate: id + source + proximity score."""
 
@@ -102,6 +116,7 @@ __all__ = [
     "SemanticIndexStatus",
     "SemanticProjection",
     "SemanticRow",
+    "SemanticRowFingerprint",
     "SemanticSearchResult",
     "SemanticSource",
 ]

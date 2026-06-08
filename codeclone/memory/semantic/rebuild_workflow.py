@@ -34,6 +34,8 @@ class RebuildSemanticIndexMeta(TypedDict):
 class RebuildSemanticIndexCounts(TypedDict):
     indexed: int
     deleted: int
+    embedded: int
+    skipped_unchanged: int
     by_source: dict[str, int]
 
 
@@ -97,7 +99,13 @@ def _rebuild_base_payload(config: MemoryConfig) -> RebuildSemanticIndexMeta:
 
 
 def _rebuild_empty_counts() -> RebuildSemanticIndexCounts:
-    return {"indexed": 0, "deleted": 0, "by_source": {}}
+    return {
+        "indexed": 0,
+        "deleted": 0,
+        "embedded": 0,
+        "skipped_unchanged": 0,
+        "by_source": {},
+    }
 
 
 def execute_semantic_index_rebuild(
@@ -175,6 +183,8 @@ def execute_semantic_index_rebuild(
         "status": "ok",
         "indexed": report.indexed,
         "deleted": report.deleted,
+        "embedded": report.embedded,
+        "skipped_unchanged": report.skipped_unchanged,
         "by_source": dict(sorted(report.by_source.items())),
         "embedding_model": provider.model_id,
     }

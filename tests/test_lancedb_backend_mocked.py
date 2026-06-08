@@ -57,10 +57,22 @@ class _FakeTable:
         self._rows = list(rows or [])
         self._search_vector: list[float] | None = None
         self._search_limit: int | None = None
+        self._select: list[str] | None = None
+        self._where: str | None = None
         self.closed = False
 
-    def search(self, vector: list[float]) -> _FakeTable:
-        self._search_vector = list(vector)
+    def search(self, vector: list[float] | None = None) -> _FakeTable:
+        self._search_vector = list(vector) if vector is not None else None
+        self._select = None
+        self._where = None
+        return self
+
+    def select(self, columns: list[str]) -> _FakeTable:
+        self._select = list(columns)
+        return self
+
+    def where(self, predicate: str) -> _FakeTable:
+        self._where = predicate
         return self
 
     def limit(self, k: int) -> _FakeTable:
@@ -88,20 +100,25 @@ class _FakeTable:
         self._rows = [row for row in self._rows if str(row["id"]) not in drop]
 
     def to_arrow(self) -> _FakeArrowTable:
-        return _FakeArrowTable([row["id"] for row in self._rows])
+        rows = self._rows
+        if self._where:
+            keep = set(re.findall(r"'([^']*)'", self._where))
+            rows = [row for row in rows if str(row["id"]) in keep]
+        columns = self._select or ["id"]
+        return _FakeArrowTable({col: [row.get(col) for row in rows] for col in columns})
 
     def close(self) -> None:
         self.closed = True
 
 
 class _FakeArrowTable:
-    def __init__(self, ids: list[object]) -> None:
-        self._ids = ids
+    def __init__(self, columns: dict[str, list[object]]) -> None:
+        self._columns = columns
 
     def column(self, name: str) -> _FakeArrowColumn:
-        if name != "id":
+        if name not in self._columns:
             raise KeyError(name)
-        return _FakeArrowColumn(self._ids)
+        return _FakeArrowColumn(self._columns[name])
 
 
 class _FakeArrowColumn:

@@ -12,19 +12,34 @@ from pathlib import Path
 from types import ModuleType
 from typing import Protocol, cast
 
-from .models import SemanticHit, SemanticIndexStatus, SemanticRow, SemanticSource
+from ...utils.iterutils import chunked
+from .models import (
+    SemanticHit,
+    SemanticIndexStatus,
+    SemanticRow,
+    SemanticRowFingerprint,
+    SemanticSource,
+)
 
 # This module is importable in the base install. The optional vector DB packages
 # are loaded only when a LanceDB backend instance is constructed.
 
 _TABLE_NAME = "semantic_index"
 _SCHEMA_MISMATCH_REASON = "schema_mismatch"
+# LanceDB `id IN (...)` filter batch — bounds the predicate size per query.
+_ID_QUERY_BATCH = 500
 
 
 class _LanceSearchQuery(Protocol):
+    def select(self, columns: list[str]) -> _LanceSearchQuery: ...
+
+    def where(self, predicate: str) -> _LanceSearchQuery: ...
+
     def limit(self, k: int) -> _LanceSearchQuery: ...
 
     def to_list(self) -> list[dict[str, object]]: ...
+
+    def to_arrow(self) -> _ArrowTable: ...
 
 
 class _LanceMergeInsert(Protocol):
@@ -54,15 +69,13 @@ class _ArrowTable(Protocol):
 class _LanceTable(Protocol):
     schema: _LanceSchema
 
-    def search(self, vector: list[float]) -> _LanceSearchQuery: ...
+    def search(self, vector: list[float] | None = None) -> _LanceSearchQuery: ...
 
     def count_rows(self) -> int: ...
 
     def merge_insert(self, key: str) -> _LanceMergeInsert: ...
 
     def delete(self, clause: str) -> None: ...
-
-    def to_arrow(self) -> _ArrowTable: ...
 
 
 class _LanceConnection(Protocol):
@@ -230,9 +243,36 @@ class LanceDbSemanticIndex:
     def known_ids(self) -> set[str]:
         if self._table is None:
             return set()
-        arrow_table = self._table.to_arrow()
-        column = arrow_table.column("id").to_pylist()
-        return {str(value) for value in column}
+        total = self._table.count_rows()
+        if total == 0:
+            return set()
+        # Metadata scan projecting only the id column: vectors are never read.
+        arrow = self._table.search().select(["id"]).limit(total).to_arrow()
+        return {str(value) for value in arrow.column("id").to_pylist()}
+
+    def row_fingerprints(self, ids: Sequence[str]) -> dict[str, SemanticRowFingerprint]:
+        if self._table is None or not ids:
+            return {}
+        result: dict[str, SemanticRowFingerprint] = {}
+        for chunk in chunked(ids, _ID_QUERY_BATCH):
+            clause = ", ".join(_sql_quote(value) for value in chunk)
+            arrow = (
+                self._table.search()
+                .select(["id", "text_hash", "embedding_model"])
+                .where(f"id IN ({clause})")
+                .limit(len(chunk))
+                .to_arrow()
+            )
+            row_ids = arrow.column("id").to_pylist()
+            hashes = arrow.column("text_hash").to_pylist()
+            models = arrow.column("embedding_model").to_pylist()
+            for row_id, text_hash, model in zip(row_ids, hashes, models, strict=True):
+                result[str(row_id)] = SemanticRowFingerprint(
+                    id=str(row_id),
+                    text_hash=str(text_hash),
+                    embedding_model=str(model),
+                )
+        return result
 
     def close(self) -> None:
         table = self._table

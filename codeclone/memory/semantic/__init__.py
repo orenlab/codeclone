@@ -15,6 +15,7 @@ from .models import (
     SemanticIndexStatus,
     SemanticProjection,
     SemanticRow,
+    SemanticRowFingerprint,
     SemanticSource,
 )
 from .projection import (
@@ -69,6 +70,11 @@ class SemanticIndexWriter(SemanticIndex, Protocol):
     def delete(self, ids: Sequence[str]) -> None: ...
 
     def known_ids(self) -> set[str]: ...
+
+    def row_fingerprints(self, ids: Sequence[str]) -> dict[str, SemanticRowFingerprint]:
+        """Stored (text_hash, embedding_model) for the given ids, vectors not
+        loaded. Missing ids are omitted; empty ``ids`` returns ``{}``."""
+        ...
 
 
 class NullSemanticIndex:
@@ -174,6 +180,7 @@ __all__ = [
     "SemanticIndexWriter",
     "SemanticProjection",
     "SemanticRow",
+    "SemanticRowFingerprint",
     "SemanticSource",
     "TrajectoryIndexSource",
     "UnavailableSemanticIndex",

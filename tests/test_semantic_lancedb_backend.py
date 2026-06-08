@@ -81,6 +81,20 @@ def test_lancedb_backend_round_trip(tmp_path: Path) -> None:
     assert writer.known_ids() == {"b"}
 
 
+def test_lancedb_backend_row_fingerprints(tmp_path: Path) -> None:
+    writer, vec_a, config = _writer_and_vector(tmp_path, dimension=4, text="alpha")
+    provider = resolve_embedding_provider(config)
+    (vec_b,) = provider.embed(["beta beta"])
+    writer.upsert([_row("a", vec_a), _row("b", vec_b)])
+
+    fingerprints = writer.row_fingerprints(["a", "absent"])
+    assert set(fingerprints) == {"a"}  # missing ids omitted
+    assert fingerprints["a"].text_hash == "h-a"
+    assert fingerprints["a"].embedding_model == "diagnostic-hash-v1"
+    # Empty request never touches the table.
+    assert writer.row_fingerprints([]) == {}
+
+
 def test_lancedb_backend_resolves_as_read_index(tmp_path: Path) -> None:
     config = _config(tmp_path, dimension=8)
     index_path = tmp_path / "semantic_index.lance"
