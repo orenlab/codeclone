@@ -6,13 +6,12 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
 from ...config.memory import MemoryConfig, resolve_memory_config
+from ...utils.ci import is_ci_environment
 from ..exceptions import MemoryContractError
 from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
@@ -33,19 +32,6 @@ from .store import (
 from .worker import run_projection_jobs_once
 
 ProjectionRebuildPolicy = Literal["off", "enqueue_when_stale"]
-
-_CI_ENV_KEYS: tuple[str, ...] = (
-    "CI",
-    "GITHUB_ACTIONS",
-    "BUILDKITE",
-    "TF_BUILD",
-    "TEAMCITY_VERSION",
-)
-
-
-def is_ci_environment(environ: Mapping[str, str] | None = None) -> bool:
-    active = environ if environ is not None else os.environ
-    return any(active.get(key, "").strip() for key in _CI_ENV_KEYS)
 
 
 def _require_memory_db_session(

@@ -22,6 +22,10 @@ ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.6"
 # SQLite migration).
 SEMANTIC_INDEX_FORMAT_VERSION: Final = "1"
 PATCH_TRAIL_SCHEMA_VERSION: Final = "1"
+# Platform observability sqlite store (.codeclone/db/platform_observability.sqlite3):
+# a runtime-profiling plane separate from audit/memory. Bump on an incompatible
+# observability schema change.
+PLATFORM_OBSERVABILITY_SCHEMA_VERSION: Final = "1.0"
 
 # Memory-derived projection/derivation versions. NOT persistence schema
 # versions: bump to supersede previously derived rows on an incompatible
