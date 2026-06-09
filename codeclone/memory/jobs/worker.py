@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ...config.memory import MemoryConfig
+from ..experience.distillation_workflow import execute_experience_distillation
 from ..models import MemoryProject
 from ..semantic.rebuild_workflow import execute_semantic_index_rebuild
 from ..trajectory.rebuild_workflow import execute_trajectory_rebuild
@@ -30,6 +31,12 @@ class ProjectionWorkerResult:
     reason: str | None
     trajectory_status: str | None
     semantic_status: str | None
+    experience_status: str | None = None
+
+
+def _block_status(result: Mapping[str, object], key: str) -> str | None:
+    block = result.get(key)
+    return str(block.get("status")) if isinstance(block, dict) else None
 
 
 def _trajectory_incremental_watermark(
@@ -78,30 +85,31 @@ def run_projection_job(
         config=config,
         project=project,
     )
+    # Experiences distill from the trajectories rebuilt above — same job, run
+    # right after so the corpus is fresh.
+    experience_payload = execute_experience_distillation(
+        root_path=root_path,
+        config=config,
+        project=project,
+    )
+    result: dict[str, object] = {
+        "trajectory": dict(trajectory_payload),
+        "semantic": dict(semantic_payload),
+        "experience": dict(experience_payload),
+        "applied_stimulus": dict(stimulus),
+    }
     trajectory_status = str(trajectory_payload.get("status", ""))
     semantic_status = str(semantic_payload.get("status", ""))
-    failed = trajectory_status == "failed" or semantic_status == "failed"
-    if failed:
-        return (
-            "failed",
-            {
-                "trajectory": dict(trajectory_payload),
-                "semantic": dict(semantic_payload),
-                "applied_stimulus": dict(stimulus),
-            },
-            "projection_step_failed",
-        )
-    skipped = trajectory_status == "skipped" and semantic_status == "skipped"
-    final_status: ProjectionJobStatus = "skipped" if skipped else "done"
-    return (
-        final_status,
-        {
-            "trajectory": dict(trajectory_payload),
-            "semantic": dict(semantic_payload),
-            "applied_stimulus": dict(stimulus),
-        },
-        None if not skipped else "all_steps_skipped",
+    experience_status = str(experience_payload.get("status", ""))
+    if trajectory_status == "failed" or semantic_status == "failed":
+        return "failed", result, "projection_step_failed"
+    skipped = (
+        trajectory_status == "skipped"
+        and semantic_status == "skipped"
+        and experience_status == "skipped"
     )
+    final_status: ProjectionJobStatus = "skipped" if skipped else "done"
+    return final_status, result, None if not skipped else "all_steps_skipped"
 
 
 def run_projection_jobs_once(
@@ -159,22 +167,13 @@ def run_projection_jobs_once(
         result=result,
         error_message=error,
     )
-    trajectory_block = result.get("trajectory")
-    semantic_block = result.get("semantic")
-    trajectory_status = (
-        str(trajectory_block.get("status"))
-        if isinstance(trajectory_block, dict)
-        else None
-    )
-    semantic_status = (
-        str(semantic_block.get("status")) if isinstance(semantic_block, dict) else None
-    )
     return ProjectionWorkerResult(
         status=final_status,
         job_id=claimed.id,
         reason=error,
-        trajectory_status=trajectory_status,
-        semantic_status=semantic_status,
+        trajectory_status=_block_status(result, "trajectory"),
+        semantic_status=_block_status(result, "semantic"),
+        experience_status=_block_status(result, "experience"),
     )
 
 

@@ -12,6 +12,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 
 from ..report.meta import current_report_timestamp_utc
+from .experience.models import Experience
 from .locks import memory_init_lock
 from .models import (
     IngestionRun,
@@ -213,6 +214,28 @@ class SqliteEngineeringMemoryStore:
             project_id=project_id,
             limit=limit,
         )
+
+    def replace_experiences(
+        self,
+        *,
+        project_id: str,
+        experiences: Sequence[Experience],
+    ) -> int:
+        from .experience.store import replace_experiences
+
+        return replace_experiences(
+            self._conn, project_id=project_id, experiences=experiences
+        )
+
+    def list_experiences(self, *, project_id: str) -> list[Experience]:
+        from .experience.store import list_experiences
+
+        return list_experiences(self._conn, project_id=project_id)
+
+    def count_experiences(self, *, project_id: str) -> int:
+        from .experience.store import count_experiences
+
+        return count_experiences(self._conn, project_id=project_id)
 
     @property
     def connection(self) -> sqlite3.Connection:

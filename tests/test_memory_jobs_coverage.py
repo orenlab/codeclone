@@ -277,6 +277,10 @@ def test_run_projection_job_failed_and_skipped() -> None:
             "codeclone.memory.jobs.worker.execute_semantic_index_rebuild",
             return_value={"status": "ok"},
         ),
+        patch(
+            "codeclone.memory.jobs.worker.execute_experience_distillation",
+            return_value={"status": "ok"},
+        ),
     ):
         status, _payload, reason = run_projection_job(
             conn,
@@ -296,6 +300,10 @@ def test_run_projection_job_failed_and_skipped() -> None:
         ),
         patch(
             "codeclone.memory.jobs.worker.execute_semantic_index_rebuild",
+            return_value={"status": "skipped"},
+        ),
+        patch(
+            "codeclone.memory.jobs.worker.execute_experience_distillation",
             return_value={"status": "skipped"},
         ),
     ):
