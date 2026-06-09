@@ -85,7 +85,7 @@ semantic-local = [
     "fastembed>=0.8.0,<0.9",
 ]
 perf = [
-    "psutil>=6,<7",
+    "psutil>=7,<8",
 ]
 dev = [
     "pytest>=9.0.3",
@@ -189,6 +189,11 @@ audit_path = ".codeclone/db/audit.sqlite3"
 audit_payloads = "full"    # "off" | "compact" | "full"
 audit_retention_days = 30
 
+[tool.codeclone.memory]
+projection_rebuild_policy = "enqueue_when_stale"              # off | enqueue_when_stale
+projection_rebuild_running_timeout_seconds = 1800
+projection_rebuild_spawn_worker = true
+
 [tool.codeclone.memory.semantic]
 enabled = true                          # default: off, zero extra deps
 backend = "lancedb"
@@ -200,11 +205,6 @@ allow_model_download = true             # fastembed: download if cache is missin
 dimension = 384
 max_results = 20
 index_audit = true                       # project audit summaries when audit DB exists
-
-[tool.codeclone.memory]
-projection_rebuild_policy = "enqueue_when_stale"              # off | enqueue_when_stale
-projection_rebuild_running_timeout_seconds = 1800
-projection_rebuild_spawn_worker = true
 
 [tool.codeclone.memory.ingest]
 contract_constants_paths = ["codeclone/contracts/__init__.py"]
