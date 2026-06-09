@@ -138,12 +138,13 @@ class SpanHandle:
         self._status = "ok"
         self._counters: dict[str, int] = {}
 
-    # Forward-declared write API, wired by the Phase 29.10 worker instrumentation.
+    # set_counter is wired by the 29.10 worker instrumentation. add_counter and
+    # set_reason_kind stay forward-declared until a caller needs them
+    # (loop-accumulation counters; post-hoc reason classification, e.g. semantic).
     # codeclone: ignore[dead-code]
     def add_counter(self, key: str, value: int = 1) -> None:
         self._counters[key] = self._counters.get(key, 0) + value
 
-    # codeclone: ignore[dead-code]
     def set_counter(self, key: str, value: int) -> None:
         self._counters[key] = value
 

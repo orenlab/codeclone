@@ -11,6 +11,8 @@ from pathlib import Path
 from typing import Literal
 
 from ...config.memory import MemoryConfig, resolve_memory_config
+from ...config.observability import resolve_observability_config
+from ...observability import bootstrap, is_observability_enabled, shutdown
 from ...utils.ci import is_ci_environment
 from ..exceptions import MemoryContractError
 from ..models import MemoryProject
@@ -188,6 +190,12 @@ def execute_run_projection_jobs_once(
         root_path,
         config=config,
     )
+    # Worker-process bootstrap: freeze the env-resolved observability decision
+    # once at the worker entry (spec §4.1). owns_observability guards against a
+    # caller that already bootstrapped (e.g. an MCP session) being shut down here.
+    owns_observability = not is_observability_enabled()
+    if owns_observability:
+        bootstrap(resolve_observability_config(), root=resolved_root)
     try:
         worker_result = run_projection_jobs_once(
             conn,
@@ -200,6 +208,8 @@ def execute_run_projection_jobs_once(
         )
     finally:
         conn.close()
+        if owns_observability:
+            shutdown()
     return {
         "action": "run_projection_jobs_once",
         "status": worker_result.status,

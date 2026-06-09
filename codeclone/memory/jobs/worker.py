@@ -10,8 +10,10 @@ import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ...config.memory import MemoryConfig
+from ...observability import operation, span
 from ..experience.distillation_workflow import execute_experience_distillation
 from ..models import MemoryProject
 from ..semantic.rebuild_workflow import execute_semantic_index_rebuild
@@ -22,6 +24,9 @@ from .store import (
     complete_projection_job,
     worker_claim_token,
 )
+
+if TYPE_CHECKING:
+    from ...observability.reason_kind import ReasonKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +42,15 @@ class ProjectionWorkerResult:
 def _block_status(result: Mapping[str, object], key: str) -> str | None:
     block = result.get(key)
     return str(block.get("status")) if isinstance(block, dict) else None
+
+
+def _payload_int(payload: Mapping[str, object], key: str) -> int:
+    """Read a non-negative integer counter from a step payload, defaulting to 0.
+
+    Tolerant of partial payloads (failed/skipped steps may omit the key).
+    """
+    value = payload.get(key, 0)
+    return value if isinstance(value, int) else 0
 
 
 def _trajectory_incremental_watermark(
@@ -63,6 +77,31 @@ def _trajectory_incremental_watermark(
     return watermark if isinstance(watermark, int) else None
 
 
+def _trajectory_reason_kind(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    watermark: int | None,
+) -> ReasonKind:
+    """Classify *why* the trajectory rebuild runs (deterministic, spec §6.4).
+
+    An integer watermark is an incremental content-change rebuild and needs no
+    extra query. A ``None`` watermark forces a full rebuild; one cheap lookup
+    then distinguishes a projection-version bump from a first index.
+    """
+    if watermark is not None:
+        return "content_changed"
+    from ..trajectory.models import TRAJECTORY_PROJECTION_VERSION
+    from .staleness import last_applied_stimulus
+
+    applied = last_applied_stimulus(conn, project_id=project_id)
+    if applied is None:
+        return "first_index"
+    if applied.get("trajectory_projection_version") != TRAJECTORY_PROJECTION_VERSION:
+        return "schema_version_changed"
+    return "first_index"
+
+
 def run_projection_job(
     conn: sqlite3.Connection,
     *,
@@ -72,44 +111,66 @@ def run_projection_job(
     project: MemoryProject,
     stimulus: Mapping[str, object],
 ) -> tuple[ProjectionJobStatus, dict[str, object], str | None]:
-    trajectory_payload = execute_trajectory_rebuild(
-        root_path=root_path,
-        config=config,
-        project=project,
-        incremental_after_event_core_id=_trajectory_incremental_watermark(
-            conn, project_id=project.id
-        ),
-    )
-    semantic_payload = execute_semantic_index_rebuild(
-        root_path=root_path,
-        config=config,
-        project=project,
-    )
-    # Experiences distill from the trajectories rebuilt above — same job, run
-    # right after so the corpus is fresh.
-    experience_payload = execute_experience_distillation(
-        root_path=root_path,
-        config=config,
-        project=project,
-    )
-    result: dict[str, object] = {
-        "trajectory": dict(trajectory_payload),
-        "semantic": dict(semantic_payload),
-        "experience": dict(experience_payload),
-        "applied_stimulus": dict(stimulus),
-    }
-    trajectory_status = str(trajectory_payload.get("status", ""))
-    semantic_status = str(semantic_payload.get("status", ""))
-    experience_status = str(experience_payload.get("status", ""))
-    if trajectory_status == "failed" or semantic_status == "failed":
-        return "failed", result, "projection_step_failed"
-    skipped = (
-        trajectory_status == "skipped"
-        and semantic_status == "skipped"
-        and experience_status == "skipped"
-    )
-    final_status: ProjectionJobStatus = "skipped" if skipped else "done"
-    return final_status, result, None if not skipped else "all_steps_skipped"
+    with operation(name="memory.projection.job", surface="memory"):
+        watermark = _trajectory_incremental_watermark(conn, project_id=project.id)
+        with span(
+            name="memory.trajectory.rebuild",
+            reason_kind=_trajectory_reason_kind(
+                conn, project_id=project.id, watermark=watermark
+            ),
+        ) as trajectory_span:
+            trajectory_payload = execute_trajectory_rebuild(
+                root_path=root_path,
+                config=config,
+                project=project,
+                incremental_after_event_core_id=watermark,
+            )
+            trajectory_span.set_counter(
+                "workflows_seen", _payload_int(trajectory_payload, "workflows_seen")
+            )
+        with span(name="memory.semantic.reindex") as semantic_span:
+            semantic_payload = execute_semantic_index_rebuild(
+                root_path=root_path,
+                config=config,
+                project=project,
+            )
+            semantic_span.set_counter(
+                "embedded", _payload_int(semantic_payload, "embedded")
+            )
+            semantic_span.set_counter(
+                "skipped_unchanged",
+                _payload_int(semantic_payload, "skipped_unchanged"),
+            )
+        # Experiences distill from the trajectories rebuilt above — same job, run
+        # right after so the corpus is fresh.
+        with span(name="memory.experience.distill") as experience_span:
+            experience_payload = execute_experience_distillation(
+                root_path=root_path,
+                config=config,
+                project=project,
+            )
+            experience_span.set_counter(
+                "experiences_distilled",
+                _payload_int(experience_payload, "experiences_distilled"),
+            )
+        result: dict[str, object] = {
+            "trajectory": dict(trajectory_payload),
+            "semantic": dict(semantic_payload),
+            "experience": dict(experience_payload),
+            "applied_stimulus": dict(stimulus),
+        }
+        trajectory_status = str(trajectory_payload.get("status", ""))
+        semantic_status = str(semantic_payload.get("status", ""))
+        experience_status = str(experience_payload.get("status", ""))
+        if trajectory_status == "failed" or semantic_status == "failed":
+            return "failed", result, "projection_step_failed"
+        skipped = (
+            trajectory_status == "skipped"
+            and semantic_status == "skipped"
+            and experience_status == "skipped"
+        )
+        final_status: ProjectionJobStatus = "skipped" if skipped else "done"
+        return final_status, result, None if not skipped else "all_steps_skipped"
 
 
 def run_projection_jobs_once(
