@@ -72,8 +72,7 @@ class OperationHandle:
         self._response_tokens: int | None = None
         self._spans: list[SpanRecord] = []
 
-    # Forward-declared write API, wired by the Phase 29.10 worker instrumentation.
-    # codeclone: ignore[dead-code]
+    # Wired by the 29.9 MCP registrar (per-tool request/response payload sizes).
     def set_request(
         self, *, request_bytes: int | None = None, request_tokens: int | None = None
     ) -> None:
@@ -82,7 +81,6 @@ class OperationHandle:
         if request_tokens is not None:
             self._request_tokens = request_tokens
 
-    # codeclone: ignore[dead-code]
     def set_response(
         self, *, response_bytes: int | None = None, response_tokens: int | None = None
     ) -> None:
@@ -207,6 +205,12 @@ class _ActiveRuntime:
         self._root = root
         self._conn: object | None = None
 
+    def bind_root(self, root: Path) -> None:
+        # First rooted call wins: an MCP server bootstraps root-less, then binds
+        # the store to the root of the first tool that carries one.
+        if self._root is None:
+            self._root = root
+
     def persist(self, record: OperationRecord) -> None:
         # Persisted to the per-root store; a root-less enabled session simply
         # drops the record (no in-memory ring in the MVP).
@@ -263,6 +267,24 @@ def shutdown() -> None:
 
 def is_observability_enabled() -> bool:
     return _ENABLED
+
+
+def bind_root(root: Path) -> None:
+    """Bind the store to ``root`` if the active runtime has none yet (no-op when
+    disabled). Lets a root-less MCP-server session open its store on the first
+    tool call that carries a ``root``.
+    """
+    runtime = _RUNTIME
+    if _ENABLED and runtime is not None:
+        runtime.bind_root(root)
+
+
+def payload_capture_enabled() -> bool:
+    """True when enabled and payload-size capture is configured on."""
+    runtime = _RUNTIME
+    return bool(
+        _ENABLED and runtime is not None and runtime.config.capture_payload_sizes
+    )
 
 
 @contextmanager
@@ -344,9 +366,11 @@ def span(
 __all__ = [
     "OperationHandle",
     "SpanHandle",
+    "bind_root",
     "bootstrap",
     "is_observability_enabled",
     "operation",
+    "payload_capture_enabled",
     "shutdown",
     "span",
 ]

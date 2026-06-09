@@ -17,9 +17,11 @@ from __future__ import annotations
 from .runtime import (
     OperationHandle,
     SpanHandle,
+    bind_root,
     bootstrap,
     is_observability_enabled,
     operation,
+    payload_capture_enabled,
     shutdown,
     span,
 )
@@ -27,9 +29,11 @@ from .runtime import (
 __all__ = [
     "OperationHandle",
     "SpanHandle",
+    "bind_root",
     "bootstrap",
     "is_observability_enabled",
     "operation",
+    "payload_capture_enabled",
     "shutdown",
     "span",
 ]

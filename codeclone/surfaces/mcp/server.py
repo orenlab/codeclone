@@ -7,15 +7,28 @@
 from __future__ import annotations
 
 import argparse
+import functools
+import inspect
 import ipaddress
 import os
 import sys
-from collections.abc import AsyncIterator, Callable
+import time
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
+from ...config.observability import resolve_observability_config
 from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
+from ...observability import (
+    bind_root,
+    bootstrap,
+    is_observability_enabled,
+    operation,
+    payload_capture_enabled,
+    shutdown,
+)
 from .auth import (
     MCP_AUTH_TOKEN_ENV,
     MCPAuthConfigurationError,
@@ -137,6 +150,7 @@ from .messages.params import (
     ThresholdIntParam,
     TtlSecondsParam,
 )
+from .payloads import measure_payload
 from .service import CodeCloneMCPService
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -166,6 +180,50 @@ class MCPDependencyError(RuntimeError):
 
 
 MCPCallable = TypeVar("MCPCallable", bound=Callable[..., object])
+
+
+def _observability_session_id() -> str:
+    """Stable per-process id grouping every operation from this MCP server."""
+    return f"mcp:{os.getpid()}:{int(time.time())}"
+
+
+def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
+    """Wrap a registered MCP tool so each call records an observability operation
+    with request/response payload sizes (bytes + tokens).
+
+    Inert direct passthrough when observability is disabled. Signature-preserving
+    (``functools.wraps`` + explicit ``__signature__``) so FastMCP schema
+    introspection — and the tool-schema snapshot — stay unchanged.
+    """
+    tool_name = getattr(func, "__name__", "tool")
+
+    @functools.wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> object:
+        if not is_observability_enabled():
+            return func(*args, **kwargs)
+        root = kwargs.get("root")
+        if isinstance(root, str) and root:
+            bind_root(Path(root))
+        with operation(name=f"mcp.{tool_name}", surface="mcp") as op:
+            if payload_capture_enabled():
+                request_bytes, request_tokens = measure_payload(kwargs)
+                op.set_request(
+                    request_bytes=request_bytes, request_tokens=request_tokens
+                )
+            result = func(*args, **kwargs)
+            if payload_capture_enabled() and isinstance(result, Mapping):
+                response_bytes, response_tokens = measure_payload(result)
+                op.set_response(
+                    response_bytes=response_bytes, response_tokens=response_tokens
+                )
+            return result
+
+    # eval_str resolves the tool's string annotations (PEP 563) into real types
+    # so FastMCP/Pydantic build the same input schema as the unwrapped handler.
+    wrapper.__signature__ = inspect.signature(  # type: ignore[attr-defined]
+        func, eval_str=True
+    )
+    return wrapper
 
 
 def _load_mcp_runtime() -> tuple[
@@ -250,11 +308,16 @@ def build_mcp_server(
         history_limit=_validated_history_limit(history_limit),
         ide_governance_channel=ide_governance_channel,
     )
+    # Freeze the env-resolved observability decision for this server process
+    # (default OFF). Root-less here; the registrar binds the store to the first
+    # tool call that carries a root.
+    bootstrap(resolve_observability_config(), session_id=_observability_session_id())
 
     @asynccontextmanager
     async def _lifespan(_app: FastMCP) -> AsyncIterator[dict[str, object]]:
         yield {}
         service.shutdown_cleanup()
+        shutdown()
 
     token_verifier = None
     auth_settings = None
@@ -287,7 +350,7 @@ def build_mcp_server(
         decorator = mcp.tool(*args, **kwargs)  # type: ignore[arg-type]
 
         def register(func: MCPCallable) -> MCPCallable:
-            decorator(func)
+            decorator(_instrument_tool(func))
             return func
 
         return register
