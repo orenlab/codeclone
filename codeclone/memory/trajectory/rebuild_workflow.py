@@ -34,6 +34,7 @@ class RebuildTrajectoriesCounts(TypedDict):
 class RebuildTrajectoriesOkPayload(RebuildTrajectoriesMeta, RebuildTrajectoriesCounts):
     status: Literal["ok"]
     run_id: str
+    mode: Literal["full", "incremental"]
 
 
 class RebuildTrajectoriesSkippedPayload(
@@ -55,6 +56,7 @@ def execute_trajectory_rebuild(
     config: MemoryConfig,
     store: SqliteEngineeringMemoryStore | None = None,
     project: MemoryProject | None = None,
+    incremental_after_event_core_id: int | None = None,
 ) -> RebuildTrajectoriesPayload:
     from .models import TRAJECTORY_PROJECTION_VERSION
 
@@ -94,19 +96,31 @@ def execute_trajectory_rebuild(
             root_path=root_path,
             value=DEFAULT_AUDIT_PATH,
         )
-        result: TrajectoryProjectionResult = (
-            active_store.rebuild_trajectories_from_audit(
+        mode: Literal["full", "incremental"]
+        if incremental_after_event_core_id is None:
+            mode = "full"
+            result: TrajectoryProjectionResult = (
+                active_store.rebuild_trajectories_from_audit(
+                    project=resolved_project,
+                    root_path=root_path,
+                    audit_db_path=audit_db_path,
+                )
+            )
+        else:
+            mode = "incremental"
+            result = active_store.rebuild_trajectories_incremental(
                 project=resolved_project,
                 root_path=root_path,
                 audit_db_path=audit_db_path,
+                after_event_core_id=incremental_after_event_core_id,
             )
-        )
     finally:
         if owns_store and active_store is not None:
             active_store.close()
     return {
         **base,
         "status": "ok",
+        "mode": mode,
         "run_id": result.run.id,
         "workflows_seen": result.run.workflows_seen,
         "trajectories_created": result.run.trajectories_created,

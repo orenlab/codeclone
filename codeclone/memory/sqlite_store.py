@@ -111,6 +111,24 @@ class SqliteEngineeringMemoryStore:
             audit_db_path=audit_db_path,
         )
 
+    def rebuild_trajectories_incremental(
+        self,
+        *,
+        project: MemoryProject,
+        root_path: Path,
+        audit_db_path: Path,
+        after_event_core_id: int,
+    ) -> TrajectoryProjectionResult:
+        from .trajectory.store import rebuild_trajectories_incremental
+
+        return rebuild_trajectories_incremental(
+            conn=self._conn,
+            project=project,
+            root_path=root_path,
+            audit_db_path=audit_db_path,
+            after_event_core_id=after_event_core_id,
+        )
+
     def count_trajectories(self, *, project_id: str) -> int:
         from .trajectory.store import count_trajectories
 

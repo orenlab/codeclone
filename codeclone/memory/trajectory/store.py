@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import sqlite3
 import uuid
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from ...audit.events import repo_root_digest
 from ...audit.reader import (
     AuditRecord,
     count_audit_event_core_gaps,
+    list_workflow_ids_with_events_after,
     read_audit_event_core_records,
 )
 from ...report.meta import current_report_timestamp_utc
@@ -40,6 +41,108 @@ from .projector import project_trajectory
 from .quality import apply_trajectory_quality_score
 
 
+def _project_and_upsert_workflow(
+    conn: sqlite3.Connection,
+    *,
+    project: MemoryProject,
+    root_digest: str,
+    workflow_id: str,
+    records: Sequence[AuditRecord],
+    projection_version: str,
+    projected_at_utc: str,
+) -> tuple[Trajectory, str]:
+    """Project one workflow's audit records into a trajectory and upsert it.
+
+    Single source of truth for the per-workflow projection used by both the
+    full and the incremental rebuild; returns the trajectory and the upsert
+    action ("created" / "updated" / "unchanged").
+    """
+    patch_trail = project_patch_trail_from_audit(
+        records=records,
+        repo_root_digest=root_digest,
+    )
+    patch_trail_digest = (
+        patch_trail.patch_trail_digest if patch_trail is not None else None
+    )
+    trajectory = project_trajectory(
+        project_id=project.id,
+        repo_root_digest=root_digest,
+        workflow_id=workflow_id,
+        records=records,
+        projection_version=projection_version,
+        projected_at_utc=projected_at_utc,
+        patch_trail_digest=patch_trail_digest,
+    )
+    patch_payload = (
+        patch_trail._canonical_dict(include_digest=True)
+        if patch_trail is not None
+        else None
+    )
+    trajectory = apply_trajectory_quality_score(
+        trajectory,
+        patch_trail_payload=patch_payload,
+        patch_trail_digest=patch_trail_digest,
+    )
+    action = upsert_trajectory(conn, trajectory)
+    if patch_trail is not None:
+        upsert_trajectory_patch_trail(
+            conn,
+            trajectory_id=trajectory.id,
+            patch_trail_json=_json_object(
+                patch_trail._canonical_dict(include_digest=True)
+            ),
+            patch_trail_digest=patch_trail.patch_trail_digest,
+            schema_version=patch_trail.schema_version,
+            projected_at_utc=projected_at_utc,
+        )
+    supersede_stale_projection_trajectories(
+        conn,
+        project_id=project.id,
+        workflow_id=workflow_id,
+        keep_trajectory_id=trajectory.id,
+        keep_trajectory_digest=trajectory.trajectory_digest,
+    )
+    return trajectory, action
+
+
+def _finalize_projection_run(
+    conn: sqlite3.Connection,
+    *,
+    project: MemoryProject,
+    root_digest: str,
+    projection_version: str,
+    started_at_utc: str,
+    workflow_count: int,
+    actions: Counter[str],
+    trajectories: Sequence[Trajectory],
+    legacy_event_count: int,
+) -> TrajectoryProjectionResult:
+    run = TrajectoryProjectionRun(
+        id=_projection_run_id(
+            project_id=project.id,
+            repo_root_digest=root_digest,
+            projection_version=projection_version,
+            started_at_utc=started_at_utc,
+            workflow_count=workflow_count,
+        ),
+        project_id=project.id,
+        repo_root_digest=root_digest,
+        projection_version=projection_version,
+        started_at_utc=started_at_utc,
+        finished_at_utc=current_report_timestamp_utc(),
+        status="ok",
+        workflows_seen=workflow_count,
+        trajectories_created=actions["created"],
+        trajectories_updated=actions["updated"],
+        trajectories_unchanged=actions["unchanged"],
+        legacy_event_count=legacy_event_count,
+        message=None,
+    )
+    write_projection_run(conn, run)
+    conn.commit()
+    return TrajectoryProjectionResult(run=run, trajectories=tuple(trajectories))
+
+
 def rebuild_trajectories_from_audit(
     *,
     conn: sqlite3.Connection,
@@ -59,86 +162,92 @@ def rebuild_trajectories_from_audit(
         repo_root_digest=root_digest,
     )
     grouped = _group_by_workflow(events)
-    created = updated = unchanged = 0
+    actions: Counter[str] = Counter()
     trajectories: list[Trajectory] = []
     for workflow_id, records in grouped.items():
-        patch_trail = project_patch_trail_from_audit(
-            records=records,
-            repo_root_digest=root_digest,
-        )
-        patch_trail_digest = (
-            patch_trail.patch_trail_digest if patch_trail is not None else None
-        )
-        trajectory = project_trajectory(
-            project_id=project.id,
-            repo_root_digest=root_digest,
+        trajectory, action = _project_and_upsert_workflow(
+            conn,
+            project=project,
+            root_digest=root_digest,
             workflow_id=workflow_id,
             records=records,
             projection_version=projection_version,
             projected_at_utc=started,
-            patch_trail_digest=patch_trail_digest,
         )
-        patch_payload = (
-            patch_trail._canonical_dict(include_digest=True)
-            if patch_trail is not None
-            else None
-        )
-        trajectory = apply_trajectory_quality_score(
-            trajectory,
-            patch_trail_payload=patch_payload,
-            patch_trail_digest=patch_trail_digest,
-        )
-        action = upsert_trajectory(conn, trajectory)
-        if patch_trail is not None:
-            upsert_trajectory_patch_trail(
-                conn,
-                trajectory_id=trajectory.id,
-                patch_trail_json=_json_object(
-                    patch_trail._canonical_dict(include_digest=True)
-                ),
-                patch_trail_digest=patch_trail.patch_trail_digest,
-                schema_version=patch_trail.schema_version,
-                projected_at_utc=started,
-            )
-        supersede_stale_projection_trajectories(
-            conn,
-            project_id=project.id,
-            workflow_id=workflow_id,
-            keep_trajectory_id=trajectory.id,
-            keep_trajectory_digest=trajectory.trajectory_digest,
-        )
-        if action == "created":
-            created += 1
-        elif action == "updated":
-            updated += 1
-        else:
-            unchanged += 1
+        actions[action] += 1
         trajectories.append(trajectory)
-    finished = current_report_timestamp_utc()
-    run = TrajectoryProjectionRun(
-        id=_projection_run_id(
-            project_id=project.id,
-            repo_root_digest=root_digest,
-            projection_version=projection_version,
-            started_at_utc=started,
-            workflow_count=len(grouped),
-        ),
-        project_id=project.id,
-        repo_root_digest=root_digest,
+    return _finalize_projection_run(
+        conn,
+        project=project,
+        root_digest=root_digest,
         projection_version=projection_version,
         started_at_utc=started,
-        finished_at_utc=finished,
-        status="ok",
-        workflows_seen=len(grouped),
-        trajectories_created=created,
-        trajectories_updated=updated,
-        trajectories_unchanged=unchanged,
+        workflow_count=len(grouped),
+        actions=actions,
+        trajectories=trajectories,
         legacy_event_count=legacy_event_count,
-        message=None,
     )
-    write_projection_run(conn, run)
-    conn.commit()
-    return TrajectoryProjectionResult(run=run, trajectories=tuple(trajectories))
+
+
+def rebuild_trajectories_incremental(
+    *,
+    conn: sqlite3.Connection,
+    project: MemoryProject,
+    root_path: Path,
+    audit_db_path: Path,
+    after_event_core_id: int,
+    projection_version: str = TRAJECTORY_PROJECTION_VERSION,
+) -> TrajectoryProjectionResult:
+    """Re-project only workflows with audit events newer than the watermark.
+
+    The audit trail is append-only, so workflows untouched since
+    ``after_event_core_id`` are byte-identical and skipped entirely. Each
+    changed workflow is re-read in full (its complete event set) and projected
+    through the same path as the full rebuild, preserving digest-stable upserts.
+    """
+    root_digest = repo_root_digest(root_path.resolve())
+    started = current_report_timestamp_utc()
+    workflow_ids = list_workflow_ids_with_events_after(
+        db_path=audit_db_path,
+        repo_root_digest=root_digest,
+        after_id=after_event_core_id,
+    )
+    legacy_event_count = count_audit_event_core_gaps(
+        db_path=audit_db_path,
+        repo_root_digest=root_digest,
+    )
+    actions: Counter[str] = Counter()
+    trajectories: list[Trajectory] = []
+    for workflow_id in workflow_ids:
+        records = read_audit_event_core_records(
+            db_path=audit_db_path,
+            repo_root_digest=root_digest,
+            workflow_id=workflow_id,
+        )
+        if not records:
+            continue
+        trajectory, action = _project_and_upsert_workflow(
+            conn,
+            project=project,
+            root_digest=root_digest,
+            workflow_id=workflow_id,
+            records=records,
+            projection_version=projection_version,
+            projected_at_utc=started,
+        )
+        actions[action] += 1
+        trajectories.append(trajectory)
+    return _finalize_projection_run(
+        conn,
+        project=project,
+        root_digest=root_digest,
+        projection_version=projection_version,
+        started_at_utc=started,
+        workflow_count=len(workflow_ids),
+        actions=actions,
+        trajectories=trajectories,
+        legacy_event_count=legacy_event_count,
+    )
 
 
 def upsert_trajectory(conn: sqlite3.Connection, trajectory: Trajectory) -> str:
@@ -781,6 +890,7 @@ __all__ = [
     "list_trajectories_for_subjects",
     "load_trajectory_patch_trail",
     "rebuild_trajectories_from_audit",
+    "rebuild_trajectories_incremental",
     "search_trajectories",
     "upsert_trajectory",
     "upsert_trajectory_patch_trail",

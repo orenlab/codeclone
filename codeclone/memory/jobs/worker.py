@@ -32,6 +32,30 @@ class ProjectionWorkerResult:
     semantic_status: str | None
 
 
+def _trajectory_incremental_watermark(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+) -> int | None:
+    """Event-core id to rebuild trajectories incrementally after, or None to
+    force a full rebuild (first run, projection-version change, or no watermark).
+
+    The watermark is the ``event_core_max_id`` of the last applied stimulus; the
+    append-only audit trail guarantees workflows with no newer event are
+    byte-identical, so they need not be re-projected.
+    """
+    from ..trajectory.models import TRAJECTORY_PROJECTION_VERSION
+    from .staleness import last_applied_stimulus
+
+    applied = last_applied_stimulus(conn, project_id=project_id)
+    if applied is None:
+        return None
+    if applied.get("trajectory_projection_version") != TRAJECTORY_PROJECTION_VERSION:
+        return None
+    watermark = applied.get("event_core_max_id")
+    return watermark if isinstance(watermark, int) else None
+
+
 def run_projection_job(
     conn: sqlite3.Connection,
     *,
@@ -45,6 +69,9 @@ def run_projection_job(
         root_path=root_path,
         config=config,
         project=project,
+        incremental_after_event_core_id=_trajectory_incremental_watermark(
+            conn, project_id=project.id
+        ),
     )
     semantic_payload = execute_semantic_index_rebuild(
         root_path=root_path,

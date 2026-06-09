@@ -319,6 +319,42 @@ def read_audit_event_core_records(
     return tuple(_record_from_row(row) for row in rows)
 
 
+def list_workflow_ids_with_events_after(
+    *,
+    db_path: Path,
+    repo_root_digest: str,
+    after_id: int,
+) -> tuple[str, ...]:
+    """Distinct workflow_ids with a projectable event-core row newer than
+    ``after_id`` (same filters as read_audit_event_core_records), ascending.
+
+    The audit trail is append-only with monotonic ids, so this yields exactly
+    the workflows changed since the watermark — the input to an incremental
+    trajectory rebuild. A missing audit DB yields ``()``.
+    """
+    if not db_path.is_file():
+        return ()
+    try:
+        conn = sqlite3.connect(str(db_path))
+    except sqlite3.Error as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        ensure_schema(conn)
+        rows = conn.execute(
+            "SELECT DISTINCT workflow_id FROM controller_events "
+            "WHERE repo_root_digest = ? AND id > ? "
+            "AND workflow_id IS NOT NULL AND workflow_id != '' "
+            "AND event_core_json IS NOT NULL AND event_core_sha256 IS NOT NULL "
+            "ORDER BY workflow_id ASC",
+            (repo_root_digest, after_id),
+        ).fetchall()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+    return tuple(str(row[0]) for row in rows)
+
+
 def count_audit_event_core_gaps(
     *,
     db_path: Path,
