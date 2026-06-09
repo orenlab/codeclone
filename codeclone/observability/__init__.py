@@ -8,8 +8,28 @@
 
 A runtime-profiling plane separate from audit truth, the analysis report, and
 the memory store: operations and stage spans for CLI / MCP / projection workers.
-Default OFF, bounded, deterministic shape. The write API (``runtime``) lands in
-Cycle 2b; this package currently exposes the data model and the sqlite store.
+Default OFF, bounded, deterministic shape. ``bootstrap`` once per process, then
+wrap work in ``operation`` / ``span``.
 """
 
 from __future__ import annotations
+
+from .runtime import (
+    OperationHandle,
+    SpanHandle,
+    bootstrap,
+    is_observability_enabled,
+    operation,
+    shutdown,
+    span,
+)
+
+__all__ = [
+    "OperationHandle",
+    "SpanHandle",
+    "bootstrap",
+    "is_observability_enabled",
+    "operation",
+    "shutdown",
+    "span",
+]
