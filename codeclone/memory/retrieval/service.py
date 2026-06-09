@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal, cast
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
 from ..embedding import embed_query
-from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
+from ..enums import LinkRelation, MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
 from ..experience.models import Experience
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
@@ -334,6 +334,65 @@ def _serialize_record_summary(
     return payload
 
 
+# Bounded down-rank for a record refuted by a 1-hop neighbour; mirrors the
+# stale -0.5 lever. Truth is corrected, never silently returned.
+_CONFLICT_PENALTY = 0.5
+_CONFLICT_RELATIONS: tuple[LinkRelation, ...] = ("contradicts", "supersedes")
+
+
+def _record_relations(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    record_ids: Sequence[str],
+) -> dict[str, dict[str, list[str]]]:
+    """1-hop contradicts/supersedes neighbours per record (deterministic).
+
+    The other endpoint may be outside ``record_ids``; it is surfaced as a
+    relation id, never promoted into the result set.
+    """
+    links = store.list_links_for_records(
+        project_id=project_id,
+        record_ids=record_ids,
+        relations=_CONFLICT_RELATIONS,
+    )
+    raw: dict[str, dict[str, set[str]]] = {}
+
+    def bucket(record_id: str) -> dict[str, set[str]]:
+        return raw.setdefault(
+            record_id,
+            {"contradicted_by": set(), "superseded_by": set(), "supersedes": set()},
+        )
+
+    for link in links:
+        if link.relation == "contradicts":
+            bucket(link.from_memory_id)["contradicted_by"].add(link.to_memory_id)
+            bucket(link.to_memory_id)["contradicted_by"].add(link.from_memory_id)
+        else:  # supersedes
+            bucket(link.from_memory_id)["supersedes"].add(link.to_memory_id)
+            bucket(link.to_memory_id)["superseded_by"].add(link.from_memory_id)
+
+    wanted = set(record_ids)
+    relations: dict[str, dict[str, list[str]]] = {}
+    for record_id, groups in raw.items():
+        if record_id not in wanted:
+            continue
+        compact = {key: sorted(values) for key, values in groups.items() if values}
+        if compact:
+            relations[record_id] = compact
+    return relations
+
+
+def _apply_conflict_penalty(
+    score: float, relations: dict[str, list[str]] | None
+) -> float:
+    if relations is not None and (
+        relations.get("contradicted_by") or relations.get("superseded_by")
+    ):
+        return round(score - _CONFLICT_PENALTY, 4)
+    return score
+
+
 def _rank_records(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -345,7 +404,7 @@ def _rank_records(
     proximity: Mapping[str, float] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
     proximity_map = proximity or {}
-    scored: list[tuple[float, str, dict[str, object]]] = []
+    base: list[tuple[float, MemoryRecord, list[MemorySubject], int]] = []
     for record in candidates:
         subjects = store.list_subjects_for_memory(record.id)
         evidence_count = store.count_evidence_for_memory(record.id)
@@ -358,23 +417,27 @@ def _rank_records(
         )
         if score <= 0.0 and (context.scope_paths or context.symbols):
             continue
-        scored.append(
-            (
-                score,
-                record.id,
-                _serialize_record_summary(
-                    record=record,
-                    subjects=subjects,
-                    evidence_count=evidence_count,
-                    relevance_score=score,
-                    detail_level=detail_level,
-                ),
-            )
+        base.append((score, record, subjects, evidence_count))
+    relations = _record_relations(
+        store, project_id=project_id, record_ids=[item[1].id for item in base]
+    )
+    scored: list[tuple[float, str, dict[str, object]]] = []
+    for score, record, subjects, evidence_count in base:
+        record_relations = relations.get(record.id)
+        adjusted = _apply_conflict_penalty(score, record_relations)
+        summary = _serialize_record_summary(
+            record=record,
+            subjects=subjects,
+            evidence_count=evidence_count,
+            relevance_score=adjusted,
+            detail_level=detail_level,
         )
+        if record_relations is not None:
+            summary["relations"] = record_relations
+        scored.append((adjusted, record.id, summary))
     scored.sort(key=lambda item: (-item[0], item[1]))
     truncated = len(scored) > max_records
-    selected = scored[:max_records]
-    return [item[2] for item in selected], truncated
+    return [item[2] for item in scored[:max_records]], truncated
 
 
 def _coverage_summary(

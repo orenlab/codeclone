@@ -10,8 +10,10 @@ import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
+from typing import cast
 
 from ..report.meta import current_report_timestamp_utc
+from .enums import LinkRelation
 from .experience.models import Experience
 from .locks import memory_init_lock
 from .models import (
@@ -748,6 +750,46 @@ class SqliteEngineeringMemoryStore:
                 link.created_at_utc,
             ),
         )
+
+    def list_links_for_records(
+        self,
+        *,
+        project_id: str,
+        record_ids: Sequence[str],
+        relations: Sequence[LinkRelation],
+    ) -> list[MemoryLink]:
+        """Typed links (in either direction) touching the given records.
+
+        The 1-hop neighbourhood for honest retrieval: deterministic order, the
+        other endpoint may be outside the queried set (surfaced as a relation,
+        never as a new scope hit).
+        """
+        ids = list(record_ids)
+        rels = list(relations)
+        if not ids or not rels:
+            return []
+        id_ph = ",".join("?" * len(ids))
+        rel_ph = ",".join("?" * len(rels))
+        rows = self._conn.execute(
+            "SELECT id, project_id, from_memory_id, to_memory_id, relation, "
+            "created_by, created_at_utc FROM memory_links "
+            f"WHERE project_id=? AND relation IN ({rel_ph}) "
+            f"AND (from_memory_id IN ({id_ph}) OR to_memory_id IN ({id_ph})) "
+            "ORDER BY from_memory_id ASC, to_memory_id ASC, relation ASC",
+            (project_id, *rels, *ids, *ids),
+        ).fetchall()
+        return [
+            MemoryLink(
+                id=str(row["id"]),
+                project_id=str(row["project_id"]),
+                from_memory_id=str(row["from_memory_id"]),
+                to_memory_id=str(row["to_memory_id"]),
+                relation=cast(LinkRelation, str(row["relation"])),
+                created_by=str(row["created_by"]),
+                created_at_utc=str(row["created_at_utc"]),
+            )
+            for row in rows
+        ]
 
     def write_ingestion_run(self, run: IngestionRun) -> None:
         self._conn.execute(
