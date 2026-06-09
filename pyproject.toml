@@ -126,6 +126,8 @@ packages = [
     "codeclone.memory.retrieval",
     "codeclone.memory.semantic",
     "codeclone.memory.trajectory",
+    "codeclone.observability",
+    "codeclone.observability.store",
     "codeclone.paths",
     "codeclone.qualnames",
     "codeclone.report",
