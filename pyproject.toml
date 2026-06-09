@@ -84,6 +84,9 @@ semantic-local = [
     "lancedb>=0.33.0",
     "fastembed>=0.8.0,<0.9",
 ]
+perf = [
+    "psutil>=6,<7",
+]
 dev = [
     "pytest>=9.0.3",
     "pytest-cov>=7.1.0",
@@ -244,6 +247,12 @@ module = [
     "codeclone.surfaces.mcp._session_workflow_mixin",
 ]
 disable_error_code = ["attr-defined", "misc"]
+
+[[tool.mypy.overrides]]
+# psutil is an optional dependency (codeclone[perf]); allow mypy to pass whether
+# or not it is installed in the checking environment.
+module = ["psutil"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 88

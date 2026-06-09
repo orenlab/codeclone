@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config.observability import ObservabilityConfig, resolve_observability_config
-from .models import OperationRecord, SpanRecord
+from .models import OperationRecord, ProfileSample, SpanRecord
 from .reason_kind import ReasonKind
 
 _ENABLED: bool = False
@@ -89,7 +89,9 @@ class OperationHandle:
         if response_tokens is not None:
             self._response_tokens = response_tokens
 
-    def _to_record(self, *, duration_ms: float) -> OperationRecord:
+    def _to_record(
+        self, *, duration_ms: float, profile: ProfileSample | None = None
+    ) -> OperationRecord:
         return OperationRecord(
             operation_id=self.operation_id,
             correlation_id=self.correlation_id,
@@ -106,6 +108,7 @@ class OperationHandle:
             response_bytes=self._response_bytes,
             request_tokens=self._request_tokens,
             response_tokens=self._response_tokens,
+            profile=profile,
             spans=tuple(self._spans),
         )
 
@@ -150,7 +153,9 @@ class SpanHandle:
     def set_reason_kind(self, reason_kind: ReasonKind) -> None:
         self._reason_kind = reason_kind
 
-    def _to_record(self, *, duration_ms: float) -> SpanRecord:
+    def _to_record(
+        self, *, duration_ms: float, profile: ProfileSample | None = None
+    ) -> SpanRecord:
         return SpanRecord(
             span_id=self.span_id,
             operation_id=self._operation_id,
@@ -163,6 +168,7 @@ class SpanHandle:
             reason=self._reason,
             dedupe_key=self._dedupe_key,
             counters=dict(self._counters),
+            profile=profile,
         )
 
 
@@ -287,6 +293,24 @@ def payload_capture_enabled() -> bool:
     )
 
 
+def _profile_baseline() -> tuple[int, float, float] | None:
+    """Capture an rss/cpu baseline when profiling is on (else None, no psutil)."""
+    runtime = _RUNTIME
+    if _ENABLED and runtime is not None and runtime.config.profile:
+        from .profile import capture_rss_cpu
+
+        return capture_rss_cpu()
+    return None
+
+
+def _profile_sample(baseline: tuple[int, float, float] | None) -> ProfileSample | None:
+    if baseline is None:
+        return None
+    from .profile import build_profile_sample
+
+    return build_profile_sample(baseline)
+
+
 @contextmanager
 def operation(
     *,
@@ -313,6 +337,7 @@ def operation(
         repo_root_digest=repo_root_digest,
     )
     token = _CURRENT_OP.set(handle)
+    baseline = _profile_baseline()
     start = time.perf_counter()
     try:
         yield handle
@@ -323,7 +348,11 @@ def operation(
     finally:
         duration_ms = (time.perf_counter() - start) * 1000.0
         _CURRENT_OP.reset(token)
-        runtime.persist(handle._to_record(duration_ms=duration_ms))
+        runtime.persist(
+            handle._to_record(
+                duration_ms=duration_ms, profile=_profile_sample(baseline)
+            )
+        )
 
 
 @contextmanager
@@ -351,6 +380,7 @@ def span(
         dedupe_key=dedupe_key,
     )
     token = _CURRENT_SPAN.set(handle)
+    baseline = _profile_baseline()
     start = time.perf_counter()
     try:
         yield handle
@@ -360,7 +390,11 @@ def span(
     finally:
         duration_ms = (time.perf_counter() - start) * 1000.0
         _CURRENT_SPAN.reset(token)
-        parent_op._spans.append(handle._to_record(duration_ms=duration_ms))
+        parent_op._spans.append(
+            handle._to_record(
+                duration_ms=duration_ms, profile=_profile_sample(baseline)
+            )
+        )
 
 
 __all__ = [
