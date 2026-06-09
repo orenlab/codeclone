@@ -237,6 +237,11 @@ class SqliteEngineeringMemoryStore:
 
         return count_experiences(self._conn, project_id=project_id)
 
+    def find_experience(self, experience_id: str) -> Experience | None:
+        from .experience.store import find_experience
+
+        return find_experience(self._conn, experience_id=experience_id)
+
     @property
     def connection(self) -> sqlite3.Connection:
         return self._conn

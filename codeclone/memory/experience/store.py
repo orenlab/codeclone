@@ -126,6 +126,19 @@ def list_experiences_for_subject_family(
     return [_row_to_experience(conn, row) for row in rows]
 
 
+def find_experience(
+    conn: sqlite3.Connection,
+    *,
+    experience_id: str,
+) -> Experience | None:
+    _use_row_factory(conn)
+    row = conn.execute(
+        "SELECT * FROM memory_experiences WHERE id=?",
+        (experience_id,),
+    ).fetchone()
+    return _row_to_experience(conn, row) if row is not None else None
+
+
 def _facets_for_experience(
     conn: sqlite3.Connection,
     experience_id: str,
@@ -206,6 +219,7 @@ def _status(value: str) -> ExperienceStatus:
 
 __all__ = [
     "count_experiences",
+    "find_experience",
     "list_experiences",
     "list_experiences_for_subject_family",
     "replace_experiences",

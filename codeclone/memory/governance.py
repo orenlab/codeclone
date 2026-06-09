@@ -410,6 +410,52 @@ def _statement_length_warnings(
     return ()
 
 
+def _new_draft_record(
+    *,
+    project: MemoryProject,
+    record_type: MemoryRecordType,
+    identity: str,
+    statement: str,
+    payload: dict[str, object],
+    now: str,
+    created_by: str,
+    code_fingerprint: str | None,
+    created_on_branch: str | None,
+    created_at_commit: str | None,
+) -> MemoryRecord:
+    """Build a draft agent record with the shared field defaults (status=draft,
+    confidence=inferred, origin=agent). Single source for the draft shape used by
+    record_candidate and promote_experience."""
+    return MemoryRecord(
+        id=generate_memory_id(),
+        project_id=project.id,
+        identity_key=identity,
+        type=record_type,
+        status="draft",
+        confidence="inferred",
+        origin="agent",
+        ingest_source="agent",
+        statement=statement,
+        summary=None,
+        payload=payload,
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by=created_by,
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=code_fingerprint,
+        stale_reason=None,
+        created_on_branch=created_on_branch,
+        created_at_commit=created_at_commit,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+
+
 def record_candidate(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -461,33 +507,17 @@ def record_candidate(
     )
     anchor_available = git.available and code_fingerprint is not None
 
-    record = MemoryRecord(
-        id=generate_memory_id(),
-        project_id=project.id,
-        identity_key=identity,
-        type=record_type,
-        status="draft",
-        confidence="inferred",
-        origin="agent",
-        ingest_source="agent",
+    record = _new_draft_record(
+        project=project,
+        record_type=record_type,
+        identity=identity,
         statement=stripped,
-        summary=None,
         payload={"subject_path": normalized_path},
-        created_at_utc=now,
-        updated_at_utc=now,
-        last_verified_at_utc=now,
-        expires_at_utc=None,
+        now=now,
         created_by=created_by,
-        verified_by=None,
-        approved_by=None,
-        approved_at_utc=None,
-        report_digest=None,
         code_fingerprint=code_fingerprint,
-        stale_reason=None,
         created_on_branch=git.branch if anchor_available else None,
         created_at_commit=git.head if anchor_available else None,
-        verified_on_branch=None,
-        verified_at_commit=None,
     )
     store.write_record(record)
     from .paths import repo_path_to_module_key
@@ -510,6 +540,87 @@ def record_candidate(
             relation="about",
         )
     )
+    store.sync_fts_record(record.id)
+    store.commit()
+    return record
+
+
+def promote_experience(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project: MemoryProject,
+    experience_id: str,
+    record_type: MemoryRecordType = "risk_note",
+    created_by: str = "agent",
+    max_candidates: int,
+) -> MemoryRecord:
+    """Promote a distilled Experience into a human-approvable draft record.
+
+    The draft carries the experience statement and one ``evidence_kind=trajectory``
+    row per proof trajectory, then follows the normal draft -> human approve path.
+    Idempotent: re-promoting the same experience is rejected. The experience keeps
+    informing agents advisorily whether or not it is ever promoted.
+    """
+    experience = store.find_experience(experience_id)
+    if experience is None or experience.project_id != project.id:
+        raise MemoryContractError(f"Experience not found: {experience_id}")
+    draft_count = store.count_records_by_status(project.id, "draft")
+    if draft_count >= max_candidates:
+        raise MemoryCapacityError(
+            f"max_candidates_reached: {draft_count}/{max_candidates}"
+        )
+    now = current_report_timestamp_utc()
+    family = experience.subject_family
+    identity = make_identity_key(
+        type=record_type,
+        subject_kind="path",
+        subject_key=family.replace("/", "."),
+        discriminator=f"experience:{experience.experience_digest[:12]}",
+    )
+    existing = store.find_by_identity_key(project.id, identity)
+    if existing is not None:
+        raise MemoryContractError(f"Experience already promoted: record={existing.id}")
+    git = read_git_provenance(Path(project.root).resolve())
+    record = _new_draft_record(
+        project=project,
+        record_type=record_type,
+        identity=identity,
+        statement=experience.statement,
+        payload={
+            "subject_path": family,
+            "promoted_from_experience": experience.id,
+            "experience_digest": experience.experience_digest,
+            "support": experience.support,
+        },
+        now=now,
+        created_by=created_by,
+        code_fingerprint=None,
+        created_on_branch=git.branch if git.available else None,
+        created_at_commit=git.head if git.available else None,
+    )
+    store.write_record(record)
+    store.write_subject(
+        MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key=family,
+            relation="about",
+        )
+    )
+    for item in experience.evidence:
+        store.write_evidence(
+            MemoryEvidence(
+                id=generate_memory_id(prefix="evid"),
+                memory_id=record.id,
+                evidence_kind="trajectory",
+                ref=item.trajectory_id,
+                locator=None,
+                quote=None,
+                digest=None,
+                created_at_utc=now,
+            )
+        )
     store.sync_fts_record(record.id)
     store.commit()
     return record
@@ -547,6 +658,7 @@ __all__ = [
     "ClaimValidationResult",
     "approve_record",
     "archive_record",
+    "promote_experience",
     "record_candidate",
     "reject_record",
     "validate_memory_claims",
