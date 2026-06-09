@@ -67,9 +67,11 @@ QUERY_ENGINEERING_MEMORY: Final = (
 
 MANAGE_ENGINEERING_MEMORY: Final = (
     "Engineering memory governance. Agent actions: refresh_from_run, "
-    "record_candidate, validate_claims, propose_from_receipt, "
+    "record_candidate, promote_experience, validate_claims, propose_from_receipt, "
     "rebuild_semantic_index, rebuild_trajectories, enqueue_projection_rebuild, "
     "projection_rebuild_status, run_projection_jobs_once. "
+    "promote_experience(experience_id) turns a distilled experience into a "
+    "human-approvable draft. "
     "approve/reject/archive are not available to agents — use VS Code Memory view."
 )
 

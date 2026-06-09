@@ -180,6 +180,7 @@ class _MCPSessionMemoryMixin:
         intent_id: str | None = None,
         run_id: str | None = None,
         record_id: str | None = None,
+        experience_id: str | None = None,
         decision: str | None = None,
         ide_governance_key: str | None = None,
         client_name: str | None = None,
@@ -312,6 +313,17 @@ class _MCPSessionMemoryMixin:
                     )
                 finally:
                     store.close()
+            if normalized == "promote_experience":
+                store, _db_path, config, project = self._open_memory_store(root_path)
+                try:
+                    return self._manage_memory_promote_experience(
+                        store,
+                        project=project,
+                        config=config,
+                        experience_id=experience_id,
+                    )
+                finally:
+                    store.close()
             if normalized == "validate_claims":
                 store, _db_path, _config, project = self._open_memory_store(root_path)
                 try:
@@ -336,6 +348,7 @@ class _MCPSessionMemoryMixin:
                     store.close()
             allowed = (
                 "record_candidate",
+                "promote_experience",
                 "validate_claims",
                 "propose_from_receipt",
                 "refresh_from_run",
@@ -387,6 +400,32 @@ class _MCPSessionMemoryMixin:
             "record_id": record.id,
             "status": record.status,
             "type": record.type,
+        }
+
+    def _manage_memory_promote_experience(
+        self,
+        store: SqliteEngineeringMemoryStore,
+        *,
+        project: MemoryProject,
+        config: MemoryConfig,
+        experience_id: str | None,
+    ) -> dict[str, object]:
+        from ...memory.governance import promote_experience
+
+        if not experience_id:
+            raise MCPServiceContractError("promote_experience requires experience_id.")
+        record = promote_experience(
+            store,
+            project=project,
+            experience_id=experience_id,
+            max_candidates=config.max_candidates,
+        )
+        return {
+            "action": "promote_experience",
+            "record_id": record.id,
+            "status": record.status,
+            "type": record.type,
+            "promoted_from_experience": experience_id,
         }
 
     def _manage_memory_validate_claims(

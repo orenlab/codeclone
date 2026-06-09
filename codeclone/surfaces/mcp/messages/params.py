@@ -464,7 +464,8 @@ ManageMemoryActionParam = Annotated[
     str,
     Field(
         description=(
-            "Agent: record_candidate, validate_claims, propose_from_receipt, "
+            "Agent: record_candidate, promote_experience, validate_claims, "
+            "propose_from_receipt, "
             "refresh_from_run, rebuild_semantic_index, rebuild_trajectories, "
             "enqueue_projection_rebuild, projection_rebuild_status, "
             "run_projection_jobs_once. "
@@ -472,6 +473,15 @@ ManageMemoryActionParam = Annotated[
             "register_ide_governance, "
             "prepare_governance, commit_governance. approve/reject/archive are not "
             "available through MCP."
+        ),
+    ),
+]
+ManageMemoryExperienceIdParam = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Experience id for manage_engineering_memory "
+            "action=promote_experience (required for that action)."
         ),
     ),
 ]
