@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal, cast
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
@@ -14,6 +15,7 @@ from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
 from ..embedding import embed_query
 from ..enums import MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError
+from ..experience.models import Experience
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
 from ..paths import (
     MEMORY_RETRIEVAL_SCOPE_REQUIRED_ERROR,
@@ -203,7 +205,75 @@ def _retrieval_policy(*, include_drafts: bool) -> dict[str, object]:
         "memory_does_not_authorize_edits": True,
         "memory_does_not_override_findings": True,
         "trajectories_do_not_authorize_edits": True,
+        "experiences_do_not_authorize_edits": True,
     }
+
+
+DEFAULT_EXPERIENCE_PREVIEW_LIMIT = 10
+
+
+def _scope_family(path: str) -> str | None:
+    """Directory family of a scope path — the experience subject_family unit."""
+    try:
+        normalized = normalize_repo_path(path)
+    except ValueError:
+        return None
+    parent = PurePosixPath(normalized).parent.as_posix()
+    return None if parent in {"", "."} else parent
+
+
+def _scope_families(scope_paths: Sequence[str]) -> frozenset[str]:
+    return frozenset(
+        family
+        for path in scope_paths
+        for family in (_scope_family(path),)
+        if family is not None
+    )
+
+
+def _serialize_experience(experience: Experience) -> dict[str, object]:
+    return {
+        "id": experience.id,
+        "subject_family": experience.subject_family,
+        "signal": experience.signal,
+        "outcome_class": experience.outcome_class,
+        "support": experience.support,
+        "information_value": experience.information_value,
+        "status": experience.status,
+        "statement": experience.statement,
+        "agent_facets": [
+            {"agent_family": facet.facet_value, "count": facet.count}
+            for facet in experience.facets
+            if facet.facet_kind == "agent_family"
+        ],
+        "evidence_trajectory_ids": [item.trajectory_id for item in experience.evidence],
+    }
+
+
+def _relevant_experiences(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    families: frozenset[str],
+    max_results: int,
+) -> list[dict[str, object]]:
+    """Advisory experiences whose subject_family matches the scope, highest
+    support first. Dormant experiences are kept but never surfaced."""
+    if not families:
+        return []
+    matched = [
+        experience
+        for experience in store.list_experiences(project_id=project_id)
+        if experience.status == "active" and experience.subject_family in families
+    ]
+    matched.sort(
+        key=lambda experience: (
+            -experience.support,
+            -experience.information_value,
+            experience.id,
+        )
+    )
+    return [_serialize_experience(experience) for experience in matched[:max_results]]
 
 
 def _serialize_subject(subject: MemorySubject) -> dict[str, object]:
@@ -409,6 +479,12 @@ def get_relevant_memory(
         first_summary = trajectories_payload[0].get("patch_trail_summary")
         if isinstance(first_summary, dict):
             patch_trail_summary = first_summary
+    experiences_payload = _relevant_experiences(
+        store,
+        project_id=project_id,
+        families=_scope_families(normalized_scope),
+        max_results=min(max_records, DEFAULT_EXPERIENCE_PREVIEW_LIMIT),
+    )
     coverage: dict[str, object]
     if normalized_scope:
         coverage = _coverage_summary(
@@ -428,9 +504,11 @@ def get_relevant_memory(
         "scope_resolved_from": scope_resolved_from,
         "records": records_payload,
         "trajectories": trajectories_payload,
+        "experiences": experiences_payload,
         "patch_trail_summary": patch_trail_summary,
         "record_count": len(records_payload),
         "trajectory_count": len(trajectories_payload),
+        "experience_count": len(experiences_payload),
         "truncated": truncated,
         "trajectories_truncated": trajectories_truncated,
         "coverage": coverage,
