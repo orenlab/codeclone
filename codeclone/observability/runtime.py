@@ -275,6 +275,16 @@ def is_observability_enabled() -> bool:
     return _ENABLED
 
 
+def current_operation_context() -> tuple[str, str] | None:
+    """Return ``(operation_id, correlation_id)`` of the active operation for
+    cross-process handoff, or ``None`` when disabled or outside an operation.
+    """
+    op = _CURRENT_OP.get()
+    if op is None or not op.operation_id:
+        return None
+    return op.operation_id, op.correlation_id
+
+
 def bind_root(root: Path) -> None:
     """Bind the store to ``root`` if the active runtime has none yet (no-op when
     disabled). Lets a root-less MCP-server session open its store on the first
@@ -402,6 +412,7 @@ __all__ = [
     "SpanHandle",
     "bind_root",
     "bootstrap",
+    "current_operation_context",
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",

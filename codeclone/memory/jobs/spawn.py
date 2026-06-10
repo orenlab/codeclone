@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from ...observability import current_operation_context
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +20,21 @@ class SpawnWorkerResult:
     spawned: bool
     reason: str | None
     pid: int | None
+
+
+def _worker_env() -> dict[str, str] | None:
+    """Subprocess env carrying the observability correlation handoff, or ``None``
+    to inherit the parent environment unchanged (no active operation).
+    """
+    context = current_operation_context()
+    if context is None:
+        return None
+    operation_id, correlation_id = context
+    return {
+        **os.environ,
+        "CODECLONE_OBSERVABILITY_CORRELATION_ID": correlation_id,
+        "CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID": operation_id,
+    }
 
 
 def spawn_projection_jobs_worker(*, root_path: Path) -> SpawnWorkerResult:
@@ -35,6 +53,7 @@ def spawn_projection_jobs_worker(*, root_path: Path) -> SpawnWorkerResult:
         proc = subprocess.Popen(
             argv,
             cwd=root,
+            env=_worker_env(),
             start_new_session=True,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

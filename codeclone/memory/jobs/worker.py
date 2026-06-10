@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -102,6 +103,17 @@ def _trajectory_reason_kind(
     return "first_index"
 
 
+def _correlation_handoff() -> tuple[str | None, str | None]:
+    """Read the cross-process observability handoff the spawner injected, so the
+    worker operation links under the finish operation that triggered it. Returns
+    ``(correlation_id, parent_operation_id)``, both None for a standalone run.
+    """
+    return (
+        os.environ.get("CODECLONE_OBSERVABILITY_CORRELATION_ID") or None,
+        os.environ.get("CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID") or None,
+    )
+
+
 def run_projection_job(
     conn: sqlite3.Connection,
     *,
@@ -111,7 +123,13 @@ def run_projection_job(
     project: MemoryProject,
     stimulus: Mapping[str, object],
 ) -> tuple[ProjectionJobStatus, dict[str, object], str | None]:
-    with operation(name="memory.projection.job", surface="memory"):
+    correlation_id, parent_operation_id = _correlation_handoff()
+    with operation(
+        name="memory.projection.job",
+        surface="memory",
+        correlation_id=correlation_id,
+        parent_operation_id=parent_operation_id,
+    ):
         watermark = _trajectory_incremental_watermark(conn, project_id=project.id)
         with span(
             name="memory.trajectory.rebuild",
