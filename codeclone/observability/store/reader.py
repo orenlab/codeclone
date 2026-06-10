@@ -32,8 +32,6 @@ from .schema import observability_store_path
 _DEFAULT_WINDOW = 20
 
 
-# Forward-declared read API, wired by the Phase 29 output cycle (CLI/HTML).
-# codeclone: ignore[dead-code]
 def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
     """Open the store read-only, or None when it does not exist yet."""
     path = observability_store_path(root)
@@ -255,8 +253,6 @@ def _aggregates(
     )
 
 
-# Forward-declared read API, wired by the Phase 29 output cycle (CLI/HTML).
-# codeclone: ignore[dead-code]
 def build_trace_view(
     conn: sqlite3.Connection,
     *,

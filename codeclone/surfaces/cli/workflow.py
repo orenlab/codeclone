@@ -804,6 +804,10 @@ def main() -> None:
         from .memory import memory_main
 
         raise SystemExit(memory_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "observability":
+        from .observability import observability_main
+
+        raise SystemExit(observability_main(sys.argv[2:]))
     try:
         _main_impl()
     except SystemExit:
