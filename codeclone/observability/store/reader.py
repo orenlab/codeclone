@@ -287,6 +287,10 @@ def _aggregates(
         key=lambda s: (-s.duration_ms, s.operation_id, s.span_id),
     )
     semantic_costs = tuple(s for s in span_costs if s.surface == "memory")
+    memory_ranked = sorted(
+        (s for s in span_costs if s.rss_delta_mb is not None),
+        key=lambda s: (-(s.rss_delta_mb or 0.0), s.operation_id, s.span_id),
+    )
     return AggregatesView(
         operation_count=len(flat),
         slowest=slowest,
@@ -297,6 +301,7 @@ def _aggregates(
         mcp_tools=_mcp_tool_aggregates(flat),
         slowest_span=span_costs[0] if span_costs else None,
         semantic_costs=semantic_costs[:_SEMANTIC_COST_LIMIT],
+        peak_memory_span=memory_ranked[0] if memory_ranked else None,
     )
 
 

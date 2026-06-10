@@ -186,6 +186,33 @@ def test_render_cockpit_sections() -> None:
     assert "469" in html
 
 
+def test_render_peak_memory_contributor() -> None:
+    consumer = SpanCostView(
+        span_id="s",
+        name="memory.semantic.reindex",
+        surface="memory",
+        operation_id="W",
+        operation_name="memory.projection.job",
+        duration_ms=1700.0,
+        rss_delta_mb=480.0,
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="t",
+        window_ended_at_utc="t",
+        aggregates=AggregatesView(
+            operation_count=1,
+            max_rss_delta_mb=600.0,
+            peak_memory_span=consumer,
+        ),
+    )
+    html = render_trace_html(trace)
+    # The peak-memory highlight names the consumer + its share, not a bare number.
+    assert "Top memory consumer" in html
+    assert "memory.semantic.reindex" in html
+    assert "80%" in html  # 480 / 600 = 80%
+
+
 def test_render_waterfall_timeline() -> None:
     group = WaterfallGroup(
         correlation_id="corr1234abcd",

@@ -96,6 +96,7 @@ class AggregatesView:
     mcp_tools: tuple[McpToolAggregate, ...] = ()
     slowest_span: SpanCostView | None = None
     semantic_costs: tuple[SpanCostView, ...] = ()
+    peak_memory_span: SpanCostView | None = None
 
 
 @dataclass(frozen=True, slots=True)

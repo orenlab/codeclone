@@ -334,7 +334,21 @@ def _highlights(agg: AggregatesView) -> str:
                 _ms(span.duration_ms),
             )
         )
-    if agg.max_rss_delta_mb is not None:
+    if agg.peak_memory_span is not None and agg.max_rss_delta_mb:
+        # Name who took the memory, not just how much — the metric becomes a
+        # conclusion ("X grew the RSS", with its share of the peak).
+        peak = agg.peak_memory_span
+        share = round((peak.rss_delta_mb or 0.0) / agg.max_rss_delta_mb * 100)
+        rows.append(
+            _lead_row(
+                "Top memory consumer",
+                f"{_surface_badge(peak.surface)}"
+                f'<span class="lname">{_esc(peak.name)}</span>'
+                f'<span class="lin">in {_esc(peak.operation_name)}</span>',
+                f"{_mb(peak.rss_delta_mb)} · {share}%",
+            )
+        )
+    elif agg.max_rss_delta_mb is not None:
         rows.append(
             _lead_row(
                 "Peak memory Δ",

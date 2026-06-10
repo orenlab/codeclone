@@ -138,6 +138,11 @@ def test_build_trace_view_tree_and_aggregates(tmp_path: Path) -> None:
     assert job_row.offset_ms == 1000.0
     assert rows[("memory.semantic.reindex", "span")].depth == 2
 
+    # Top memory consumer: the reindex span carries the largest rss delta.
+    assert agg.peak_memory_span is not None
+    assert agg.peak_memory_span.name == "memory.semantic.reindex"
+    assert agg.peak_memory_span.rss_delta_mb == 6144.0
+
 
 def test_build_trace_view_focus_by_operation_id(tmp_path: Path) -> None:
     _seed(tmp_path)
