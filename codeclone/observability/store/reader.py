@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 
@@ -24,12 +25,20 @@ from ..views import (
     AggregatesView,
     McpToolAggregate,
     OperationView,
+    SpanCostView,
     SpanView,
     TraceView,
+    WaterfallGroup,
+    WaterfallRow,
 )
 from .schema import observability_store_path
 
 _DEFAULT_WINDOW = 20
+
+# Counters whose presence marks a span as *meant* to do productive work; when
+# they are all present-and-zero the span ran but touched nothing (a no-op).
+_PRODUCTIVE_COUNTER_KEYS = ("embedded", "workflows_seen", "experiences_distilled")
+_SEMANTIC_COST_LIMIT = 8
 
 
 def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
@@ -71,6 +80,7 @@ def _span_view(row: sqlite3.Row) -> SpanView:
         dedupe_key=row["dedupe_key"],
         counters=_parse_counters(row["counters_json"]),
         rss_delta_mb=row["rss_delta_mb"],
+        started_at_utc=str(row["started_at_utc"]),
     )
 
 
@@ -195,6 +205,28 @@ def _build_forest(
     return tuple(build(root) for root in sorted(children_ids[None], key=_order))
 
 
+def _span_cost_view(op: OperationView, span: SpanView) -> SpanCostView:
+    """Flatten a span with its owning operation's identity and classify whether
+    it did productive work (see ``SpanCostView.no_op``)."""
+    productive = [
+        span.counters[key] for key in _PRODUCTIVE_COUNTER_KEYS if key in span.counters
+    ]
+    produced = sum(productive)
+    return SpanCostView(
+        span_id=span.span_id,
+        name=span.name,
+        surface=op.surface,
+        operation_id=op.operation_id,
+        operation_name=op.name,
+        duration_ms=span.duration_ms,
+        reason_kind=span.reason_kind,
+        rss_delta_mb=span.rss_delta_mb,
+        produced=produced,
+        skipped=int(span.counters.get("skipped_unchanged", 0)),
+        no_op=bool(productive) and produced == 0,
+    )
+
+
 def _mcp_tool_aggregates(flat: list[OperationView]) -> tuple[McpToolAggregate, ...]:
     by_name: dict[str, list[OperationView]] = defaultdict(list)
     for view in flat:
@@ -204,8 +236,14 @@ def _mcp_tool_aggregates(flat: list[OperationView]) -> tuple[McpToolAggregate, .
     for name in sorted(by_name):
         ops = by_name[name]
         durations = [op.duration_ms for op in ops]
+        requests = [
+            float(op.request_bytes) for op in ops if op.request_bytes is not None
+        ]
         responses = [
             float(op.response_bytes) for op in ops if op.response_bytes is not None
+        ]
+        response_tokens = [
+            float(op.response_tokens) for op in ops if op.response_tokens is not None
         ]
         aggregates.append(
             McpToolAggregate(
@@ -214,6 +252,8 @@ def _mcp_tool_aggregates(flat: list[OperationView]) -> tuple[McpToolAggregate, .
                 p50_duration_ms=_percentile(durations, 0.5),
                 p95_duration_ms=_percentile(durations, 0.95),
                 p95_response_bytes=int(_percentile(responses, 0.95)),
+                p95_request_bytes=int(_percentile(requests, 0.95)),
+                p95_response_tokens=int(_percentile(response_tokens, 0.95)),
             )
         )
     return tuple(aggregates)
@@ -242,6 +282,11 @@ def _aggregates(
         for span in spans
         if span.reason_kind == "unknown"
     )
+    span_costs = sorted(
+        (_span_cost_view(op, span) for op in flat for span in op.spans),
+        key=lambda s: (-s.duration_ms, s.operation_id, s.span_id),
+    )
+    semantic_costs = tuple(s for s in span_costs if s.surface == "memory")
     return AggregatesView(
         operation_count=len(flat),
         slowest=slowest,
@@ -250,7 +295,96 @@ def _aggregates(
         anomaly_count=0,
         unknown_expensive_rebuild_count=unknown,
         mcp_tools=_mcp_tool_aggregates(flat),
+        slowest_span=span_costs[0] if span_costs else None,
+        semantic_costs=semantic_costs[:_SEMANTIC_COST_LIMIT],
     )
+
+
+def _epoch_ms(iso: str) -> float:
+    """Parse a store timestamp to epoch milliseconds (0.0 when absent/unparsable)."""
+    if not iso:
+        return 0.0
+    try:
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000.0
+    except ValueError:
+        return 0.0
+
+
+def _wf_row(
+    *,
+    label: str,
+    surface: str,
+    kind: str,
+    depth: int,
+    start_iso: str,
+    duration_ms: float,
+    base_ms: float,
+    reason_kind: str | None = None,
+    status: str = "ok",
+) -> WaterfallRow:
+    return WaterfallRow(
+        label=label,
+        surface=surface,
+        kind=kind,
+        depth=depth,
+        offset_ms=max(0.0, _epoch_ms(start_iso) - base_ms),
+        duration_ms=duration_ms,
+        reason_kind=reason_kind,
+        status=status,
+    )
+
+
+def _waterfall_rows(
+    op: OperationView, depth: int, base_ms: float
+) -> list[WaterfallRow]:
+    rows = [
+        _wf_row(
+            label=op.name,
+            surface=op.surface,
+            kind="operation",
+            depth=depth,
+            start_iso=op.started_at_utc,
+            duration_ms=op.duration_ms,
+            base_ms=base_ms,
+            status=op.status,
+        )
+    ]
+    rows.extend(
+        _wf_row(
+            label=span.name,
+            surface=op.surface,
+            kind="span",
+            depth=depth + 1,
+            start_iso=span.started_at_utc,
+            duration_ms=span.duration_ms,
+            base_ms=base_ms,
+            reason_kind=span.reason_kind,
+            status=span.status,
+        )
+        for span in op.spans
+    )
+    for child in op.children:
+        rows.extend(_waterfall_rows(child, depth + 1, base_ms))
+    return rows
+
+
+def _waterfall_groups(tree: tuple[OperationView, ...]) -> tuple[WaterfallGroup, ...]:
+    """One self-contained timeline per causal chain (tree root); offsets are
+    relative to that root's start so a long-idle window never crushes the bars."""
+    groups: list[WaterfallGroup] = []
+    for root in tree:
+        base_ms = _epoch_ms(root.started_at_utc)
+        rows = tuple(_waterfall_rows(root, 0, base_ms))
+        span_ms = max((row.offset_ms + row.duration_ms for row in rows), default=0.0)
+        groups.append(
+            WaterfallGroup(
+                correlation_id=root.correlation_id,
+                started_at_utc=root.started_at_utc,
+                duration_ms=span_ms,
+                rows=rows,
+            )
+        )
+    return tuple(groups)
 
 
 def build_trace_view(
@@ -276,14 +410,16 @@ def build_trace_view(
     ]
     by_id = {view.operation_id: view for view in flat}
     starts = [str(row["started_at_utc"]) for row in rows]
+    operation_tree = _build_forest(rows, spans_by_op)
     return TraceView(
         schema_version=PLATFORM_OBSERVABILITY_SCHEMA_VERSION,
         window_started_at_utc=min(starts) if starts else "",
         window_ended_at_utc=max(starts) if starts else "",
         aggregates=_aggregates(flat, spans_by_op),
         focus_operation=by_id.get(focus_id) if focus_id is not None else None,
-        operation_tree=_build_forest(rows, spans_by_op),
+        operation_tree=operation_tree,
         correlated_operations=tuple(flat),
+        waterfall=_waterfall_groups(operation_tree),
     )
 
 

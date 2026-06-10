@@ -28,6 +28,30 @@ class SpanView:
     dedupe_key: str | None = None
     counters: Mapping[str, int] = field(default_factory=dict)
     rss_delta_mb: float | None = None
+    started_at_utc: str = ""
+
+
+@dataclass(frozen=True, slots=True)
+class SpanCostView:
+    """A span flattened with its owning operation's identity, for the cockpit
+    cost views (slowest-span highlight, semantic/memory cost table).
+
+    ``no_op`` is the deterministic answer to "did this span do productive work?":
+    true when the span declares productive counters and they sum to zero — a
+    rebuild/reindex that touched nothing yet still spent wall time and memory.
+    """
+
+    span_id: str
+    name: str
+    surface: str
+    operation_id: str
+    operation_name: str
+    duration_ms: float
+    reason_kind: str | None = None
+    rss_delta_mb: float | None = None
+    produced: int = 0
+    skipped: int = 0
+    no_op: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +81,8 @@ class McpToolAggregate:
     p50_duration_ms: float
     p95_duration_ms: float
     p95_response_bytes: int
+    p95_request_bytes: int = 0
+    p95_response_tokens: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +94,36 @@ class AggregatesView:
     anomaly_count: int = 0
     unknown_expensive_rebuild_count: int = 0
     mcp_tools: tuple[McpToolAggregate, ...] = ()
+    slowest_span: SpanCostView | None = None
+    semantic_costs: tuple[SpanCostView, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class WaterfallRow:
+    """One time-positioned bar in a waterfall: a span or operation placed at
+    ``offset_ms`` after its group's start, ``duration_ms`` wide. ``depth`` nests
+    spans under their operation and child operations under their parent."""
+
+    label: str
+    surface: str
+    kind: str  # "operation" | "span"
+    depth: int
+    offset_ms: float
+    duration_ms: float
+    reason_kind: str | None = None
+    status: str = "ok"
+
+
+@dataclass(frozen=True, slots=True)
+class WaterfallGroup:
+    """One correlated causal chain rendered as a self-contained timeline; every
+    row's ``offset_ms`` is relative to ``started_at_utc`` and bounded by
+    ``duration_ms`` (the group's own window, not the whole trace)."""
+
+    correlation_id: str
+    started_at_utc: str
+    duration_ms: float
+    rows: tuple[WaterfallRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,12 +136,16 @@ class TraceView:
     focus_operation: OperationView | None = None
     operation_tree: tuple[OperationView, ...] = ()
     correlated_operations: tuple[OperationView, ...] = ()
+    waterfall: tuple[WaterfallGroup, ...] = ()
 
 
 __all__ = [
     "AggregatesView",
     "McpToolAggregate",
     "OperationView",
+    "SpanCostView",
     "SpanView",
     "TraceView",
+    "WaterfallGroup",
+    "WaterfallRow",
 ]
