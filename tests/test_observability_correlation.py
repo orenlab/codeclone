@@ -118,3 +118,34 @@ def test_spawn_without_operation_inherits_env(
     # Observability disabled -> no active operation -> inherit parent env.
     spawn.spawn_projection_jobs_worker(root_path=tmp_path)
     assert captured["env"] is None
+
+
+def test_mcp_analyze_repository_emits_pipeline_spans(tmp_path: Path) -> None:
+    from codeclone.surfaces.mcp.service import CodeCloneMCPService
+    from codeclone.surfaces.mcp.session import MCPAnalysisRequest
+
+    (tmp_path / "module.py").write_text(
+        "def add(a, b):\n    return a + b\n", encoding="utf-8"
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        # The registrar opens this op around each MCP tool; emulate it so the
+        # session's stage spans have an operation to attach to.
+        with operation(name="mcp.analyze_repository", surface="mcp") as op:
+            op_id = op.operation_id
+            service.analyze_repository(
+                MCPAnalysisRequest(root=str(tmp_path), respect_pyproject=False)
+            )
+    finally:
+        shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        rows = conn.execute(
+            "SELECT name FROM platform_spans WHERE operation_id=?", (op_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    names = {row[0] for row in rows}
+    assert {"pipeline.discover", "pipeline.process", "pipeline.analyze"} <= names

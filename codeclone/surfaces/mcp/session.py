@@ -15,6 +15,7 @@ from ...audit import AuditEvent, AuditWriter, repo_root_digest
 from ...audit.runtime import open_audit_writer_for_root
 from ...cache.store import resolve_cache_status
 from ...memory.ide_governance import IdeGovernanceSessionState
+from ...observability import span
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
@@ -251,19 +252,29 @@ class MCPSession(
         )
         console = _BufferConsole()
 
-        boot = bootstrap(
-            args=args,
-            root=root_path,
-            output_paths=OutputPaths(json=_REPORT_DUMMY_PATH),
-            cache_path=cache_path,
-        )
-        discovery_result = discover(boot=boot, cache=cache)
-        processing_result = process(boot=boot, discovery=discovery_result, cache=cache)
-        analysis_result = analyze(
-            boot=boot,
-            discovery=discovery_result,
-            processing=processing_result,
-        )
+        # Stage spans so mcp.analyze_repository carries the same discover/process/
+        # analyze timing as cli.analyze (this path bypasses run_analysis_stages,
+        # spec §6.1). Spans attach to the active operation from the MCP registrar;
+        # inert when observability is disabled or no operation is open.
+        with span(name="pipeline.bootstrap"):
+            boot = bootstrap(
+                args=args,
+                root=root_path,
+                output_paths=OutputPaths(json=_REPORT_DUMMY_PATH),
+                cache_path=cache_path,
+            )
+        with span(name="pipeline.discover"):
+            discovery_result = discover(boot=boot, cache=cache)
+        with span(name="pipeline.process"):
+            processing_result = process(
+                boot=boot, discovery=discovery_result, cache=cache
+            )
+        with span(name="pipeline.analyze"):
+            analysis_result = analyze(
+                boot=boot,
+                discovery=discovery_result,
+                processing=processing_result,
+            )
 
         clone_baseline_state = resolve_clone_baseline_state(
             baseline_path=baseline_path,
