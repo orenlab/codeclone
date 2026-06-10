@@ -12,8 +12,10 @@ from pathlib import Path
 import pytest
 
 from codeclone.config.memory import MemoryConfig, resolve_memory_config
+from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.jobs import compute_projection_stimulus
 from codeclone.memory.jobs import workflow as jobs_workflow
+from codeclone.memory.jobs.spawn import SpawnWorkerResult
 from codeclone.memory.jobs.store import (
     enqueue_projection_job,
     has_live_running_job,
@@ -23,6 +25,16 @@ from codeclone.memory.jobs.workflow import execute_enqueue_projection_rebuild
 from codeclone.memory.models import MemoryProject
 from codeclone.memory.project import resolve_memory_db_path
 from codeclone.memory.schema import open_memory_db
+from codeclone.observability import (
+    bootstrap,
+    current_operation_context,
+    operation,
+    shutdown,
+)
+from codeclone.observability.store.schema import (
+    observability_store_path,
+    open_observability_store,
+)
 from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import cli_memory_repo
@@ -151,3 +163,58 @@ def test_enqueue_skips_spawn_when_worker_running(
         assert payload["spawned"] is False
         assert payload["spawn_skipped_reason"] == "worker_already_running"
         assert payload["status"] == "enqueued"
+
+
+def test_enqueue_records_spawn_op_b_under_finish(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(jobs_workflow, "is_ci_environment", lambda: False)
+    captured: dict[str, tuple[str, str] | None] = {}
+
+    def _fake_spawn(*, root_path: Path) -> SpawnWorkerResult:
+        # The spawn handoff reads the active operation here; under op B it must
+        # see B (not the finish op A), so the worker links parent=B.
+        captured["ctx"] = current_operation_context()
+        return SpawnWorkerResult(spawned=True, reason=None, pid=4242)
+
+    monkeypatch.setattr(jobs_workflow, "spawn_projection_jobs_worker", _fake_spawn)
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        config = resolve_memory_config(root)
+        bootstrap(ObservabilityConfig(enabled=True), root=root)
+        try:
+            with operation(
+                name="finish_controlled_change",
+                surface="mcp",
+                correlation_id="A-corr",
+            ) as finish_op:
+                finish_op_id = finish_op.operation_id
+                payload = execute_enqueue_projection_rebuild(
+                    root_path=root,
+                    config=config,
+                    trigger="mcp_finish",
+                    force=True,
+                    spawn_worker=True,
+                )
+        finally:
+            shutdown()
+
+        assert payload["spawned"] is True
+        ctx = captured["ctx"]
+        assert ctx is not None
+        spawn_op_id, spawn_corr = ctx
+        assert spawn_corr == "A-corr"  # B inherits A's correlation
+        assert spawn_op_id != finish_op_id  # B is its own operation, not A
+
+        obs = open_observability_store(observability_store_path(root))
+        try:
+            row = obs.execute(
+                "SELECT operation_id, parent_operation_id, correlation_id "
+                "FROM platform_operations WHERE name='memory.projection.spawn'"
+            ).fetchone()
+        finally:
+            obs.close()
+        # Op B persisted, parented to the finish op (A) with A's correlation.
+        assert row is not None
+        assert row[0] == spawn_op_id
+        assert row[1] == finish_op_id
+        assert row[2] == "A-corr"

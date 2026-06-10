@@ -12,7 +12,13 @@ from typing import Literal
 
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...config.observability import resolve_observability_config
-from ...observability import bootstrap, is_observability_enabled, shutdown
+from ...observability import (
+    bootstrap,
+    current_operation_context,
+    is_observability_enabled,
+    operation,
+    shutdown,
+)
 from ...utils.ci import is_ci_environment
 from ..exceptions import MemoryContractError
 from ..models import MemoryProject
@@ -166,7 +172,18 @@ def execute_enqueue_projection_rebuild(
             # redundant overlapping process.
             spawn_skipped_reason = "worker_already_running"
         else:
-            spawn_result = spawn_projection_jobs_worker(root_path=resolved_root)
+            # Op B of the finish->spawn->worker chain (spec §4.3). The spawn
+            # decision becomes the active operation, inheriting the finish op (A)
+            # as parent + correlation, so the env handoff in spawn.py parents the
+            # worker (C) under B. Inert when observability is disabled.
+            parent = current_operation_context()
+            with operation(
+                name="memory.projection.spawn",
+                surface="memory",
+                parent_operation_id=parent[0] if parent else None,
+                correlation_id=parent[1] if parent else None,
+            ):
+                spawn_result = spawn_projection_jobs_worker(root_path=resolved_root)
             spawned = spawn_result.spawned
             worker_pid = spawn_result.pid
     return {
