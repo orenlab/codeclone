@@ -23,8 +23,11 @@ from codeclone.observability.views import (
     AggregatesView,
     McpToolAggregate,
     OperationView,
+    SpanCostView,
     SpanView,
     TraceView,
+    WaterfallGroup,
+    WaterfallRow,
 )
 from codeclone.surfaces.cli.observability import observability_main
 
@@ -87,6 +90,140 @@ def test_render_trace_html_is_branded() -> None:
     assert "pipeline.analyze" in html
     assert "content_changed" in html
     assert "finish_controlled_change" in html
+
+
+def _cockpit_trace() -> TraceView:
+    reindex = SpanView(
+        span_id="sx",
+        name="memory.semantic.reindex",
+        duration_ms=850.0,
+        status="ok",
+        reason_kind="content_changed",
+        counters={"embedded": 0, "skipped_unchanged": 1423},
+    )
+    worker = OperationView(
+        operation_id="W",
+        correlation_id="A",
+        surface="memory",
+        name="memory.projection.job",
+        started_at_utc="2026-06-10T04:00:01Z",
+        duration_ms=900.0,
+        status="ok",
+        parent_operation_id="A",
+        rss_delta_mb=512.0,
+        spans=(reindex,),
+    )
+    finish = OperationView(
+        operation_id="A",
+        correlation_id="A",
+        surface="mcp",
+        name="finish_controlled_change",
+        started_at_utc="2026-06-10T04:00:00Z",
+        duration_ms=120.0,
+        status="ok",
+        request_bytes=51,
+        response_bytes=1873,
+        children=(worker,),
+    )
+    costly = SpanCostView(
+        span_id="sx",
+        name="memory.semantic.reindex",
+        surface="memory",
+        operation_id="W",
+        operation_name="memory.projection.job",
+        duration_ms=850.0,
+        reason_kind="content_changed",
+        produced=0,
+        skipped=1423,
+        no_op=True,
+    )
+    agg = AggregatesView(
+        operation_count=2,
+        slowest=(worker, finish),
+        max_rss_delta_mb=512.0,
+        mcp_tools=(
+            McpToolAggregate(
+                "finish_controlled_change",
+                3,
+                80.0,
+                120.0,
+                1873,
+                p95_request_bytes=51,
+                p95_response_tokens=469,
+            ),
+        ),
+        slowest_span=costly,
+        semantic_costs=(costly,),
+    )
+    return TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:02Z",
+        aggregates=agg,
+        operation_tree=(finish,),
+        correlated_operations=(finish, worker),
+    )
+
+
+def test_render_cockpit_sections() -> None:
+    html = render_trace_html(_cockpit_trace())
+    # Section trajectory: summary -> chain -> memory cost -> MCP matrix.
+    assert "Runtime summary" in html
+    assert "Correlated event chains" in html
+    assert "Memory pipeline cost" in html
+    assert "MCP tool matrix" in html
+    # Cross-process correlation: a breadcrumb chains finish -> worker, and the
+    # worker nests under it via the indent rail (not a card inside a card).
+    assert "finish_controlled_change" in html
+    assert "memory.projection.job" in html
+    assert "→" in html
+    assert 'class="kids"' in html
+    # The reindex ran but embedded nothing -> flagged as a costly no-op.
+    assert "no-op" in html
+    assert "Hottest span" in html
+    # MCP matrix carries request bytes and response tokens, not just response bytes.
+    assert "51 B" in html
+    assert "469" in html
+
+
+def test_render_waterfall_timeline() -> None:
+    group = WaterfallGroup(
+        correlation_id="corr1234abcd",
+        started_at_utc="2026-06-10T04:00:00Z",
+        duration_ms=1000.0,
+        rows=(
+            WaterfallRow(
+                label="finish_controlled_change",
+                surface="mcp",
+                kind="operation",
+                depth=0,
+                offset_ms=0.0,
+                duration_ms=120.0,
+            ),
+            WaterfallRow(
+                label="memory.projection.job",
+                surface="memory",
+                kind="operation",
+                depth=1,
+                offset_ms=300.0,
+                duration_ms=700.0,
+            ),
+        ),
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=AggregatesView(operation_count=2),
+        waterfall=(group,),
+    )
+    html = render_trace_html(trace)
+    assert "Timeline" in html
+    assert "wf-bar" in html
+    # The worker bar is offset 300/1000 = 30% and 700/1000 = 70% wide.
+    assert "left:30.0%" in html
+    assert "width:70.0%" in html
+    assert "memory.projection.job" in html
 
 
 def test_render_trace_html_escapes_user_text() -> None:
