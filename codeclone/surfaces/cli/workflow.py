@@ -17,6 +17,7 @@ from ...cache.projection import build_segment_report_projection
 from ...cache.store import Cache
 from ...config import resolver as config_resolver
 from ...config.argparse_builder import build_parser
+from ...config.observability import resolve_observability_config
 from ...config.pyproject_loader import load_pyproject_config
 from ...contracts import (
     ISSUES_URL,
@@ -30,6 +31,8 @@ from ...core.parallelism import process
 from ...core.pipeline import analyze
 from ...core.reporting import gate, report
 from ...models import MetricsDiff
+from ...observability import bootstrap as start_observability
+from ...observability import operation
 from ...report.html import build_html_report
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
@@ -539,11 +542,15 @@ def _main_impl() -> None:
         output_paths=output_paths,
         cache_path=cache_path,
     )
-    discovery_result, processing_result, analysis_result = _run_analysis_stages(
-        args=args,
-        boot=boot,
-        cache=cache,
-    )
+    # Freeze the env-resolved observability decision for this CLI process
+    # (default OFF) so the core pipeline stage spans attach to a cli.analyze op.
+    start_observability(resolve_observability_config(), root=root_path)
+    with operation(name="cli.analyze", surface="cli"):
+        discovery_result, processing_result, analysis_result = _run_analysis_stages(
+            args=args,
+            boot=boot,
+            cache=cache,
+        )
 
     source_read_contract_failure = (
         bool(processing_result.source_read_failures)
