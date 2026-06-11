@@ -23,6 +23,7 @@ from ..paths import (
     normalize_memory_scope_paths,
     normalize_repo_path,
     repo_path_to_module_key,
+    subject_matches_scope,
 )
 from ..search_index import SearchMatchMode
 from ..sqlite_store import SqliteEngineeringMemoryStore
@@ -38,6 +39,7 @@ from ..trajectory.retrieval import (
     rank_trajectories_for_query,
     rank_trajectories_for_scope,
     serialize_trajectory_detail,
+    serialize_trajectory_preview,
     trajectory_status_payload,
     trajectory_subject_keys,
 )
@@ -212,6 +214,15 @@ def _retrieval_policy(*, include_drafts: bool) -> dict[str, object]:
 
 
 DEFAULT_EXPERIENCE_PREVIEW_LIMIT = 10
+COMPACT_MEMORY_SUBJECT_LIMIT = 6
+
+_MEMORY_SUBJECT_KIND_ORDER = {
+    "path": 0,
+    "module": 1,
+    "symbol": 2,
+    "intent": 3,
+    "workflow": 4,
+}
 
 
 def _scope_family(path: str) -> str | None:
@@ -253,21 +264,55 @@ def _serialize_experience(
         "information_value": experience.information_value,
         "status": experience.status,
         "statement": statement,
-        "agent_facets": [
-            {"agent_family": facet.facet_value, "count": facet.count}
+    }
+    agent_facet_items = sorted(
+        (
+            (facet.facet_value, facet.count)
             for facet in experience.facets
             if facet.facet_kind == "agent_family"
-        ],
-    }
+        ),
+        key=lambda item: (-item[1], item[0]),
+    )
+    agent_facets: list[dict[str, object]] = [
+        {"agent_family": family, "count": count} for family, count in agent_facet_items
+    ]
+    payload.update(
+        _experience_detail_payload(
+            experience,
+            detail_level=detail_level,
+            statement_length=statement_length,
+            statement=statement,
+            agent_facets=agent_facets,
+        )
+    )
+    return payload
+
+
+def _experience_detail_payload(
+    experience: Experience,
+    *,
+    detail_level: MemoryDetailLevel,
+    statement_length: int,
+    statement: str,
+    agent_facets: list[dict[str, object]],
+) -> dict[str, object]:
     if detail_level == "full":
-        payload["evidence_trajectory_ids"] = [
-            item.trajectory_id for item in experience.evidence
-        ]
-    else:
-        payload["statement_length"] = statement_length
-        payload["evidence_count"] = len(experience.evidence)
-        if statement_length > len(statement):
-            payload["statement_truncated"] = True
+        return {
+            "agent_facets": agent_facets,
+            "evidence_trajectory_ids": [
+                item.trajectory_id for item in experience.evidence
+            ],
+        }
+    payload: dict[str, object] = {
+        "statement_length": statement_length,
+        "evidence_count": len(experience.evidence),
+        "agent_family_count": len(agent_facets),
+        "multi_agent": len(agent_facets) > 1,
+    }
+    if agent_facets:
+        payload["dominant_agent_facet"] = agent_facets[0]
+    if statement_length > len(statement):
+        payload["statement_truncated"] = True
     return payload
 
 
@@ -315,6 +360,50 @@ def _serialize_subject(subject: MemorySubject) -> dict[str, object]:
     }
 
 
+def _memory_subject_priority(
+    subject: MemorySubject,
+    *,
+    context: RankingContext | None,
+) -> tuple[object, ...]:
+    key = subject.subject_key.replace("\\", "/").strip("/")
+    context_group = 3
+    context_score = 0.0
+    if context is not None:
+        if key in context.symbols:
+            context_group = 0
+            context_score = 1.0
+        else:
+            scope_score = subject_matches_scope(key, scope_paths=context.scope_paths)
+            if scope_score > 0.0:
+                context_group = 1
+                context_score = scope_score
+            elif key in context.blast_dependents:
+                context_group = 2
+                context_score = 0.7
+    return (
+        context_group,
+        -context_score,
+        _MEMORY_SUBJECT_KIND_ORDER.get(subject.subject_kind, 99),
+        key,
+        subject.relation,
+        subject.id,
+    )
+
+
+def _preview_memory_subjects(
+    subjects: Sequence[MemorySubject],
+    *,
+    detail_level: MemoryDetailLevel,
+    context: RankingContext | None,
+) -> list[MemorySubject]:
+    if detail_level == "full":
+        return list(subjects)
+    return sorted(
+        subjects,
+        key=lambda subject: _memory_subject_priority(subject, context=context),
+    )[:COMPACT_MEMORY_SUBJECT_LIMIT]
+
+
 def _serialize_evidence(evidence: MemoryEvidence) -> dict[str, object]:
     return {
         "id": evidence.id,
@@ -339,12 +428,18 @@ def _serialize_record_summary(
     evidence_count: int,
     relevance_score: float | None = None,
     detail_level: MemoryDetailLevel = "compact",
+    context: RankingContext | None = None,
 ) -> dict[str, object]:
     statement_length = len(record.statement)
     if detail_level == "full":
         statement_value: str = record.statement
     else:
         statement_value = _statement_preview(record.statement)
+    serialized_subjects = _preview_memory_subjects(
+        subjects,
+        detail_level=detail_level,
+        context=context,
+    )
     payload: dict[str, object] = {
         "id": record.id,
         "type": record.type,
@@ -353,14 +448,17 @@ def _serialize_record_summary(
         "approved": record.approved_by is not None,
         "statement": statement_value,
         "statement_length": statement_length,
-        "subjects": [_serialize_subject(item) for item in subjects],
+        "subjects": [_serialize_subject(item) for item in serialized_subjects],
         "evidence_count": evidence_count,
         "stale": record.status == "stale",
     }
     if detail_level == "full":
         payload["payload"] = record.payload
-    elif detail_level == "compact" and statement_length > len(statement_value):
-        payload["statement_truncated"] = True
+    else:
+        payload["subject_count"] = len(subjects)
+        payload["subjects_truncated"] = len(serialized_subjects) < len(subjects)
+        if statement_length > len(statement_value):
+            payload["statement_truncated"] = True
     if record.stale_reason:
         payload["stale_reason"] = record.stale_reason
     if record.status == "draft":
@@ -441,10 +539,13 @@ def _rank_records(
     proximity: Mapping[str, float] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
     proximity_map = proximity or {}
+    candidate_ids = tuple(record.id for record in candidates)
+    subjects_by_id = store.list_subjects_for_memories(candidate_ids)
+    evidence_counts = store.count_evidence_for_memories(candidate_ids)
     base: list[tuple[float, MemoryRecord, list[MemorySubject], int]] = []
     for record in candidates:
-        subjects = store.list_subjects_for_memory(record.id)
-        evidence_count = store.count_evidence_for_memory(record.id)
+        subjects = subjects_by_id[record.id]
+        evidence_count = evidence_counts[record.id]
         score = relevance_score(
             record=record,
             subjects=subjects,
@@ -468,6 +569,7 @@ def _rank_records(
             evidence_count=evidence_count,
             relevance_score=adjusted,
             detail_level=detail_level,
+            context=context,
         )
         if record_relations is not None:
             summary["relations"] = record_relations
@@ -576,11 +678,6 @@ def get_relevant_memory(
         patch_trails=patch_trails,
         detail_level=normalized_detail,
     )
-    patch_trail_summary = None
-    if trajectories_payload:
-        first_summary = trajectories_payload[0].get("patch_trail_summary")
-        if isinstance(first_summary, dict):
-            patch_trail_summary = first_summary
     matching_experiences = _matching_experiences(
         store,
         project_id=project_id,
@@ -614,13 +711,12 @@ def get_relevant_memory(
             "coverage_percent": None,
             "coverage_note": "symbol_scoped_retrieval",
         }
-    return {
+    payload: dict[str, object] = {
         "project_id": project_id,
         "scope_resolved_from": scope_resolved_from,
         "records": records_payload,
         "trajectories": trajectories_payload,
         "experiences": experiences_payload,
-        "patch_trail_summary": patch_trail_summary,
         "record_count": len(records_payload),
         "trajectory_count": len(trajectories_payload),
         "experience_count": len(experiences_payload),
@@ -630,6 +726,26 @@ def get_relevant_memory(
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
+    payload.update(
+        _root_patch_trail_payload(
+            detail_level=normalized_detail,
+            trajectories=trajectories_payload,
+        )
+    )
+    return payload
+
+
+def _root_patch_trail_payload(
+    *,
+    detail_level: MemoryDetailLevel,
+    trajectories: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    if detail_level != "full" or not trajectories:
+        return {}
+    first_summary = trajectories[0].get("patch_trail_summary")
+    if not isinstance(first_summary, dict):
+        return {}
+    return {"patch_trail_summary": first_summary}
 
 
 def _load_patch_trails_for_trajectories(
@@ -637,12 +753,7 @@ def _load_patch_trails_for_trajectories(
     *,
     trajectory_ids: Sequence[str],
 ) -> dict[str, dict[str, object]]:
-    trails: dict[str, dict[str, object]] = {}
-    for trajectory_id in trajectory_ids:
-        loaded = store.load_trajectory_patch_trail(trajectory_id)
-        if loaded is not None:
-            trails[trajectory_id] = loaded
-    return trails
+    return store.load_trajectory_patch_trails(trajectory_ids)
 
 
 def _parse_filters(
@@ -875,6 +986,7 @@ def _handle_trajectory_search_mode(
     max_results: int,
     match_mode: SearchMatchMode,
     include_routine: bool = False,
+    detail_level: MemoryDetailLevel = "compact",
 ) -> dict[str, object]:
     statement = _require_query_field(query, mode=mode, field="query")
     candidates = store.search_trajectories(
@@ -889,11 +1001,12 @@ def _handle_trajectory_search_mode(
         max_results=max_results,
         match_mode=match_mode,
         include_routine=include_routine,
+        detail_level=detail_level,
     )
     return {
         "mode": mode,
         "status": "ok",
-        "detail_level": "compact",
+        "detail_level": detail_level,
         "payload": {
             "trajectories": trajectories,
             "trajectory_count": len(trajectories),
@@ -910,16 +1023,18 @@ def _handle_trajectory_anomalies_mode(
     project_id: str,
     max_results: int,
     include_routine: bool = False,
+    detail_level: MemoryDetailLevel = "compact",
 ) -> dict[str, object]:
     return {
         "mode": mode,
         "status": "ok",
-        "detail_level": "compact",
+        "detail_level": detail_level,
         "payload": build_trajectory_anomalies_payload(
             store,
             project_id=project_id,
             max_results=max_results,
             include_routine=include_routine,
+            detail_level=detail_level,
         ),
     }
 
@@ -950,16 +1065,18 @@ def _handle_trajectory_dashboard_mode(
     project_id: str,
     max_results: int,
     include_routine: bool = False,
+    detail_level: MemoryDetailLevel = "compact",
 ) -> dict[str, object]:
     return {
         "mode": mode,
         "status": "ok",
-        "detail_level": "compact",
+        "detail_level": detail_level,
         "payload": build_trajectory_dashboard_payload(
             store,
             project_id=project_id,
             max_results=max_results,
             include_routine=include_routine,
+            detail_level=detail_level,
         ),
     }
 
@@ -1221,13 +1338,21 @@ def _hydrate_trajectory_hits(
     *,
     project_id: str,
     hits: Sequence[SemanticHit],
+    detail_level: MemoryDetailLevel,
 ) -> list[dict[str, object]]:
     trajectories: list[dict[str, object]] = []
     for hit in hits:
         trajectory = store.find_trajectory(hit.source_id)
         if trajectory is None or trajectory.project_id != project_id:
             continue
-        payload = serialize_trajectory_detail(trajectory, max_steps=4)
+        payload = (
+            serialize_trajectory_detail(trajectory, max_steps=4)
+            if detail_level == "full"
+            else serialize_trajectory_preview(
+                trajectory,
+                detail_level="compact",
+            )
+        )
         payload["semantic_score"] = hit.score
         trajectories.append(payload)
     return trajectories
@@ -1306,6 +1431,7 @@ def _handle_semantic_search_mode(
             store,
             project_id=project_id,
             hits=trajectory_hits,
+            detail_level=detail_level,
         )
         semantic_block = _semantic_status_block(
             status,
@@ -1473,6 +1599,7 @@ def query_engineering_memory(
             project_id=project_id,
             max_results=max_results,
             include_routine=include_routine,
+            detail_level=normalized_detail,
         )
     if mode == "trajectory_agents":
         return _handle_trajectory_agents_mode(
@@ -1488,6 +1615,7 @@ def query_engineering_memory(
             project_id=project_id,
             max_results=max_results,
             include_routine=include_routine,
+            detail_level=normalized_detail,
         )
     if mode == "trajectory_search":
         return _handle_trajectory_search_mode(
@@ -1498,6 +1626,7 @@ def query_engineering_memory(
             max_results=max_results,
             match_mode=match_mode,
             include_routine=include_routine,
+            detail_level=normalized_detail,
         )
     statuses = _search_statuses_for_mode(
         mode,
@@ -1566,6 +1695,7 @@ def query_engineering_memory(
 
 
 __all__ = [
+    "COMPACT_MEMORY_SUBJECT_LIMIT",
     "QUERY_MODES",
     "MemoryDetailLevel",
     "QueryMode",

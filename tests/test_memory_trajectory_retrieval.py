@@ -305,19 +305,28 @@ def test_get_relevant_memory_returns_patch_trail_summary(tmp_path: Path) -> None
             audit_db_path=audit_db,
         )
 
-        result = get_relevant_memory(
+        compact = get_relevant_memory(
             store,
             project_id=project.id,
             scope_paths=("pkg/helper.py",),
             scope_resolved_from="explicit",
             max_records=5,
         )
+        full = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/helper.py",),
+            scope_resolved_from="explicit",
+            max_records=5,
+            detail_level="full",
+        )
 
-    trajectories = result["trajectories"]
+    trajectories = compact["trajectories"]
     assert isinstance(trajectories, list)
     assert trajectories
     assert trajectories[0].get("patch_trail_summary") is not None
-    summary = result.get("patch_trail_summary")
+    assert "patch_trail_summary" not in compact
+    summary = full.get("patch_trail_summary")
     assert isinstance(summary, dict)
     assert summary.get("counts", {}).get("untouched_in_declared") == 1
 

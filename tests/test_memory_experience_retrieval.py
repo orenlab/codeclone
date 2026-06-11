@@ -123,7 +123,17 @@ def test_relevant_memory_compacts_experience_statement_and_evidence(
     assert len(compact_statement) < 300
     assert compact_experience["evidence_count"] == 5
     assert "evidence_trajectory_ids" not in compact_experience
+    assert "agent_facets" not in compact_experience
+    assert compact_experience["agent_family_count"] == 2
+    assert compact_experience["multi_agent"] is True
+    assert compact_experience["dominant_agent_facet"] == {
+        "agent_family": "claude-code",
+        "count": 3,
+    }
     assert full_experience["statement"] == "x" * 300
+    full_facets = full_experience["agent_facets"]
+    assert isinstance(full_facets, list)
+    assert len(full_facets) == 2
     full_evidence = full_experience["evidence_trajectory_ids"]
     assert isinstance(full_evidence, list)
     assert len(full_evidence) == 5

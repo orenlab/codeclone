@@ -23,6 +23,7 @@ from ...audit.reader import (
     read_audit_event_core_records,
 )
 from ...report.meta import current_report_timestamp_utc
+from ...utils.iterutils import chunked
 from ...utils.json_io import json_text
 from ..models import MemoryProject
 from ..search_index import SearchMatchMode, tokenize_query
@@ -39,6 +40,8 @@ from .models import (
 from .patch_trail_projector import project_patch_trail_from_audit
 from .projector import project_trajectory
 from .quality import apply_trajectory_quality_score
+
+_SQLITE_IN_QUERY_BATCH = 500
 
 
 def _project_and_upsert_workflow(
@@ -882,6 +885,31 @@ def load_trajectory_patch_trail(
     return loaded if isinstance(loaded, dict) else None
 
 
+def load_trajectory_patch_trails(
+    conn: sqlite3.Connection,
+    *,
+    trajectory_ids: Sequence[str],
+) -> dict[str, dict[str, object]]:
+    loaded_by_id: dict[str, dict[str, object]] = {}
+    normalized_ids = tuple(sorted(set(trajectory_ids)))
+    for batch in chunked(normalized_ids, _SQLITE_IN_QUERY_BATCH):
+        placeholders = ", ".join("?" for _ in batch)
+        rows = conn.execute(
+            f"""
+            SELECT trajectory_id, patch_trail_json
+            FROM memory_trajectory_patch_trails
+            WHERE trajectory_id IN ({placeholders})
+            ORDER BY trajectory_id ASC
+            """,
+            batch,
+        ).fetchall()
+        for row in rows:
+            loaded = orjson.loads(str(row["patch_trail_json"]))
+            if isinstance(loaded, dict):
+                loaded_by_id[str(row["trajectory_id"])] = loaded
+    return loaded_by_id
+
+
 __all__ = [
     "count_trajectories",
     "find_trajectory",
@@ -889,6 +917,7 @@ __all__ = [
     "list_trajectories",
     "list_trajectories_for_subjects",
     "load_trajectory_patch_trail",
+    "load_trajectory_patch_trails",
     "rebuild_trajectories_from_audit",
     "rebuild_trajectories_incremental",
     "search_trajectories",

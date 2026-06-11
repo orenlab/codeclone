@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 
 from ..report.meta import current_report_timestamp_utc
+from ..utils.iterutils import chunked
 from .enums import LinkRelation
 from .experience.models import Experience
 from .locks import memory_init_lock
@@ -45,6 +46,8 @@ from .trajectory.models import (
     TrajectoryProjectionResult,
     TrajectoryProjectionRun,
 )
+
+_SQLITE_IN_QUERY_BATCH = 500
 
 
 class SqliteEngineeringMemoryStore:
@@ -202,6 +205,17 @@ class SqliteEngineeringMemoryStore:
         from .trajectory.store import load_trajectory_patch_trail
 
         return load_trajectory_patch_trail(self._conn, trajectory_id=trajectory_id)
+
+    def load_trajectory_patch_trails(
+        self,
+        trajectory_ids: Sequence[str],
+    ) -> dict[str, dict[str, object]]:
+        from .trajectory.store import load_trajectory_patch_trails
+
+        return load_trajectory_patch_trails(
+            self._conn,
+            trajectory_ids=trajectory_ids,
+        )
 
     def list_canonical_trajectories_for_export(
         self,
@@ -447,6 +461,39 @@ class SqliteEngineeringMemoryStore:
             for row in rows
         ]
 
+    def list_subjects_for_memories(
+        self,
+        memory_ids: Sequence[str],
+    ) -> dict[str, list[MemorySubject]]:
+        normalized_ids = tuple(sorted(set(memory_ids)))
+        grouped: dict[str, list[MemorySubject]] = {
+            memory_id: [] for memory_id in normalized_ids
+        }
+        for batch in chunked(normalized_ids, _SQLITE_IN_QUERY_BATCH):
+            placeholders = ", ".join("?" for _ in batch)
+            rows = self._conn.execute(
+                f"""
+                SELECT MIN(id) AS id, memory_id, subject_kind, subject_key, relation
+                FROM memory_subjects
+                WHERE memory_id IN ({placeholders})
+                GROUP BY memory_id, subject_kind, subject_key, relation
+                ORDER BY memory_id ASC, subject_kind ASC, subject_key ASC, id ASC
+                """,
+                batch,
+            ).fetchall()
+            for row in rows:
+                memory_id = str(row["memory_id"])
+                grouped[memory_id].append(
+                    MemorySubject(
+                        id=str(row["id"]),
+                        memory_id=memory_id,
+                        subject_kind=str(row["subject_kind"]),  # type: ignore[arg-type]
+                        subject_key=str(row["subject_key"]),
+                        relation=str(row["relation"]),  # type: ignore[arg-type]
+                    )
+                )
+        return grouped
+
     def list_evidence_for_memory(self, memory_id: str) -> list[MemoryEvidence]:
         rows = self._conn.execute(
             """
@@ -478,6 +525,28 @@ class SqliteEngineeringMemoryStore:
             (memory_id,),
         ).fetchone()
         return int(row[0]) if row is not None else 0
+
+    def count_evidence_for_memories(
+        self,
+        memory_ids: Sequence[str],
+    ) -> dict[str, int]:
+        normalized_ids = tuple(sorted(set(memory_ids)))
+        counts = dict.fromkeys(normalized_ids, 0)
+        for batch in chunked(normalized_ids, _SQLITE_IN_QUERY_BATCH):
+            placeholders = ", ".join("?" for _ in batch)
+            rows = self._conn.execute(
+                f"""
+                SELECT memory_id, COUNT(*) AS evidence_count
+                FROM memory_evidence
+                WHERE memory_id IN ({placeholders})
+                GROUP BY memory_id
+                ORDER BY memory_id ASC
+                """,
+                batch,
+            ).fetchall()
+            for row in rows:
+                counts[str(row["memory_id"])] = int(row["evidence_count"])
+        return counts
 
     def search_records(
         self,

@@ -321,6 +321,7 @@ def rank_trajectories_for_query(
     max_results: int,
     match_mode: SearchMatchMode,
     include_routine: bool = False,
+    detail_level: TrajectoryDetailLevel = "full",
 ) -> tuple[list[dict[str, object]], bool]:
     tokens = tokenize_query(query)
     if not tokens:
@@ -336,7 +337,11 @@ def rank_trajectories_for_query(
         query_tokens=tokens,
         match_mode=match_mode,
     )
-    return _preview_results(scored, max_results=max_results)
+    return _preview_results(
+        scored,
+        max_results=max_results,
+        detail_level=detail_level,
+    )
 
 
 def filter_trajectories_for_query(

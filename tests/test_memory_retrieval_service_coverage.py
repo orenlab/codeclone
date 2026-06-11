@@ -12,8 +12,9 @@ from types import SimpleNamespace
 import pytest
 
 from codeclone.memory.exceptions import MemoryContractError
-from codeclone.memory.models import MemoryEvidence, MemoryRecord
+from codeclone.memory.models import MemoryEvidence, MemoryRecord, MemorySubject
 from codeclone.memory.retrieval import service as retrieval_service
+from codeclone.memory.retrieval.ranking import RankingContext
 from codeclone.report.meta import current_report_timestamp_utc
 
 
@@ -198,3 +199,62 @@ def test_normalize_detail_level_and_compact_serialization() -> None:
     assert "payload" not in compact
     assert full["statement"] == "x" * 200
     assert full["payload"] is None
+
+
+def test_compact_record_subjects_are_bounded_and_scope_relevant() -> None:
+    record = _record()
+    subjects = [
+        MemorySubject(
+            id=f"subject-{index}",
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key=f"noise/path_{index}.py",
+            relation="about",
+        )
+        for index in range(10)
+    ]
+    subjects.append(
+        MemorySubject(
+            id="subject-relevant",
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key="pkg/service.py",
+            relation="about",
+        )
+    )
+    context = RankingContext.from_scope(
+        scope_paths=("pkg/service.py",),
+        symbols=(),
+        blast_dependents=(),
+    )
+
+    compact = retrieval_service._serialize_record_summary(
+        record=record,
+        subjects=subjects,
+        evidence_count=0,
+        detail_level="compact",
+        context=context,
+    )
+    full = retrieval_service._serialize_record_summary(
+        record=record,
+        subjects=subjects,
+        evidence_count=0,
+        detail_level="full",
+        context=context,
+    )
+
+    assert {
+        "subject_count": compact["subject_count"],
+        "subjects_truncated": compact["subjects_truncated"],
+    } == {
+        "subject_count": 11,
+        "subjects_truncated": True,
+    }
+    compact_subjects = compact["subjects"]
+    assert isinstance(compact_subjects, list)
+    assert len(compact_subjects) == retrieval_service.COMPACT_MEMORY_SUBJECT_LIMIT
+    assert compact_subjects[0]["subject_key"] == "pkg/service.py"
+    full_subjects = full.get("subjects")
+    assert isinstance(full_subjects, list)
+    assert len(full_subjects) == 11
+    assert {"subject_count", "subjects_truncated"}.isdisjoint(full)

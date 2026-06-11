@@ -18,6 +18,7 @@ from .anomalies import (
 )
 from .models import Trajectory
 from .retrieval import (
+    TrajectoryDetailLevel,
     filter_trajectories_for_default_retrieval,
     serialize_trajectory_preview,
     trajectory_list_item_to_preview,
@@ -94,6 +95,7 @@ def build_trajectory_anomalies_payload(
     max_results: int = DEFAULT_ANOMALY_PREVIEW_LIMIT,
     limit: int = DEFAULT_ANALYTICS_LIMIT,
     include_routine: bool = False,
+    detail_level: TrajectoryDetailLevel = "full",
 ) -> dict[str, object]:
     trajectories = _load_trajectories(
         store,
@@ -123,7 +125,10 @@ def build_trajectory_anomalies_payload(
     selected = hits[: max(1, int(max_results))]
     payload_items: list[dict[str, object]] = []
     for trajectory, anomalies in selected:
-        preview = serialize_trajectory_preview(trajectory)
+        preview = serialize_trajectory_preview(
+            trajectory,
+            detail_level=detail_level,
+        )
         preview["agent_label"] = trajectory_agent_label(trajectory)
         preview["anomalies"] = [serialize_anomaly(item) for item in anomalies]
         payload_items.append(preview)
@@ -141,6 +146,7 @@ def build_trajectory_dashboard_payload(
     project_id: str,
     max_results: int = DEFAULT_ANOMALY_PREVIEW_LIMIT,
     include_routine: bool = False,
+    detail_level: TrajectoryDetailLevel = "full",
 ) -> dict[str, object]:
     status = trajectory_status_payload(
         count=store.count_trajectories(project_id=project_id),
@@ -156,6 +162,7 @@ def build_trajectory_dashboard_payload(
         project_id=project_id,
         max_results=max_results,
         include_routine=include_routine,
+        detail_level=detail_level,
     )
     recent_items = store.list_trajectories(
         project_id=project_id,

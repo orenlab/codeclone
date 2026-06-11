@@ -910,6 +910,7 @@ def test_hydrate_trajectory_hits_skips_foreign_project(tmp_path: Path) -> None:
             store,
             project_id=project.id,
             hits=[SemanticHit(source_id=trajectory.id, source="trajectory", score=0.5)],
+            detail_level="compact",
         )
         assert hits
         assert hits[0]["semantic_score"] == 0.5
@@ -917,6 +918,7 @@ def test_hydrate_trajectory_hits_skips_foreign_project(tmp_path: Path) -> None:
             store,
             project_id="other-project",
             hits=[SemanticHit(source_id=trajectory.id, source="trajectory", score=0.5)],
+            detail_level="compact",
         )
         assert missing == []
 
@@ -955,14 +957,13 @@ def test_audit_reader_missing_db_and_connect_errors(
     finally:
         conn.close()
 
-    real_connect = sqlite3.connect
+    def _fail_open(_path: Path) -> sqlite3.Connection:
+        raise sqlite3.Error("connect failed")
 
-    def _fail_connect(database: str, *args: Any, **kwargs: Any) -> sqlite3.Connection:
-        if database == str(audit_db):
-            raise sqlite3.Error("connect failed")
-        return cast(sqlite3.Connection, real_connect(database, *args, **kwargs))
-
-    monkeypatch.setattr(sqlite3, "connect", _fail_connect)
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        _fail_open,
+    )
     with pytest.raises(AuditReadError, match="cannot open audit database"):
         list_workflow_ids_with_events_after(
             db_path=audit_db,
@@ -972,8 +973,6 @@ def test_audit_reader_missing_db_and_connect_errors(
     with pytest.raises(AuditReadError, match="cannot open audit database"):
         count_audit_event_core_gaps(db_path=audit_db, repo_root_digest="digest")
 
-    monkeypatch.setattr(sqlite3, "connect", real_connect)
-
     class _BrokenConn:
         def execute(self, *_args: object, **_kwargs: object) -> None:
             raise sqlite3.Error("query failed")
@@ -981,7 +980,10 @@ def test_audit_reader_missing_db_and_connect_errors(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: _BrokenConn())
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        lambda *_a, **_k: _BrokenConn(),
+    )
     with pytest.raises(AuditReadError, match="cannot read audit database"):
         read_audit_summary(db_path=audit_db, limit=5)
 
@@ -1670,8 +1672,6 @@ def test_staleness_audit_validation_and_events_edges(
     finally:
         conn.close()
 
-    real_connect = sqlite3.connect
-
     class _BrokenConn:
         def execute(self, *_args: object, **_kwargs: object) -> None:
             raise sqlite3.Error("query failed")
@@ -1679,18 +1679,24 @@ def test_staleness_audit_validation_and_events_edges(
         def close(self) -> None:
             return None
 
-    monkeypatch.setattr(sqlite3, "connect", lambda *_a, **_k: _BrokenConn())
-    with pytest.raises(AuditReadError, match="cannot read audit database"):
+    def _broken_open(_path: Path) -> _BrokenConn:
+        return _BrokenConn()
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        _broken_open,
+    )
+    audit_db_error = "cannot .* audit database"
+    with pytest.raises(AuditReadError, match=audit_db_error):
         read_audit_event_core_records(db_path=audit_db, repo_root_digest="digest")
-    with pytest.raises(AuditReadError, match="cannot read audit database"):
+    with pytest.raises(AuditReadError, match=audit_db_error):
         list_workflow_ids_with_events_after(
             db_path=audit_db,
             repo_root_digest="digest",
             after_id=0,
         )
-    with pytest.raises(AuditReadError, match="cannot read audit database"):
+    with pytest.raises(AuditReadError, match=audit_db_error):
         count_audit_event_core_gaps(db_path=audit_db, repo_root_digest="digest")
-    monkeypatch.setattr(sqlite3, "connect", real_connect)
 
 
 def test_trajectory_projector_and_retrieval_residual_edges(tmp_path: Path) -> None:
