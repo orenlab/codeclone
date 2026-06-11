@@ -77,9 +77,17 @@ def test_run_projection_job_links_under_finish(
         row = conn.execute(
             "SELECT name, correlation_id, parent_operation_id FROM platform_operations"
         ).fetchone()
+        boot = conn.execute(
+            "SELECT name, duration_ms FROM platform_spans "
+            "WHERE name='memory.projection.worker_bootstrap'"
+        ).fetchone()
     finally:
         conn.close()
     assert row == ("memory.projection.job", "A-corr", "A-op")
+    # The spawned worker (env handoff present) attributes its cold-start as a
+    # span, so the spawn->job gap is labelled in the waterfall.
+    assert boot is not None
+    assert boot[1] >= 0.0
 
 
 def test_spawn_injects_correlation_env(

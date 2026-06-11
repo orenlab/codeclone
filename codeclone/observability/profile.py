@@ -14,9 +14,31 @@ effort and must never break the work it measures.
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
+
 from .models import ProfileSample
 
 _BYTES_PER_MB = 1024 * 1024
+
+
+def worker_bootstrap_sample() -> tuple[str, float] | None:
+    """Process cold-start as ``(creation_timestamp_iso, ms_elapsed_to_now)``.
+
+    The elapsed time spans process spawn, interpreter startup, imports and setup
+    up to this call — the part of the spawn->job handoff a worker cannot wrap
+    with a normal span. Returns ``None`` when psutil is unavailable.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return None
+    created = psutil.Process().create_time()  # epoch seconds
+    elapsed_ms = max(0.0, (time.time() - created) * 1000.0)
+    created_iso = datetime.fromtimestamp(created, tz=timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%S.%fZ"
+    )
+    return created_iso, elapsed_ms
 
 
 def capture_rss_cpu() -> tuple[int, float, float] | None:
@@ -66,4 +88,4 @@ def build_profile_sample(
     )
 
 
-__all__ = ["build_profile_sample", "capture_rss_cpu"]
+__all__ = ["build_profile_sample", "capture_rss_cpu", "worker_bootstrap_sample"]

@@ -14,7 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ...config.memory import MemoryConfig
-from ...observability import operation, span
+from ...observability import (
+    is_observability_enabled,
+    operation,
+    record_elapsed_span,
+    span,
+)
+from ...observability.profile import worker_bootstrap_sample
 from ..experience.distillation_workflow import execute_experience_distillation
 from ..models import MemoryProject
 from ..semantic.rebuild_workflow import execute_semantic_index_rebuild
@@ -114,6 +120,25 @@ def _correlation_handoff() -> tuple[str | None, str | None]:
     )
 
 
+def _emit_worker_bootstrap_span() -> None:
+    """Record the worker cold-start (process spawn -> first job instrumentation)
+    as a ``memory.projection.worker_bootstrap`` span, positioned at the process
+    creation time so the spawn->job gap in the waterfall is labelled rather than
+    left as empty space. No-op when disabled or psutil is unavailable.
+    """
+    if not is_observability_enabled():
+        return
+    sample = worker_bootstrap_sample()
+    if sample is None:
+        return
+    started_at_utc, elapsed_ms = sample
+    record_elapsed_span(
+        "memory.projection.worker_bootstrap",
+        started_at_utc=started_at_utc,
+        duration_ms=elapsed_ms,
+    )
+
+
 def run_projection_job(
     conn: sqlite3.Connection,
     *,
@@ -130,6 +155,10 @@ def run_projection_job(
         correlation_id=correlation_id,
         parent_operation_id=parent_operation_id,
     ):
+        # Only a spawned worker (one that carries the env handoff) has a real
+        # cold-start to attribute; an in-process run shares the caller's process.
+        if parent_operation_id is not None:
+            _emit_worker_bootstrap_span()
         watermark = _trajectory_incremental_watermark(conn, project_id=project.id)
         with span(
             name="memory.trajectory.rebuild",

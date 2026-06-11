@@ -25,6 +25,7 @@ from .runtime import (
     operation,
     payload_capture_enabled,
     record_db_query,
+    record_elapsed_span,
     shutdown,
     span,
 )
@@ -40,6 +41,7 @@ __all__ = [
     "operation",
     "payload_capture_enabled",
     "record_db_query",
+    "record_elapsed_span",
     "shutdown",
     "span",
 ]

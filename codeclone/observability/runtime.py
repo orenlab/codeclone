@@ -407,6 +407,33 @@ def span(
         )
 
 
+def record_elapsed_span(
+    name: str,
+    *,
+    started_at_utc: str,
+    duration_ms: float,
+    reason_kind: ReasonKind | None = None,
+) -> None:
+    """Attach a span with explicit timing to the active operation, for work that
+    finished before instrumentation could wrap it (e.g. a worker's cold-start).
+    No-op when disabled or outside an operation.
+    """
+    parent_op = _CURRENT_OP.get()
+    if not _ENABLED or parent_op is None:
+        return
+    handle = SpanHandle(
+        span_id=_new_id(),
+        operation_id=parent_op.operation_id,
+        name=name,
+        started_at_utc=started_at_utc,
+        parent_span_id=None,
+        reason_kind=reason_kind,
+        reason=None,
+        dedupe_key=None,
+    )
+    parent_op._spans.append(handle._to_record(duration_ms=duration_ms))
+
+
 _DB_WRITE_KINDS = frozenset({"insert", "update", "delete", "replace"})
 
 
@@ -449,6 +476,7 @@ __all__ = [
     "operation",
     "payload_capture_enabled",
     "record_db_query",
+    "record_elapsed_span",
     "shutdown",
     "span",
 ]
