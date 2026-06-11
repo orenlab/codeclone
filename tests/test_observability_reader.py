@@ -23,6 +23,7 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.observability.store.writer import write_operation
+from codeclone.observability.views import TraceView
 
 
 def _seed(tmp_path: Path) -> None:
@@ -80,18 +81,22 @@ def _seed(tmp_path: Path) -> None:
         conn.close()
 
 
+def _read_trace(tmp_path: Path, *, correlation_id: str) -> TraceView:
+    read = open_observability_store_readonly(tmp_path)
+    assert read is not None
+    try:
+        return build_trace_view(read, correlation_id=correlation_id)
+    finally:
+        read.close()
+
+
 def test_open_readonly_missing_store_returns_none(tmp_path: Path) -> None:
     assert open_observability_store_readonly(tmp_path) is None
 
 
 def test_build_trace_view_tree_and_aggregates(tmp_path: Path) -> None:
     _seed(tmp_path)
-    read = open_observability_store_readonly(tmp_path)
-    assert read is not None
-    try:
-        trace = build_trace_view(read, correlation_id="A")
-    finally:
-        read.close()
+    trace = _read_trace(tmp_path, correlation_id="A")
 
     assert trace.schema_version == PLATFORM_OBSERVABILITY_SCHEMA_VERSION
     assert len(trace.operation_tree) == 1
@@ -203,12 +208,7 @@ def test_no_op_span_and_mcp_payload_percentiles(tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    read = open_observability_store_readonly(tmp_path)
-    assert read is not None
-    try:
-        trace = build_trace_view(read, correlation_id="M")
-    finally:
-        read.close()
+    trace = _read_trace(tmp_path, correlation_id="M")
 
     tool = trace.aggregates.mcp_tools[0]
     assert tool.p95_request_bytes == 51
@@ -269,12 +269,7 @@ def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    read = open_observability_store_readonly(tmp_path)
-    assert read is not None
-    try:
-        trace = build_trace_view(read, correlation_id="W")
-    finally:
-        read.close()
+    trace = _read_trace(tmp_path, correlation_id="W")
 
     costs = trace.aggregates.db_costs
     # Sorted by total queries desc: distill (1875) before reindex (1306).
@@ -285,3 +280,60 @@ def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
     assert by_name["memory.semantic.reindex"].total_queries == 1306
     assert by_name["memory.semantic.reindex"].total_writes == 0
     assert by_name["memory.semantic.reindex"].max_queries == 1306
+
+
+def test_waste_ranks_no_op_and_high_payload(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="M",
+                correlation_id="M",
+                surface="mcp",
+                name="get_relevant_memory",
+                started_at_utc="2026-06-09T00:00:00Z",
+                duration_ms=200.0,
+                status="ok",
+                response_bytes=20480,
+                response_tokens=11000,
+            ),
+        )
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="W",
+                correlation_id="M",
+                surface="memory",
+                name="memory.projection.job",
+                started_at_utc="2026-06-09T00:00:01Z",
+                duration_ms=850.0,
+                status="ok",
+                parent_operation_id="M",
+                spans=(
+                    SpanRecord(
+                        span_id="s",
+                        operation_id="W",
+                        name="memory.semantic.reindex",
+                        started_at_utc="2026-06-09T00:00:01Z",
+                        duration_ms=800.0,
+                        status="ok",
+                        counters={"embedded": 0, "skipped_unchanged": 826},
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+
+    trace = _read_trace(tmp_path, correlation_id="M")
+
+    waste = trace.aggregates.waste
+    assert {w.kind for w in waste} == {"no-op", "high payload"}
+    noop = next(w for w in waste if w.kind == "no-op")
+    assert noop.subject == "memory.semantic.reindex"
+    assert "skipped 826" in noop.detail
+    high = next(w for w in waste if w.kind == "high payload")
+    assert high.subject == "get_relevant_memory"
+    # High payload (20 KB) outranks the no-op span (800 ms) by severity.
+    assert waste[0].kind == "high payload"

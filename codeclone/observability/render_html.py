@@ -32,6 +32,7 @@ from .views import (
     SpanCostView,
     SpanView,
     TraceView,
+    WasteItem,
     WaterfallGroup,
     WaterfallRow,
 )
@@ -380,6 +381,28 @@ def _summary(trace: TraceView) -> str:
     return _section("Runtime summary", cards + _highlights(agg))
 
 
+def _waste_row(item: WasteItem) -> str:
+    return (
+        '<tr class="flag"><td>'
+        f'<span class="chip warn">{_esc(item.kind)}</span></td>'
+        f'<td class="t">{_surface_badge(item.surface)} {_esc(item.subject)}</td>'
+        f'<td class="t muted">{_esc(item.detail)}</td></tr>'
+    )
+
+
+def _waste_section(agg: AggregatesView) -> str:
+    if not agg.waste:
+        return ""
+    rows = "".join(_waste_row(item) for item in agg.waste)
+    headers = (("Kind", False), ("What", False), ("Cost", False))
+    return _section(
+        "Waste",
+        _table(headers, rows),
+        subtitle="Resources spent without payoff — no-op rebuilds and "
+        "payload-heavy calls. Ranked fix candidates.",
+    )
+
+
 def _op_lineage(op: OperationView) -> list[OperationView]:
     flat = [op]
     for child in op.children:
@@ -654,6 +677,7 @@ def render_trace_html(trace: TraceView) -> str:
         f'<style>{_CSS}</style></head><body><div class="wrap">'
         + _header(trace)
         + _summary(trace)
+        + _waste_section(trace.aggregates)
         + _waterfall(trace)
         + _chain(trace)
         + _semantic(trace.aggregates)

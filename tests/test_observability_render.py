@@ -29,6 +29,7 @@ from codeclone.observability.views import (
     SpanCostView,
     SpanView,
     TraceView,
+    WasteItem,
     WaterfallGroup,
     WaterfallRow,
 )
@@ -249,6 +250,39 @@ def test_render_agent_context() -> None:
     assert "context pressure" in html
     assert "get_relevant_memory" in html
     assert "80%" in html  # 800 / 1000 context share for the top consumer
+
+
+def test_render_waste_section() -> None:
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="t",
+        window_ended_at_utc="t",
+        aggregates=AggregatesView(
+            operation_count=1,
+            waste=(
+                WasteItem(
+                    kind="high payload",
+                    subject="get_relevant_memory",
+                    surface="mcp",
+                    detail="p95 20 KB resp · 11000 tok",
+                    severity=20480.0,
+                ),
+                WasteItem(
+                    kind="no-op",
+                    subject="memory.semantic.reindex",
+                    surface="memory",
+                    detail="ran 800ms, skipped 826",
+                    severity=800.0,
+                ),
+            ),
+        ),
+    )
+    html = render_trace_html(trace)
+    assert "Waste" in html
+    assert "no-op" in html
+    assert "high payload" in html
+    assert "skipped 826" in html
+    assert "get_relevant_memory" in html
 
 
 def test_render_db_cost() -> None:

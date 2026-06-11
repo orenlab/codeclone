@@ -124,6 +124,19 @@ class AgentView:
 
 
 @dataclass(frozen=True, slots=True)
+class WasteItem:
+    """One ranked "fix candidate": resources spent without payoff — a no-op
+    rebuild that ran but produced nothing, or a payload-heavy call. ``severity``
+    is the descending sort key (magnitude of the wasted cost)."""
+
+    kind: str
+    subject: str
+    surface: str
+    detail: str
+    severity: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
 class AggregatesView:
     operation_count: int
     slowest: tuple[OperationView, ...] = ()
@@ -137,6 +150,7 @@ class AggregatesView:
     peak_memory_span: SpanCostView | None = None
     db_costs: tuple[DbCostRow, ...] = ()
     agent: AgentView | None = None
+    waste: tuple[WasteItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -190,6 +204,7 @@ __all__ = [
     "SpanCostView",
     "SpanView",
     "TraceView",
+    "WasteItem",
     "WaterfallGroup",
     "WaterfallRow",
 ]

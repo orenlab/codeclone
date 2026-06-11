@@ -31,6 +31,7 @@ from ..views import (
     SpanCostView,
     SpanView,
     TraceView,
+    WasteItem,
     WaterfallGroup,
     WaterfallRow,
 )
@@ -42,6 +43,12 @@ _DEFAULT_WINDOW = 20
 # they are all present-and-zero the span ran but touched nothing (a no-op).
 _PRODUCTIVE_COUNTER_KEYS = ("embedded", "workflows_seen", "experiences_distilled")
 _SEMANTIC_COST_LIMIT = 8
+
+# Waste thresholds: a no-op span is only worth flagging once it has spent time;
+# an MCP response is "heavy" past these payload sizes.
+_WASTE_NOOP_MS = 50.0
+_HIGH_PAYLOAD_BYTES = 16 * 1024
+_HIGH_PAYLOAD_TOKENS = 4000
 
 
 def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
@@ -262,6 +269,46 @@ def _mcp_tool_aggregates(flat: list[OperationView]) -> tuple[McpToolAggregate, .
     return tuple(aggregates)
 
 
+def _waste(
+    semantic_costs: tuple[SpanCostView, ...],
+    mcp_tools: tuple[McpToolAggregate, ...],
+) -> tuple[WasteItem, ...]:
+    items: list[WasteItem] = []
+    for span in semantic_costs:
+        if span.no_op and span.duration_ms >= _WASTE_NOOP_MS:
+            rss = (
+                f", +{span.rss_delta_mb:.0f} MB"
+                if span.rss_delta_mb and span.rss_delta_mb >= 1
+                else ""
+            )
+            items.append(
+                WasteItem(
+                    kind="no-op",
+                    subject=span.name,
+                    surface=span.surface,
+                    detail=f"ran {span.duration_ms:.0f}ms{rss}, skipped {span.skipped}",
+                    severity=span.duration_ms,
+                )
+            )
+    items.extend(
+        WasteItem(
+            kind="high payload",
+            subject=tool.name,
+            surface="mcp",
+            detail=(
+                f"p95 {tool.p95_response_bytes / 1024:.0f} KB resp · "
+                f"{tool.p95_response_tokens} tok"
+            ),
+            severity=float(tool.p95_response_bytes),
+        )
+        for tool in mcp_tools
+        if tool.p95_response_bytes >= _HIGH_PAYLOAD_BYTES
+        or tool.p95_response_tokens >= _HIGH_PAYLOAD_TOKENS
+    )
+    items.sort(key=lambda w: (-w.severity, w.kind, w.subject))
+    return tuple(items)
+
+
 def _agent_view(flat: list[OperationView]) -> AgentView | None:
     mcp_ops = [op for op in flat if op.surface == "mcp"]
     if not mcp_ops:
@@ -341,6 +388,7 @@ def _aggregates(
         (s for s in span_costs if s.rss_delta_mb is not None),
         key=lambda s: (-(s.rss_delta_mb or 0.0), s.operation_id, s.span_id),
     )
+    mcp_tools = _mcp_tool_aggregates(flat)
     return AggregatesView(
         operation_count=len(flat),
         slowest=slowest,
@@ -348,12 +396,13 @@ def _aggregates(
         max_rss_delta_mb=max(rss) if rss else None,
         anomaly_count=0,
         unknown_expensive_rebuild_count=unknown,
-        mcp_tools=_mcp_tool_aggregates(flat),
+        mcp_tools=mcp_tools,
         slowest_span=span_costs[0] if span_costs else None,
         semantic_costs=semantic_costs[:_SEMANTIC_COST_LIMIT],
         peak_memory_span=memory_ranked[0] if memory_ranked else None,
         db_costs=_db_costs(flat),
         agent=_agent_view(flat),
+        waste=_waste(semantic_costs, mcp_tools),
     )
 
 
