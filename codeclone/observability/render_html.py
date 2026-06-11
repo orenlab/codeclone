@@ -29,6 +29,7 @@ from .views import (
     DbCostRow,
     McpToolAggregate,
     OperationView,
+    PipelineGroup,
     SpanCostView,
     SpanView,
     TraceView,
@@ -359,6 +360,18 @@ def _highlights(agg: AggregatesView) -> str:
                 _mb(agg.max_rss_delta_mb),
             )
         )
+    if agg.heaviest_cpu is not None:
+        op = agg.heaviest_cpu
+        cpu_ms = (op.cpu_user_ms or 0.0) + (op.cpu_system_ms or 0.0)
+        ratio = cpu_ms / op.duration_ms if op.duration_ms else 0.0
+        rows.append(
+            _lead_row(
+                "Heaviest CPU",
+                f"{_surface_badge(op.surface)}"
+                f'<span class="lname">{_esc(op.name)}</span>',
+                f"{_ms(cpu_ms)} · {ratio:.1f}x wall",
+            )
+        )
     return f'<div class="panel lead">{"".join(rows)}</div>' if rows else ""
 
 
@@ -667,6 +680,27 @@ def _db_cost(agg: AggregatesView) -> str:
     )
 
 
+def _pipeline_row(group: PipelineGroup) -> str:
+    return (
+        f'<tr><td class="t">{_esc(group.name)}</td>'
+        f'<td class="r">{group.op_count}</td>'
+        f'<td class="r">{_ms(group.duration_ms)}</td>'
+        f'<td class="r">{_ms(group.cpu_ms)}</td></tr>'
+    )
+
+
+def _pipeline_section(agg: AggregatesView) -> str:
+    if not agg.pipeline:
+        return ""
+    rows = "".join(_pipeline_row(group) for group in agg.pipeline)
+    headers = (("Subsystem", False), ("Ops", True), ("Wall", True), ("CPU", True))
+    return _section(
+        "Pipeline",
+        _table(headers, rows),
+        subtitle="Where the run spends wall time and CPU, grouped by subsystem.",
+    )
+
+
 def render_trace_html(trace: TraceView) -> str:
     """Render a ``TraceView`` as a self-contained, branded diagnosis cockpit."""
     foot = f"CodeClone · platform observability · schema {_esc(trace.schema_version)}"
@@ -684,6 +718,7 @@ def render_trace_html(trace: TraceView) -> str:
         + _db_cost(trace.aggregates)
         + _agent(trace.aggregates)
         + _mcp(trace.aggregates.mcp_tools)
+        + _pipeline_section(trace.aggregates)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"
     )

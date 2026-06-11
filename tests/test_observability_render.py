@@ -26,6 +26,7 @@ from codeclone.observability.views import (
     DbCostRow,
     McpToolAggregate,
     OperationView,
+    PipelineGroup,
     SpanCostView,
     SpanView,
     TraceView,
@@ -215,6 +216,39 @@ def test_render_peak_memory_contributor() -> None:
     assert "Top memory consumer" in html
     assert "memory.semantic.reindex" in html
     assert "80%" in html  # 480 / 600 = 80%
+
+
+def test_render_cpu_highlight_and_pipeline() -> None:
+    op = OperationView(
+        operation_id="W",
+        correlation_id="W",
+        surface="memory",
+        name="memory.projection.job",
+        started_at_utc="t",
+        duration_ms=1000.0,
+        status="ok",
+        cpu_user_ms=1800.0,
+        cpu_system_ms=200.0,
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="t",
+        window_ended_at_utc="t",
+        aggregates=AggregatesView(
+            operation_count=1,
+            heaviest_cpu=op,
+            pipeline=(
+                PipelineGroup(
+                    name="memory", op_count=2, duration_ms=2500.0, cpu_ms=3000.0
+                ),
+            ),
+        ),
+    )
+    html = render_trace_html(trace)
+    assert "Heaviest CPU" in html
+    assert "2.0x wall" in html  # 2000ms CPU / 1000ms wall
+    assert "Pipeline" in html
+    assert "memory" in html
 
 
 def test_render_agent_context() -> None:

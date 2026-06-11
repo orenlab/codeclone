@@ -337,3 +337,47 @@ def test_waste_ranks_no_op_and_high_payload(tmp_path: Path) -> None:
     assert high.subject == "get_relevant_memory"
     # High payload (20 KB) outranks the no-op span (800 ms) by severity.
     assert waste[0].kind == "high payload"
+
+
+def test_cpu_and_pipeline_rollup(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="W",
+                correlation_id="W",
+                surface="memory",
+                name="memory.projection.job",
+                started_at_utc="2026-06-09T00:00:00Z",
+                duration_ms=1000.0,
+                status="ok",
+                profile=ProfileSample(cpu_user_ms=1800.0, cpu_system_ms=200.0),
+            ),
+        )
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="A",
+                correlation_id="W",
+                surface="mcp",
+                name="mcp.analyze_repository",
+                started_at_utc="2026-06-09T00:00:01Z",
+                duration_ms=500.0,
+                status="ok",
+                parent_operation_id="W",
+                profile=ProfileSample(cpu_user_ms=100.0, cpu_system_ms=50.0),
+            ),
+        )
+    finally:
+        conn.close()
+
+    agg = _read_trace(tmp_path, correlation_id="W").aggregates
+    # Heaviest CPU: the memory job spent 2000ms CPU on 1000ms wall (parallel).
+    assert agg.heaviest_cpu is not None
+    assert agg.heaviest_cpu.name == "memory.projection.job"
+    assert agg.heaviest_cpu.cpu_user_ms == 1800.0
+    # Pipeline rolls ops up by subsystem.
+    pipe = {group.name: group for group in agg.pipeline}
+    assert pipe["memory"].cpu_ms == 2000.0
+    assert pipe["analysis"].op_count == 1

@@ -72,6 +72,8 @@ class OperationView:
     rss_delta_mb: float | None = None
     spans: tuple[SpanView, ...] = ()
     children: tuple[OperationView, ...] = ()
+    cpu_user_ms: float | None = None
+    cpu_system_ms: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,6 +139,17 @@ class WasteItem:
 
 
 @dataclass(frozen=True, slots=True)
+class PipelineGroup:
+    """Operations rolled up by subsystem (memory / analysis / controller / …),
+    showing where the run spends wall time and CPU."""
+
+    name: str
+    op_count: int
+    duration_ms: float
+    cpu_ms: float
+
+
+@dataclass(frozen=True, slots=True)
 class AggregatesView:
     operation_count: int
     slowest: tuple[OperationView, ...] = ()
@@ -151,6 +164,8 @@ class AggregatesView:
     db_costs: tuple[DbCostRow, ...] = ()
     agent: AgentView | None = None
     waste: tuple[WasteItem, ...] = ()
+    heaviest_cpu: OperationView | None = None
+    pipeline: tuple[PipelineGroup, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +216,7 @@ __all__ = [
     "DbCostRow",
     "McpToolAggregate",
     "OperationView",
+    "PipelineGroup",
     "SpanCostView",
     "SpanView",
     "TraceView",

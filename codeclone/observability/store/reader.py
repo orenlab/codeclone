@@ -28,6 +28,7 @@ from ..views import (
     DbCostRow,
     McpToolAggregate,
     OperationView,
+    PipelineGroup,
     SpanCostView,
     SpanView,
     TraceView,
@@ -133,6 +134,8 @@ def _operation_view(
         rss_delta_mb=row["rss_delta_mb"],
         spans=spans,
         children=children,
+        cpu_user_ms=row["cpu_user_ms"],
+        cpu_system_ms=row["cpu_system_ms"],
     )
 
 
@@ -309,6 +312,50 @@ def _waste(
     return tuple(items)
 
 
+_CONTROLLER_TOOLS = frozenset(
+    {
+        "mcp.start_controlled_change",
+        "mcp.finish_controlled_change",
+        "mcp.manage_change_intent",
+        "mcp.check_patch_contract",
+        "mcp.create_review_receipt",
+        "mcp.validate_review_claims",
+    }
+)
+
+
+def _cpu_ms(op: OperationView) -> float:
+    return (op.cpu_user_ms or 0.0) + (op.cpu_system_ms or 0.0)
+
+
+def _subsystem(op: OperationView) -> str:
+    if op.surface == "memory":
+        return "memory"
+    if "analyze" in op.name:
+        return "analysis"
+    if op.name in _CONTROLLER_TOOLS:
+        return "controller"
+    if op.surface == "mcp":
+        return "mcp query"
+    return op.surface or "other"
+
+
+def _pipeline(flat: list[OperationView]) -> tuple[PipelineGroup, ...]:
+    grouped: dict[str, list[OperationView]] = defaultdict(list)
+    for op in flat:
+        grouped[_subsystem(op)].append(op)
+    rows = [
+        PipelineGroup(
+            name=name,
+            op_count=len(ops),
+            duration_ms=sum(op.duration_ms for op in ops),
+            cpu_ms=sum(_cpu_ms(op) for op in ops),
+        )
+        for name, ops in grouped.items()
+    ]
+    return tuple(sorted(rows, key=lambda g: (-g.duration_ms, g.name)))
+
+
 def _agent_view(flat: list[OperationView]) -> AgentView | None:
     mcp_ops = [op for op in flat if op.surface == "mcp"]
     if not mcp_ops:
@@ -389,6 +436,8 @@ def _aggregates(
         key=lambda s: (-(s.rss_delta_mb or 0.0), s.operation_id, s.span_id),
     )
     mcp_tools = _mcp_tool_aggregates(flat)
+    cpu_ranked = sorted(flat, key=lambda v: (-_cpu_ms(v), v.operation_id))
+    heaviest_cpu = cpu_ranked[0] if cpu_ranked and _cpu_ms(cpu_ranked[0]) > 0 else None
     return AggregatesView(
         operation_count=len(flat),
         slowest=slowest,
@@ -403,6 +452,8 @@ def _aggregates(
         db_costs=_db_costs(flat),
         agent=_agent_view(flat),
         waste=_waste(semantic_costs, mcp_tools),
+        heaviest_cpu=heaviest_cpu,
+        pipeline=_pipeline(flat),
     )
 
 
