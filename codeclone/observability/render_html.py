@@ -27,6 +27,7 @@ from .views import (
     AgentTokenRow,
     AggregatesView,
     DbCostRow,
+    DbFingerprintRow,
     McpToolAggregate,
     OperationView,
     PipelineGroup,
@@ -680,6 +681,34 @@ def _db_cost(agg: AggregatesView) -> str:
     )
 
 
+def _db_fingerprint_row(row: DbFingerprintRow) -> str:
+    table = _esc(row.table_hint) if row.table_hint else "—"
+    return (
+        f'<tr><td class="t">{_esc(row.span_name)}</td>'
+        f'<td class="t"><code>{_esc(row.fingerprint)}</code></td>'
+        f'<td class="t">{table}</td>'
+        f'<td class="r">{row.count}</td></tr>'
+    )
+
+
+def _db_fingerprints(agg: AggregatesView) -> str:
+    if not agg.db_fingerprints:
+        return ""
+    rows = "".join(_db_fingerprint_row(row) for row in agg.db_fingerprints)
+    headers = (
+        ("Span", False),
+        ("Query shape", False),
+        ("Table", False),
+        ("Count", True),
+    )
+    return _section(
+        "DB query shapes",
+        _table(headers, rows),
+        subtitle="The literal-free statement shapes behind the query counts — the "
+        "high-count rows name the N+1 to fix (batch these reads).",
+    )
+
+
 def _pipeline_row(group: PipelineGroup) -> str:
     return (
         f'<tr><td class="t">{_esc(group.name)}</td>'
@@ -716,6 +745,7 @@ def render_trace_html(trace: TraceView) -> str:
         + _chain(trace)
         + _semantic(trace.aggregates)
         + _db_cost(trace.aggregates)
+        + _db_fingerprints(trace.aggregates)
         + _agent(trace.aggregates)
         + _mcp(trace.aggregates.mcp_tools)
         + _pipeline_section(trace.aggregates)

@@ -24,6 +24,7 @@ from codeclone.observability.views import (
     AgentView,
     AggregatesView,
     DbCostRow,
+    DbFingerprintRow,
     McpToolAggregate,
     OperationView,
     PipelineGroup,
@@ -95,6 +96,31 @@ def test_render_trace_html_is_branded() -> None:
     assert "pipeline.analyze" in html
     assert "content_changed" in html
     assert "finish_controlled_change" in html
+
+
+def test_render_trace_html_shows_db_query_shapes() -> None:
+    agg = AggregatesView(
+        operation_count=1,
+        db_fingerprints=(
+            DbFingerprintRow(
+                span_name="memory.experience.distill",
+                surface="memory",
+                fingerprint="select * from memory_evidence where memory_id = ?",
+                table_hint="memory_evidence",
+                count=1200,
+            ),
+        ),
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=agg,
+    )
+    html = render_trace_html(trace)
+    assert "DB query shapes" in html
+    assert "select * from memory_evidence where memory_id = ?" in html
+    assert "memory_evidence" in html
 
 
 def _cockpit_trace() -> TraceView:

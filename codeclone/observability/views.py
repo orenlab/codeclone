@@ -29,6 +29,8 @@ class SpanView:
     counters: Mapping[str, int] = field(default_factory=dict)
     rss_delta_mb: float | None = None
     started_at_utc: str = ""
+    # Top-N literal-free SQL shapes seen on this span -> occurrence count.
+    db_fingerprints: Mapping[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +106,20 @@ class DbCostRow:
 
 
 @dataclass(frozen=True, slots=True)
+class DbFingerprintRow:
+    """One literal-free SQL shape attributed to a span class, with how often it
+    ran — the decomposition of a span's ``db_queries`` total into named
+    statements, so an N+1 reads as "1200x SELECT evidence by memory_id" instead
+    of a bare count. ``table_hint`` is re-derived from the stored shape."""
+
+    span_name: str
+    surface: str
+    fingerprint: str
+    table_hint: str | None
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTokenRow:
     """One MCP tool's cumulative token economics across the window."""
 
@@ -166,6 +182,7 @@ class AggregatesView:
     waste: tuple[WasteItem, ...] = ()
     heaviest_cpu: OperationView | None = None
     pipeline: tuple[PipelineGroup, ...] = ()
+    db_fingerprints: tuple[DbFingerprintRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,6 +231,7 @@ __all__ = [
     "AgentView",
     "AggregatesView",
     "DbCostRow",
+    "DbFingerprintRow",
     "McpToolAggregate",
     "OperationView",
     "PipelineGroup",

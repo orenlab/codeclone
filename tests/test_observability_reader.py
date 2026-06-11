@@ -23,7 +23,7 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.observability.store.writer import write_operation
-from codeclone.observability.views import TraceView
+from codeclone.observability.views import DbFingerprintRow, TraceView
 
 
 def _seed(tmp_path: Path) -> None:
@@ -280,6 +280,52 @@ def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
     assert by_name["memory.semantic.reindex"].total_queries == 1306
     assert by_name["memory.semantic.reindex"].total_writes == 0
     assert by_name["memory.semantic.reindex"].max_queries == 1306
+
+
+def test_db_fingerprints_aggregate_per_shape(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="F",
+                correlation_id="F",
+                surface="memory",
+                name="memory.projection.job",
+                started_at_utc="2026-06-09T00:00:01Z",
+                duration_ms=500.0,
+                status="ok",
+                spans=(
+                    SpanRecord(
+                        span_id="f1",
+                        operation_id="F",
+                        name="memory.experience.distill",
+                        started_at_utc="2026-06-09T00:00:01Z",
+                        duration_ms=400.0,
+                        status="ok",
+                        db_fingerprints={
+                            "select * from memory_evidence where memory_id = ?": 1200,
+                            "select * from memory_subjects where id = ?": 500,
+                        },
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+
+    shapes = _read_trace(tmp_path, correlation_id="F").aggregates.db_fingerprints
+
+    # Ranked by count desc; table_hint is re-derived from the stored shape. Assert
+    # the whole row at once (a flat run of per-field asserts clones other tests).
+    assert shapes[0] == DbFingerprintRow(
+        span_name="memory.experience.distill",
+        surface="memory",
+        fingerprint="select * from memory_evidence where memory_id = ?",
+        table_hint="memory_evidence",
+        count=1200,
+    )
+    assert shapes[1].table_hint == "memory_subjects"
 
 
 def test_waste_ranks_no_op_and_high_payload(tmp_path: Path) -> None:

@@ -21,11 +21,13 @@ from typing import cast
 import orjson
 
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+from ..db_fingerprint import fingerprint_sql
 from ..views import (
     AgentTokenRow,
     AgentView,
     AggregatesView,
     DbCostRow,
+    DbFingerprintRow,
     McpToolAggregate,
     OperationView,
     PipelineGroup,
@@ -44,6 +46,7 @@ _DEFAULT_WINDOW = 20
 # they are all present-and-zero the span ran but touched nothing (a no-op).
 _PRODUCTIVE_COUNTER_KEYS = ("embedded", "workflows_seen", "experiences_distilled")
 _SEMANTIC_COST_LIMIT = 8
+_DB_FINGERPRINT_ROW_LIMIT = 15
 
 # Waste thresholds: a no-op span is only worth flagging once it has spent time;
 # an MCP response is "heavy" past these payload sizes.
@@ -80,6 +83,9 @@ def _parse_counters(raw: object) -> dict[str, int]:
 
 
 def _span_view(row: sqlite3.Row) -> SpanView:
+    # sqlite3.Row membership (`x in row`) tests values, so probe column names via
+    # keys() to stay tolerant of stores written before db_fingerprints existed.
+    columns = row.keys()
     return SpanView(
         span_id=str(row["span_id"]),
         name=str(row["name"]),
@@ -92,6 +98,9 @@ def _span_view(row: sqlite3.Row) -> SpanView:
         counters=_parse_counters(row["counters_json"]),
         rss_delta_mb=row["rss_delta_mb"],
         started_at_utc=str(row["started_at_utc"]),
+        db_fingerprints=_parse_counters(
+            row["db_fingerprints"] if "db_fingerprints" in columns else None
+        ),
     )
 
 
@@ -403,6 +412,28 @@ def _db_costs(flat: list[OperationView]) -> tuple[DbCostRow, ...]:
     return tuple(sorted(rows, key=lambda r: (-r.total_queries, r.span_name)))
 
 
+def _db_fingerprints(flat: list[OperationView]) -> tuple[DbFingerprintRow, ...]:
+    grouped: dict[tuple[str, str], int] = defaultdict(int)
+    surface_of: dict[str, str] = {}
+    for op in flat:
+        for span in op.spans:
+            for fingerprint, count in span.db_fingerprints.items():
+                grouped[(span.name, fingerprint)] += count
+                surface_of.setdefault(span.name, op.surface)
+    rows = [
+        DbFingerprintRow(
+            span_name=span_name,
+            surface=surface_of[span_name],
+            fingerprint=fingerprint,
+            table_hint=fingerprint_sql(fingerprint).table_hint,
+            count=count,
+        )
+        for (span_name, fingerprint), count in grouped.items()
+    ]
+    rows.sort(key=lambda r: (-r.count, r.span_name, r.fingerprint))
+    return tuple(rows[:_DB_FINGERPRINT_ROW_LIMIT])
+
+
 def _aggregates(
     flat: list[OperationView], spans_by_op: dict[str, tuple[SpanView, ...]]
 ) -> AggregatesView:
@@ -454,6 +485,7 @@ def _aggregates(
         waste=_waste(semantic_costs, mcp_tools),
         heaviest_cpu=heaviest_cpu,
         pipeline=_pipeline(flat),
+        db_fingerprints=_db_fingerprints(flat),
     )
 
 
