@@ -16,7 +16,11 @@ pytest.importorskip("psutil")
 
 from codeclone.config.observability import ObservabilityConfig
 from codeclone.observability import bootstrap, operation, shutdown, span
-from codeclone.observability.profile import build_profile_sample
+from codeclone.observability.profile import (
+    build_profile_sample,
+    capture_rss_cpu,
+    worker_bootstrap_sample,
+)
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
@@ -78,3 +82,43 @@ def test_profile_false_leaves_columns_null(tmp_path: Path) -> None:
         conn.close()
     assert op_row == (None, None, None)
     assert span_row[0] is None
+
+
+def test_worker_bootstrap_sample_and_capture_rss_cpu_return_values() -> None:
+    bootstrap = worker_bootstrap_sample()
+    assert bootstrap is not None
+    created_iso, elapsed_ms = bootstrap
+    assert created_iso.endswith("Z")
+    assert elapsed_ms >= 0.0
+
+    snapshot = capture_rss_cpu()
+    assert snapshot is not None
+    rss, user_cpu, system_cpu = snapshot
+    assert rss > 0
+    assert user_cpu >= 0.0
+    assert system_cpu >= 0.0
+
+
+def test_profile_helpers_return_none_without_psutil(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    from collections.abc import Mapping, Sequence
+
+    real_import = builtins.__import__
+
+    def _import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "psutil":
+            raise ImportError("psutil unavailable in test")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+    assert worker_bootstrap_sample() is None
+    assert capture_rss_cpu() is None
+    assert build_profile_sample((0, 0.0, 0.0)) is None

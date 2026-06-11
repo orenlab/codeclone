@@ -19,8 +19,10 @@ from codeclone.memory.retrieval import get_relevant_memory, query_engineering_me
 from codeclone.memory.retrieval.context_coverage import build_context_coverage
 from codeclone.memory.trajectory.models import TrajectorySubject
 from codeclone.memory.trajectory.retrieval import (
+    rank_trajectories_for_query,
     rank_trajectories_for_scope,
     serialize_trajectory_preview,
+    trajectory_status_payload,
 )
 from codeclone.report.meta import current_report_timestamp_utc
 
@@ -466,3 +468,68 @@ def test_trajectory_search_excludes_run_only_routine_by_default(tmp_path: Path) 
     assert isinstance(include_payload, dict)
     assert default_payload.get("trajectory_count") == 0
     assert (include_payload.get("trajectory_count") or 0) >= 1
+
+
+def test_trajectory_status_payload_without_latest_run() -> None:
+    payload = trajectory_status_payload(count=3, latest_run=None)
+    assert payload["trajectory_count"] == 3
+    assert payload["latest_projection"] is None
+
+
+def test_rank_trajectories_for_query_returns_matches(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    empty, truncated = rank_trajectories_for_query(
+        [trajectory],
+        query="",
+        max_results=5,
+        match_mode="any",
+    )
+    assert empty == []
+    assert truncated is False
+
+    hits, truncated_hits = rank_trajectories_for_query(
+        [trajectory],
+        query="recover",
+        max_results=5,
+        match_mode="any",
+    )
+    assert hits
+    assert isinstance(truncated_hits, bool)
+
+
+def test_rank_trajectories_for_scope_with_patch_trail_and_long_summary(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.trajectory.patch_trail import compute_patch_trail
+
+    from .test_memory_trajectory_coverage import _patch_trail_inputs
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+        trajectory = replace(trajectory, summary="z" * 400)
+        trail = compute_patch_trail(_patch_trail_inputs())
+        previews, truncated = rank_trajectories_for_scope(
+            [trajectory],
+            scope_paths=("pkg/service.py",),
+            symbols=("pkg.service",),
+            max_results=5,
+            patch_trails={trajectory.id: trail.to_payload(detail_level="summary")},
+            detail_level="compact",
+        )
+    assert previews
+    assert isinstance(truncated, bool)
+    assert "…" in str(previews[0]["summary"])

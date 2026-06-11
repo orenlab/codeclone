@@ -16,6 +16,8 @@ from codeclone.contracts import PATCH_TRAIL_SCHEMA_VERSION
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.trajectory.cli_render import (
     render_projection_run,
+    render_trajectory_agents,
+    render_trajectory_anomalies,
     render_trajectory_detail,
     render_trajectory_list,
     render_trajectory_search_results,
@@ -31,8 +33,11 @@ from codeclone.memory.trajectory.dto import (
 from codeclone.memory.trajectory.export_context import (
     build_export_context,
     build_export_record,
+    extract_trajectory_citations,
     projection_version_rank,
+    resolve_export_scope_paths,
     select_canonical_trajectories,
+    trajectory_path_subjects,
 )
 from codeclone.memory.trajectory.models import (
     TRAJECTORY_PROJECTION_VERSION_V1,
@@ -54,7 +59,17 @@ from codeclone.memory.trajectory.retrieval import (
     trajectory_subject_keys,
 )
 
-from .memory_fixtures import memory_store, seed_trajectory_audit_workflow
+from .memory_fixtures import (
+    memory_store,
+    seed_path_subject_record,
+    seed_trajectory_audit_workflow,
+)
+
+
+def _export_context(payload: dict[str, object]) -> dict[str, object]:
+    context = payload["context"]
+    assert isinstance(context, dict)
+    return context
 
 
 class _CapturePrinter:
@@ -304,3 +319,169 @@ def test_trajectory_retrieval_helpers_handle_empty_query_and_subjects(
     )
     assert "path" in keys
     assert keys["symbol"] == ("pkg.service",)
+
+
+def test_cli_render_agents_and_anomalies_cover_populated_payloads() -> None:
+    printer = _CapturePrinter()
+    render_trajectory_agents(
+        console=printer,
+        payload={
+            "agent_count": 1,
+            "trajectory_count": 2,
+            "unlabeled_trajectory_count": 0,
+            "agents": [
+                {
+                    "agent_label": "test-agent",
+                    "trajectory_count": 2,
+                    "intent_count": 1,
+                    "failed_outcome_count": 0,
+                    "anomaly_count": 1,
+                }
+            ],
+        },
+    )
+    render_trajectory_agents(console=printer, payload={"agents": []})
+    render_trajectory_anomalies(
+        console=printer,
+        payload={
+            "summary": {
+                "trajectories_with_anomalies": 1,
+                "anomaly_count": 2,
+                "error_count": 1,
+                "warn_count": 1,
+            },
+            "trajectories": [
+                {
+                    "trajectory_id": "traj-1",
+                    "agent_label": "test-agent",
+                    "outcome": "accepted",
+                    "quality_tier": "verified",
+                    "anomalies": [
+                        {
+                            "severity": "warn",
+                            "kind": "scope_expanded",
+                            "message": "expanded related files",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+    render_trajectory_anomalies(console=printer, payload={"trajectories": []})
+    assert any("Agents:" in line for line in printer.lines)
+    assert any("Anomaly summary:" in line for line in printer.lines)
+
+
+def test_export_context_record_citations_and_scope_paths(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory = projection.trajectories[0]
+        profile = resolve_export_profile("agent-memory-retrieval-v1")
+        record = build_export_record(
+            trajectory=trajectory,
+            profile=profile,
+            project=project,
+            include_payloads=True,
+            enrichment={"context": "not-a-dict", "citations": "not-a-list"},
+            scope_paths=("pkg/service.py",),
+        )
+        assert isinstance(record["context"], dict)
+        assert record["citations"] == []
+        assert "steps" in record
+        citations = extract_trajectory_citations(trajectory)
+        assert isinstance(citations, list)
+        scope = resolve_export_scope_paths(trajectory, patch_trail_payload=None)
+        assert scope
+        conn = store._conn
+        context_payload = build_export_context(
+            conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=scope,
+            patch_trail_payload=None,
+            canonical_by_workflow={trajectory.workflow_id: trajectory},
+        )
+        assert _export_context(context_payload)["memory_precedents"] is not None
+
+
+def test_export_scope_paths_and_precedents_from_patch_trail(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory = projection.trajectories[0]
+        trail = compute_patch_trail(_patch_trail_inputs())
+        scope = resolve_export_scope_paths(
+            replace(trajectory, subjects=()),
+            patch_trail_payload=trail.to_payload(detail_level="full"),
+        )
+        assert scope
+        assert "pkg/service.py" in trajectory_path_subjects(
+            trajectory, relations={"about"}
+        )
+        older = replace(
+            trajectory,
+            id="traj-older",
+            workflow_id="intent:intent-older",
+            finished_at_utc="2020-01-01T00:00:00Z",
+            started_at_utc="2020-01-01T00:00:00Z",
+        )
+        context_payload = build_export_context(
+            store._conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=("pkg/service.py",),
+            patch_trail_payload=trail.to_payload(detail_level="summary"),
+            canonical_by_workflow={
+                trajectory.workflow_id: trajectory,
+                older.workflow_id: older,
+            },
+        )
+        export_ctx = _export_context(context_payload)
+        trajectory_precedents = export_ctx["trajectory_precedents"]
+        assert isinstance(trajectory_precedents, list)
+        citations = extract_trajectory_citations(trajectory)
+        assert isinstance(citations, list)
+        profile = resolve_export_profile("agent-change-control-v1")
+        enriched = build_export_record(
+            trajectory=trajectory,
+            profile=profile,
+            project=project,
+            include_payloads=False,
+            enrichment={
+                "patch_trail_summary": {"declared": 1, "changed": 1},
+                "context": {"memory_precedents": [], "trajectory_precedents": []},
+                "citations": [{"kind": "finding", "cited_id": "f-1"}],
+            },
+            scope_paths=("pkg/service.py",),
+        )
+        assert enriched["patch_trail_summary"] == {"declared": 1, "changed": 1}
+        assert enriched["citations"] == [{"kind": "finding", "cited_id": "f-1"}]
+
+        seed_path_subject_record(
+            store,
+            project_id=project.id,
+            path="pkg/other.py",
+            statement="overlap memory for export precedents",
+        )
+        overlap_context = build_export_context(
+            store._conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=("pkg/service.py", "pkg/other.py"),
+            patch_trail_payload=None,
+            canonical_by_workflow={trajectory.workflow_id: trajectory},
+        )
+        memory_precedents = _export_context(overlap_context)["memory_precedents"]
+        assert isinstance(memory_precedents, list)
+        assert memory_precedents
