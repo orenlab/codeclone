@@ -22,6 +22,8 @@ import orjson
 
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
 from ..views import (
+    AgentTokenRow,
+    AgentView,
     AggregatesView,
     DbCostRow,
     McpToolAggregate,
@@ -260,6 +262,31 @@ def _mcp_tool_aggregates(flat: list[OperationView]) -> tuple[McpToolAggregate, .
     return tuple(aggregates)
 
 
+def _agent_view(flat: list[OperationView]) -> AgentView | None:
+    mcp_ops = [op for op in flat if op.surface == "mcp"]
+    if not mcp_ops:
+        return None
+    grouped: dict[str, list[OperationView]] = defaultdict(list)
+    for op in mcp_ops:
+        grouped[op.name].append(op)
+    rows = [
+        AgentTokenRow(
+            name=name,
+            calls=len(ops),
+            request_tokens=sum(op.request_tokens or 0 for op in ops),
+            response_tokens=sum(op.response_tokens or 0 for op in ops),
+        )
+        for name, ops in grouped.items()
+    ]
+    rows.sort(key=lambda r: (-r.response_tokens, r.name))
+    return AgentView(
+        mcp_calls=len(mcp_ops),
+        request_tokens=sum(row.request_tokens for row in rows),
+        response_tokens=sum(row.response_tokens for row in rows),
+        consumers=tuple(rows),
+    )
+
+
 def _db_costs(flat: list[OperationView]) -> tuple[DbCostRow, ...]:
     grouped: dict[str, list[SpanView]] = defaultdict(list)
     surface_of: dict[str, str] = {}
@@ -326,6 +353,7 @@ def _aggregates(
         semantic_costs=semantic_costs[:_SEMANTIC_COST_LIMIT],
         peak_memory_span=memory_ranked[0] if memory_ranked else None,
         db_costs=_db_costs(flat),
+        agent=_agent_view(flat),
     )
 
 

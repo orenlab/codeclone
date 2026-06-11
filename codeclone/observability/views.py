@@ -102,6 +102,28 @@ class DbCostRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentTokenRow:
+    """One MCP tool's cumulative token economics across the window."""
+
+    name: str
+    calls: int
+    request_tokens: int
+    response_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class AgentView:
+    """Agentic context economics: how many tokens MCP tools pushed back into
+    the agent's context (``response_tokens`` = context pressure), ranked by the
+    biggest consumer. Built only when MCP operations are present."""
+
+    mcp_calls: int = 0
+    request_tokens: int = 0
+    response_tokens: int = 0
+    consumers: tuple[AgentTokenRow, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class AggregatesView:
     operation_count: int
     slowest: tuple[OperationView, ...] = ()
@@ -114,6 +136,7 @@ class AggregatesView:
     semantic_costs: tuple[SpanCostView, ...] = ()
     peak_memory_span: SpanCostView | None = None
     db_costs: tuple[DbCostRow, ...] = ()
+    agent: AgentView | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +181,8 @@ class TraceView:
 
 
 __all__ = [
+    "AgentTokenRow",
+    "AgentView",
     "AggregatesView",
     "DbCostRow",
     "McpToolAggregate",

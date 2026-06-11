@@ -24,6 +24,7 @@ from collections.abc import Mapping
 from html import escape
 
 from .views import (
+    AgentTokenRow,
     AggregatesView,
     DbCostRow,
     McpToolAggregate,
@@ -572,6 +573,45 @@ def _waterfall(trace: TraceView) -> str:
     )
 
 
+def _agent_row(row: AgentTokenRow, total_response: int) -> str:
+    share = round(row.response_tokens / total_response * 100) if total_response else 0
+    return (
+        f'<tr><td class="t">{_esc(row.name)}</td>'
+        f'<td class="r">{row.calls}</td>'
+        f'<td class="r">{_tokens(row.request_tokens)}</td>'
+        f'<td class="r">{_tokens(row.response_tokens)}</td>'
+        f'<td class="r">{share}%</td></tr>'
+    )
+
+
+def _agent(agg: AggregatesView) -> str:
+    view = agg.agent
+    if view is None:
+        return ""
+    cards = (
+        '<div class="grid">'
+        + _stat(_tokens(view.response_tokens), "context pressure (tok)", "accent")
+        + _stat(_tokens(view.request_tokens), "sent (tok)")
+        + _stat(str(view.mcp_calls), "mcp calls")
+        + _stat(str(len(view.consumers)), "tools")
+        + "</div>"
+    )
+    rows = "".join(_agent_row(row, view.response_tokens) for row in view.consumers)
+    headers = (
+        ("Tool", False),
+        ("Calls", True),
+        ("↑ tok", True),
+        ("↓ tok", True),
+        ("Context %", True),
+    )
+    return _section(
+        "Agent context",
+        cards + _table(headers, rows),
+        subtitle="Tokens MCP tools push back into the agent's context — the real "
+        "per-call cost for an LLM. The top row is your biggest context consumer.",
+    )
+
+
 def _db_row(row: DbCostRow) -> str:
     per_call = round(row.total_queries / row.span_count) if row.span_count else 0
     return (
@@ -618,6 +658,7 @@ def render_trace_html(trace: TraceView) -> str:
         + _chain(trace)
         + _semantic(trace.aggregates)
         + _db_cost(trace.aggregates)
+        + _agent(trace.aggregates)
         + _mcp(trace.aggregates.mcp_tools)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"

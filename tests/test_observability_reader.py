@@ -222,6 +222,14 @@ def test_no_op_span_and_mcp_payload_percentiles(tmp_path: Path) -> None:
     assert costly.produced == 0
     assert costly.skipped == 1423
 
+    # Agent context: the one MCP op contributes its response tokens.
+    agent = trace.aggregates.agent
+    assert agent is not None
+    assert agent.mcp_calls == 1
+    assert agent.response_tokens == 469
+    assert agent.consumers[0].name == "finish_controlled_change"
+    assert agent.consumers[0].response_tokens == 469
+
 
 def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
     conn = open_observability_store(observability_store_path(tmp_path))

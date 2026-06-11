@@ -20,6 +20,8 @@ from codeclone.observability.store.schema import (
 )
 from codeclone.observability.store.writer import write_operation
 from codeclone.observability.views import (
+    AgentTokenRow,
+    AgentView,
     AggregatesView,
     DbCostRow,
     McpToolAggregate,
@@ -212,6 +214,41 @@ def test_render_peak_memory_contributor() -> None:
     assert "Top memory consumer" in html
     assert "memory.semantic.reindex" in html
     assert "80%" in html  # 480 / 600 = 80%
+
+
+def test_render_agent_context() -> None:
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="t",
+        window_ended_at_utc="t",
+        aggregates=AggregatesView(
+            operation_count=2,
+            agent=AgentView(
+                mcp_calls=5,
+                request_tokens=300,
+                response_tokens=1000,
+                consumers=(
+                    AgentTokenRow(
+                        name="get_relevant_memory",
+                        calls=4,
+                        request_tokens=200,
+                        response_tokens=800,
+                    ),
+                    AgentTokenRow(
+                        name="finish_controlled_change",
+                        calls=1,
+                        request_tokens=100,
+                        response_tokens=200,
+                    ),
+                ),
+            ),
+        ),
+    )
+    html = render_trace_html(trace)
+    assert "Agent context" in html
+    assert "context pressure" in html
+    assert "get_relevant_memory" in html
+    assert "80%" in html  # 800 / 1000 context share for the top consumer
 
 
 def test_render_db_cost() -> None:
