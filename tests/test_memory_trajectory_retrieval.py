@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,11 @@ from codeclone.audit.events import repo_root_digest
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.models import MemoryEvidence, generate_memory_id
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
+from codeclone.memory.trajectory.models import TrajectorySubject
+from codeclone.memory.trajectory.retrieval import (
+    rank_trajectories_for_scope,
+    serialize_trajectory_preview,
+)
 from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import (
@@ -57,6 +64,63 @@ def test_get_relevant_memory_returns_scoped_trajectories(tmp_path: Path) -> None
     assert trajectories[0]["type"] == "trajectory"
     assert trajectories[0]["trajectory_id"].startswith("traj-")
     assert trajectories[0]["relevance_score"] > 1.0
+    assert "quality_contract" not in trajectories[0]
+    assert isinstance(trajectories[0]["subjects_truncated"], bool)
+
+
+def test_compact_trajectory_preview_preserves_scope_subjects_and_slims_payload(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory = replace(
+            projection.trajectories[0],
+            subjects=(
+                *(
+                    TrajectorySubject("path", f"pkg/noise_{index}.py", "about")
+                    for index in range(12)
+                ),
+                TrajectorySubject("path", "pkg/service.py", "about"),
+                TrajectorySubject("path", "pkg/service.py", "touched"),
+            ),
+        )
+
+        compact_results, _truncated = rank_trajectories_for_scope(
+            (trajectory,),
+            scope_paths=("pkg/service.py",),
+            symbols=(),
+            detail_level="compact",
+        )
+
+    compact = compact_results[0]
+    full = serialize_trajectory_preview(trajectory, detail_level="full")
+    assert full == serialize_trajectory_preview(trajectory)
+    assert "quality_contract" not in compact
+    assert "quality_contract" in full
+    assert compact["subject_count"] == 14
+    assert compact["matched_subject_count"] == 2
+    assert compact["subjects_truncated"] is True
+    compact_subjects = compact["subjects"]
+    assert isinstance(compact_subjects, list)
+    assert len(compact_subjects) == 8
+    assert [
+        subject["subject_key"]
+        for subject in compact_subjects
+        if isinstance(subject, dict)
+    ][:2] == ["pkg/service.py", "pkg/service.py"]
+    full_subjects = full["subjects"]
+    assert isinstance(full_subjects, list)
+    assert len(full_subjects) == 14
+    assert "subjects_truncated" not in full
+    compact_size = len(json.dumps(compact, sort_keys=True, separators=(",", ":")))
+    full_size = len(json.dumps(full, sort_keys=True, separators=(",", ":")))
+    assert compact_size < full_size * 0.6
 
 
 def test_get_relevant_memory_returns_patch_trail_summary(tmp_path: Path) -> None:

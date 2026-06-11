@@ -45,6 +45,7 @@ def test_relevant_memory_surfaces_experiences(tmp_path: Path) -> None:
             project_id=project.id,
             scope_paths=(f"{_FAMILY}/store.py",),
             scope_resolved_from="explicit",
+            detail_level="full",
         )
 
         experiences = result["experiences"]
@@ -63,6 +64,55 @@ def test_relevant_memory_surfaces_experiences(tmp_path: Path) -> None:
         policy = result["retrieval_policy"]
         assert isinstance(policy, dict)
         assert policy["experiences_do_not_authorize_edits"] is True
+
+
+def test_relevant_memory_compacts_experience_statement_and_evidence(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db):
+        _seed_and_distill(root, project, store)
+        experience = store.list_experiences(project_id=project.id)[0]
+        store.replace_experiences(
+            project_id=project.id,
+            experiences=[replace(experience, statement="x" * 300)],
+        )
+
+        compact = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=(f"{_FAMILY}/store.py",),
+            scope_resolved_from="explicit",
+            detail_level="compact",
+        )
+        full = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=(f"{_FAMILY}/store.py",),
+            scope_resolved_from="explicit",
+            detail_level="full",
+        )
+
+    by_detail: dict[str, dict[str, object]] = {}
+    for detail, payload in (("compact", compact), ("full", full)):
+        experiences = payload["experiences"]
+        assert isinstance(experiences, list)
+        experience_payload = experiences[0]
+        assert isinstance(experience_payload, dict)
+        by_detail[detail] = experience_payload
+    compact_experience = by_detail["compact"]
+    full_experience = by_detail["full"]
+    assert compact_experience["statement_length"] == 300
+    assert compact_experience["statement_truncated"] is True
+    compact_statement = compact_experience["statement"]
+    assert isinstance(compact_statement, str)
+    assert len(compact_statement) < 300
+    assert compact_experience["evidence_count"] == 5
+    assert "evidence_trajectory_ids" not in compact_experience
+    assert full_experience["statement"] == "x" * 300
+    full_evidence = full_experience["evidence_trajectory_ids"]
+    assert isinstance(full_evidence, list)
+    assert len(full_evidence) == 5
+    assert "evidence_count" not in full_experience
 
 
 def test_experiences_are_typed_separate_from_records(tmp_path: Path) -> None:

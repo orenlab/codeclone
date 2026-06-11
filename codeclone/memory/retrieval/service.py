@@ -231,8 +231,18 @@ def _scope_families(scope_paths: Sequence[str]) -> frozenset[str]:
     )
 
 
-def _serialize_experience(experience: Experience) -> dict[str, object]:
-    return {
+def _serialize_experience(
+    experience: Experience,
+    *,
+    detail_level: MemoryDetailLevel,
+) -> dict[str, object]:
+    statement_length = len(experience.statement)
+    statement = (
+        experience.statement
+        if detail_level == "full"
+        else _statement_preview(experience.statement)
+    )
+    payload: dict[str, object] = {
         "id": experience.id,
         "subject_family": experience.subject_family,
         "signal": experience.signal,
@@ -240,14 +250,23 @@ def _serialize_experience(experience: Experience) -> dict[str, object]:
         "support": experience.support,
         "information_value": experience.information_value,
         "status": experience.status,
-        "statement": experience.statement,
+        "statement": statement,
         "agent_facets": [
             {"agent_family": facet.facet_value, "count": facet.count}
             for facet in experience.facets
             if facet.facet_kind == "agent_family"
         ],
-        "evidence_trajectory_ids": [item.trajectory_id for item in experience.evidence],
     }
+    if detail_level == "full":
+        payload["evidence_trajectory_ids"] = [
+            item.trajectory_id for item in experience.evidence
+        ]
+    else:
+        payload["statement_length"] = statement_length
+        payload["evidence_count"] = len(experience.evidence)
+        if statement_length > len(statement):
+            payload["statement_truncated"] = True
+    return payload
 
 
 def _relevant_experiences(
@@ -256,6 +275,7 @@ def _relevant_experiences(
     project_id: str,
     families: frozenset[str],
     max_results: int,
+    detail_level: MemoryDetailLevel,
 ) -> list[dict[str, object]]:
     """Advisory experiences whose subject_family matches the scope, highest
     support first. Dormant experiences are kept but never surfaced."""
@@ -273,7 +293,10 @@ def _relevant_experiences(
             experience.id,
         )
     )
-    return [_serialize_experience(experience) for experience in matched[:max_results]]
+    return [
+        _serialize_experience(experience, detail_level=detail_level)
+        for experience in matched[:max_results]
+    ]
 
 
 def _serialize_subject(subject: MemorySubject) -> dict[str, object]:
@@ -536,6 +559,7 @@ def get_relevant_memory(
         max_results=min(max_records, DEFAULT_TRAJECTORY_PREVIEW_LIMIT),
         include_routine=include_routine,
         patch_trails=patch_trails,
+        detail_level=normalized_detail,
     )
     patch_trail_summary = None
     if trajectories_payload:
@@ -547,6 +571,7 @@ def get_relevant_memory(
         project_id=project_id,
         families=_scope_families(normalized_scope),
         max_results=min(max_records, DEFAULT_EXPERIENCE_PREVIEW_LIMIT),
+        detail_level=normalized_detail,
     )
     coverage: dict[str, object]
     if normalized_scope:

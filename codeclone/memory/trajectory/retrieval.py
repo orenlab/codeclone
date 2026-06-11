@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from typing import Literal
 
 from ..paths import normalize_memory_scope_path, repo_path_to_module_key
 from ..search_index import SearchMatchMode, tokenize_query
@@ -22,7 +23,9 @@ from .step_labels import step_display_name
 
 DEFAULT_TRAJECTORY_PREVIEW_LIMIT = 5
 DEFAULT_TRAJECTORY_STEP_LIMIT = 12
+COMPACT_TRAJECTORY_SUBJECT_LIMIT = 8
 TRAJECTORY_PREVIEW_CHARS = 220
+TrajectoryDetailLevel = Literal["compact", "full"]
 
 
 def trajectory_excluded_from_default_retrieval(
@@ -101,7 +104,15 @@ def serialize_trajectory_preview(
     *,
     relevance_score: float | None = None,
     patch_trail_payload: Mapping[str, object] | None = None,
+    detail_level: TrajectoryDetailLevel = "full",
+    preferred_subjects: frozenset[tuple[str, str]] = frozenset(),
 ) -> dict[str, object]:
+    subjects = trajectory.subjects
+    serialized_subjects, matched_subject_count = _preview_subjects(
+        subjects,
+        detail_level=detail_level,
+        preferred_subjects=preferred_subjects,
+    )
     payload: dict[str, object] = {
         "type": "trajectory",
         "trajectory_id": trajectory.id,
@@ -112,7 +123,7 @@ def serialize_trajectory_preview(
         "summary": _preview_text(trajectory.summary),
         "labels": list(trajectory.labels),
         "agent_label": trajectory_agent_label(trajectory),
-        "subjects": [_serialize_subject(subject) for subject in trajectory.subjects],
+        "subjects": serialized_subjects,
         "evidence_count": len(trajectory.evidence),
         "event_count": trajectory.event_count,
         "step_count": trajectory.step_count,
@@ -125,20 +136,71 @@ def serialize_trajectory_preview(
     summary = serialize_patch_trail_summary(patch_trail_payload)
     if summary is not None:
         payload["patch_trail_summary"] = summary
+    _add_quality_fields(
+        payload,
+        trajectory=trajectory,
+        patch_trail_payload=patch_trail_payload,
+        detail_level=detail_level,
+        subject_count=len(subjects),
+        matched_subject_count=matched_subject_count,
+        serialized_subject_count=len(serialized_subjects),
+    )
+    return payload
+
+
+def _preview_subjects(
+    subjects: Sequence[object],
+    *,
+    detail_level: TrajectoryDetailLevel,
+    preferred_subjects: frozenset[tuple[str, str]],
+) -> tuple[list[dict[str, object]], int]:
+    matched_subject_count = sum(
+        (
+            str(getattr(subject, "subject_kind", "")),
+            str(getattr(subject, "subject_key", "")),
+        )
+        in preferred_subjects
+        for subject in subjects
+    )
+    selected = (
+        _compact_trajectory_subjects(
+            subjects,
+            preferred_subjects=preferred_subjects,
+        )
+        if detail_level == "compact"
+        else tuple(subjects)
+    )
+    return [_serialize_subject(subject) for subject in selected], matched_subject_count
+
+
+def _add_quality_fields(
+    payload: dict[str, object],
+    *,
+    trajectory: Trajectory,
+    patch_trail_payload: Mapping[str, object] | None,
+    detail_level: TrajectoryDetailLevel,
+    subject_count: int,
+    matched_subject_count: int,
+    serialized_subject_count: int,
+) -> None:
     contract = compute_trajectory_quality_contract(
         trajectory,
         patch_trail_payload=patch_trail_payload,
     )
-    payload["quality_contract"] = serialize_trajectory_quality_contract(
-        contract,
-        trajectory=trajectory,
-        patch_trail_payload=patch_trail_payload,
-    )
+    if detail_level == "full":
+        payload["quality_contract"] = serialize_trajectory_quality_contract(
+            contract,
+            trajectory=trajectory,
+            patch_trail_payload=patch_trail_payload,
+        )
+    else:
+        payload["subject_count"] = subject_count
+        payload["matched_subject_count"] = matched_subject_count
+        payload["subjects_truncated"] = serialized_subject_count < subject_count
     payload["complexity_score"] = contract.complexity_score
     payload["scope_accuracy"] = contract.scope_accuracy
     payload["duration_seconds"] = contract.duration_seconds
     payload["anomaly_count"] = contract.anomaly_count
-    return payload
 
 
 def serialize_patch_trail_summary(
@@ -224,8 +286,13 @@ def rank_trajectories_for_scope(
     max_results: int = DEFAULT_TRAJECTORY_PREVIEW_LIMIT,
     include_routine: bool = False,
     patch_trails: Mapping[str, Mapping[str, object]] | None = None,
+    detail_level: TrajectoryDetailLevel = "full",
 ) -> tuple[list[dict[str, object]], bool]:
     normalized_scope = tuple(normalize_memory_scope_path(path) for path in scope_paths)
+    preferred_subjects = _preferred_subjects(
+        scope_paths=normalized_scope,
+        symbols=symbols,
+    )
     visible = filter_trajectories_for_default_retrieval(
         trajectories,
         include_routine=include_routine,
@@ -241,6 +308,8 @@ def rank_trajectories_for_scope(
         scored,
         max_results=max_results,
         patch_trails=patch_trails or {},
+        detail_level=detail_level,
+        preferred_subjects=preferred_subjects,
     )
 
 
@@ -391,6 +460,8 @@ def _preview_results(
     *,
     max_results: int,
     patch_trails: Mapping[str, Mapping[str, object]] | None = None,
+    detail_level: TrajectoryDetailLevel = "full",
+    preferred_subjects: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[list[dict[str, object]], bool]:
     limit = max(1, int(max_results))
     truncated = len(results) > limit
@@ -401,9 +472,59 @@ def _preview_results(
             item.trajectory,
             relevance_score=item.relevance_score,
             patch_trail_payload=trails.get(item.trajectory.id),
+            detail_level=detail_level,
+            preferred_subjects=preferred_subjects,
         )
         for item in selected
     ], truncated
+
+
+def _preferred_subjects(
+    *,
+    scope_paths: Sequence[str],
+    symbols: Sequence[str],
+) -> frozenset[tuple[str, str]]:
+    subject_keys = trajectory_subject_keys(
+        scope_paths=scope_paths,
+        symbols=symbols,
+    )
+    return frozenset((kind, key) for kind, keys in subject_keys.items() for key in keys)
+
+
+def _compact_trajectory_subjects(
+    subjects: Sequence[object],
+    *,
+    preferred_subjects: frozenset[tuple[str, str]],
+) -> tuple[object, ...]:
+    indexed = tuple(enumerate(subjects))
+    ranked = sorted(
+        indexed,
+        key=lambda item: _compact_subject_sort_key(
+            item[1],
+            index=item[0],
+            preferred_subjects=preferred_subjects,
+        ),
+    )
+    return tuple(
+        subject for _index, subject in ranked[:COMPACT_TRAJECTORY_SUBJECT_LIMIT]
+    )
+
+
+def _compact_subject_sort_key(
+    subject: object,
+    *,
+    index: int,
+    preferred_subjects: frozenset[tuple[str, str]],
+) -> tuple[int, int, int, int]:
+    kind = str(getattr(subject, "subject_kind", ""))
+    key = str(getattr(subject, "subject_key", ""))
+    relation = str(getattr(subject, "relation", ""))
+    return (
+        0 if (kind, key) in preferred_subjects else 1,
+        {"touched": 0, "untouched": 1, "about": 2}.get(relation, 3),
+        {"path": 0, "symbol": 1, "module": 2}.get(kind, 3),
+        index,
+    )
 
 
 def _patch_trail_untouched_overlap(
@@ -483,6 +604,7 @@ def trajectory_semantic_text_parts(trajectory: Trajectory) -> Iterable[str]:
 
 
 __all__ = [
+    "COMPACT_TRAJECTORY_SUBJECT_LIMIT",
     "DEFAULT_TRAJECTORY_PREVIEW_LIMIT",
     "DEFAULT_TRAJECTORY_STEP_LIMIT",
     "TrajectorySearchResult",
