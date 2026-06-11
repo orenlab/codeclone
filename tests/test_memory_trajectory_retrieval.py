@@ -138,6 +138,38 @@ def test_compact_trajectory_preview_preserves_scope_subjects_and_slims_payload(
     assert compact_size < full_size * 0.6
 
 
+def test_scoped_trajectory_preview_prefers_diverse_examples(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        base = projection.trajectories[0]
+        duplicate = replace(base, id="traj-duplicate")
+        partial = replace(
+            base,
+            id="traj-partial",
+            outcome="partial",
+            quality_tier="corrected",
+        )
+
+        results, truncated = rank_trajectories_for_scope(
+            (base, duplicate, partial),
+            scope_paths=("pkg/service.py",),
+            symbols=(),
+            max_results=2,
+            detail_level="compact",
+        )
+
+    assert truncated is True
+    trajectory_ids = [item["trajectory_id"] for item in results]
+    assert trajectory_ids[0] == "traj-partial"
+    assert trajectory_ids[1] in {base.id, "traj-duplicate"}
+
+
 def test_context_coverage_matches_trajectory_module_subject(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (root, project, store, _db_path):
         audit_db = tmp_path / "audit.sqlite3"

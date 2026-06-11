@@ -42,7 +42,7 @@ from ..trajectory.retrieval import (
     trajectory_subject_keys,
 )
 from .context_coverage import build_context_coverage
-from .ranking import RankingContext, is_git_change_hotspot, relevance_score
+from .ranking import RankingContext, relevance_score, retrieval_lane
 from .semantic import audit_event_row
 
 if TYPE_CHECKING:
@@ -328,9 +328,8 @@ def _serialize_evidence(evidence: MemoryEvidence) -> dict[str, object]:
 
 
 def _retrieval_lane_payload(record: MemoryRecord) -> dict[str, object]:
-    return (
-        {"retrieval_lane": "hotspot_context"} if is_git_change_hotspot(record) else {}
-    )
+    lane = retrieval_lane(record)
+    return {"retrieval_lane": lane} if lane is not None else {}
 
 
 def _serialize_record_summary(

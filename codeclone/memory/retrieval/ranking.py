@@ -36,6 +36,9 @@ _SEMANTIC_WEIGHT = 0.3
 # assertion. Keep exact-scope hotspots visible without letting their type and
 # ingest boosts outrank richer memory by default.
 _CHANGE_HOTSPOT_PENALTY = 0.35
+# Finish-hook module-role drafts are workflow reminders, not durable module
+# descriptions. Keep them visible while placing substantive memory first.
+_WORKFLOW_CONTEXT_PENALTY = 0.65
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,8 +73,25 @@ def is_git_change_hotspot(record: MemoryRecord) -> bool:
     )
 
 
+def retrieval_lane(record: MemoryRecord) -> str | None:
+    if is_git_change_hotspot(record):
+        return "hotspot_context"
+    if (
+        record.type == "module_role"
+        and record.status == "draft"
+        and record.created_by == "finish_hook"
+    ):
+        return "workflow_context"
+    return None
+
+
 def _context_signal_adjustment(record: MemoryRecord) -> float:
-    return -_CHANGE_HOTSPOT_PENALTY if is_git_change_hotspot(record) else 0.0
+    lane = retrieval_lane(record)
+    if lane == "hotspot_context":
+        return -_CHANGE_HOTSPOT_PENALTY
+    if lane == "workflow_context":
+        return -_WORKFLOW_CONTEXT_PENALTY
+    return 0.0
 
 
 def relevance_score(
@@ -124,4 +144,4 @@ def relevance_score(
     return round(score, 4)
 
 
-__all__ = ["RankingContext", "is_git_change_hotspot", "relevance_score"]
+__all__ = ["RankingContext", "relevance_score", "retrieval_lane"]

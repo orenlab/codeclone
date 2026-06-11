@@ -310,6 +310,7 @@ def rank_trajectories_for_scope(
         patch_trails=patch_trails or {},
         detail_level=detail_level,
         preferred_subjects=preferred_subjects,
+        diversify=True,
     )
 
 
@@ -462,10 +463,15 @@ def _preview_results(
     patch_trails: Mapping[str, Mapping[str, object]] | None = None,
     detail_level: TrajectoryDetailLevel = "full",
     preferred_subjects: frozenset[tuple[str, str]] = frozenset(),
+    diversify: bool = False,
 ) -> tuple[list[dict[str, object]], bool]:
     limit = max(1, int(max_results))
     truncated = len(results) > limit
-    selected = results[:limit]
+    selected = (
+        _select_diverse_scope_results(results, limit=limit)
+        if diversify
+        else results[:limit]
+    )
     trails = patch_trails or {}
     return [
         serialize_trajectory_preview(
@@ -477,6 +483,35 @@ def _preview_results(
         )
         for item in selected
     ], truncated
+
+
+def _select_diverse_scope_results(
+    results: Sequence[TrajectorySearchResult],
+    *,
+    limit: int,
+) -> Sequence[TrajectorySearchResult]:
+    selected: list[TrajectorySearchResult] = []
+    selected_ids: set[str] = set()
+    seen_examples: set[tuple[str, str, str]] = set()
+    for item in results:
+        trajectory = item.trajectory
+        example_key = (
+            trajectory.outcome,
+            trajectory.quality_tier,
+            trajectory_agent_label(trajectory) or "",
+        )
+        if example_key not in seen_examples:
+            selected.append(item)
+            selected_ids.add(trajectory.id)
+            seen_examples.add(example_key)
+            if len(selected) >= limit:
+                return selected
+    for item in results:
+        if item.trajectory.id not in selected_ids:
+            selected.append(item)
+            if len(selected) >= limit:
+                break
+    return selected
 
 
 def _preferred_subjects(

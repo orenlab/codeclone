@@ -107,18 +107,20 @@ def _observation_confidence(
         )
         if _count(coverage, key) > 0
     ]
-    observed_paths = max(
-        _count(record_coverage, "scope_paths_with_memory"),
-        _count(trajectory_coverage, "scope_paths_with_trajectories"),
-    )
     path_total = _count(record_coverage, "scope_paths_total")
+    record_paths = _count(record_coverage, "scope_paths_with_memory")
+    trajectory_paths = _count(
+        trajectory_coverage,
+        "scope_paths_with_trajectories",
+    )
     level = "unknown"
     if basis:
-        level = (
-            "supported"
-            if observed_paths >= path_total and len(basis) >= 2
-            else "partial"
+        complete_path_evidence = (
+            path_total > 0
+            and record_paths >= path_total
+            and trajectory_paths >= path_total
         )
+        level = "supported" if complete_path_evidence else "partial"
     return {
         "level": level,
         "basis": basis,

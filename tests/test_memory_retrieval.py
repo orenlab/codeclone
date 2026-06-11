@@ -25,6 +25,40 @@ from .memory_fixtures import (
 )
 
 
+def _score_scoped_record(
+    record: MemoryRecord,
+    *,
+    path: str = "pkg/service.py",
+    evidence_count: int = 0,
+) -> tuple[float, dict[str, object]]:
+    subjects = [
+        MemorySubject(
+            id=f"subj-{record.id}",
+            memory_id=record.id,
+            subject_kind="path",
+            subject_key=path,
+            relation="about",
+        )
+    ]
+    score = relevance_score(
+        record=record,
+        subjects=subjects,
+        context=RankingContext.from_scope(
+            scope_paths=(path,),
+            symbols=(),
+            blast_dependents=(),
+        ),
+        evidence_count=evidence_count,
+    )
+    summary = retrieval_service._serialize_record_summary(
+        record=record,
+        subjects=subjects,
+        evidence_count=evidence_count,
+        relevance_score=score,
+    )
+    return score, summary
+
+
 def test_relevance_score_prefers_scope_path_match() -> None:
     now = current_report_timestamp_utc()
     record = MemoryRecord(
@@ -188,42 +222,47 @@ def test_relevance_score_keeps_git_hotspot_below_durable_scope_context() -> None
             "period_days": 90,
         },
     )
-    subjects = [
-        MemorySubject(
-            id="subj-service",
-            memory_id=module_record.id,
-            subject_kind="path",
-            subject_key="pkg/service.py",
-            relation="about",
-        )
-    ]
-    context = RankingContext.from_scope(
-        scope_paths=("pkg/service.py",),
-        symbols=(),
-        blast_dependents=(),
-    )
-
-    module_score = relevance_score(
-        record=module_record,
-        subjects=subjects,
-        context=context,
+    module_score, _module_summary = _score_scoped_record(
+        module_record,
         evidence_count=7,
     )
-    hotspot_score = relevance_score(
-        record=hotspot_record,
-        subjects=subjects,
-        context=context,
+    hotspot_score, summary = _score_scoped_record(
+        hotspot_record,
         evidence_count=7,
-    )
-    summary = retrieval_service._serialize_record_summary(
-        record=hotspot_record,
-        subjects=subjects,
-        evidence_count=7,
-        relevance_score=hotspot_score,
     )
 
     assert 0.0 < hotspot_score < module_score
     assert summary["retrieval_lane"] == "hotspot_context"
+
+
+def test_finish_hook_module_role_is_bounded_workflow_context() -> None:
+    module_record = make_module_record("proj-1", "pkg.service")
+    substantive_record = replace(
+        module_record,
+        id="mem-rationale",
+        identity_key="rationale",
+        type="change_rationale",
+        status="draft",
+        origin="agent",
+        ingest_source="agent",
+        statement="Keep retrieval provenance separate from durable assertions.",
+        created_by="agent",
+    )
+    workflow_record = replace(
+        module_record,
+        id="mem-workflow",
+        identity_key="workflow",
+        status="draft",
+        origin="agent",
+        ingest_source="agent",
+        statement="Patch touched scope includes pkg/service.py.",
+        created_by="finish_hook",
+    )
+    substantive_score, _substantive_summary = _score_scoped_record(substantive_record)
+    workflow_score, summary = _score_scoped_record(workflow_record)
+
+    assert 0.0 < workflow_score < substantive_score
+    assert summary["retrieval_lane"] == "workflow_context"
 
 
 def test_get_relevant_memory_ranks_module_role_for_scoped_path(tmp_path: Path) -> None:

@@ -74,6 +74,7 @@ def test_relevant_memory_surfaces_experiences(tmp_path: Path) -> None:
             "cursor-vscode",
         ]
         assert agent_diversity["experience_agent_family_count"] == 2
+        assert coverage["observation_confidence"]["level"] == "partial"
         # Advisory contract, exactly like trajectories.
         policy = result["retrieval_policy"]
         assert isinstance(policy, dict)
