@@ -21,7 +21,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
-from urllib.parse import quote
 
 from codeclone.config.intent_registry import (
     IntentRegistryConfig,
@@ -44,6 +43,10 @@ from codeclone.surfaces.mcp._workspace_intent_paths import (
     read_payload,
     record_sort_key,
     registry_files,
+)
+from codeclone.surfaces.mcp._workspace_intent_schema import (
+    IntentRegistrySchemaError,
+    open_intent_registry_db_readonly,
 )
 
 GateReason = Literal[
@@ -107,7 +110,7 @@ def evaluate_workspace_edit_gate(root: Path | str) -> WorkspaceEditGateDecision:
 
     try:
         records = _load_registry_records_read_only(root_path, config)
-    except (OSError, sqlite3.Error, ValueError) as exc:
+    except (OSError, sqlite3.Error, IntentRegistrySchemaError, ValueError) as exc:
         return WorkspaceEditGateDecision(
             allowed=False,
             reason="registry_error",
@@ -240,7 +243,7 @@ def _list_unclosed_workspace_intents_filtered(
 
     try:
         records = _load_registry_records_read_only(root_path, config)
-    except (OSError, sqlite3.Error, ValueError) as exc:
+    except (OSError, sqlite3.Error, IntentRegistrySchemaError, ValueError) as exc:
         raise WorkspaceIntentRegistryUnavailable(str(exc)) from exc
 
     current_time = utc_now()
@@ -373,8 +376,7 @@ def _load_file_records(root: Path) -> tuple[WorkspaceIntentRecord, ...]:
 def _load_sqlite_records(db_path: Path) -> tuple[WorkspaceIntentRecord, ...]:
     if not db_path.is_file():
         return ()
-    uri = f"file:{quote(str(db_path), safe='/')}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = open_intent_registry_db_readonly(db_path)
     try:
         rows = conn.execute(
             """

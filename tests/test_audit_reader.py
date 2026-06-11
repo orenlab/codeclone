@@ -73,10 +73,18 @@ def test_read_latest_analysis_run_connect_error(tmp_path: Path) -> None:
 
 def test_read_latest_analysis_run_read_error(tmp_path: Path) -> None:
     db_path = _write_cli_analysis_event(tmp_path)
+
+    class _FailingConnection:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise sqlite3.Error("query failed")
+
+        def close(self) -> None:
+            return None
+
     with (
         patch(
-            "codeclone.audit.reader.ensure_schema",
-            side_effect=sqlite3.Error("query failed"),
+            "codeclone.audit.reader.open_audit_db_readonly",
+            return_value=_FailingConnection(),
         ),
         pytest.raises(AuditReadError, match="cannot read audit database"),
     ):

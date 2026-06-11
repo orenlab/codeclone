@@ -15,6 +15,7 @@ import orjson
 
 from ...audit.events import repo_root_digest
 from ...audit.reader import count_audit_event_core_gaps
+from ...audit.schema import open_audit_db_readonly
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig
 from ..models import MemoryProject
@@ -33,7 +34,7 @@ def _audit_event_core_fingerprint(
             "event_core_max_id": 0,
             "legacy_event_count": 0,
         }
-    conn = sqlite3.connect(str(audit_db_path))
+    conn = open_audit_db_readonly(audit_db_path)
     try:
         row = conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM controller_events "

@@ -219,17 +219,18 @@ def test_gate_closes_sqlite_read_connection(
 
     fake = _FakeConnection()
 
-    def _connect(database: str, *, uri: bool) -> _FakeConnection:
-        seen["uri"] = database
-        seen["uri_flag"] = uri
+    def _open_readonly(database: Path) -> _FakeConnection:
+        seen["database"] = database
         return fake
 
-    monkeypatch.setattr("codeclone.workspace_intent.gate.sqlite3.connect", _connect)
+    monkeypatch.setattr(
+        "codeclone.workspace_intent.gate.open_intent_registry_db_readonly",
+        _open_readonly,
+    )
 
     assert_gate_denied(tmp_path, reason="no_active_intent")
     assert fake.closed is True
-    assert seen["uri_flag"] is True
-    assert str(seen["uri"]).endswith("?mode=ro")
+    assert seen["database"] == db_path
     assert "SELECT payload_json" in str(seen["sql"])
 
 

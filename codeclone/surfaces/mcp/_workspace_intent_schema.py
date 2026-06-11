@@ -15,6 +15,7 @@ from ...utils.sqlite_store import (
     get_meta_value,
     initialize_schema_v1,
     open_sqlite_db,
+    open_sqlite_db_readonly,
 )
 
 INTENT_REGISTRY_SCHEMA_VERSION = "2"
@@ -50,13 +51,39 @@ _INDEX_SQL = (
     "ON workspace_intents(closed_at_utc)",
 )
 
+_REQUIRED_INTENT_COLUMNS = frozenset(
+    {
+        "agent_pid",
+        "agent_start_epoch",
+        "intent_id",
+        "declared_at_utc",
+        "payload_json",
+        "closed_at_utc",
+        "updated_at_utc",
+    }
+)
+
 
 class IntentRegistrySchemaError(RuntimeError):
     """Raised for unsupported or corrupt intent registry database schemas."""
 
 
 def open_intent_registry_db(path: Path) -> sqlite3.Connection:
-    return open_sqlite_db(path, ensure_schema=ensure_schema)
+    conn = open_sqlite_db(path, ensure_schema=ensure_schema)
+    from ...observability import instrument_db_connection
+
+    instrument_db_connection(conn)
+    return conn
+
+
+def open_intent_registry_db_readonly(path: Path) -> sqlite3.Connection:
+    """Open a current registry without creating or migrating coordination state."""
+
+    conn = open_sqlite_db_readonly(path, validate_schema=_validate_readonly_schema)
+    from ...observability import instrument_db_connection
+
+    instrument_db_connection(conn)
+    return conn
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -114,6 +141,26 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _validate_readonly_schema(conn: sqlite3.Connection) -> None:
+    current = get_meta(conn, "schema_version")
+    if current != INTENT_REGISTRY_SCHEMA_VERSION:
+        rendered = current if current is not None else "missing"
+        raise IntentRegistrySchemaError(
+            "Intent registry requires writable schema initialization or migration: "
+            f"found {rendered}, expected {INTENT_REGISTRY_SCHEMA_VERSION}"
+        )
+    columns = {
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(workspace_intents)").fetchall()
+        if len(row) > 1
+    }
+    missing = sorted(_REQUIRED_INTENT_COLUMNS - columns)
+    if missing:
+        raise IntentRegistrySchemaError(
+            "Intent registry is missing required columns: " + ", ".join(missing)
+        )
+
+
 def get_meta(conn: sqlite3.Connection, key: str) -> str | None:
     return get_meta_value(conn, meta_table=_INTENT_META_TABLE, key=key)
 
@@ -125,4 +172,5 @@ __all__ = [
     "ensure_schema",
     "get_meta",
     "open_intent_registry_db",
+    "open_intent_registry_db_readonly",
 ]

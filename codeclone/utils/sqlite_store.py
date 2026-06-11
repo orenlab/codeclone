@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
+from urllib.parse import quote
 
 _SQLITE_PRAGMAS = (
     "PRAGMA journal_mode=WAL",
@@ -66,6 +67,29 @@ def open_sqlite_db(
     return conn
 
 
+def open_sqlite_db_readonly(
+    path: Path,
+    *,
+    validate_schema: Callable[[sqlite3.Connection], None],
+) -> sqlite3.Connection:
+    """Open an existing SQLite database without allowing writes or creation."""
+
+    resolved = path.resolve(strict=True)
+    uri = f"file:{quote(str(resolved), safe='/')}?mode=ro"
+    conn = sqlite3.connect(
+        uri,
+        uri=True,
+    )
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("PRAGMA busy_timeout=5000")
+        validate_schema(conn)
+    except Exception:
+        conn.close()
+        raise
+    return conn
+
+
 def get_meta_value(
     conn: sqlite3.Connection,
     *,
@@ -108,4 +132,5 @@ __all__ = [
     "get_meta_value",
     "initialize_schema_v1",
     "open_sqlite_db",
+    "open_sqlite_db_readonly",
 ]

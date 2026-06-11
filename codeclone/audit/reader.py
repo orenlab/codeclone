@@ -19,7 +19,7 @@ from .events import (
     EVENT_ANALYSIS_COMPLETED,
     repo_root_digest,
 )
-from .schema import ensure_schema, get_meta
+from .schema import get_meta, open_audit_db_readonly
 from .validation import AuditReadError, AuditSchemaError
 
 
@@ -142,11 +142,10 @@ def read_latest_analysis_run(
         return None
     digest = repo_root_digest(repo_root.resolve())
     try:
-        conn = sqlite3.connect(str(db_path))
-    except sqlite3.Error as exc:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
         raise AuditReadError(f"cannot open audit database: {exc}") from exc
     try:
-        ensure_schema(conn)
         row = conn.execute(
             "SELECT run_id, created_at_utc, payload_json "
             "FROM controller_events "
@@ -190,11 +189,10 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
     if not db_path.is_file():
         raise AuditReadError("no audit data")
     try:
-        conn = sqlite3.connect(str(db_path))
-    except sqlite3.Error as exc:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
         raise AuditReadError(f"cannot open audit database: {exc}") from exc
     try:
-        ensure_schema(conn)
         retention_days = _int_meta(conn, "retention_days")
         total = _count(conn, "SELECT COUNT(*) FROM controller_events")
         intent_events = _count(
@@ -223,13 +221,13 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
         )
         oldest = _text_scalar(conn, "SELECT MIN(created_at_utc) FROM controller_events")
         latest = _text_scalar(conn, "SELECT MAX(created_at_utc) FROM controller_events")
-        token_cols = _has_token_columns(conn)
+        event_columns = _event_columns(conn)
+        token_cols = _has_token_columns(event_columns)
+        select_prefix = _audit_record_select_prefix(event_columns)
         if token_cols:
             rows = conn.execute(
-                "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
-                "intent_id, report_digest, workflow_id, surface, tool_name, "
-                "event_core_json, event_core_sha256, payload_sha256, "
-                "status, agent_label, summary, "
+                f"SELECT {select_prefix}, "
+                f"{_column_or_null(event_columns, 'summary')}, "
                 "estimated_tokens, token_encoding, payload_characters "
                 "FROM controller_events "
                 "ORDER BY created_at_utc DESC, id DESC "
@@ -239,10 +237,7 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
             token_summary = _token_summary(conn)
         else:
             rows = conn.execute(
-                "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
-                "intent_id, report_digest, workflow_id, surface, tool_name, "
-                "event_core_json, event_core_sha256, payload_sha256, "
-                "status, agent_label "
+                f"SELECT {select_prefix} "
                 "FROM controller_events "
                 "ORDER BY created_at_utc DESC, id DESC "
                 "LIMIT ?",
@@ -285,11 +280,10 @@ def read_audit_event_core_records(
     if not db_path.is_file():
         raise AuditReadError("no audit data")
     try:
-        conn = sqlite3.connect(str(db_path))
-    except sqlite3.Error as exc:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
         raise AuditReadError(f"cannot open audit database: {exc}") from exc
     try:
-        ensure_schema(conn)
         where = [
             "repo_root_digest = ?",
             "workflow_id IS NOT NULL",
@@ -335,11 +329,10 @@ def list_workflow_ids_with_events_after(
     if not db_path.is_file():
         return ()
     try:
-        conn = sqlite3.connect(str(db_path))
-    except sqlite3.Error as exc:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
         raise AuditReadError(f"cannot open audit database: {exc}") from exc
     try:
-        ensure_schema(conn)
         rows = conn.execute(
             "SELECT DISTINCT workflow_id FROM controller_events "
             "WHERE repo_root_digest = ? AND id > ? "
@@ -365,11 +358,10 @@ def count_audit_event_core_gaps(
     if not db_path.is_file():
         return 0
     try:
-        conn = sqlite3.connect(str(db_path))
-    except sqlite3.Error as exc:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
         raise AuditReadError(f"cannot open audit database: {exc}") from exc
     try:
-        ensure_schema(conn)
         row = conn.execute(
             "SELECT COUNT(*) FROM controller_events "
             "WHERE repo_root_digest = ? "
@@ -410,13 +402,51 @@ def _record_from_row(row: tuple[object, ...]) -> AuditRecord:
     )
 
 
-def _has_token_columns(conn: sqlite3.Connection) -> bool:
-    """Check whether the controller_events table has token columns."""
-    columns = {
-        row[1]
+def _event_columns(conn: sqlite3.Connection) -> frozenset[str]:
+    return frozenset(
+        str(row[1])
         for row in conn.execute("PRAGMA table_info(controller_events)").fetchall()
-    }
-    return "estimated_tokens" in columns
+        if len(row) > 1
+    )
+
+
+def _has_token_columns(columns: frozenset[str]) -> bool:
+    """Return whether the complete token-accounting projection is readable."""
+
+    return {
+        "estimated_tokens",
+        "token_encoding",
+        "payload_characters",
+    }.issubset(columns)
+
+
+def _column_or_null(columns: frozenset[str], name: str) -> str:
+    return name if name in columns else f"NULL AS {name}"
+
+
+def _audit_record_select_prefix(columns: frozenset[str]) -> str:
+    required = (
+        "id",
+        "event_id",
+        "event_type",
+        "severity",
+        "created_at_utc",
+        "run_id",
+        "intent_id",
+        "report_digest",
+    )
+    optional = (
+        "workflow_id",
+        "surface",
+        "tool_name",
+        "event_core_json",
+        "event_core_sha256",
+        "payload_sha256",
+    )
+    suffix = ("status", "agent_label")
+    return ", ".join(
+        (*required, *(_column_or_null(columns, name) for name in optional), *suffix)
+    )
 
 
 def _token_summary(

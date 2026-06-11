@@ -267,7 +267,7 @@ def test_store_list_and_latest_done_projection_job(tmp_path: Path) -> None:
 def test_run_projection_job_failed_and_skipped() -> None:
     project = MagicMock()
     config = MagicMock()
-    conn = MagicMock()
+    store = MagicMock()
     with (
         patch(
             "codeclone.memory.jobs.worker.execute_trajectory_rebuild",
@@ -283,7 +283,7 @@ def test_run_projection_job_failed_and_skipped() -> None:
         ),
     ):
         status, _payload, reason = run_projection_job(
-            conn,
+            store,
             job_id="job-1",
             root_path=Path("/tmp"),
             config=config,
@@ -308,7 +308,7 @@ def test_run_projection_job_failed_and_skipped() -> None:
         ),
     ):
         status, _payload, reason = run_projection_job(
-            conn,
+            store,
             job_id="job-2",
             root_path=Path("/tmp"),
             config=config,
@@ -320,36 +320,31 @@ def test_run_projection_job_failed_and_skipped() -> None:
 
 
 def test_run_projection_jobs_once_handles_worker_exception(tmp_path: Path) -> None:
-    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
         config = resolve_memory_config(root)
-        db_path = resolve_memory_db_path(root, config)
-        conn = open_memory_db(db_path)
-        try:
-            stimulus = compute_projection_stimulus(
-                conn=conn,
-                project=project,
+        stimulus = compute_projection_stimulus(
+            conn=store.connection,
+            project=project,
+            root_path=root,
+            config=config,
+        )
+        enqueue_projection_job(
+            store.connection,
+            project=project,
+            trigger="cli",
+            stimulus=stimulus,
+        )
+        with patch(
+            "codeclone.memory.jobs.worker.run_projection_job",
+            side_effect=RuntimeError("boom"),
+        ):
+            result = run_projection_jobs_once(
+                store,
                 root_path=root,
                 config=config,
-            )
-            enqueue_projection_job(
-                conn,
                 project=project,
-                trigger="cli",
-                stimulus=stimulus,
+                running_timeout_seconds=60,
             )
-            with patch(
-                "codeclone.memory.jobs.worker.run_projection_job",
-                side_effect=RuntimeError("boom"),
-            ):
-                result = run_projection_jobs_once(
-                    conn,
-                    root_path=root,
-                    config=config,
-                    project=project,
-                    running_timeout_seconds=60,
-                )
-        finally:
-            conn.close()
         assert result.status == "failed"
         assert result.reason == "boom"
 
@@ -431,44 +426,39 @@ def test_is_ci_environment_detects_common_keys() -> None:
 
 
 def test_run_projection_jobs_once_completes_pending_job(tmp_path: Path) -> None:
-    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
         config = resolve_memory_config(root)
-        db_path = resolve_memory_db_path(root, config)
-        conn = open_memory_db(db_path)
-        try:
-            stimulus = compute_projection_stimulus(
-                conn=conn,
-                project=project,
+        stimulus = compute_projection_stimulus(
+            conn=store.connection,
+            project=project,
+            root_path=root,
+            config=config,
+        )
+        enqueue_projection_job(
+            store.connection,
+            project=project,
+            trigger="cli",
+            stimulus=stimulus,
+        )
+        with patch(
+            "codeclone.memory.jobs.worker.run_projection_job",
+            return_value=(
+                "done",
+                {
+                    "trajectory": {"status": "ok"},
+                    "semantic": {"status": "skipped"},
+                    "applied_stimulus": stimulus,
+                },
+                None,
+            ),
+        ):
+            result = run_projection_jobs_once(
+                store,
                 root_path=root,
                 config=config,
-            )
-            enqueue_projection_job(
-                conn,
                 project=project,
-                trigger="cli",
-                stimulus=stimulus,
+                running_timeout_seconds=60,
             )
-            with patch(
-                "codeclone.memory.jobs.worker.run_projection_job",
-                return_value=(
-                    "done",
-                    {
-                        "trajectory": {"status": "ok"},
-                        "semantic": {"status": "skipped"},
-                        "applied_stimulus": stimulus,
-                    },
-                    None,
-                ),
-            ):
-                result = run_projection_jobs_once(
-                    conn,
-                    root_path=root,
-                    config=config,
-                    project=project,
-                    running_timeout_seconds=60,
-                )
-        finally:
-            conn.close()
         assert result.status == "done"
         assert result.job_id is not None
 

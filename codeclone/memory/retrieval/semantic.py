@@ -11,6 +11,8 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast
 
+from ...audit.schema import open_audit_db_readonly
+from ...audit.validation import AuditSchemaError
 from ..embedding import embed_query
 from ..semantic.models import SemanticSearchResult
 
@@ -103,7 +105,7 @@ def _hydrate_audit(
 
 
 def _hydrate_trajectory(
-    hit: SemanticHit, store: _RecordStore, preview_chars: int
+    hit: SemanticHit, store: object, preview_chars: int
 ) -> SemanticSearchResult | None:
     find_trajectory = getattr(store, "find_trajectory", None)
     if not callable(find_trajectory):
@@ -130,8 +132,8 @@ def audit_event_row(
     if not audit_db_path.is_file():
         return None
     try:
-        conn = sqlite3.connect(str(audit_db_path))
-    except sqlite3.Error:
+        conn = open_audit_db_readonly(audit_db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError):
         return None
     try:
         row = conn.execute(
@@ -139,7 +141,7 @@ def audit_event_row(
             "WHERE event_id = ?",
             (event_id,),
         ).fetchone()
-    except sqlite3.Error:
+    except (sqlite3.Error, AuditSchemaError):
         return None
     finally:
         conn.close()

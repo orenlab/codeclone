@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from typing import Protocol
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -51,6 +52,11 @@ from .patch_verify import VALID_STRICTNESS_PROFILES
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
 _CLI_SESSION_START_EPOCH = int(time.time())
+
+
+class _AuditEnabledArgs(Protocol):
+    audit_enabled: bool
+
 
 __all__ = [
     "LEGACY_CACHE_PATH",
@@ -756,7 +762,7 @@ def _main_impl() -> None:
 
 def _emit_cli_analysis_completed_if_enabled(
     *,
-    args: CLIArgsLike,
+    args: _AuditEnabledArgs,
     root_path: Path,
     report_document: object,
     new_func_count: int,

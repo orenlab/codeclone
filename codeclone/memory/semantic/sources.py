@@ -11,6 +11,8 @@ from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from ...audit.schema import open_audit_db_readonly
+from ...audit.validation import AuditSchemaError
 from ..models import MemoryQuery, MemoryRecord, MemorySubject
 from ..trajectory.models import Trajectory, TrajectoryListItem
 from .models import SemanticProjection
@@ -171,8 +173,8 @@ class AuditIndexSource:
         event_types = tuple(sorted(INDEXED_AUDIT_EVENTS))
         placeholders = ", ".join("?" for _ in event_types)
         try:
-            conn = sqlite3.connect(str(self._db_path))
-        except sqlite3.Error:
+            conn = open_audit_db_readonly(self._db_path)
+        except (sqlite3.Error, AuditSchemaError, OSError):
             return
         try:
             rows = conn.execute(
@@ -182,7 +184,7 @@ class AuditIndexSource:
                 "ORDER BY created_at_utc ASC, id ASC",
                 event_types,
             ).fetchall()
-        except sqlite3.Error:
+        except (sqlite3.Error, AuditSchemaError):
             return
         finally:
             conn.close()

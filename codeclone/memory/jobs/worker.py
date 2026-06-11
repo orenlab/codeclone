@@ -24,6 +24,7 @@ from ...observability.profile import worker_bootstrap_sample
 from ..experience.distillation_workflow import execute_experience_distillation
 from ..models import MemoryProject
 from ..semantic.rebuild_workflow import execute_semantic_index_rebuild
+from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..trajectory.rebuild_workflow import execute_trajectory_rebuild
 from .models import ProjectionJobStatus
 from .store import claim_next_projection_job as _claim_next
@@ -140,7 +141,7 @@ def _emit_worker_bootstrap_span() -> None:
 
 
 def run_projection_job(
-    conn: sqlite3.Connection,
+    store: SqliteEngineeringMemoryStore,
     *,
     job_id: str,
     root_path: Path,
@@ -148,6 +149,7 @@ def run_projection_job(
     project: MemoryProject,
     stimulus: Mapping[str, object],
 ) -> tuple[ProjectionJobStatus, dict[str, object], str | None]:
+    conn = store.connection
     correlation_id, parent_operation_id = _correlation_handoff()
     with operation(
         name="memory.projection.job",
@@ -169,6 +171,7 @@ def run_projection_job(
             trajectory_payload = execute_trajectory_rebuild(
                 root_path=root_path,
                 config=config,
+                store=store,
                 project=project,
                 incremental_after_event_core_id=watermark,
             )
@@ -179,6 +182,7 @@ def run_projection_job(
             semantic_payload = execute_semantic_index_rebuild(
                 root_path=root_path,
                 config=config,
+                store=store,
                 project=project,
             )
             semantic_span.set_counter(
@@ -194,6 +198,7 @@ def run_projection_job(
             experience_payload = execute_experience_distillation(
                 root_path=root_path,
                 config=config,
+                store=store,
                 project=project,
             )
             experience_span.set_counter(
@@ -221,13 +226,14 @@ def run_projection_job(
 
 
 def run_projection_jobs_once(
-    conn: sqlite3.Connection,
+    store: SqliteEngineeringMemoryStore,
     *,
     root_path: Path,
     config: MemoryConfig,
     project: MemoryProject,
     running_timeout_seconds: int,
 ) -> ProjectionWorkerResult:
+    conn = store.connection
     claimed = _claim_next(
         conn,
         project_id=project.id,
@@ -247,7 +253,7 @@ def run_projection_jobs_once(
     stimulus = parse_stimulus_json(claimed.stimulus_json)
     try:
         final_status, result, error = run_projection_job(
-            conn,
+            store,
             job_id=claimed.id,
             root_path=root_path,
             config=config,

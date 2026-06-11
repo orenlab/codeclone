@@ -107,7 +107,7 @@ def test_projection_job_includes_experience_step(tmp_path: Path) -> None:
         config = replace(resolve_memory_config(root), trajectories_enabled=False)
 
         _final_status, result, _error = run_projection_job(
-            store.connection,
+            store,
             job_id="job-1",
             root_path=root,
             config=config,

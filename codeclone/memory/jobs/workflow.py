@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Literal
 
@@ -23,7 +22,7 @@ from ...utils.ci import is_ci_environment
 from ..exceptions import MemoryContractError
 from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
-from ..schema import open_memory_db
+from ..sqlite_store import SqliteEngineeringMemoryStore
 from .models import ProjectionJobRecord
 from .spawn import spawn_projection_jobs_worker
 from .staleness import (
@@ -42,10 +41,10 @@ from .worker import run_projection_jobs_once
 ProjectionRebuildPolicy = Literal["off", "enqueue_when_stale"]
 
 
-def _require_memory_db_session(
+def _require_memory_store_session(
     root_path: Path,
     config: MemoryConfig | None = None,
-) -> tuple[Path, MemoryConfig, MemoryProject, sqlite3.Connection]:
+) -> tuple[Path, MemoryConfig, MemoryProject, SqliteEngineeringMemoryStore]:
     resolved_root = root_path.resolve()
     resolved_config = config or resolve_memory_config(resolved_root)
     db_path = resolve_memory_db_path(resolved_root, resolved_config)
@@ -55,8 +54,8 @@ def _require_memory_db_session(
             "Run memory init or refresh_from_run first."
         )
     project = resolve_project_identity(resolved_root)
-    conn = open_memory_db(db_path)
-    return resolved_root, resolved_config, project, conn
+    store = SqliteEngineeringMemoryStore(db_path)
+    return resolved_root, resolved_config, project, store
 
 
 def execute_projection_rebuild_status(
@@ -65,10 +64,11 @@ def execute_projection_rebuild_status(
     config: MemoryConfig | None = None,
     limit: int = 10,
 ) -> dict[str, object]:
-    resolved_root, resolved_config, project, conn = _require_memory_db_session(
+    resolved_root, resolved_config, project, store = _require_memory_store_session(
         root_path,
         config=config,
     )
+    conn = store.connection
     try:
         current = compute_projection_stimulus(
             conn=conn,
@@ -80,7 +80,7 @@ def execute_projection_rebuild_status(
         active = pending_projection_job(conn, project_id=project.id)
         jobs = list_projection_jobs(conn, project_id=project.id, limit=limit)
     finally:
-        conn.close()
+        store.close()
     return {
         "action": "projection_rebuild_status",
         "policy": resolved_config.projection_rebuild_policy,
@@ -118,10 +118,11 @@ def execute_enqueue_projection_rebuild(
             "job_id": None,
             "spawned": False,
         }
-    resolved_root, resolved_config, project, conn = _require_memory_db_session(
+    resolved_root, resolved_config, project, store = _require_memory_store_session(
         root_path,
         config=resolved_config,
     )
+    conn = store.connection
     try:
         stimulus = compute_projection_stimulus(
             conn=conn,
@@ -156,7 +157,7 @@ def execute_enqueue_projection_rebuild(
             ),
         )
     finally:
-        conn.close()
+        store.close()
     base_should_spawn = (
         resolved_config.projection_rebuild_spawn_worker
         if spawn_worker is None
@@ -203,7 +204,7 @@ def execute_run_projection_jobs_once(
     root_path: Path,
     config: MemoryConfig | None = None,
 ) -> dict[str, object]:
-    resolved_root, resolved_config, project, conn = _require_memory_db_session(
+    resolved_root, resolved_config, project, store = _require_memory_store_session(
         root_path,
         config=config,
     )
@@ -215,7 +216,7 @@ def execute_run_projection_jobs_once(
         bootstrap(resolve_observability_config(), root=resolved_root)
     try:
         worker_result = run_projection_jobs_once(
-            conn,
+            store,
             root_path=resolved_root,
             config=resolved_config,
             project=project,
@@ -224,7 +225,7 @@ def execute_run_projection_jobs_once(
             ),
         )
     finally:
-        conn.close()
+        store.close()
         if owns_observability:
             shutdown()
     return {

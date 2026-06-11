@@ -28,6 +28,14 @@ def _clear_workspace_intent_store_cache() -> Generator[None, None, None]:
     clear_workspace_intent_store_cache()
 
 
+@pytest.fixture(autouse=True)
+def _reset_observability_runtime() -> Generator[None, None, None]:
+    yield
+    from codeclone.observability.runtime import shutdown
+
+    shutdown()
+
+
 @pytest.fixture
 def report_meta_factory() -> ReportMetaFactory:
     def _make(**overrides: object) -> dict[str, object]:

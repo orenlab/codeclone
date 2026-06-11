@@ -62,8 +62,9 @@ def test_run_projection_job_links_under_finish(
     )
 
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    store = MagicMock()
     worker.run_projection_job(
-        MagicMock(),
+        store,
         job_id="j1",
         root_path=tmp_path,
         config=MagicMock(),

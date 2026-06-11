@@ -17,8 +17,6 @@ from codeclone.config.memory import resolve_memory_config
 from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.jobs import worker as worker_module
 from codeclone.memory.jobs.worker import run_projection_job
-from codeclone.memory.project import resolve_memory_db_path
-from codeclone.memory.schema import open_memory_db
 from codeclone.observability import bootstrap, shutdown
 from codeclone.observability.store.schema import (
     observability_store_path,
@@ -35,9 +33,8 @@ def _reset_runtime() -> Iterator[None]:
 
 
 def test_run_projection_job_emits_operation_and_spans(tmp_path: Path) -> None:
-    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
         config = resolve_memory_config(root)
-        conn = open_memory_db(resolve_memory_db_path(root, config))
         bootstrap(ObservabilityConfig(enabled=True), root=root)
         try:
             with (
@@ -45,7 +42,7 @@ def test_run_projection_job_emits_operation_and_spans(tmp_path: Path) -> None:
                     worker_module,
                     "execute_trajectory_rebuild",
                     return_value={"status": "ok", "mode": "full", "workflows_seen": 7},
-                ),
+                ) as trajectory_rebuild,
                 patch.object(
                     worker_module,
                     "execute_semantic_index_rebuild",
@@ -54,15 +51,15 @@ def test_run_projection_job_emits_operation_and_spans(tmp_path: Path) -> None:
                         "embedded": 1423,
                         "skipped_unchanged": 11,
                     },
-                ),
+                ) as semantic_rebuild,
                 patch.object(
                     worker_module,
                     "execute_experience_distillation",
                     return_value={"status": "ok", "experiences_distilled": 3},
-                ),
+                ) as experience_distillation,
             ):
                 status, _result, _reason = run_projection_job(
-                    conn,
+                    store,
                     job_id="job-1",
                     root_path=root,
                     config=config,
@@ -70,10 +67,12 @@ def test_run_projection_job_emits_operation_and_spans(tmp_path: Path) -> None:
                     stimulus={},
                 )
         finally:
-            conn.close()
             shutdown()
 
         assert status == "done"
+        assert trajectory_rebuild.call_args.kwargs["store"] is store
+        assert semantic_rebuild.call_args.kwargs["store"] is store
+        assert experience_distillation.call_args.kwargs["store"] is store
 
         obs = open_observability_store(observability_store_path(root))
         try:

@@ -15,6 +15,7 @@ from ..utils.sqlite_store import (
     get_meta_value,
     initialize_schema_v1,
     open_sqlite_db,
+    open_sqlite_db_readonly,
 )
 from .validation import AUDIT_SCHEMA_VERSION, AuditSchemaError
 
@@ -97,9 +98,41 @@ _ADDITIVE_EVENT_COLUMNS = (
     ("agent_start_epoch", "INTEGER"),
 )
 
+_READABLE_EVENT_COLUMNS = frozenset(
+    {
+        "id",
+        "event_id",
+        "event_type",
+        "severity",
+        "created_at_utc",
+        "repo_root_digest",
+        "run_id",
+        "intent_id",
+        "report_digest",
+        "agent_label",
+        "agent_pid",
+        "status",
+        "payload_json",
+    }
+)
+
 
 def open_audit_db(path: Path) -> sqlite3.Connection:
-    return open_sqlite_db(path, ensure_schema=ensure_schema)
+    conn = open_sqlite_db(path, ensure_schema=ensure_schema)
+    from ..observability import instrument_db_connection
+
+    instrument_db_connection(conn)
+    return conn
+
+
+def open_audit_db_readonly(path: Path) -> sqlite3.Connection:
+    """Open a structurally readable audit database without mutating it."""
+
+    conn = open_sqlite_db_readonly(path, validate_schema=_validate_readonly_schema)
+    from ..observability import instrument_db_connection
+
+    instrument_db_connection(conn)
+    return conn
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -157,6 +190,25 @@ def _ensure_event_columns(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def _validate_readonly_schema(conn: sqlite3.Connection) -> None:
+    current = get_meta(conn, "schema_version")
+    if current is not None and current not in _MIGRATABLE_VERSIONS:
+        raise AuditSchemaError(f"Unsupported audit schema version: {current}")
+    missing = sorted(_READABLE_EVENT_COLUMNS - _event_columns(conn))
+    if missing:
+        raise AuditSchemaError(
+            "Audit database is missing required columns: " + ", ".join(missing)
+        )
+
+
+def _event_columns(conn: sqlite3.Connection) -> frozenset[str]:
+    return frozenset(
+        str(row[1])
+        for row in conn.execute("PRAGMA table_info(controller_events)").fetchall()
+        if len(row) > 1
+    )
+
+
 def _set_meta(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
         f"INSERT OR REPLACE INTO {_AUDIT_META_TABLE}(key, value) VALUES (?, ?)",
@@ -174,4 +226,5 @@ __all__ = [
     "ensure_schema",
     "get_meta",
     "open_audit_db",
+    "open_audit_db_readonly",
 ]
