@@ -21,6 +21,7 @@ from codeclone.observability.store.schema import (
 from codeclone.observability.store.writer import write_operation
 from codeclone.observability.views import (
     AggregatesView,
+    DbCostRow,
     McpToolAggregate,
     OperationView,
     SpanCostView,
@@ -211,6 +212,32 @@ def test_render_peak_memory_contributor() -> None:
     assert "Top memory consumer" in html
     assert "memory.semantic.reindex" in html
     assert "80%" in html  # 480 / 600 = 80%
+
+
+def test_render_db_cost() -> None:
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="t",
+        window_ended_at_utc="t",
+        aggregates=AggregatesView(
+            operation_count=1,
+            db_costs=(
+                DbCostRow(
+                    span_name="memory.semantic.reindex",
+                    surface="memory",
+                    span_count=2,
+                    total_queries=1306,
+                    total_writes=0,
+                    max_queries=1000,
+                ),
+            ),
+        ),
+    )
+    html = render_trace_html(trace)
+    assert "DB cost" in html
+    assert "memory.semantic.reindex" in html
+    assert "1306" in html
+    assert "653" in html  # 1306 / 2 queries per call
 
 
 def test_render_waterfall_timeline() -> None:

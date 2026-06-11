@@ -221,3 +221,59 @@ def test_no_op_span_and_mcp_payload_percentiles(tmp_path: Path) -> None:
     assert costly.no_op is True
     assert costly.produced == 0
     assert costly.skipped == 1423
+
+
+def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="W",
+                correlation_id="W",
+                surface="memory",
+                name="memory.projection.job",
+                started_at_utc="2026-06-09T00:00:01Z",
+                duration_ms=900.0,
+                status="ok",
+                spans=(
+                    SpanRecord(
+                        span_id="s1",
+                        operation_id="W",
+                        name="memory.semantic.reindex",
+                        started_at_utc="2026-06-09T00:00:01Z",
+                        duration_ms=800.0,
+                        status="ok",
+                        counters={"db_queries": 1306, "embedded": 9},
+                    ),
+                    SpanRecord(
+                        span_id="s2",
+                        operation_id="W",
+                        name="memory.experience.distill",
+                        started_at_utc="2026-06-09T00:00:02Z",
+                        duration_ms=20.0,
+                        status="ok",
+                        counters={"db_queries": 1875, "db_writes": 768},
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+
+    read = open_observability_store_readonly(tmp_path)
+    assert read is not None
+    try:
+        trace = build_trace_view(read, correlation_id="W")
+    finally:
+        read.close()
+
+    costs = trace.aggregates.db_costs
+    # Sorted by total queries desc: distill (1875) before reindex (1306).
+    assert costs[0].span_name == "memory.experience.distill"
+    assert costs[0].total_queries == 1875
+    assert costs[0].total_writes == 768
+    by_name = {row.span_name: row for row in costs}
+    assert by_name["memory.semantic.reindex"].total_queries == 1306
+    assert by_name["memory.semantic.reindex"].total_writes == 0
+    assert by_name["memory.semantic.reindex"].max_queries == 1306

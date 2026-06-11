@@ -23,6 +23,7 @@ import orjson
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
 from ..views import (
     AggregatesView,
+    DbCostRow,
     McpToolAggregate,
     OperationView,
     SpanCostView,
@@ -259,6 +260,28 @@ def _mcp_tool_aggregates(flat: list[OperationView]) -> tuple[McpToolAggregate, .
     return tuple(aggregates)
 
 
+def _db_costs(flat: list[OperationView]) -> tuple[DbCostRow, ...]:
+    grouped: dict[str, list[SpanView]] = defaultdict(list)
+    surface_of: dict[str, str] = {}
+    for op in flat:
+        for span in op.spans:
+            if "db_queries" in span.counters:
+                grouped[span.name].append(span)
+                surface_of.setdefault(span.name, op.surface)
+    rows = [
+        DbCostRow(
+            span_name=name,
+            surface=surface_of[name],
+            span_count=len(spans),
+            total_queries=sum(s.counters.get("db_queries", 0) for s in spans),
+            total_writes=sum(s.counters.get("db_writes", 0) for s in spans),
+            max_queries=max(s.counters.get("db_queries", 0) for s in spans),
+        )
+        for name, spans in grouped.items()
+    ]
+    return tuple(sorted(rows, key=lambda r: (-r.total_queries, r.span_name)))
+
+
 def _aggregates(
     flat: list[OperationView], spans_by_op: dict[str, tuple[SpanView, ...]]
 ) -> AggregatesView:
@@ -302,6 +325,7 @@ def _aggregates(
         slowest_span=span_costs[0] if span_costs else None,
         semantic_costs=semantic_costs[:_SEMANTIC_COST_LIMIT],
         peak_memory_span=memory_ranked[0] if memory_ranked else None,
+        db_costs=_db_costs(flat),
     )
 
 

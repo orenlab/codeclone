@@ -86,6 +86,22 @@ class McpToolAggregate:
 
 
 @dataclass(frozen=True, slots=True)
+class DbCostRow:
+    """SQLite work attributed to a span class (performance-truth, not audit).
+
+    Aggregated from span db_queries/db_writes counters; ``max_queries`` is the
+    worst single instance and ``queries`` ÷ a per-row productive count exposes
+    N+1-shaped access (many reads, little produced)."""
+
+    span_name: str
+    surface: str
+    span_count: int
+    total_queries: int
+    total_writes: int
+    max_queries: int
+
+
+@dataclass(frozen=True, slots=True)
 class AggregatesView:
     operation_count: int
     slowest: tuple[OperationView, ...] = ()
@@ -97,6 +113,7 @@ class AggregatesView:
     slowest_span: SpanCostView | None = None
     semantic_costs: tuple[SpanCostView, ...] = ()
     peak_memory_span: SpanCostView | None = None
+    db_costs: tuple[DbCostRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +159,7 @@ class TraceView:
 
 __all__ = [
     "AggregatesView",
+    "DbCostRow",
     "McpToolAggregate",
     "OperationView",
     "SpanCostView",

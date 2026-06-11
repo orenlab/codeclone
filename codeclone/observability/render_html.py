@@ -25,6 +25,7 @@ from html import escape
 
 from .views import (
     AggregatesView,
+    DbCostRow,
     McpToolAggregate,
     OperationView,
     SpanCostView,
@@ -571,6 +572,38 @@ def _waterfall(trace: TraceView) -> str:
     )
 
 
+def _db_row(row: DbCostRow) -> str:
+    per_call = round(row.total_queries / row.span_count) if row.span_count else 0
+    return (
+        f'<tr><td class="t">{_esc(row.span_name)}</td>'
+        f'<td class="r">{row.span_count}</td>'
+        f'<td class="r">{row.total_queries}</td>'
+        f'<td class="r">{row.total_writes}</td>'
+        f'<td class="r">{per_call}</td>'
+        f'<td class="r">{row.max_queries}</td></tr>'
+    )
+
+
+def _db_cost(agg: AggregatesView) -> str:
+    if not agg.db_costs:
+        return ""
+    rows = "".join(_db_row(row) for row in agg.db_costs)
+    headers = (
+        ("Span", False),
+        ("Spans", True),
+        ("Queries", True),
+        ("Writes", True),
+        ("Q / call", True),
+        ("Max", True),
+    )
+    return _section(
+        "DB cost",
+        _table(headers, rows),
+        subtitle="SQLite work per span (performance-truth) — a high Q/call is "
+        "N+1-shaped: many reads for little produced.",
+    )
+
+
 def render_trace_html(trace: TraceView) -> str:
     """Render a ``TraceView`` as a self-contained, branded diagnosis cockpit."""
     foot = f"CodeClone · platform observability · schema {_esc(trace.schema_version)}"
@@ -584,6 +617,7 @@ def render_trace_html(trace: TraceView) -> str:
         + _waterfall(trace)
         + _chain(trace)
         + _semantic(trace.aggregates)
+        + _db_cost(trace.aggregates)
         + _mcp(trace.aggregates.mcp_tools)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"
