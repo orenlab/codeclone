@@ -6,16 +6,19 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
+from codeclone.memory.retrieval import service as retrieval_service
 from codeclone.memory.retrieval.ranking import RankingContext, relevance_score
 from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import (
+    make_module_record,
     memory_store,
     seed_module_role,
     seed_path_subject_record,
@@ -169,6 +172,60 @@ def test_relevance_score_filters_global_contract_notes_for_scope() -> None:
     assert score == 0.0
 
 
+def test_relevance_score_keeps_git_hotspot_below_durable_scope_context() -> None:
+    module_record = make_module_record("proj-1", "pkg.service")
+    hotspot_record = replace(
+        module_record,
+        id="mem-hotspot",
+        identity_key="hotspot",
+        type="risk_note",
+        confidence="verified",
+        ingest_source="git",
+        statement="pkg/service.py changed 12 times in the last 90 days.",
+        payload={
+            "risk_kind": "change_hotspot",
+            "change_count": 12,
+            "period_days": 90,
+        },
+    )
+    subjects = [
+        MemorySubject(
+            id="subj-service",
+            memory_id=module_record.id,
+            subject_kind="path",
+            subject_key="pkg/service.py",
+            relation="about",
+        )
+    ]
+    context = RankingContext.from_scope(
+        scope_paths=("pkg/service.py",),
+        symbols=(),
+        blast_dependents=(),
+    )
+
+    module_score = relevance_score(
+        record=module_record,
+        subjects=subjects,
+        context=context,
+        evidence_count=7,
+    )
+    hotspot_score = relevance_score(
+        record=hotspot_record,
+        subjects=subjects,
+        context=context,
+        evidence_count=7,
+    )
+    summary = retrieval_service._serialize_record_summary(
+        record=hotspot_record,
+        subjects=subjects,
+        evidence_count=7,
+        relevance_score=hotspot_score,
+    )
+
+    assert 0.0 < hotspot_score < module_score
+    assert summary["retrieval_lane"] == "hotspot_context"
+
+
 def test_get_relevant_memory_ranks_module_role_for_scoped_path(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (_root, project, store, _db_path):
         seed_module_role(
@@ -290,6 +347,49 @@ def test_get_relevant_memory_ranks_scope_records(tmp_path: Path) -> None:
     assert isinstance(records, list)
     assert records
     assert records[0]["statement"] == "sqlite store module"
+    coverage = result["coverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["coverage_kind"] == "record_subject_coverage"
+    assert coverage["observation_confidence"] == {
+        "level": "partial",
+        "basis": ["records"],
+        "note": (
+            "Evidence availability only; not correctness, approval, or edit "
+            "authorization."
+        ),
+    }
+
+
+def test_get_relevant_memory_reports_unknown_observation_coverage(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        result = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/unknown.py",),
+            scope_resolved_from="explicit",
+        )
+
+    coverage = result["coverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["record_coverage"] == {
+        "scope_paths_with_memory": 0,
+        "scope_paths_total": 1,
+        "coverage_percent": 0,
+        "coverage_kind": "record_subject_coverage",
+    }
+    assert coverage["trajectory_coverage"] == {
+        "scope_paths_with_trajectories": 0,
+        "scope_paths_total": 1,
+        "coverage_percent": 0,
+    }
+    assert coverage["experience_coverage"] == {
+        "scope_families_with_experiences": 0,
+        "scope_families_total": 1,
+        "coverage_percent": 0,
+    }
+    assert coverage["observation_confidence"]["level"] == "unknown"
 
 
 def test_query_engineering_memory_search_and_status(tmp_path: Path) -> None:

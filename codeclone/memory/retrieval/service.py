@@ -34,13 +34,15 @@ from ..trajectory.analytics import (
 )
 from ..trajectory.retrieval import (
     DEFAULT_TRAJECTORY_PREVIEW_LIMIT,
+    filter_trajectories_for_default_retrieval,
     rank_trajectories_for_query,
     rank_trajectories_for_scope,
     serialize_trajectory_detail,
     trajectory_status_payload,
     trajectory_subject_keys,
 )
-from .ranking import RankingContext, relevance_score
+from .context_coverage import build_context_coverage
+from .ranking import RankingContext, is_git_change_hotspot, relevance_score
 from .semantic import audit_event_row
 
 if TYPE_CHECKING:
@@ -269,16 +271,13 @@ def _serialize_experience(
     return payload
 
 
-def _relevant_experiences(
+def _matching_experiences(
     store: SqliteEngineeringMemoryStore,
     *,
     project_id: str,
     families: frozenset[str],
-    max_results: int,
-    detail_level: MemoryDetailLevel,
-) -> list[dict[str, object]]:
-    """Advisory experiences whose subject_family matches the scope, highest
-    support first. Dormant experiences are kept but never surfaced."""
+) -> list[Experience]:
+    """Active advisory experiences matching the requested scope families."""
     if not families:
         return []
     matched = [
@@ -293,9 +292,18 @@ def _relevant_experiences(
             experience.id,
         )
     )
+    return matched
+
+
+def _serialize_relevant_experiences(
+    experiences: Sequence[Experience],
+    *,
+    max_results: int,
+    detail_level: MemoryDetailLevel,
+) -> list[dict[str, object]]:
     return [
         _serialize_experience(experience, detail_level=detail_level)
-        for experience in matched[:max_results]
+        for experience in experiences[:max_results]
     ]
 
 
@@ -317,6 +325,12 @@ def _serialize_evidence(evidence: MemoryEvidence) -> dict[str, object]:
         "digest": evidence.digest,
         "created_at_utc": evidence.created_at_utc,
     }
+
+
+def _retrieval_lane_payload(record: MemoryRecord) -> dict[str, object]:
+    return (
+        {"retrieval_lane": "hotspot_context"} if is_git_change_hotspot(record) else {}
+    )
 
 
 def _serialize_record_summary(
@@ -352,6 +366,7 @@ def _serialize_record_summary(
         payload["stale_reason"] = record.stale_reason
     if record.status == "draft":
         payload["draft_unverified"] = True
+    payload.update(_retrieval_lane_payload(record))
     if relevance_score is not None:
         payload["relevance_score"] = relevance_score
     return payload
@@ -484,6 +499,7 @@ def _coverage_summary(
         "scope_paths_with_memory": with_memory,
         "scope_paths_total": total,
         "coverage_percent": percent,
+        "coverage_kind": "record_subject_coverage",
     }
 
 
@@ -566,19 +582,31 @@ def get_relevant_memory(
         first_summary = trajectories_payload[0].get("patch_trail_summary")
         if isinstance(first_summary, dict):
             patch_trail_summary = first_summary
-    experiences_payload = _relevant_experiences(
+    matching_experiences = _matching_experiences(
         store,
         project_id=project_id,
         families=_scope_families(normalized_scope),
+    )
+    experiences_payload = _serialize_relevant_experiences(
+        matching_experiences,
         max_results=min(max_records, DEFAULT_EXPERIENCE_PREVIEW_LIMIT),
         detail_level=normalized_detail,
     )
     coverage: dict[str, object]
     if normalized_scope:
-        coverage = _coverage_summary(
-            store,
-            project_id=project_id,
+        coverage = build_context_coverage(
+            record_coverage=_coverage_summary(
+                store,
+                project_id=project_id,
+                scope_paths=normalized_scope,
+            ),
             scope_paths=normalized_scope,
+            scope_families=_scope_families(normalized_scope),
+            trajectories=filter_trajectories_for_default_retrieval(
+                trajectory_candidates,
+                include_routine=include_routine,
+            ),
+            experiences=matching_experiences,
         )
     else:
         coverage = {

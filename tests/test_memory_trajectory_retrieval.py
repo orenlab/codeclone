@@ -16,6 +16,7 @@ from codeclone.audit.events import repo_root_digest
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.models import MemoryEvidence, generate_memory_id
 from codeclone.memory.retrieval import get_relevant_memory, query_engineering_memory
+from codeclone.memory.retrieval.context_coverage import build_context_coverage
 from codeclone.memory.trajectory.models import TrajectorySubject
 from codeclone.memory.trajectory.retrieval import (
     rank_trajectories_for_scope,
@@ -66,6 +67,20 @@ def test_get_relevant_memory_returns_scoped_trajectories(tmp_path: Path) -> None
     assert trajectories[0]["relevance_score"] > 1.0
     assert "quality_contract" not in trajectories[0]
     assert isinstance(trajectories[0]["subjects_truncated"], bool)
+    coverage = result["coverage"]
+    assert isinstance(coverage, dict)
+    assert coverage["trajectory_coverage"] == {
+        "scope_paths_with_trajectories": 1,
+        "scope_paths_total": 1,
+        "coverage_percent": 100,
+    }
+    assert coverage["agent_diversity"] == {
+        "trajectory_agent_labels": ["test-agent"],
+        "trajectory_agent_label_count": 1,
+        "experience_agent_families": [],
+        "experience_agent_family_count": 0,
+    }
+    assert coverage["observation_confidence"]["level"] == "supported"
 
 
 def test_compact_trajectory_preview_preserves_scope_subjects_and_slims_payload(
@@ -121,6 +136,46 @@ def test_compact_trajectory_preview_preserves_scope_subjects_and_slims_payload(
     compact_size = len(json.dumps(compact, sort_keys=True, separators=(",", ":")))
     full_size = len(json.dumps(full, sort_keys=True, separators=(",", ":")))
     assert compact_size < full_size * 0.6
+
+
+def test_context_coverage_matches_trajectory_module_subject(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory = replace(
+            projection.trajectories[0],
+            subjects=(
+                TrajectorySubject("module", "pkg.service", "about"),
+                TrajectorySubject("agent", "test-agent/1", "actor"),
+            ),
+        )
+
+    coverage = build_context_coverage(
+        record_coverage={
+            "scope_paths_with_memory": 0,
+            "scope_paths_total": 1,
+            "coverage_percent": 0,
+            "coverage_kind": "record_subject_coverage",
+        },
+        scope_paths=("pkg/service.py", "pkg/other.py"),
+        scope_families=frozenset({"pkg"}),
+        trajectories=(trajectory,),
+        experiences=(),
+    )
+
+    assert coverage["trajectory_coverage"] == {
+        "scope_paths_with_trajectories": 1,
+        "scope_paths_total": 2,
+        "coverage_percent": 50,
+    }
+    observation_confidence = coverage["observation_confidence"]
+    assert isinstance(observation_confidence, dict)
+    assert observation_confidence["level"] == "partial"
 
 
 def test_get_relevant_memory_returns_patch_trail_summary(tmp_path: Path) -> None:

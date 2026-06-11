@@ -32,6 +32,10 @@ _INGEST_BOOST: dict[str, float] = {
 # never dominates an exact subject match (1.0) or a scope match. It is applied
 # only after the scoped short-circuit, so it cannot inject out-of-scope records.
 _SEMANTIC_WEIGHT = 0.3
+# Git churn is useful review context, but it is not a durable architectural
+# assertion. Keep exact-scope hotspots visible without letting their type and
+# ingest boosts outrank richer memory by default.
+_CHANGE_HOTSPOT_PENALTY = 0.35
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +58,20 @@ class RankingContext:
             symbols=frozenset(symbols),
             blast_dependents=frozenset(blast_dependents),
         )
+
+
+def is_git_change_hotspot(record: MemoryRecord) -> bool:
+    payload = record.payload
+    return (
+        record.type == "risk_note"
+        and record.ingest_source == "git"
+        and isinstance(payload, dict)
+        and payload.get("risk_kind") == "change_hotspot"
+    )
+
+
+def _context_signal_adjustment(record: MemoryRecord) -> float:
+    return -_CHANGE_HOTSPOT_PENALTY if is_git_change_hotspot(record) else 0.0
 
 
 def relevance_score(
@@ -101,8 +119,9 @@ def relevance_score(
             score += 0.05
     if record.status == "stale":
         score -= 0.5
+    score += _context_signal_adjustment(record)
     score += semantic_proximity * _SEMANTIC_WEIGHT
     return round(score, 4)
 
 
-__all__ = ["RankingContext", "relevance_score"]
+__all__ = ["RankingContext", "is_git_change_hotspot", "relevance_score"]

@@ -60,6 +60,20 @@ def test_relevant_memory_surfaces_experiences(tmp_path: Path) -> None:
             "cursor-vscode",
         }
         assert len(experience["evidence_trajectory_ids"]) >= 1
+        coverage = result["coverage"]
+        assert isinstance(coverage, dict)
+        assert coverage["experience_coverage"] == {
+            "scope_families_with_experiences": 1,
+            "scope_families_total": 1,
+            "coverage_percent": 100,
+        }
+        agent_diversity = coverage["agent_diversity"]
+        assert isinstance(agent_diversity, dict)
+        assert agent_diversity["experience_agent_families"] == [
+            "claude-code",
+            "cursor-vscode",
+        ]
+        assert agent_diversity["experience_agent_family_count"] == 2
         # Advisory contract, exactly like trajectories.
         policy = result["retrieval_policy"]
         assert isinstance(policy, dict)
