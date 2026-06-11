@@ -20,9 +20,11 @@ from .runtime import (
     bind_root,
     bootstrap,
     current_operation_context,
+    instrument_db_connection,
     is_observability_enabled,
     operation,
     payload_capture_enabled,
+    record_db_query,
     shutdown,
     span,
 )
@@ -33,9 +35,11 @@ __all__ = [
     "bind_root",
     "bootstrap",
     "current_operation_context",
+    "instrument_db_connection",
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",
+    "record_db_query",
     "shutdown",
     "span",
 ]

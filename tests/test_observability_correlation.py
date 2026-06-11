@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+import sqlite3
 import subprocess
 from collections.abc import Iterator
 from pathlib import Path
@@ -19,8 +21,10 @@ from codeclone.config.observability import ObservabilityConfig
 from codeclone.observability import (
     bootstrap,
     current_operation_context,
+    instrument_db_connection,
     operation,
     shutdown,
+    span,
 )
 from codeclone.observability.store.schema import (
     observability_store_path,
@@ -149,3 +153,46 @@ def test_mcp_analyze_repository_emits_pipeline_spans(tmp_path: Path) -> None:
         conn.close()
     names = {row[0] for row in rows}
     assert {"pipeline.discover", "pipeline.process", "pipeline.analyze"} <= names
+
+
+def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with (
+            operation(name="memory.projection.job", surface="memory"),
+            span(name="memory.semantic.reindex"),
+        ):
+            conn = sqlite3.connect(":memory:")
+            instrument_db_connection(conn)
+            conn.execute("CREATE TABLE t (a INTEGER)")
+            conn.execute("INSERT INTO t VALUES (1)")
+            conn.execute("INSERT INTO t VALUES (2)")
+            conn.execute("SELECT * FROM t").fetchall()
+            conn.close()
+    finally:
+        shutdown()
+
+    obs = open_observability_store(observability_store_path(tmp_path))
+    try:
+        row = obs.execute(
+            "SELECT counters_json FROM platform_spans "
+            "WHERE name='memory.semantic.reindex'"
+        ).fetchone()
+    finally:
+        obs.close()
+    counters = json.loads(row[0]) if row and row[0] else {}
+    # create + 2 inserts + select all land on the active span; only the inserts
+    # are writes.
+    assert counters.get("db_queries", 0) >= 4
+    assert counters.get("db_writes", 0) == 2
+
+
+def test_instrument_db_connection_is_inert_when_disabled() -> None:
+    # Disabled process: no trace callback, no counting, no error, zero overhead.
+    conn = sqlite3.connect(":memory:")
+    try:
+        instrument_db_connection(conn)
+        conn.execute("CREATE TABLE t (a)")
+        assert current_operation_context() is None
+    finally:
+        conn.close()

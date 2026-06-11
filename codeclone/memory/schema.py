@@ -233,12 +233,18 @@ _INDEX_SQL = (
 def open_memory_db(path: Path) -> sqlite3.Connection:
     # synchronous=FULL: every commit survives unclean process exit.
     # Memory records are few, each governance-governed and valuable.
-    return open_sqlite_db(
+    conn = open_sqlite_db(
         path,
         ensure_schema=ensure_schema,
         foreign_keys=True,
         synchronous="FULL",
     )
+    # Performance telemetry only: count SQL per active observability span so the
+    # cockpit can attribute span cost to DB work. No-op when disabled.
+    from ..observability import instrument_db_connection
+
+    instrument_db_connection(conn)
+    return conn
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

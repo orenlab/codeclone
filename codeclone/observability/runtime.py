@@ -15,6 +15,7 @@ flushed in a single transaction on exit.
 
 from __future__ import annotations
 
+import sqlite3
 import time
 import uuid
 from collections.abc import Iterator
@@ -139,10 +140,9 @@ class SpanHandle:
         self._status = "ok"
         self._counters: dict[str, int] = {}
 
-    # set_counter is wired by the 29.10 worker instrumentation. add_counter and
-    # set_reason_kind stay forward-declared until a caller needs them
-    # (loop-accumulation counters; post-hoc reason classification, e.g. semantic).
-    # codeclone: ignore[dead-code]
+    # set_counter is wired by the 29.10 worker instrumentation; add_counter by
+    # the 29.DB query-trace hook (record_db_query). set_reason_kind stays
+    # forward-declared until a caller needs post-hoc reason classification.
     def add_counter(self, key: str, value: int = 1) -> None:
         self._counters[key] = self._counters.get(key, 0) + value
 
@@ -407,15 +407,48 @@ def span(
         )
 
 
+_DB_WRITE_KINDS = frozenset({"insert", "update", "delete", "replace"})
+
+
+def _classify_sql(sql: str) -> str:
+    stripped = sql.lstrip()
+    if not stripped:
+        return ""
+    return stripped.split(None, 1)[0].lower()
+
+
+def record_db_query(sql: str) -> None:
+    """Trace-callback sink: attribute one SQL statement to the active span as a
+    ``db_queries`` counter (plus ``db_writes`` for mutations). No-op outside a
+    span. Performance telemetry only — never audit or contract truth.
+    """
+    span_handle = _CURRENT_SPAN.get()
+    if span_handle is None:
+        return
+    span_handle.add_counter("db_queries", 1)
+    if _classify_sql(sql) in _DB_WRITE_KINDS:
+        span_handle.add_counter("db_writes", 1)
+
+
+def instrument_db_connection(conn: sqlite3.Connection) -> None:
+    """Attach the per-span DB-query counter to ``conn``. No-op (and no per-query
+    trace overhead) when observability is disabled for this process.
+    """
+    if _ENABLED:
+        conn.set_trace_callback(record_db_query)
+
+
 __all__ = [
     "OperationHandle",
     "SpanHandle",
     "bind_root",
     "bootstrap",
     "current_operation_context",
+    "instrument_db_connection",
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",
+    "record_db_query",
     "shutdown",
     "span",
 ]
