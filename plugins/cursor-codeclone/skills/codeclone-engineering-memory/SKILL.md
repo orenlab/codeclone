@@ -93,8 +93,15 @@ semantic-quality embeddings — do not present hits as LLM recall.
 - **Never** use project root as memory scope (`"."`, `""`, unscoped retrieval)
 - Compress observations before `record_candidate`: one durable fact, target
   ≤300 chars; rewrite if >500; hard reject >1000
-- List responses are compact by default — use `mode=get` or `detail_level=full`
-  for complete statements
+- Read compact lanes separately: `records[]` are durable assertions,
+  `experiences[]` are advisory patterns, `trajectories[]` are bounded examples,
+  and `coverage` describes evidence availability
+- Compact is default: subject lists are bounded with
+  `subject_count`/`subjects_truncated`; experience diversity uses
+  `multi_agent`/`dominant_agent_facet`; trajectory contracts, steps, evidence
+  ids, payloads, and the duplicated root Patch Trail are omitted
+- Use `mode=get`, `trajectory_get`, or `detail_level=full` for complete
+  statements, subjects, agent facets, contracts, evidence, and payloads
 
 ## When NOT to use memory
 

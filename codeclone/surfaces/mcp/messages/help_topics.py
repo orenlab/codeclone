@@ -546,8 +546,16 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "trajectory_dashboard after rebuild_trajectories."
             ),
             (
-                "Scoped response may include trajectories[] and "
-                "patch_trail_summary — forensics only, not edit authorization."
+                "Scoped response lanes: records[]=durable assertions, "
+                "experiences[]=advisory patterns, trajectories[]=bounded examples, "
+                "coverage=availability/trust context."
+            ),
+            (
+                "compact (default): record/trajectory subjects are bounded with "
+                "subject_count+subjects_truncated; experiences expose multi_agent "
+                "+ dominant_agent_facet; no quality_contract, steps, evidence ids, "
+                "payload, or duplicated root patch_trail_summary. Use full/get "
+                "for drill-down."
             ),
             (
                 "Semantic (off by default): enable sidecar, rebuild_semantic_index, "
@@ -576,7 +584,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         doc_links=(ENGINEERING_MEMORY_DOC_LINK, MCP_INTERFACE_DOC_LINK),
         warnings=(
             "Draft, inferred, and stale records are not established policy.",
-            "trajectories[] and patch_trail_summary do not override findings.",
+            "trajectories[] and Patch Trail context do not override findings.",
+            "Truncation metadata means more evidence exists; it is not evidence loss.",
         ),
         anti_patterns=(
             "Using memory to justify do_not_touch edits or scope expansion.",

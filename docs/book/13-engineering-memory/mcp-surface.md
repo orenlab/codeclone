@@ -52,6 +52,20 @@ List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
 to **compact** payloads: statement preview, `statement_length`, no `payload`.
 Use `mode=get` or `detail_level=full` for complete statements and payload.
 
+Scoped retrieval keeps four typed lanes:
+
+| Lane             | Meaning                                      | `compact`                                                     | `full`                                      |
+|------------------|----------------------------------------------|---------------------------------------------------------------|---------------------------------------------|
+| `records[]`      | Durable asserted/project memory              | Preview; relevance-first bounded `subjects`; count/truncation | Full statement, subjects, record payload    |
+| `experiences[]`  | Advisory patterns distilled from trajectories | Preview; agent-family count, multi-agent flag, dominant facet | Full agent facets and trajectory evidence ids |
+| `trajectories[]` | Prior workflow examples/evidence             | Bounded preview; no steps or `quality_contract`               | Full contract/subjects; use `trajectory_get` for steps |
+| `coverage`       | Availability of record/trajectory/experience context | Same factual coverage metadata                                | Same factual coverage metadata              |
+
+`subject_count` and `subjects_truncated=true` mean more linked subjects exist;
+they do not downgrade or discard the record. Each compact trajectory retains
+its own `patch_trail_summary`. The duplicate top-level `patch_trail_summary` is
+full-only.
+
 **Filters** (`filters` object):
 
 | Key           | Values                   | Notes                                 |

@@ -153,8 +153,9 @@ flowchart LR
 subjects match (declare `scope_paths`, check `changed_files`, or
 `untouched_in_declared`). When a stored Patch Trail exists for a matched
 trajectory, each preview includes **`patch_trail_summary`** (counts, digest,
-verification status). The top-ranked trajectory also surfaces
-**`patch_trail_summary`** at the response root for quick scope context.
+verification status). With `detail_level=full`, the top-ranked trajectory also
+surfaces **`patch_trail_summary`** at the response root. Compact retrieval omits
+that root duplicate; the summary remains on the trajectory preview.
 
 `query_engineering_memory(mode=trajectory_get)` returns **`patch_trail`** on the
 trajectory payload when persisted for that workflow.
@@ -196,5 +197,3 @@ Refs:
 - `codeclone/memory/trajectory/rebuild_workflow.py:execute_trajectory_rebuild`
 - `codeclone/memory/trajectory/export.py:export_trajectories_jsonl`
 - `tests/test_memory_trajectory_*.py`, `tests/test_audit_event_core_v2.py`
-
----

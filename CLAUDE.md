@@ -122,7 +122,11 @@ After `start_controlled_change` returns `edit_allowed: true`:
 **Scope and token hygiene:** never use project root as memory scope. Compress
 `record_candidate` statements to one durable fact (target ≤300 chars;
 `validate_claims` warns above 500; hard limit 1000). List responses default to
-compact previews — use `mode=get` or `detail_level=full` for complete text.
+compact previews. Treat `records[]`, `experiences[]`, and `trajectories[]` as
+separate evidence lanes; `subject_count` / `subjects_truncated` means more
+subjects exist, not that evidence disappeared. Use `mode=get` or
+`detail_level=full` for complete subjects, agent facets, trajectory contracts,
+steps, evidence ids, payloads, and root Patch Trail drill-down.
 
 ### Before `finish`: incident / complexity memory (MANDATORY)
 
