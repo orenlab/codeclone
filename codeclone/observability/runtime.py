@@ -25,8 +25,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..config.observability import ObservabilityConfig, resolve_observability_config
+from .db_fingerprint import fingerprint_sql
 from .models import OperationRecord, ProfileSample, SpanRecord
 from .reason_kind import ReasonKind
+
+# Bound how many distinct SQL shapes a span persists; the diagnostic value is in
+# the few high-count statements, not the long tail.
+_DB_FINGERPRINT_TOP_N = 8
 
 _ENABLED: bool = False
 _RUNTIME: _ActiveRuntime | None = None
@@ -139,6 +144,7 @@ class SpanHandle:
         self._dedupe_key = dedupe_key
         self._status = "ok"
         self._counters: dict[str, int] = {}
+        self._db_fingerprints: dict[str, int] = {}
 
     # set_counter is wired by the 29.10 worker instrumentation; add_counter by
     # the 29.DB query-trace hook (record_db_query). set_reason_kind stays
@@ -148,6 +154,19 @@ class SpanHandle:
 
     def set_counter(self, key: str, value: int) -> None:
         self._counters[key] = value
+
+    # Wired by the 29.DB query-trace hook (record_db_query): accumulate the
+    # normalized SQL shape so _to_record can flush the top-N per span.
+    def add_db_fingerprint(self, fingerprint: str) -> None:
+        self._db_fingerprints[fingerprint] = (
+            self._db_fingerprints.get(fingerprint, 0) + 1
+        )
+
+    def _top_db_fingerprints(self) -> dict[str, int]:
+        if not self._db_fingerprints:
+            return {}
+        ranked = sorted(self._db_fingerprints.items(), key=lambda kv: (-kv[1], kv[0]))
+        return dict(ranked[:_DB_FINGERPRINT_TOP_N])
 
     # codeclone: ignore[dead-code]
     def set_reason_kind(self, reason_kind: ReasonKind) -> None:
@@ -168,6 +187,7 @@ class SpanHandle:
             reason=self._reason,
             dedupe_key=self._dedupe_key,
             counters=dict(self._counters),
+            db_fingerprints=self._top_db_fingerprints(),
             profile=profile,
         )
 
@@ -455,6 +475,9 @@ def record_db_query(sql: str) -> None:
     span_handle.add_counter("db_queries", 1)
     if _classify_sql(sql) in _DB_WRITE_KINDS:
         span_handle.add_counter("db_writes", 1)
+    fingerprint = fingerprint_sql(sql).fingerprint
+    if fingerprint:
+        span_handle.add_db_fingerprint(fingerprint)
 
 
 def instrument_db_connection(conn: sqlite3.Connection) -> None:

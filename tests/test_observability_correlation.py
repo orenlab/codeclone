@@ -196,6 +196,39 @@ def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
     assert counters.get("db_writes", 0) == 2
 
 
+def test_db_fingerprints_capture_query_shapes_per_span(tmp_path: Path) -> None:
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with (
+            operation(name="memory.projection.job", surface="memory"),
+            span(name="memory.experience.distill"),
+        ):
+            conn = sqlite3.connect(":memory:")
+            instrument_db_connection(conn)
+            conn.execute("CREATE TABLE memory_evidence (memory_id INTEGER)")
+            # The N+1 the fingerprints are meant to name: the same SELECT shape,
+            # different literals, run repeatedly.
+            for memory_id in range(3):
+                conn.execute(
+                    "SELECT * FROM memory_evidence WHERE memory_id = ?", (memory_id,)
+                ).fetchall()
+            conn.close()
+    finally:
+        shutdown()
+
+    obs = open_observability_store(observability_store_path(tmp_path))
+    try:
+        row = obs.execute(
+            "SELECT db_fingerprints FROM platform_spans "
+            "WHERE name='memory.experience.distill'"
+        ).fetchone()
+    finally:
+        obs.close()
+    shapes = json.loads(row[0]) if row and row[0] else {}
+    # Three differently-valued selects collapse to one literal-free shape.
+    assert shapes.get("select * from memory_evidence where memory_id = ?") == 3
+
+
 def test_instrument_db_connection_is_inert_when_disabled() -> None:
     # Disabled process: no trace callback, no counting, no error, zero overhead.
     conn = sqlite3.connect(":memory:")

@@ -32,9 +32,9 @@ _OPERATION_SQL = (
 _SPAN_SQL = (
     "INSERT OR REPLACE INTO platform_spans("
     "span_id, operation_id, parent_span_id, name, started_at_utc, duration_ms, "
-    "status, reason_kind, reason, dedupe_key, counters_json, rss_mb, "
-    "rss_delta_mb, cpu_user_ms, cpu_system_ms, open_fds, thread_count) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "status, reason_kind, reason, dedupe_key, counters_json, db_fingerprints, "
+    "rss_mb, rss_delta_mb, cpu_user_ms, cpu_system_ms, open_fds, thread_count) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -78,6 +78,11 @@ def _span_row(span: SpanRecord) -> tuple[object, ...]:
     counters_json = (
         json_text(dict(span.counters), sort_keys=True) if span.counters else None
     )
+    db_fingerprints_json = (
+        json_text(dict(span.db_fingerprints), sort_keys=True)
+        if span.db_fingerprints
+        else None
+    )
     return (
         span.span_id,
         span.operation_id,
@@ -90,6 +95,7 @@ def _span_row(span: SpanRecord) -> tuple[object, ...]:
         span.reason,
         span.dedupe_key,
         counters_json,
+        db_fingerprints_json,
         *_profile_cols(span.profile),
     )
 

@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS platform_spans (
     reason TEXT,
     dedupe_key TEXT,
     counters_json TEXT,
+    db_fingerprints TEXT,
     rss_mb REAL,
     rss_delta_mb REAL,
     cpu_user_ms REAL,
@@ -85,8 +86,23 @@ def observability_store_path(root: Path) -> Path:
     return root.resolve() / _OBSERVABILITY_DB_RELATIVE
 
 
+def _ensure_span_columns(conn: sqlite3.Connection) -> None:
+    """Additive migration for stores created before a span column existed.
+
+    ``CREATE TABLE IF NOT EXISTS`` never alters an existing table, so a store
+    written by an older build keeps its old shape. This backfills the column
+    with ``ALTER TABLE ... ADD COLUMN`` (a no-op on fresh stores, which already
+    have it from ``_SCHEMA``) so writes/reads stay forward-compatible without a
+    destructive rebuild of disposable telemetry.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info(platform_spans)")}
+    if "db_fingerprints" not in existing:
+        conn.execute("ALTER TABLE platform_spans ADD COLUMN db_fingerprints TEXT")
+
+
 def create_observability_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
+    _ensure_span_columns(conn)
     conn.execute(
         "INSERT OR REPLACE INTO platform_meta(key, value) VALUES('schema_version', ?)",
         (PLATFORM_OBSERVABILITY_SCHEMA_VERSION,),

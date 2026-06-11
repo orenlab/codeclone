@@ -44,6 +44,8 @@ class SpanRecord:
     reason: str | None = None
     dedupe_key: str | None = None
     counters: Mapping[str, int] = field(default_factory=dict)
+    # Top-N literal-free SQL shapes seen on this span -> occurrence count.
+    db_fingerprints: Mapping[str, int] = field(default_factory=dict)
     profile: ProfileSample | None = None
 
 
