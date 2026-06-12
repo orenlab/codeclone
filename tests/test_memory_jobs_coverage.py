@@ -358,7 +358,14 @@ def test_execute_projection_rebuild_status_payload(tmp_path: Path) -> None:
         assert isinstance(payload["jobs"], list)
 
 
-def test_execute_enqueue_skips_when_stimulus_unchanged(tmp_path: Path) -> None:
+def test_execute_enqueue_skips_when_stimulus_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.workflow.is_ci_environment",
+        lambda: False,
+    )
     with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
         config = replace(
             resolve_memory_config(root),
@@ -397,7 +404,14 @@ def test_execute_enqueue_skips_when_stimulus_unchanged(tmp_path: Path) -> None:
         assert payload["reason"] == "stimulus_unchanged"
 
 
-def test_execute_enqueue_enqueues_with_spawn_disabled(tmp_path: Path) -> None:
+def test_execute_enqueue_enqueues_with_spawn_disabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.workflow.is_ci_environment",
+        lambda: False,
+    )
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         payload = execute_enqueue_projection_rebuild(
             root_path=root,
@@ -464,7 +478,14 @@ def test_run_projection_jobs_once_completes_pending_job(tmp_path: Path) -> None:
         assert result.job_id is not None
 
 
-def test_maybe_auto_enqueue_returns_payload_when_enqueued(tmp_path: Path) -> None:
+def test_maybe_auto_enqueue_returns_payload_when_enqueued(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.workflow.is_ci_environment",
+        lambda: False,
+    )
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         config = replace(
             resolve_memory_config(root),

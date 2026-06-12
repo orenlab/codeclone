@@ -60,6 +60,11 @@ def test_run_projection_job_links_under_finish(
     monkeypatch.setattr(
         worker, "execute_experience_distillation", lambda **_k: {"status": "ok"}
     )
+    monkeypatch.setattr(
+        worker,
+        "worker_bootstrap_sample",
+        lambda: ("2026-01-01T00:00:00.000000Z", 12.5),
+    )
 
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     store = MagicMock()

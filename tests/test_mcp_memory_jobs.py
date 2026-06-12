@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 
 from .memory_fixtures import cli_memory_repo
@@ -27,7 +29,12 @@ def test_mcp_manage_memory_projection_rebuild_status(tmp_path: Path) -> None:
 
 def test_mcp_manage_memory_enqueue_projection_rebuild_force_via_policy_off(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.workflow.is_ci_environment",
+        lambda: False,
+    )
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         service = CodeCloneMCPService(history_limit=2)
         payload = service.manage_engineering_memory(
