@@ -27,7 +27,9 @@ class _InMemoryWriter:
     def __init__(self) -> None:
         self.rows: dict[str, SemanticRow] = {}
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+    def search(
+        self, vector: Sequence[float], *, k: int, source: str | None = None
+    ) -> list[SemanticHit]:
         return []
 
     def status(self) -> SemanticIndexStatus:

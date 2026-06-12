@@ -25,8 +25,15 @@ class _FakeIndex:
     def __init__(self, hits: list[SemanticHit]) -> None:
         self._hits = hits
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
-        return self._hits[:k]
+    def search(
+        self, vector: Sequence[float], *, k: int, source: str | None = None
+    ) -> list[SemanticHit]:
+        hits = (
+            self._hits
+            if source is None
+            else [hit for hit in self._hits if hit.source == source]
+        )
+        return hits[:k]
 
     def status(self) -> SemanticIndexStatus:
         return SemanticIndexStatus(available=True, indexed_count=len(self._hits))

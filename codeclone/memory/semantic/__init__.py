@@ -54,7 +54,13 @@ class SemanticIndex(Protocol):
     module level.
     """
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]: ...
+    def search(
+        self, vector: Sequence[float], *, k: int, source: SemanticSource | None = None
+    ) -> list[SemanticHit]:
+        """Top-k nearest hits. ``source`` restricts the search to one lane
+        (memory/audit/trajectory) so each lane gets its own budget; None
+        searches every lane in a single shared top-k."""
+        ...
 
     def status(self) -> SemanticIndexStatus: ...
 
@@ -80,7 +86,9 @@ class SemanticIndexWriter(SemanticIndex, Protocol):
 class NullSemanticIndex:
     """Disabled index: every read is empty."""
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+    def search(
+        self, vector: Sequence[float], *, k: int, source: SemanticSource | None = None
+    ) -> list[SemanticHit]:
         return []
 
     def status(self) -> SemanticIndexStatus:
@@ -97,7 +105,9 @@ class UnavailableSemanticIndex:
     def __init__(self, *, reason: str) -> None:
         self._reason = reason
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+    def search(
+        self, vector: Sequence[float], *, k: int, source: SemanticSource | None = None
+    ) -> list[SemanticHit]:
         return []
 
     def status(self) -> SemanticIndexStatus:

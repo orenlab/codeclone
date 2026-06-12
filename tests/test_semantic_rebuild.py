@@ -23,10 +23,17 @@ class _FakeWriter:
     def __init__(self) -> None:
         self.rows: list[SemanticRow] = []
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+    def search(
+        self, vector: Sequence[float], *, k: int, source: str | None = None
+    ) -> list[SemanticHit]:
+        rows = (
+            self.rows
+            if source is None
+            else [row for row in self.rows if row.source == source]
+        )
         return [
             SemanticHit(source_id=row.id, source=row.source, score=0.0)
-            for row in self.rows[:k]
+            for row in rows[:k]
         ]
 
     def status(self) -> SemanticIndexStatus:

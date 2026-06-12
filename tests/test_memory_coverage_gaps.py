@@ -723,12 +723,17 @@ def test_retrieval_service_semantic_helpers_and_scope_family() -> None:
     from codeclone.memory.semantic.models import SemanticHit, SemanticIndexStatus
 
     class _Index:
-        def search(self, vector: object, *, k: int) -> list[SemanticHit]:
-            return [
+        def search(
+            self, vector: object, *, k: int, source: str | None = None
+        ) -> list[SemanticHit]:
+            hits = [
                 SemanticHit(source_id="mem-1", source="memory", score=0.9),
                 SemanticHit(source_id="evt-1", source="audit", score=0.8),
                 SemanticHit(source_id="traj-1", source="trajectory", score=0.7),
             ]
+            if source is not None:
+                hits = [hit for hit in hits if hit.source == source]
+            return hits[:k]
 
         def status(self) -> SemanticIndexStatus:
             return SemanticIndexStatus(available=True, indexed_count=3)

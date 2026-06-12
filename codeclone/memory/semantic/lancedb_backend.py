@@ -185,10 +185,15 @@ class LanceDbSemanticIndex:
             return False
         return getattr(vector_type, "list_size", None) == self._dimension
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
+    def search(
+        self, vector: Sequence[float], *, k: int, source: SemanticSource | None = None
+    ) -> list[SemanticHit]:
         if self._table is None:
             return []
-        rows = self._table.search(list(vector)).limit(k).to_list()
+        query = self._table.search(list(vector))
+        if source is not None:
+            query = query.where(f"source = {_sql_quote(source)}")
+        rows = query.limit(k).to_list()
         hits: list[SemanticHit] = []
         for row in rows:
             distance = row.get("_distance", 0)

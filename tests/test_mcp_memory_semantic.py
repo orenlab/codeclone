@@ -87,8 +87,10 @@ def test_mcp_query_semantic_closes_read_index(
     class _ClosableIndex:
         closed = False
 
-        def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
-            del vector, k
+        def search(
+            self, vector: Sequence[float], *, k: int, source: str | None = None
+        ) -> list[SemanticHit]:
+            del vector, k, source
             return []
 
         def status(self) -> SemanticIndexStatus:

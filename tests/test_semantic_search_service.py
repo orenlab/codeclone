@@ -39,8 +39,15 @@ class _FakeIndex:
         self._available = available
         self._reason = reason
 
-    def search(self, vector: Sequence[float], *, k: int) -> list[SemanticHit]:
-        return self._hits[:k]
+    def search(
+        self, vector: Sequence[float], *, k: int, source: str | None = None
+    ) -> list[SemanticHit]:
+        hits = (
+            self._hits
+            if source is None
+            else [hit for hit in self._hits if hit.source == source]
+        )
+        return hits[:k]
 
     def status(self) -> SemanticIndexStatus:
         return SemanticIndexStatus(
@@ -155,6 +162,37 @@ def test_semantic_only_record_respects_type_filter(tmp_path: Path) -> None:
     # FTS hit kept; the semantic-only module_role no longer bypasses the filter.
     assert kept.id in ids
     assert filtered.id not in ids
+
+
+def test_semantic_hits_searches_each_source_with_its_own_budget() -> None:
+    from codeclone.memory.retrieval import service as retrieval_service
+
+    captured: list[tuple[str | None, int]] = []
+
+    class _RecordingIndex:
+        def search(
+            self, vector: Sequence[float], *, k: int, source: str | None = None
+        ) -> list[SemanticHit]:
+            captured.append((source, k))
+            return []
+
+        def status(self) -> SemanticIndexStatus:
+            return SemanticIndexStatus(available=True)
+
+    proximity, audit_hits, trajectory_hits = retrieval_service._semantic_hits(
+        index=_RecordingIndex(),
+        provider=_FakeProvider(),
+        query="alpha",
+        k=7,
+    )
+
+    # Each lane is searched independently with the full k budget, so a dense
+    # source (e.g. audit) cannot crowd another lane out of one shared top-k.
+    assert len(captured) == 3
+    assert dict(captured) == {"memory": 7, "audit": 7, "trajectory": 7}
+    assert proximity == {}
+    assert audit_hits == []
+    assert trajectory_hits == []
 
 
 def test_unavailable_index_falls_back_to_fts(tmp_path: Path) -> None:

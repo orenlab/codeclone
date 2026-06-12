@@ -1281,17 +1281,15 @@ def _semantic_hits(
     query: str,
     k: int,
 ) -> tuple[dict[str, float], list[SemanticHit], list[SemanticHit]]:
+    # Search each lane with its own top-k budget so a dense source (e.g. audit)
+    # cannot crowd memory hits out of one shared top-k (#3). The index applies
+    # the source filter, so results arrive already lane-scoped.
     vector = embed_query(provider, query)
     proximity: dict[str, float] = {}
-    audit_hits: list[SemanticHit] = []
-    trajectory_hits: list[SemanticHit] = []
-    for hit in index.search(vector, k=k):
-        if hit.source == "memory":
-            proximity.setdefault(hit.source_id, hit.score)
-        elif hit.source == "audit":
-            audit_hits.append(hit)
-        elif hit.source == "trajectory":
-            trajectory_hits.append(hit)
+    for hit in index.search(vector, k=k, source="memory"):
+        proximity.setdefault(hit.source_id, hit.score)
+    audit_hits = list(index.search(vector, k=k, source="audit"))
+    trajectory_hits = list(index.search(vector, k=k, source="trajectory"))
     return proximity, audit_hits, trajectory_hits
 
 
