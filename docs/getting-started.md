@@ -153,8 +153,8 @@ See [Exit codes](book/09-exit-codes.md).
 
 ## MCP Setup
 
-The MCP server exposes **31 tools** for agent clients over the same canonical
-pipeline (33 when VS Code starts the server with `--ide-governance-channel` for
+The MCP server exposes **32 tools** for agent clients over the same canonical
+pipeline (34 when VS Code starts the server with `--ide-governance-channel` for
 session stats and audit insights).
 
 ### Start the server

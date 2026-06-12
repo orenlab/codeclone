@@ -60,7 +60,8 @@ to an absolute path to `codeclone-mcp`.
 
 The MCP server never mutates repository source, baselines, analysis cache, or
 canonical reports. It may write ephemeral coordination state under
-`.cache/codeclone/intents/`, optional audit records when enabled, and Engineering
+`.codeclone/intents/` (file backend) or `.codeclone/db/intents.sqlite3`
+(SQLite backend), optional audit records when enabled, and Engineering
 Memory **draft** rows through agent tools. Human approve/reject stays in VS Code
 Memory or `codeclone memory approve`.
 

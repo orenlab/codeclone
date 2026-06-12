@@ -1,7 +1,9 @@
-### Projection rebuild jobs (schema 1.3)
+### Projection rebuild jobs (schema 1.3+)
 
-Trajectory + semantic projections can be rebuilt asynchronously via a
-coalesced job row in Engineering Memory SQLite (`memory_projection_jobs`).
+Trajectory, Experience, and semantic projections can be rebuilt asynchronously
+via a coalesced job row in Engineering Memory SQLite
+(`memory_projection_jobs`). The worker rebuilds trajectories first, distills
+Experiences from the resulting corpus, then refreshes the semantic sidecar.
 Default policy is **`off`**; opt in with:
 
 ```toml

@@ -46,7 +46,7 @@ codeclone . --ci               # CI mode
 - **Quality metrics** — complexity, coupling, cohesion, dead code, health score
 - **Baseline governance** — separates legacy debt from new regressions; CI fails only on what changed
 - **Change controller** — intent declaration, blast radius, patch contract, review receipt for AI agents
-- **MCP server** — 31-tool read-only interface for IDE and agent clients
+- **MCP server** — 32-tool default interface for IDE and agent clients
 - **Reports** — HTML, JSON, Markdown, SARIF, text from one canonical payload
 
 ## MCP Server

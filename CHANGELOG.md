@@ -3,8 +3,8 @@
 ## [2.1.0a1] - Unreleased
 
 `2.1.0a1` opens the v2.1 alpha line with the structural change controller,
-Engineering Memory, semantic retrieval, and a fully reorganized documentation
-site.
+Engineering Memory with trajectory and experience layers, semantic retrieval,
+Platform Observability, and a fully reorganized documentation site.
 
 ### Added
 
@@ -13,7 +13,7 @@ site.
   to 3-4. Blast radius projection (`get_blast_radius`), patch contract
   verification with profile-aware depth (`check_patch_contract`), citation-based
   claim guard (`validate_review_claims`), and deterministic review receipts
-  (`create_review_receipt`). 31 MCP tools total.
+  (`create_review_receipt`). 32 default agent-visible MCP tools.
 - **Change intent lifecycle.** `manage_change_intent`: declare, check, clear,
   queue, promote, recover. Renewable ownership leases with
   own/recoverable/foreign-active classification. Optional SQLite backend with
@@ -28,22 +28,31 @@ site.
   `codeclone memory approve`). Scope coverage metrics and
   `finish_controlled_change(propose_memory=true)` for draft candidates on
   accepted patches.
-- **Trajectory memory** Deterministic audit-derived workflow
+- **Trajectory memory.** Deterministic audit-derived workflow
   timelines in Engineering Memory SQLite (`memory trajectory rebuild`),
   scoped MCP/CLI retrieval (`trajectories[]`, `trajectory_*` query modes),
   optional semantic source, and disabled-by-default local JSONL export profiles.
+  The `trajectory-v3` projection adds trajectory passports, contract-quality
+  and complexity scoring, anomaly detection, agent profiles, and dashboard
+  views.
+- **Experience Layer.** Deterministic `experience-v1` advisory patterns are
+  distilled from verified trajectories and surfaced through a separate
+  `experiences[]` retrieval lane with evidence and agent-diversity facets.
+  Projection jobs can distill experiences automatically, while
+  `promote_experience` converts a selected pattern into a human-governed
+  Engineering Memory draft rather than treating it as authority.
 - **Semantic retrieval.** Opt-in `[tool.codeclone.memory.semantic]` with
   LanceDB sidecar. Local `fastembed` provider (`BAAI/bge-small-en-v1.5`) via
   `codeclone[semantic-local]`; `api` provider reserved for Team+; `local_model`
   reserved for Enterprise. CLI `codeclone memory semantic status|rebuild|search`,
   MCP `query_engineering_memory(mode=search, semantic=true)`.
-- **Patch Trail** Deterministic scope narrative at
+- **Patch Trail.** Deterministic scope narrative at
   `finish_controlled_change`: declared/changed/untouched-in-declared,
   boundary-held paths, verification outcome, and audit anchors
-  (`patch_trail.computed`). Engineering Memory schema **1.4** adds
-  `memory_trajectory_patch_trails`; trajectory projection version
-  **`trajectory-v2`**. Rebuild persists Patch Trail from audit; scoped retrieval
-  exposes `patch_trail_summary`. MCP finish accepts optional `patch_trail_detail`.
+  (`patch_trail.computed`). Rebuild persists Patch Trail from audit into
+  Engineering Memory schema **1.6** and the current **`trajectory-v3`**
+  projection; scoped retrieval exposes `patch_trail_summary`. MCP finish accepts
+  optional `patch_trail_detail`.
 - **Trajectory export enrichment (schema 2).** JSONL export rows now populate
   `memory_precedents`, `trajectory_precedents`, `citations`, and
   `patch_trail_summary`; export deduplicates superseded projection versions;
@@ -56,6 +65,13 @@ site.
   governance channel (`--ide-governance-channel`) with session HMAC attestation.
   Workspace session stats and controller audit trail webviews (IDE-only MCP
   tools; shared payloads in `codeclone/controller_insights/`).
+- **Platform Observability.** Opt-in, development-only operation/span telemetry
+  correlates CLI, MCP, analysis, and projection-worker execution without
+  affecting canonical reports, gates, baselines, memory facts, or edit
+  authorization. The local SQLite trace captures RSS/CPU, MCP payload sizes,
+  database query shapes, pipeline costs, agent context pressure, and avoidable
+  work. CLI JSON/HTML trace views provide a diagnostic cockpit and waterfall;
+  MCP exposes the bounded `query_platform_observability` slicer.
 - **Cursor plugin** (`plugins/cursor-codeclone/`): six skills, three rules
   (including always-on `change-control-gate`), fail-closed `preToolUse` hook
   via `codeclone.workspace_intent`, project hook installer with

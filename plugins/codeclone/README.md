@@ -5,8 +5,9 @@ development** — over `codeclone-mcp`.
 
 Same canonical MCP surface used by CLI, VS Code, Claude Desktop, and Claude Code.
 Repository read-only (source, baselines, cache, canonical reports); local stdio
-only. The bundled launcher exposes the full 31-tool MCP server, including
-change-control and session tools — ephemeral coordination under
+only. The bundled launcher exposes the full default agent MCP surface, including
+change-control, Engineering Memory, Platform Observability, and session tools —
+ephemeral coordination under
 `.codeclone/intents/` and optional audit records when enabled.
 Current-run metric surfaces from the local `codeclone-mcp` version flow through
 directly, including `Coverage Join` facts and the optional `coverage` help topic.

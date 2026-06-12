@@ -36,9 +36,12 @@ controlled edits.
 | 24    | Scoped trajectory retrieval + memory evidence                 | MCP `get_relevant_memory.trajectories[]`; `query_engineering_memory(mode=trajectory_*)`  |
 | 25    | Disabled-by-default local JSONL export profiles               | CLI `memory trajectory export --profile ... --out ...`                                   |
 | 26    | Patch Trail persistence + scoped retrieval                    | `memory_trajectory_patch_trails`; `patch_trail_summary` on scoped retrieval              |
+| 28    | Incremental projection jobs                                   | Watermarked trajectory rebuild, semantic hash-skip, coalesced worker                     |
+| RFC   | Trajectory quality and passport analytics                     | Quality/complexity contract, anomalies, agents, dashboard                                |
+| RFC   | Experience Layer                                               | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`1.4`**).
+`codeclone/contracts/__init__.py` (currently **`1.6`**).
 
 Semantic index format (separate contract): `SEMANTIC_INDEX_FORMAT_VERSION`
 (currently **`1`**) in the same module. The vector sidecar is independent of
@@ -97,6 +100,7 @@ Module ownership:
 | `codeclone/memory/staleness.py`                   | Refresh-time and scope-time staleness                |
 | `codeclone/memory/jobs/store.py`                  | Coalesced projection rebuild jobs (schema 1.3+)      |
 | `codeclone/memory/trajectory/*`                   | Audit → trajectory projection, Patch Trail, export   |
+| `codeclone/memory/experience/*`                   | Deterministic Experience distillation + persistence  |
 | `codeclone/config/memory*.py`                     | `[tool.codeclone.memory]` resolution                 |
 | `codeclone/surfaces/cli/memory*.py`               | Human CLI + Rich rendering                           |
 | `codeclone/surfaces/mcp/_session_memory_mixin.py` | MCP memory tools + finish hook                       |

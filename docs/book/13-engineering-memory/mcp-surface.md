@@ -47,6 +47,9 @@ Mode router for inspection and search.
 | `trajectory_status` | —                              | Trajectory projection run metadata        |
 | `trajectory_search` | `query`; optional `intent_id`  | Search stored trajectories                |
 | `trajectory_get`    | `record_id` (trajectory id)    | One trajectory + steps (compact default)  |
+| `trajectory_anomalies` | optional `filters.include_routine` | Detected trajectory contract anomalies |
+| `trajectory_agents`    | optional `filters.include_routine` | Aggregate quality/outcomes by agent family |
+| `trajectory_dashboard` | optional `filters.include_routine` | Combined status, agent, and anomaly view |
 
 List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
 to **compact** payloads: statement preview, `statement_length`, no `payload`.
@@ -86,10 +89,11 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 | `refresh_from_run`       | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
 | `rebuild_semantic_index` | (none)                                              | Rebuild LanceDB sidecar when `memory.semantic.enabled`     |
 | `rebuild_trajectories`   | (none)                                              | Rebuild trajectory projections from audit event core       |
-| `enqueue_projection_rebuild` | optional `force`                                | Queue semantic + trajectory rebuild job                    |
+| `enqueue_projection_rebuild` | (none)                                              | Queue trajectory + Experience + semantic projection job    |
 | `projection_rebuild_status` | (none)                                           | Latest projection job status                               |
 | `run_projection_jobs_once` | (none)                                           | Run one queued projection job inline                       |
 | `record_candidate`       | `record_type`, `statement`, **`subject_path`**      | Creates **draft** record                                   |
+| `promote_experience`     | `experience_id`                                     | Convert advisory Experience into human-reviewable draft    |
 | `validate_claims`        | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
 | `propose_from_receipt`   | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
 
@@ -113,7 +117,7 @@ On **accepted** or **accepted_with_external_changes** finish:
 - returns `memory_candidates`, `memory_staleness`, `memory_coverage_delta`
 - when `memory.projection_rebuild_policy` is not `off` and the environment is
   not CI, may enqueue a projection rebuild job (`projection_rebuild` in the
-  finish payload — semantic + trajectory sidecars)
+  finish payload — trajectory, Experience, and semantic projections)
 
 This is the preferred post-edit memory update path when using the workflow
 tools.

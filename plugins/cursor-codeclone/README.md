@@ -118,7 +118,7 @@ Reload Cursor or reopen the workspace after installing. Project hooks require a
 
 The plugin bundles a stdio-based `codeclone-mcp` server configuration via
 `python3 ./scripts/launch_mcp.py` (workspace `.venv` → Poetry env → `PATH`).
-The server exposes all **31** MCP tools for agents (full passthrough; no
+The server exposes the full default agent MCP surface (no
 `--ide-governance-channel`). Skills and rules steer agents toward the documented
 workflow; the plugin does not filter tools at the transport layer. IDE-only
 `get_workspace_session_stats` / `get_controller_audit_trail` require the VS Code
@@ -148,8 +148,9 @@ ln -s /path/to/codeclone/plugins/cursor-codeclone ~/.cursor/plugins/local/codecl
 - **No second truth model** — health, findings, and drift come exclusively from
   `codeclone-mcp` and canonical report semantics.
 - **Repository read-only** — the plugin never edits source files, baselines,
-  caches, or report artifacts. Agents reach the full MCP server (31 tools),
-  including change-control and session tools, via the bundled stdio launcher.
+  caches, or report artifacts. Agents reach the full default MCP server,
+  including change-control, Engineering Memory, Platform Observability, and
+  session tools, via the bundled stdio launcher.
 - **Intent-first edits** — the change control skill enforces the full declare /
   blast-radius / edit / verify / clear cycle.
 - **Deterministic, not opinionated** — the agent reports what CodeClone finds,

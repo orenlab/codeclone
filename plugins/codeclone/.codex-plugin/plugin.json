@@ -25,7 +25,7 @@
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural Change Controller for AI-assisted Python development.",
-    "longDescription": "CodeClone for Codex — structural change controller for AI-assisted Python development. Clone detection, quality metrics, baseline-aware governance, engineering memory, and intent-first change control over the canonical codeclone-mcp server. Repository read-only (source, baselines, cache, reports); full 31-tool MCP passthrough. Ships review, hotspot, change-control, and engineering-memory skills for conservative-first structural review and scoped repository edits.",
+    "longDescription": "CodeClone for Codex — structural change controller for AI-assisted Python development. Clone detection, quality metrics, baseline-aware governance, engineering memory, and intent-first change control over the canonical codeclone-mcp server. Repository read-only (source, baselines, cache, reports); full default agent MCP passthrough. Ships review, hotspot, change-control, and engineering-memory skills for conservative-first structural review and scoped repository edits.",
     "developerName": "OrenLab",
     "category": "Developer Tools",
     "capabilities": [

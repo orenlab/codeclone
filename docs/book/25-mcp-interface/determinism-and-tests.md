@@ -5,7 +5,7 @@
 | Default transport | Local `stdio`                                                                                                                                                    |
 | Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                              |
 | Lazy loading      | Base installs and CI do not require MCP packages                                                                                                                 |
-| Read-only         | Never mutates source, baseline, cache, or canonical report artifacts; may write ephemeral workspace intent registry (`.cache/codeclone/intents/`), optional audit DB, Engineering Memory **draft** rows, and projection job metadata under `.codeclone/` when enabled |
+| Read-only         | Never mutates source, baseline, cache, or canonical report artifacts; may write the ephemeral workspace intent registry under `.codeclone/`, optional audit/observability DBs, Engineering Memory **draft** rows, and projection job metadata when enabled |
 
 ---
 

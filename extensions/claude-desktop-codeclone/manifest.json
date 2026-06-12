@@ -4,7 +4,7 @@
   "display_name": "CodeClone",
   "version": "2.1.0",
   "description": "Structural Change Controller for AI-assisted Python development — local MCP bundle for Claude Desktop.",
-  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. Structural change controller for AI-assisted Python development — same canonical 31-tool MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin. Repository read-only (source, baselines, cache, reports), baseline-aware, local stdio only. Includes intent declaration, blast radius, patch contract, review receipt, engineering memory, and claim validation via validate_review_claims and finish_controlled_change. Ephemeral coordination may be stored under .codeclone/intents/ (file backend) or .codeclone/db/ (SQLite backend).",
+  "long_description": "CodeClone for Claude Desktop wraps the local codeclone-mcp launcher as an MCP bundle. Structural change controller for AI-assisted Python development — same canonical default agent MCP surface used by the CLI, HTML report, VS Code extension, and Codex plugin. Repository read-only (source, baselines, cache, reports), baseline-aware, local stdio only. Includes intent declaration, blast radius, patch contract, review receipt, engineering memory, platform observability, and claim validation via validate_review_claims and finish_controlled_change. Ephemeral coordination may be stored under .codeclone/intents/ (file backend) or .codeclone/db/ (SQLite backend).",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
@@ -54,19 +54,23 @@
     },
     {
       "name": "get_relevant_memory",
-      "description": "Ranked, evidence-linked engineering memory for the declared edit scope. Read-only."
+      "description": "Ranked, evidence-linked records, experiences, and trajectories for the declared edit scope. Read-only."
     },
     {
       "name": "query_engineering_memory",
-      "description": "Mode-based engineering memory inspection: search, get, for_path, for_symbol, stale, drafts, coverage, status. Read-only."
+      "description": "Engineering Memory router: record search/status, trajectory detail/search/status, anomalies, agents, and dashboard views. Read-only."
     },
     {
       "name": "manage_engineering_memory",
-      "description": "Engineering memory governance router: refresh_from_run, rebuild_semantic_index, record_candidate (draft), validate_claims, propose_from_receipt. Human approve/reject use the VS Code Memory view."
+      "description": "Engineering Memory actions: refresh, draft recording, experience promotion, claim validation, semantic/trajectory rebuilds, and projection jobs. Human approve/reject/archive require the VS Code Memory view."
+    },
+    {
+      "name": "query_platform_observability",
+      "description": "Read-only, development-only diagnostics over CodeClone runtime telemetry; never a repository quality signal."
     },
     {
       "name": "manage_change_intent",
-      "description": "Change intent lifecycle: declare scope, get status, check diff, clear intent."
+      "description": "Change intent lifecycle: list, declare, check, renew, queue/promote, recover, clear, and workspace cleanup."
     },
     {
       "name": "start_controlled_change",

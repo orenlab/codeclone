@@ -36,6 +36,7 @@ graph TD
         WIR["Workspace Intent Registry<br/>.codeclone/intents/ or intents.sqlite3"]
         MEM["Engineering Memory SQLite<br/>.codeclone/memory/"]
         AUD["Audit trail (optional)<br/>.codeclone/db/"]
+        OBS["Platform Observability (dev-only)<br/>.codeclone/db/"]
     end
 
     MCPSession -->|" coordination + drafts "| Disk
@@ -52,7 +53,9 @@ graph TD
 **Read-only contract (analysis truth):** MCP never mutates source files,
 baselines, analysis cache, or canonical report artifacts. It **may** write
 ephemeral workspace intent records, Engineering Memory **drafts** (human approve
-required for promotion), and optional audit evidence when enabled.
+required for promotion), optional audit evidence, and opt-in development
+telemetry when enabled. Platform Observability remains separate from repository
+findings, reports, gates, baselines, and memory facts.
 
 ## Mixin chain
 
@@ -62,7 +65,7 @@ sit outermost.
 
 ```mermaid
 graph BT
-    STM["_MCPSessionStateMixin<br/><small>runs, markers, gates; embeds finding/report stack</small>"]
+    STM["_MCPSessionStateMixin<br/><small>runs, markers, gates, observability query</small>"]
     INS["_MCPSessionInsightsMixin<br/><small>session stats, audit queries</small>"]
     BR["_MCPSessionBlastRadiusMixin"]
     MM["_MCPSessionMemoryMixin"]

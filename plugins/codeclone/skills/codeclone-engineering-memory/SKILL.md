@@ -37,6 +37,7 @@ Do not invent memory from local files or report dumps.
 | Store health                     | `query_engineering_memory` | `mode=status`                                               |
 | Stale inventory                  | `query_engineering_memory` | `mode=stale`                                                |
 | Trajectory forensics             | `query_engineering_memory` | `mode=trajectory_get\|trajectory_search\|trajectory_status` |
+| Trajectory analytics             | `query_engineering_memory` | `mode=trajectory_anomalies\|trajectory_agents\|trajectory_dashboard` |
 
 Defaults exclude **stale**. Keyword `search` excludes drafts unless
 `include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
@@ -74,7 +75,8 @@ semantic-quality embeddings — do not present hits as LLM recall.
 | Refresh system facts from run   | `manage_engineering_memory(action=refresh_from_run, run_id?)`                               | Force ingest                 |
 | Rebuild semantic LanceDB sidecar | `manage_engineering_memory(action=rebuild_semantic_index)`                                 | After semantic enabled + extras |
 | Rebuild trajectories             | `manage_engineering_memory(action=rebuild_trajectories)`                                   | After audit-enabled workflows   |
-| Projection jobs                  | `enqueue_projection_rebuild` / `projection_rebuild_status` / `run_projection_jobs_once`    | When policy enabled             |
+| Promote an Experience            | `manage_engineering_memory(action=promote_experience, experience_id=…)`                    | Creates a human-reviewable draft |
+| Projection jobs                  | `manage_engineering_memory(action=enqueue_projection_rebuild)` / `action=projection_rebuild_status` / `action=run_projection_jobs_once` | When policy enabled |
 | Atomic fallback                 | `manage_engineering_memory(action=propose_from_receipt, text=…, intent_id?)`                | When finish hook unavailable |
 
 ### Write rules

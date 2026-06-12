@@ -18,8 +18,8 @@ All commands live under `codeclone memory` and accept `--root` (default `.`).
 | `approve RECORD_ID [--verified-by NAME]`                                   | Promote draft → active                        |
 | `reject RECORD_ID [--reason TEXT]`                                         | Reject draft                                  |
 | `archive RECORD_ID [--reason TEXT]`                                        | Archive record                                |
-| `trajectory status\|rebuild\|list\|search\|show\|export`                 | Trajectory projection read/rebuild/export     |
-| `jobs status\|enqueue\|run-once\|list`                                     | Projection rebuild job queue (semantic + traj.) |
+| `trajectory status\|rebuild\|list\|search\|show\|agents\|anomalies\|dashboard\|export` | Trajectory projection, passport analytics, and export |
+| `jobs status\|enqueue\|run-once\|list`                                     | Trajectory + Experience + semantic projection queue |
 
 Human governance (`approve`, `reject`, `archive`) is available through the
 **CodeClone VS Code Memory** view (IDE governance channel) and the

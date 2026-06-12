@@ -104,13 +104,11 @@ Current server characteristics:
 
 ## Tools
 
-## Tools
-
-Current tool set: **31 tools** for agent clients, organized by workflow phase.
+Current tool set: **32 tools** for agent clients, organized by workflow phase.
 
 When the MCP server starts with `--ide-governance-channel` (CodeClone VS Code
 extension), two additional read-only tools register:
-`get_workspace_session_stats` and `get_controller_audit_trail` (**33 tools**
+`get_workspace_session_stats` and `get_controller_audit_trail` (**34 tools**
 total). They are not listed in generic agent tool catalogs; payloads mirror CLI
 `--session-stats` and `--audit` via `codeclone/controller_insights/`.
 

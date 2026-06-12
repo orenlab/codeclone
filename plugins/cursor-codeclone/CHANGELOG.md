@@ -13,7 +13,7 @@
 - **Three hooks** via `hooks/run_hook.py`: fail-closed `preToolUse` intent gate
   (`codeclone.workspace_intent`), `postToolUse` Python edit reminder
   (`additional_context`), `stop` unclosed-intent advisory (`followup_message`)
-- **MCP:** `mcp.json` runs `python3 ./scripts/launch_mcp.py` (full 31-tool
-  passthrough; no `--ide-governance-channel`)
+- **MCP:** `mcp.json` runs `python3 ./scripts/launch_mcp.py` (full default
+  agent-tool passthrough; no `--ide-governance-channel`)
 - **Installer:** `scripts/install-project-hooks.py` → `.cursor/hooks.json` and
   `.cursor/codeclone-hooks.json` (`enforce_scope` `python` | `repo`)

@@ -1,4 +1,4 @@
-## Trajectory memory (Phases 22–26) {#trajectory-memory-phases-2226}
+## Trajectory memory {#trajectory-memory}
 
 Trajectory memory is a **deterministic process narrative** derived from the audit
 event core. It complements governed memory cards: cards hold durable repository
@@ -40,8 +40,9 @@ flowchart TB
     end
 
     subgraph Project["Trajectory rebuild"]
-        PRJ[projector trajectory-v2]
+        PRJ[projector trajectory-v3]
         PTP[patch_trail_projector]
+        QLT[quality + anomaly analytics]
         SUP[supersede stale rows]
     end
 
@@ -54,17 +55,20 @@ flowchart TB
     subgraph Read["Read surfaces"]
         GR[get_relevant_memory.trajectories]
         QEM[query_engineering_memory trajectory_*]
+        DASH[dashboard + agents + anomalies]
         EXP[JSONL export v2]
     end
 
     AUDE --> EC
     EC --> PRJ
     EC --> PTP
+    PRJ --> QLT
     PRJ --> TRJ
     PTP --> PTR
     PRJ --> SUP
     TRJ --> GR
     TRJ --> QEM
+    QLT --> DASH
     PTR --> GR
     PTR --> QEM
     TRJ --> EXP
@@ -79,7 +83,9 @@ Module ownership:
 | `codeclone/audit/events.py`                            | Bounded `event_core_json`; `patch_trail.computed` compaction   |
 | `codeclone/memory/trajectory/patch_trail.py`           | Finish-time Patch Trail compute (`PATCH_TRAIL_SCHEMA_VERSION`) |
 | `codeclone/memory/trajectory/patch_trail_projector.py` | Rebuild Patch Trail from audit event cores                     |
-| `codeclone/memory/trajectory/projector.py`             | Deterministic trajectory projection (`trajectory-v2`)          |
+| `codeclone/memory/trajectory/projector.py`             | Deterministic trajectory projection (`trajectory-v3`)          |
+| `codeclone/memory/trajectory/quality.py`               | Contract-quality and separate complexity scoring               |
+| `codeclone/memory/trajectory/analytics.py`             | Dashboard, anomaly, and per-agent aggregates                    |
 | `codeclone/memory/trajectory/store.py`                 | SQLite persistence, supersede, rebuild orchestration           |
 | `codeclone/memory/trajectory/retrieval.py`             | Scoped ranking + `patch_trail_summary`                         |
 | `codeclone/memory/trajectory/export_context.py`        | Export v2 context: precedents, citations, scope paths          |
@@ -130,22 +136,12 @@ includes:
 | `citations`                     | Claim-validation event cores + report digests                         |
 | `scope.paths`                   | Resolved from Patch Trail / declare / check event cores               |
 | `patch_trail_summary`           | When persisted in `memory_trajectory_patch_trails`                    |
-| `projection_version`            | `trajectory-v1` or `trajectory-v2` (v2 includes `patch_trail_digest`) |
+| `projection_version`            | `trajectory-v1`, `trajectory-v2`, or active `trajectory-v3`; v2 adds Patch Trail digest and v3 adds quality score + agent subject |
 
 Rebuild supersedes older projection rows for the same workflow (one canonical
 trajectory per `workflow_id` in export). Legacy audit rows without path facts in
 frozen event core are supplemented deterministically from stored audit payloads
 during projection. Changing profile shape requires a profile version bump.
-
-```mermaid
-flowchart LR
-    CAN[Canonical trajectories] --> CTX[export_context.build_export_context]
-    CAN --> REC[build_export_record]
-    CTX --> REC
-    MEM[(memory_records FTS)] --> CTX
-    PTR[(patch_trails)] --> CTX
-    REC --> JSONL[JSONL file cap-enforced]
-```
 
 ### MCP retrieval
 
@@ -158,13 +154,17 @@ surfaces **`patch_trail_summary`** at the response root. Compact retrieval omits
 that root duplicate; the summary remains on the trajectory preview.
 
 `query_engineering_memory(mode=trajectory_get)` returns **`patch_trail`** on the
-trajectory payload when persisted for that workflow.
+trajectory payload when persisted for that workflow. Full detail also includes
+the explainable **`quality_contract`**; compact payloads retain headline
+`quality_score`, `complexity_score`, and anomaly count.
 
 Trajectory rebuild (`memory trajectory rebuild` / MCP
 `manage_engineering_memory(action=rebuild_trajectories)`) synthesizes Patch Trail
 from audit event cores (`intent.declared`, `intent.checked`, verify events) and
 stores it in **`memory_trajectory_patch_trails`**. Trajectory digest
-(`trajectory-v2`) incorporates **`patch_trail_digest`** when present.
+(`trajectory-v2` and later) incorporates **`patch_trail_digest`** when present.
+The active **`trajectory-v3`** digest additionally incorporates the persisted
+quality score and records the primary agent as an `agent` subject.
 
 Scoped ranking adds a small boost when query scope paths intersect
 **`untouched_in_declared`** paths from the stored Patch Trail.
@@ -176,6 +176,9 @@ Scoped ranking adds a small boost when query scope paths intersect
 | `trajectory_status` | project       | Projection run manifest                               |
 | `trajectory_search` | query text    | Requires `query`; excludes `run:*` routine by default |
 | `trajectory_get`    | trajectory id | `record_id` = trajectory id                           |
+| `trajectory_anomalies` | project    | Contract anomalies, optionally including routine runs |
+| `trajectory_agents` | project       | Outcome and quality aggregates by agent family        |
+| `trajectory_dashboard` | project    | Combined status, agent, and anomaly payload           |
 
 Filter: `filters.include_routine=true` on `trajectory_search` includes single-event
 `run:*` analysis workflows.
@@ -192,8 +195,6 @@ Community CodeClone writes **local JSONL only** — no remote API, upload, or
 training pipeline. Corporate policy packs, signing, approval workflows, and dataset
 registry are out of scope unless explicitly requested.
 
-Refs:
-
-- `codeclone/memory/trajectory/rebuild_workflow.py:execute_trajectory_rebuild`
-- `codeclone/memory/trajectory/export.py:export_trajectories_jsonl`
-- `tests/test_memory_trajectory_*.py`, `tests/test_audit_event_core_v2.py`
+Refs: `codeclone/memory/trajectory/rebuild_workflow.py`,
+`codeclone/memory/trajectory/export.py`, `tests/test_memory_trajectory_*.py`,
+`tests/test_audit_event_core_v2.py`.

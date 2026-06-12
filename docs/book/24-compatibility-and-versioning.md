@@ -33,10 +33,14 @@ Current contract versions:
 - `CACHE_VERSION = "2.8"`
 - `REPORT_SCHEMA_VERSION = "2.11"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
-- `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.4"`
+- `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.6"`
 - `PATCH_TRAIL_SCHEMA_VERSION = "1"` (finish-time Patch Trail JSON; audit + SQLite sidecar)
 - `TRAJECTORY_EXPORT_SCHEMA_VERSION = "2"` (JSONL export rows; `codeclone/memory/trajectory/profiles.py`)
+- `TRAJECTORY_PROJECTION_VERSION = "trajectory-v3"` (derived trajectory rows)
+- `TRAJECTORY_QUALITY_SCORE_VERSION = "2"` (quality contract formula)
+- `EXPERIENCE_DISTILLATION_VERSION = "experience-v1"` (derived Experience rows)
 - `SEMANTIC_INDEX_FORMAT_VERSION = "1"` (LanceDB sidecar; separate from SQLite memory schema)
+- `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.0"` (dev-only telemetry SQLite)
 
 Refs:
 
@@ -52,14 +56,19 @@ Version bump rules:
 - bump **report schema** for canonical report document shape/meaning changes
 - bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
 - bump **engineering memory schema** for SQLite DDL / governed record-shape changes
-  (`codeclone/memory/schema_migrate.py`) — e.g. **`1.4`** adds
-  `memory_trajectory_patch_trails`
+  (`codeclone/memory/schema_migrate.py`) — **`1.4`** added Patch Trail
+  persistence, **`1.5`** quality scoring, and **`1.6`** Experience tables
 - bump **patch trail schema** (`PATCH_TRAIL_SCHEMA_VERSION`) when finish-time Patch
   Trail JSON shape changes incompatibly
 - bump **trajectory export schema** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`) when JSONL
   row shape changes incompatibly
+- bump **trajectory projection**, **quality score**, or **Experience
+  distillation** versions when their derived identity/formula changes; rebuild
+  derived rows rather than migrating source evidence
 - bump **semantic index format** when LanceDB projection or stored row fields change
   incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory/index.md](13-engineering-memory/index.md))
+- bump **Platform Observability schema** only for incompatible telemetry-store
+  changes; it remains separate from reports, gates, baselines, and memory facts
 
 Operational compatibility rules:
 

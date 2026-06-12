@@ -22,9 +22,9 @@ skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
 through directly, including Coverage Join facts and the optional `coverage`
 help topic when supported. The plugin does not mutate `~/.codex/config.toml` or
 install a second server binary. The bundled launcher does not filter MCP tools;
-agents receive the **31-tool** agent surface from the resolved `codeclone-mcp`
-server (no `--ide-governance-channel` — IDE-only session/audit tools are VS Code
-only).
+agents receive the full default agent surface from the resolved
+`codeclone-mcp` server (no `--ide-governance-channel` — IDE-only session/audit
+tools are VS Code only).
 
 `.agents/plugins/marketplace.json` is the monorepo-local source entry used for
 development and packaging into `orenlab/codeclone-codex`; it is not the public

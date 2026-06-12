@@ -805,7 +805,7 @@ DESIGN FINDINGS
 INTEGRITY
 ```
 
-## Engineering Memory schema (`1.4`)
+## Engineering Memory schema (`1.6`)
 
 SQLite database at `.codeclone/memory/engineering_memory.sqlite3` (default).
 Schema version stored in `memory_meta.schema_version`.
@@ -820,18 +820,27 @@ Core tables:
 | `memory_fts`             | FTS5 search index (schema 1.1+)                           |
 | `memory_revisions`       | Governance audit trail                                    |
 | `memory_ingestion_runs`  | Init/refresh run metadata                                 |
-| `memory_projection_jobs` | Coalesced trajectory/semantic rebuild jobs (schema 1.3+)  |
+| `memory_projection_jobs` | Coalesced trajectory/Experience/semantic jobs (schema 1.3+) |
 
-Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection **`trajectory-v2`**):
+Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection
+**`trajectory-v3`**):
 
 | Table                               | Role                                                                  |
 |-------------------------------------|-----------------------------------------------------------------------|
-| `memory_trajectories`               | One row per `(project_id, workflow_id, projection_version)`           |
+| `memory_trajectories`               | One row per `(project_id, workflow_id, projection_version)` with quality score |
 | `memory_trajectory_steps`           | Ordered audit steps with frozen `event_core_json`                     |
 | `memory_trajectory_subjects`        | Path/module subjects linked to a trajectory                           |
 | `memory_trajectory_evidence`        | Report/run/audit evidence refs                                        |
 | `memory_trajectory_patch_trails`    | Patch Trail JSON + digest per trajectory (schema **`1.4`**, Phase 26) |
 | `memory_trajectory_projection_runs` | Rebuild run manifest                                                  |
+
+Experience tables (schema **`1.6`**, derived from trajectory evidence):
+
+| Table                        | Role                                                       |
+|------------------------------|------------------------------------------------------------|
+| `memory_experiences`         | Advisory distilled patterns (`experience-v1`)              |
+| `memory_experience_facets`   | Agent/profile/intent diversity facets                       |
+| `memory_experience_evidence` | Contributing trajectory ids and outcomes                    |
 
 Patch Trail JSON uses `PATCH_TRAIL_SCHEMA_VERSION` (currently **`1`**) in
 `codeclone/contracts/__init__.py`. Trajectory JSONL export rows use

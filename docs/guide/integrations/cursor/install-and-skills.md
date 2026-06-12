@@ -150,7 +150,8 @@ does not treat report-only signals as CI failures or vulnerability claims.
 ## Runtime model
 
 Additive: local MCP via `launch_mcp.py`, six skills, three rules (two
-`alwaysApply` + one Python glob), optional hooks. **31** MCP tools for agents — launcher does **not**
+`alwaysApply` + one Python glob), optional hooks. The full default agent MCP
+surface is passed through — the launcher does **not**
 pass `--ide-governance-channel` (VS Code adds +2 IDE-only tools and Memory
 governance). New server tools from upgraded `codeclone-mcp` pass through
 unfiltered.
