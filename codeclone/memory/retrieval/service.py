@@ -210,6 +210,10 @@ def _retrieval_policy(*, include_drafts: bool) -> dict[str, object]:
         "memory_does_not_override_findings": True,
         "trajectories_do_not_authorize_edits": True,
         "experiences_do_not_authorize_edits": True,
+        # Per-record guardrail lives here once, not duplicated on every record:
+        # status is the single source of truth (status=="draft" => unverified).
+        "status_is_authoritative": True,
+        "draft_records_are_unverified": True,
     }
 
 
@@ -450,7 +454,6 @@ def _serialize_record_summary(
         "statement_length": statement_length,
         "subjects": [_serialize_subject(item) for item in serialized_subjects],
         "evidence_count": evidence_count,
-        "stale": record.status == "stale",
     }
     if detail_level == "full":
         payload["payload"] = record.payload
@@ -461,8 +464,6 @@ def _serialize_record_summary(
             payload["statement_truncated"] = True
     if record.stale_reason:
         payload["stale_reason"] = record.stale_reason
-    if record.status == "draft":
-        payload["draft_unverified"] = True
     payload.update(_retrieval_lane_payload(record))
     if relevance_score is not None:
         payload["relevance_score"] = relevance_score
@@ -706,9 +707,11 @@ def get_relevant_memory(
         )
     else:
         coverage = {
-            "scope_paths_with_memory": 0,
-            "scope_paths_total": 0,
-            "coverage_percent": None,
+            "record_coverage": {
+                "scope_paths_with_memory": 0,
+                "scope_paths_total": 0,
+                "coverage_percent": None,
+            },
             "coverage_note": "symbol_scoped_retrieval",
         }
     payload: dict[str, object] = {
@@ -726,26 +729,7 @@ def get_relevant_memory(
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
-    payload.update(
-        _root_patch_trail_payload(
-            detail_level=normalized_detail,
-            trajectories=trajectories_payload,
-        )
-    )
     return payload
-
-
-def _root_patch_trail_payload(
-    *,
-    detail_level: MemoryDetailLevel,
-    trajectories: Sequence[Mapping[str, object]],
-) -> dict[str, object]:
-    if detail_level != "full" or not trajectories:
-        return {}
-    first_summary = trajectories[0].get("patch_trail_summary")
-    if not isinstance(first_summary, dict):
-        return {}
-    return {"patch_trail_summary": first_summary}
 
 
 def _load_patch_trails_for_trajectories(

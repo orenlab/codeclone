@@ -388,7 +388,7 @@ def test_get_relevant_memory_ranks_scope_records(tmp_path: Path) -> None:
     assert records[0]["statement"] == "sqlite store module"
     coverage = result["coverage"]
     assert isinstance(coverage, dict)
-    assert coverage["coverage_kind"] == "record_subject_coverage"
+    assert coverage["record_coverage"]["coverage_kind"] == "record_subject_coverage"
     assert coverage["observation_confidence"] == {
         "level": "partial",
         "basis": ["records"],

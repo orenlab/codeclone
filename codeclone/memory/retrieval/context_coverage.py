@@ -149,7 +149,6 @@ def build_context_coverage(
     )
     record_payload = dict(record_coverage)
     return {
-        **record_payload,
         "record_coverage": record_payload,
         "trajectory_coverage": trajectory_coverage,
         "experience_coverage": experience_coverage,

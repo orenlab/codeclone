@@ -324,11 +324,13 @@ def test_get_relevant_memory_returns_patch_trail_summary(tmp_path: Path) -> None
     trajectories = compact["trajectories"]
     assert isinstance(trajectories, list)
     assert trajectories
-    assert trajectories[0].get("patch_trail_summary") is not None
-    assert "patch_trail_summary" not in compact
-    summary = full.get("patch_trail_summary")
+    summary = trajectories[0].get("patch_trail_summary")
     assert isinstance(summary, dict)
     assert summary.get("counts", {}).get("untouched_in_declared") == 1
+    # patch_trail_summary lives on each trajectory; it is no longer duplicated at
+    # the payload root in any detail level.
+    assert "patch_trail_summary" not in compact
+    assert "patch_trail_summary" not in full
 
 
 def test_query_engineering_memory_trajectory_modes(tmp_path: Path) -> None:
