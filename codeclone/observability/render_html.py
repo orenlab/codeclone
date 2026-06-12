@@ -179,6 +179,9 @@ td{padding:9px 16px;border-top:1px solid var(--border);font-family:var(--mono);
 white-space:nowrap}
 td.t{font-family:var(--font)}
 th.r,td.r{text-align:right}
+.shape{font-family:var(--font);font-size:12.5px}
+.sqlraw{font-family:var(--mono);font-size:11px;color:var(--mute);max-width:440px;
+overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
 tr.flag td{background:var(--warn-soft)}
 .muted{color:var(--mute)}
 .empty{padding:30px;text-align:center;color:var(--mute);font-size:13px}
@@ -683,11 +686,15 @@ def _db_cost(agg: AggregatesView) -> str:
 
 def _db_fingerprint_row(row: DbFingerprintRow) -> str:
     table = _esc(row.table_hint) if row.table_hint else "—"
+    shape = _esc(row.summary) if row.summary else "—"
+    raw = _esc(row.fingerprint)
     return (
         f'<tr><td class="t">{_esc(row.span_name)}</td>'
-        f'<td class="t"><code>{_esc(row.fingerprint)}</code></td>'
-        f'<td class="t">{table}</td>'
-        f'<td class="r">{row.count}</td></tr>'
+        f"<td>{table}</td>"
+        f'<td class="muted">{_esc(row.kind.upper())}</td>'
+        f'<td class="r">{row.count}</td>'
+        f'<td class="t"><div class="shape">{shape}</div>'
+        f'<div class="sqlraw" title="{raw}">{raw}</div></td></tr>'
     )
 
 
@@ -697,15 +704,16 @@ def _db_fingerprints(agg: AggregatesView) -> str:
     rows = "".join(_db_fingerprint_row(row) for row in agg.db_fingerprints)
     headers = (
         ("Span", False),
-        ("Query shape", False),
         ("Table", False),
+        ("Kind", False),
         ("Count", True),
+        ("Shape", False),
     )
     return _section(
         "DB query shapes",
         _table(headers, rows),
-        subtitle="The literal-free statement shapes behind the query counts — the "
-        "high-count rows name the N+1 to fix (batch these reads).",
+        subtitle="Each query count decoded into what it filters on — the high-count "
+        "rows name the N+1 to batch. Raw shape is the second line.",
     )
 
 

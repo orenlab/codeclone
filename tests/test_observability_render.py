@@ -108,6 +108,8 @@ def test_render_trace_html_shows_db_query_shapes() -> None:
                 fingerprint="select * from memory_evidence where memory_id = ?",
                 table_hint="memory_evidence",
                 count=1200,
+                kind="select",
+                summary="by memory_id",
             ),
         ),
     )
@@ -118,9 +120,15 @@ def test_render_trace_html_shows_db_query_shapes() -> None:
         aggregates=agg,
     )
     html = render_trace_html(trace)
-    assert "DB query shapes" in html
-    assert "select * from memory_evidence where memory_id = ?" in html
-    assert "memory_evidence" in html
+    # Interpreted columns (shape/kind/table) plus the raw shape as a secondary line.
+    for needle in (
+        "DB query shapes",
+        "by memory_id",
+        ">SELECT<",
+        "memory_evidence",
+        "select * from memory_evidence where memory_id = ?",
+    ):
+        assert needle in html
 
 
 def _cockpit_trace() -> TraceView:

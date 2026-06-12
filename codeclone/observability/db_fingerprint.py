@@ -34,6 +34,16 @@ _TABLE_HINT_RE = re.compile(r"\b(?:from|into|update|join)\s+([a-z_][a-z0-9_$]*)"
 
 _KINDS = frozenset({"select", "insert", "update", "delete"})
 
+# Everything after the first WHERE — the predicate columns live here.
+_WHERE_RE = re.compile(r"\bwhere\b(.*)")
+# An identifier immediately left of a comparison operator — a filter column.
+_WHERE_COLUMN_RE = re.compile(
+    r"([a-z_][a-z0-9_$.]*)\s*(?:<=|>=|!=|<>|=|<|>|\bin\b|\bis\b|\blike\b)"
+)
+# The projection list between SELECT and FROM (count(*) / distinct x / columns).
+_PROJECTION_RE = re.compile(r"^select\s+(.*?)\s+from\b")
+_MAX_WHERE_COLUMNS = 4
+
 
 @dataclass(frozen=True, slots=True)
 class SqlFingerprint:
@@ -42,6 +52,21 @@ class SqlFingerprint:
     fingerprint: str
     table_hint: str | None
     kind: str  # select | insert | update | delete | other
+
+
+@dataclass(frozen=True, slots=True)
+class SqlShape:
+    """Human-facing interpretation of a fingerprint for the cockpit.
+
+    ``summary`` reads like "count by repo_root_digest, workflow_id" or
+    "by memory_id" — the predicate, not the raw SQL, so a query count decodes
+    into *what it filters on*.
+    """
+
+    kind: str
+    table: str | None
+    where_columns: tuple[str, ...]
+    summary: str
 
 
 def _normalize(sql: str) -> str:
@@ -74,4 +99,58 @@ def fingerprint_sql(sql: str) -> SqlFingerprint:
     )
 
 
-__all__ = ["SqlFingerprint", "fingerprint_sql"]
+def _where_columns(normalized: str) -> tuple[str, ...]:
+    match = _WHERE_RE.search(normalized)
+    if not match:
+        return ()
+    seen: list[str] = []
+    for raw in _WHERE_COLUMN_RE.findall(match.group(1)):
+        # Strip a table/alias prefix (t.id -> id); keep first-seen order.
+        column = raw.split(".")[-1]
+        if column not in seen:
+            seen.append(column)
+    return tuple(seen)
+
+
+def _projection(normalized: str) -> str | None:
+    match = _PROJECTION_RE.match(normalized)
+    if not match:
+        return None
+    columns = match.group(1).strip()
+    if columns.startswith("count("):
+        return "count"
+    if columns.startswith("distinct "):
+        target = columns[len("distinct ") :].split(",", 1)[0].strip()
+        return f"distinct {target}"
+    return None
+
+
+def _summarize(kind: str, normalized: str, where_columns: tuple[str, ...]) -> str:
+    shown = ", ".join(where_columns[:_MAX_WHERE_COLUMNS])
+    if len(where_columns) > _MAX_WHERE_COLUMNS:
+        shown += ", …"
+    head = _projection(normalized) or ""
+    if shown and head:
+        return f"{head} by {shown}"
+    if shown:
+        return f"by {shown}"
+    if head:
+        return head
+    return "all rows" if kind == "select" else ""
+
+
+def describe_fingerprint(fingerprint: str) -> SqlShape:
+    """Interpret a (normalized or raw) statement into a cockpit-facing shape:
+    its kind, table, predicate columns, and a one-line ``summary``.
+    """
+    fp = fingerprint_sql(fingerprint)
+    where_columns = _where_columns(fp.fingerprint)
+    return SqlShape(
+        kind=fp.kind,
+        table=fp.table_hint,
+        where_columns=where_columns,
+        summary=_summarize(fp.kind, fp.fingerprint, where_columns),
+    )
+
+
+__all__ = ["SqlFingerprint", "SqlShape", "describe_fingerprint", "fingerprint_sql"]

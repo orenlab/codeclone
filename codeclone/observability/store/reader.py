@@ -21,7 +21,7 @@ from typing import cast
 import orjson
 
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
-from ..db_fingerprint import fingerprint_sql
+from ..db_fingerprint import describe_fingerprint
 from ..views import (
     AgentTokenRow,
     AgentView,
@@ -412,6 +412,21 @@ def _db_costs(flat: list[OperationView]) -> tuple[DbCostRow, ...]:
     return tuple(sorted(rows, key=lambda r: (-r.total_queries, r.span_name)))
 
 
+def _fingerprint_row(
+    span_name: str, surface: str, fingerprint: str, count: int
+) -> DbFingerprintRow:
+    shape = describe_fingerprint(fingerprint)
+    return DbFingerprintRow(
+        span_name=span_name,
+        surface=surface,
+        fingerprint=fingerprint,
+        table_hint=shape.table,
+        count=count,
+        kind=shape.kind,
+        summary=shape.summary,
+    )
+
+
 def _db_fingerprints(flat: list[OperationView]) -> tuple[DbFingerprintRow, ...]:
     grouped: dict[tuple[str, str], int] = defaultdict(int)
     surface_of: dict[str, str] = {}
@@ -421,13 +436,7 @@ def _db_fingerprints(flat: list[OperationView]) -> tuple[DbFingerprintRow, ...]:
                 grouped[(span.name, fingerprint)] += count
                 surface_of.setdefault(span.name, op.surface)
     rows = [
-        DbFingerprintRow(
-            span_name=span_name,
-            surface=surface_of[span_name],
-            fingerprint=fingerprint,
-            table_hint=fingerprint_sql(fingerprint).table_hint,
-            count=count,
-        )
+        _fingerprint_row(span_name, surface_of[span_name], fingerprint, count)
         for (span_name, fingerprint), count in grouped.items()
     ]
     rows.sort(key=lambda r: (-r.count, r.span_name, r.fingerprint))

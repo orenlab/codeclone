@@ -8,7 +8,12 @@ from __future__ import annotations
 
 import pytest
 
-from codeclone.observability.db_fingerprint import SqlFingerprint, fingerprint_sql
+from codeclone.observability.db_fingerprint import (
+    SqlFingerprint,
+    SqlShape,
+    describe_fingerprint,
+    fingerprint_sql,
+)
 
 
 @pytest.mark.parametrize(
@@ -88,3 +93,71 @@ def test_fingerprint_caps_length() -> None:
     assert len(fp.fingerprint) <= 200
     assert fp.kind == "select"
     assert fp.table_hint == "big_table"
+
+
+@pytest.mark.parametrize(
+    ("sql", "kind", "table", "where_columns", "summary"),
+    [
+        (
+            "select count(*) from controller_events "
+            "where repo_root_digest = ? and (workflow_id is null or workflow_id = ?)",
+            "select",
+            "controller_events",
+            ("repo_root_digest", "workflow_id"),
+            "count by repo_root_digest, workflow_id",
+        ),
+        (
+            "select distinct workflow_id from controller_events "
+            "where repo_root_digest = ? and id > ? and workflow_id is not null",
+            "select",
+            "controller_events",
+            ("repo_root_digest", "id", "workflow_id"),
+            "distinct workflow_id by repo_root_digest, id, workflow_id",
+        ),
+        (
+            "SELECT * FROM memory_evidence WHERE memory_id = 7",
+            "select",
+            "memory_evidence",
+            ("memory_id",),
+            "by memory_id",
+        ),
+        (
+            "SELECT * FROM controller_events",
+            "select",
+            "controller_events",
+            (),
+            "all rows",
+        ),
+        (
+            "UPDATE memory_records SET status = ? WHERE id = ?",
+            "update",
+            "memory_records",
+            ("id",),
+            "by id",
+        ),
+    ],
+)
+def test_describe_fingerprint(
+    sql: str,
+    kind: str,
+    table: str,
+    where_columns: tuple[str, ...],
+    summary: str,
+) -> None:
+    assert describe_fingerprint(sql) == SqlShape(
+        kind=kind, table=table, where_columns=where_columns, summary=summary
+    )
+
+
+def test_describe_fingerprint_caps_where_columns_in_summary() -> None:
+    shape = describe_fingerprint(
+        "select * from t where a = ? and b = ? and c = ? and d = ? and e = ?"
+    )
+    assert shape.where_columns == ("a", "b", "c", "d", "e")
+    assert shape.summary == "by a, b, c, d, …"
+
+
+def test_describe_fingerprint_insert_has_no_predicate_summary() -> None:
+    shape = describe_fingerprint("INSERT INTO memory_records (id) VALUES (?)")
+    assert shape.kind == "insert"
+    assert shape.summary == ""

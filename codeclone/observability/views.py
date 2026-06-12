@@ -117,6 +117,9 @@ class DbFingerprintRow:
     fingerprint: str
     table_hint: str | None
     count: int
+    kind: str = "other"
+    # Human predicate summary, e.g. "count by repo_root_digest, workflow_id".
+    summary: str = ""
 
 
 @dataclass(frozen=True, slots=True)

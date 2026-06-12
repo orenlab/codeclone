@@ -324,6 +324,8 @@ def test_db_fingerprints_aggregate_per_shape(tmp_path: Path) -> None:
         fingerprint="select * from memory_evidence where memory_id = ?",
         table_hint="memory_evidence",
         count=1200,
+        kind="select",
+        summary="by memory_id",
     )
     assert shapes[1].table_hint == "memory_subjects"
 
