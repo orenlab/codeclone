@@ -128,9 +128,10 @@ font-weight:600}
 .bar{display:block;width:100%;height:7px}
 .dur{font-family:var(--mono);font-size:12.5px;text-align:right;white-space:nowrap;
 color:var(--dim)}
-.rss{font-family:var(--mono);font-size:11.5px;color:var(--warn);white-space:nowrap;
-font-weight:550}
-.meta{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-width:0}
+.mem{font-family:var(--mono);font-size:11.5px;color:var(--warn);font-weight:550;
+text-align:right;white-space:nowrap;overflow:hidden}
+.extra{display:flex;align-items:center;justify-content:flex-end;gap:6px;
+min-width:0;overflow:hidden}
 .pay{font-family:var(--mono);font-size:11px;color:var(--mute);white-space:nowrap}
 .chain{padding:6px 16px 12px}
 .group{padding:13px 0;border-top:1px solid var(--border)}
@@ -140,8 +141,8 @@ font-weight:550}
 .crumb .cname{font-family:var(--mono);font-size:12px;color:var(--text)}
 .crumb .arrow{color:var(--mute);font-size:13px}
 .oprow,.spanrow{display:grid;
-grid-template-columns:minmax(0,1fr) 160px 64px minmax(92px,auto);
-align-items:center;column-gap:14px;row-gap:2px;padding:5px 0}
+grid-template-columns:minmax(0,1fr) 140px 56px 70px 120px;
+align-items:center;column-gap:13px;row-gap:2px;padding:5px 0}
 .lead-cell{display:flex;align-items:center;gap:9px;min-width:0}
 .opname{font-family:var(--mono);font-size:13px;font-weight:550;overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
@@ -255,11 +256,6 @@ def _counters(counters: Mapping[str, int]) -> str:
 
 def _rss_text(value: float | None) -> str:
     return "" if value is None or value < 0.05 else f"Δ{_mb(value)}"
-
-
-def _rss_badge(value: float | None) -> str:
-    text = _rss_text(value)
-    return f'<span class="rss">{text}</span>' if text else ""
 
 
 def _payload(op: OperationView) -> str:
@@ -439,25 +435,30 @@ def _breadcrumb(lineage: list[OperationView]) -> str:
 
 
 def _op_row(op: OperationView, group_max: float) -> str:
+    # Fixed metric columns: name | bar | dur | mem | extra. Splitting rss (mem)
+    # and payload (extra) into their own cells keeps every column right-anchored
+    # so bars and durations line up across nesting depths.
     return (
         '<div class="oprow"><span class="lead-cell">'
         f'{_surface_badge(op.surface)}<span class="opname">{_esc(op.name)}</span>'
         f"</span>{_bar(op.duration_ms, group_max)}"
         f'<span class="dur">{_ms(op.duration_ms)}</span>'
-        f'<span class="meta">{_rss_badge(op.rss_delta_mb)}{_payload(op)}</span></div>'
+        f'<span class="mem">{_rss_text(op.rss_delta_mb)}</span>'
+        f'<span class="extra">{_payload(op)}</span></div>'
     )
 
 
 def _span_row(span: SpanView, op_duration: float) -> str:
     color = "var(--warn)" if span.reason_kind == "unknown" else "var(--accent)"
-    meta = f"{_reason_chip(span.reason_kind)}{_rss_badge(span.rss_delta_mb)}"
     return (
         '<div class="spanrow"><span class="lead-cell">'
         f'<span class="tick">▸</span>'
         f'<span class="spanname">{_esc(span.name)}</span></span>'
         f"{_bar(span.duration_ms, op_duration, color=color)}"
         f'<span class="dur">{_ms(span.duration_ms)}</span>'
-        f'<span class="meta">{meta}</span>{_counters(span.counters)}</div>'
+        f'<span class="mem">{_rss_text(span.rss_delta_mb)}</span>'
+        f'<span class="extra">{_reason_chip(span.reason_kind)}</span>'
+        f"{_counters(span.counters)}</div>"
     )
 
 
