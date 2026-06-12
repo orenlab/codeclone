@@ -243,3 +243,177 @@ def test_agent_context_ranks_token_consumers(tmp_path: Path) -> None:
     top = _rows(out["rows"])[0]
     assert top["tool"] == "mcp.get_relevant_memory"
     assert top["verdict"] == "context_heavy"
+
+
+def test_projection_helpers_and_diagnostic_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from codeclone.observability.views import (
+        AgentTokenRow,
+        AgentView,
+        AggregatesView,
+        DbCostRow,
+        McpToolAggregate,
+        OperationView,
+        PipelineGroup,
+        SpanCostView,
+        SpanView,
+        TraceView,
+    )
+
+    warnings: list[str] = []
+    assert query_mod._resolve_detail("verbose", warnings) == "compact"
+    assert warnings
+
+    sentinel = object()
+    calls: list[dict[str, object]] = []
+
+    def _build_trace(_conn: object, **kwargs: object) -> object:
+        calls.append(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(query_mod, "build_trace_view", _build_trace)
+    assert query_mod._build_trace(object(), "corr-1") is sentinel
+    assert calls == [{"correlation_id": "corr-1"}]
+
+    empty_child = OperationView(
+        operation_id="empty",
+        correlation_id="corr",
+        surface="memory",
+        name="empty",
+        started_at_utc="2026-01-01T00:00:00Z",
+        duration_ms=1.0,
+        status="ok",
+    )
+    measured_child = replace(empty_child, operation_id="measured", rss_delta_mb=4.0)
+    root = OperationView(
+        operation_id="root",
+        correlation_id="corr",
+        surface="mcp",
+        name="query_engineering_memory",
+        started_at_utc="2026-01-01T00:00:00Z",
+        duration_ms=12.25,
+        status="ok",
+        rss_delta_mb=2.0,
+        spans=(
+            SpanView(
+                span_id="span",
+                name="memory.semantic.reindex",
+                duration_ms=9.0,
+                status="ok",
+                rss_delta_mb=3.0,
+            ),
+        ),
+        children=(empty_child, measured_child),
+    )
+    semantic = SpanCostView(
+        span_id="semantic",
+        name="memory.semantic.reindex",
+        surface="memory",
+        operation_id="root",
+        operation_name=root.name,
+        duration_ms=10.5,
+        rss_delta_mb=250.0,
+        produced=0,
+        skipped=2,
+        no_op=True,
+    )
+    aggregate = AggregatesView(
+        operation_count=1,
+        slowest=(root,),
+        mcp_tools=(
+            McpToolAggregate(
+                name="query_engineering_memory",
+                count=2,
+                p50_duration_ms=3.0,
+                p95_duration_ms=8.0,
+                p95_response_bytes=4096,
+                p95_request_bytes=512,
+                p95_response_tokens=9000,
+            ),
+        ),
+        semantic_costs=(semantic,),
+        peak_memory_span=semantic,
+        db_costs=(
+            DbCostRow(
+                span_name="memory.hydrate",
+                surface="memory",
+                span_count=2,
+                total_queries=500,
+                total_writes=1,
+                max_queries=300,
+            ),
+        ),
+        agent=AgentView(
+            mcp_calls=2,
+            response_tokens=9000,
+            consumers=(
+                AgentTokenRow(
+                    name="query_engineering_memory",
+                    calls=2,
+                    request_tokens=10,
+                    response_tokens=9000,
+                ),
+            ),
+        ),
+        pipeline=(PipelineGroup("memory", 1, 12.25, 4.0),),
+    )
+    trace = TraceView(
+        schema_version="1",
+        window_started_at_utc="2026-01-01T00:00:00Z",
+        window_ended_at_utc="2026-01-01T00:00:01Z",
+        aggregates=aggregate,
+        operation_tree=(root,),
+    )
+
+    assert query_mod._slow_operations(aggregate, 1)[0]["operation"] == root.name
+    assert query_mod._memory_pipeline_cost(aggregate, 1)[0]["no_op"] is True
+    assert query_mod._mcp_tool_matrix(aggregate, 1)[0]["calls"] == 2
+    assert query_mod._costly_noops(aggregate, 1)[0]["span"] == semantic.name
+    assert query_mod._pipeline(aggregate, 1)[0]["subsystem"] == "memory"
+    assert query_mod._correlated_chains(trace, 1)[0]["peak_rss_delta_mb"] == 4.0
+    assert query_mod._agent_context_body(AggregatesView(0), 1) == {
+        "total_response_tokens": 0,
+        "rows": [],
+    }
+    assert query_mod._memory_diagnostic(AggregatesView(0)) is None
+    assert (
+        query_mod._memory_diagnostic(
+            AggregatesView(
+                1,
+                peak_memory_span=replace(semantic, rss_delta_mb=10.0),
+            )
+        )
+        is None
+    )
+    assert query_mod._db_diagnostic(AggregatesView(0)) is None
+    assert (
+        query_mod._db_diagnostic(
+            AggregatesView(
+                1,
+                db_costs=(replace(aggregate.db_costs[0], total_queries=2),),
+            )
+        )
+        is None
+    )
+    assert query_mod._context_diagnostic(AggregatesView(0)) is None
+    agent = aggregate.agent
+    assert agent is not None
+    assert (
+        query_mod._context_diagnostic(
+            AggregatesView(
+                1,
+                agent=replace(
+                    agent,
+                    response_tokens=100,
+                    consumers=(replace(agent.consumers[0], response_tokens=10),),
+                ),
+            )
+        )
+        is None
+    )
+    assert query_mod._top_diagnostics(aggregate)
+    assert query_mod._recommended_next_sections("db_cost", aggregate) == []
+    assert len(query_mod._recommended_next_sections("summary", aggregate)) == 3

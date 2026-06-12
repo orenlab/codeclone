@@ -429,3 +429,21 @@ def test_cpu_and_pipeline_rollup(tmp_path: Path) -> None:
     pipe = {group.name: group for group in agg.pipeline}
     assert pipe["memory"].cpu_ms == 2000.0
     assert pipe["analysis"].op_count == 1
+
+
+def test_epoch_ms_and_empty_correlation_filter(tmp_path: Path) -> None:
+    from codeclone.observability.store.reader import _by_correlations, _epoch_ms
+    from codeclone.observability.store.schema import (
+        observability_store_path,
+        open_observability_store,
+    )
+
+    assert _epoch_ms("") == 0.0
+    assert _epoch_ms("not-a-date") == 0.0
+    assert _epoch_ms("2026-01-01T00:00:00Z") > 0.0
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        assert _by_correlations(conn, []) == []
+    finally:
+        conn.close()

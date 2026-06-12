@@ -100,3 +100,86 @@ def test_query_engineering_memory_trajectory_dashboard_mode(tmp_path: Path) -> N
     assert "agents" in payload
     assert "anomalies" in payload
     assert "recent_trajectories" in payload
+
+
+def test_agent_aggregation_counts_failed_outcomes_without_anomalies(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from codeclone.memory.trajectory.agents import (
+        aggregate_agent_rows,
+        trajectory_agent_label,
+    )
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    assert trajectory_agent_label(replace(trajectory, subjects=())) is None
+    violated = replace(trajectory, outcome="violated")
+    rows = aggregate_agent_rows(
+        (violated,),
+        anomaly_by_id={trajectory.id: ()},
+    )
+    assert rows[0].failed_outcome_count == 1
+    assert rows[0].anomaly_count == 0
+    assert rows[0].intent_count == 1
+
+
+def test_anomalies_cover_elevated_incidents_and_incident_label_severity(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from codeclone.memory.trajectory.anomalies import detect_trajectory_anomalies
+
+    audit_db = tmp_path / "audit.sqlite3"
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        base = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    trajectory = replace(
+        base,
+        incident_count=2,
+        labels=("baseline_abuse_detected", "foreign_conflict_seen"),
+    )
+    anomalies = detect_trajectory_anomalies(trajectory)
+    by_kind = {item.kind: item.severity for item in anomalies}
+    assert by_kind["elevated_incidents"] == "warn"
+    assert by_kind["label_baseline_abuse_detected"] == "error"
+    assert by_kind["label_foreign_conflict_seen"] == "warn"
+
+
+def test_agent_aggregation_skips_empty_agent_subject(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from codeclone.memory.trajectory.agents import aggregate_agent_rows
+    from codeclone.memory.trajectory.models import TrajectorySubject
+
+    audit_db = tmp_path / "audit.sqlite3"
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        base = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    unlabeled = replace(
+        base,
+        subjects=(TrajectorySubject("agent", " ", "actor"),),
+        intent_id=None,
+    )
+    assert aggregate_agent_rows((unlabeled,)) == ()

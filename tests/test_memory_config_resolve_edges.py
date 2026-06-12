@@ -61,3 +61,38 @@ def test_resolve_memory_config_rejects_non_string_db_path(
                 }
             },
         )
+
+
+def test_intent_registry_path_must_stay_under_repo(tmp_path: Path) -> None:
+    from codeclone.config.intent_registry import (
+        IntentRegistryConfigError,
+        resolve_intent_registry_db_path,
+    )
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    outside = (tmp_path / "outside" / "intents.sqlite3").resolve()
+    with pytest.raises(IntentRegistryConfigError, match="relative to the repository"):
+        resolve_intent_registry_db_path(
+            root_path=root,
+            value=str(outside),
+        )
+
+
+def test_memory_state_path_validation_errors(tmp_path: Path) -> None:
+    from codeclone.config.memory import _resolve_memory_state_path
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    with pytest.raises(TypeError, match="must resolve to a string path"):
+        _resolve_memory_state_path(
+            key="memory.semantic.index_path",
+            value=123,
+            root_path=root,
+        )
+    with pytest.raises(ValueError, match="must stay under the repository root"):
+        _resolve_memory_state_path(
+            key="memory.semantic.index_path",
+            value="../outside.lance",
+            root_path=root,
+        )

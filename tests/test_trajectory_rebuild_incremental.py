@@ -198,3 +198,32 @@ def test_worker_watermark_decision(monkeypatch: pytest.MonkeyPatch) -> None:
         assert _trajectory_incremental_watermark(conn, project_id="p") is None
     finally:
         conn.close()
+
+
+def test_execute_rebuild_reports_full_and_incremental_modes(tmp_path: Path) -> None:
+    from codeclone.config.memory import resolve_memory_config
+    from codeclone.memory.trajectory.rebuild_workflow import execute_trajectory_rebuild
+
+    from .memory_fixtures import seed_trajectory_audit_workflow
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = root / ".codeclone" / "db" / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        config = resolve_memory_config(root)
+        full = execute_trajectory_rebuild(
+            root_path=root,
+            config=config,
+            store=store,
+            project=project,
+        )
+        assert full["status"] == "ok"
+        assert full["mode"] == "full"
+        incremental = execute_trajectory_rebuild(
+            root_path=root,
+            config=config,
+            store=store,
+            project=project,
+            incremental_after_event_core_id=1,
+        )
+        assert incremental["status"] == "ok"
+        assert incremental["mode"] == "incremental"

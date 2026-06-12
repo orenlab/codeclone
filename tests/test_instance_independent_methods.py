@@ -364,3 +364,12 @@ def test_occurrences_are_deterministically_ordered() -> None:
     )
     starts = [occ.start for occ in occurrences]
     assert starts == sorted(starts)
+
+
+def test_decorator_and_base_name_helpers_ignore_non_names() -> None:
+    import ast
+
+    import codeclone.findings.design.instance_methods as instance_methods_mod
+
+    assert instance_methods_mod._simple_decorator_name(ast.Constant(value=1)) == ""
+    assert instance_methods_mod._simple_base_name(ast.Constant(value=1)) == ""

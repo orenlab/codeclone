@@ -303,3 +303,11 @@ def test_emit_analysis_completed_from_report_custom_agent_fields(
         ),
     )
     assert row == (4242, 1700000001, "custom-agent")
+
+
+def test_sequence_normalizes_only_list_values() -> None:
+    from codeclone.audit.analysis_completed import _sequence
+
+    assert _sequence("not-a-list") == ()
+    assert _sequence([1, 2]) == (1, 2)
+    assert _sequence(42) == ()

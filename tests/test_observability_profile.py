@@ -122,3 +122,25 @@ def test_profile_helpers_return_none_without_psutil(
     assert worker_bootstrap_sample() is None
     assert capture_rss_cpu() is None
     assert build_profile_sample((0, 0.0, 0.0)) is None
+
+
+def test_profile_open_fds_degrades_gracefully(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    from unittest.mock import MagicMock
+
+    from codeclone.observability.profile import build_profile_sample
+
+    process = MagicMock()
+    process.memory_info.return_value = MagicMock(rss=1024 * 1024)
+    process.cpu_times.return_value = MagicMock(user=0.1, system=0.2)
+    process.num_fds.side_effect = OSError("unsupported")
+    process.num_threads.return_value = 3
+    mock_psutil = MagicMock()
+    mock_psutil.Process.return_value = process
+    monkeypatch.setitem(sys.modules, "psutil", mock_psutil)
+
+    sample = build_profile_sample((512 * 1024, 0.0, 0.0))
+    assert sample is not None
+    assert sample.open_fds is None

@@ -6,16 +6,27 @@
 
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+from codeclone.config.memory import MemoryConfig
 from codeclone.contracts import ExitCode
 from codeclone.memory.ingest import InitReport
 from codeclone.surfaces.cli.memory import _CLI_GOVERNANCE_BREAK_GLASS_FLAG, memory_main
 
 from .memory_fixtures import cli_memory_repo
+
+
+class _MemoryCliConsole:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def print(self, *objects: object, **_kwargs: object) -> None:
+        self.lines.append(" ".join(str(value) for value in objects))
 
 
 @pytest.mark.parametrize(
@@ -340,3 +351,111 @@ def test_memory_cli_governance_missing_database_reports_error(
     code = memory_main(argv)
     assert code == int(ExitCode.CONTRACT_ERROR)
     assert any("database not found" in line for line in printed)
+
+
+def test_memory_cli_trajectory_and_job_fallback_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli import memory
+
+    console = _MemoryCliConsole()
+    closed: list[bool] = []
+    monkeypatch.setattr(
+        memory,
+        "_open_store",
+        lambda _root: (
+            SimpleNamespace(close=lambda: closed.append(True)),
+            SimpleNamespace(trajectories_enabled=False),
+            SimpleNamespace(id="project"),
+        ),
+    )
+    assert memory._run_trajectory_rebuild(
+        console=console,
+        root_path=tmp_path,
+    ) == int(ExitCode.CONTRACT_ERROR)
+    assert closed == [True]
+
+    monkeypatch.setattr(
+        memory,
+        "query_engineering_memory",
+        lambda *_args, **_kwargs: {"payload": {}},
+    )
+    monkeypatch.setattr(
+        memory,
+        "_open_store",
+        lambda _root: (
+            SimpleNamespace(close=lambda: None),
+            SimpleNamespace(
+                trajectories_enabled=True,
+                backend="sqlite",
+                db_path=tmp_path / "memory.sqlite3",
+            ),
+            SimpleNamespace(id="project"),
+        ),
+    )
+    args = argparse.Namespace(limit=5, json=False)
+    assert memory._run_trajectory_dashboard(
+        console=console,
+        root_path=tmp_path,
+        args=args,
+    ) == int(ExitCode.SUCCESS)
+
+    monkeypatch.setattr(
+        memory,
+        "query_engineering_memory",
+        lambda *_args, **_kwargs: {
+            "payload": {
+                "status": {"trajectory_count": 0, "latest_projection": None},
+            }
+        },
+    )
+    assert memory._run_trajectory_dashboard(
+        console=console,
+        root_path=tmp_path,
+        args=args,
+    ) == int(ExitCode.SUCCESS)
+
+    assert memory._run_jobs_json(
+        console=console,
+        root_path=tmp_path,
+        action=lambda: {"status": "failed"},
+    ) == int(ExitCode.CONTRACT_ERROR)
+
+    monkeypatch.setattr(
+        memory,
+        "execute_projection_rebuild_status",
+        lambda **_kwargs: {"jobs": ["invalid-row"]},
+    )
+    assert memory._run_jobs_list(
+        console=console,
+        root_path=tmp_path,
+        args=argparse.Namespace(limit=5, json=False),
+    ) == int(ExitCode.SUCCESS)
+
+
+def test_memory_cli_semantic_text_without_subject_path() -> None:
+    from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
+    from codeclone.memory.semantic.models import SemanticSearchResult
+    from codeclone.surfaces.cli import memory
+
+    console = _MemoryCliConsole()
+    result = SemanticSearchResult(
+        source="memory",
+        source_id="mem-1",
+        score=0.5,
+        kind="module_role",
+        preview="Module role",
+    )
+    code = memory._render_semantic_text(
+        console=console,
+        query="module",
+        config=cast(
+            "MemoryConfig",
+            SimpleNamespace(semantic=SimpleNamespace(embedding_provider="diagnostic")),
+        ),
+        provider=DeterministicHashEmbeddingProvider(dimension=8),
+        results=[result],
+    )
+    assert code == int(ExitCode.SUCCESS)
+    assert not any("subject:" in line for line in console.lines)

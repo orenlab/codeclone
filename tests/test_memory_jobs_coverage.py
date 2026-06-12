@@ -20,6 +20,7 @@ from codeclone.audit.schema import ensure_schema
 from codeclone.audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.exceptions import MemoryContractError
+from codeclone.memory.jobs.models import ProjectionJobRecord
 from codeclone.memory.jobs.spawn import (
     run_projection_jobs_worker_sync,
     spawn_projection_jobs_worker,
@@ -495,3 +496,183 @@ def test_execute_projection_rebuild_status_requires_existing_db(tmp_path: Path) 
     root.mkdir()
     with pytest.raises(MemoryContractError, match="database not found"):
         execute_projection_rebuild_status(root_path=root)
+
+
+def test_worker_reason_classification_and_bootstrap_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.jobs import worker
+    from codeclone.memory.trajectory.models import TRAJECTORY_PROJECTION_VERSION
+
+    conn = sqlite3.connect(":memory:")
+    try:
+        assert (
+            worker._trajectory_reason_kind(
+                conn,
+                project_id="p",
+                watermark=1,
+            )
+            == "content_changed"
+        )
+
+        monkeypatch.setattr(
+            "codeclone.memory.jobs.staleness.last_applied_stimulus",
+            lambda _conn, *, project_id: None,
+        )
+        assert (
+            worker._trajectory_reason_kind(
+                conn,
+                project_id="p",
+                watermark=None,
+            )
+            == "first_index"
+        )
+
+        monkeypatch.setattr(
+            "codeclone.memory.jobs.staleness.last_applied_stimulus",
+            lambda _conn, *, project_id: {
+                "trajectory_projection_version": f"{TRAJECTORY_PROJECTION_VERSION}-old"
+            },
+        )
+        assert (
+            worker._trajectory_reason_kind(
+                conn,
+                project_id="p",
+                watermark=None,
+            )
+            == "schema_version_changed"
+        )
+    finally:
+        conn.close()
+
+    monkeypatch.setattr(worker, "is_observability_enabled", lambda: False)
+    worker._emit_worker_bootstrap_span()
+    monkeypatch.setattr(worker, "is_observability_enabled", lambda: True)
+    monkeypatch.setattr(worker, "worker_bootstrap_sample", lambda: None)
+    worker._emit_worker_bootstrap_span()
+
+
+def test_workflow_auto_enqueue_and_job_payload_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.jobs import workflow
+
+    monkeypatch.setattr(workflow, "is_ci_environment", lambda: True)
+    assert workflow.maybe_auto_enqueue_projection_rebuild(root_path=tmp_path) is None
+
+    monkeypatch.setattr(workflow, "is_ci_environment", lambda: False)
+    config = replace(
+        resolve_memory_config(tmp_path),
+        projection_rebuild_policy="enqueue_when_stale",
+    )
+    monkeypatch.setattr(workflow, "resolve_memory_config", lambda _root: config)
+    monkeypatch.setattr(
+        workflow,
+        "execute_enqueue_projection_rebuild",
+        lambda **_kwargs: {"status": "skipped"},
+    )
+    assert workflow.maybe_auto_enqueue_projection_rebuild(root_path=tmp_path) is None
+
+    record = ProjectionJobRecord(
+        id="job-1",
+        project_id="project",
+        job_kind="projection_bundle",
+        status="pending",
+        trigger="cli",
+        requested_at_utc="2026-01-01T00:00:00Z",
+        started_at_utc=None,
+        finished_at_utc=None,
+        claimed_by=None,
+        attempt=0,
+        stimulus_json="{}",
+        result_json=None,
+        error_message=None,
+    )
+    payload = workflow._job_payload(record)
+    assert payload is not None
+    assert payload["id"] == "job-1"
+
+
+def test_execute_worker_reuses_existing_observability_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.memory.jobs import workflow
+    from codeclone.observability import bootstrap, shutdown
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        bootstrap(ObservabilityConfig(enabled=True), root=root)
+        shutdown_mock = MagicMock()
+        monkeypatch.setattr(workflow, "shutdown", shutdown_mock)
+        payload = workflow.execute_run_projection_jobs_once(root_path=root)
+        assert payload["status"] == "nothing_to_do"
+        shutdown_mock.assert_not_called()
+        shutdown()
+
+
+def test_store_reclaims_invalid_timestamp_and_blocks_parallel_claim(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.jobs import store as job_store
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+        config = resolve_memory_config(root)
+        conn = open_memory_db(resolve_memory_db_path(root, config))
+        try:
+            conn.execute(
+                "INSERT INTO memory_projection_jobs("
+                "id, project_id, job_kind, status, trigger, requested_at_utc, "
+                "started_at_utc, claimed_by, attempt, stimulus_json"
+                ") VALUES (?, ?, 'projection_bundle', 'running', 'cli', ?, ?, ?, 1, ?)",
+                (
+                    "job-invalid-time",
+                    project.id,
+                    "2026-01-01T00:00:00Z",
+                    "not-a-timestamp",
+                    worker_claim_token(),
+                    "{}",
+                ),
+            )
+            conn.commit()
+            monkeypatch.setattr(job_store, "_pid_alive", lambda _token: True)
+            job_store._reclaim_stale_running_jobs(
+                conn,
+                project_id=project.id,
+                running_timeout_seconds=60,
+            )
+            status = conn.execute(
+                "SELECT status FROM memory_projection_jobs WHERE id=?",
+                ("job-invalid-time",),
+            ).fetchone()
+            assert status is not None
+            assert status[0] == "failed"
+
+            conn.execute(
+                "INSERT INTO memory_projection_jobs("
+                "id, project_id, job_kind, status, trigger, requested_at_utc, "
+                "started_at_utc, claimed_by, attempt, stimulus_json"
+                ") VALUES (?, ?, 'projection_bundle', 'running', 'cli', ?, ?, ?, 1, ?)",
+                (
+                    "job-live",
+                    project.id,
+                    "2026-01-01T00:00:00Z",
+                    "2999-01-01T00:00:00Z",
+                    worker_claim_token(),
+                    "{}",
+                ),
+            )
+            conn.commit()
+            assert (
+                claim_next_projection_job(
+                    conn,
+                    project_id=project.id,
+                    claimed_by=worker_claim_token(),
+                    running_timeout_seconds=60,
+                )
+                is None
+            )
+        finally:
+            conn.close()

@@ -264,6 +264,36 @@ def test_lancedb_backend_mocked_close_releases_available_handles(
 
     assert table.closed is True
     assert fake_db.closed is True
+
+
+def test_lancedb_helper_and_schema_failure_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.semantic import lancedb_backend
+
+    assert lancedb_backend._as_float("1.25") == 1.25
+    lancedb_backend._close_if_available(None)
+    lancedb_backend._close_if_available(object())
+
+    _install_fake_lancedb(monkeypatch)
+    index = LanceDbSemanticIndex(path=tmp_path / "idx.lance", dimension=4)
+
+    class _BrokenSchema:
+        def field(self, _name: str) -> object:
+            raise AttributeError("missing")
+
+    broken_table = type("BrokenTable", (), {"schema": _BrokenSchema()})()
+    assert index._schema_matches(broken_table) is False
+
+    assert index._table is not None
+    index._table._rows = [  # type: ignore[attr-defined]
+        {"id": "audit-1", "source": "audit", "_distance": "0.5"}
+    ]
+    hits = index.search([0.0, 0.0, 0.0, 0.0], k=1, source="audit")
+    assert hits[0].source == "audit"
+    assert index._table._where == "source = 'audit'"  # type: ignore[attr-defined]
+    index._table._rows = []  # type: ignore[attr-defined]
     assert index.search([0.0, 0.0, 0.0, 0.0], k=1) == []
 
 

@@ -134,3 +134,58 @@ def test_export_record_includes_context_citations_and_patch_trail(
         assert payload["context"]["memory_precedents"][0]["memory_id"] == record.id
         assert "patch_trail_summary" in payload
         assert result.manifest["deduplicated_workflows"] == 1
+
+
+def test_export_context_helper_rejection_and_deduplication_edges(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.trajectory import export_context
+
+    assert export_context.projection_version_rank("trajectory-vnext") == 0
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        current = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    legacy = replace(
+        current,
+        id="traj-legacy-later",
+        projection_version=TRAJECTORY_PROJECTION_VERSION_V1,
+    )
+    assert select_canonical_trajectories([current, legacy]) == [current]
+
+    citations: list[dict[str, object]] = []
+    seen: set[tuple[str, str, int]] = set()
+    for _ in range(2):
+        export_context._append_trajectory_citation(
+            citations,
+            seen,
+            kind="finding",
+            cited_id="finding-1",
+            valid=True,
+            source_event_type="claim_validation.completed",
+            audit_sequence=1,
+            dedupe_sequence=1,
+        )
+    assert len(citations) == 1
+
+    assert (
+        export_context._trajectory_precedent_match(
+            replace(
+                current,
+                id="traj-prior",
+                workflow_id="intent:prior",
+                started_at_utc="2025-01-01T00:00:00Z",
+                finished_at_utc="2025-01-01T00:01:00Z",
+                subjects=(),
+            ),
+            trajectory=current,
+            scope_set={"pkg/missing.py"},
+        )
+        is None
+    )

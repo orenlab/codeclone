@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from codeclone.audit.events import AuditEvent, repo_root_digest
 from codeclone.audit.writer import SqliteAuditWriter
 
@@ -116,3 +118,119 @@ def test_rebuild_supersedes_duplicate_workflow_projection_rows(tmp_path: Path) -
         assert store.count_trajectories(project_id=project.id) == 1
         canonical = store.list_canonical_trajectories_for_export(project_id=project.id)
         assert len(canonical) == 1
+
+
+def test_store_empty_inputs_invalid_patch_trails_and_stale_projection_cleanup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace
+
+    from codeclone.memory.trajectory import store as trajectory_store
+    from tests.memory_fixtures import seed_trajectory_audit_workflow
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        conn = store._conn
+        assert (
+            trajectory_store.list_trajectories_for_subjects(
+                conn,
+                project_id=project.id,
+                subjects={},
+            )
+            == []
+        )
+        assert (
+            trajectory_store.search_trajectories(
+                conn,
+                project_id=project.id,
+                query="",
+            )
+            == []
+        )
+        assert (
+            trajectory_store.load_trajectory_patch_trail(
+                conn,
+                trajectory_id="missing",
+            )
+            is None
+        )
+
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        base = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+        old = replace(
+            base,
+            id="traj-old",
+            workflow_id="intent:shared",
+        )
+        current = replace(
+            old,
+            id="traj-current",
+            projection_version="3",
+            trajectory_digest="e" * 64,
+        )
+        assert trajectory_store.upsert_trajectory(conn, old) == "created"
+        assert trajectory_store.upsert_trajectory(conn, current) == "created"
+        assert (
+            trajectory_store.supersede_stale_projection_trajectories(
+                conn,
+                project_id=project.id,
+                workflow_id=current.workflow_id,
+                keep_trajectory_id=current.id,
+                keep_trajectory_digest=current.trajectory_digest,
+            )
+            == 1
+        )
+        assert trajectory_store.find_trajectory(conn, old.id) is None
+
+        trajectory_store.upsert_trajectory_patch_trail(
+            conn,
+            trajectory_id=current.id,
+            patch_trail_json="[]",
+            patch_trail_digest="f" * 64,
+            schema_version="1",
+            projected_at_utc=current.projected_at_utc,
+        )
+        assert (
+            trajectory_store.load_trajectory_patch_trail(
+                conn,
+                trajectory_id=current.id,
+            )
+            is None
+        )
+        assert (
+            trajectory_store.load_trajectory_patch_trails(
+                conn,
+                trajectory_ids=(current.id,),
+            )
+            == {}
+        )
+
+        monkeypatch.setattr(
+            trajectory_store,
+            "list_workflow_ids_with_events_after",
+            lambda **_kwargs: ["intent:empty"],
+        )
+        monkeypatch.setattr(
+            trajectory_store,
+            "read_audit_event_core_records",
+            lambda **_kwargs: [],
+        )
+        monkeypatch.setattr(
+            trajectory_store,
+            "count_audit_event_core_gaps",
+            lambda **_kwargs: 0,
+        )
+        result = trajectory_store.rebuild_trajectories_incremental(
+            conn=conn,
+            project=project,
+            root_path=root,
+            audit_db_path=tmp_path / "audit-empty.sqlite3",
+            after_event_core_id=10,
+        )
+        assert result.run.workflows_seen == 1
+        assert result.trajectories == ()

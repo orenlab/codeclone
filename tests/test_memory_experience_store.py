@@ -172,3 +172,12 @@ def test_empty_replace_clears_project(conn: sqlite3.Connection) -> None:
     )
     replace_experiences(conn, project_id=_PROJECT_ID, experiences=[])
     assert count_experiences(conn, project_id=_PROJECT_ID) == 0
+
+
+def test_private_validators_reject_unknown_values() -> None:
+    from codeclone.memory.experience.store import _facet_kind, _status
+
+    with pytest.raises(ValueError, match="unknown experience facet kind"):
+        _facet_kind("not-a-facet")
+    with pytest.raises(ValueError, match="unknown experience status"):
+        _status("archived")

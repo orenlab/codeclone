@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -540,3 +541,73 @@ def test_rank_trajectories_for_scope_with_patch_trail_and_long_summary(
     assert previews
     assert isinstance(truncated, bool)
     assert "…" in str(previews[0]["summary"])
+
+
+def test_scope_and_query_ranking_cover_all_subject_kinds_and_rejections(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.trajectory.retrieval import (
+        filter_trajectories_for_query,
+        serialize_trajectory_detail,
+        trajectory_semantic_text_parts,
+    )
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        base = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    scoped = replace(
+        base,
+        quality_tier="corrected",
+        labels=("change_control_workflow",),
+        subjects=(
+            TrajectorySubject("path", "pkg/mod.py", "touched"),
+            TrajectorySubject("path", "pkg/other.py", "untouched"),
+            TrajectorySubject("module", "pkg.mod", "about"),
+            TrajectorySubject("symbol", "pkg.mod.run", "about"),
+        ),
+    )
+    irrelevant = replace(
+        base,
+        id="traj-irrelevant",
+        workflow_id="intent:intent-b-001",
+        summary="unrelated",
+        subjects=(),
+    )
+
+    assert filter_trajectories_for_query([scoped], query="", match_mode="any") == ()
+    assert rank_trajectories_for_query(
+        [scoped],
+        query="missing token",
+        max_results=5,
+        match_mode="all",
+    ) == ([], False)
+    assert rank_trajectories_for_query(
+        [scoped],
+        query="missing",
+        max_results=5,
+        match_mode="any",
+    ) == ([], False)
+
+    previews, truncated = rank_trajectories_for_scope(
+        [scoped, irrelevant],
+        scope_paths=("pkg/mod.py", "pkg/other.py"),
+        symbols=("pkg.mod.run",),
+        patch_trails={scoped.id: {}},
+        max_results=5,
+    )
+    assert truncated is False
+    assert [item["trajectory_id"] for item in previews] == [scoped.id]
+    assert cast("int", previews[0]["relevance_score"]) > 3
+
+    detail = serialize_trajectory_detail(scoped, patch_trail_payload={})
+    assert "patch_trail" not in detail
+    semantic_parts = tuple(trajectory_semantic_text_parts(scoped))
+    assert any(part.startswith("labels ") for part in semantic_parts)
+    assert any(part.startswith("paths ") for part in semantic_parts)
+    assert any(part.startswith("steps ") for part in semantic_parts)

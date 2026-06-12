@@ -8,13 +8,16 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
 from codeclone.memory.exceptions import MemoryContractError
+from codeclone.memory.experience.models import Experience
 from codeclone.memory.models import MemoryEvidence, MemoryRecord, MemorySubject
 from codeclone.memory.retrieval import service as retrieval_service
 from codeclone.memory.retrieval.ranking import RankingContext
+from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
 
@@ -258,3 +261,91 @@ def test_compact_record_subjects_are_bounded_and_scope_relevant() -> None:
     assert isinstance(full_subjects, list)
     assert len(full_subjects) == 11
     assert {"subject_count", "subjects_truncated"}.isdisjoint(full)
+
+
+def test_visibility_experience_and_subject_priority_edges() -> None:
+    assert (
+        retrieval_service._record_visible(
+            _record(status="historical"),
+            include_stale=False,
+            include_drafts=False,
+        )
+        is True
+    )
+
+    compact = retrieval_service._experience_detail_payload(
+        cast(
+            "Experience",
+            SimpleNamespace(evidence=[SimpleNamespace(trajectory_id="traj-1")]),
+        ),
+        detail_level="compact",
+        statement_length=20,
+        statement="short",
+        agent_facets=[{"agent_family": "codex"}, {"agent_family": "claude"}],
+    )
+    assert compact["dominant_agent_facet"] == {"agent_family": "codex"}
+    assert compact["statement_truncated"] is True
+    assert compact["multi_agent"] is True
+
+    subject = MemorySubject(
+        id="subject",
+        memory_id="mem-1",
+        subject_kind="symbol",
+        subject_key="pkg.mod.run",
+        relation="about",
+    )
+    symbol_context = RankingContext.from_scope(
+        scope_paths=(),
+        symbols=("pkg.mod.run",),
+        blast_dependents=(),
+    )
+    blast_context = RankingContext.from_scope(
+        scope_paths=(),
+        symbols=(),
+        blast_dependents=("pkg/mod.py",),
+    )
+    assert retrieval_service._memory_subject_priority(
+        subject,
+        context=symbol_context,
+    )[:2] == (0, -1.0)
+    assert retrieval_service._memory_subject_priority(
+        replace(subject, subject_kind="path", subject_key="pkg/mod.py"),
+        context=blast_context,
+    )[:2] == (2, -0.7)
+
+
+def test_record_relations_filters_external_endpoints_and_trajectory_not_found() -> None:
+    from codeclone.memory.models import MemoryLink
+
+    now = current_report_timestamp_utc()
+    links = [
+        MemoryLink(
+            id="link-1",
+            project_id="proj",
+            from_memory_id="mem-1",
+            to_memory_id="external",
+            relation="contradicts",
+            created_by="test",
+            created_at_utc=now,
+        )
+    ]
+    store = SimpleNamespace(
+        list_links_for_records=lambda **_kwargs: links,
+        find_trajectory=lambda _trajectory_id: None,
+    )
+    relations = retrieval_service._record_relations(
+        cast("SqliteEngineeringMemoryStore", store),
+        project_id="proj",
+        record_ids=("mem-1",),
+    )
+    assert relations == {"mem-1": {"contradicted_by": ["external"]}}
+    assert retrieval_service._handle_trajectory_get_mode(
+        cast("SqliteEngineeringMemoryStore", store),
+        mode="trajectory_get",
+        project_id="proj",
+        record_id="missing",
+    ) == {
+        "mode": "trajectory_get",
+        "status": "not_found",
+        "payload": {"trajectory_id": "missing"},
+    }

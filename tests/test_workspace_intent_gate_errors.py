@@ -117,3 +117,52 @@ def test_gate_load_registry_records_file_backend(tmp_path: Path) -> None:
     )
     records = gate_mod._load_registry_records_read_only(tmp_path, config)
     assert records == ()
+
+
+def test_hook_cleanup_reports_registry_configuration_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.workspace_intent.gate import (
+        WorkspaceIntentRegistryUnavailable,
+        list_unclosed_workspace_intents_for_hook_cleanup,
+    )
+
+    def _boom(_root: Path) -> object:
+        raise ValueError("broken registry")
+
+    monkeypatch.setattr(
+        "codeclone.workspace_intent.gate.resolve_intent_registry_config",
+        _boom,
+    )
+    with pytest.raises(WorkspaceIntentRegistryUnavailable, match="broken registry"):
+        list_unclosed_workspace_intents_for_hook_cleanup(tmp_path)
+
+
+def test_hook_cleanup_reports_sqlite_load_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.workspace_intent.gate import (
+        WorkspaceIntentRegistryUnavailable,
+        list_unclosed_workspace_intents_for_hook_cleanup,
+    )
+
+    class _Config:
+        backend = "sqlite"
+        storage_path = Path(".codeclone/db/intents.sqlite3")
+
+    monkeypatch.setattr(
+        "codeclone.workspace_intent.gate.resolve_intent_registry_config",
+        lambda _root: _Config(),
+    )
+
+    def _load_fail(*_args: object, **_kwargs: object) -> object:
+        raise OSError("cannot read sqlite")
+
+    monkeypatch.setattr(
+        "codeclone.workspace_intent.gate._load_registry_records_read_only",
+        _load_fail,
+    )
+    with pytest.raises(WorkspaceIntentRegistryUnavailable, match="cannot read sqlite"):
+        list_unclosed_workspace_intents_for_hook_cleanup(tmp_path)

@@ -1200,3 +1200,60 @@ def test_emit_cli_analysis_completed_if_enabled_swallows_errors(
         new_func_count=0,
         new_block_count=0,
     )
+
+
+def test_workflow_audit_emit_and_digest_helpers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from codeclone.surfaces.cli import workflow as cli_workflow
+
+    class _Args:
+        audit_enabled = True
+
+    cli_workflow._emit_cli_analysis_completed_if_enabled(
+        args=_Args(),
+        root_path=tmp_path,
+        report_document="not-a-dict",
+        new_func_count=0,
+        new_block_count=0,
+    )
+    cli_workflow._emit_cli_analysis_completed_if_enabled(
+        args=_Args(),
+        root_path=tmp_path,
+        report_document={"integrity": {"digest": {"value": ""}}},
+        new_func_count=0,
+        new_block_count=0,
+    )
+
+    def _boom(**_kwargs: object) -> None:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(
+        "codeclone.audit.analysis_completed.emit_analysis_completed_from_report",
+        _boom,
+    )
+    cli_workflow._emit_cli_analysis_completed_if_enabled(
+        args=_Args(),
+        root_path=tmp_path,
+        report_document={"integrity": {"digest": {"value": "a" * 64}}},
+        new_func_count=1,
+        new_block_count=0,
+    )
+
+    assert cli_workflow._report_digest_from_document({}) == ""
+    assert (
+        cli_workflow._report_digest_from_document(
+            {"integrity": {"digest": "not-a-mapping"}}
+        )
+        == ""
+    )
+
+    monkeypatch.setattr(sys, "argv", ["codeclone", "observability"])
+    with pytest.raises(SystemExit):
+        cli_workflow.main()
+    monkeypatch.setattr(sys, "argv", ["codeclone", "memory", "--help"])
+    with pytest.raises(SystemExit):
+        cli_workflow.main()

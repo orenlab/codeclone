@@ -18,6 +18,7 @@ import codeclone.surfaces.cli.workflow as cli
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.cache.store import Cache
 from codeclone.config.observability import ObservabilityConfig
+from codeclone.contracts import ExitCode
 from codeclone.core._types import (
     AnalysisResult,
     BootstrapResult,
@@ -26,10 +27,13 @@ from codeclone.core._types import (
     ProcessingResult,
 )
 from codeclone.observability import bootstrap, operation, shutdown
+from codeclone.observability.models import OperationRecord
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
 )
+from codeclone.observability.store.writer import write_operation
+from codeclone.surfaces.cli.observability import observability_main
 
 
 @pytest.fixture(autouse=True)
@@ -158,3 +162,91 @@ def test_cli_pipeline_emits_stage_spans(
         "files_analyzed": 2,
         "failed_files": 0,
     }
+
+
+def test_observability_cli_help_and_stdout_trace(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    assert observability_main([]) == int(ExitCode.CONTRACT_ERROR)
+    assert "trace" in capsys.readouterr().out
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="cli.analyze", surface="cli"):
+            pass
+    finally:
+        shutdown()
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="op-1",
+                correlation_id="corr",
+                surface="cli",
+                name="cli.analyze",
+                started_at_utc="2026-01-01T00:00:00Z",
+                duration_ms=1.0,
+                status="ok",
+                spans=(),
+            ),
+        )
+    finally:
+        conn.close()
+
+    code = observability_main(["trace", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == int(ExitCode.SUCCESS)
+    assert '"operation_tree"' in out
+
+
+def test_observability_cli_missing_store_and_file_outputs(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    empty_root = tmp_path / "empty"
+    empty_root.mkdir()
+    code = observability_main(["trace", "--root", str(empty_root)])
+    assert code == int(ExitCode.SUCCESS)
+    assert "No observability store" in capsys.readouterr().out
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    conn = open_observability_store(observability_store_path(repo))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="op-cli",
+                correlation_id="op-cli",
+                surface="cli",
+                name="cli.analyze",
+                started_at_utc="2026-01-01T00:00:00Z",
+                duration_ms=1.0,
+                status="ok",
+                spans=(),
+            ),
+        )
+    finally:
+        conn.close()
+
+    json_path = tmp_path / "trace.json"
+    html_path = tmp_path / "trace.html"
+    code = observability_main(
+        [
+            "trace",
+            "--root",
+            str(repo),
+            "--json",
+            str(json_path),
+            "--html",
+            str(html_path),
+        ]
+    )
+    out = capsys.readouterr().out
+    assert code == int(ExitCode.SUCCESS)
+    assert json_path.is_file()
+    assert html_path.is_file()
+    assert f"Wrote {json_path}" in out
+    assert f"Wrote {html_path}" in out

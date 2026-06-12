@@ -7410,6 +7410,27 @@ def test_mcp_service_record_lookup_helper_branches(tmp_path: Path) -> None:
     )
 
 
+def _assert_optional_summary_metric(
+    service: CodeCloneMCPService,
+    record: MCPRunRecord,
+    *,
+    key: str,
+) -> dict[str, object]:
+    payload = service._summary_payload(record.summary, record=record)
+    metric_payload = cast("dict[str, object]", payload[key])
+    service._runs.register(record)
+    assert key in service.get_production_triage(run_id=record.run_id)
+    empty_report_record = replace(
+        record,
+        report_document={"metrics": {"families": {}}},
+    )
+    assert key not in service._summary_payload(
+        empty_report_record.summary,
+        record=empty_report_record,
+    )
+    return metric_payload
+
+
 def test_mcp_service_summary_and_gate_contract_for_coverage_join(
     tmp_path: Path,
 ) -> None:
@@ -7463,8 +7484,11 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         new_block=frozenset(),
         metrics_diff=None,
     )
-    payload = service._summary_payload(record.summary, record=record)
-    assert cast(dict[str, object], payload["coverage_join"]) == {
+    assert _assert_optional_summary_metric(
+        service,
+        record,
+        key="coverage_join",
+    ) == {
         "status": "ok",
         "overall_permille": 700,
         "coverage_hotspots": 1,
@@ -7472,14 +7496,6 @@ def test_mcp_service_summary_and_gate_contract_for_coverage_join(
         "hotspot_threshold_percent": 50,
         "source": "coverage.xml",
     }
-    empty_report_record = replace(
-        record,
-        report_document={"metrics": {"families": {}}},
-    )
-    assert "coverage_join" not in service._summary_payload(
-        empty_report_record.summary,
-        record=empty_report_record,
-    )
     with pytest.raises(MCPServiceContractError, match="coverage_xml"):
         service._evaluate_gate_snapshot(
             record=record,
@@ -7604,8 +7620,11 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         new_block=frozenset(),
         metrics_diff=None,
     )
-    payload = service._summary_payload(record.summary, record=record)
-    assert cast(dict[str, object], payload["security_surfaces"]) == {
+    assert _assert_optional_summary_metric(
+        service,
+        record,
+        key="security_surfaces",
+    ) == {
         "items": 5,
         "categories": 3,
         "production": 4,
@@ -7613,14 +7632,6 @@ def test_mcp_service_summary_payload_includes_security_surfaces(
         "report_only": True,
         "note": "report_only inventory; not a vulnerability scan",
     }
-    empty_report_record = replace(
-        record,
-        report_document={"metrics": {"families": {}}},
-    )
-    assert "security_surfaces" not in service._summary_payload(
-        empty_report_record.summary,
-        record=empty_report_record,
-    )
 
 
 def test_mcp_service_short_id_and_comparison_helper_branches(
@@ -8949,6 +8960,12 @@ def test_mcp_finish_controlled_change_external_health_and_memory_hook(
         "finish_propose_memory",
         lambda **_: {"memory_candidates": [{"id": "mem-1"}]},
     )
+    monkeypatch.setattr(docs_service, "_audit_emit", lambda **_: 42)
+    monkeypatch.setattr(
+        docs_service,
+        "maybe_auto_enqueue_projection_rebuild",
+        lambda **_: {"status": "enqueued"},
+    )
     finished = docs_service.finish_controlled_change(
         intent_id=docs_intent,
         changed_files=["README.md"],
@@ -8966,6 +8983,12 @@ def test_mcp_finish_controlled_change_external_health_and_memory_hook(
     )
     assert cast("list[dict[str, object]]", finished["memory_candidates"])[0]["id"] == (
         "mem-1"
+    )
+    assert finished["projection_rebuild"] == {"status": "enqueued"}
+    patch_trail = cast("dict[str, object]", finished["patch_trail"])
+    assert (
+        cast("dict[str, object]", patch_trail["evidence"])["patch_trail_audit_sequence"]
+        == 42
     )
 
 
@@ -9016,10 +9039,6 @@ def test_mcp_finish_controlled_change_propose_memory_empty_hook(
 
 
 def test_mcp_intent_helper_edges_and_renew_paths(tmp_path: Path) -> None:
-    from codeclone.surfaces.mcp._workspace_hygiene import (
-        ForeignDirtyOverlap,
-        WorkspaceHygieneResult,
-    )
     from codeclone.surfaces.mcp.messages import intent as intent_msgs
 
     service = CodeCloneMCPService(history_limit=2)
@@ -9109,6 +9128,179 @@ def test_mcp_intent_helper_edges_and_renew_paths(tmp_path: Path) -> None:
         == intent_msgs.RECOVERY_FOREIGN_STALE
     )
 
+
+def test_mcp_intent_promotion_contract_errors_and_evicted_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+
+    with pytest.raises(MCPServiceContractError, match="requires intent_id"):
+        service.manage_change_intent(action="promote")
+    with pytest.raises(MCPServiceContractError, match="Unknown change intent"):
+        service.manage_change_intent(action="promote", intent_id="missing")
+
+    active = service.manage_change_intent(
+        action="declare",
+        run_id="workflow",
+        scope={"allowed_files": ["README.md"]},
+        intent="active docs edit",
+    )
+    with pytest.raises(MCPServiceContractError, match="not 'queued'"):
+        service.manage_change_intent(
+            action="promote",
+            intent_id=str(active["intent_id"]),
+        )
+
+    queued_root = tmp_path / "queued"
+    queued_root.mkdir()
+    queued_service, _foreign_id = _two_agent_service(queued_root, monkeypatch)
+    queued_id = _declare_queued_pkg_a(queued_service)
+    queued_service._runs.clear()
+    evicted = queued_service.manage_change_intent(
+        action="promote",
+        intent_id=queued_id,
+    )
+    assert evicted["status"] == "unverified"
+    assert evicted["reason"] == "before_run_evicted"
+
+
+def test_mcp_intent_queue_context_and_boundary_helper_edges() -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    empty_scope = mcp_intent_mod.IntentScope(
+        allowed_files=(),
+        allowed_related=(),
+        forbidden=(),
+    )
+    assert (
+        service._queued_context_from_workspace(
+            scope=empty_scope,
+            workspace_existing=(),
+        )
+        == []
+    )
+
+    record = mcp_workspace_intents_mod.WorkspaceIntentRecord(
+        intent_id="q-other",
+        agent_pid=9999,
+        agent_start_epoch=1,
+        agent_label="other",
+        run_id="run-1",
+        declared_at_utc="2026-01-01T00:00:00Z",
+        expires_at_utc="2026-01-01T01:00:00Z",
+        ttl_seconds=3600,
+        report_digest="digest",
+        status="queued",
+        intent="queued",
+        scope={"allowed_files": ["pkg/other.py"]},
+        scope_digest="digest",
+        blast_radius_summary={},
+        lease_renewed_at_utc="2026-01-01T00:00:00Z",
+        lease_seconds=60,
+    )
+    scope = mcp_intent_mod.IntentScope(
+        allowed_files=("pkg/a.py",),
+        allowed_related=(),
+        forbidden=(),
+    )
+    assert (
+        service._queued_context_from_workspace(
+            scope=scope,
+            workspace_existing=(record,),
+        )
+        == []
+    )
+    assert mcp_session_intent_mod._blast_boundary_paths(
+        ({"path": "pkg/a.py"}, "pkg\\b.py", {"path": ""}),
+        limit=5,
+    ) == ("pkg/a.py", "pkg/b.py")
+
+
+def test_mcp_redeclaring_same_run_replaces_previous_intent(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+    first = service.manage_change_intent(
+        action="declare",
+        run_id="workflow",
+        scope={"allowed_files": ["README.md"]},
+        intent="first",
+    )
+    second = service.manage_change_intent(
+        action="declare",
+        run_id="workflow",
+        scope={"allowed_files": ["docs/index.md"]},
+        intent="second",
+    )
+    assert first["intent_id"] != second["intent_id"]
+    assert (
+        service.manage_change_intent(action="get")["intent_id"] == second["intent_id"]
+    )
+
+
+def test_mcp_run_store_pin_and_pruning_edges(tmp_path: Path) -> None:
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
+    with pytest.raises(MCPRunNotFoundError):
+        store.pin("missing")
+
+    records = [
+        _patch_contract_run_record(
+            tmp_path,
+            run_id=f"run-{index}",
+            digest=f"digest-{index}",
+            include_regression=False,
+            complexity=1,
+        )
+        for index in range(3)
+    ]
+    for record in records:
+        store.register(record)
+    store.pin(records[0].run_id)
+    store._history_limit = 1
+    store._latest_run_id = records[1].run_id
+    store._prune_unpinned_locked()
+    assert records[0].run_id in {item.run_id for item in store.records()}
+    assert records[1].run_id not in {item.run_id for item in store.records()}
+
+
+def test_mcp_memory_projection_management_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.memory.jobs as jobs
+    import codeclone.memory.trajectory.rebuild_workflow as rebuild_workflow
+
+    service = CodeCloneMCPService(history_limit=2)
+    monkeypatch.setattr(
+        rebuild_workflow,
+        "execute_trajectory_rebuild",
+        lambda **_kwargs: {"status": "trajectory-ok"},
+    )
+    monkeypatch.setattr(
+        jobs,
+        "execute_run_projection_jobs_once",
+        lambda **_kwargs: {"status": "worker-ok"},
+    )
+
+    rebuilt = service.manage_engineering_memory(
+        root=str(tmp_path),
+        action="rebuild_trajectories",
+    )
+    worker = service.manage_engineering_memory(
+        root=str(tmp_path),
+        action="run_projection_jobs_once",
+    )
+    assert rebuilt["status"] == "trajectory-ok"
+    assert worker["status"] == "worker-ok"
+
+
+def test_mcp_intent_renew_and_workflow_helper_edges(tmp_path: Path) -> None:
+    from codeclone.surfaces.mcp._workspace_hygiene import (
+        ForeignDirtyOverlap,
+        WorkspaceHygieneResult,
+    )
+
+    service = CodeCloneMCPService(history_limit=2)
     run_record = _blast_radius_run_record(tmp_path)
     service._runs.register(run_record)
     declared = service.manage_change_intent(
@@ -9671,3 +9863,122 @@ def test_query_platform_observability_wires_dev_envelope(tmp_path: Path) -> None
     # No store under a fresh root -> inert envelope, never an error.
     assert out["status"] in {"disabled", "no_store"}
     assert out["rows"] == []
+
+
+def test_measure_payload_handles_unserializable_values() -> None:
+    from codeclone.surfaces.mcp.payloads import measure_payload
+
+    class _Bad:
+        def __str__(self) -> str:
+            raise TypeError("nope")
+
+    bytes_size, tokens = measure_payload({"bad": _Bad()})
+    assert bytes_size == 0
+    assert tokens == 0
+
+
+def test_measure_payload_estimate_failure_uses_char_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp.payloads import measure_payload
+
+    def _boom(_payload: object) -> object:
+        raise TypeError("estimate failed")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.payloads.estimate_payload",
+        _boom,
+    )
+    byte_size, tokens = measure_payload({"ok": True})
+    assert byte_size > 0
+    assert tokens > 0
+
+
+def test_mcp_payload_paginate_and_finding_resolution() -> None:
+    from codeclone.surfaces.mcp.payloads import (
+        PageWindow,
+        paginate,
+        resolve_finding_id,
+        short_id,
+    )
+
+    window = paginate([1, 2, 3, 4], offset=1, limit=2, max_limit=10)
+    assert isinstance(window, PageWindow)
+    assert window.items == [2, 3]
+    assert window.next_offset == 3
+
+    tail = paginate([9], offset=0, limit=5, max_limit=10)
+    assert tail.next_offset is None
+
+    canonical = {"finding-abcdef12": "short"}
+    assert (
+        resolve_finding_id(
+            canonical_to_short=canonical,
+            short_to_canonical={"short": "finding-abcdef12"},
+            finding_id="finding-abcdef12",
+        )
+        == "finding-abcdef12"
+    )
+    assert (
+        resolve_finding_id(
+            canonical_to_short=canonical,
+            short_to_canonical={"short": "finding-abcdef12"},
+            finding_id="short",
+        )
+        == "finding-abcdef12"
+    )
+    assert (
+        resolve_finding_id(
+            canonical_to_short=canonical,
+            short_to_canonical={},
+            finding_id="missing",
+        )
+        is None
+    )
+    assert short_id("finding-abcdef12", length=8) == "finding-"
+
+
+def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    with pytest.raises(MCPServiceContractError, match="Numeric analysis settings"):
+        service._build_args(
+            root_path=tmp_path,
+            request=MCPAnalysisRequest(
+                root=str(tmp_path),
+                respect_pyproject=False,
+                coverage_min=101,
+            ),
+        )
+
+    summary = _dummy_run_record(tmp_path, "summary-run").summary
+    payload = service._summary_payload(summary)
+    assert payload["run_id"] == "summary-"
+    assert "workspace_hygiene" not in payload
+
+    stale = _dummy_run_record(tmp_path, "stale-run")
+    service._runs.register(stale)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="stale-ru",
+        scope={"allowed_files": ["README.md"]},
+        intent="stale state",
+    )
+    intent_id = str(declared["intent_id"])
+    service._review_state[stale.run_id] = OrderedDict([("finding", None)])
+    service._last_gate_results[stale.run_id] = {"status": "pass"}
+    service._spread_max_cache[stale.run_id] = 1
+    from codeclone.analysis.blast_radius import BlastRadiusResult
+
+    service._blast_radius_cache[(stale.run_id, ("README.md",), "direct")] = cast(
+        "BlastRadiusResult",
+        {},
+    )
+
+    service._runs.clear()
+    service._prune_session_state()
+
+    assert stale.run_id not in service._review_state
+    assert stale.run_id not in service._last_gate_results
+    assert stale.run_id not in service._spread_max_cache
+    assert service._blast_radius_cache == {}
+    assert intent_id not in service._active_intents

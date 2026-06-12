@@ -498,3 +498,41 @@ def test_observability_main_no_store(
     code = observability_main(["trace", "--root", str(tmp_path)])
     assert code == 0
     assert "No observability store" in capsys.readouterr().out
+
+
+def test_html_format_helpers_and_semantic_cost_rows() -> None:
+    from dataclasses import replace
+
+    from codeclone.observability.render_html import _bytes, _mb, _semantic_row, _tokens
+
+    assert _mb(None) == "—"
+    assert "GB" in _mb(2048.0)
+    assert "MB" in _mb(512.0)
+    assert _bytes(None) == "—"
+    assert "MB" in _bytes(1024 * 1024)
+    assert "KB" in _bytes(2048)
+    assert _bytes(12).endswith(" B")
+    assert _tokens(None) == "—"
+    assert _tokens(0) == "—"
+    assert _tokens(1500).endswith("k")
+
+    costly = SpanCostView(
+        span_id="s1",
+        name="memory.semantic.reindex",
+        surface="memory",
+        operation_id="op",
+        operation_name="memory.projection.job",
+        duration_ms=6000.0,
+        no_op=True,
+        reason_kind="schema_version_changed",
+    )
+    costly_html = _semantic_row(costly)
+    assert "no-op · costly" in costly_html
+    assert "schema_version_changed" in costly_html
+
+    noop = replace(costly, duration_ms=10.0)
+    assert "no-op" in _semantic_row(noop)
+    assert "costly" not in _semantic_row(noop)
+
+    productive = replace(noop, no_op=False, reason_kind=None)
+    assert "productive" in _semantic_row(productive)

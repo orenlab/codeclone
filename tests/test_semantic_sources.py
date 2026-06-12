@@ -10,6 +10,8 @@ import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
+import pytest
+
 from codeclone.audit.events import EVENT_INTENT_DECLARED, AuditEvent, repo_root_digest
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.memory.enums import MemoryStatus
@@ -244,6 +246,70 @@ def test_trajectory_index_source_projects_bounded_text() -> None:
     assert "intent.declared" in projection.text
     assert "event_core_json" not in projection.text
     assert '{"secret"' not in projection.text
+
+
+def test_trajectory_source_name_missing_record_and_pagination() -> None:
+    trajectory = _trajectory("proj-traj")
+    source = TrajectoryIndexSource(
+        _FakeTrajectoryStore([trajectory]),
+        project_id="proj-traj",
+    )
+    assert source.name() == "trajectory"
+
+    class _MissingTrajectoryStore(_FakeTrajectoryStore):
+        def find_trajectory(self, trajectory_id: str) -> Trajectory | None:
+            return None
+
+    assert (
+        list(
+            TrajectoryIndexSource(
+                _MissingTrajectoryStore([trajectory]),
+                project_id="proj-traj",
+            ).iter_projections()
+        )
+        == []
+    )
+
+    trajectories = [
+        dataclasses.replace(trajectory, id=f"traj-{index}") for index in range(201)
+    ]
+    projections = list(
+        TrajectoryIndexSource(
+            _FakeTrajectoryStore(trajectories),
+            project_id="proj-traj",
+        ).iter_projections()
+    )
+    assert len(projections) == 201
+
+
+def test_audit_source_tolerates_query_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.semantic import sources
+
+    db_path = tmp_path / "audit.sqlite3"
+    db_path.touch()
+
+    class _BrokenConnection:
+        closed = False
+
+        def execute(self, _sql: str, _params: object) -> object:
+            raise sqlite3.OperationalError("broken query")
+
+        def close(self) -> None:
+            self.closed = True
+
+    connection = _BrokenConnection()
+    monkeypatch.setattr(
+        sources,
+        "open_audit_db_readonly",
+        lambda _path: connection,
+    )
+    assert (
+        list(AuditIndexSource(enabled=True, db_path=db_path).iter_projections()) == []
+    )
+    assert connection.closed is True
 
 
 def _trajectory(project_id: str) -> Trajectory:

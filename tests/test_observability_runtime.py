@@ -116,3 +116,53 @@ def test_operation_records_error_status(tmp_path: Path) -> None:
         assert row == ("error", "ValueError")
     finally:
         conn.close()
+
+
+def test_record_elapsed_span_is_noop_without_active_operation(tmp_path: Path) -> None:
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.observability import bootstrap, record_elapsed_span, shutdown
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        record_elapsed_span(
+            "orphan-span",
+            started_at_utc="2026-01-01T00:00:00Z",
+            duration_ms=1.0,
+        )
+    finally:
+        shutdown()
+
+
+def test_runtime_optional_payload_root_and_empty_sql_edges(tmp_path: Path) -> None:
+    from codeclone.observability import runtime
+
+    bootstrap(ObservabilityConfig(enabled=True), session_id="session")
+    with operation(name="rootless", surface="mcp") as op:
+        op.set_request(request_bytes=1)
+        op.set_request(request_tokens=2)
+        op.set_response(response_bytes=3)
+        op.set_response(response_tokens=4)
+        with span(name="db"):
+            runtime.record_db_query("")
+
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    runtime.bind_root(first_root)
+    runtime.bind_root(second_root)
+    with operation(name="rooted", surface="mcp"):
+        pass
+    shutdown()
+
+    assert observability_store_path(first_root).exists()
+    assert not observability_store_path(second_root).exists()
+
+    bootstrap(ObservabilityConfig(enabled=False))
+    runtime.bind_root(tmp_path / "disabled")
+
+    active = runtime._ActiveRuntime(
+        ObservabilityConfig(enabled=True),
+        root=tmp_path,
+    )
+    active._conn = object()
+    active.close()
+    assert active._conn is None

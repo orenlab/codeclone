@@ -242,6 +242,40 @@ def test_project_trajectory_marks_incident_labels() -> None:
     assert "baseline_abuse_detected" in trajectory.labels
 
 
+def test_projector_helpers_reject_incomplete_steps_and_cover_fallbacks() -> None:
+    from codeclone.memory.trajectory import projector
+
+    record = _record(1, "analysis.completed")
+    with pytest.raises(TrajectoryProjectionError, match="missing audit_sequence"):
+        projector._step_from_record(0, replace(record, audit_sequence=None))
+    with pytest.raises(TrajectoryProjectionError, match="missing event core"):
+        projector._step_from_record(
+            0,
+            replace(record, event_core_json=None, event_core_sha256=None),
+        )
+
+    corrected = projector._quality_tier(
+        outcome="accepted",
+        records=(_record(1, "patch_contract.violated"),),
+        labels=(),
+    )
+    assert corrected == "corrected"
+    assert projector._primary_agent_label((record,)) == "agent"
+    assert projector._primary_agent_label((replace(record, agent_label=""),)) is None
+
+    subjects = projector._subjects(
+        workflow_id="run:one",
+        intent_id=None,
+        run_ids=(),
+        report_digests=(),
+        cores=(),
+        agent_label=None,
+    )
+    assert {(item.subject_kind, item.subject_key) for item in subjects} == {
+        ("workflow", "run:one")
+    }
+
+
 def test_project_trajectory_rejects_event_core_digest_mismatch() -> None:
     record = _record(1, "intent.declared", status="active")
     broken = replace(record, event_core_sha256="0" * 64)
@@ -253,3 +287,37 @@ def test_project_trajectory_rejects_event_core_digest_mismatch() -> None:
             workflow_id="intent:intent-a-001",
             records=(broken,),
         )
+
+
+def test_patch_trail_projector_helper_and_status_fallback_edges() -> None:
+    from codeclone.memory.trajectory import patch_trail_projector
+
+    record = _record(1, "intent.checked", status="clean")
+    with pytest.raises(TrajectoryProjectionError, match="missing audit_sequence"):
+        patch_trail_projector._record_order_key(replace(record, audit_sequence=None))
+    assert (
+        patch_trail_projector._event_core(
+            replace(record, event_core_json=None, event_core_sha256=None)
+        )
+        == {}
+    )
+    assert patch_trail_projector._facts_paths({}, "changed_files") == ()
+    assert (
+        patch_trail_projector._facts_paths(
+            {"facts": {"changed_files": "pkg/a.py"}},
+            "changed_files",
+        )
+        == ()
+    )
+
+    state = patch_trail_projector._WorkflowAuditState(scope_check_status="")
+    patch_trail_projector._apply_audit_record(
+        state,
+        replace(record, status=None),
+    )
+    assert state.scope_check_status == "clean"
+    patch_trail_projector._apply_audit_record(
+        state,
+        _record(2, "receipt.created"),
+    )
+    assert state.receipt_seq == 2

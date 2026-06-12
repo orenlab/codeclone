@@ -97,3 +97,17 @@ def test_external_output_requires_explicit_opt_in(tmp_path: Path) -> None:
             raw_path="/tmp/codeclone-export.jsonl",
             allow_external_out=False,
         )
+
+
+def test_jsonl_accumulator_enforces_record_and_file_limits() -> None:
+    from codeclone.memory.trajectory.export import _JsonlExportAccumulator
+
+    accumulator = _JsonlExportAccumulator()
+    assert accumulator.try_append("oversized", record_limit=2, file_limit=100) is False
+    assert accumulator.truncated_records == 1
+
+    assert accumulator.try_append("ok", record_limit=10, file_limit=2) is False
+    assert accumulator.records_written == 0
+
+    assert accumulator.try_append("ok", record_limit=10, file_limit=10) is True
+    assert accumulator.lines == ["ok"]

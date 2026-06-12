@@ -2557,3 +2557,11 @@ def test_decode_wire_segment_rejects_missing_segment_signature() -> None:
 
 def test_decode_wire_dead_candidate_rejects_invalid_rows() -> None:
     assert _decode_wire_dead_candidate(object(), "pkg/mod.py") is None
+
+
+def test_integrity_read_json_document_forwards_max_bytes(tmp_path: Path) -> None:
+    from codeclone.cache.integrity import read_json_document
+
+    path = tmp_path / "doc.json"
+    path.write_text('{"ok": true}', encoding="utf-8")
+    assert read_json_document(path, max_bytes=64) == {"ok": True}

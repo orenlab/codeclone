@@ -178,6 +178,53 @@ def test_resolve_export_profile_and_eligibility(tmp_path: Path) -> None:
         assert trajectory_eligible_for_export(partial, profile=profile) is False
 
 
+def test_export_eligibility_rejects_missing_digests_and_disallowed_partial(
+    tmp_path: Path,
+) -> None:
+    profile = EXPORT_PROFILES["agent-change-control-v1"]
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    assert (
+        trajectory_eligible_for_export(
+            replace(trajectory, trajectory_digest=""),
+            profile=profile,
+        )
+        is False
+    )
+    assert (
+        trajectory_eligible_for_export(
+            replace(trajectory, outcome="partial"),
+            profile=profile,
+        )
+        is False
+    )
+
+
+def test_execute_trajectory_rebuild_owns_and_closes_store(tmp_path: Path) -> None:
+    from .memory_fixtures import cli_memory_repo
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (
+        root,
+        _project,
+        store,
+    ):
+        audit_db = root / ".codeclone" / "db" / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        config = resolve_memory_config(root)
+        store.close()
+
+        payload = execute_trajectory_rebuild(root_path=root, config=config)
+
+    assert payload["status"] == "ok"
+
+
 def test_cli_render_helpers_cover_empty_and_populated_states(tmp_path: Path) -> None:
     printer = _CapturePrinter()
     render_trajectory_status(

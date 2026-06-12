@@ -122,3 +122,40 @@ unknown_key = true
     )
     with pytest.raises(ValueError, match=r"Invalid tool\.codeclone\.memory\.ingest"):
         resolve_memory_config(tmp_path)
+
+
+def test_resolvers_skip_missing_and_escaping_paths(tmp_path: Path) -> None:
+    from codeclone.config.memory import IngestConfig
+    from codeclone.memory.ingest.paths import (
+        resolve_contract_constants_paths,
+        resolve_document_link_paths,
+        resolve_mcp_tool_contradiction_sources,
+        resolve_mcp_tool_schema_snapshot_path,
+    )
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    ingest = IngestConfig(
+        contract_constants_paths=("missing/contracts.py",),
+        document_link_paths=("../escape.md",),
+        mcp_tool_schema_snapshot_path="missing-tools.json",
+        mcp_tool_count_doc_paths=("missing-doc.md",),
+    )
+    assert (
+        resolve_contract_constants_paths(
+            root_path=root,
+            registry_paths=frozenset(),
+            ingest=ingest,
+        )
+        == ()
+    )
+    assert (
+        resolve_document_link_paths(
+            root_path=root,
+            registry_paths=frozenset({"docs/book/01.md"}),
+            ingest=ingest,
+        )
+        == ()
+    )
+    assert resolve_mcp_tool_schema_snapshot_path(root_path=root, ingest=ingest) is None
+    assert resolve_mcp_tool_contradiction_sources(root_path=root, ingest=ingest) is None

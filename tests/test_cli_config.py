@@ -339,3 +339,33 @@ def test_load_toml_py310_uses_tomli_load(
         SimpleNamespace(import_module=lambda _name: _FakeTomli),
     )
     assert loader_mod._load_toml(toml_path) == {"tool": {}}
+
+
+def test_pyproject_loader_rejects_symlinks_and_invalid_ingest_table(
+    tmp_path: Path,
+) -> None:
+    from codeclone.config.pyproject_loader import (
+        ConfigValidationError,
+        _validate_nested_ingest_table,
+        load_pyproject_config,
+        open_repo_config,
+    )
+
+    broken = tmp_path / "pyproject.toml"
+    broken.symlink_to(tmp_path / "missing.toml")
+    with pytest.raises(ConfigValidationError, match="must not be a symlink"):
+        load_pyproject_config(tmp_path)
+
+    real = tmp_path / "real.toml"
+    real.write_text("[tool.codeclone]\n", encoding="utf-8")
+    broken.unlink()
+    link = tmp_path / "pyproject.toml"
+    link.symlink_to(real)
+    with pytest.raises(ConfigValidationError, match="must not be a symlink"):
+        open_repo_config(tmp_path)
+
+    with pytest.raises(ConfigValidationError, match="must be object"):
+        _validate_nested_ingest_table(
+            ingest_obj="not-a-table",
+            config_path=tmp_path / "pyproject.toml",
+        )

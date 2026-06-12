@@ -320,3 +320,126 @@ def test_hook_cleanup_includes_recoverable_cursor_intent_only(
     unclosed = list_unclosed_workspace_intents_for_hook_cleanup(tmp_path)
 
     assert unclosed == (UnclosedWorkspaceIntent("intent-cursor-dead-001", "active"),)
+
+
+def test_hook_cleanup_resolves_owner_identity_from_environment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import os
+    from dataclasses import replace
+
+    from codeclone.workspace_intent.gate import (
+        list_unclosed_workspace_intents_for_hook_cleanup,
+    )
+    from tests.test_workspace_intents import _record
+    from tests.workspace_intent_gate_helpers import write_workspace_record
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive",
+        lambda _pid: True,
+    )
+    own_pid = os.getpid()
+    own = replace(
+        _record(intent_id="intent-own-env-001", status="active"),
+        agent_pid=own_pid,
+        agent_start_epoch=42,
+    )
+    write_workspace_record(tmp_path, own)
+    monkeypatch.setenv("CODECLONE_HOOK_OWN_AGENT_PID", str(own_pid))
+    monkeypatch.setenv("CODECLONE_HOOK_OWN_AGENT_START_EPOCH", "42")
+
+    unclosed = list_unclosed_workspace_intents_for_hook_cleanup(tmp_path)
+
+    assert len(unclosed) == 1
+    assert unclosed[0].intent_id == "intent-own-env-001"
+
+
+def test_hook_cleanup_record_filter_handles_recoverable_agents() -> None:
+    import os
+    from dataclasses import replace
+
+    from codeclone.surfaces.mcp._workspace_intent_lifecycle import utc_now
+    from codeclone.workspace_intent.gate import _include_record_in_hook_cleanup
+    from tests.test_workspace_intents import _record
+
+    recoverable = replace(
+        _record(intent_id="intent-rec-001", status="active"),
+        agent_pid=os.getpid() + 5000,
+        agent_label="cursor-vscode/dead",
+    )
+    now = utc_now()
+    assert (
+        _include_record_in_hook_cleanup(
+            recoverable,
+            own_pid=os.getpid(),
+            own_start_epoch=1,
+            recoverable_agent_label_prefix=None,
+            include_foreign=False,
+            now=now,
+        )
+        is False
+    )
+    assert (
+        _include_record_in_hook_cleanup(
+            recoverable,
+            own_pid=os.getpid(),
+            own_start_epoch=1,
+            recoverable_agent_label_prefix="cursor-vscode/",
+            include_foreign=False,
+            now=now,
+        )
+        is True
+    )
+
+
+def test_hook_authorizes_foreign_active_environment_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.workspace_intent.gate import (
+        HOOK_AUTHORIZE_FOREIGN_ENV,
+        _hook_authorizes_foreign_active,
+    )
+
+    monkeypatch.delenv(HOOK_AUTHORIZE_FOREIGN_ENV, raising=False)
+    assert _hook_authorizes_foreign_active() is True
+    monkeypatch.setenv(HOOK_AUTHORIZE_FOREIGN_ENV, "maybe")
+    assert _hook_authorizes_foreign_active() is False
+    monkeypatch.setenv(HOOK_AUTHORIZE_FOREIGN_ENV, "off")
+    assert _hook_authorizes_foreign_active() is False
+    monkeypatch.setenv(HOOK_AUTHORIZE_FOREIGN_ENV, "yes")
+    assert _hook_authorizes_foreign_active() is True
+
+
+def test_workspace_ownership_honors_foreign_active_authorization(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
+    from codeclone.workspace_intent import gate as gate_mod
+
+    monkeypatch.setattr(gate_mod, "_hook_authorizes_foreign_active", lambda: True)
+    assert (
+        gate_mod._ownership_authorizes_hook(
+            workspace_intents.IntentOwnership.FOREIGN_ACTIVE,
+            liveness=workspace_intents.PidLiveness.ALIVE,
+        )
+        is True
+    )
+    monkeypatch.setattr(gate_mod, "_hook_authorizes_foreign_active", lambda: False)
+    assert (
+        gate_mod._ownership_authorizes_hook(
+            workspace_intents.IntentOwnership.FOREIGN_ACTIVE,
+            liveness=workspace_intents.PidLiveness.ALIVE,
+        )
+        is False
+    )
+
+
+def test_agent_pid_liveness_honors_boolean_probe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp import _workspace_intent_pid as pid_mod
+    from codeclone.surfaces.mcp._workspace_intent_lifecycle import PidLiveness
+
+    monkeypatch.setattr(pid_mod, "is_agent_pid_alive", lambda _pid: False)
+    assert pid_mod.agent_pid_liveness(123) is PidLiveness.DEAD

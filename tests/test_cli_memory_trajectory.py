@@ -129,3 +129,118 @@ def test_memory_trajectory_cli_export_and_missing_db(tmp_path: Path) -> None:
     assert memory_main(["trajectory", "status", "--root", str(missing_root)]) == int(
         ExitCode.CONTRACT_ERROR
     )
+
+
+def test_trajectory_renderers_handle_populated_and_empty_payloads(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace
+
+    from codeclone.memory.trajectory.cli_render import (
+        render_projection_run,
+        render_trajectory_agents,
+        render_trajectory_anomalies,
+        render_trajectory_detail,
+        render_trajectory_list,
+        render_trajectory_search_results,
+        render_trajectory_status,
+    )
+    from codeclone.memory.trajectory.models import TrajectoryListItem
+
+    from .memory_fixtures import memory_store, seed_trajectory_audit_workflow
+
+    class _CapturePrinter:
+        def __init__(self) -> None:
+            self.lines: list[str] = []
+
+        def print(self, *objects: object, **_kwargs: object) -> None:
+            self.lines.append(" ".join(str(item) for item in objects))
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+    run = replace(projection.run, legacy_event_count=3)
+    trajectory = projection.trajectories[0]
+
+    printer = _CapturePrinter()
+    render_trajectory_status(
+        console=printer,
+        enabled=True,
+        count=1,
+        latest_run=run,
+    )
+    render_projection_run(console=printer, run=run)
+    render_trajectory_list(console=printer, items=[])
+    assert "No trajectories found." in printer.lines
+
+    item = TrajectoryListItem(
+        id=trajectory.id,
+        workflow_id=trajectory.workflow_id,
+        outcome=trajectory.outcome,
+        quality_tier=trajectory.quality_tier,
+        quality_score=trajectory.quality_score,
+        event_count=trajectory.event_count,
+        started_at_utc=trajectory.started_at_utc,
+        finished_at_utc=trajectory.finished_at_utc,
+        summary=trajectory.summary,
+    )
+    render_trajectory_list(console=printer, items=[item])
+    render_trajectory_search_results(
+        console=printer,
+        query="recover",
+        trajectories=[],
+    )
+    render_trajectory_agents(console=printer, payload={"agents": []})
+    render_trajectory_agents(
+        console=printer,
+        payload={
+            "agent_count": 1,
+            "trajectory_count": 1,
+            "unlabeled_trajectory_count": 0,
+            "agents": [
+                "not-a-mapping",
+                {"agent_label": "agent", "trajectory_count": 1},
+            ],
+        },
+    )
+    render_trajectory_anomalies(
+        console=printer,
+        payload={
+            "summary": {
+                "trajectories_with_anomalies": 1,
+                "anomaly_count": 1,
+                "error_count": 1,
+                "warn_count": 0,
+            },
+            "trajectories": [
+                "skip",
+                {
+                    "trajectory_id": trajectory.id,
+                    "agent_label": "agent",
+                    "outcome": "violated",
+                    "quality_tier": "incident",
+                    "anomalies": [
+                        "skip",
+                        {
+                            "severity": "error",
+                            "kind": "scope_violation",
+                            "message": "bad scope",
+                        },
+                    ],
+                },
+            ],
+        },
+    )
+    render_trajectory_detail(console=printer, trajectory=trajectory)
+
+    joined = "\n".join(printer.lines)
+    assert trajectory.id in joined
+    assert "No matching trajectories" in joined
+    assert "No agent-labeled" in joined
+    assert "scope_violation" in joined
+    assert trajectory.summary in joined

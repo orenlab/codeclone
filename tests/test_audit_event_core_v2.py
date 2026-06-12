@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from codeclone.audit.events import (
     AUDIT_EVENT_CORE_VERSION,
     EVENT_INTENT_CHECKED,
@@ -98,3 +100,38 @@ def test_patch_trail_event_core_uses_counts() -> None:
     assert isinstance(facts, dict)
     assert facts["untouched_in_declared"] == 1
     assert facts["patch_trail_digest"] == "abc"
+
+
+def test_event_core_json_falls_back_when_canonical_encoding_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import json
+
+    from codeclone.audit.events import AuditEvent, event_core_for_event
+    from codeclone.audit.writer import _event_core_json
+
+    calls = {"count": 0}
+
+    def _canonical_or_fallback(payload: object) -> str:
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise TypeError("cannot serialize")
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+    monkeypatch.setattr(
+        "codeclone.audit.writer._canonical_json",
+        _canonical_or_fallback,
+    )
+    event = AuditEvent(
+        event_type="intent.declared",
+        severity="info",
+        repo_root_digest="digest",
+        agent_pid=1,
+        agent_label="agent",
+        status="active",
+        payload={},
+    )
+    payload = json.loads(_event_core_json(event))
+    assert payload["truncated"] is True
+    assert payload["event_type"] == "intent.declared"
+    assert event_core_for_event(event)["event_type"] == "intent.declared"
