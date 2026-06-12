@@ -1343,12 +1343,32 @@ def _hydrate_trajectory_hits(
     return trajectories
 
 
+def _record_passes_filters(
+    record: MemoryRecord,
+    *,
+    types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    confidences: tuple[MemoryConfidence, ...],
+) -> bool:
+    # Mirror the types/statuses/confidences predicate the FTS branch applies in
+    # SQL (store.search_records), so semantic candidates cannot bypass the
+    # public query filter contract. An empty category tuple means "no filter".
+    return (
+        (not types or record.type in types)
+        and (not statuses or record.status in statuses)
+        and (not confidences or record.confidence in confidences)
+    )
+
+
 def _semantic_search_candidates(
     store: SqliteEngineeringMemoryStore,
     *,
     project_id: str,
     fts_records: Sequence[MemoryRecord],
     proximity: Mapping[str, float],
+    filter_types: tuple[MemoryRecordType, ...],
+    statuses: tuple[MemoryStatus, ...],
+    filter_confidences: tuple[MemoryConfidence, ...],
 ) -> list[MemoryRecord]:
     seen = {record.id for record in fts_records}
     candidates = list(fts_records)
@@ -1356,7 +1376,16 @@ def _semantic_search_candidates(
         if record_id in seen:
             continue
         record = store.find_record(record_id)
-        if record is not None and record.project_id == project_id:
+        if (
+            record is not None
+            and record.project_id == project_id
+            and _record_passes_filters(
+                record,
+                types=filter_types,
+                statuses=statuses,
+                confidences=filter_confidences,
+            )
+        ):
             candidates.append(record)
             seen.add(record_id)
     return candidates
@@ -1410,6 +1439,9 @@ def _handle_semantic_search_mode(
             project_id=project_id,
             fts_records=fts_records,
             proximity=proximity,
+            filter_types=filter_types,
+            statuses=statuses,
+            filter_confidences=filter_confidences,
         )
         audit_events = _hydrate_audit_events(audit_db_path, audit_hits)
         trajectories = _hydrate_trajectory_hits(

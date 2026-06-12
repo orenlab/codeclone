@@ -5,13 +5,18 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from codeclone.memory.retrieval import query_engineering_memory
 from codeclone.memory.semantic.models import SemanticHit, SemanticIndexStatus
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
-from tests.memory_fixtures import insert_audit_event, memory_store, seed_module_role
+from tests.memory_fixtures import (
+    insert_audit_event,
+    memory_store,
+    seed_document_link,
+    seed_module_role,
+)
 
 
 class _FakeProvider:
@@ -55,6 +60,7 @@ def _search(
     query: str,
     index: _FakeIndex,
     audit: Path | None = None,
+    filters: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     return query_engineering_memory(
         store,
@@ -69,6 +75,7 @@ def _search(
         embedding_provider=_FakeProvider(),
         provider_label="diagnostic",
         audit_db_path=audit,
+        filters=filters,
     )
 
 
@@ -115,6 +122,39 @@ def test_hybrid_merges_semantic_only_record(tmp_path: Path) -> None:
     # FTS hit and the semantic-only record are merged into one ranked list.
     assert fts.id in ids
     assert semantic_only.id in ids
+
+
+def test_semantic_only_record_respects_type_filter(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        kept = seed_document_link(
+            store,
+            project_id=project.id,
+            doc_file="codeclone/a.py",
+            ref_path="codeclone/a.py",
+            statement="alpha beta gamma",
+        )
+        filtered = seed_module_role(
+            store,
+            project_id=project.id,
+            file_path="codeclone/b.py",
+            statement="delta epsilon zeta",
+        )
+        index = _FakeIndex(
+            [SemanticHit(source_id=filtered.id, source="memory", score=0.9)]
+        )
+        result = _search(
+            store,
+            root=root,
+            project_id=project.id,
+            db_path=db_path,
+            query="alpha",
+            index=index,
+            filters={"types": ["document_link"]},
+        )
+    ids = _record_ids(result)
+    # FTS hit kept; the semantic-only module_role no longer bypasses the filter.
+    assert kept.id in ids
+    assert filtered.id not in ids
 
 
 def test_unavailable_index_falls_back_to_fts(tmp_path: Path) -> None:
