@@ -13,11 +13,12 @@ from unittest.mock import patch
 import orjson
 import pytest
 
-from codeclone.config.memory import resolve_memory_config
+from codeclone.config.memory import MemoryConfig, resolve_memory_config
 from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.jobs import worker as worker_module
+from codeclone.memory.jobs import workflow as workflow_module
 from codeclone.memory.jobs.worker import run_projection_job
-from codeclone.observability import bootstrap, shutdown
+from codeclone.observability import bootstrap, is_observability_enabled, shutdown
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
@@ -110,3 +111,26 @@ def test_run_projection_job_emits_operation_and_spans(tmp_path: Path) -> None:
     assert orjson.loads(by_name["memory.experience.distill"][2]) == {
         "experiences_distilled": 3
     }
+
+
+def test_worker_bootstraps_observability_before_opening_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        workflow_module,
+        "resolve_observability_config",
+        lambda: ObservabilityConfig(enabled=True),
+    )
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        enabled_at_open: list[bool] = []
+        real_session = workflow_module._require_memory_store_session
+
+        def _spy(root_path: Path, config: MemoryConfig | None = None) -> object:
+            # open_memory_db only instruments while observability is enabled.
+            enabled_at_open.append(is_observability_enabled())
+            return real_session(root_path, config=config)
+
+        monkeypatch.setattr(workflow_module, "_require_memory_store_session", _spy)
+        workflow_module.execute_run_projection_jobs_once(root_path=root)
+
+    assert enabled_at_open == [True]

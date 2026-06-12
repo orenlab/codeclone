@@ -204,28 +204,33 @@ def execute_run_projection_jobs_once(
     root_path: Path,
     config: MemoryConfig | None = None,
 ) -> dict[str, object]:
-    resolved_root, resolved_config, project, store = _require_memory_store_session(
-        root_path,
-        config=config,
-    )
-    # Worker-process bootstrap: freeze the env-resolved observability decision
-    # once at the worker entry (spec §4.1). owns_observability guards against a
-    # caller that already bootstrapped (e.g. an MCP session) being shut down here.
+    # Bootstrap observability BEFORE opening the store: open_memory_db attaches
+    # the per-span DB-query counter only while observability is enabled, so a
+    # store opened pre-bootstrap stays uninstrumented and the worker's whole
+    # query stream is invisible to the cockpit. owns_observability guards against
+    # a caller that already bootstrapped (e.g. an MCP session).
+    resolved_root = root_path.resolve()
     owns_observability = not is_observability_enabled()
     if owns_observability:
         bootstrap(resolve_observability_config(), root=resolved_root)
     try:
-        worker_result = run_projection_jobs_once(
-            store,
-            root_path=resolved_root,
-            config=resolved_config,
-            project=project,
-            running_timeout_seconds=(
-                resolved_config.projection_rebuild_running_timeout_seconds
-            ),
+        resolved_root, resolved_config, project, store = _require_memory_store_session(
+            resolved_root,
+            config=config,
         )
+        try:
+            worker_result = run_projection_jobs_once(
+                store,
+                root_path=resolved_root,
+                config=resolved_config,
+                project=project,
+                running_timeout_seconds=(
+                    resolved_config.projection_rebuild_running_timeout_seconds
+                ),
+            )
+        finally:
+            store.close()
     finally:
-        store.close()
         if owns_observability:
             shutdown()
     return {
