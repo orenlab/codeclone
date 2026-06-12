@@ -704,6 +704,7 @@ def get_relevant_memory(
                 include_routine=include_routine,
             ),
             experiences=matching_experiences,
+            detail_level=normalized_detail,
         )
     else:
         coverage = {

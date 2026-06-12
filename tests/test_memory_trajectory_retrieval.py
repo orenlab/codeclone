@@ -76,12 +76,8 @@ def test_get_relevant_memory_returns_scoped_trajectories(tmp_path: Path) -> None
         "scope_paths_total": 1,
         "coverage_percent": 100,
     }
-    assert coverage["agent_diversity"] == {
-        "trajectory_agent_labels": ["test-agent"],
-        "trajectory_agent_label_count": 1,
-        "experience_agent_families": [],
-        "experience_agent_family_count": 0,
-    }
+    # agent_diversity is detail-only now; compact coverage omits it.
+    assert "agent_diversity" not in coverage
     assert coverage["observation_confidence"]["level"] == "supported"
 
 

@@ -138,6 +138,7 @@ def build_context_coverage(
     scope_families: frozenset[str],
     trajectories: Sequence[Trajectory],
     experiences: Sequence[Experience],
+    detail_level: str = "compact",
 ) -> dict[str, object]:
     trajectory_coverage, trajectory_agents = _trajectory_coverage(
         scope_paths=scope_paths,
@@ -148,22 +149,25 @@ def build_context_coverage(
         experiences=experiences,
     )
     record_payload = dict(record_coverage)
-    return {
+    coverage: dict[str, object] = {
         "record_coverage": record_payload,
         "trajectory_coverage": trajectory_coverage,
         "experience_coverage": experience_coverage,
-        "agent_diversity": {
-            "trajectory_agent_labels": sorted(trajectory_agents),
-            "trajectory_agent_label_count": len(trajectory_agents),
-            "experience_agent_families": sorted(experience_agents),
-            "experience_agent_family_count": len(experience_agents),
-        },
         "observation_confidence": _observation_confidence(
             record_coverage=record_payload,
             trajectory_coverage=trajectory_coverage,
             experience_coverage=experience_coverage,
         ),
     }
+    # agent_diversity is analytics, not pre-edit signal — full/detail only.
+    if detail_level != "compact":
+        coverage["agent_diversity"] = {
+            "trajectory_agent_labels": sorted(trajectory_agents),
+            "trajectory_agent_label_count": len(trajectory_agents),
+            "experience_agent_families": sorted(experience_agents),
+            "experience_agent_family_count": len(experience_agents),
+        }
+    return coverage
 
 
 __all__ = ["build_context_coverage"]

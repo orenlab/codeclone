@@ -24,8 +24,19 @@ from .step_labels import step_display_name
 DEFAULT_TRAJECTORY_PREVIEW_LIMIT = 5
 DEFAULT_TRAJECTORY_STEP_LIMIT = 12
 COMPACT_TRAJECTORY_SUBJECT_LIMIT = 8
+COMPACT_TRAJECTORY_LABEL_LIMIT = 8
 TRAJECTORY_PREVIEW_CHARS = 220
 TrajectoryDetailLevel = Literal["compact", "full"]
+
+
+def _preview_labels(
+    labels: Sequence[str], *, detail_level: TrajectoryDetailLevel
+) -> list[str]:
+    # Full keeps the raw label list; compact sorts (deterministic) and caps so a
+    # trajectory that accumulated many labels cannot bloat the preview.
+    if detail_level == "full":
+        return list(labels)
+    return sorted(labels)[:COMPACT_TRAJECTORY_LABEL_LIMIT]
 
 
 def trajectory_excluded_from_default_retrieval(
@@ -121,7 +132,7 @@ def serialize_trajectory_preview(
         "quality_tier": trajectory.quality_tier,
         "quality_score": trajectory.quality_score,
         "summary": _preview_text(trajectory.summary),
-        "labels": list(trajectory.labels),
+        "labels": _preview_labels(trajectory.labels, detail_level=detail_level),
         "agent_label": trajectory_agent_label(trajectory),
         "subjects": serialized_subjects,
         "evidence_count": len(trajectory.evidence),
@@ -193,13 +204,15 @@ def _add_quality_fields(
             trajectory=trajectory,
             patch_trail_payload=patch_trail_payload,
         )
+        # Contract-component numbers are interpretable only alongside the full
+        # breakdown; compact keeps quality_score + anomaly_count as the headline.
+        payload["complexity_score"] = contract.complexity_score
+        payload["scope_accuracy"] = contract.scope_accuracy
+        payload["duration_seconds"] = contract.duration_seconds
     else:
         payload["subject_count"] = subject_count
         payload["matched_subject_count"] = matched_subject_count
         payload["subjects_truncated"] = serialized_subject_count < subject_count
-    payload["complexity_score"] = contract.complexity_score
-    payload["scope_accuracy"] = contract.scope_accuracy
-    payload["duration_seconds"] = contract.duration_seconds
     payload["anomaly_count"] = contract.anomaly_count
 
 
