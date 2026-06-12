@@ -592,14 +592,16 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "Scoped response lanes: records[]=durable assertions, "
                 "experiences[]=advisory patterns, trajectories[]=bounded examples, "
-                "coverage=availability/trust context."
+                "coverage=availability/trust context. Scores are lane-local: "
+                "never compare relevance_score across lanes; for_path and plain "
+                "(non-semantic) search are unranked."
             ),
             (
                 "compact (default): record/trajectory subjects are bounded with "
                 "subject_count+subjects_truncated; experiences expose multi_agent "
                 "+ dominant_agent_facet; no quality_contract, steps, evidence ids, "
-                "payload, or duplicated root patch_trail_summary. Use full/get "
-                "for drill-down."
+                "or payload. patch_trail_summary rides each trajectory, never "
+                "duplicated at the payload root. Use full/get for drill-down."
             ),
             (
                 "Semantic (off by default): enable sidecar, rebuild_semantic_index, "

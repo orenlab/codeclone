@@ -123,10 +123,15 @@ After `start_controlled_change` returns `edit_allowed: true`:
 `record_candidate` statements to one durable fact (target ≤300 chars;
 `validate_claims` warns above 500; hard limit 1000). List responses default to
 compact previews. Treat `records[]`, `experiences[]`, and `trajectories[]` as
-separate evidence lanes; `subject_count` / `subjects_truncated` means more
-subjects exist, not that evidence disappeared. Use `mode=get` or
-`detail_level=full` for complete subjects, agent facets, trajectory contracts,
-steps, evidence ids, payloads, and root Patch Trail drill-down.
+separate evidence lanes: records = asserted knowledge, trajectories = episodic
+workflow evidence, experiences = advisory patterns, `coverage` = visibility
+metadata. **Scores are lane-local — never compare `relevance_score` across
+lanes; `for_path` and plain (non-semantic) search are unranked.**
+`subject_count` / `subjects_truncated` means more subjects exist, not that
+evidence disappeared. Use `mode=get` or `detail_level=full` for complete
+subjects, agent facets, trajectory contracts, steps, evidence ids, and
+payloads; `patch_trail_summary` rides each trajectory (never duplicated at the
+payload root).
 
 ### Before `finish`: incident / complexity memory (MANDATORY)
 

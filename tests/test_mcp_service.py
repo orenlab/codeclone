@@ -1363,7 +1363,8 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     memory_points = str(memory_help["key_points"])
     assert "subject_count+subjects_truncated" in memory_points
     assert "dominant_agent_facet" in memory_points
-    assert "duplicated root patch_trail_summary" in memory_points
+    assert "never duplicated at the payload root" in memory_points
+    assert "Scores are lane-local" in memory_points
 
 
 def _memory_sync_service_with_run(
