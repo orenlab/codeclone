@@ -111,6 +111,23 @@ HELP: Final = (
     "verification_profiles."
 )
 
+QUERY_PLATFORM_OBSERVABILITY: Final = (
+    "Read-only sectioned diagnostics over CodeClone's own runtime telemetry "
+    "(Phase 29). Observability is for CodeClone self-development and "
+    "diagnostics. It is NOT part of user-facing CodeClone analysis. It MUST "
+    "NOT affect reports, gates, baselines, memory facts, or edit "
+    "authorization. A slicer, not a trace export API: each call returns one "
+    "bounded section, never the full trace, numeric metrics only (no raw SQL "
+    "or payloads). Anti-inference guard: this describes the runtime of "
+    "CodeClone itself, not the user repository — high DB queries != repository "
+    "bad; high MCP payload != code quality low; hot semantic reindex != unsafe "
+    "change. Sections: summary, slow_operations, memory_pipeline_cost, "
+    "db_cost, agent_context, mcp_tool_matrix, correlated_chains, costly_noops, "
+    "pipeline. detail_level compact|normal (full downgrades to normal for "
+    "aggregate sections). Intended for CodeClone maintainers and development "
+    "agents; do not use it to make user-facing quality claims about a repo."
+)
+
 EVALUATE_GATES: Final = (
     "Evaluate CodeClone gate conditions against an existing MCP run without "
     "modifying baselines or exiting the process."
@@ -275,6 +292,7 @@ TITLE_CHECK_PATCH_CONTRACT: Final = "Check Patch Contract"
 TITLE_CREATE_REVIEW_RECEIPT: Final = "Create Review Receipt"
 TITLE_VALIDATE_REVIEW_CLAIMS: Final = "Validate Review Claims"
 TITLE_HELP: Final = "Help"
+TITLE_QUERY_PLATFORM_OBSERVABILITY: Final = "Query Platform Observability"
 TITLE_EVALUATE_GATES: Final = "Evaluate Gates"
 TITLE_GET_REPORT_SECTION: Final = "Get Report Section"
 TITLE_LIST_FINDINGS: Final = "List Findings"

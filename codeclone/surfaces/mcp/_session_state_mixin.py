@@ -1086,6 +1086,34 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             payload["warnings"] = list(spec.warnings)
         return payload
 
+    def query_platform_observability(
+        self,
+        *,
+        root: str,
+        section: str,
+        detail_level: str = "compact",
+        limit: int = 10,
+        window: str = "latest",
+        operation_id: str | None = None,
+        span_id: str | None = None,
+    ) -> dict[str, object]:
+        # Dev-only telemetry slicer; read-only, never touches analysis/memory/
+        # audit state. Local import keeps the MCP session import-light and avoids
+        # shadowing this method name.
+        from ...observability.query import (
+            query_platform_observability as _query_observability,
+        )
+
+        return _query_observability(
+            root=root,
+            section=section,
+            detail_level=detail_level,
+            limit=limit,
+            window=window,
+            operation_id=operation_id,
+            span_id=span_id,
+        )
+
     def generate_pr_summary(
         self,
         *,

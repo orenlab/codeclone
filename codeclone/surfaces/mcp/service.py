@@ -53,6 +53,11 @@ class _QueryServiceMixin:
     def get_help(self: _RunDictService, **params: object) -> dict[str, object]:
         return self._run_dict("get_help", **params)
 
+    def query_platform_observability(
+        self: _RunDictService, **params: object
+    ) -> dict[str, object]:
+        return self._run_dict("query_platform_observability", **params)
+
     def get_blast_radius(
         self: _RunDictService,
         **params: object,

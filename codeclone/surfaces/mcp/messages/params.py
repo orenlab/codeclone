@@ -546,3 +546,39 @@ ProposeMemoryParam = Annotated[
         ),
     ),
 ]
+
+ObservabilitySectionParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Telemetry section to project: summary | slow_operations | "
+            "memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | "
+            "correlated_chains | costly_noops | pipeline."
+        ),
+    ),
+]
+ObservabilityDetailParam = Annotated[
+    str,
+    Field(
+        description=(
+            "compact (bounded top rows) or normal (rows up to limit); full "
+            "downgrades to normal for aggregate sections."
+        ),
+    ),
+]
+ObservabilityLimitParam = Annotated[
+    int,
+    Field(description="Row cap per section; clamped to [1, 50], else 10."),
+]
+ObservabilityWindowParam = Annotated[
+    str,
+    Field(description="'latest' for the recent window, or a correlation_id."),
+]
+ObservabilityOperationIdParam = Annotated[
+    str | None,
+    Field(description="Reserved for detail sections; echoed in ignored_parameters."),
+]
+ObservabilitySpanIdParam = Annotated[
+    str | None,
+    Field(description="Reserved for detail sections; echoed in ignored_parameters."),
+]

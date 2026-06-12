@@ -140,6 +140,10 @@
       "signature": "(self, *, root: 'str', mode: 'str', record_id: 'str | None' = None, path: 'str | None' = None, symbol: 'str | None' = None, query: 'str | None' = None, scope: 'Sequence[str] | None' = None, filters: 'Mapping[str, object] | None' = None, max_results: 'int' = 20, include_stale: 'bool' = False, include_drafts: 'bool' = False) -> 'dict[str, object]'"
     },
     {
+      "name": "query_platform_observability",
+      "signature": "(self: '_RunDictService', **params: 'object') -> 'dict[str, object]'"
+    },
+    {
       "name": "read_resource",
       "signature": "(self, uri: 'str') -> 'str'"
     },

@@ -118,6 +118,12 @@ from .messages.params import (
     MinComplexityParam,
     MinSeverityParam,
     NoveltyParam,
+    ObservabilityDetailParam,
+    ObservabilityLimitParam,
+    ObservabilityOperationIdParam,
+    ObservabilitySectionParam,
+    ObservabilitySpanIdParam,
+    ObservabilityWindowParam,
     OffsetParam,
     OnConflictParam,
     OptionalIntentIdParam,
@@ -801,6 +807,31 @@ def build_mcp_server(
             path=path,
             offset=offset,
             limit=limit,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_QUERY_PLATFORM_OBSERVABILITY,
+        description=mcp_tools.QUERY_PLATFORM_OBSERVABILITY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def query_platform_observability(
+        root: RootParam,
+        section: ObservabilitySectionParam,
+        detail_level: ObservabilityDetailParam = "compact",
+        limit: ObservabilityLimitParam = 10,
+        window: ObservabilityWindowParam = "latest",
+        operation_id: ObservabilityOperationIdParam = None,
+        span_id: ObservabilitySpanIdParam = None,
+    ) -> dict[str, object]:
+        return service.query_platform_observability(
+            root=root,
+            section=section,
+            detail_level=detail_level,
+            limit=limit,
+            window=window,
+            operation_id=operation_id,
+            span_id=span_id,
         )
 
     @tool(

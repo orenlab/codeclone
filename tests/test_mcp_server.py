@@ -142,6 +142,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "analyze_changed_paths",
         "clear_session_runs",
         "help",
+        "query_platform_observability",
         "get_run_summary",
         "get_production_triage",
         "get_blast_radius",
@@ -192,6 +193,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "validate_review_claims",
                 "evaluate_gates",
                 "help",
+                "query_platform_observability",
                 "get_report_section",
                 "list_findings",
                 "get_finding",
@@ -242,6 +244,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "change_control, trust_boundaries, engineering_memory" in str(
         tools["help"].description
     )
+    obs_description = str(tools["query_platform_observability"].description)
+    assert "slicer, not a trace export API" in obs_description
+    assert "high DB queries != repository" in obs_description
     assert init_options.server_version == CODECLONE_VERSION
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description

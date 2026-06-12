@@ -9650,3 +9650,14 @@ def test_mcp_validate_review_claims_warns_on_health_regression_overclaim(
     assert any(
         item.get("pattern") == "health_regression_overclaim" for item in violations
     )
+
+
+def test_query_platform_observability_wires_dev_envelope(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    out = service.query_platform_observability(root=str(tmp_path), section="summary")
+    assert out["surface"] == "platform_observability"
+    assert out["user_facing"] is False
+    assert out["affects_edit_permission"] is False
+    # No store under a fresh root -> inert envelope, never an error.
+    assert out["status"] in {"disabled", "no_store"}
+    assert out["rows"] == []

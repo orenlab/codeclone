@@ -2661,6 +2661,73 @@
     }
   },
   {
+    "name": "query_platform_observability",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "section": {
+          "description": "Telemetry section to project: summary | slow_operations | memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | correlated_chains | costly_noops | pipeline.",
+          "title": "Section",
+          "type": "string"
+        },
+        "detail_level": {
+          "default": "compact",
+          "description": "compact (bounded top rows) or normal (rows up to limit); full downgrades to normal for aggregate sections.",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Row cap per section; clamped to [1, 50], else 10.",
+          "title": "Limit",
+          "type": "integer"
+        },
+        "window": {
+          "default": "latest",
+          "description": "'latest' for the recent window, or a correlation_id.",
+          "title": "Window",
+          "type": "string"
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "title": "Operation Id"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "title": "Span Id"
+        }
+      },
+      "required": [
+        "root",
+        "section"
+      ],
+      "title": "query_platform_observabilityArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "start_controlled_change",
     "input_schema": {
       "properties": {
