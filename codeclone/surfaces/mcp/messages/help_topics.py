@@ -525,6 +525,50 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "as privileged.",
         ),
     ),
+    "observability": MCPHelpTopicSpec(
+        summary=(
+            "query_platform_observability: read-only, dev-only diagnostics over "
+            "CodeClone's OWN runtime telemetry (Phase 29). A sectioned slicer, "
+            "not a trace export API — for building CodeClone itself, never a "
+            "user-facing repository signal."
+        ),
+        key_points=(
+            "Dev-only: never affects reports, gates, baselines, memory facts, "
+            "or edit authorization; numeric metrics only, no raw SQL/payloads.",
+            (
+                "Sections: summary | slow_operations | memory_pipeline_cost | "
+                "db_cost | agent_context | mcp_tool_matrix | correlated_chains "
+                "| costly_noops | pipeline. Start at summary, then follow "
+                "recommended_next_sections."
+            ),
+            (
+                "detail_level compact|normal; full is reserved for future "
+                "by-id detail sections and downgrades to normal here. limit "
+                "clamps to [1, 50]."
+            ),
+            (
+                "Anti-inference: this is CodeClone's runtime, not the user "
+                "repo. High DB queries != repository bad; high MCP payload != "
+                "code quality low; hot semantic reindex != unsafe change."
+            ),
+            (
+                "Absent/disabled telemetry returns an inert "
+                "status=disabled|no_store envelope, never an error; the "
+                "branded HTML cockpit stays the humans' everything-view."
+            ),
+        ),
+        recommended_tools=("query_platform_observability",),
+        doc_links=(MCP_INTERFACE_DOC_LINK,),
+        warnings=(
+            "Sections return status=disabled unless "
+            "CODECLONE_OBSERVABILITY_ENABLED was set for the producing process.",
+        ),
+        anti_patterns=(
+            "Using runtime telemetry to make user-facing quality claims about "
+            "a repository.",
+            "Reading db_queries or payload sizes as a code-quality verdict.",
+        ),
+    ),
     "engineering_memory": MCPHelpTopicSpec(
         summary=(
             "Ranked scope context before edits, FTS search, optional semantic "

@@ -1310,6 +1310,15 @@ def test_help_topic_specs_match_valid_help_topics() -> None:
     assert set(HELP_TOPIC_SPECS) == set(_VALID_HELP_TOPICS)
 
 
+def test_help_observability_topic_surfaces_query_tool() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    payload = service.get_help(topic="observability", detail="normal")
+    assert payload["topic"] == "observability"
+    assert "query_platform_observability" in str(payload["recommended_tools"])
+    text = str(payload["key_points"]).lower()
+    assert "anti-inference" in text and "dev-only" in text
+
+
 def test_mcp_service_help_validates_topic_and_detail() -> None:
     service = CodeCloneMCPService(history_limit=4)
 

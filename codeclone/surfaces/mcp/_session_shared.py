@@ -246,6 +246,7 @@ _VALID_HELP_TOPICS = frozenset(
         "changed_scope",
         "change_control",
         "trust_boundaries",
+        "observability",
         "engineering_memory",
         "verification_profiles",
     }

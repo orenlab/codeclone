@@ -108,7 +108,7 @@ HELP: Final = (
     "anti_patterns; normal adds warnings. Topics: workflow, analysis_profile, "
     "suppressions, baseline, coverage, latest_runs, review_state, "
     "changed_scope, change_control, trust_boundaries, engineering_memory, "
-    "verification_profiles."
+    "verification_profiles, observability."
 )
 
 QUERY_PLATFORM_OBSERVABILITY: Final = (
