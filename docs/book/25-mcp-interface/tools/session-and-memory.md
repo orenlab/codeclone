@@ -16,3 +16,5 @@ This tool is **development-only**. It reports numeric operation/span,
 database-cost, payload, agent-context, and pipeline diagnostics for CodeClone
 itself. It never contributes repository findings, gates, baselines, memory
 facts, or edit authorization, and it does not expose raw SQL or payload bodies.
+See the dedicated
+[Platform Observability tool contract](platform-observability.md).

@@ -253,4 +253,7 @@ See [Config and defaults](book/10-config-and-defaults.md).
 - [Architecture narrative](guide/explanation/how-it-works.md) — how the pipeline works
 - [Baseline contract](book/07-baseline.md) — trust model and schema
 - [MCP interface contract](book/25-mcp-interface/index.md) — tool surface and guarantees
+- [Engineering Memory recipes](guide/mcp/workflows/memory-recipes.md) — scoped context and governed drafts
+- [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md) — workflow evidence and recurring patterns
+- [Platform Observability](guide/observability/diagnostics.md) — diagnose CodeClone's own runtime
 - [Report contract](book/05-report.md) — canonical JSON schema

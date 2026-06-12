@@ -1796,7 +1796,7 @@
     "input_schema": {
       "properties": {
         "topic": {
-          "description": "workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, verification_profiles",
+          "description": "workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, verification_profiles, observability",
           "title": "Topic",
           "type": "string"
         },

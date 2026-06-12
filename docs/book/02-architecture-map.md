@@ -145,6 +145,8 @@ Refs:
 | Cache trust and fail-open behavior    | [08-cache.md](08-cache.md)                                                                                       |
 | Report schema and provenance          | [05-report.md](05-report.md), [06-html-render.md](06-html-render.md)                                             |
 | MCP agent surface                     | [25-mcp-interface/index.md](25-mcp-interface/index.md), [14-claim-guard.md](14-claim-guard.md)                               |
+| Engineering Memory evidence layers    | [13-engineering-memory/index.md](13-engineering-memory/index.md), [13-engineering-memory/trajectory-quality-and-passport.md](13-engineering-memory/trajectory-quality-and-passport.md), [13-engineering-memory/experience-layer.md](13-engineering-memory/experience-layer.md) |
+| Platform runtime diagnostics          | [26-platform-observability.md](26-platform-observability.md)                                                               |
 | Health score model                    | [15-health-score.md](15-health-score.md)                                                                         |
 | Metrics gates and metrics baseline    | [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)                                               |
 | Dead-code liveness policy             | [17-dead-code-contract.md](17-dead-code-contract.md)                                                             |

@@ -164,7 +164,8 @@ HelpTopicParam = Annotated[
         description=(
             "workflow, analysis_profile, suppressions, baseline, coverage, "
             "latest_runs, review_state, changed_scope, change_control, "
-            "trust_boundaries, engineering_memory, verification_profiles"
+            "trust_boundaries, engineering_memory, verification_profiles, "
+            "observability"
         )
     ),
 ]

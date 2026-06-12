@@ -63,7 +63,8 @@ enqueue projection rebuild when configured.
 | Keyword search | `query_engineering_memory(mode=search, query=..., root=<abs>, filters={match_mode: any\|all})` |
 | Semantic blend | same + `semantic=true` when semantic index is built |
 | One path | `query_engineering_memory(mode=for_path, path=..., root=<abs>)` |
-| Trajectory preview | `query_engineering_memory(mode=trajectory_get, intent_id=..., root=<abs>)` |
+| Trajectory detail | `query_engineering_memory(mode=trajectory_get, record_id=<trajectory-id>, root=<abs>)` |
+| Trajectory dashboard | `query_engineering_memory(mode=trajectory_dashboard, root=<abs>)` |
 | Playbook | `help(topic=engineering_memory)` |
 
 ## 6. Semantic index maintenance
@@ -75,5 +76,13 @@ manage_engineering_memory(action=rebuild_semantic_index, root=<abs>)
 ```
 
 Contract: [Semantic search](../../../book/13-engineering-memory/search-semantic.md).
+
+## 7. Trajectory and Experience evidence
+
+Scoped `get_relevant_memory` keeps governed records, trajectory precedents, and
+advisory Experiences in separate response lanes. Inspect the workflow in
+[Trajectories and Experiences](../../memory/trajectories-and-experiences.md);
+use `promote_experience` only when a recurring pattern deserves human review as
+a draft memory record.
 
 ---

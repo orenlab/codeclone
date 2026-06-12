@@ -52,7 +52,9 @@ patch against the declared boundary, and generates an auditable review receipt.
 | MCP usage (workflows, setup)       | [MCP guide](guide/mcp/README.md)                                        |
 | Change controller workflow         | [Structural Change Controller](book/12-structural-change-controller/index.md) |
 | Engineering Memory (scope context) | [Engineering Memory](book/13-engineering-memory/index.md)                     |
+| Trajectories and recurring patterns | [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md)   |
 | MCP interface contract             | [MCP interface](book/25-mcp-interface/index.md)                               |
+| Diagnose CodeClone runtime         | [Platform Observability](guide/observability/diagnostics.md)                  |
 
 ## IDE and Agent Clients
 

@@ -820,7 +820,7 @@ Core tables:
 | `memory_fts`             | FTS5 search index (schema 1.1+)                           |
 | `memory_revisions`       | Governance audit trail                                    |
 | `memory_ingestion_runs`  | Init/refresh run metadata                                 |
-| `memory_projection_jobs` | Coalesced trajectory/Experience/semantic jobs (schema 1.3+) |
+| `memory_projection_jobs` | Coalesced trajectory/semantic/Experience jobs (schema 1.3+) |
 
 Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection
 **`trajectory-v3`**):
@@ -839,7 +839,7 @@ Experience tables (schema **`1.6`**, derived from trajectory evidence):
 | Table                        | Role                                                       |
 |------------------------------|------------------------------------------------------------|
 | `memory_experiences`         | Advisory distilled patterns (`experience-v1`)              |
-| `memory_experience_facets`   | Agent/profile/intent diversity facets                       |
+| `memory_experience_facets`   | Agent-family facets today; profile/intent kinds are reserved |
 | `memory_experience_evidence` | Contributing trajectory ids and outcomes                    |
 
 Patch Trail JSON uses `PATCH_TRAIL_SCHEMA_VERSION` (currently **`1`**) in
@@ -866,6 +866,26 @@ Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
 - Row/projection semantics: [Engineering Memory](../13-engineering-memory/index.md);
   bump rules: [24-compatibility-and-versioning.md](../24-compatibility-and-versioning.md).
 
+## Platform Observability schema (`1.0`)
+
+Optional local SQLite database at
+`.codeclone/db/platform_observability.sqlite3`. It is disposable development
+telemetry, not report, baseline, cache, audit, or Engineering Memory truth.
+
+| Table | Role |
+|---|---|
+| `platform_meta` | Schema version metadata. |
+| `platform_operations` | Surface-level operation identity, correlation, duration, status, bounded payload sizes, and optional process metrics. |
+| `platform_spans` | Ordered subsystem timing, reason/dedupe metadata, counters, normalized SQL fingerprints, and optional process metrics. |
+
+Operation and span rows are persisted together in one transaction. Profile
+columns are nullable and populated only when profiling is enabled with
+`codeclone[perf]`. `db_fingerprints` is additively migrated for older local
+stores.
+
+See [Platform Observability](../26-platform-observability.md) for configuration,
+privacy, query, and anti-inference rules.
+
 ## Refs
 
 - `codeclone/baseline/clone_baseline.py`
@@ -874,6 +894,7 @@ Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
 - `codeclone/memory/schema_trajectory.py`
 - `codeclone/memory/schema_migrate.py`
 - `codeclone/memory/semantic/models.py`
+- `codeclone/observability/store/schema.py`
 - `codeclone/contracts/__init__.py` (`SEMANTIC_INDEX_FORMAT_VERSION`)
 - `codeclone/report/document/builder.py`
 - `codeclone/report/renderers/text.py`

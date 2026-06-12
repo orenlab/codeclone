@@ -28,6 +28,7 @@ Team or Enterprise options.
 | **Intent registry backend**         | SQLite (local)  | SQLite or managed                       | PostgreSQL (managed or self-hosted) |
 | **Audit trail retention**           | 30 days         | 90 days                                 | configurable                        |
 | **Audit payloads**                  | compact         | compact or full                         | compact or full                     |
+| **Platform Observability**          | local, opt-in   | local, opt-in                           | local, opt-in                       |
 | **Support**                         | community       | priority onboarding + premium           | dedicated + SLA                     |
 
 ---
@@ -103,6 +104,18 @@ transitions, workspace coordination) in a local SQLite database when
 
 Full payloads include complete tool request/response metadata; compact payloads
 include event type, timestamps, and identifiers only.
+
+## Platform Observability
+
+Platform Observability is a development diagnostic store, not controller audit
+retention and not repository quality history. It is disabled by default and
+local in every edition. Automatic retention pruning is not currently enforced;
+operators own the lifecycle of
+`.codeclone/db/platform_observability.sqlite3`.
+
+The observer stores no raw MCP/prompt bodies and never contributes findings,
+gates, baselines, memory facts, or edit authorization. See
+[Platform Observability](book/26-platform-observability.md).
 
 ## Why longer retention matters
 

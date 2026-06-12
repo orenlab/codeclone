@@ -69,6 +69,7 @@ Version bump rules:
   incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory/index.md](13-engineering-memory/index.md))
 - bump **Platform Observability schema** only for incompatible telemetry-store
   changes; it remains separate from reports, gates, baselines, and memory facts
+  (see [26-platform-observability.md](26-platform-observability.md))
 
 Operational compatibility rules:
 
@@ -124,6 +125,7 @@ Refs:
 | Metrics-baseline schema bump   | Dedicated metrics-baseline files must be regenerated           |
 | Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`           |
 | Semantic index format bump     | LanceDB sidecar invalidated; run `memory semantic rebuild`     |
+| Platform Observability bump    | Local diagnostic store reader/writer must migrate together     |
 
 ## Determinism / canonicalization
 

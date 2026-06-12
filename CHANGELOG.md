@@ -36,7 +36,7 @@ Platform Observability, and a fully reorganized documentation site.
   and complexity scoring, anomaly detection, agent profiles, and dashboard
   views.
 - **Experience Layer.** Deterministic `experience-v1` advisory patterns are
-  distilled from verified trajectories and surfaced through a separate
+  distilled from canonical trajectories across all outcomes and surfaced through a separate
   `experiences[]` retrieval lane with evidence and agent-diversity facets.
   Projection jobs can distill experiences automatically, while
   `promote_experience` converts a selected pattern into a human-governed
@@ -64,7 +64,9 @@ Platform Observability, and a fully reorganized documentation site.
   UX, QuickPick search, memory-for-active-file, search results webview. IDE
   governance channel (`--ide-governance-channel`) with session HMAC attestation.
   Workspace session stats and controller audit trail webviews (IDE-only MCP
-  tools; shared payloads in `codeclone/controller_insights/`).
+  tools; shared payloads in `codeclone/controller_insights/`). Trajectory
+  dashboard/detail views expose quality passports, anomalies, agent aggregates,
+  Patch Trail evidence, and a copyable dashboard brief.
 - **Platform Observability.** Opt-in, development-only operation/span telemetry
   correlates CLI, MCP, analysis, and projection-worker execution without
   affecting canonical reports, gates, baselines, memory facts, or edit
@@ -79,11 +81,12 @@ Platform Observability, and a fully reorganized documentation site.
   agent definition.
 - **CLI controller query modes:** `--blast-radius`, `--patch-verify`,
   `--session-stats`, `--audit`.
-- **Documentation reorganization.** Book chapters renumbered 00-25 in thematic
+- **Documentation reorganization.** Book chapters organized 00-26 in thematic
   groups. Four integration guide+contract splits merged into single pages
   (VS Code, Claude Desktop, Codex, Cursor). Six-tab nav (Home, Get started,
   Guides, Reference, Legal & plans, Maintainers). Doc-scope ownership comments
-  on all 45 documentation files.
+  across guide and contract leaves. Dedicated chapters cover trajectory quality,
+  the Experience Layer, and Platform Observability with cross-linked diagrams.
 - **Edition-specific feature tiers** (plans-and-retention): Engineering Memory
   limits and retention, semantic provider editions (fastembed/api/local_model),
   audit trail retention, and workspace intent registry limits per Open Source /

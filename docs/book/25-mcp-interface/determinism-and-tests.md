@@ -1,3 +1,10 @@
+<!-- doc-scope: MCP SECURITY, DETERMINISM, AND TEST LOCKS. -->
+# MCP Security, Determinism, and Tests
+
+Tool inventory and payload contracts:
+[MCP interface](index.md). Platform diagnostics:
+[Platform Observability tool](tools/platform-observability.md).
+
 ## Security model
 
 | Property          | Guarantee                                                                                                                                                        |
@@ -28,6 +35,8 @@
 - `tests/test_mcp_service.py`
 - `tests/test_mcp_server.py`
 - `tests/test_mcp_tool_schema_snapshot.py`
+- `tests/test_observability_mcp_registrar.py`
+- `tests/test_observability_query.py`
 
 ---
 
@@ -40,3 +49,4 @@
 - [11-cli.md](../11-cli.md) — CLI reference
 - [05-report.md](../05-report.md) — canonical report schema
 - [MCP deep dive](../../guide/mcp/README.md) — architecture, client setup, workflows, and prompt patterns
+- [Platform Observability](../26-platform-observability.md) — observer storage, privacy, and anti-inference contract

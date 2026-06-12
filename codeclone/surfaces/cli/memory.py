@@ -264,7 +264,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     trajectory_parser = subparsers.add_parser(
         "trajectory",
-        help="Trajectory projection storage (status / rebuild / list / show).",
+        help=(
+            "Trajectory projections and analytics "
+            "(status / rebuild / list / search / show / agents / "
+            "anomalies / dashboard / export)."
+        ),
     )
     trajectory_sub = trajectory_parser.add_subparsers(
         dest="trajectory_action",

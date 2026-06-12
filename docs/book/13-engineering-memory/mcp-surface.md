@@ -45,15 +45,16 @@ Mode router for inspection and search.
 | `status`     | —                                     | Store status (like CLI `status`)          |
 | `drafts`     | optional `limit`                      | Draft inbox (compact by default)          |
 | `trajectory_status` | —                              | Trajectory projection run metadata        |
-| `trajectory_search` | `query`; optional `intent_id`  | Search stored trajectories                |
-| `trajectory_get`    | `record_id` (trajectory id)    | One trajectory + steps (compact default)  |
+| `trajectory_search` | `query`; optional `filters.include_routine` | Search stored trajectories |
+| `trajectory_get`    | `record_id` (trajectory id)    | One trajectory + steps (always full)      |
 | `trajectory_anomalies` | optional `filters.include_routine` | Detected trajectory contract anomalies |
-| `trajectory_agents`    | optional `filters.include_routine` | Aggregate quality/outcomes by agent family |
+| `trajectory_agents`    | optional `filters.include_routine` | Aggregate quality/outcomes by exact agent label |
 | `trajectory_dashboard` | optional `filters.include_routine` | Combined status, agent, and anomaly view |
 
 List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
 to **compact** payloads: statement preview, `statement_length`, no `payload`.
 Use `mode=get` or `detail_level=full` for complete statements and payload.
+`trajectory_get` is also always full regardless of requested detail level.
 
 Scoped retrieval keeps four typed lanes:
 
@@ -89,7 +90,7 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 | `refresh_from_run`       | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
 | `rebuild_semantic_index` | (none)                                              | Rebuild LanceDB sidecar when `memory.semantic.enabled`     |
 | `rebuild_trajectories`   | (none)                                              | Rebuild trajectory projections from audit event core       |
-| `enqueue_projection_rebuild` | (none)                                              | Queue trajectory + Experience + semantic projection job    |
+| `enqueue_projection_rebuild` | (none)                                              | Queue trajectory + semantic + Experience projection job    |
 | `projection_rebuild_status` | (none)                                           | Latest projection job status                               |
 | `run_projection_jobs_once` | (none)                                           | Run one queued projection job inline                       |
 | `record_candidate`       | `record_type`, `statement`, **`subject_path`**      | Creates **draft** record                                   |
@@ -117,7 +118,7 @@ On **accepted** or **accepted_with_external_changes** finish:
 - returns `memory_candidates`, `memory_staleness`, `memory_coverage_delta`
 - when `memory.projection_rebuild_policy` is not `off` and the environment is
   not CI, may enqueue a projection rebuild job (`projection_rebuild` in the
-  finish payload — trajectory, Experience, and semantic projections)
+  finish payload — trajectory, semantic, and Experience projections)
 
 This is the preferred post-edit memory update path when using the workflow
 tools.
@@ -125,6 +126,10 @@ tools.
 ### Help topic
 
 `help(topic="engineering_memory")` — compact agent playbook summary.
+
+Trajectory analytics and Experience semantics are specified in
+[Trajectory quality and passport](trajectory-quality-and-passport.md) and
+[Experience Layer](experience-layer.md).
 
 Refs:
 

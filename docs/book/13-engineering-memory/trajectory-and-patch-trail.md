@@ -153,10 +153,9 @@ verification status). With `detail_level=full`, the top-ranked trajectory also
 surfaces **`patch_trail_summary`** at the response root. Compact retrieval omits
 that root duplicate; the summary remains on the trajectory preview.
 
-`query_engineering_memory(mode=trajectory_get)` returns **`patch_trail`** on the
-trajectory payload when persisted for that workflow. Full detail also includes
-the explainable **`quality_contract`**; compact payloads retain headline
-`quality_score`, `complexity_score`, and anomaly count.
+`query_engineering_memory(mode=trajectory_get)` returns **`patch_trail`** when
+persisted and always uses full detail, including **`quality_contract`**.
+List/search previews retain headline quality, complexity, and anomaly counts.
 
 Trajectory rebuild (`memory trajectory rebuild` / MCP
 `manage_engineering_memory(action=rebuild_trajectories)`) synthesizes Patch Trail
@@ -177,7 +176,7 @@ Scoped ranking adds a small boost when query scope paths intersect
 | `trajectory_search` | query text    | Requires `query`; excludes `run:*` routine by default |
 | `trajectory_get`    | trajectory id | `record_id` = trajectory id                           |
 | `trajectory_anomalies` | project    | Contract anomalies, optionally including routine runs |
-| `trajectory_agents` | project       | Outcome and quality aggregates by agent family        |
+| `trajectory_agents` | project       | Outcome and quality aggregates by exact agent label   |
 | `trajectory_dashboard` | project    | Combined status, agent, and anomaly payload           |
 
 Filter: `filters.include_routine=true` on `trajectory_search` includes single-event
@@ -186,8 +185,9 @@ Filter: `filters.include_routine=true` on `trajectory_search` includes single-ev
 Evidence kind **`trajectory`** links memory records to trajectories; human approve
 still required for agent drafts.
 
-Label taxonomy and **`step_label`** display names:
-[Trajectory labels](trajectory-labels.md).
+See [Trajectory labels](trajectory-labels.md) for labels and
+[Trajectory quality and passport](trajectory-quality-and-passport.md) for
+scoring, anomalies, dashboards, and IDE passport semantics.
 
 ### Enterprise boundary (export)
 

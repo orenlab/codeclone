@@ -127,3 +127,7 @@ graph LR
 
 The surface is intentionally triage-first: analyze → summarize/triage →
 drill into one finding or one hotspot family.
+
+Tool families and exact parameters are split under
+[Tools](tools/analysis.md), including the
+[Platform Observability slicer](tools/platform-observability.md).

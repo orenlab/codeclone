@@ -138,6 +138,11 @@ These commands require workspace trust and an active MCP connection.
 - **Open Memory Search Panel** / **Refresh Memory Search** — results webview.
 - **Configure Memory Search** — workspace wizard for semantic, drafts, stale, and
   result limit (see **Engineering Memory search** settings below).
+- **Show Trajectory Dashboard** — projection health, quality/outcome aggregates,
+  anomalies, and recent trajectories.
+- **Show Trajectory Detail** — full passport with quality/complexity
+  calculations, Patch Trail, contract gates, incidents, steps, and evidence.
+- **Copy Trajectory Dashboard Brief** — Markdown summary for review notes.
 
 Server-side semantic still requires `[tool.codeclone.memory.semantic] enabled`,
 the semantic sidecar, and a successful rebuild (`manage_engineering_memory`
@@ -147,6 +152,8 @@ rebuild` for CLI/CI). Install
 semantic-quality recall; `codeclone[semantic-lancedb]` alone can run only the
 deterministic diagnostic provider. See
 [Engineering Memory](../../../book/13-engineering-memory/index.md).
+Trajectory semantics:
+[Trajectory quality and passport](../../../book/13-engineering-memory/trajectory-quality-and-passport.md).
 
 
 ## Open Triage

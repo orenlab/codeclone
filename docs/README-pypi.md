@@ -46,7 +46,9 @@ codeclone . --ci               # CI mode
 - **Quality metrics** — complexity, coupling, cohesion, dead code, health score
 - **Baseline governance** — separates legacy debt from new regressions; CI fails only on what changed
 - **Change controller** — intent declaration, blast radius, patch contract, review receipt for AI agents
+- **Engineering Memory** — governed records, trajectory passports, and advisory Experiences
 - **MCP server** — 32-tool default interface for IDE and agent clients
+- **Platform Observability** — opt-in local diagnostics for CodeClone's own runtime
 - **Reports** — HTML, JSON, Markdown, SARIF, text from one canonical payload
 
 ## MCP Server
@@ -58,9 +60,19 @@ codeclone-mcp --transport stdio
 
 Native clients: VS Code extension, Claude Desktop bundle, Codex plugin.
 
+Engineering Memory and runtime diagnostics:
+
+```bash
+codeclone memory trajectory dashboard --root .
+CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
+codeclone observability trace --root . --html /tmp/codeclone-observer.html
+```
+
 ## Links
 
 - Documentation: <https://orenlab.github.io/codeclone/>
+- Engineering Memory: <https://orenlab.github.io/codeclone/book/13-engineering-memory/>
+- Platform Observability: <https://orenlab.github.io/codeclone/book/26-platform-observability/>
 - Source: <https://github.com/orenlab/codeclone>
 - Issues: <https://github.com/orenlab/codeclone/issues>
 

@@ -25,6 +25,8 @@ artifacts.
   impact for the active file; `Copy Blast Radius Brief` puts a Markdown summary on the clipboard
 - **Session & audit insights** — `Show Session Stats` and `Show Controller Audit Trail` mirror
   CLI `--session-stats` and `--audit` in read-only webviews (IDE-only MCP tools, not exposed to agents)
+- **Trajectory passports** — dashboard and detail views expose quality,
+  complexity, anomalies, Patch Trail evidence, and agent aggregates
 - **Coverage Join** — integrates `coverage.xml` to surface untested hotspots when available
 - **Source-first navigation** — `Reveal Source` opens the exact location; `Next / Previous Hotspot`
   steps through active targets in the editor
@@ -151,9 +153,17 @@ is separate so the tree stays focused on human review work:
   (mode=for_path)
 - **Open Memory Search Panel** — read-only results webview (CSP, no scripts,
   allowlisted `command:` links to open a record)
+- **Show Trajectory Dashboard** — status, agent/outcome aggregates, anomalies,
+  and recent trajectories
+- **Show Trajectory Detail** — quality passport, complexity factors, Patch
+  Trail, contract gates, incidents, steps, and evidence
+- **Copy Trajectory Dashboard Brief** — Markdown summary for review notes
 
 Use **Configure Memory Search** to adjust semantic recall, drafts/stale filters,
 and result limits per workspace.
+
+Trajectory views are read-only projections from
+`query_engineering_memory`; they do not create IDE-local workflow truth.
 
 ---
 

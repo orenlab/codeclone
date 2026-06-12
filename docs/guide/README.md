@@ -18,6 +18,8 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 | Connect an AI agent via MCP | [MCP overview](mcp/README.md) |
 | Govern agent edits | [Change control overview](change-control/overview.md) |
 | Scope context before edits | [Engineering Memory overview](memory/overview.md) |
+| Inspect trajectory history and patterns | [Trajectories and Experiences](memory/trajectories-and-experiences.md) |
+| Diagnose CodeClone runtime cost | [Platform Observability](observability/diagnostics.md) |
 
 ## MCP workflows
 

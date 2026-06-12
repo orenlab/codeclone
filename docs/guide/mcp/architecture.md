@@ -36,7 +36,7 @@ graph TD
         WIR["Workspace Intent Registry<br/>.codeclone/intents/ or intents.sqlite3"]
         MEM["Engineering Memory SQLite<br/>.codeclone/memory/"]
         AUD["Audit trail (optional)<br/>.codeclone/db/"]
-        OBS["Platform Observability (dev-only)<br/>.codeclone/db/"]
+        OBS["Platform Observability (dev-only)<br/>platform_observability.sqlite3"]
     end
 
     MCPSession -->|" coordination + drafts "| Disk

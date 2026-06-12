@@ -34,6 +34,10 @@ nav = [
         ] },
         { "Engineering Memory" = [
             { "Overview" = "guide/memory/overview.md" },
+            { "Trajectories & Experiences" = "guide/memory/trajectories-and-experiences.md" },
+        ] },
+        { "Diagnostics" = [
+            { "Platform Observability" = "guide/observability/diagnostics.md" },
         ] },
         { "MCP" = [
             { "Overview" = "guide/mcp/README.md" },
@@ -104,7 +108,9 @@ nav = [
             { "FTS search" = "book/13-engineering-memory/search-fts.md" },
             { "Semantic search" = "book/13-engineering-memory/search-semantic.md" },
             { "Trajectory" = "book/13-engineering-memory/trajectory-and-patch-trail.md" },
+            { "Trajectory quality & passport" = "book/13-engineering-memory/trajectory-quality-and-passport.md" },
             { "Trajectory labels" = "book/13-engineering-memory/trajectory-labels.md" },
+            { "Experience Layer" = "book/13-engineering-memory/experience-layer.md" },
             { "Projection jobs" = "book/13-engineering-memory/projection-jobs.md" },
             { "Scope & invariants" = "book/13-engineering-memory/scope-and-invariants.md" },
         ] },
@@ -121,6 +127,7 @@ nav = [
             { "Determinism" = "book/22-determinism.md" },
             { "Testing as Spec" = "book/23-testing-as-spec.md" },
             { "Compatibility and Versioning" = "book/24-compatibility-and-versioning.md" },
+            { "Platform Observability" = "book/26-platform-observability.md" },
         ] },
         { "MCP interface" = [
             { "Overview" = "book/25-mcp-interface/index.md" },
@@ -131,6 +138,7 @@ nav = [
                 { "Workflow" = "book/25-mcp-interface/tools/workflow.md" },
                 { "Atomic change control" = "book/25-mcp-interface/tools/atomic-change-control.md" },
                 { "Session & memory" = "book/25-mcp-interface/tools/session-and-memory.md" },
+                { "Platform observability" = "book/25-mcp-interface/tools/platform-observability.md" },
                 { "IDE governance" = "book/25-mcp-interface/tools/ide-governance.md" },
             ] },
             { "Resources" = "book/25-mcp-interface/resources.md" },

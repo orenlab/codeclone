@@ -68,12 +68,14 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [22-determinism.md](22-determinism.md) — determinism policy
 - [23-testing-as-spec.md](23-testing-as-spec.md) — tests as specification
 - [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md) — compatibility and versioning rules
+- [26-platform-observability.md](26-platform-observability.md) — local diagnostics for CodeClone's own runtime
 
 ### MCP interface
 
 - [25-mcp-interface/index.md](25-mcp-interface/index.md) — MCP interface contract
 - [25-mcp-interface/tools/workflow.md](25-mcp-interface/tools/workflow.md) — workflow tools
 - [25-mcp-interface/resources.md](25-mcp-interface/resources.md) — resource URIs
+- [25-mcp-interface/tools/platform-observability.md](25-mcp-interface/tools/platform-observability.md) — bounded diagnostics tool
 
 ### Appendix
 

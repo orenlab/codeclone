@@ -36,11 +36,15 @@ Security-relevant input classes:
 - HTML escapes text and attribute contexts before embedding.
 - MCP is read-only with respect to source files, baselines, analysis cache
   (`cache.json`), and canonical report artifacts.
-- Allowed repo-local writes are limited to ephemeral controller coordination
-  (workspace intent registry: file backend under `.codeclone/intents/`,
-  or SQLite under `.codeclone/db/intents.sqlite3` when configured) and
-  optional audit trail (`.codeclone/db/audit.sqlite3` when
-  `audit_enabled=true`).
+- Allowed repo-local writes are explicit and isolated: ephemeral controller
+  coordination (file backend under `.codeclone/intents/` or SQLite under
+  `.codeclone/db/intents.sqlite3`), optional controller audit
+  (`.codeclone/db/audit.sqlite3`), Engineering Memory/projection state under
+  `.codeclone/memory/`, and opt-in Platform Observability
+  (`.codeclone/db/platform_observability.sqlite3`).
+- Platform Observability stores bounded metadata and literal-free SQL
+  fingerprints, never raw payload bodies, and cannot affect analysis truth,
+  gates, baselines, memory facts, or edit authorization.
 - Session-local review markers and in-memory run history do not survive
   process restart.
 - Five session/coordination tools are marked `destructiveHint` in MCP metadata
@@ -142,6 +146,16 @@ Refs:
 - `codeclone/surfaces/mcp/server.py`
 - `tests/test_mcp_http_auth.py`
 - `tests/test_mcp_server.py::test_mcp_server_main_rejects_non_loopback_host_without_opt_in`
+
+### Platform Observability
+
+The observer is an optional local diagnostics boundary. Its CLI and MCP readers
+open the telemetry store read-only; the instrumentation writer commits one
+completed operation and its spans atomically. No network exporter is provided.
+
+The MCP slicer is bounded and declares that its output is CodeClone-development
+telemetry, not repository quality evidence. See
+[26-platform-observability.md](26-platform-observability.md).
 
 Refs:
 

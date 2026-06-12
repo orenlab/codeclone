@@ -35,6 +35,23 @@ _CONTRACT_SPLIT_GLOBS = (
     "book/25-mcp-interface/**/*.md",
 )
 
+_COMPLEX_SURFACE_PAGES = (
+    "book/26-platform-observability.md",
+    "book/13-engineering-memory/experience-layer.md",
+    "book/13-engineering-memory/trajectory-quality-and-passport.md",
+    "guide/observability/diagnostics.md",
+    "guide/memory/trajectories-and-experiences.md",
+)
+
+_REQUIRED_NAV_PAGES = (
+    "book/26-platform-observability.md",
+    "book/13-engineering-memory/experience-layer.md",
+    "book/13-engineering-memory/trajectory-quality-and-passport.md",
+    "book/25-mcp-interface/tools/platform-observability.md",
+    "guide/observability/diagnostics.md",
+    "guide/memory/trajectories-and-experiences.md",
+)
+
 
 def _line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
@@ -85,3 +102,45 @@ def test_change_control_workflow_has_single_mermaid_diagram() -> None:
     text = path.read_text(encoding="utf-8")
     count = text.count("```mermaid")
     assert count == 1, f"expected one mermaid block, found {count}"
+
+
+def test_complex_surfaces_have_visual_contracts() -> None:
+    missing = [
+        rel
+        for rel in _COMPLEX_SURFACE_PAGES
+        if "```mermaid" not in (_DOCS / rel).read_text(encoding="utf-8")
+    ]
+    assert missing == [], f"complex pages without Mermaid diagrams: {missing}"
+
+
+def test_new_surfaces_are_reachable_from_navigation() -> None:
+    nav = (_REPO_ROOT / "zensical.toml").read_text(encoding="utf-8")
+    missing = [rel for rel in _REQUIRED_NAV_PAGES if rel not in nav]
+    assert missing == [], f"pages missing from navigation: {missing}"
+
+
+def test_observability_and_memory_guides_cross_link_contracts() -> None:
+    pairs = (
+        (
+            "guide/observability/diagnostics.md",
+            "../../book/26-platform-observability.md",
+        ),
+        (
+            "guide/memory/trajectories-and-experiences.md",
+            "../../book/13-engineering-memory/experience-layer.md",
+        ),
+        (
+            "book/26-platform-observability.md",
+            "../guide/observability/diagnostics.md",
+        ),
+        (
+            "book/13-engineering-memory/experience-layer.md",
+            "../../guide/memory/trajectories-and-experiences.md",
+        ),
+    )
+    missing = [
+        f"{rel} -> {target}"
+        for rel, target in pairs
+        if target not in (_DOCS / rel).read_text(encoding="utf-8")
+    ]
+    assert missing == [], f"missing required cross-links: {missing}"

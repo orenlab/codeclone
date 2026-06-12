@@ -37,8 +37,8 @@ controlled edits.
 | 25    | Disabled-by-default local JSONL export profiles               | CLI `memory trajectory export --profile ... --out ...`                                   |
 | 26    | Patch Trail persistence + scoped retrieval                    | `memory_trajectory_patch_trails`; `patch_trail_summary` on scoped retrieval              |
 | 28    | Incremental projection jobs                                   | Watermarked trajectory rebuild, semantic hash-skip, coalesced worker                     |
-| RFC   | Trajectory quality and passport analytics                     | Quality/complexity contract, anomalies, agents, dashboard                                |
-| RFC   | Experience Layer                                               | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
+| Live  | Trajectory quality and passport analytics                     | Quality/complexity contract, anomalies, agents, dashboard                                |
+| Live  | Experience Layer                                               | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.6`**).
@@ -65,6 +65,8 @@ graph TB
         SUB[memory_subjects]
         EV[memory_evidence]
         FTS[memory_fts FTS5]
+        TRAJ[trajectory projection]
+        EXP[Experience projection]
     end
 
     subgraph Surfaces["Read / write surfaces"]
@@ -78,6 +80,7 @@ graph TB
     CT -->|init / refresh ingest| MemoryStore
     GIT -->|init / refresh ingest| MemoryStore
     RC -->|propose_from_receipt / finish hook| MemoryStore
+    RC --> TRAJ --> EXP
     MemoryStore --> CLI
     MemoryStore --> MCP_R
     MCP_W -->|draft only| MemoryStore
@@ -110,6 +113,14 @@ Refs:
 - `codeclone/memory/ingest/runner.py:run_memory_init`
 - `codeclone/memory/retrieval/service.py:query_engineering_memory`
 - `codeclone/surfaces/mcp/_session_memory_mixin.py`
+
+Normative detail:
+
+- [Trajectory and Patch Trail](trajectory-and-patch-trail.md)
+- [Trajectory quality and passport](trajectory-quality-and-passport.md)
+- [Experience Layer](experience-layer.md)
+- [Projection jobs](projection-jobs.md)
+- [Practical trajectory and Experience guide](../../guide/memory/trajectories-and-experiences.md)
 
 ---
 

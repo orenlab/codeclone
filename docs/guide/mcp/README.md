@@ -6,7 +6,8 @@ Use CodeClone through `codeclone-mcp` — same pipeline and report as the CLI.
 **Analysis truth is read-only:** MCP never mutates source, baselines, analysis
 cache, or canonical reports. It **may** write session-local coordination
 (workspace intents), Engineering Memory **drafts**, and optional audit rows when
-enabled.
+enabled. Opt-in Platform Observability writes separate local development
+telemetry and never becomes repository truth.
 
 Install: [Getting started — MCP extra](../../getting-started.md#install).
 
@@ -41,3 +42,4 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 | Payload field cheat sheet | [Payload cheatsheet](payload-cheatsheet.md) |
 | Change control contract | [Structural Change Controller](../../book/12-structural-change-controller/index.md) |
 | Engineering Memory contract | [Engineering Memory](../../book/13-engineering-memory/index.md) |
+| Runtime diagnostics | [Platform Observability](../observability/diagnostics.md) |

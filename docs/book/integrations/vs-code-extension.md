@@ -117,6 +117,9 @@ canonical report truth.
   and is not older than the current run.
 - **Session-local state**: reviewed markers shape review UX but never leak
   into repository truth.
+- **Trajectory evidence**: dashboard/detail commands render MCP trajectory
+  status, anomalies, exact agent-label aggregates, quality passports, and
+  Patch Trail evidence without inventing IDE-local scoring.
 - **First-run clarity**: onboarding leads to `Analyze Workspace`, not
   transport setup.
 - **Restricted Mode honesty**: explain requirements without pretending
@@ -145,3 +148,5 @@ CodeClone CLI, canonical report JSON, and CodeClone MCP.
 For the underlying interface contract, see
 [MCP usage guide](../../guide/mcp/README.md) and
 [MCP interface contract](../25-mcp-interface/index.md).
+Trajectory scoring is defined by
+[Trajectory quality and passport](../13-engineering-memory/trajectory-quality-and-passport.md).

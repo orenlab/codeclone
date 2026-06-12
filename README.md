@@ -48,7 +48,7 @@ reviewers, CI pipelines, and pre-merge gates.
 - **Change control before the diff** — declare intent, inspect blast radius, bound the edit, verify the patch
   contract, validate review claims, leave an auditable receipt.
 - **Engineering Memory** — typed, evidence-linked project facts (contracts, risks, decisions, prior changes);
-  durable agent context, human-governed promotion, never LLM-as-truth.
+  durable agent context, trajectory passports, recurring Experiences, human-governed promotion, never LLM-as-truth.
 - **One canonical report, many surfaces** — duplication, structural drift, dead code, complexity / coupling /
   cohesion, health — the same deterministic facts everywhere, no second engine.
 - **Baseline-aware CI** — gates fail only on what got *worse*; accepted legacy debt stays separate from real
@@ -208,13 +208,32 @@ and governed drafts. After `start_controlled_change`, agents read ranked scope c
 memory is **human-governed** — agent drafts never become truth automatically. The store auto-bootstraps from the
 latest MCP run (`mcp_sync_policy=bootstrap_if_missing`); `codeclone memory init` remains for CI/offline.
 
+Audit-derived trajectories preserve workflow and Patch Trail evidence. Quality
+passports, anomaly and agent dashboards, and deterministic Experiences make
+recurring project patterns visible without promoting them to authority.
+
 ```bash
 codeclone memory init --root .
 codeclone memory search "baseline schema" --match all
 codeclone memory approve mem-…   # human-only governance
 ```
 
-[Engineering Memory docs](https://orenlab.github.io/codeclone/book/13-engineering-memory/)
+[Engineering Memory docs](https://orenlab.github.io/codeclone/book/13-engineering-memory/) &middot;
+[Trajectories and Experiences](https://orenlab.github.io/codeclone/guide/memory/trajectories-and-experiences/)
+
+### Platform Observability
+
+Opt-in local diagnostics trace CodeClone's own CLI, MCP, database, analysis,
+and projection-worker costs. The observer is disabled by default, stores no raw
+payload bodies, and never influences findings, gates, baselines, memory facts,
+or edit authorization.
+
+```bash
+CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
+codeclone observability trace --root . --html /tmp/codeclone-observer.html
+```
+
+[Platform Observability](https://orenlab.github.io/codeclone/book/26-platform-observability/)
 
 ### Native agent and IDE clients
 
@@ -341,6 +360,7 @@ Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.githu
 [MCP guide](https://orenlab.github.io/codeclone/guide/mcp/) &middot;
 [Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/) &middot;
 [Engineering Memory](https://orenlab.github.io/codeclone/book/13-engineering-memory/) &middot;
+[Platform Observability](https://orenlab.github.io/codeclone/book/26-platform-observability/) &middot;
 [CLI](https://orenlab.github.io/codeclone/book/11-cli/) &middot;
 [Benchmarking](https://orenlab.github.io/codeclone/book/20-benchmarking/)
 
