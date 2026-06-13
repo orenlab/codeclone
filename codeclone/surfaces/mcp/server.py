@@ -28,6 +28,7 @@ from ...observability import (
     operation,
     payload_capture_enabled,
     shutdown,
+    span,
 )
 from .auth import (
     MCP_AUTH_TOKEN_ENV,
@@ -216,7 +217,12 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
                 op.set_request(
                     request_bytes=request_bytes, request_tokens=request_tokens
                 )
-            result = func(*args, **kwargs)
+            # Open a root span around the handler: record_db_query attributes
+            # SQL to the active span, not the operation. Without this span every
+            # DB-touching MCP tool (start/finish/get_relevant_memory/manage_*)
+            # records zero db_queries — the operation has no span to hold them.
+            with span(name=f"mcp.{tool_name}"):
+                result = func(*args, **kwargs)
             if payload_capture_enabled() and isinstance(result, Mapping):
                 response_bytes, response_tokens = measure_payload(result)
                 op.set_response(
