@@ -1,140 +1,117 @@
-# Changelog
+Changelog
 
-## [2.1.0a1] - Unreleased
+[2.1.0a1] - Unreleased
 
-`2.1.0a1` opens the v2.1 alpha line with the structural change controller,
-Engineering Memory with trajectory and experience layers, semantic retrieval,
-Platform Observability, and a fully reorganized documentation site.
+2.1.0a1 opens the CodeClone 2.1 alpha line with intent-first structural
+change control, Engineering Memory, trajectory and experience layers, semantic
+retrieval, Platform Observability, native agent integrations, and a reorganized
+documentation site.
 
-### Added
+Added
 
-- **Structural Change Controller.** `start_controlled_change` /
-  `finish_controlled_change` reduce the agent edit cycle from 7-11 MCP calls
-  to 3-4. Blast radius projection (`get_blast_radius`), patch contract
-  verification with profile-aware depth (`check_patch_contract`), citation-based
-  claim guard (`validate_review_claims`), and deterministic review receipts
-  (`create_review_receipt`). 32 default agent-visible MCP tools.
-- **Change intent lifecycle.** `manage_change_intent`: declare, check, clear,
-  queue, promote, recover. Renewable ownership leases with
-  own/recoverable/foreign-active classification. Optional SQLite backend with
-  configurable retention (default 7 days, max 14 in open source).
-- **Engineering Memory.** SQLite store under `.codeclone/memory/` with typed,
-  evidence-linked repository facts (contracts, decisions, risks, git
-  provenance). Scoped retrieval via `get_relevant_memory` and
-  `query_engineering_memory`, FTS5 search, refresh-time staleness engine,
-  retention-driven vacuum, and MCP auto-sync
-  (`mcp_sync_policy=bootstrap_if_missing`). Agent-side draft recording with
-  human-governed promotion (VS Code Memory view or CLI
-  `codeclone memory approve`). Scope coverage metrics and
-  `finish_controlled_change(propose_memory=true)` for draft candidates on
-  accepted patches.
-- **Trajectory memory.** Deterministic audit-derived workflow
-  timelines in Engineering Memory SQLite (`memory trajectory rebuild`),
-  scoped MCP/CLI retrieval (`trajectories[]`, `trajectory_*` query modes),
-  optional semantic source, and disabled-by-default local JSONL export profiles.
-  The `trajectory-v3` projection adds trajectory passports, contract-quality
-  and complexity scoring, anomaly detection, agent profiles, and dashboard
-  views.
-- **Experience Layer.** Deterministic `experience-v1` advisory patterns are
-  distilled from canonical trajectories across all outcomes and surfaced through a separate
-  `experiences[]` retrieval lane with evidence and agent-diversity facets.
-  Projection jobs can distill experiences automatically, while
-  `promote_experience` converts a selected pattern into a human-governed
-  Engineering Memory draft rather than treating it as authority.
-- **Semantic retrieval.** Opt-in `[tool.codeclone.memory.semantic]` with
-  LanceDB sidecar. Local `fastembed` provider (`BAAI/bge-small-en-v1.5`) via
-  `codeclone[semantic-local]`; `api` provider reserved for Team+; `local_model`
-  reserved for Enterprise. CLI `codeclone memory semantic status|rebuild|search`,
-  MCP `query_engineering_memory(mode=search, semantic=true)`.
-- **Patch Trail.** Deterministic scope narrative at
-  `finish_controlled_change`: declared/changed/untouched-in-declared,
-  boundary-held paths, verification outcome, and audit anchors
-  (`patch_trail.computed`). Rebuild persists Patch Trail from audit into
-  Engineering Memory schema **1.6** and the current **`trajectory-v3`**
-  projection; scoped retrieval exposes `patch_trail_summary`. MCP finish accepts
-  optional `patch_trail_detail`.
-- **Trajectory export enrichment (schema 2).** JSONL export rows now populate
-  `memory_precedents`, `trajectory_precedents`, `citations`, and
-  `patch_trail_summary`; export deduplicates superseded projection versions;
-  rebuild repoints trajectory memory evidence and deletes stale workflow rows.
-  Claim-validation event core stores bounded `validated_citations`; projection
-  supplements legacy path facts from stored audit payloads when event core lacks
-  them.
-- **IDE surfaces.** VS Code extension Memory view: draft inbox, approve/reject
-  UX, QuickPick search, memory-for-active-file, search results webview. IDE
-  governance channel (`--ide-governance-channel`) with session HMAC attestation.
-  Workspace session stats and controller audit trail webviews (IDE-only MCP
-  tools; shared payloads in `codeclone/controller_insights/`). Trajectory
-  dashboard/detail views expose quality passports, anomalies, agent aggregates,
-  Patch Trail evidence, and a copyable dashboard brief.
-- **Platform Observability.** Opt-in, development-only operation/span telemetry
-  correlates CLI, MCP, analysis, and projection-worker execution without
-  affecting canonical reports, gates, baselines, memory facts, or edit
-  authorization. The local SQLite trace captures RSS/CPU, MCP payload sizes,
-  database query shapes, pipeline costs, agent context pressure, and avoidable
-  work. CLI JSON/HTML trace views provide a diagnostic cockpit and waterfall;
-  MCP exposes the bounded `query_platform_observability` slicer.
-- **Cursor plugin** (`plugins/cursor-codeclone/`): six skills, three rules
-  (including always-on `change-control-gate`), fail-closed `preToolUse` hook
-  via `codeclone.workspace_intent`, project hook installer with
-  `enforce_scope` (`python` | `repo`), and a `codeclone-structural-reviewer`
-  agent definition.
-- **CLI controller query modes:** `--blast-radius`, `--patch-verify`,
-  `--session-stats`, `--audit`.
-- **Documentation reorganization.** Book chapters organized 00-26 in thematic
-  groups. Four integration guide+contract splits merged into single pages
-  (VS Code, Claude Desktop, Codex, Cursor). Six-tab nav (Home, Get started,
-  Guides, Reference, Legal & plans, Maintainers). Doc-scope ownership comments
-  across guide and contract leaves. Dedicated chapters cover trajectory quality,
-  the Experience Layer, and Platform Observability with cross-linked diagrams.
-- **Edition-specific feature tiers** (plans-and-retention): Engineering Memory
-  limits and retention, semantic provider editions (fastembed/api/local_model),
-  audit trail retention, and workspace intent registry limits per Open Source /
-  Team / Enterprise.
-- Workspace hygiene tips when `.codeclone/` is not gitignored.
-- MCP tool JSON schemas with per-parameter descriptions; `next_tool` hint in
-  analysis responses.
-- Audit trail events for intent lifecycle and token budget tracking.
-- Admonition indentation lint (`scripts/lint_admonitions.py`) covered by the
-  docs build contract test.
+* Structural Change Controller. The new
+  start_controlled_change / finish_controlled_change workflow reduces the
+  governed agent edit cycle from 7–11 MCP calls to 3–4. It combines workspace
+  checks, intent declaration, blast-radius mapping, bounded edit scope, patch
+  verification, review-claim validation, and deterministic review receipts.
+  CodeClone now exposes 32 agent-visible MCP tools by default.
+* Change-intent lifecycle and multi-agent coordination.
+  manage_change_intent supports declare, check, clear, queue, promote, and
+  recover operations. Renewable leases, ownership classification, optional
+  SQLite coordination, retention, workspace hygiene, and recoverable-intent
+  handling make concurrent agent work explicit and auditable.
+* Engineering Memory. A local SQLite knowledge graph stores typed,
+  evidence-linked repository facts such as contracts, decisions, risks, test
+  anchors, prior changes, and git provenance. Agents receive ranked,
+  scope-aware context through get_relevant_memory and
+  query_engineering_memory; drafts remain human-governed and can be approved
+  through the CLI or VS Code Memory view. Memory never authorizes edits or
+  overrides the canonical report, gates, or Patch Trail.
+* Trajectory Memory and Patch Trail. Audit-derived trajectories preserve
+  agent workflows, declared scope, actual changed paths, verification outcomes,
+  incidents, citations, and review evidence. The current trajectory-v3
+  projection adds quality passports, complexity scoring, anomaly detection,
+  agent profiles, dashboards, semantic retrieval, and deterministic Patch Trail
+  summaries. Engineering Memory schema 1.6 persists trajectory and Patch
+  Trail evidence.
+* Experience Layer. Deterministic experience-v1 patterns are distilled
+  from canonical trajectories across all outcomes and exposed through a
+  separate advisory retrieval lane. Experiences retain supporting evidence and
+  agent-diversity facets, but never become authority automatically;
+  promote_experience creates a human-governed memory draft.
+* Semantic memory retrieval. Optional LanceDB-backed hybrid search combines
+  FTS5/BM25 and vector retrieval using deterministic Reciprocal Rank Fusion.
+  Local embeddings are available through codeclone[semantic-local] with
+  BAAI/bge-small-en-v1.5. Semantic indexing is lazy, failure-tolerant, and
+  eventually consistent rather than synchronously rebuilt after every finish.
+* Platform Observability. Opt-in, development-only telemetry traces
+  CodeClone’s own CLI, MCP, analysis, database, semantic-index, and projection
+  worker activity. The local observer captures timings, RSS/CPU, MCP payload and
+  token pressure, DB query counts and shapes, causal worker chains, and costly
+  no-ops. JSON/HTML views provide a diagnostic cockpit, while
+  query_platform_observability exposes bounded MCP sections for development
+  agents. Observability never affects reports, gates, baselines, memory facts,
+  or edit authorization.
+* IDE and agent integrations. The VS Code extension gains Engineering
+  Memory governance, trajectory dashboards, controller audit views, and
+  workspace session statistics. Native integrations are available for Claude
+  Desktop, Codex, and Cursor. The Cursor plugin includes skills, rules,
+  fail-closed preToolUse enforcement, scoped workspace-intent checks, and a
+  structural-review agent.
+* Controller and diagnostic CLI surfaces. Added blast-radius, patch
+  verification, session statistics, controller audit, memory trajectory,
+  anomaly, agent-profile, semantic-search, and Platform Observability commands.
+* Documentation and edition model. Documentation is reorganized into a
+  thematic 00–26 contract book with unified integration guides, dedicated
+  chapters for the Controller, Engineering Memory, trajectories, Experiences,
+  and Platform Observability, plus explicit Open Source / Team / Enterprise
+  retention and capability tiers.
+* MCP schemas now include parameter-level descriptions and deterministic
+  next_tool guidance. Workspace hygiene warnings, audit events, token-budget
+  tracking, and documentation-contract linting were also added.
 
-### Changed
+Changed
 
-- Default per-project workspace directory moved from `.cache/codeclone/` to
-  `.codeclone/`. CLI warns when legacy paths are still present.
-- Documentation site build migrated from MkDocs to Zensical (`zensical.toml`);
-  docs workflow runs `uv run --with zensical==0.0.43 zensical build --clean --strict`.
-- `pydantic` is now a base dependency.
-- LCOM4 cohesion graph excludes Protocol methods and Pydantic
-  validation/serialization hooks; `computed_field` remains included.
-- Repository test coverage gate raised to `>=99%`.
+* The default project workspace moved from .cache/codeclone/ to
+  .codeclone/; legacy locations now produce a migration warning.
+* Documentation builds now use Zensical with strict, clean builds.
+* pydantic is now a base dependency.
+* LCOM4 excludes Protocol methods and Pydantic validation/serialization hooks;
+  computed_field remains part of cohesion analysis.
+* Repository test coverage is enforced at >=99%.
 
-### Fixed
+Fixed
 
-- **Memory draft persistence:** `open_memory_db` now uses
-  `synchronous=FULL` so every commit survives unclean MCP process exit
-  (SIGKILL, IDE restart, stdio timeout). Intent and audit stores keep
-  `synchronous=NORMAL` — their writes are frequent and recovery-designed.
-- **Memory draft staleness:** refresh-time staleness engine no longer marks
-  draft records stale before human governance; drafts become subject to
-  staleness only after promotion to active.
-- `finish_controlled_change` hygiene gate blocks only on `missing_evidence`
-  and `foreign_dirty_overlap`; out-of-scope dirt is advisory
-  (`accepted_with_external_changes`). Recoverable intents do not grant
-  foreign attribution.
-- `dirty_scope_policy=continue_own_wip` allows resuming own dirty scope when
-  no foreign overlap.
-- Queued foreign intents no longer populate `foreign_dirty_overlaps`.
-- Patch verify rejects identical before/after runs for python_structural and
-  governance_config profiles (`reason: after_run_not_new`).
-- Negative `health_delta` surfaces `health_regression_advisory`; Claim Guard
-  warns on overclaims when `patch_health_delta < 0`.
-- MCP doc URLs updated across help topics, plugin READMEs, skill definitions,
-  and test expectations after book renumber.
-- Blast-radius graph core moved to `codeclone/analysis/blast_radius.py` (fixes
-  CLI-to-MCP import violation).
-- `respect_pyproject=false` no longer surfaces golden-fixture clone groups as
-  false `new` regressions.
+* Durable memory writes. Engineering Memory now uses
+  synchronous=FULL, preserving committed drafts across unclean MCP process
+  exits. Intent and audit stores retain recovery-oriented
+  synchronous=NORMAL.
+* Memory lifecycle correctness. Draft records are no longer marked stale
+  before human promotion. Trajectory rebuilds now deduplicate superseded
+  projections, repoint evidence, remove stale workflow rows, and preserve
+  bounded claim-validation citations.
+* Workspace hygiene and intent attribution. Finish blocks only on missing
+  evidence or foreign dirty overlap. Out-of-scope dirt is advisory,
+  continue_own_wip supports resuming owned work, queued foreign intents no
+  longer create false overlaps, and recoverable intents do not grant foreign
+  attribution.
+* Patch verification correctness. Identical before/after runs are rejected
+  for structural and governance profiles. Negative health deltas now surface a
+  regression advisory, and Claim Guard warns when review text overstates patch
+  quality.
+* Semantic retrieval correctness and cost. Hybrid search now preserves
+  lexical and vector relevance through RRF instead of allowing metadata ranking
+  to suppress strong matches. Per-source vector retrieval prevents dense lanes
+  from crowding out other sources. Embedding providers load lazily, failures
+  preserve documented fallback behavior, and redundant projection jobs are
+  coalesced or deferred.
+* Architecture and import boundaries. Blast-radius graph logic moved into
+  codeclone/analysis/blast_radius.py, removing the CLI-to-MCP dependency
+  violation.
+* Regression accuracy. respect_pyproject=false no longer reports
+  golden-fixture clone groups as false new regressions. Documentation URLs,
+  plugin references, and contract tests were updated after the documentation
+  reorganization.
 
 ## [2.0.2] - 2026-05-19
 
