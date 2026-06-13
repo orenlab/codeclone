@@ -125,18 +125,17 @@ def test_find_trajectories_by_ids_batch_matches_single_path(tmp_path: Path) -> N
 
         # Batch hydration is identical to the per-id single path, in input order.
         single = [trajectory_store.find_trajectory(conn, tid) for tid in ids]
-        assert trajectory_store._find_trajectories_by_ids(conn, ids) == single
+        assert trajectory_store.find_trajectories_by_ids(conn, ids) == single
 
         # Order is preserved, missing ids are skipped, empty input yields [].
         reversed_ids = list(reversed(ids))
-        assert trajectory_store._find_trajectories_by_ids(conn, reversed_ids) == [
+        assert trajectory_store.find_trajectories_by_ids(conn, reversed_ids) == [
             trajectory_store.find_trajectory(conn, tid) for tid in reversed_ids
         ]
         assert (
-            trajectory_store._find_trajectories_by_ids(conn, ["missing", *ids])
-            == single
+            trajectory_store.find_trajectories_by_ids(conn, ["missing", *ids]) == single
         )
-        assert trajectory_store._find_trajectories_by_ids(conn, []) == []
+        assert trajectory_store.find_trajectories_by_ids(conn, []) == []
 
 
 def test_rebuild_supersedes_duplicate_workflow_projection_rows(tmp_path: Path) -> None:

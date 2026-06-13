@@ -198,6 +198,14 @@ class SqliteEngineeringMemoryStore:
 
         return find_trajectory(self._conn, trajectory_id)
 
+    def find_trajectories(
+        self,
+        trajectory_ids: Sequence[str],
+    ) -> list[Trajectory]:
+        from .trajectory.store import find_trajectories_by_ids
+
+        return find_trajectories_by_ids(self._conn, trajectory_ids)
+
     def load_trajectory_patch_trail(
         self,
         trajectory_id: str,

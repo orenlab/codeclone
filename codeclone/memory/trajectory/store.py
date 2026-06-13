@@ -438,7 +438,7 @@ def list_canonical_trajectories_for_export(
         """,
         (project_id, max(1, int(limit))),
     ).fetchall()
-    trajectories = _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
+    trajectories = find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
     from .export_context import select_canonical_trajectories
 
     return select_canonical_trajectories(trajectories)
@@ -539,7 +539,7 @@ def list_trajectories_for_subjects(
         """,
         (*params, max(1, int(limit))),
     ).fetchall()
-    return _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
+    return find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
 
 
 def list_trajectories_for_intent_id(
@@ -557,7 +557,7 @@ def list_trajectories_for_intent_id(
         """,
         (project_id, intent_id),
     ).fetchall()
-    return tuple(_find_trajectories_by_ids(conn, [str(row["id"]) for row in rows]))
+    return tuple(find_trajectories_by_ids(conn, [str(row["id"]) for row in rows]))
 
 
 def search_trajectories(
@@ -606,7 +606,7 @@ def search_trajectories(
         """,
         (*params, max(1, int(limit))),
     ).fetchall()
-    return _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
+    return find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
 
 
 def _row_to_trajectory(
@@ -662,7 +662,7 @@ def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory 
     )
 
 
-def _find_trajectories_by_ids(
+def find_trajectories_by_ids(
     conn: sqlite3.Connection,
     ids: Sequence[str],
 ) -> list[Trajectory]:
@@ -1014,6 +1014,7 @@ def load_trajectory_patch_trails(
 
 __all__ = [
     "count_trajectories",
+    "find_trajectories_by_ids",
     "find_trajectory",
     "latest_projection_run",
     "list_trajectories",

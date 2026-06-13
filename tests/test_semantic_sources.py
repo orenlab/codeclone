@@ -48,8 +48,12 @@ class _FakeStore:
     def query_records(self, query: MemoryQuery) -> Sequence[MemoryRecord]:
         return self._records[query.offset : query.offset + query.limit]
 
-    def list_subjects_for_memory(self, memory_id: str) -> list[MemorySubject]:
-        return self._subjects.get(memory_id, [])
+    def list_subjects_for_memories(
+        self, memory_ids: Sequence[str]
+    ) -> dict[str, list[MemorySubject]]:
+        return {
+            memory_id: self._subjects.get(memory_id, []) for memory_id in memory_ids
+        }
 
 
 class _FakeTrajectoryStore:
@@ -79,8 +83,12 @@ class _FakeTrajectoryStore:
         ]
         return items[:limit]
 
-    def find_trajectory(self, trajectory_id: str) -> Trajectory | None:
-        return self._trajectories.get(trajectory_id)
+    def find_trajectories(self, trajectory_ids: Sequence[str]) -> list[Trajectory]:
+        return [
+            self._trajectories[tid]
+            for tid in trajectory_ids
+            if tid in self._trajectories
+        ]
 
 
 def _prose(
@@ -257,8 +265,8 @@ def test_trajectory_source_name_missing_record_and_pagination() -> None:
     assert source.name() == "trajectory"
 
     class _MissingTrajectoryStore(_FakeTrajectoryStore):
-        def find_trajectory(self, trajectory_id: str) -> Trajectory | None:
-            return None
+        def find_trajectories(self, trajectory_ids: Sequence[str]) -> list[Trajectory]:
+            return []
 
     assert (
         list(
@@ -310,6 +318,50 @@ def test_audit_source_tolerates_query_failure(
         list(AuditIndexSource(enabled=True, db_path=db_path).iter_projections()) == []
     )
     assert connection.closed is True
+
+
+def test_memory_index_source_batches_subjects_per_page() -> None:
+    project_id = "proj-batch"
+    records = [_prose(project_id, statement=f"note {index}") for index in range(250)]
+
+    class _CountingStore(_FakeStore):
+        batch_calls = 0
+
+        def list_subjects_for_memories(
+            self, memory_ids: Sequence[str]
+        ) -> dict[str, list[MemorySubject]]:
+            self.batch_calls += 1
+            return super().list_subjects_for_memories(memory_ids)
+
+    store = _CountingStore(records, {})
+    projections = list(
+        MemoryIndexSource(store, project_id=project_id).iter_projections()
+    )
+    assert len(projections) == 250
+    # 250 records over 2 pages (200 + 50) -> 2 batched subject loads, not 250.
+    assert store.batch_calls == 2
+
+
+def test_trajectory_index_source_batches_hydration_per_page() -> None:
+    base = _trajectory("proj-traj")
+    trajectories = [
+        dataclasses.replace(base, id=f"traj-{index}") for index in range(250)
+    ]
+
+    class _CountingTrajectoryStore(_FakeTrajectoryStore):
+        batch_calls = 0
+
+        def find_trajectories(self, trajectory_ids: Sequence[str]) -> list[Trajectory]:
+            self.batch_calls += 1
+            return super().find_trajectories(trajectory_ids)
+
+    store = _CountingTrajectoryStore(trajectories)
+    projections = list(
+        TrajectoryIndexSource(store, project_id="proj-traj").iter_projections()
+    )
+    assert len(projections) == 250
+    # 2 pages (200 + 50) -> 2 batched hydrations, not 250 find_trajectory calls.
+    assert store.batch_calls == 2
 
 
 def _trajectory(project_id: str) -> Trajectory:

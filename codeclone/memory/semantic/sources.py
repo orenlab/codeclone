@@ -30,6 +30,13 @@ _INDEXED_STATUSES: frozenset[str] = frozenset({"active", "draft", "stale"})
 _PAGE_SIZE = 200
 
 
+def _primary_path(subjects: Sequence[MemorySubject]) -> str | None:
+    for subject in subjects:
+        if subject.subject_kind == "path":
+            return subject.subject_key
+    return None
+
+
 class IndexSource(Protocol):
     """A source of deterministic projections to feed the semantic index.
 
@@ -49,7 +56,9 @@ class _MemoryReadStore(Protocol):
 
     def query_records(self, query: MemoryQuery) -> Sequence[MemoryRecord]: ...
 
-    def list_subjects_for_memory(self, memory_id: str) -> list[MemorySubject]: ...
+    def list_subjects_for_memories(
+        self, memory_ids: Sequence[str]
+    ) -> dict[str, list[MemorySubject]]: ...
 
 
 class _TrajectoryReadStore(Protocol):
@@ -60,7 +69,7 @@ class _TrajectoryReadStore(Protocol):
         limit: int = 20,
     ) -> list[TrajectoryListItem]: ...
 
-    def find_trajectory(self, trajectory_id: str) -> Trajectory | None: ...
+    def find_trajectories(self, trajectory_ids: Sequence[str]) -> list[Trajectory]: ...
 
 
 class MemoryIndexSource:
@@ -91,24 +100,24 @@ class MemoryIndexSource:
                     offset=offset,
                 )
             )
-            for record in records:
-                if not is_indexed_memory_type(record.type):
-                    continue
-                if record.status not in _INDEXED_STATUSES:
-                    continue
+            indexed = [
+                record
+                for record in records
+                if is_indexed_memory_type(record.type)
+                and record.status in _INDEXED_STATUSES
+            ]
+            # One batched subject load per page instead of a query per record.
+            subjects_by_id = self._store.list_subjects_for_memories(
+                [record.id for record in indexed]
+            )
+            for record in indexed:
                 yield project_memory_record(
                     record,
-                    subject_path=self._primary_path(record.id),
+                    subject_path=_primary_path(subjects_by_id.get(record.id, [])),
                 )
             if len(records) < _PAGE_SIZE:
                 return
             offset += _PAGE_SIZE
-
-    def _primary_path(self, memory_id: str) -> str | None:
-        for subject in self._store.list_subjects_for_memory(memory_id):
-            if subject.subject_kind == "path":
-                return subject.subject_key
-        return None
 
 
 class TrajectoryIndexSource:
@@ -136,10 +145,9 @@ class TrajectoryIndexSource:
                 limit=_PAGE_SIZE + offset,
             )
             page = items[offset : offset + _PAGE_SIZE]
-            for item in page:
-                trajectory = self._store.find_trajectory(item.id)
-                if trajectory is not None:
-                    yield project_trajectory(trajectory)
+            # Batch-hydrate the page instead of one find_trajectory per item.
+            for trajectory in self._store.find_trajectories([item.id for item in page]):
+                yield project_trajectory(trajectory)
             if len(page) < _PAGE_SIZE:
                 return
             offset += _PAGE_SIZE
