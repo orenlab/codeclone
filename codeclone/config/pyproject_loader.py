@@ -15,6 +15,10 @@ from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
 )
+from .analytics_specs import (
+    ANALYTICS_NESTED_TABLE_KEY,
+    ANALYTICS_PATH_CONFIG_KEYS,
+)
 from .memory_specs import (
     INGEST_NESTED_TABLE_KEY,
     MEMORY_CONFIG_KEY_SPECS,
@@ -129,7 +133,9 @@ def load_pyproject_config(
         )
 
     unknown = sorted(
-        set(codeclone_obj.keys()) - set(config_key_specs) - {MEMORY_NESTED_TABLE_KEY}
+        set(codeclone_obj.keys())
+        - set(config_key_specs)
+        - {MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY}
     )
     if unknown:
         raise ConfigValidationError(
@@ -138,7 +144,7 @@ def load_pyproject_config(
 
     validated: dict[str, object] = {}
     for key in sorted(codeclone_obj.keys()):
-        if key == MEMORY_NESTED_TABLE_KEY:
+        if key in {MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY}:
             continue
         value = validate_config_value(
             key=key,
@@ -159,7 +165,40 @@ def load_pyproject_config(
             root_path=root_path,
             config_path=config_path,
         )
+    analytics_obj = codeclone_obj.get(ANALYTICS_NESTED_TABLE_KEY)
+    if analytics_obj is not None:
+        validated[ANALYTICS_NESTED_TABLE_KEY] = _validate_nested_analytics_table(
+            analytics_obj=analytics_obj,
+            root_path=root_path,
+            config_path=config_path,
+        )
     return validated
+
+
+def _validate_nested_analytics_table(
+    *,
+    analytics_obj: object,
+    root_path: Path,
+    config_path: Path,
+) -> dict[str, object]:
+    if not isinstance(analytics_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.analytics' must be object"
+        )
+    normalized: dict[str, object] = {}
+    for key in sorted(analytics_obj.keys()):
+        value = analytics_obj[key]
+        if key in ANALYTICS_PATH_CONFIG_KEYS and isinstance(value, str):
+            normalized[key] = normalize_path_config_value(
+                key=key,
+                value=value,
+                root_path=root_path,
+                path_config_keys=ANALYTICS_PATH_CONFIG_KEYS,
+            )
+        else:
+            normalized[key] = value
+    return normalized
 
 
 def _validate_nested_memory_table(

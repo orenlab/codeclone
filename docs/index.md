@@ -56,6 +56,7 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Trajectories and recurring patterns | [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md)  |
 | MCP interface contract              | [MCP interface](book/25-mcp-interface/index.md)                               |
 | Diagnose CodeClone runtime          | [Platform Observability](guide/observability/diagnostics.md)                  |
+| Cluster historical intents        | [Corpus Analytics](guide/analytics/overview.md)                               |
 
 ## IDE and Agent Clients
 

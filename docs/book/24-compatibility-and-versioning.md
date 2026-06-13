@@ -41,6 +41,10 @@ Current contract versions:
 - `EXPERIENCE_DISTILLATION_VERSION = "experience-v1"` (derived Experience rows)
 - `SEMANTIC_INDEX_FORMAT_VERSION = "1"` (LanceDB sidecar; separate from SQLite memory schema)
 - `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.0"` (dev-only telemetry SQLite)
+- `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.0"` (corpus analytics SQLite)
+- `CORPUS_EXPORT_SCHEMA_VERSION = "1.0"` (clustering JSON export)
+- `CORPUS_REPRESENTATION_CONTRACT_VERSION = "1"` (intent representation payloads)
+- `CORPUS_EMBEDDING_CONTRACT_VERSION = "1"` (analytics embedding sidecar)
 
 Refs:
 
@@ -71,6 +75,10 @@ Version bump rules:
 - bump **Platform Observability schema** only for incompatible telemetry-store
   changes; it remains separate from reports, gates, baselines, and memory facts
   (see [26-platform-observability.md](26-platform-observability.md))
+- bump **corpus analytics store/export/representation/embedding** versions when
+  SQLite layout or export semantics change incompatibly; rebuild analytics
+  artifacts rather than treating them as analysis truth (
+  see [27-corpus-analytics.md](27-corpus-analytics.md))
 
 Operational compatibility rules:
 

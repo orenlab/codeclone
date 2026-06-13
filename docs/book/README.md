@@ -72,6 +72,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [23-testing-as-spec.md](23-testing-as-spec.md) — tests as specification
 - [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md) — compatibility and versioning rules
 - [26-platform-observability.md](26-platform-observability.md) — local diagnostics for CodeClone's own runtime
+- [27-corpus-analytics.md](27-corpus-analytics.md) — offline intent corpus clustering (optional `[analytics]`)
 
 ### MCP interface
 

@@ -84,6 +84,13 @@ semantic-local = [
     "lancedb>=0.33.0",
     "fastembed>=0.8.0,<0.9",
 ]
+analytics = [
+    "hdbscan>=0.8.0",
+    "scikit-learn>=1.5.0",
+    "lancedb>=0.33.0",
+    "fastembed>=0.8.0,<0.9",
+    "umap-learn>=0.5.0; python_version < '3.14'",
+]
 perf = [
     "psutil>=7,<8",
 ]
@@ -105,6 +112,15 @@ codeclone-mcp = "codeclone.surfaces.mcp.server:main"
 packages = [
     "codeclone",
     "codeclone.analysis",
+    "codeclone.analytics",
+    "codeclone.analytics.clustering",
+    "codeclone.analytics.corpus",
+    "codeclone.analytics.corpus.adapters",
+    "codeclone.analytics.corpus.representations",
+    "codeclone.analytics.embedding",
+    "codeclone.analytics.export",
+    "codeclone.analytics.report",
+    "codeclone.analytics.store",
     "codeclone.audit",
     "codeclone.baseline",
     "codeclone.blocks",

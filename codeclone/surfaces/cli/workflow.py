@@ -806,6 +806,10 @@ def _report_digest_from_document(report_document: dict[str, object]) -> str:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "analytics":
+        from .analytics import analytics_main
+
+        raise SystemExit(analytics_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "memory":
         from .memory import memory_main
 

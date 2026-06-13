@@ -269,6 +269,40 @@ def read_audit_summary(*, db_path: Path, limit: int = 50) -> AuditSummary:
     )
 
 
+def read_intent_declared_records(
+    *,
+    db_path: Path,
+    repo_root_digest: str,
+) -> tuple[AuditRecord, ...]:
+    """Return audit ``intent.declared`` rows for a repository, ordered by id ASC."""
+
+    from .events import EVENT_INTENT_DECLARED
+
+    if not db_path.is_file():
+        return ()
+    try:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        rows = conn.execute(
+            "SELECT id, event_id, event_type, severity, created_at_utc, run_id, "
+            "intent_id, report_digest, workflow_id, surface, tool_name, "
+            "event_core_json, event_core_sha256, payload_sha256, "
+            "status, agent_label, summary, "
+            "estimated_tokens, token_encoding, payload_characters, payload_json "
+            "FROM controller_events "
+            "WHERE repo_root_digest = ? AND event_type = ? "
+            "ORDER BY id ASC",
+            (repo_root_digest, EVENT_INTENT_DECLARED),
+        ).fetchall()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+    return tuple(_record_from_row(row) for row in rows)
+
+
 def read_audit_event_core_records(
     *,
     db_path: Path,
@@ -741,5 +775,6 @@ __all__ = [
     "payload_footprint_to_dict",
     "read_audit_event_core_records",
     "read_audit_summary",
+    "read_intent_declared_records",
     "read_latest_analysis_run",
 ]

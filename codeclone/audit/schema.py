@@ -14,8 +14,6 @@ from ..report.meta import current_report_timestamp_utc
 from ..utils.sqlite_store import (
     get_meta_value,
     initialize_schema_v1,
-    open_sqlite_db,
-    open_sqlite_db_readonly,
 )
 from .validation import AUDIT_SCHEMA_VERSION, AuditSchemaError
 
@@ -118,21 +116,19 @@ _READABLE_EVENT_COLUMNS = frozenset(
 
 
 def open_audit_db(path: Path) -> sqlite3.Connection:
-    conn = open_sqlite_db(path, ensure_schema=ensure_schema)
-    from ..observability import instrument_db_connection
+    from ..observability.sqlite_access import open_instrumented_sqlite_db
 
-    instrument_db_connection(conn)
-    return conn
+    return open_instrumented_sqlite_db(path, ensure_schema=ensure_schema)
 
 
 def open_audit_db_readonly(path: Path) -> sqlite3.Connection:
     """Open a structurally readable audit database without mutating it."""
+    from ..observability.sqlite_access import open_instrumented_sqlite_db_readonly
 
-    conn = open_sqlite_db_readonly(path, validate_schema=_validate_readonly_schema)
-    from ..observability import instrument_db_connection
-
-    instrument_db_connection(conn)
-    return conn
+    return open_instrumented_sqlite_db_readonly(
+        path,
+        validate_schema=_validate_readonly_schema,
+    )
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:

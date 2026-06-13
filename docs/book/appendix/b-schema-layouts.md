@@ -886,6 +886,26 @@ stores.
 See [Platform Observability](../26-platform-observability.md) for configuration,
 privacy, query, and anti-inference rules.
 
+## Corpus analytics store (`1.0`)
+
+Optional SQLite database (default `.codeclone/analytics/corpus_clustering.sqlite3`)
+and LanceDB vector directory (default `.codeclone/analytics/corpus_vectors`).
+Derived offline analytics — not report, baseline, cache, audit, or Engineering
+Memory truth.
+
+| Artifact            | Role                                                        |
+|---------------------|-------------------------------------------------------------|
+| `corpus_snapshots`  | Immutable snapshot metadata and source digests              |
+| `embedding_runs`    | Analytics embedding generation records                      |
+| `clustering_runs` | PCA/HDBSCAN parameters, diagnostics, membership digest      |
+| LanceDB sidecar     | Separate vectors from Engineering Memory semantic index     |
+
+Store schema version: `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` in
+`codeclone/contracts/__init__.py` (currently **`1.0`**).
+
+See [Corpus Analytics](../27-corpus-analytics.md) for CLI, configuration, and trust
+boundaries.
+
 ## Refs
 
 - `codeclone/baseline/clone_baseline.py`

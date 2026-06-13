@@ -14,7 +14,6 @@ from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
 from ..report.meta import current_report_timestamp_utc
 from ..utils.sqlite_store import (
     initialize_schema_v1,
-    open_sqlite_db,
 )
 from .exceptions import MemorySchemaError
 from .schema_experience import (
@@ -231,20 +230,21 @@ _INDEX_SQL = (
 
 
 def open_memory_db(path: Path) -> sqlite3.Connection:
-    # synchronous=FULL: every commit survives unclean process exit.
-    # Memory records are few, each governance-governed and valuable.
-    conn = open_sqlite_db(
+    from ..observability.sqlite_access import open_instrumented_sqlite_db
+
+    return open_instrumented_sqlite_db(
         path,
         ensure_schema=ensure_schema,
         foreign_keys=True,
         synchronous="FULL",
     )
-    # Performance telemetry only: count SQL per active observability span so the
-    # cockpit can attribute span cost to DB work. No-op when disabled.
-    from ..observability import instrument_db_connection
 
-    instrument_db_connection(conn)
-    return conn
+
+def open_memory_db_readonly(path: Path) -> sqlite3.Connection:
+    """Open an existing engineering-memory database without allowing writes."""
+    from ..observability.sqlite_access import open_instrumented_sqlite_db_readonly
+
+    return open_instrumented_sqlite_db_readonly(path, validate_schema=ensure_schema)
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -293,5 +293,6 @@ __all__ = [
     "ensure_schema",
     "get_meta",
     "open_memory_db",
+    "open_memory_db_readonly",
     "set_meta",
 ]

@@ -70,6 +70,12 @@ Added
 * MCP schemas now include parameter-level descriptions and deterministic
   next_tool guidance. Workspace hygiene warnings, audit events, token-budget
   tracking, and documentation-contract linting were also added.
+* **Corpus Analytics (intent lane, Slice 1).** Optional offline clustering of
+  historical change-control intents via `codeclone analytics corpus …`.
+  Requires `codeclone[analytics]`. Reads audit + trajectory (+ optional registry
+  overlay), writes SQLite/LanceDB artifacts under `.codeclone/analytics/`, and
+  exports JSON/HTML. Separate embedding contract from Engineering Memory semantic
+  index; `[tool.codeclone.analytics]` configures paths and clustering defaults.
 
 Changed
 

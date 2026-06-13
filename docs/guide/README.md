@@ -21,6 +21,7 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 | Scope context before edits              | [Engineering Memory overview](memory/overview.md)                      |
 | Inspect trajectory history and patterns | [Trajectories and Experiences](memory/trajectories-and-experiences.md) |
 | Diagnose CodeClone runtime cost         | [Platform Observability](observability/diagnostics.md)                 |
+| Cluster historical agent intents        | [Corpus Analytics](analytics/overview.md)                              |
 
 ## MCP workflows
 

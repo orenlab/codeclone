@@ -137,6 +137,14 @@ Refs:
       cockpit views.
     - A missing local store is an informational success state.
     - Full contract: [Platform Observability](26-platform-observability.md).
+- Corpus Analytics commands are terminal-only, offline clustering of historical
+  intents (requires `codeclone[analytics]`):
+    - `codeclone analytics snapshot|embed|cluster|build|clusters|cluster-show|outliers`
+    - `build` runs snapshot → embed → cluster; `--use-recommended` selects the
+      heuristic sweep winner.
+    - Representations: `description` (default) or `description_with_frame`.
+    - Artifacts live under `.codeclone/analytics/` (SQLite metadata + LanceDB vectors).
+    - Full contract: [Corpus Analytics](27-corpus-analytics.md).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.

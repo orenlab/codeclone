@@ -49,6 +49,7 @@ codeclone . --ci               # CI mode
 - **Engineering Memory** — governed records, trajectory passports, and advisory Experiences
 - **MCP server** — 32-tool default interface for IDE and agent clients
 - **Platform Observability** — opt-in local diagnostics for CodeClone's own runtime
+- **Corpus Analytics** — optional offline intent clustering (`codeclone[analytics]`)
 - **Reports** — HTML, JSON, Markdown, SARIF, text from one canonical payload
 
 ## MCP Server
@@ -60,9 +61,11 @@ codeclone-mcp --transport stdio
 
 Native clients: VS Code extension, Claude Desktop bundle, Codex plugin.
 
-Engineering Memory and runtime diagnostics:
+Engineering Memory, Corpus Analytics, and runtime diagnostics:
 
 ```bash
+uv tool install "codeclone[analytics]"
+codeclone analytics build --root . --use-recommended
 codeclone memory trajectory dashboard --root .
 CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
 codeclone observability trace --root . --html /tmp/codeclone-observer.html
@@ -73,6 +76,7 @@ codeclone observability trace --root . --html /tmp/codeclone-observer.html
 - Documentation: <https://orenlab.github.io/codeclone/>
 - Engineering Memory: <https://orenlab.github.io/codeclone/book/13-engineering-memory/>
 - Platform Observability: <https://orenlab.github.io/codeclone/book/26-platform-observability/>
+- Corpus Analytics: <https://orenlab.github.io/codeclone/book/27-corpus-analytics/>
 - Source: <https://github.com/orenlab/codeclone>
 - Issues: <https://github.com/orenlab/codeclone/issues>
 

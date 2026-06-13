@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from codeclone.audit.schema import (
     open_audit_db_readonly,
 )
 from codeclone.audit.validation import AuditSchemaError
+from codeclone.memory.schema import open_memory_db, open_memory_db_readonly
 from codeclone.surfaces.mcp._workspace_intent_schema import (
     IntentRegistrySchemaError,
     open_intent_registry_db,
@@ -111,8 +113,40 @@ def test_intent_readonly_opener_rejects_stale_schema_without_migration(
 
 
 @pytest.mark.parametrize(
+    "module_name",
+    [
+        "codeclone.audit.schema",
+        "codeclone.memory.schema",
+        "codeclone.analytics.schema",
+        "codeclone.surfaces.mcp._workspace_intent_schema",
+    ],
+)
+def test_schema_module_import_does_not_load_observability(module_name: str) -> None:
+    for name in list(sys.modules):
+        if name == "codeclone.observability" or name.startswith(
+            "codeclone.observability."
+        ):
+            sys.modules.pop(name, None)
+
+    import importlib
+
+    importlib.import_module(module_name)
+
+    assert not any(
+        name == "codeclone.observability" or name.startswith("codeclone.observability.")
+        for name in sys.modules
+    )
+
+
+@pytest.mark.parametrize(
     "opener",
-    [open_audit_db, open_audit_db_readonly, open_intent_registry_db],
+    [
+        open_audit_db,
+        open_audit_db_readonly,
+        open_intent_registry_db,
+        open_memory_db,
+        open_memory_db_readonly,
+    ],
 )
 def test_domain_openers_attach_observability(
     tmp_path: Path,
@@ -121,16 +155,23 @@ def test_domain_openers_attach_observability(
 ) -> None:
     audit_path = tmp_path / "audit.sqlite3"
     intent_path = tmp_path / "intents.sqlite3"
+    memory_path = tmp_path / "memory.sqlite3"
     open_audit_db(audit_path).close()
+    open_memory_db(memory_path).close()
     calls: list[sqlite3.Connection] = []
     monkeypatch.setattr(
-        "codeclone.observability.instrument_db_connection",
+        "codeclone.observability.runtime.instrument_db_connection",
         calls.append,
     )
 
     selected = opener
     assert callable(selected)
-    path = intent_path if selected is open_intent_registry_db else audit_path
+    if selected is open_intent_registry_db:
+        path = intent_path
+    elif selected in (open_memory_db, open_memory_db_readonly):
+        path = memory_path
+    else:
+        path = audit_path
     conn = selected(path)
     try:
         assert calls == [conn]
@@ -146,7 +187,7 @@ def test_intent_readonly_opener_attaches_observability(
     open_intent_registry_db(db_path).close()
     calls: list[sqlite3.Connection] = []
     monkeypatch.setattr(
-        "codeclone.observability.instrument_db_connection",
+        "codeclone.observability.runtime.instrument_db_connection",
         calls.append,
     )
 

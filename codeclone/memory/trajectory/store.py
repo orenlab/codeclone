@@ -500,6 +500,24 @@ def list_trajectories_for_subjects(
     return _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
 
 
+def list_trajectories_for_intent_id(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    intent_id: str,
+) -> tuple[Trajectory, ...]:
+    rows = conn.execute(
+        """
+        SELECT id
+        FROM memory_trajectories
+        WHERE project_id=? AND intent_id=?
+        ORDER BY finished_at_utc DESC, id ASC
+        """,
+        (project_id, intent_id),
+    ).fetchall()
+    return tuple(_find_trajectories_by_ids(conn, [str(row["id"]) for row in rows]))
+
+
 def search_trajectories(
     conn: sqlite3.Connection,
     *,
@@ -915,6 +933,7 @@ __all__ = [
     "find_trajectory",
     "latest_projection_run",
     "list_trajectories",
+    "list_trajectories_for_intent_id",
     "list_trajectories_for_subjects",
     "load_trajectory_patch_trail",
     "load_trajectory_patch_trails",

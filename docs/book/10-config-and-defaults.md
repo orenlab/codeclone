@@ -326,6 +326,7 @@ instead of duplicating tables.
 | MCP workspace intent TTL / lease | `resolved_ttl_seconds`, `resolved_lease_seconds` | Explicit MCP tool parameter > env > built-in default                                       |
 | Finish hygiene strict mode       | `_strict_finish_enabled`                         | Env only (no pyproject key)                                                                |
 | Platform Observability           | `resolve_observability_config`                   | Env only; disabled by default, no pyproject table                                          |
+| Corpus Analytics                 | `resolve_analytics_config`                       | `[tool.codeclone.analytics]` > built-in defaults; no env overrides in Slice 1              |
 | Cursor / IDE hooks               | hook helpers                                     | Env > repo config file (where noted) > built-in default                                    |
 
 There is no generic `CODECLONE_MEMORY__*` nested env convention. Each variable
@@ -343,6 +344,20 @@ Platform Observability is environment-only and disabled by default. It has no
 `[tool.codeclone.observability]` table. See
 [Platform Observability](26-platform-observability.md) for the data and trust
 contracts.
+
+### Corpus Analytics
+
+Optional intent corpus clustering uses `[tool.codeclone.analytics]`. Install
+`codeclone[analytics]` before running `codeclone analytics …`. Paths resolve
+under the repository root. Full key list:
+[Corpus Analytics](27-corpus-analytics.md#configuration).
+
+Refs:
+
+- `codeclone/config/analytics.py:resolve_analytics_config`
+- `codeclone/config/pyproject_loader.py:load_pyproject_config`
+
+### Platform Observability (environment)
 
 | Variable                                        | Values         | Effect                                                              |
 |-------------------------------------------------|----------------|---------------------------------------------------------------------|

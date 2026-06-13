@@ -38,6 +38,7 @@ nav = [
         ] },
         { "Diagnostics" = [
             { "Platform Observability" = "guide/observability/diagnostics.md" },
+            { "Corpus Analytics" = "guide/analytics/overview.md" },
         ] },
         { "MCP" = [
             { "Overview" = "guide/mcp/README.md" },
@@ -129,6 +130,7 @@ nav = [
             { "Testing as Spec" = "book/23-testing-as-spec.md" },
             { "Compatibility and Versioning" = "book/24-compatibility-and-versioning.md" },
             { "Platform Observability" = "book/26-platform-observability.md" },
+            { "Corpus Analytics" = "book/27-corpus-analytics.md" },
         ] },
         { "MCP interface" = [
             { "Overview" = "book/25-mcp-interface/index.md" },
