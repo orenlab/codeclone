@@ -10,8 +10,9 @@ import hashlib
 import sqlite3
 import uuid
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
+from typing import TypeVar
 
 import orjson
 
@@ -42,6 +43,47 @@ from .projector import project_trajectory
 from .quality import apply_trajectory_quality_score
 
 _SQLITE_IN_QUERY_BATCH = 500
+
+_T = TypeVar("_T")
+
+# Batch child-table loads for trajectory hydration. Each is ORDER BY
+# trajectory_id first (rows for one trajectory stay contiguous) then the same
+# keys the per-trajectory query uses, so grouping preserves identical ordering.
+_STEPS_BATCH_SQL = (
+    "SELECT * FROM memory_trajectory_steps "
+    "WHERE trajectory_id IN ({placeholders}) "
+    "ORDER BY trajectory_id ASC, step_index ASC"
+)
+_SUBJECTS_BATCH_SQL = (
+    "SELECT trajectory_id, subject_kind, subject_key, relation "
+    "FROM memory_trajectory_subjects "
+    "WHERE trajectory_id IN ({placeholders}) "
+    "ORDER BY trajectory_id ASC, subject_kind ASC, subject_key ASC"
+)
+_EVIDENCE_BATCH_SQL = (
+    "SELECT trajectory_id, evidence_kind, ref, locator, digest, created_at_utc "
+    "FROM memory_trajectory_evidence "
+    "WHERE trajectory_id IN ({placeholders}) "
+    "ORDER BY trajectory_id ASC, created_at_utc ASC, evidence_kind ASC, ref ASC"
+)
+
+
+def _group_rows_by_trajectory_id(
+    conn: sqlite3.Connection,
+    *,
+    ids: Sequence[str],
+    sql: str,
+    build: Callable[[sqlite3.Row], _T],
+) -> dict[str, list[_T]]:
+    """Run ``sql`` (one ``{placeholders}`` slot) over ``ids`` in chunks and group
+    the rows by ``trajectory_id``, preserving SQL order within each group."""
+    grouped: dict[str, list[_T]] = {trajectory_id: [] for trajectory_id in ids}
+    for batch in chunked(tuple(ids), _SQLITE_IN_QUERY_BATCH):
+        placeholders = ", ".join("?" for _ in batch)
+        rows = conn.execute(sql.format(placeholders=placeholders), batch).fetchall()
+        for row in rows:
+            grouped.setdefault(str(row["trajectory_id"]), []).append(build(row))
+    return grouped
 
 
 def _project_and_upsert_workflow(
@@ -567,16 +609,13 @@ def search_trajectories(
     return _find_trajectories_by_ids(conn, [str(row["id"]) for row in rows])
 
 
-def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory | None:
-    row = conn.execute(
-        "SELECT * FROM memory_trajectories WHERE id=?",
-        (trajectory_id,),
-    ).fetchone()
-    if row is None:
-        return None
-    steps = _steps_for_trajectory(conn, trajectory_id)
-    subjects = _subjects_for_trajectory(conn, trajectory_id)
-    evidence = _evidence_for_trajectory(conn, trajectory_id)
+def _row_to_trajectory(
+    row: sqlite3.Row,
+    *,
+    steps: Sequence[TrajectoryStep],
+    subjects: Sequence[TrajectorySubject],
+    evidence: Sequence[TrajectoryEvidence],
+) -> Trajectory:
     return Trajectory(
         id=str(row["id"]),
         project_id=str(row["project_id"]),
@@ -608,16 +647,58 @@ def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory 
     )
 
 
+def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory | None:
+    row = conn.execute(
+        "SELECT * FROM memory_trajectories WHERE id=?",
+        (trajectory_id,),
+    ).fetchone()
+    if row is None:
+        return None
+    return _row_to_trajectory(
+        row,
+        steps=_steps_for_trajectory(conn, trajectory_id),
+        subjects=_subjects_for_trajectory(conn, trajectory_id),
+        evidence=_evidence_for_trajectory(conn, trajectory_id),
+    )
+
+
 def _find_trajectories_by_ids(
     conn: sqlite3.Connection,
     ids: Sequence[str],
 ) -> list[Trajectory]:
-    hydrated: list[Trajectory] = []
-    for trajectory_id in ids:
-        trajectory = find_trajectory(conn, trajectory_id)
-        if trajectory is not None:
-            hydrated.append(trajectory)
-    return hydrated
+    # Batch hydration: 4 chunked IN(...) queries total instead of 4 per id
+    # (row + steps + subjects + evidence). Preserves input id order and the
+    # per-trajectory child ordering of the single-id path.
+    id_list = [str(trajectory_id) for trajectory_id in ids]
+    if not id_list:
+        return []
+    rows_by_id: dict[str, sqlite3.Row] = {}
+    for batch in chunked(tuple(id_list), _SQLITE_IN_QUERY_BATCH):
+        placeholders = ", ".join("?" for _ in batch)
+        for row in conn.execute(
+            f"SELECT * FROM memory_trajectories WHERE id IN ({placeholders})",
+            batch,
+        ).fetchall():
+            rows_by_id[str(row["id"])] = row
+    present_ids = [tid for tid in id_list if tid in rows_by_id]
+    steps_by_id = _group_rows_by_trajectory_id(
+        conn, ids=present_ids, sql=_STEPS_BATCH_SQL, build=_row_to_step
+    )
+    subjects_by_id = _group_rows_by_trajectory_id(
+        conn, ids=present_ids, sql=_SUBJECTS_BATCH_SQL, build=_row_to_subject
+    )
+    evidence_by_id = _group_rows_by_trajectory_id(
+        conn, ids=present_ids, sql=_EVIDENCE_BATCH_SQL, build=_row_to_evidence
+    )
+    return [
+        _row_to_trajectory(
+            rows_by_id[tid],
+            steps=steps_by_id.get(tid, []),
+            subjects=subjects_by_id.get(tid, []),
+            evidence=evidence_by_id.get(tid, []),
+        )
+        for tid in present_ids
+    ]
 
 
 def count_trajectories(conn: sqlite3.Connection, *, project_id: str) -> int:
@@ -744,6 +825,40 @@ def _insert_evidence(
     )
 
 
+def _row_to_step(row: sqlite3.Row) -> TrajectoryStep:
+    return TrajectoryStep(
+        step_index=int(row["step_index"]),
+        audit_sequence=int(row["audit_sequence"]),
+        event_id=str(row["event_id"]),
+        event_type=str(row["event_type"]),
+        status=_optional_text(row["status"]),
+        run_id=_optional_text(row["run_id"]),
+        report_digest=_optional_text(row["report_digest"]),
+        event_core_sha256=str(row["event_core_sha256"]),
+        event_core_json=str(row["event_core_json"]),
+        summary=_optional_text(row["summary"]),
+        created_at_utc=str(row["created_at_utc"]),
+    )
+
+
+def _row_to_subject(row: sqlite3.Row) -> TrajectorySubject:
+    return TrajectorySubject(
+        subject_kind=str(row["subject_kind"]),
+        subject_key=str(row["subject_key"]),
+        relation=str(row["relation"]),
+    )
+
+
+def _row_to_evidence(row: sqlite3.Row) -> TrajectoryEvidence:
+    return TrajectoryEvidence(
+        evidence_kind=str(row["evidence_kind"]),
+        ref=str(row["ref"]),
+        locator=_optional_text(row["locator"]),
+        digest=_optional_text(row["digest"]),
+        created_at_utc=str(row["created_at_utc"]),
+    )
+
+
 def _steps_for_trajectory(
     conn: sqlite3.Connection,
     trajectory_id: str,
@@ -753,22 +868,7 @@ def _steps_for_trajectory(
         "ORDER BY step_index ASC",
         (trajectory_id,),
     ).fetchall()
-    return [
-        TrajectoryStep(
-            step_index=int(row["step_index"]),
-            audit_sequence=int(row["audit_sequence"]),
-            event_id=str(row["event_id"]),
-            event_type=str(row["event_type"]),
-            status=_optional_text(row["status"]),
-            run_id=_optional_text(row["run_id"]),
-            report_digest=_optional_text(row["report_digest"]),
-            event_core_sha256=str(row["event_core_sha256"]),
-            event_core_json=str(row["event_core_json"]),
-            summary=_optional_text(row["summary"]),
-            created_at_utc=str(row["created_at_utc"]),
-        )
-        for row in rows
-    ]
+    return [_row_to_step(row) for row in rows]
 
 
 def _subjects_for_trajectory(
@@ -780,14 +880,7 @@ def _subjects_for_trajectory(
         "WHERE trajectory_id=? ORDER BY subject_kind ASC, subject_key ASC",
         (trajectory_id,),
     ).fetchall()
-    return [
-        TrajectorySubject(
-            subject_kind=str(row["subject_kind"]),
-            subject_key=str(row["subject_key"]),
-            relation=str(row["relation"]),
-        )
-        for row in rows
-    ]
+    return [_row_to_subject(row) for row in rows]
 
 
 def _evidence_for_trajectory(
@@ -800,16 +893,7 @@ def _evidence_for_trajectory(
         "ORDER BY created_at_utc ASC, evidence_kind ASC, ref ASC",
         (trajectory_id,),
     ).fetchall()
-    return [
-        TrajectoryEvidence(
-            evidence_kind=str(row["evidence_kind"]),
-            ref=str(row["ref"]),
-            locator=_optional_text(row["locator"]),
-            digest=_optional_text(row["digest"]),
-            created_at_utc=str(row["created_at_utc"]),
-        )
-        for row in rows
-    ]
+    return [_row_to_evidence(row) for row in rows]
 
 
 def _projection_run_id(

@@ -16,7 +16,9 @@ from codeclone.audit.writer import SqliteAuditWriter
 from .memory_fixtures import memory_store
 
 
-def _write_workflow_events(root: Path, audit_db: Path) -> None:
+def _write_workflow_events(
+    root: Path, audit_db: Path, *, intent_id: str = "intent-test-001"
+) -> None:
     root_digest = repo_root_digest(root.resolve())
     writer = SqliteAuditWriter(
         db_path=audit_db,
@@ -31,7 +33,7 @@ def _write_workflow_events(root: Path, audit_db: Path) -> None:
                 repo_root_digest=root_digest,
                 agent_pid=100,
                 agent_label="tester",
-                intent_id="intent-test-001",
+                intent_id=intent_id,
                 run_id="abc12345",
                 report_digest="1" * 64,
                 status="active",
@@ -53,7 +55,7 @@ def _write_workflow_events(root: Path, audit_db: Path) -> None:
                 repo_root_digest=root_digest,
                 agent_pid=100,
                 agent_label="tester",
-                intent_id="intent-test-001",
+                intent_id=intent_id,
                 run_id="def67890",
                 report_digest="2" * 64,
                 status="accepted",
@@ -104,6 +106,37 @@ def test_rebuild_trajectories_from_audit_is_idempotent(tmp_path: Path) -> None:
             "patch_contract.verified",
         ]
         assert store.latest_trajectory_projection_run(project_id=project.id) is not None
+
+
+def test_find_trajectories_by_ids_batch_matches_single_path(tmp_path: Path) -> None:
+    from codeclone.memory.trajectory import store as trajectory_store
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        for intent_id in ("intent-test-001", "intent-test-002", "intent-test-003"):
+            _write_workflow_events(root, audit_db, intent_id=intent_id)
+        store.rebuild_trajectories_from_audit(
+            project=project, root_path=root, audit_db_path=audit_db
+        )
+
+        conn = store._conn
+        ids = [item.id for item in store.list_trajectories(project_id=project.id)]
+        assert len(ids) == 3
+
+        # Batch hydration is identical to the per-id single path, in input order.
+        single = [trajectory_store.find_trajectory(conn, tid) for tid in ids]
+        assert trajectory_store._find_trajectories_by_ids(conn, ids) == single
+
+        # Order is preserved, missing ids are skipped, empty input yields [].
+        reversed_ids = list(reversed(ids))
+        assert trajectory_store._find_trajectories_by_ids(conn, reversed_ids) == [
+            trajectory_store.find_trajectory(conn, tid) for tid in reversed_ids
+        ]
+        assert (
+            trajectory_store._find_trajectories_by_ids(conn, ["missing", *ids])
+            == single
+        )
+        assert trajectory_store._find_trajectories_by_ids(conn, []) == []
 
 
 def test_rebuild_supersedes_duplicate_workflow_projection_rows(tmp_path: Path) -> None:
