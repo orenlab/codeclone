@@ -8,7 +8,9 @@ from __future__ import annotations
 import dataclasses
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
+from typing import Any, Literal, cast
 
 import pytest
 
@@ -21,6 +23,7 @@ from codeclone.memory.models import (
     MemorySubject,
     generate_memory_id,
 )
+from codeclone.memory.retrieval.semantic import audit_event_row
 from codeclone.memory.semantic.sources import (
     AuditIndexSource,
     MemoryIndexSource,
@@ -422,3 +425,82 @@ def _trajectory(project_id: str) -> Trajectory:
             ),
         ),
     )
+
+
+def test_memory_index_source_without_path_subject() -> None:
+    project_id = "proj-no-path"
+    record = replace(
+        make_module_record(project_id, "pkg.mod"),
+        type="contract_note",
+        statement="recover semantic index without path subject",
+    )
+    subjects = [
+        MemorySubject(
+            id="s-test",
+            memory_id=record.id,
+            subject_kind="test",
+            subject_key="tests/test_mod.py",
+            relation="about",
+        )
+    ]
+    store = type(
+        "_Store",
+        (),
+        {
+            "query_records": lambda self, query: [record][
+                query.offset : query.offset + 250
+            ],
+            "list_subjects_for_memories": lambda self, memory_ids: dict.fromkeys(
+                memory_ids, subjects
+            ),
+        },
+    )()
+    source = MemoryIndexSource(cast(Any, store), project_id=project_id)
+    projections = list(source.iter_projections())
+    assert len(projections) == 1
+    assert projections[0].subject_path is None
+
+
+def test_audit_index_source_connect_error(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    db_path.mkdir()
+    source = AuditIndexSource(enabled=True, db_path=db_path)
+    assert source.name() == "audit"
+    assert list(source.iter_projections()) == []
+
+
+def test_audit_event_row_connect_and_query_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    audit_db = tmp_path / "audit.sqlite3"
+    audit_db.mkdir()
+    assert audit_event_row(audit_db, "evt-1") is None
+
+    audit_file = tmp_path / "audit2.sqlite3"
+    audit_file.write_text("not sqlite", encoding="utf-8")
+
+    real_connect = sqlite3.connect
+
+    def _fail_connect(
+        database: str,
+        timeout: float = 5.0,
+        detect_types: int = 0,
+        isolation_level: Literal["DEFERRED", "EXCLUSIVE", "IMMEDIATE"] | None = None,
+        check_same_thread: bool = True,
+        cached_statements: int = 128,
+        uri: bool = False,
+    ) -> sqlite3.Connection:
+        if database == str(audit_file):
+            raise sqlite3.Error("connect failed")
+        return real_connect(
+            database,
+            timeout=timeout,
+            detect_types=detect_types,
+            isolation_level=isolation_level,
+            check_same_thread=check_same_thread,
+            cached_statements=cached_statements,
+            uri=uri,
+        )
+
+    monkeypatch.setattr(sqlite3, "connect", _fail_connect)
+    assert audit_event_row(audit_file, "evt-1") is None

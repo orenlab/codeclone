@@ -54,3 +54,9 @@ unknown_key = true
         match=r"Unknown key\(s\) in tool\.codeclone\.memory",
     ):
         load_pyproject_config(tmp_path)
+
+
+def test_ingest_config_validator_passthrough_non_dict() -> None:
+    from codeclone.config.memory import IngestConfig
+
+    assert IngestConfig._normalize_path_lists.__func__(IngestConfig, 42) == 42

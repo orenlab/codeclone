@@ -159,3 +159,46 @@ def test_resolvers_skip_missing_and_escaping_paths(tmp_path: Path) -> None:
     )
     assert resolve_mcp_tool_schema_snapshot_path(root_path=root, ingest=ingest) is None
     assert resolve_mcp_tool_contradiction_sources(root_path=root, ingest=ingest) is None
+
+
+def test_resolve_doc_anchor_path_normalizes_registry_and_filesystem(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.ingest.extractors import _resolve_doc_anchor_path
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    target = root / "pkg" / "mod.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("x = 1\n", encoding="utf-8")
+    loose = root / "standalone.py"
+    loose.write_text("pass\n", encoding="utf-8")
+    registry = frozenset({"pkg/mod.py"})
+    assert _resolve_doc_anchor_path("", root_path=root, registry_paths=registry) is None
+    assert (
+        _resolve_doc_anchor_path("pkg/mod.py", root_path=root, registry_paths=registry)
+        == "pkg/mod.py"
+    )
+    assert (
+        _resolve_doc_anchor_path(
+            "missing/path", root_path=root, registry_paths=registry
+        )
+        is None
+    )
+    assert (
+        _resolve_doc_anchor_path("mod.py", root_path=root, registry_paths=registry)
+        == "pkg/mod.py"
+    )
+    ambiguous = frozenset({"pkg/a/mod.py", "pkg/b/mod.py"})
+    assert (
+        _resolve_doc_anchor_path("mod.py", root_path=root, registry_paths=ambiguous)
+        is None
+    )
+    assert (
+        _resolve_doc_anchor_path(
+            "standalone.py",
+            root_path=root,
+            registry_paths=frozenset(),
+        )
+        == "standalone.py"
+    )

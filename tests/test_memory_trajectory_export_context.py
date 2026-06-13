@@ -7,8 +7,12 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
+from typing import Any, cast
+
+import pytest
 
 from codeclone.audit.events import (
     EVENT_CLAIM_COMPLETED,
@@ -16,7 +20,7 @@ from codeclone.audit.events import (
     event_core_for_event,
 )
 from codeclone.config.memory import resolve_memory_config
-from codeclone.memory.models import MemoryEvidence, generate_memory_id
+from codeclone.memory.models import MemoryEvidence, MemoryRecord, generate_memory_id
 from codeclone.memory.trajectory.export import export_trajectories_jsonl
 from codeclone.memory.trajectory.export_context import select_canonical_trajectories
 from codeclone.memory.trajectory.models import TRAJECTORY_PROJECTION_VERSION_V1
@@ -189,3 +193,323 @@ def test_export_context_helper_rejection_and_deduplication_edges(
         )
         is None
     )
+
+
+def test_export_context_observability_and_audit_validation_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.events import (
+        EVENT_INTENT_CHECKED,
+        EVENT_INTENT_DECLARED,
+        EVENT_PATCH_VERIFIED,
+    )
+    from codeclone.audit.reader import read_audit_event_core_records
+    from codeclone.audit.validation import (
+        AuditReadError,
+        AuditValidationError,
+        EventRow,
+        validate_event_row,
+    )
+    from codeclone.contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+    from codeclone.memory.trajectory.export_context import (
+        _effective_scope_paths,
+        _load_event_core,
+        _prefer_trajectory_projection,
+        _preview_text,
+        build_export_context,
+        extract_trajectory_citations,
+        select_canonical_trajectories,
+    )
+    from codeclone.memory.trajectory.patch_trail_projector import (
+        project_patch_trail_from_audit,
+    )
+    from codeclone.memory.trajectory.projector import TrajectoryProjectionError
+    from codeclone.observability.models import OperationRecord
+    from codeclone.observability.store.reader import (
+        build_trace_view,
+        open_observability_store_readonly,
+    )
+    from codeclone.observability.store.schema import (
+        observability_store_path,
+        open_observability_store,
+    )
+    from codeclone.observability.store.writer import write_operation
+    from codeclone.report.meta import current_report_timestamp_utc
+
+    from .memory_fixtures import memory_store, seed_trajectory_audit_workflow
+    from .test_memory_trajectory_projector import _core, _record
+
+    assert _load_event_core("{not-json") == {}
+    assert _load_event_core('["list"]') == {}
+    assert _preview_text("x" * 500).endswith("...")
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        projection = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory = projection.trajectories[0]
+        dup_subject = replace(
+            trajectory,
+            subjects=(
+                *trajectory.subjects,
+                trajectory.subjects[0],
+            ),
+        )
+        assert extract_trajectory_citations(dup_subject)
+        assert (
+            _effective_scope_paths(
+                trajectory,
+                scope_paths=(),
+                patch_trail_payload=None,
+            )
+            == ()
+        )
+        no_precedents = build_export_context(
+            store._conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=(),
+            patch_trail_payload=None,
+            canonical_by_workflow={trajectory.workflow_id: trajectory},
+        )
+        no_precedents_context = no_precedents["context"]
+        assert isinstance(no_precedents_context, dict)
+        assert no_precedents_context["trajectory_precedents"] == []
+
+        for index in range(8):
+            note = MemoryRecord(
+                id=generate_memory_id(),
+                project_id=project.id,
+                identity_key=f"risk_note:test:{index}",
+                type="risk_note",
+                status="active",
+                confidence="supported",
+                origin="system",
+                ingest_source="analysis",
+                statement=f"linked precedent {index}",
+                summary=None,
+                payload={},
+                created_at_utc=current_report_timestamp_utc(),
+                updated_at_utc=current_report_timestamp_utc(),
+                last_verified_at_utc=current_report_timestamp_utc(),
+                expires_at_utc=None,
+                created_by="test",
+                verified_by=None,
+                approved_by=None,
+                approved_at_utc=None,
+                report_digest=None,
+                code_fingerprint=None,
+                stale_reason=None,
+                created_on_branch=None,
+                created_at_commit=None,
+                verified_on_branch=None,
+                verified_at_commit=None,
+            )
+            store.write_record(note)
+            store.write_evidence(
+                MemoryEvidence(
+                    id=generate_memory_id(prefix="evid"),
+                    memory_id=note.id,
+                    evidence_kind="trajectory",
+                    ref=trajectory.id,
+                    locator=None,
+                    quote=None,
+                    digest=trajectory.trajectory_digest,
+                    created_at_utc=current_report_timestamp_utc(),
+                )
+            )
+        store.commit()
+        capped = build_export_context(
+            store._conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=("pkg/service.py",),
+            patch_trail_payload=None,
+            canonical_by_workflow={trajectory.workflow_id: trajectory},
+        )
+        capped_context = capped["context"]
+        assert isinstance(capped_context, dict)
+        assert len(capped_context["memory_precedents"]) == 8
+
+        older = replace(
+            trajectory,
+            id="traj-older-export",
+            finished_at_utc="2020-01-01T00:00:00Z",
+            started_at_utc="2020-01-01T00:00:00Z",
+        )
+        newer_same_version = replace(
+            trajectory,
+            id="traj-newer-export",
+            finished_at_utc="2026-06-01T00:00:00Z",
+        )
+        canonical = select_canonical_trajectories([older, newer_same_version])
+        assert len(canonical) == 1
+        assert canonical[0].id == "traj-newer-export"
+        assert _prefer_trajectory_projection(newer_same_version, older) is True
+        tie_a = replace(
+            newer_same_version,
+            finished_at_utc=trajectory.finished_at_utc,
+            id="traj-a",
+        )
+        tie_b = replace(
+            newer_same_version,
+            finished_at_utc=trajectory.finished_at_utc,
+            id="traj-b",
+        )
+        assert _prefer_trajectory_projection(tie_b, tie_a) is True
+
+    core_json, core_sha = _core(
+        EVENT_INTENT_CHECKED,
+        status="partial",
+        declared_scope_paths=["pkg/a.py"],
+        changed_files=["pkg/a.py"],
+    )
+    partial_check = replace(
+        _record(
+            2,
+            EVENT_INTENT_CHECKED,
+            declared_scope_paths=["pkg/a.py"],
+            changed_files=["pkg/a.py"],
+        ),
+        status=None,
+        event_core_json=core_json,
+        event_core_sha256=core_sha,
+    )
+    declared_only = _record(1, EVENT_INTENT_DECLARED, status="active")
+    trail = project_patch_trail_from_audit(
+        records=(
+            declared_only,
+            partial_check,
+            _record(3, "receipt.created"),
+            _record(4, EVENT_PATCH_VERIFIED),
+        ),
+        repo_root_digest="digest",
+    )
+    assert trail is None or trail.scope_check_status == "partial"
+
+    bad_digest = replace(
+        _record(1, EVENT_INTENT_DECLARED, status="active", scope_paths=["pkg/a.py"]),
+        event_core_sha256="0" * 64,
+    )
+    with pytest.raises(TrajectoryProjectionError, match="digest mismatch"):
+        project_patch_trail_from_audit(
+            records=(bad_digest,),
+            repo_root_digest="digest",
+        )
+
+    audit_db = tmp_path / "broken-audit.sqlite3"
+    audit_db.write_text("not sqlite", encoding="utf-8")
+    real_connect = sqlite3.connect
+
+    def _fail_event_core_connect(
+        database: str, *args: Any, **kwargs: Any
+    ) -> sqlite3.Connection:
+        if database == str(audit_db):
+            raise sqlite3.Error("connect failed")
+        return cast(sqlite3.Connection, real_connect(database, *args, **kwargs))
+
+    monkeypatch.setattr(sqlite3, "connect", _fail_event_core_connect)
+    with pytest.raises(AuditReadError, match="cannot open audit database"):
+        read_audit_event_core_records(db_path=audit_db, repo_root_digest="digest")
+
+    row = EventRow(
+        event_id="evt_surface",
+        event_type="analysis.completed",
+        severity="info",
+        created_at_utc="2026-05-25T00:00:00Z",
+        repo_root_digest="a" * 16,
+        run_id="run1234567890abcdef",
+        intent_id=None,
+        report_digest="b" * 64,
+        agent_label="agent",
+        agent_pid=1,
+        agent_start_epoch=None,
+        status="full",
+        payload_json="{}",
+        surface="bogus",
+    )
+    with pytest.raises(AuditValidationError, match="invalid surface"):
+        validate_event_row(row)
+
+    row_sha_only = EventRow(
+        event_id="evt_core",
+        event_type="analysis.completed",
+        severity="info",
+        created_at_utc="2026-05-25T00:00:00Z",
+        repo_root_digest="a" * 16,
+        run_id="run1234567890abcdef",
+        intent_id=None,
+        report_digest="b" * 64,
+        agent_label="agent",
+        agent_pid=1,
+        agent_start_epoch=None,
+        status="full",
+        payload_json="{}",
+        event_core_json=None,
+        event_core_sha256="c" * 64,
+    )
+    with pytest.raises(AuditValidationError, match="event_core_sha256 requires"):
+        validate_event_row(row_sha_only)
+
+    conn = open_observability_store(observability_store_path(tmp_path / "obs"))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="missing-op",
+                correlation_id="missing-op",
+                surface="mcp",
+                name="mcp.check_patch_contract",
+                started_at_utc="not-a-timestamp",
+                duration_ms=10.0,
+                status="ok",
+                session_id="sess-1",
+            ),
+        )
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="analyze-op",
+                correlation_id="analyze-op",
+                surface="mcp",
+                name="mcp.analyze_repository",
+                started_at_utc="2026-06-09T00:00:01Z",
+                duration_ms=20.0,
+                status="ok",
+                session_id="sess-1",
+            ),
+        )
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="query-op",
+                correlation_id="query-op",
+                surface="mcp",
+                name="mcp.get_finding",
+                started_at_utc="2026-06-09T00:00:02Z",
+                duration_ms=15.0,
+                status="ok",
+            ),
+        )
+    finally:
+        conn.close()
+
+    read_conn = open_observability_store_readonly(tmp_path / "obs")
+    assert read_conn is not None
+    try:
+        missing = build_trace_view(read_conn, operation_id="does-not-exist")
+        assert missing.operation_tree == ()
+        by_session = build_trace_view(read_conn, session_id="sess-1")
+        assert by_session.aggregates.operation_count == 2
+        recent = build_trace_view(read_conn, last=1)
+        assert recent.schema_version == PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+        pipe = {group.name for group in recent.aggregates.pipeline}
+        assert {"controller", "analysis", "mcp query"} & pipe
+        assert recent.waterfall
+    finally:
+        read_conn.close()

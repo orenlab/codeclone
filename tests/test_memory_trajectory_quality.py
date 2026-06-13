@@ -260,3 +260,42 @@ def test_complexity_calculation_serialization() -> None:
     assert declared_line.get("raw") == 4
     assert declared_line.get("contribution") == 8
     assert declared_line.get("cap") == 40
+
+
+def test_trajectory_quality_timestamp_and_band_edges() -> None:
+    from codeclone.audit.events import EVENT_INTENT_DECLARED, EVENT_PATCH_VERIFIED
+    from codeclone.memory.trajectory.projector import project_trajectory
+    from codeclone.memory.trajectory.quality import (
+        _complexity_band_label,
+        _parse_utc_timestamp,
+        compute_trajectory_duration_seconds,
+    )
+
+    from .test_memory_trajectory_projector import _record
+
+    trajectory = project_trajectory(
+        project_id="proj",
+        repo_root_digest="digest",
+        workflow_id="intent:intent-a-001",
+        records=(
+            _record(
+                1, EVENT_INTENT_DECLARED, status="active", scope_paths=["pkg/a.py"]
+            ),
+            _record(2, EVENT_PATCH_VERIFIED, status="accepted"),
+        ),
+    )
+    broken_times = replace(
+        trajectory,
+        started_at_utc="not-a-timestamp",
+        finished_at_utc="also-bad",
+    )
+    assert compute_trajectory_duration_seconds(broken_times) == 0
+    assert _parse_utc_timestamp("") is None
+    assert _parse_utc_timestamp("bad-ts") is None
+    assert _parse_utc_timestamp("2026-01-01T00:00:00Z") is not None
+    assert _complexity_band_label(70) == ("high", "High")
+    assert _complexity_band_label(35) == ("moderate", "Moderate")
+    assert _complexity_band_label(10) == ("low", "Low")
+    naive = _parse_utc_timestamp("2026-01-01T00:00:00")
+    assert naive is not None
+    assert naive.tzinfo is not None

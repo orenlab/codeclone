@@ -117,3 +117,19 @@ def test_execute_mcp_memory_sync_rejects_invalid_policy(tmp_path: Path) -> None:
     )
     assert payload["status"] == "unchanged"
     assert payload["reason"] == "policy_off"
+
+
+def test_execute_mcp_memory_sync_skips_without_report_digest(tmp_path: Path) -> None:
+    from codeclone.memory.ingest.mcp_sync import execute_mcp_memory_sync
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    payload = execute_mcp_memory_sync(
+        root_path=root,
+        report_document={},
+        trigger="auto",
+        run_id="run-no-digest",
+        force=False,
+    )
+    assert payload["status"] == "skipped"
+    assert payload["reason"] == "missing_report_digest"

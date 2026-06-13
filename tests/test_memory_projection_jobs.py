@@ -22,6 +22,7 @@ from codeclone.memory.jobs import (
 from codeclone.memory.jobs.store import pending_projection_job
 from codeclone.memory.project import resolve_memory_db_path
 from codeclone.memory.schema import open_memory_db
+from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import cli_memory_repo
 
@@ -96,3 +97,50 @@ def test_worker_run_once_without_pending_job(tmp_path: Path) -> None:
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         payload = execute_run_projection_jobs_once(root_path=root)
         assert payload["status"] == "nothing_to_do"
+
+
+def test_projection_job_pid_alive_and_reclaim_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.jobs.store import _pid_alive, _reclaim_stale_running_jobs
+
+    assert _pid_alive(None) is False
+    assert _pid_alive("not-a-pid@host") is False
+    assert _pid_alive("0@host") is False
+    assert _pid_alive(f"{__import__('os').getpid()}@host") is True
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+        config = resolve_memory_config(root)
+        db_path = resolve_memory_db_path(root, config)
+        conn = open_memory_db(db_path)
+        try:
+            now = current_report_timestamp_utc()
+            conn.execute(
+                "INSERT INTO memory_projection_jobs("
+                "id, project_id, job_kind, status, trigger, requested_at_utc, "
+                "started_at_utc, claimed_by, attempt, stimulus_json"
+                ") VALUES (?, ?, 'projection_bundle', 'running', 'cli', ?, ?, ?, 1, ?)",
+                (
+                    "job-stale",
+                    project.id,
+                    now,
+                    "not-a-timestamp",
+                    "999999@dead",
+                    "{}",
+                ),
+            )
+            conn.commit()
+            _reclaim_stale_running_jobs(
+                conn,
+                project_id=project.id,
+                running_timeout_seconds=1,
+            )
+            row = conn.execute(
+                "SELECT status FROM memory_projection_jobs WHERE id=?",
+                ("job-stale",),
+            ).fetchone()
+        finally:
+            conn.close()
+        assert row is not None
+        assert str(row[0]) == "failed"

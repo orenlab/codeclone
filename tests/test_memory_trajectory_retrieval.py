@@ -611,3 +611,32 @@ def test_scope_and_query_ranking_cover_all_subject_kinds_and_rejections(
     assert any(part.startswith("labels ") for part in semantic_parts)
     assert any(part.startswith("paths ") for part in semantic_parts)
     assert any(part.startswith("steps ") for part in semantic_parts)
+
+
+def test_hydrate_trajectory_hits_skips_foreign_project(tmp_path: Path) -> None:
+    from codeclone.memory.retrieval import service as retrieval_service
+    from codeclone.memory.semantic.models import SemanticHit
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+        hits = retrieval_service._hydrate_trajectory_hits(
+            store,
+            project_id=project.id,
+            hits=[SemanticHit(source_id=trajectory.id, source="trajectory", score=0.5)],
+            detail_level="compact",
+        )
+        assert hits
+        assert hits[0]["semantic_score"] == 0.5
+        missing = retrieval_service._hydrate_trajectory_hits(
+            store,
+            project_id="other-project",
+            hits=[SemanticHit(source_id=trajectory.id, source="trajectory", score=0.5)],
+            detail_level="compact",
+        )
+        assert missing == []

@@ -22,7 +22,11 @@ from codeclone.memory.ingest.extractors import (
     extract_test_anchors,
 )
 from codeclone.memory.models import MemoryProject
-from codeclone.memory.project import GitProvenance
+from codeclone.memory.project import (
+    GitProvenance,
+    read_git_provenance,
+    resolve_project_identity,
+)
 
 _NOW = "2026-01-01T00:00:00Z"
 
@@ -338,3 +342,107 @@ def test_extract_contradictions_tools_must_be_dict_and_claim_mismatch(
     record = batch.records[0]
     assert record.type == "contradiction_note"
     assert record.status == "draft"
+
+
+def _tool_count_contradiction_repo(
+    tmp_path: Path,
+    *,
+    tools_json: str,
+    doc_name: str,
+    doc_text: str,
+) -> tuple[Path, MemoryProject, GitProvenance, IngestConfig]:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / "tools.json").write_text(tools_json, encoding="utf-8")
+    (root / doc_name).write_text(doc_text, encoding="utf-8")
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    ingest = IngestConfig(
+        mcp_tool_schema_snapshot_path="tools.json",
+        mcp_tool_count_doc_paths=(doc_name,),
+    )
+    return root, project, git, ingest
+
+
+def test_extract_contradictions_handles_broken_snapshot_and_docs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.ingest.extractors import extract_contradictions
+
+    root, project, git, ingest = _tool_count_contradiction_repo(
+        tmp_path,
+        tools_json="{bad",
+        doc_name="docs.md",
+        doc_text="The server exposes 3 MCP tools for agents.",
+    )
+    docs = root / "docs.md"
+    broken = extract_contradictions(
+        project=project,
+        root_path=root,
+        git=git,
+        report_digest="digest",
+        analysis_fingerprint="fp",
+        ingest=ingest,
+    )
+    assert broken.records == []
+
+    (root / "tools.json").write_text(
+        '{"tools": {"a": {}, "b": {}}}',
+        encoding="utf-8",
+    )
+
+    original_read_text = Path.read_text
+
+    def _raise_oserror(self: Path, *args: object, **kwargs: object) -> str:
+        if self == docs:
+            raise OSError("unreadable")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", _raise_oserror)
+    skipped = extract_contradictions(
+        project=project,
+        root_path=root,
+        git=git,
+        report_digest="digest",
+        analysis_fingerprint="fp",
+        ingest=ingest,
+    )
+    assert skipped.records == []
+
+
+def test_extract_contradictions_records_tool_count_mismatch(tmp_path: Path) -> None:
+    from codeclone.memory.ingest.extractors import extract_contradictions
+
+    root, project, git, ingest = _tool_count_contradiction_repo(
+        tmp_path,
+        tools_json='{"tools": {"a": {}, "b": {}}}',
+        doc_name="docs.md",
+        doc_text="The bundle exposes 3 MCP tools.",
+    )
+    batch = extract_contradictions(
+        project=project,
+        root_path=root,
+        git=git,
+        report_digest="digest",
+        analysis_fingerprint="fp",
+        ingest=ingest,
+    )
+    assert len(batch.records) == 1
+    assert batch.records[0].type == "contradiction_note"
+
+    (root / "docs-match.md").write_text(
+        "The bundle exposes 2 MCP tools.", encoding="utf-8"
+    )
+    matching = extract_contradictions(
+        project=project,
+        root_path=root,
+        git=git,
+        report_digest="digest",
+        analysis_fingerprint="fp",
+        ingest=IngestConfig(
+            mcp_tool_schema_snapshot_path="tools.json",
+            mcp_tool_count_doc_paths=("docs-match.md",),
+        ),
+    )
+    assert matching.records == []

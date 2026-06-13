@@ -6,10 +6,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+from codeclone.config.memory_defaults import (
+    DEFAULT_MEMORY_SOFT_STATEMENT_CHARS,
+    DEFAULT_MEMORY_TARGET_STATEMENT_CHARS,
+)
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.governance import (
     approve_record,
@@ -19,6 +24,8 @@ from codeclone.memory.governance import (
 from codeclone.memory.models import MemoryEvidence
 from codeclone.memory.project import resolve_project_identity
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+
+from .memory_fixtures import make_module_record, memory_store
 
 
 class _StaleHitStore:
@@ -122,3 +129,54 @@ def test_validate_memory_claims_warns_on_stale_hits_when_no_stale_in_text() -> N
     )
     assert result.valid is True
     assert any("Active stale records exist" in w for w in result.warnings)
+
+
+def test_record_candidate_requires_subject_path(tmp_path: Path) -> None:
+    from codeclone.memory.governance import record_candidate
+
+    with (
+        memory_store(tmp_path) as (_root, project, store, _db_path),
+        pytest.raises(MemoryContractError, match="subject_path"),
+    ):
+        record_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            statement="needs a path",
+            subject_path="   ",
+            max_candidates=5,
+        )
+
+
+def test_validate_memory_claims_warns_when_stale_records_exist(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        stale = replace(
+            make_module_record(project.id, "pkg.stale"),
+            status="stale",
+            stale_reason="seed",
+        )
+        store.upsert_record(stale)
+        result = validate_memory_claims(
+            store,
+            project_id=project.id,
+            text="There are no stale memory records in this project.",
+        )
+    assert any("stale" in warning.lower() for warning in result.warnings)
+
+
+def test_validate_memory_claims_statement_length_warnings(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        over_target = "x" * (DEFAULT_MEMORY_TARGET_STATEMENT_CHARS + 1)
+        over_soft = "y" * (DEFAULT_MEMORY_SOFT_STATEMENT_CHARS + 1)
+        target_result = validate_memory_claims(
+            store, project_id=project.id, text=over_target
+        )
+        soft_result = validate_memory_claims(
+            store, project_id=project.id, text=over_soft
+        )
+    assert any("target" in warning for warning in target_result.warnings)
+    assert any("soft limit" in warning for warning in soft_result.warnings)

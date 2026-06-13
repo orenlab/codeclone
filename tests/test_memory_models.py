@@ -15,6 +15,7 @@ from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import (
     MemoryRecord,
     generate_memory_id,
+    parse_payload_json,
 )
 from codeclone.memory.project import compute_project_id
 from codeclone.report.meta import current_report_timestamp_utc
@@ -71,3 +72,8 @@ def test_memory_record_frozen_fields() -> None:
     )
     with pytest.raises(FrozenInstanceError):
         record.statement = "changed"  # type: ignore[misc]
+
+
+def test_parse_payload_json_rejects_non_object() -> None:
+    with pytest.raises(TypeError, match="payload_json must decode to an object"):
+        parse_payload_json("[1, 2]")

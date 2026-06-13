@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 
@@ -365,3 +366,17 @@ def test_upsert_skips_human_origin_record(tmp_path: Path) -> None:
         assert loaded.statement == "human approved fact"
     finally:
         store.close()
+
+
+def test_open_sqlite_db_rejects_invalid_synchronous(tmp_path: Path) -> None:
+    from codeclone.utils.sqlite_store import open_sqlite_db
+
+    def _schema(conn: sqlite3.Connection) -> None:
+        conn.execute("CREATE TABLE t (id INTEGER PRIMARY KEY)")
+
+    with pytest.raises(ValueError, match="synchronous must be one of"):
+        open_sqlite_db(
+            tmp_path / "bad.sqlite3",
+            ensure_schema=_schema,
+            synchronous="invalid",
+        )

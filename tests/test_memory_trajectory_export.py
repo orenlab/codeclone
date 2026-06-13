@@ -111,3 +111,81 @@ def test_jsonl_accumulator_enforces_record_and_file_limits() -> None:
 
     assert accumulator.try_append("ok", record_limit=10, file_limit=10) is True
     assert accumulator.lines == ["ok"]
+
+
+def test_parse_contract_constants_and_patch_trail_projector_edges(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.ingest.extractors import _parse_contract_constants
+    from codeclone.memory.trajectory.patch_trail_projector import (
+        project_patch_trail_from_audit,
+    )
+
+    from .test_memory_trajectory_projector import _record
+
+    broken = tmp_path / "broken.py"
+    broken.write_text("def (\n", encoding="utf-8")
+    assert _parse_contract_constants(broken) == {}
+
+    constants = tmp_path / "constants.py"
+    constants.write_text(
+        "CACHE_VERSION = 2\nIGNORED = 1\n",
+        encoding="utf-8",
+    )
+    parsed = _parse_contract_constants(constants)
+    assert parsed.get("CACHE_VERSION") == "2"
+
+    assert project_patch_trail_from_audit(records=(), repo_root_digest="digest") is None
+    non_intent = replace(
+        _record(1, "intent.declared", status="active", scope_paths=["pkg/a.py"]),
+        workflow_id="analysis:run-1",
+    )
+    assert (
+        project_patch_trail_from_audit(
+            records=(non_intent,),
+            repo_root_digest="digest",
+        )
+        is None
+    )
+
+
+def test_patch_trail_projector_additional_audit_branches() -> None:
+    from codeclone.audit.events import EVENT_INTENT_DECLARED
+    from codeclone.memory.trajectory.patch_trail_projector import (
+        _apply_audit_record,
+        _WorkflowAuditState,
+        project_patch_trail_from_audit,
+    )
+
+    from .test_memory_trajectory_projector import _record
+
+    state = _WorkflowAuditState()
+    _apply_audit_record(
+        state,
+        replace(
+            _record(1, EVENT_INTENT_DECLARED, status="active"), audit_sequence=None
+        ),
+    )
+    assert state.declared_files == ()
+
+    assert (
+        project_patch_trail_from_audit(
+            records=(_record(1, EVENT_INTENT_DECLARED, status="active"),),
+            repo_root_digest="digest",
+        )
+        is None
+    )
+
+
+def test_serialize_patch_trail_summary_from_computed_trail() -> None:
+    from codeclone.memory.trajectory.patch_trail import compute_patch_trail
+    from codeclone.memory.trajectory.retrieval import serialize_patch_trail_summary
+
+    from .test_memory_trajectory_coverage import _patch_trail_inputs
+
+    trail = compute_patch_trail(_patch_trail_inputs())
+    summary = serialize_patch_trail_summary(
+        trail.to_payload(detail_level="summary"),
+    )
+    assert summary is not None
+    assert summary["verification_status"] == "accepted"

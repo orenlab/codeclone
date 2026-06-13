@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from codeclone.contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
 from codeclone.observability.models import (
     OperationRecord,
@@ -128,3 +130,48 @@ def test_profile_columns_persist(tmp_path: Path) -> None:
         assert rss == 6144.0
     finally:
         conn.close()
+
+
+def test_observability_span_error_and_sql_classification(tmp_path: Path) -> None:
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.observability import (
+        bootstrap,
+        operation,
+        record_elapsed_span,
+        shutdown,
+        span,
+    )
+    from codeclone.observability.runtime import _classify_sql
+    from codeclone.observability.store.schema import (
+        observability_store_path,
+        open_observability_store,
+    )
+
+    assert _classify_sql("   ") == ""
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    with operation(name="job", surface="cli"):
+        record_elapsed_span(
+            "cold-start",
+            started_at_utc="2026-01-01T00:00:00Z",
+            duration_ms=12.5,
+        )
+        with pytest.raises(RuntimeError, match="boom"), span(name="failing-stage"):
+            raise RuntimeError("boom")
+    shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        span_row = conn.execute(
+            "SELECT status FROM platform_spans WHERE name=?",
+            ("failing-stage",),
+        ).fetchone()
+        elapsed_row = conn.execute(
+            "SELECT name FROM platform_spans WHERE name=?",
+            ("cold-start",),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert span_row is not None
+    assert str(span_row[0]) == "error"
+    assert elapsed_row is not None

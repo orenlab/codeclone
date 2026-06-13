@@ -13,6 +13,7 @@ import pytest
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.ingest import InitOptions
 from codeclone.memory.ingest.runner import (
+    _registry_paths,
     build_init_batch,
     enrich_batch_git_evidence,
     planned_type_counts,
@@ -261,3 +262,111 @@ def test_enrich_batch_git_evidence_skips_when_head_missing() -> None:
     )
     enrich_batch_git_evidence(batch, git)
     assert batch.evidence == []
+
+
+def test_registry_paths_rejects_malformed_inventory_sections() -> None:
+    assert _registry_paths({"inventory": 1}) == frozenset()
+    assert _registry_paths({"inventory": {"file_registry": 1}}) == frozenset()
+    assert (
+        _registry_paths({"inventory": {"file_registry": {"items": "x"}}}) == frozenset()
+    )
+
+
+def test_build_init_batch_malformed_inventory_shapes(tmp_path: Path) -> None:
+    root, _report_path, _report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    for report_document in (
+        {"inventory": "not-a-map"},
+        {"inventory": {"file_registry": 1}},
+        {"inventory": {"file_registry": {"items": "not-a-list"}}},
+    ):
+        batch = build_init_batch(
+            root_path=root,
+            project=project,
+            report_document=report_document,
+            git=git,
+            report_digest=None,
+            analysis_fingerprint=None,
+            options=InitOptions(include_docs=True, include_tests=False),
+        )
+        assert batch.records == []
+
+
+def test_build_init_batch_registry_paths_via_docs_extract(tmp_path: Path) -> None:
+    root, _report_path, _report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    (root / "docs").mkdir()
+    (root / "docs" / "guide.md").write_text("See pkg/a.py\n", encoding="utf-8")
+    project = resolve_project_identity(root)
+    git = read_git_provenance(root)
+    batch = build_init_batch(
+        root_path=root,
+        project=project,
+        report_document={"inventory": {"file_registry": {"items": 99}}},
+        git=git,
+        report_digest=None,
+        analysis_fingerprint=None,
+        options=InitOptions(include_docs=True, include_tests=False),
+    )
+    assert isinstance(batch.records, list)
+
+
+def test_registry_paths_rejects_non_mapping_inventory() -> None:
+    from codeclone.memory.ingest.runner import _registry_paths
+
+    assert _registry_paths({}) == frozenset()
+    assert _registry_paths({"inventory": "bad"}) == frozenset()
+    assert _registry_paths({"inventory": {"file_registry": "bad"}}) == frozenset()
+
+
+def test_build_init_batch_rejects_invalid_project_and_git(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.ingest import InitOptions
+
+    with pytest.raises(TypeError, match="project must be MemoryProject"):
+        build_init_batch(
+            root_path=tmp_path,
+            project=object(),
+            report_document={},
+            git=read_git_provenance(tmp_path),
+            report_digest=None,
+            analysis_fingerprint=None,
+            options=InitOptions(),
+        )
+
+
+def test_analysis_fingerprint_from_meta_timestamp() -> None:
+    fp = analysis_fingerprint_from_report(
+        {"meta": {"report_generated_at_utc": "2026-06-02T12:00:00Z"}}
+    )
+    assert fp != "unknown"
+    assert len(fp) == 16
+
+
+def test_read_git_provenance_unavailable_without_branch_or_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    (root / ".git").mkdir()
+    monkeypatch.setattr(
+        "codeclone.memory.project._git_output_optional",
+        lambda _root, args: (
+            None
+            if args == ["rev-parse", "--abbrev-ref", "HEAD"]
+            else "deadbeef"
+            if args == ["rev-parse", "HEAD"]
+            else None
+        ),
+    )
+    git = read_git_provenance(root)
+    assert git.available is False

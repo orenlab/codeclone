@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.experience.distillation_workflow import (
     execute_experience_distillation,
@@ -120,3 +122,31 @@ def test_projection_job_includes_experience_step(tmp_path: Path) -> None:
         assert isinstance(experience, dict)
         assert experience["action"] == "distill_experiences"
         assert experience["status"] == "skipped"
+
+
+def test_experience_distillation_opens_store_when_not_passed(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.exceptions import MemoryContractError
+    from codeclone.memory.experience.distillation_workflow import (
+        execute_experience_distillation,
+    )
+
+    empty_root = tmp_path / "empty-repo"
+    empty_root.mkdir()
+    missing_config = resolve_memory_config(empty_root)
+    with pytest.raises(MemoryContractError, match="not found"):
+        execute_experience_distillation(
+            root_path=empty_root,
+            config=missing_config,
+        )
+
+    with memory_store(tmp_path) as (root, project, _store, db_path):
+        config = replace(resolve_memory_config(root), db_path=db_path)
+        payload = execute_experience_distillation(
+            root_path=root,
+            config=config,
+            project=project,
+        )
+        assert payload["status"] == "ok"
+        assert payload["experiences_distilled"] == 0

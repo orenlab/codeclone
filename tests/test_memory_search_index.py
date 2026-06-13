@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+from typing import Any, cast
+
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
 from codeclone.memory.search_index import (
@@ -15,6 +18,8 @@ from codeclone.memory.search_index import (
     tokenize_query,
 )
 from codeclone.report.meta import current_report_timestamp_utc
+
+from .memory_fixtures import make_module_record
 
 
 def _sample_record() -> MemoryRecord:
@@ -92,3 +97,16 @@ def test_build_search_text_includes_subjects_and_payload() -> None:
     assert "memory search helpers" in text
     assert "search_index.py" in text
     assert "alpha" in text
+
+
+def test_build_search_text_scalar_payload() -> None:
+    now = current_report_timestamp_utc()
+    record = replace(
+        make_module_record("proj", "pkg.mod"),
+        payload=cast(Any, 42),
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+    )
+    text = build_search_text(record=record, subjects=[])
+    assert "42" in text

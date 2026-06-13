@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.retrieval import query_engineering_memory
@@ -107,3 +108,30 @@ def test_query_engineering_memory_get_missing_record(tmp_path: Path) -> None:
             record_id="missing-id",
         )
     assert result["status"] == "not_found"
+
+
+def test_handle_semantic_search_disabled_block(tmp_path: Path) -> None:
+    from codeclone.memory.retrieval.service import _handle_semantic_search_mode
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        payload = _handle_semantic_search_mode(
+            store,
+            project_id=project.id,
+            query="recover checkpoint",
+            filter_types=(),
+            statuses=("active",),
+            filter_confidences=(),
+            match_mode="any",
+            max_results=5,
+            detail_level="compact",
+            include_stale=False,
+            include_drafts=False,
+            semantic_index=None,
+            embedding_provider=None,
+            provider_label=None,
+            semantic_reason=None,
+            audit_db_path=None,
+        )
+    semantic = cast(dict[str, object], payload["semantic"])
+    assert semantic["used"] is False
+    assert semantic["reason"] == "disabled"

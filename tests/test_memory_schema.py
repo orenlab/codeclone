@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -95,5 +96,26 @@ def test_migrate_memory_schema_noop_when_already_current(tmp_path: Path) -> None
     try:
         migrate_memory_schema(conn)
         assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+    finally:
+        conn.close()
+
+
+def test_ensure_schema_raises_on_unsupported_version(tmp_path: Path) -> None:
+    from codeclone.memory.schema import create_schema_v1, ensure_schema, set_meta
+
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        set_meta(conn, "schema_version", "0.0")
+        conn.commit()
+        with (
+            patch(
+                "codeclone.memory.schema_migrate.migrate_memory_schema",
+                lambda _conn: None,
+            ),
+            pytest.raises(MemorySchemaError, match="Unsupported engineering memory"),
+        ):
+            ensure_schema(conn)
     finally:
         conn.close()

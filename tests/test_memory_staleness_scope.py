@@ -61,3 +61,27 @@ def test_apply_scope_staleness_skips_records_already_marked_stale(
                 changed_paths=["pkg/stale.py"],
             )
         assert report.records_marked_stale == 0
+
+
+def test_apply_scope_staleness_prefix_directory_match(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        record = make_module_record(project.id, "pkg.nested")
+        store.upsert_record(record)
+        store.write_subject(
+            MemorySubject(
+                id="subj-nested",
+                memory_id=record.id,
+                subject_kind="path",
+                subject_key="pkg/nested/deep.py",
+                relation="about",
+            )
+        )
+        report = apply_scope_staleness(
+            store,
+            project_id=project.id,
+            changed_paths=["pkg/nested"],
+        )
+        loaded = store.find_record(record.id)
+        assert report.records_marked_stale == 1
+        assert loaded is not None
+        assert loaded.status == "stale"

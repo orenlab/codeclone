@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -16,7 +17,8 @@ from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.experience.models import Experience
 from codeclone.memory.models import MemoryEvidence, MemoryRecord, MemorySubject
 from codeclone.memory.retrieval import service as retrieval_service
-from codeclone.memory.retrieval.ranking import RankingContext
+from codeclone.memory.retrieval.ranking import RankingContext, relevance_score
+from codeclone.memory.semantic.models import SemanticHit
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
@@ -349,3 +351,99 @@ def test_record_relations_filters_external_endpoints_and_trajectory_not_found() 
         "status": "not_found",
         "payload": {"trajectory_id": "missing"},
     }
+
+
+def test_hydrate_audit_events_skips_missing_rows(tmp_path: Path) -> None:
+    audit_db = tmp_path / "audit.sqlite3"
+    hits = [SemanticHit(source_id="missing", source="audit", score=0.5)]
+    events = retrieval_service._hydrate_audit_events(audit_db, hits)
+    assert events == []
+
+
+def test_relevance_score_symbol_boost() -> None:
+    now = current_report_timestamp_utc()
+    record = MemoryRecord(
+        id="mem-sym",
+        project_id="proj",
+        identity_key="id-sym",
+        type="contract_note",
+        status="active",
+        confidence="verified",
+        origin="system",
+        ingest_source="contract",
+        statement="symbol match",
+        summary=None,
+        payload=None,
+        created_at_utc=now,
+        updated_at_utc=now,
+        last_verified_at_utc=now,
+        expires_at_utc=None,
+        created_by="test",
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=None,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+    subjects = [
+        MemorySubject(
+            id="subj-sym",
+            memory_id=record.id,
+            subject_kind="symbol",
+            subject_key="pkg.mod.fn",
+            relation="about",
+        )
+    ]
+    context = RankingContext.from_scope(
+        scope_paths=(),
+        symbols=("pkg.mod.fn",),
+        blast_dependents=(),
+    )
+    score = relevance_score(
+        record=record,
+        subjects=subjects,
+        context=context,
+        evidence_count=0,
+    )
+    assert score > 0.0
+
+
+def test_retrieval_service_semantic_helpers_and_scope_family() -> None:
+    from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
+    from codeclone.memory.retrieval import service as retrieval_service
+    from codeclone.memory.semantic.models import SemanticHit, SemanticIndexStatus
+
+    class _Index:
+        def search(
+            self, vector: object, *, k: int, source: str | None = None
+        ) -> list[SemanticHit]:
+            hits = [
+                SemanticHit(source_id="mem-1", source="memory", score=0.9),
+                SemanticHit(source_id="evt-1", source="audit", score=0.8),
+                SemanticHit(source_id="traj-1", source="trajectory", score=0.7),
+            ]
+            if source is not None:
+                hits = [hit for hit in hits if hit.source == source]
+            return hits[:k]
+
+        def status(self) -> SemanticIndexStatus:
+            return SemanticIndexStatus(available=True, indexed_count=3)
+
+    proximity, audit_hits, trajectory_hits = retrieval_service._semantic_hits(
+        index=_Index(),
+        provider=DeterministicHashEmbeddingProvider(dimension=8),
+        query="recover",
+        k=5,
+    )
+    assert "mem-1" in proximity
+    assert len(audit_hits) == 1
+    assert len(trajectory_hits) == 1
+    assert retrieval_service._scope_family("") is None
+    assert retrieval_service._scope_family("pkg/mod.py") == "pkg"
+
+    assert retrieval_service._scope_family("../escape") is None

@@ -9,6 +9,9 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
+from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
@@ -565,3 +568,17 @@ def test_query_for_path_includes_draft_without_include_drafts_flag(
         for item in records
         if isinstance(item, dict)
     )
+
+
+def test_get_relevant_memory_requires_scope_or_symbols(tmp_path: Path) -> None:
+    with (
+        memory_store(tmp_path) as (_root, project, store, _db_path),
+        pytest.raises(MemoryContractError, match="scope"),
+    ):
+        get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=(),
+            symbols=(),
+            scope_resolved_from="test",
+        )

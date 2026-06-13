@@ -7,9 +7,12 @@
 from __future__ import annotations
 
 import hashlib
+import sqlite3
 import subprocess
 from dataclasses import replace
 from pathlib import Path
+
+import pytest
 
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.governance import record_candidate
@@ -364,3 +367,68 @@ def test_record_candidate_omits_commit_without_subject_fingerprint(
         assert record.created_at_commit is None
         assert record.created_on_branch is None
         assert record.code_fingerprint is None
+
+
+def test_audit_reader_missing_db_and_connect_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.reader import (
+        count_audit_event_core_gaps,
+        list_workflow_ids_with_events_after,
+        read_audit_event_core_records,
+        read_audit_summary,
+    )
+    from codeclone.audit.schema import ensure_schema
+    from codeclone.audit.validation import AuditReadError
+
+    missing = tmp_path / "missing.sqlite3"
+    with pytest.raises(AuditReadError, match="no audit data"):
+        read_audit_event_core_records(db_path=missing, repo_root_digest="digest")
+    assert (
+        list_workflow_ids_with_events_after(
+            db_path=missing,
+            repo_root_digest="digest",
+            after_id=0,
+        )
+        == ()
+    )
+    assert count_audit_event_core_gaps(db_path=missing, repo_root_digest="digest") == 0
+
+    audit_db = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(audit_db)
+    try:
+        ensure_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    def _fail_open(_path: Path) -> sqlite3.Connection:
+        raise sqlite3.Error("connect failed")
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        _fail_open,
+    )
+    with pytest.raises(AuditReadError, match="cannot open audit database"):
+        list_workflow_ids_with_events_after(
+            db_path=audit_db,
+            repo_root_digest="digest",
+            after_id=0,
+        )
+    with pytest.raises(AuditReadError, match="cannot open audit database"):
+        count_audit_event_core_gaps(db_path=audit_db, repo_root_digest="digest")
+
+    class _BrokenConn:
+        def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise sqlite3.Error("query failed")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        lambda *_a, **_k: _BrokenConn(),
+    )
+    with pytest.raises(AuditReadError, match="cannot read audit database"):
+        read_audit_summary(db_path=audit_db, limit=5)

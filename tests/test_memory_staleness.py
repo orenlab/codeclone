@@ -6,19 +6,27 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
 
 import pytest
 
-from codeclone.memory.models import MemorySubject, RecordBatch, generate_memory_id
+from codeclone.memory.models import (
+    MemoryEvidence,
+    MemoryRecord,
+    MemorySubject,
+    RecordBatch,
+    generate_memory_id,
+)
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.memory.staleness import (
     apply_refresh_staleness,
     apply_scope_staleness,
     inventory_paths_from_report,
 )
+from codeclone.report.meta import current_report_timestamp_utc
 from tests.memory_fixtures import make_module_record, memory_store
 
 
@@ -298,3 +306,355 @@ def test_staleness_internal_noop_and_commit_edges(
     )
     assert result.records_marked_stale == 0
     assert commits == [True]
+
+
+def test_refresh_marks_evidence_digest_mismatch_when_batch_differs(
+    tmp_path: Path,
+) -> None:
+    report = {"inventory": {"file_registry": {"items": ["pkg/mod.py"]}}}
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        existing = make_module_record(project.id, "pkg.mod")
+        store.upsert_record(existing)
+        store.write_evidence(
+            MemoryEvidence(
+                id="ev-old",
+                memory_id=existing.id,
+                evidence_kind="report",
+                ref="run-1",
+                locator=None,
+                quote=None,
+                digest="digest-a",
+                created_at_utc=current_report_timestamp_utc(),
+            )
+        )
+        store.commit()
+        incoming = replace(existing, statement="updated")
+        batch = RecordBatch(
+            records=[incoming],
+            evidence=[
+                MemoryEvidence(
+                    id="ev-new",
+                    memory_id=incoming.id,
+                    evidence_kind="report",
+                    ref="run-1",
+                    locator=None,
+                    quote=None,
+                    digest="digest-b",
+                    created_at_utc=current_report_timestamp_utc(),
+                )
+            ],
+        )
+        result = apply_refresh_staleness(
+            store,
+            project_id=project.id,
+            batch=batch,
+            report_document=report,
+            root_path=root,
+        )
+        loaded = store.find_record(existing.id)
+        assert result.records_marked_stale >= 1
+        assert loaded is not None
+        assert loaded.stale_reason == "evidence_digest_mismatch"
+
+
+def test_refresh_human_origin_unanchored_stays_active_without_system_signals(
+    tmp_path: Path,
+) -> None:
+    report: dict[str, object] = {"inventory": {"file_registry": {"items": []}}}
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        human = replace(
+            make_module_record(project.id, "pkg.human"),
+            origin="human",
+        )
+        store.upsert_record(human)
+        result = apply_refresh_staleness(
+            store,
+            project_id=project.id,
+            batch=RecordBatch(records=[]),
+            report_document=report,
+            root_path=root,
+        )
+        assert result.records_marked_stale == 0
+        loaded = store.find_record(human.id)
+        assert loaded is not None
+        assert loaded.status == "active"
+
+
+def test_staleness_audit_validation_and_events_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.events import (
+        EVENT_INTENT_CHECKED,
+        EVENT_WORKSPACE_CONFLICT,
+        event_core_for_event,
+        event_summary,
+    )
+    from codeclone.audit.reader import (
+        count_audit_event_core_gaps,
+        list_workflow_ids_with_events_after,
+        read_audit_event_core_records,
+    )
+    from codeclone.audit.validation import (
+        AuditReadError,
+        AuditValidationError,
+        EventRow,
+        validate_event_row,
+    )
+    from codeclone.memory.staleness import (
+        _batch_evidence_index,
+        apply_refresh_staleness,
+    )
+
+    from .memory_fixtures import memory_store
+    from .test_audit_events_coverage import _event, _facts
+
+    orphan_evidence = MemoryEvidence(
+        id=generate_memory_id(prefix="evid"),
+        memory_id="missing-record",
+        evidence_kind="report",
+        ref="digest",
+        locator=None,
+        quote=None,
+        digest="abc",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+    assert _batch_evidence_index(RecordBatch(evidence=[orphan_evidence])) == {}
+
+    conflict_core = event_core_for_event(
+        _event(EVENT_WORKSPACE_CONFLICT, concurrent_intents=[{"intent_id": "a"}])
+    )
+    assert _facts(conflict_core)["concurrent_intents"] == 1
+
+    many_declared = [f"pkg/file_{index}.py" for index in range(60)]
+    check_payload = event_core_for_event(
+        _event(
+            EVENT_INTENT_CHECKED,
+            declared_scope=[*many_declared, 123, "../escape", "/abs"],
+            actual_changed_files=["pkg/file_0.py"],
+            status="clean",
+        )
+    )
+    check_facts = check_payload["facts"]
+    assert isinstance(check_facts, dict)
+    assert check_facts.get("paths_truncated") is True
+    assert check_facts.get("untouched_in_declared")
+
+    summary = event_summary(
+        "analysis.completed",
+        {"source": "mcp", "health": {"score": "high"}},
+    )
+    assert summary == "analysis completed (mcp)"
+
+    base_row = EventRow(
+        event_id="evt_val",
+        event_type="analysis.completed",
+        severity="info",
+        created_at_utc="2026-05-25T00:00:00Z",
+        repo_root_digest="a" * 16,
+        run_id="run1234567890abcdef",
+        intent_id=None,
+        report_digest="b" * 64,
+        agent_label="agent",
+        agent_pid=1,
+        agent_start_epoch=None,
+        status="full",
+        payload_json="{}",
+    )
+    with pytest.raises(AuditValidationError, match="event_core_json must be JSON"):
+        validate_event_row(
+            replace(
+                base_row,
+                event_core_json="{bad",
+                event_core_sha256="c" * 64,
+            )
+        )
+    with pytest.raises(AuditValidationError, match="must be a JSON object"):
+        validate_event_row(
+            replace(
+                base_row,
+                event_core_json='["list"]',
+                event_core_sha256="d" * 64,
+            )
+        )
+    import hashlib
+    import json
+
+    bad_version = json.dumps(
+        {
+            "core_schema_version": "0",
+            "event_family": "analysis",
+            "event_type": "analysis.completed",
+            "facts": {},
+            "status": "",
+            "truncated": False,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with pytest.raises(AuditValidationError, match="unsupported core_schema_version"):
+        validate_event_row(
+            replace(
+                base_row,
+                event_core_json=bad_version,
+                event_core_sha256=hashlib.sha256(bad_version.encode()).hexdigest(),
+            )
+        )
+    good_core = json.dumps(
+        {
+            "core_schema_version": "2",
+            "event_family": "analysis",
+            "event_type": "analysis.completed",
+            "facts": {},
+            "status": "",
+            "truncated": False,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    with pytest.raises(AuditValidationError, match="does not match event_core_json"):
+        validate_event_row(
+            replace(
+                base_row,
+                event_core_json=good_core,
+                event_core_sha256="f" * 64,
+            )
+        )
+    with pytest.raises(AuditValidationError, match="must be lowercase sha256 hex"):
+        validate_event_row(
+            replace(
+                base_row,
+                event_core_json=good_core,
+                event_core_sha256="G" * 64,
+            )
+        )
+
+    report: dict[str, object] = {"inventory": {"file_registry": {"items": []}}}
+    memory_root = tmp_path / "memory"
+    memory_root.mkdir()
+    with memory_store(memory_root) as (root, project, store, _db_path):
+        draft = MemoryRecord(
+            id=generate_memory_id(),
+            project_id=project.id,
+            identity_key="draft:note:1",
+            type="risk_note",
+            status="draft",
+            confidence="inferred",
+            origin="agent",
+            ingest_source="agent",
+            statement="draft only",
+            summary=None,
+            payload={},
+            created_at_utc="2026-01-01T00:00:00Z",
+            updated_at_utc="2026-01-01T00:00:00Z",
+            last_verified_at_utc=None,
+            expires_at_utc=None,
+            created_by="agent",
+            verified_by=None,
+            approved_by=None,
+            approved_at_utc=None,
+            report_digest=None,
+            code_fingerprint=None,
+            stale_reason=None,
+            created_on_branch=None,
+            created_at_commit=None,
+            verified_on_branch=None,
+            verified_at_commit=None,
+        )
+        store.write_record(draft)
+        stale = replace(
+            draft, id=generate_memory_id(), status="stale", identity_key="stale:1"
+        )
+        store.write_record(stale)
+        store.commit()
+        draft_result = apply_refresh_staleness(
+            store,
+            project_id=project.id,
+            batch=RecordBatch(records=[]),
+            report_document=report,
+            root_path=root,
+        )
+        assert draft_result.records_marked_stale == 0
+
+    audit_db = tmp_path / "audit-read.sqlite3"
+    conn = sqlite3.connect(audit_db)
+    try:
+        from codeclone.audit.schema import ensure_schema
+
+        ensure_schema(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+    class _BrokenConn:
+        def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise sqlite3.Error("query failed")
+
+        def close(self) -> None:
+            return None
+
+    def _broken_open(_path: Path) -> _BrokenConn:
+        return _BrokenConn()
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        _broken_open,
+    )
+    audit_db_error = "cannot .* audit database"
+    with pytest.raises(AuditReadError, match=audit_db_error):
+        read_audit_event_core_records(db_path=audit_db, repo_root_digest="digest")
+    with pytest.raises(AuditReadError, match=audit_db_error):
+        list_workflow_ids_with_events_after(
+            db_path=audit_db,
+            repo_root_digest="digest",
+            after_id=0,
+        )
+    with pytest.raises(AuditReadError, match=audit_db_error):
+        count_audit_event_core_gaps(db_path=audit_db, repo_root_digest="digest")
+
+
+def test_refresh_stale_primary_reason_skips_stale_records(tmp_path: Path) -> None:
+    from codeclone.memory.staleness import _refresh_stale_primary_reason
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        stale = MemoryRecord(
+            id=generate_memory_id(),
+            project_id=project.id,
+            identity_key="risk_note:stale:1",
+            type="risk_note",
+            status="stale",
+            confidence="supported",
+            origin="system",
+            ingest_source="analysis",
+            statement="already stale",
+            summary=None,
+            payload={},
+            created_at_utc="2026-01-01T00:00:00Z",
+            updated_at_utc="2026-01-01T00:00:00Z",
+            last_verified_at_utc=None,
+            expires_at_utc=None,
+            created_by="test",
+            verified_by=None,
+            approved_by=None,
+            approved_at_utc=None,
+            report_digest="digest-a",
+            code_fingerprint=None,
+            stale_reason="missing_from_refresh",
+            created_on_branch=None,
+            created_at_commit=None,
+            verified_on_branch=None,
+            verified_at_commit=None,
+        )
+        store.write_record(stale)
+        store.commit()
+        assert (
+            _refresh_stale_primary_reason(
+                store,
+                stale,
+                batch_identity_keys=frozenset(),
+                batch_by_identity={},
+                batch_evidence={},
+                report_digest="digest-b",
+            )
+            is None
+        )
