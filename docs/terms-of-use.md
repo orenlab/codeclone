@@ -37,7 +37,8 @@ Integrations:
 
 CodeClone integrations do not modify or replace the security, account,
 privacy, or usage policies of third-party host applications such as
-Claude Desktop, Codex, VS Code, Anthropic services, or OpenAI services.
+Claude Desktop, Claude Code, Codex, Cursor, VS Code, Anthropic services, or
+OpenAI services.
 
 Those platforms remain governed by their own applicable terms and policies.
 

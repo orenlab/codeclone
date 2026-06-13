@@ -77,6 +77,15 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [25-mcp-interface/resources.md](25-mcp-interface/resources.md) — resource URIs
 - [25-mcp-interface/tools/platform-observability.md](25-mcp-interface/tools/platform-observability.md) — bounded diagnostics tool
 
+### Integrations
+
+- [integrations/vs-code-extension.md](integrations/vs-code-extension.md) — VS Code extension contract
+- [integrations/cursor-plugin.md](integrations/cursor-plugin.md) — Cursor plugin contract
+- [integrations/claude-code-plugin.md](integrations/claude-code-plugin.md) — Claude Code plugin contract
+- [integrations/codex-plugin.md](integrations/codex-plugin.md) — Codex plugin contract
+- [integrations/claude-desktop-bundle.md](integrations/claude-desktop-bundle.md) — Claude Desktop bundle contract
+- [integrations/sarif.md](integrations/sarif.md) — SARIF projection contract
+
 ### Appendix
 
 - [appendix/a-status-enums.md](appendix/a-status-enums.md) — status enums and typed contracts

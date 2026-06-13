@@ -93,6 +93,21 @@ def _make_source(tmp_path: Path) -> Path:
         source / "plugins" / "codeclone" / "scripts" / "launch_mcp.py",
         "def resolve_launch_target():\n    return None\n",
     )
+    _write(
+        source / "plugins" / "claude-code-codeclone" / ".claude-plugin" / "plugin.json",
+        "{}\n",
+    )
+    _write(
+        source / "plugins" / "claude-code-codeclone" / ".mcp.json",
+        "{}\n",
+    )
+    _write(
+        source / "plugins" / "claude-code-codeclone" / "scripts" / "launch_mcp.py",
+        "import runpy\n",
+    )
+    _write(
+        source / "plugins" / "claude-code-codeclone" / "skills" / "review" / "SKILL.md"
+    )
     _seed_integration_dist(source)
     _write(
         source / "extensions" / "claude-desktop-codeclone" / "manifest.json",
@@ -404,6 +419,29 @@ def test_codex_sync_writes_public_marketplace(tmp_path: Path) -> None:
     assert marketplace["plugins"][0]["source"]["path"] == "./plugins/codeclone"
 
 
+def test_claude_code_sync_writes_public_marketplace(tmp_path: Path) -> None:
+    source = _make_source(tmp_path)
+    target = _make_target(tmp_path, "claude-code")
+
+    sync_target(
+        source_root=source,
+        target_root=target,
+        target=SYNC_TARGETS["claude-code"],
+        allow_dirty=False,
+        dry_run=False,
+    )
+
+    marketplace = json.loads(
+        (target / ".claude-plugin/marketplace.json").read_text(encoding="utf-8")
+    )
+    assert marketplace["name"] == "orenlab-codeclone"
+    assert marketplace["plugins"][0]["name"] == "codeclone"
+    assert marketplace["plugins"][0]["source"] == "./plugins/codeclone"
+    assert (
+        target / "plugins" / "codeclone" / ".claude-plugin" / "plugin.json"
+    ).is_file()
+
+
 def test_sync_writes_gitignore_for_all_targets(tmp_path: Path) -> None:
     source = _make_source(tmp_path)
     for name in SYNC_TARGETS:
@@ -454,5 +492,24 @@ def test_cursor_sync_ships_standalone_launcher(tmp_path: Path) -> None:
     )
 
     launcher = (target / "scripts" / "launch_mcp.py").read_text(encoding="utf-8")
+    assert "resolve_launch_target" in launcher
+    assert "runpy" not in launcher
+
+
+def test_claude_code_sync_ships_standalone_launcher(tmp_path: Path) -> None:
+    source = _make_source(tmp_path)
+    target = _make_target(tmp_path, "claude-code")
+
+    sync_target(
+        source_root=source,
+        target_root=target,
+        target=SYNC_TARGETS["claude-code"],
+        allow_dirty=False,
+        dry_run=False,
+    )
+
+    launcher = (
+        target / "plugins" / "codeclone" / "scripts" / "launch_mcp.py"
+    ).read_text(encoding="utf-8")
     assert "resolve_launch_target" in launcher
     assert "runpy" not in launcher

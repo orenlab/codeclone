@@ -15,7 +15,27 @@ the `codeclone-mcp` server.
 - Python workspace
 - `codeclone-mcp` launcher (`codeclone >= 2.0.0`)
 
-### Install the launcher
+## Install from the Cursor marketplace
+
+The public plugin source is
+[orenlab/codeclone-cursor](https://github.com/orenlab/codeclone-cursor).
+
+If CodeClone is already visible in your Cursor marketplace, open the marketplace
+panel, select **CodeClone**, choose user or project scope, and install it.
+
+For a team marketplace, an administrator imports the storefront repository:
+
+1. Open **Cursor Dashboard → Settings → Plugins**.
+2. Under **Team Marketplaces**, choose **Add Marketplace**.
+3. Choose **Import from Repo** and enter
+   `https://github.com/orenlab/codeclone-cursor`.
+4. Add CodeClone to the marketplace, configure team access, and save.
+5. Install CodeClone from the marketplace panel in Cursor.
+
+The old `~/.cursor/plugins/local` symlink path is for plugin development only;
+it is not the public installation route.
+
+### Install the MCP launcher
 
 ```bash
 uv tool install "codeclone[mcp]"
@@ -127,6 +147,7 @@ extension launcher.
 ## Distribution
 
 - **Monorepo source:** `plugins/cursor-codeclone/`
+- **Public storefront:** `https://github.com/orenlab/codeclone-cursor`
 - **Not in** `.agents/plugins/marketplace.json` (Codex-only local marketplace)
 - **Standalone releases:** embed the full launcher from
   `plugins/codeclone/scripts/launch_mcp.py`; the monorepo uses a thin delegator
@@ -135,7 +156,7 @@ extension launcher.
 
 ## Local development
 
-Symlink the plugin directory for local testing:
+For plugin development only, symlink the source directory:
 
 ```bash
 ln -s /path/to/codeclone/plugins/cursor-codeclone ~/.cursor/plugins/local/codeclone

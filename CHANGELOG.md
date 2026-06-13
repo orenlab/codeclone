@@ -55,9 +55,10 @@ Added
 * IDE and agent integrations. The VS Code extension gains Engineering
   Memory governance, trajectory dashboards, controller audit views, and
   workspace session statistics. Native integrations are available for Claude
-  Desktop, Codex, and Cursor. The Cursor plugin includes skills, rules,
-  fail-closed preToolUse enforcement, scoped workspace-intent checks, and a
-  structural-review agent.
+  Desktop, Claude Code, Codex, and Cursor. Claude Code now has a dedicated
+  marketplace plugin and storefront, separate from the Desktop `.mcpb` bundle.
+  The Cursor plugin includes skills, rules, fail-closed preToolUse enforcement,
+  scoped workspace-intent checks, and a structural-review agent.
 * Controller and diagnostic CLI surfaces. Added blast-radius, patch
   verification, session statistics, controller audit, memory trajectory,
   anomaly, agent-profile, semantic-search, and Platform Observability commands.

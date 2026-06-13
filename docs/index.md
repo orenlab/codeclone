@@ -61,9 +61,10 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Surface               | Guide (how to) | Contract (guarantees) |
 |-----------------------|----------------|------------------------|
 | VS Code extension     | [Setup](guide/integrations/vscode/setup.md) | [VS Code contract](book/integrations/vs-code-extension.md) |
-| Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md) | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
-| Codex plugin          | [Setup](guide/integrations/codex/setup.md) | [Codex contract](book/integrations/codex-plugin.md) |
 | Cursor plugin         | [Install & skills](guide/integrations/cursor/install-and-skills.md) | [Cursor contract](book/integrations/cursor-plugin.md) |
+| Claude Code plugin    | [Install](guide/integrations/claude-code/setup.md) | [Claude Code contract](book/integrations/claude-code-plugin.md) |
+| Codex plugin          | [Install](guide/integrations/codex/setup.md) | [Codex contract](book/integrations/codex-plugin.md) |
+| Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md) | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
 | SARIF & code scanning | [Export](guide/integrations/sarif/export.md) | [SARIF contract](book/integrations/sarif.md) |
 
 ## Reports

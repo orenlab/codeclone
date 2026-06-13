@@ -8,15 +8,24 @@ All clients use the same server. Only the registration format differs.
 === "Claude Code"
 
     ```bash
-    claude mcp add codeclone -- codeclone-mcp --transport stdio
+    claude plugin marketplace add orenlab/codeclone-claude-code
+    claude plugin install codeclone@orenlab-codeclone
     ```
 
-    Use `--scope project` to store config in `.mcp.json` for the repository.
+    The native plugin supplies the MCP definition and CodeClone skills. See the
+    [Claude Code plugin guide](../integrations/claude-code/setup.md).
+
+    Manual MCP registration without the plugin remains available:
+
+    ```bash
+    claude mcp add --scope project codeclone -- codeclone-mcp --transport stdio
+    ```
 
 === "Codex"
 
     ```bash
-    marketplace add orenlab/codeclone-codex
+    codex plugin marketplace add orenlab/codeclone-codex
+    codex plugin add codeclone@orenlab-codeclone
     ```
 
     The native plugin includes the MCP definition and CodeClone skills.
@@ -30,22 +39,15 @@ All clients use the same server. Only the registration format differs.
 
 === "Cursor"
 
-    Add to `.cursor/mcp.json`:
+    For the complete integration, import
+    `https://github.com/orenlab/codeclone-cursor` through
+    **Dashboard → Settings → Plugins → Team Marketplaces → Add Marketplace →
+    Import from Repo**, then install **CodeClone**.
 
-    ```json
-    {
-      "mcpServers": {
-        "codeclone": {
-          "command": "codeclone-mcp",
-          "args": ["--transport", "stdio"]
-        }
-      }
-    }
-    ```
-
-    For intent-first edits with IDE enforcement, use the bundled
-    [Cursor plugin](../integrations/cursor/install-and-skills.md): install project hooks so `preToolUse`
-    reads the same workspace intent registry (file or SQLite) as MCP.
+    The bundled [Cursor plugin](../integrations/cursor/install-and-skills.md)
+    includes MCP registration, skills, rules, and project hooks. Manual
+    `.cursor/mcp.json` registration is covered under generic setup below, but
+    does not install the rest of that surface.
 
 === "Claude Desktop"
 

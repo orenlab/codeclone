@@ -33,255 +33,226 @@
 
 ---
 
-**CodeClone** is a deterministic **structural change controller** with **Engineering Memory** for AI-assisted
-Python development. It governs change *before the diff exists*: an agent declares intent, CodeClone maps the
-structural blast radius, bounds the edit, verifies the resulting patch against one canonical report, and leaves an
-auditable receipt. Engineering Memory adds a typed, evidence-linked project knowledge graph — contracts, decisions,
-incidents, stale assumptions — so agents carry durable context without turning LLM output into truth.
+> [!NOTE]
+> This repository and the documentation site track the **unreleased v2.1.0 development line**.
+> For the current stable release, use
+> [CodeClone v2.0.2](https://github.com/orenlab/codeclone/tree/v2.0.2)
+> or install [CodeClone 2.0.2 from PyPI](https://pypi.org/project/codeclone/2.0.2/).
 
-It is not a linter and not LLM judgment. CodeClone makes structural **scope, context, memory, and verification**
-explicit — deterministically, before the diff, and verified after. The same control surface protects human
-reviewers, CI pipelines, and pre-merge gates.
+**CodeClone** is a deterministic **Structural Change Controller** for AI-assisted Python development, built on one
+canonical structural analysis of the repository.
 
-## At a glance
-
-- **Change control before the diff** — declare intent, inspect blast radius, bound the edit, verify the patch
-  contract, validate review claims, leave an auditable receipt.
-- **Engineering Memory** — typed, evidence-linked project facts (contracts, risks, decisions, prior changes);
-  durable agent context, trajectory passports, recurring Experiences, human-governed promotion, never LLM-as-truth.
-- **One canonical report, many surfaces** — duplication, structural drift, dead code, complexity / coupling /
-  cohesion, health — the same deterministic facts everywhere, no second engine.
-- **Baseline-aware CI** — gates fail only on what got *worse*; accepted legacy debt stays separate from real
-  regressions.
-- **Built for agents and teams** — CLI · HTML · JSON · SARIF · Markdown · MCP · VS Code · Claude Desktop · Codex ·
-  Cursor · GitHub Action · CI.
-
-## Why CodeClone
-
-AI coding agents do not just write code faster — they expand scope faster. A prompt asks for one change; the agent
-edits the target file, touches another module because it looks "related", updates a helper, rewrites a few tests —
-and the final diff still looks plausible. The problem is not speed. It is **silent scope expansion**.
-
-CodeClone governs that workflow with deterministic structural boundaries:
+Before editing, an agent declares intent. CodeClone maps the structural blast radius, establishes explicit edit
+boundaries, and exposes the regression budget. After editing, it compares the actual patch with the declared scope,
+verifies structural changes, checks review claims against report facts, and leaves an auditable receipt.
 
 ```text
-declare intent
-  → inspect structural blast radius
-  → constrain edit scope
-  → edit
-  → verify patch contract
-  → validate review claims
-  → leave auditable receipt
+intent → blast radius → bounded edit → patch check → review receipt
 ```
 
-It does not replace the agent and does not use LLM judgment to decide what is safe. It gives the agent deterministic
-boundaries **before the diff exists**, then verifies whether the resulting patch stayed inside them.
+CodeClone does not use LLM judgment to classify structural regressions or authorize edits. Structural facts come
+from deterministic analysis; the same facts serve agents, human reviewers, IDEs, and CI.
 
-## Install
+## Install and try
+
+Stable release:
 
 ```bash
-uv tool install codeclone          # recommended
-pip install codeclone              # or pip
-
-# with the MCP server for AI agents and IDE clients
-uv tool install "codeclone[mcp]"
-
-# with token-accurate MCP payload sizing (adds tiktoken)
-uv tool install "codeclone[mcp,token-bench]"
+uv tool install codeclone
+codeclone .
+codeclone . --html --open-html-report
 ```
 
-<details>
-<summary>Run without installing</summary>
+Run without installing:
 
 ```bash
 uvx codeclone@latest .
 ```
 
-</details>
-
-## Quick start
+Install the MCP server for local AI agents and IDE clients:
 
 ```bash
-codeclone .                                    # analyze the current directory
-codeclone . --html --open-html-report          # interactive HTML report
-codeclone . --json --md --sarif --text         # every report format
-codeclone . --ci                               # CI mode: baseline-aware gating
+uv tool install "codeclone[mcp]"
+codeclone-mcp --transport stdio
 ```
 
-<details>
-<summary>More commands</summary>
+Run the current development line from source:
 
 ```bash
-# Changed-scope review against a branch
-codeclone . --changed-only --diff-against main
-codeclone . --paths-from-git-diff HEAD~1
-
-# Structural Change Controller — CLI surface
-codeclone . --blast-radius codeclone/analysis/parser.py
-codeclone . --patch-verify --diff-against HEAD~1
+git clone https://github.com/orenlab/codeclone.git
+cd codeclone
+uv sync --all-extras
+uv run codeclone .
 ```
 
-</details>
+## Why CodeClone
 
-## How it works
+AI coding agents accelerate implementation, but they also make scope expansion easier to miss. A narrow task can
+quietly spread into shared helpers, tests, public APIs, configuration, and unrelated modules while the final diff
+still looks reasonable.
 
-<details>
-<summary>Pipeline overview</summary>
-<br>
-<img
-  alt="CodeClone pipeline — parse, analyze, fuse, report, gate"
-  src="docs/assets/codeclone-pipeline.svg"
-  width="680"
->
-</details>
+Most review tools start with the completed diff. CodeClone starts with the declared intent.
 
-CodeClone produces **one canonical JSON report** and renders it through every surface — CLI, HTML, Markdown, SARIF,
-MCP, IDE extensions, GitHub Action, CI. The same deterministic facts drive human review, baseline-aware gates, and
-agent workflows. The canonical report is the source of truth; surfaces render, filter, and explain it — there is
-never a second analysis engine.
+```text
+declare intent
+  → inspect structural blast radius
+  → establish edit boundaries
+  → make the change
+  → compare declared and actual scope
+  → verify structural regressions
+  → record the outcome
+```
 
-[Architecture narrative](https://orenlab.github.io/codeclone/guide/explanation/how-it-works/) &middot;
-[CFG semantics](https://orenlab.github.io/codeclone/book/04-cfg-semantics/)
+The agent still writes the code. CodeClone makes the declared scope explicit before editing and exposes undeclared
+expansion when the patch is verified.
 
 ## Structural Change Controller
 
-The Controller governs AI-assisted edits before they become invisible diffs. Every stage is deterministic —
-structural facts come from the canonical report, not from LLM inference.
+The controller reduces the governed agent workflow to four steps:
 
-| Stage                        | Surface                                     | Purpose                                                                      |
-|------------------------------|---------------------------------------------|------------------------------------------------------------------------------|
-| **Start controlled change**  | `start_controlled_change`                   | Pre-edit: workspace check, declare scope, blast radius, patch budget         |
-| **Finish controlled change** | `finish_controlled_change`                  | Post-edit: scope check, verify, optional claims/receipt, clear intent        |
-| **Map blast radius**         | `get_blast_radius` · `--blast-radius`       | Reverse imports, clone cohorts, review context, do-not-touch boundaries      |
-| **Check patch contract**     | `check_patch_contract` · `--patch-verify`   | Pre-edit budget check and post-edit structural verification                  |
-| **Validate claims**          | `validate_review_claims`                    | Cross-check review text against the canonical report                         |
-| **Generate receipt**         | `create_review_receipt`                     | Auditable artifact: intent, scope, blast radius, patch outcome               |
-
-Intent execution is **session-local**; cross-agent visibility is optional, advisory, TTL/lease-bound, and stored as
-ephemeral workspace coordination state under `.codeclone/intents/`. An optional audit trail records passive
-controller events when enabled. CodeClone never mutates source files, baselines, generated reports, or analysis
-cache through MCP — **read-only by contract**.
-
-[Structural Change Controller docs](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
-
-## What CodeClone reviews
-
-The canonical report the Controller acts on covers:
-
-| Category                | What it covers                                                                                                                                                  |
-|-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Clone detection**     | Function clones via CFG fingerprints, block clones via statement windows, segment clones as report-only review context                                          |
-| **Structural findings** | Duplicated branch families, clone guard/exit divergence, clone-cohort drift                                                                                      |
-| **Quality metrics**     | Cyclomatic complexity, coupling (CBO), cohesion (LCOM4), dependency cycles, adaptive depth profile, dead code, overall health score, overloaded-module profile  |
-| **Baseline governance** | Separates accepted legacy debt from new regressions — CI fails only on what got worse                                                                           |
-| **Coverage Join**       | Fuses external Cobertura XML into the current run to surface untested hotspots and coverage scope gaps                                                           |
-| **Adoption & API**      | Type and docstring annotation coverage, public API surface inventory, baseline-aware API break detection                                                        |
-| **Security Surfaces**   | Report-only inventory of security-relevant capability boundaries — no vulnerability claims                                                                       |
-| **Design signals**      | Overloaded modules and other report-only structural review context                                                                                              |
-
-## AI agents and IDE clients
-
-CodeClone ships an MCP control surface for AI agents and IDE clients, built on the same canonical pipeline as the
-CLI. Canonical analysis is **read-only by contract** — MCP tools never mutate source, baselines, reports, or cache;
-controller state is session-local or ephemeral workspace coordination.
-
-```bash
-codeclone-mcp --transport stdio             # local clients (IDE, agents)
-codeclone-mcp --transport streamable-http   # HTTP transport
+```text
+analyze → start → edit → finish
 ```
 
-Tools are triage-first (analyze → triage → drill down → focused checks → change control → session), so the full
-report never floods agent context. Stable `codeclone://latest/*` and `codeclone://runs/{run_id}/*` resources return
-deterministic projections, and run identity is derived from the canonical report integrity digest.
+- **Start controlled change** — `start_controlled_change` checks workspace state, records intent, maps blast radius,
+  separates allowed paths from review context and do-not-touch boundaries, and returns the authoritative
+  `edit_allowed` permission.
+- **Finish controlled change** — `finish_controlled_change` resolves the actual changed files once, checks scope,
+  verifies the patch against the canonical report, validates optional review claims, and produces a review receipt.
+- **Patch Trail** — records declared, changed, untouched-in-declared, and boundary-held paths together with
+  verification and audit anchors.
+- **Multi-agent coordination** — lease-bound intents, queues, recovery, and workspace hygiene make concurrent work
+  visible without treating advisory ownership as structural truth.
 
-> [!WARNING]
-> Analysis tools require an absolute repository root; relative roots such as `.` are rejected. Keep `stdio` as the
-> default transport for local clients — HTTP exposure beyond loopback requires explicit `--allow-remote`.
+Host integrations can enforce the permission model before file edits where the host supports hooks. Regardless of
+host enforcement, finish-time verification remains deterministic.
 
-[MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/) &middot;
-[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/) &middot;
+[Structural Change Controller documentation](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
 
-### Engineering Memory
+## One canonical report, every structural surface
 
-A local SQLite store of evidence-linked repository facts — contract notes, decisions, risk hotspots, git provenance,
-and governed drafts. After `start_controlled_change`, agents read ranked scope context via MCP. Promotion to durable
-memory is **human-governed** — agent drafts never become truth automatically. The store auto-bootstraps from the
-latest MCP run (`mcp_sync_policy=bootstrap_if_missing`); `codeclone memory init` remains for CI/offline.
+CodeClone runs one deterministic structural analysis and renders its canonical report through CLI, HTML, JSON,
+Markdown, SARIF, MCP, IDE integrations, GitHub Action, and CI. There is no separate analysis engine for agents.
 
-Audit-derived trajectories preserve workflow and Patch Trail evidence. Quality
-passports, anomaly and agent dashboards, and deterministic Experiences make
-recurring project patterns visible without promoting them to authority.
+The report covers:
+
+- function clones through CFG fingerprints;
+- block clones through statement windows and report-only segment clones;
+- clone-cohort drift, duplicated branch families, and guard/exit divergence;
+- cyclomatic complexity, coupling, cohesion, dependency cycles, and dead code;
+- overloaded-module and other report-only design context;
+- type and docstring adoption;
+- public API inventory and baseline-aware API break detection;
+- external Cobertura coverage joined with structural hotspots;
+- report-only security capability boundaries without vulnerability claims;
+- deterministic structural health and review priorities.
+
+```bash
+codeclone . --json --html --md --sarif --text
+```
+
+[How CodeClone works](https://orenlab.github.io/codeclone/guide/explanation/how-it-works/) ·
+[Canonical report contract](https://orenlab.github.io/codeclone/book/05-report/)
+
+## Baseline-aware CI
+
+CodeClone separates accepted legacy debt from new structural regressions.
+
+```bash
+# Create and commit the project baseline once
+codeclone . --update-baseline
+
+# Gate future changes against that baseline
+codeclone . --ci
+```
+
+The baseline is a versioned, integrity-checked contract. CI can reject newly introduced clones and baseline-aware
+metric, API, and coverage regressions without requiring the existing codebase to be clean first. Absolute threshold
+gates remain opt-in.
+
+```bash
+codeclone . --fail-on-new-metrics
+codeclone . --fail-complexity 20 --fail-coupling 10 --fail-cohesion 4
+codeclone . --fail-cycles --fail-dead-code
+codeclone . --coverage coverage.xml --fail-on-untested-hotspots
+codeclone . --api-surface --fail-on-api-break
+```
+
+[Metrics and quality gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) ·
+[Baseline contract](https://orenlab.github.io/codeclone/book/07-baseline/)
+
+## Engineering Memory
+
+Engineering Memory gives agents durable, repository-specific context without treating model output as project truth.
+
+The local SQLite store contains typed, evidence-linked knowledge such as contracts, architecture decisions, risks,
+test anchors, public surfaces, git provenance, and prior controlled changes. Scope-aware retrieval supports the
+current change, while project-wide search can combine FTS5 with optional semantic retrieval.
+
+Audit-derived trajectories preserve how work actually unfolded. Trajectory passports, anomaly profiles, Patch Trail
+evidence, and recurring advisory patterns called **Experiences** make previous successes and failures reusable.
+Agent-created records remain drafts until a human approves them.
 
 ```bash
 codeclone memory init --root .
 codeclone memory search "baseline schema" --match all
-codeclone memory approve mem-…   # human-only governance
+codeclone memory approve mem-12345678
 ```
 
-[Engineering Memory docs](https://orenlab.github.io/codeclone/book/13-engineering-memory/) &middot;
+Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical
+report facts.
+
+[Engineering Memory documentation](https://orenlab.github.io/codeclone/book/13-engineering-memory/) ·
 [Trajectories and Experiences](https://orenlab.github.io/codeclone/guide/memory/trajectories-and-experiences/)
 
-### Platform Observability
+## AI agents and IDE integrations
 
-Opt-in local diagnostics trace CodeClone's own CLI, MCP, database, analysis,
-and projection-worker costs. The observer is disabled by default, stores no raw
-payload bodies, and never influences findings, gates, baselines, memory facts,
-or edit authorization.
-
-```bash
-CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
-codeclone observability trace --root . --html /tmp/codeclone-observer.html
-```
-
-[Platform Observability](https://orenlab.github.io/codeclone/book/26-platform-observability/)
-
-### Native agent and IDE clients
-
-| Surface                   | Install                                                                                                                       | Docs                                                                        |
-|---------------------------|------------------------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------|
-| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone)                                 | [Guide](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)      |
-| **Claude Desktop bundle** | [`orenlab/codeclone-claude-desktop`](https://github.com/orenlab/codeclone-claude-desktop) | [Guide](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/) |
-| **Codex plugin**          | [`orenlab/codeclone-codex`](https://github.com/orenlab/codeclone-codex)                                                      | [Guide](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)          |
-| **Cursor plugin**         | [`orenlab/codeclone-cursor`](https://github.com/orenlab/codeclone-cursor)                       | [Guide](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/)         |
-
-All clients connect to the same `codeclone-mcp` contract — no second analysis engine.
-
-## CI and quality gates
+The MCP server is triage-first: analyze the repository, narrow the problem, inspect evidence, start a controlled
+change, and finish with verification. Bounded tools and resources keep the full report out of agent context until
+deeper evidence is requested.
 
 ```bash
-# 1. Generate the baseline once, then commit it to your repo
-codeclone . --update-baseline
-
-# 2. Enforce it on every push
-codeclone . --ci
+codeclone-mcp --transport stdio
+codeclone-mcp --transport streamable-http
 ```
 
-`--ci` is equivalent to `--fail-on-new --no-color --quiet`, and enables `--fail-on-new-metrics` when a trusted
-metrics baseline is present. The baseline becomes the contract CI enforces — separating accepted legacy debt from
-real regressions. Exit codes: `0` success · `2` contract error · `3` gating failure · `5` internal
-([policy](https://orenlab.github.io/codeclone/book/09-exit-codes/)).
+Structural analysis tools do not mutate source files, baselines, generated reports, or analysis cache. Controller
+and memory operations update only their explicit state stores.
 
-<details>
-<summary>Quality gate flags</summary>
+> [!WARNING]
+> Analysis tools require an absolute repository root. Keep `stdio` as the default transport for local clients.
+> Exposing HTTP beyond loopback requires explicit `--allow-remote`.
+
+| Surface | Install or source | Documentation |
+|---|---|---|
+| **VS Code extension** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone) | [Setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/) |
+| **Cursor plugin** | [Cursor storefront](https://github.com/orenlab/codeclone-cursor) | [Install](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
+| **Claude Code plugin** | [Claude Code marketplace](https://github.com/orenlab/codeclone-claude-code) | [Install](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/) |
+| **Codex plugin** | [Codex marketplace](https://github.com/orenlab/codeclone-codex) | [Install](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/) |
+| **Claude Desktop bundle** | [Bundle repository](https://github.com/orenlab/codeclone-claude-desktop) | [Setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/) |
+
+Every client uses the same `codeclone-mcp` interface and canonical structural facts.
+
+[MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/) ·
+[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/)
+
+## Quick workflows
+
+Review only the current Git scope:
 
 ```bash
-# Structural metric thresholds
-codeclone . --fail-complexity 20 --fail-coupling 10 --fail-cohesion 4 --fail-health 60
-codeclone . --fail-cycles --fail-dead-code
-
-# Baseline-aware regression detection
-codeclone . --fail-on-new-metrics --fail-on-typing-regression --fail-on-docstring-regression
-
-# Adoption, API, and coverage governance
-codeclone . --min-typing-coverage 80 --api-surface --fail-on-api-break
-codeclone . --coverage coverage.xml --fail-on-untested-hotspots --coverage-min 50
+codeclone . --changed-only --diff-against main
+codeclone . --paths-from-git-diff HEAD~1
 ```
 
-[Gate reference](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/)
+Inspect structural blast radius and verify a patch:
 
-</details>
+```bash
+codeclone . --blast-radius codeclone/analysis/parser.py
+codeclone . --patch-verify --diff-against HEAD~1
+```
 
-### GitHub Action
+Use CodeClone in GitHub Actions:
 
 ```yaml
 - uses: orenlab/codeclone/.github/actions/codeclone@v2
@@ -291,49 +262,30 @@ codeclone . --coverage coverage.xml --fail-on-untested-hotspots --coverage-min 5
     pr-comment: "true"
 ```
 
-The Action runs baseline-aware gating, generates JSON and SARIF reports, uploads SARIF to GitHub Code Scanning, and
-posts or updates a PR summary comment.
-[Action docs](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
+The Action can run baseline-aware gating, publish SARIF to GitHub Code Scanning, upload reports, and maintain a PR
+summary comment.
 
-### Pre-commit
+[GitHub Action documentation](https://orenlab.github.io/codeclone/getting-started/#github-action)
 
-```yaml
-repos:
-  - repo: local
-    hooks:
-      - id: codeclone
-        name: CodeClone
-        entry: codeclone
-        language: system
-        pass_filenames: false
-        args: [ ".", "--ci" ]
-        types: [ python ]
-```
+## Platform Observability
 
-## Reports
+Platform Observability is an opt-in diagnostics layer for developing CodeClone itself. It correlates CLI, MCP,
+analysis, database, semantic-index, and projection-worker execution and exposes timings, RSS/CPU, query shapes,
+payload pressure, causal worker chains, and costly no-ops.
 
-All formats render from one canonical JSON payload — same facts, different audiences.
-
-| Format   | Flag      | Default path                    |
-|----------|-----------|---------------------------------|
-| HTML     | `--html`  | `.codeclone/report.html`  |
-| JSON     | `--json`  | `.codeclone/report.json`  |
-| Markdown | `--md`    | `.codeclone/report.md`    |
-| SARIF    | `--sarif` | `.codeclone/report.sarif` |
-| Text     | `--text`  | `.codeclone/report.txt`   |
+It is disabled by default, stores no raw payload bodies, and cannot affect repository findings, gates, baselines,
+memory facts, or edit authorization.
 
 ```bash
-codeclone . --html --json --md --sarif --text
+CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
+codeclone observability trace --root . --html /tmp/codeclone-observer.html
 ```
 
-`--open-html-report` opens the HTML in the default browser; `--timestamped-report-paths` appends a UTC timestamp to
-default filenames. The canonical JSON (`report_schema_version`, `meta`, `inventory`, `findings`, `metrics`,
-`derived`, `integrity`) is documented in the [report contract](https://orenlab.github.io/codeclone/book/05-report/).
+[Platform Observability documentation](https://orenlab.github.io/codeclone/book/26-platform-observability/)
 
 ## Configuration
 
-CodeClone loads project configuration from `pyproject.toml` — precedence is
-**CLI flags > `pyproject.toml` > built-in defaults**.
+Project configuration lives in `pyproject.toml`:
 
 ```toml
 [tool.codeclone]
@@ -346,23 +298,17 @@ block_min_loc = 20
 block_min_stmt = 8
 ```
 
-[Config reference](https://orenlab.github.io/codeclone/book/10-config-and-defaults/) &middot;
-[Inline suppressions](https://orenlab.github.io/codeclone/book/19-inline-suppressions/) &middot;
-[Baseline contract](https://orenlab.github.io/codeclone/book/07-baseline/)
+Precedence is **CLI flags > `pyproject.toml` > built-in defaults**.
+
+[Configuration reference](https://orenlab.github.io/codeclone/book/10-config-and-defaults/) ·
+[Inline suppressions](https://orenlab.github.io/codeclone/book/19-inline-suppressions/)
 
 ## Documentation
 
-Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)
+The documentation site contains user guides, interface contracts, report and baseline schemas, configuration
+reference, integration setup, and maintainer material:
 
-[Baseline](https://orenlab.github.io/codeclone/book/07-baseline/) &middot;
-[Report](https://orenlab.github.io/codeclone/book/05-report/) &middot;
-[Metrics & gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) &middot;
-[MCP guide](https://orenlab.github.io/codeclone/guide/mcp/) &middot;
-[Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/) &middot;
-[Engineering Memory](https://orenlab.github.io/codeclone/book/13-engineering-memory/) &middot;
-[Platform Observability](https://orenlab.github.io/codeclone/book/26-platform-observability/) &middot;
-[CLI](https://orenlab.github.io/codeclone/book/11-cli/) &middot;
-[Benchmarking](https://orenlab.github.io/codeclone/book/20-benchmarking/)
+**[orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)**
 
 ## License
 
@@ -371,13 +317,13 @@ Full docs and contract book: [orenlab.github.io/codeclone](https://orenlab.githu
 
 ## Links
 
-- **Docs:** <https://orenlab.github.io/codeclone/>
+- **Documentation:** <https://orenlab.github.io/codeclone/>
 - **PyPI:** <https://pypi.org/project/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **Discussions:** <https://github.com/orenlab/codeclone/discussions>
 - **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE)
-  &middot; [MIT docs](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT)
-  &middot; [Scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
+  · [MIT documentation license](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT)
+  · [License scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
 
 <!-- Shields -->
 

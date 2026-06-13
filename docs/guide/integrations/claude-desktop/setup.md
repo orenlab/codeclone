@@ -4,6 +4,10 @@
 Local `.mcpb` bundle that launches `codeclone-mcp` over stdio. Same canonical MCP
 surface as CLI, VS Code, Codex, and Cursor — no second analyzer or truth path.
 
+For the terminal agent, use the separate
+[Claude Code marketplace plugin](../claude-code/setup.md). The `.mcpb` described
+here is only for Claude Desktop.
+
 ## Prerequisites
 
 - Claude Desktop with extension support

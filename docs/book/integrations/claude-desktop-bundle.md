@@ -1,6 +1,9 @@
 <!-- doc-scope: Claude Desktop Bundle contract. class: contract max-lines: 150 -->
 # Claude Desktop Bundle
 
+This contract covers the Claude Desktop `.mcpb` package. Claude Code uses the
+separate [Claude Code plugin](claude-code-plugin.md) and marketplace workflow.
+
 ## Bundle workflow
 
 1. Build: `cd extensions/claude-desktop-codeclone && node scripts/build-mcpb.mjs`
@@ -79,7 +82,8 @@ See [Privacy Policy](../../privacy-policy.md).
 
 - CLI remains the scripting and CI surface.
 - MCP remains the read-only agent/client contract.
-- Claude Code can still register `codeclone-mcp` directly through `mcp add`.
+- Claude Code installs the dedicated marketplace plugin; direct `mcp add`
+  remains a manual fallback.
 - The Claude Desktop bundle is the installable local package layer for users
   who want a native Claude Desktop setup path.
 

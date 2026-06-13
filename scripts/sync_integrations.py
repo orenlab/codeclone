@@ -90,6 +90,23 @@ SYNC_TARGETS: dict[str, SyncTarget] = {
         ),
         generated=(MANIFEST_NAME,),
     ),
+    "claude-code": SyncTarget(
+        name="claude-code",
+        copies=(
+            ("plugins/claude-code-codeclone", "plugins/codeclone"),
+            (
+                "plugins/codeclone/scripts/launch_mcp.py",
+                "plugins/codeclone/scripts/launch_mcp.py",
+            ),
+            _dist_file("README.claude-code.root.md", "README.md"),
+            _dist_file("gitignore.claude-code", ".gitignore"),
+            _dist_file(
+                "marketplace.claude-code.json",
+                ".claude-plugin/marketplace.json",
+            ),
+        ),
+        generated=(MANIFEST_NAME,),
+    ),
     "claude-desktop": SyncTarget(
         name="claude-desktop",
         copies=(

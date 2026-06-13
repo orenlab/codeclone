@@ -434,9 +434,9 @@ Refs: `plugins/cursor-codeclone/hooks/_hook_io.py`, [integrations/cursor-plugin.
 
 ### IDE and MCP launcher passthrough
 
-Set by VS Code, Claude Desktop, Codex/Cursor plugin launchers — not usually edited
-in `pyproject.toml`. Launchers forward variables prefixed with `CODECLONE_` to the
-child `codeclone-mcp` process.
+Set by VS Code, Claude Desktop, Claude Code, Codex, and Cursor launchers — not
+usually edited in `pyproject.toml`. Launchers forward variables prefixed with
+`CODECLONE_` to the child `codeclone-mcp` process.
 
 | Variable                          | Values              | Effect                                                                                                                        |
 |-----------------------------------|---------------------|-------------------------------------------------------------------------------------------------------------------------------|

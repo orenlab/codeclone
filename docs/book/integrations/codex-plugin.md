@@ -30,6 +30,13 @@ tools are VS Code only).
 development and packaging into `orenlab/codeclone-codex`; it is not the public
 install path.
 
+Public installation is:
+
+```bash
+codex plugin marketplace add orenlab/codeclone-codex
+codex plugin add codeclone@orenlab-codeclone
+```
+
 
 ## Read-only contract
 

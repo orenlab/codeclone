@@ -33,29 +33,41 @@ skills.
 
 ## Install
 
-Install `codeclone[mcp]` so `launch_mcp.py` can resolve `codeclone-mcp`:
+### Install from the Cursor marketplace
+
+The public storefront is
+[orenlab/codeclone-cursor](https://github.com/orenlab/codeclone-cursor).
+
+If CodeClone is already listed in your marketplace panel, select **CodeClone**,
+choose user or project scope, and install it.
+
+To expose the repository as a team marketplace:
+
+1. Open **Cursor Dashboard → Settings → Plugins**.
+2. Under **Team Marketplaces**, select **Add Marketplace**.
+3. Select **Import from Repo** and enter
+   `https://github.com/orenlab/codeclone-cursor`.
+4. Add CodeClone, configure team access, and save.
+5. Install CodeClone from Cursor's marketplace panel.
+
+Install `codeclone[mcp]` separately so the bundled launcher can resolve
+`codeclone-mcp`:
 
 ```bash
 uv tool install "codeclone[mcp]"
 codeclone-mcp --help
 ```
 
-### Recommended: Cursor plugin discovery
+### Local development only
 
-Register the plugin directory (loads manifest, skills, rules, hooks, and
-`mcp.json` together):
+Use a local symlink only while developing the plugin:
 
 ```bash
 ln -sfn /path/to/codeclone/plugins/cursor-codeclone ~/.cursor/plugins/local/codeclone
 ```
 
-Reload Cursor. Enable the plugin for trusted workspaces.
-
-### Optional: manual `.cursor/` symlinks
-
-Only if you are not using plugin discovery — symlink skills, rules, agent, and
-MCP separately (see monorepo comments in older guides). Prefer plugin discovery
-so all three rules and hook manifest stay bundled.
+Reload Cursor after changing the local source. Do not present this path to
+normal users as the installation flow.
 
 ### Project hooks (Hooks UI)
 
@@ -73,9 +85,10 @@ Writes:
 Do **not** commit generated files (machine-local Python paths). This monorepo
 ignores `/.cursor/` in `.gitignore`.
 
-!!! note "Marketplace"
-    Not listed in `.agents/plugins/marketplace.json` (Codex-only). Install from
-    `plugins/cursor-codeclone/` via Cursor local plugin discovery or symlinks.
+!!! note "Marketplace catalogs"
+    `.agents/plugins/marketplace.json` belongs to Codex. Cursor installs this
+    plugin from the `orenlab/codeclone-cursor` storefront through Cursor's own
+    marketplace UI.
 
 
 ## Skills
@@ -142,8 +155,8 @@ does not treat report-only signals as CI failures or vulnerability claims.
 ## Distribution
 
 - **Monorepo source:** `plugins/cursor-codeclone/`
-- **Marketplace:** not in `.agents/plugins/marketplace.json` (Codex-only entry)
-- **Install:** Cursor local plugin discovery (recommended) or `.cursor/` symlinks
+- **Marketplace source:** `https://github.com/orenlab/codeclone-cursor`
+- **Install:** Cursor marketplace panel; local symlink only for development
 - **Standalone releases:** ship full `plugins/codeclone/scripts/launch_mcp.py` body
 
 

@@ -2,6 +2,17 @@
 
 # Cursor Plugin
 
+## Installation contract
+
+The public source is
+`https://github.com/orenlab/codeclone-cursor`. Users install CodeClone from
+Cursor's marketplace panel. Team administrators expose the storefront through
+**Dashboard → Settings → Plugins → Team Marketplaces → Add Marketplace →
+Import from Repo**.
+
+`~/.cursor/plugins/local` symlinks are development-only and must not be
+presented as the normal installation path.
+
 ## Rules
 
 All three ship under `plugins/cursor-codeclone/rules/`:

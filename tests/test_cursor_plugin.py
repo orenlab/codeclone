@@ -104,3 +104,14 @@ def test_cursor_plugin_version_is_semver() -> None:
     assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
         f"Plugin version must be semver (X.Y.Z), got: {version}"
     )
+
+
+def test_cursor_readme_uses_marketplace_install_flow() -> None:
+    root = Path(__file__).resolve().parents[1]
+    readme = (root / "plugins" / "cursor-codeclone" / "README.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "https://github.com/orenlab/codeclone-cursor" in readme
+    assert "Import from Repo" in readme
+    assert "development only" in readme.lower()

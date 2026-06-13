@@ -8,7 +8,7 @@ synced from [orenlab/codeclone](https://github.com/orenlab/codeclone); see
 
 | Path | Role |
 |------|------|
-| `.agents/plugins/marketplace.json` | Codex marketplace catalog (`marketplace add orenlab/codeclone-codex`) |
+| `.agents/plugins/marketplace.json` | Codex marketplace catalog (`codex plugin marketplace add orenlab/codeclone-codex`) |
 | `plugins/codeclone/` | Plugin root (manifest, skills, MCP launcher, assets) |
 | `plugins/codeclone/README.md` | **Full** install and usage guide for the plugin tree |
 
@@ -19,7 +19,8 @@ repo root.
 ## Install
 
 ```bash
-marketplace add orenlab/codeclone-codex
+codex plugin marketplace add orenlab/codeclone-codex
+codex plugin add codeclone@orenlab-codeclone
 ```
 
 Install `codeclone[mcp]` in your workspace or on `PATH` so the bundled launcher

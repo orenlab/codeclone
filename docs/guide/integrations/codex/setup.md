@@ -4,7 +4,19 @@
 Install the plugin from the Codex marketplace:
 
 ```bash
-marketplace add orenlab/codeclone-codex
+codex plugin marketplace add orenlab/codeclone-codex
+codex plugin add codeclone@orenlab-codeclone
+```
+
+The first command registers the public marketplace repository. The second
+installs the `codeclone` plugin from the marketplace named
+`orenlab-codeclone`.
+
+Verify the configured marketplace and installed plugin:
+
+```bash
+codex plugin marketplace list
+codex plugin list
 ```
 
 The plugin manifest version tracks the CodeClone package release line (currently

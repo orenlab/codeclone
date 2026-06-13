@@ -185,26 +185,40 @@ codeclone-mcp --transport streamable-http   # remote / HTTP clients
 
     See [Claude Desktop guide](guide/integrations/claude-desktop/setup.md).
 
+=== "Claude Code"
+
+    ```bash
+    claude plugin marketplace add orenlab/codeclone-claude-code
+    claude plugin install codeclone@orenlab-codeclone
+    ```
+
+    The marketplace repository is
+    [orenlab/codeclone-claude-code](https://github.com/orenlab/codeclone-claude-code).
+
+    See [Claude Code plugin guide](guide/integrations/claude-code/setup.md).
+
 === "Codex"
 
     ```bash
-    marketplace add orenlab/codeclone-codex
+    codex plugin marketplace add orenlab/codeclone-codex
+    codex plugin add codeclone@orenlab-codeclone
     ```
 
-    The source plugin lives in
-    [`plugins/codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/codeclone);
-    the marketplace distribution is `orenlab/codeclone-codex`.
+    The marketplace repository is
+    [orenlab/codeclone-codex](https://github.com/orenlab/codeclone-codex).
 
     See [Codex plugin guide](guide/integrations/codex/setup.md).
 
 === "Cursor"
 
-    Install from the monorepo path
-    [`plugins/cursor-codeclone/`](https://github.com/orenlab/codeclone/tree/main/plugins/cursor-codeclone)
-    (symlink into `.cursor/` or use Cursor local plugin discovery).
+    In Cursor, open **Dashboard → Settings → Plugins → Team Marketplaces**,
+    choose **Add Marketplace → Import from Repo**, and enter:
 
-    The Cursor plugin is **not** listed in `.agents/plugins/marketplace.json`;
-    that file is Codex-only for local monorepo development.
+    ```text
+    https://github.com/orenlab/codeclone-cursor
+    ```
+
+    Then install **CodeClone** from the imported marketplace.
 
     See [Cursor plugin guide](guide/integrations/cursor/install-and-skills.md).
 

@@ -161,7 +161,8 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     readme_text = (plugin_root / "README.md").read_text(encoding="utf-8")
 
     assert "# CodeClone for Codex" in readme_text
-    assert "marketplace add orenlab/codeclone-codex" in readme_text
+    assert "codex plugin marketplace add orenlab/codeclone-codex" in readme_text
+    assert "codex plugin add codeclone@orenlab-codeclone" in readme_text
     assert "codex mcp add codeclone -- codeclone-mcp --transport stdio" in readme_text
     assert "does not rewrite `~/.codex/config.toml`" in readme_text
     assert "prefers a workspace `.venv`" in readme_text

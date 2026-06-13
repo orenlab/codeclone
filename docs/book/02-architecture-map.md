@@ -46,7 +46,7 @@ Main ownership layers:
 | Platform Observability  | `codeclone/observability/*`                                                                                                   | Opt-in operation/span telemetry, local SQLite store, bounded MCP slicer, and CLI JSON/HTML diagnostics; never analysis truth or a gate input                                                                                                                                                                                   |
 | Controller insights     | `codeclone/controller_insights/*`                                                                                             | Shared session-stats and audit-trail payloads for CLI `--session-stats` / `--audit` and IDE-only MCP `get_workspace_session_stats` / `get_controller_audit_trail`                                                                                                                                                              |
 | Audit trail             | `codeclone/audit/*`                                                                                                           | Optional controller event and MCP payload footprint recording under `.codeclone/db/` when enabled                                                                                                                                                                                                                              |
-| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*`, `plugins/cursor-codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                                                                                                                                                                                                                                           |
+| Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*`, `plugins/cursor-codeclone/*`, `plugins/claude-code-codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                                                                                                                                                                                                                     |
 
 Refs:
 
@@ -67,7 +67,8 @@ Refs:
 - MCP is read-only and must not create a second analysis truth path. Change
   control and claim guard are projections over stored run/report semantics, not
   new analyzers.
-- VS Code, Claude Desktop, Codex plugin, and Cursor plugin surfaces are clients over MCP, not second analyzers.
+- VS Code, Claude Desktop, Claude Code, Codex, and Cursor surfaces are clients
+  over MCP, not second analyzers.
 
 Refs:
 

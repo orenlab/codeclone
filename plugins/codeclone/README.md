@@ -33,7 +33,8 @@ user-facing label stays in `interface.displayName` as `CodeClone`.
 Install the distribution package from the Codex marketplace:
 
 ```bash
-marketplace add orenlab/codeclone-codex
+codex plugin marketplace add orenlab/codeclone-codex
+codex plugin add codeclone@orenlab-codeclone
 ```
 
 This plugin does not install the MCP server binary. Install CodeClone with the
@@ -62,7 +63,8 @@ then `codeclone-mcp` from `PATH`, without relying on `sh -lc`.
 
 `.agents/plugins/marketplace.json` is the monorepo-local source entry used for
 development and distribution packaging. Public installs should use
-`marketplace add orenlab/codeclone-codex`.
+`codex plugin marketplace add orenlab/codeclone-codex`, followed by
+`codex plugin add codeclone@orenlab-codeclone`.
 
 The plugin does not rewrite `~/.codex/config.toml`.
 

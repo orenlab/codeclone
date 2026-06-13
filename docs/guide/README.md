@@ -7,7 +7,7 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 !!! abstract "Who is this for?"
     - **Developers** — install, CI, first analysis run
     - **Agent authors** — MCP workflows, change control, memory recipes
-    - **IDE users** — VS Code, Cursor, Codex, Claude Desktop setup
+    - **IDE and agent users** — VS Code, Cursor, Claude Code, Codex, Claude Desktop setup
 
 ## Start here
 
@@ -37,6 +37,7 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 |--------|-------------|----------|
 | VS Code | [Setup](integrations/vscode/setup.md) | [Contract](../book/integrations/vs-code-extension.md) |
 | Cursor | [Install & skills](integrations/cursor/install-and-skills.md) | [Contract](../book/integrations/cursor-plugin.md) |
-| Codex | [Setup](integrations/codex/setup.md) | [Contract](../book/integrations/codex-plugin.md) |
+| Claude Code | [Install](integrations/claude-code/setup.md) | [Contract](../book/integrations/claude-code-plugin.md) |
+| Codex | [Install](integrations/codex/setup.md) | [Contract](../book/integrations/codex-plugin.md) |
 | Claude Desktop | [Setup](integrations/claude-desktop/setup.md) | [Contract](../book/integrations/claude-desktop-bundle.md) |
 | SARIF export | [Export](integrations/sarif/export.md) | [Contract](../book/integrations/sarif.md) |
