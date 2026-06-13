@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -40,9 +40,16 @@ class FastEmbedEmbeddingProvider:
         self.dimension = dimension
         self.cache_dir = cache_dir
         self.allow_model_download = allow_model_download
-        self._model = self._load_model()
+        # Verify the optional package eagerly (cheap) so "extra not installed"
+        # still fails at construction, but defer the expensive ONNX model load
+        # (~hundreds of MB / seconds) to the first embed. A provider that is
+        # built but never embeds — e.g. a semantic query against an index that
+        # turns out to be unavailable — then costs nothing. Callers degrade
+        # gracefully when the model is unavailable at embed time.
+        self._text_embedding = self._resolve_text_embedding()
+        self._model: _TextEmbeddingModel | None = None
 
-    def _load_model(self) -> _TextEmbeddingModel:
+    def _resolve_text_embedding(self) -> Callable[..., object]:
         try:
             fastembed = importlib.import_module("fastembed")
         except ImportError as exc:
@@ -55,25 +62,28 @@ class FastEmbedEmbeddingProvider:
             raise MemorySemanticUnavailableError(
                 "fastembed package does not expose TextEmbedding"
             )
-        try:
-            return cast(
-                _TextEmbeddingModel,
-                text_embedding(
+        return cast("Callable[..., object]", text_embedding)
+
+    def _get_model(self) -> _TextEmbeddingModel:
+        if self._model is None:
+            try:
+                model = self._text_embedding(
                     model_name=self.model_name,
                     cache_dir=str(self.cache_dir),
                     local_files_only=not self.allow_model_download,
-                ),
-            )
-        except Exception as exc:
-            mode = (
-                "download disabled"
-                if not self.allow_model_download
-                else "download allowed"
-            )
-            raise MemorySemanticUnavailableError(
-                "fastembed embedding model is unavailable "
-                f"({self.model_name}; {mode}; cache={self.cache_dir}): {exc}"
-            ) from exc
+                )
+            except Exception as exc:
+                mode = (
+                    "download disabled"
+                    if not self.allow_model_download
+                    else "download allowed"
+                )
+                raise MemorySemanticUnavailableError(
+                    "fastembed embedding model is unavailable "
+                    f"({self.model_name}; {mode}; cache={self.cache_dir}): {exc}"
+                ) from exc
+            self._model = cast(_TextEmbeddingModel, model)
+        return self._model
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return self.embed_documents(texts)
@@ -87,7 +97,7 @@ class FastEmbedEmbeddingProvider:
 
     def _embed_prefixed(self, texts: Sequence[str]) -> list[list[float]]:
         try:
-            raw_vectors = list(self._model.embed(list(texts)))
+            raw_vectors = list(self._get_model().embed(list(texts)))
         except Exception as exc:
             raise MemorySemanticUnavailableError(
                 f"fastembed embedding failed for model {self.model_name}: {exc}"

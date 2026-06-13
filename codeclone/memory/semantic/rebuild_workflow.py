@@ -174,6 +174,17 @@ def execute_semantic_index_rebuild(
                 project=resolved_project,
             ),
         )
+    except MemorySemanticUnavailableError as exc:
+        # The embedding model loads lazily, so an unavailable model surfaces at
+        # the first embed here rather than at resolve. Report it the same way an
+        # unresolved provider does instead of letting the rebuild raise.
+        return {
+            **base,
+            **empty,
+            "status": "unavailable",
+            "reason": str(exc),
+            "embedding_model": None,
+        }
     finally:
         close_semantic_index(writer)
         if owns_store and active_store is not None:

@@ -1275,6 +1275,10 @@ def _run_semantic_search(
             limit=max(1, int(args.limit)),
             preview_chars=DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS,
         )
+    except MemorySemanticUnavailableError as exc:
+        # The embedding model loads lazily, so an unavailable model surfaces at
+        # the first embed rather than at provider resolution.
+        return _semantic_unavailable(console, f"Semantic search unavailable: {exc}.")
     finally:
         if store is not None:
             store.close()

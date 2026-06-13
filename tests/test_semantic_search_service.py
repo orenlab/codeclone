@@ -8,6 +8,8 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from codeclone.memory.embedding import EmbeddingProvider
+from codeclone.memory.exceptions import MemorySemanticUnavailableError
 from codeclone.memory.retrieval import query_engineering_memory
 from codeclone.memory.semantic.models import SemanticHit, SemanticIndexStatus
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
@@ -68,6 +70,7 @@ def _search(
     index: _FakeIndex,
     audit: Path | None = None,
     filters: Mapping[str, object] | None = None,
+    provider: EmbeddingProvider | None = None,
 ) -> dict[str, object]:
     return query_engineering_memory(
         store,
@@ -79,7 +82,7 @@ def _search(
         query=query,
         semantic=True,
         semantic_index=index,
-        embedding_provider=_FakeProvider(),
+        embedding_provider=provider or _FakeProvider(),
         provider_label="diagnostic",
         audit_db_path=audit,
         filters=filters,
@@ -233,6 +236,41 @@ def test_rank_records_lets_rrf_lead_over_metadata(tmp_path: Path) -> None:
     # RRF leads: the BM25 rank-0 match wins even though document_link has the
     # higher metadata boost. Metadata only breaks ties.
     assert ids == [lexical_top.id, meta_rich.id]
+
+
+class _FailingProvider:
+    model_id = "diagnostic-hash-v1"
+    dimension = 8
+
+    def embed(self, texts: Sequence[str]) -> list[list[float]]:
+        raise MemorySemanticUnavailableError("model unavailable (download disabled)")
+
+
+def test_semantic_search_degrades_to_fts_when_model_unavailable(tmp_path: Path) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        fts = seed_module_role(
+            store,
+            project_id=project.id,
+            file_path="codeclone/a.py",
+            statement="alpha beta gamma",
+        )
+        index = _FakeIndex([SemanticHit(source_id=fts.id, source="memory", score=0.9)])
+        result = _search(
+            store,
+            root=root,
+            project_id=project.id,
+            db_path=db_path,
+            query="alpha",
+            index=index,
+            provider=_FailingProvider(),
+        )
+    block = result["semantic"]
+    assert isinstance(block, dict)
+    # The lazy model load fails at embed; the query degrades to FTS-only and
+    # surfaces the reason instead of raising.
+    assert block["used"] is False
+    assert "model unavailable" in str(block["reason"])
+    assert fts.id in _record_ids(result)
 
 
 def test_unavailable_index_falls_back_to_fts(tmp_path: Path) -> None:

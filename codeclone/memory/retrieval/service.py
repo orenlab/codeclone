@@ -14,7 +14,7 @@ from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
 from ..embedding import embed_query
 from ..enums import LinkRelation, MemoryConfidence, MemoryRecordType, MemoryStatus
-from ..exceptions import MemoryContractError
+from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..experience.models import Experience
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
 from ..paths import (
@@ -1439,18 +1439,36 @@ def _handle_semantic_search_mode(
         match_mode=match_mode,
     )
     status = semantic_index.status() if semantic_index is not None else None
+    proximity: dict[str, float] = {}
+    audit_hits: list[SemanticHit] = []
+    trajectory_hits: list[SemanticHit] = []
+    used_block: dict[str, object] | None = None
     if (
         semantic_index is not None
         and embedding_provider is not None
         and status is not None
         and status.available
     ):
-        proximity, audit_hits, trajectory_hits = _semantic_hits(
-            index=semantic_index,
-            provider=embedding_provider,
-            query=statement,
-            k=max_results,
-        )
+        try:
+            proximity, audit_hits, trajectory_hits = _semantic_hits(
+                index=semantic_index,
+                provider=embedding_provider,
+                query=statement,
+                k=max_results,
+            )
+        except MemorySemanticUnavailableError as exc:
+            # The embedding model loads lazily, so an unavailable model (e.g.
+            # download disabled and not cached) first surfaces here. Degrade to
+            # FTS-only with the reason rather than failing the whole query.
+            semantic_reason = str(exc)
+        else:
+            used_block = _semantic_status_block(
+                status,
+                used=True,
+                provider_label=provider_label,
+                model=embedding_provider.model_id,
+            )
+    if used_block is not None:
         candidates = _semantic_search_candidates(
             store,
             project_id=project_id,
@@ -1467,14 +1485,8 @@ def _handle_semantic_search_mode(
             hits=trajectory_hits,
             detail_level=detail_level,
         )
-        semantic_block = _semantic_status_block(
-            status,
-            used=True,
-            provider_label=provider_label,
-            model=embedding_provider.model_id,
-        )
+        semantic_block = used_block
     else:
-        proximity = {}
         candidates = list(fts_records)
         audit_events = []
         trajectories = []

@@ -181,6 +181,24 @@ def test_fastembed_provider_uses_local_model_cache_and_prefixes(
     assert provider.embed(["legacy call"]) == [[1.0] * 384]
 
 
+def test_fastembed_provider_defers_model_load_until_first_embed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _install_fake_fastembed(monkeypatch)
+    config = SemanticConfig(embedding_provider="fastembed")
+
+    provider = resolve_embedding_provider(config)
+    # Construction verifies the package but must NOT load the ONNX model yet.
+    assert created == []
+    assert provider.model_id == "fastembed:BAAI/bge-small-en-v1.5"
+
+    embed_query(provider, "first call loads the model")
+    assert len(created) == 1
+    # A second embed reuses the cached model instead of reloading it.
+    embed_documents(provider, ["reuse the model"])
+    assert len(created) == 1
+
+
 def test_fastembed_provider_honors_download_opt_in(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -192,6 +210,8 @@ def test_fastembed_provider_honors_download_opt_in(
     provider = resolve_embedding_provider(config)
 
     assert provider.dimension == 384
+    # The download flag is passed when the model loads — i.e. at first embed.
+    embed_query(provider, "trigger lazy model load")
     assert [item.local_files_only for item in created] == [False]
 
 
@@ -221,8 +241,11 @@ def test_fastembed_provider_fails_clear_when_model_unavailable(
         allow_model_download=allow_model_download,
     )
 
+    # Resolve succeeds (cheap package check); the model load — and its failure —
+    # is deferred to the first embed.
+    provider = resolve_embedding_provider(config)
     with pytest.raises(MemorySemanticUnavailableError, match=message):
-        resolve_embedding_provider(config)
+        embed_query(provider, "boom")
 
 
 def test_fastembed_provider_fails_clear_when_embedding_call_fails(

@@ -16,6 +16,7 @@ import codeclone.memory.semantic as semantic_pkg
 import codeclone.surfaces.cli.memory as cli_memory
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
+from codeclone.memory.exceptions import MemorySemanticUnavailableError
 from codeclone.memory.models import MemorySubject, generate_memory_id
 from codeclone.memory.project import resolve_memory_db_path, resolve_project_identity
 from codeclone.memory.semantic.models import (
@@ -236,6 +237,40 @@ def test_semantic_status_reports_provider_unavailable(
     assert "provider: unavailable" in out
     assert "local_model embedding provider is not" in out.replace("\n", " ")
     assert "available yet" in out.replace("\n", " ")
+
+
+def test_semantic_search_degrades_when_model_unavailable_at_embed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _seed_semantic_repo(
+        tmp_path, statement="recover after restart", monkeypatch=monkeypatch
+    )
+
+    class _FailingProvider:
+        model_id = "diagnostic-hash-v1"
+        dimension = 64
+
+        def embed(self, texts: Sequence[str]) -> list[list[float]]:
+            raise MemorySemanticUnavailableError(
+                "model unavailable (download disabled)"
+            )
+
+    # Provider resolves (lazy); the model only fails when the search embeds.
+    monkeypatch.setattr(
+        cli_memory, "resolve_embedding_provider", lambda _config: _FailingProvider()
+    )
+
+    code = memory_main(
+        ["semantic", "search", "recover after restart", "--root", str(tmp_path)]
+    )
+
+    out = capsys.readouterr().out
+    assert code != 0
+    assert "unavailable" in out.lower()
+    assert "model unavailable" in out.replace("\n", " ")
+    assert "Traceback" not in out
 
 
 def test_semantic_search_hydrates_and_renders_json(
