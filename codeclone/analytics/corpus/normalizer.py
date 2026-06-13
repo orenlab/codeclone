@@ -11,6 +11,7 @@ import unicodedata
 from dataclasses import dataclass
 
 from ...contracts import CORPUS_NORMALIZER_VERSION
+from ...utils.json_io import json_text
 from .keys import sha256_hex
 
 _DIGEST_PATTERN = re.compile(
@@ -65,8 +66,9 @@ def normalize_corpus_text(raw: str) -> NormalizedText:
     )
 
 
-def source_content_digest(raw: str) -> str:
-    return normalize_corpus_text(raw).digest
+def source_content_digest(raw_inputs: object) -> str:
+    """Hash canonical raw representation inputs before text normalization."""
+    return sha256_hex(json_text(raw_inputs, sort_keys=True))
 
 
 __all__ = ["NormalizedText", "normalize_corpus_text", "source_content_digest"]

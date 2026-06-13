@@ -102,3 +102,14 @@ def test_trajectory_selection_deterministic() -> None:
     assert result.selected is not None
     assert result.selected.id == "traj-b"
     assert set(result.discarded_ids) == {"traj-a"}
+
+
+def test_trajectory_selection_uses_greatest_id_for_sequence_tie() -> None:
+    result = select_trajectory_for_intent(
+        (
+            _trajectory(trajectory_id="traj-a", terminal_sequence=20),
+            _trajectory(trajectory_id="traj-z", terminal_sequence=20),
+        )
+    )
+    assert result.selected is not None
+    assert result.selected.id == "traj-z"

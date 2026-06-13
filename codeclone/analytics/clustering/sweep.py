@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 
 from ...utils.json_io import json_text
 from ..corpus.keys import sha256_hex
@@ -119,6 +121,7 @@ def run_digest(
     embedding_generation_id: str,
     effective: EffectiveClusteringParameters,
     random_seed: int,
+    algorithm_manifest: dict[str, object],
 ) -> str:
     payload = {
         "snapshot_id": snapshot_id,
@@ -128,10 +131,37 @@ def run_digest(
             "min_cluster_size": effective.min_cluster_size,
             "min_samples": effective.min_samples,
             "cluster_selection_method": effective.cluster_selection_method,
+            "n_samples": effective.n_samples,
+            "n_features": effective.n_features,
         },
         "random_seed": random_seed,
+        "algorithm_manifest": algorithm_manifest,
     }
     return sha256_hex(json_text(payload, sort_keys=True))
+
+
+def clustering_algorithm_manifest() -> dict[str, object]:
+    return {
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "numpy_version": _package_version("numpy"),
+        "scipy_version": _package_version("scipy"),
+        "scikit_learn_version": _package_version("scikit-learn"),
+        "hdbscan_version": _package_version("hdbscan"),
+        "vector_preprocessing": "l2_normalize",
+        "pca_solver": "full",
+        "pca_whiten": False,
+        "clustering_input": "pca_reduced_coordinates",
+        "hdbscan_implementation": "hdbscan",
+        "clustering_metric": "euclidean",
+        "hdbscan_core_dist_n_jobs": 1,
+    }
+
+
+def _package_version(distribution: str) -> str:
+    try:
+        return version(distribution)
+    except PackageNotFoundError:
+        return "unknown"
 
 
 __all__ = [
@@ -141,6 +171,7 @@ __all__ = [
     "SWEEP_SELECTION_METHODS",
     "SweepCandidate",
     "SweepCandidateResult",
+    "clustering_algorithm_manifest",
     "iter_sweep_candidates",
     "rank_sweep_results",
     "run_digest",

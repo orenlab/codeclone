@@ -886,22 +886,39 @@ stores.
 See [Platform Observability](../26-platform-observability.md) for configuration,
 privacy, query, and anti-inference rules.
 
-## Corpus analytics store (`1.0`)
+## Corpus analytics store (`1.1`)
 
 Optional SQLite database (default `.codeclone/analytics/corpus_clustering.sqlite3`)
 and LanceDB vector directory (default `.codeclone/analytics/corpus_vectors`).
 Derived offline analytics — not report, baseline, cache, audit, or Engineering
 Memory truth.
 
-| Artifact            | Role                                                        |
-|---------------------|-------------------------------------------------------------|
-| `corpus_snapshots`  | Immutable snapshot metadata and source digests              |
-| `embedding_runs`    | Analytics embedding generation records                      |
-| `clustering_runs` | PCA/HDBSCAN parameters, diagnostics, membership digest      |
-| LanceDB sidecar     | Separate vectors from Engineering Memory semantic index     |
+| Artifact                | Role                                                                  |
+|-------------------------|-----------------------------------------------------------------------|
+| `corpus_snapshots`      | Immutable-by-contract snapshot metadata and source digests            |
+| `corpus_items`          | Normalized representation, metadata, and optional registry overlay    |
+| `embedding_generations` | Provider/model/preprocessing manifest                                  |
+| `embedding_items`       | Vector row keys, float32 digests, dimensions; no vector blobs          |
+| `clustering_runs`       | Requested/effective parameters, algorithm manifest, lifecycle status  |
+| `cluster_assignments`   | Per-run item label, strength, and membership digest                    |
+| `cluster_summaries`     | Canonical display id and persisted diagnostics per cluster/noise       |
+| LanceDB sidecar         | Separate float32 vectors from Engineering Memory semantic index        |
 
 Store schema version: `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`1.0`**).
+`codeclone/contracts/__init__.py` (currently **`1.1`**).
+
+Writable open migrates `1.0` to `1.1` only after checking existing snapshots,
+embedding references, clustering assignments/summaries, vector row keys, and
+display ids. Read-only open never migrates and rejects stale schema. SQLite
+triggers prevent orphan-producing inserts, relationship updates, and parent
+deletes; unique indexes protect vector row keys and non-null display cluster ids.
+
+The SQLite transaction and LanceDB sidecar cannot share one physical
+transaction. The embedding workflow therefore writes metadata and vectors as
+one controlled operation, rolls SQLite back and removes the generation on
+ordinary failures, and validates row keys, dimensions, and float32 digests
+before clustering. Crash residue is detected as an integrity error rather than
+accepted as a completed generation.
 
 See [Corpus Analytics](../27-corpus-analytics.md) for CLI, configuration, and trust
 boundaries.

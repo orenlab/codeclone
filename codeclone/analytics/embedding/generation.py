@@ -9,6 +9,7 @@ from __future__ import annotations
 import importlib
 import uuid
 from collections.abc import Sequence
+from contextlib import suppress
 from dataclasses import dataclass
 
 from ...config.analytics import AnalyticsConfig
@@ -17,7 +18,7 @@ from ...memory.embedding import EmbeddingProvider, embed_documents
 from ...memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
 from ...report.meta import current_report_timestamp_utc
 from ..contracts import CorpusItemRecord, EmbeddingGenerationRecord, EmbeddingItemRecord
-from ..exceptions import AnalyticsCapabilityError
+from ..exceptions import AnalyticsCapabilityError, AnalyticsWorkflowError
 from ..store.protocols import CorpusStore
 from ..store.vectors_lancedb import AnalyticsVectorStore, vector_digest, vector_row_key
 
@@ -61,11 +62,13 @@ def generate_embeddings_for_snapshot(
 ) -> EmbeddingBatchResult:
     items = store.list_items(snapshot_id)
     if not items:
-        msg = f"snapshot has no items: {snapshot_id}"
-        raise ValueError(msg)
+        raise AnalyticsWorkflowError(f"snapshot has no items: {snapshot_id}")
     active_provider = provider or _resolve_fastembed_provider(config)
     texts = [item.normalized_text for item in items]
-    vectors = embed_documents(active_provider, texts)
+    try:
+        vectors = embed_documents(active_provider, texts)
+    except Exception as exc:
+        raise AnalyticsWorkflowError(f"analytics embedding failed: {exc}") from exc
     generation_id = f"emb-{uuid.uuid4().hex[:16]}"
     provider_id = active_provider.model_id.split(":", 1)[0]
     if provider_id not in {"fastembed", "diagnostic-hash-v1"}:
@@ -93,7 +96,6 @@ def generate_embeddings_for_snapshot(
         vector_preprocessing="l2_normalize",
         created_at_utc=current_report_timestamp_utc(),
     )
-    store.insert_embedding_generation(generation)
     embedding_items: list[EmbeddingItemRecord] = []
     vector_rows: list[dict[str, object]] = []
     for item, vector in zip(items, vectors, strict=True):
@@ -117,19 +119,19 @@ def generate_embeddings_for_snapshot(
                 "vector": vector,
             }
         )
-    store.insert_embedding_items(embedding_items)
-    stored_items = store.list_embedding_items(embedding_generation_id=generation_id)
-    if len(stored_items) != len(embedding_items):
-        msg = (
-            "embedding item count mismatch after persist: "
-            f"expected {len(embedding_items)}, stored {len(stored_items)}"
+    try:
+        store.insert_embedding_generation(generation)
+        store.insert_embedding_items(embedding_items)
+        vector_store.write_vectors(
+            embedding_generation_id=generation_id,
+            rows=vector_rows,
         )
-        raise ValueError(msg)
-    vector_store.write_vectors(
-        embedding_generation_id=generation_id,
-        rows=vector_rows,
-    )
-    store.commit()
+        store.commit()
+    except Exception:
+        store.rollback()
+        with suppress(Exception):
+            vector_store.delete_generation(generation_id)
+        raise
     return EmbeddingBatchResult(
         embedding_generation_id=generation_id,
         item_count=len(items),

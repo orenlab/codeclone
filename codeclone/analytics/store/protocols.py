@@ -109,6 +109,8 @@ class CorpusStore(Protocol):
 
     def commit(self) -> None: ...
 
+    def rollback(self) -> None: ...
+
     def close(self) -> None: ...
 
 
@@ -126,6 +128,22 @@ class VectorGenerationStore(Protocol):
         embedding_generation_id: str,
         snapshot_item_ids: Sequence[str],
     ) -> dict[str, list[float]]: ...
+
+    def read_vector_rows(
+        self,
+        *,
+        embedding_generation_id: str,
+        snapshot_item_ids: Sequence[str],
+    ) -> dict[str, dict[str, object]]: ...
+
+    def list_generation_item_ids(
+        self,
+        *,
+        embedding_generation_id: str,
+        limit: int,
+    ) -> tuple[str, ...]: ...
+
+    def delete_generation(self, embedding_generation_id: str) -> None: ...
 
     def close(self) -> None: ...
 

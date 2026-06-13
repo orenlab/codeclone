@@ -15,7 +15,7 @@ from pathlib import Path
 
 from ....audit.events import repo_root_digest
 from ....audit.reader import AuditRecord, read_intent_declared_records
-from ....audit.validation import DEFAULT_AUDIT_PATH
+from ....audit.validation import AUDIT_SCHEMA_VERSION, DEFAULT_AUDIT_PATH
 from ....config.intent_registry import (
     IntentRegistryConfigError,
     resolve_intent_registry_config,
@@ -236,10 +236,21 @@ def extract_historical_intent_items(
                     "source": "patch_trail",
                     "digest": patch_trail_digest,
                 },
-                "registry_overlay": {"present": False},
             }
 
-            metadata: dict[str, object] = {}
+            metadata: dict[str, object] = {
+                "agent_client_raw": None,
+                "agent_family": "unknown",
+                "outcome": None,
+                "quality_tier": None,
+                "finished_at_utc": None,
+                "scope_expanded": None,
+                "anomaly_kinds": None,
+                "scope_check_status": None,
+                "verification_status": None,
+                "declared_file_count": None,
+                "changed_file_count": None,
+            }
             agent_raw: str | None = None
             if selected_trajectory is not None:
                 agent_raw = trajectory_agent_label(selected_trajectory)
@@ -273,8 +284,6 @@ def extract_historical_intent_items(
                 if resolved_registry_db is not None
                 else None
             )
-            if registry_overlay is not None:
-                provenance["registry_overlay"] = {"present": True}
 
             rep_input = IntentRepresentationInput(
                 description=description,
@@ -293,7 +302,12 @@ def extract_historical_intent_items(
                         project_id=group_project_id,
                         intent_id=intent_id,
                     ),
-                    source_content_digest=source_content_digest(description),
+                    source_content_digest=source_content_digest(
+                        _raw_representation_inputs(
+                            representation_kind=representation_kind,
+                            payload=rep_input,
+                        )
+                    ),
                     provenance=provenance,
                     metadata=metadata,
                     registry_overlay=registry_overlay,
@@ -324,6 +338,23 @@ def build_source_digest_items(
             )
         )
     return tuple(sorted(digest_items, key=lambda entry: entry.source_record_key))
+
+
+def _raw_representation_inputs(
+    *,
+    representation_kind: str,
+    payload: IntentRepresentationInput,
+) -> dict[str, object]:
+    raw: dict[str, object] = {"description": payload.description}
+    if representation_kind.endswith("description_with_frame.v1"):
+        raw.update(
+            {
+                "intent_kind": payload.intent_kind,
+                "declared_path_families": sorted(set(payload.declared_path_families)),
+                "declared_constraints": sorted(set(payload.declared_constraints)),
+            }
+        )
+    return raw
 
 
 def compute_source_digest(
@@ -411,7 +442,7 @@ def materialize_corpus_item(
 
 def default_source_schema_versions() -> dict[str, str]:
     return {
-        "audit": "4",
+        "audit": AUDIT_SCHEMA_VERSION,
         "memory": ENGINEERING_MEMORY_SCHEMA_VERSION,
         "patch_trail": PATCH_TRAIL_SCHEMA_VERSION,
     }

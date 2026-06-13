@@ -46,16 +46,16 @@ def metadata_distribution(
     items: Sequence[CorpusItemRecord],
     *,
     field: str,
+    min_sample_size: int,
 ) -> dict[str, CorrelationCell]:
     counts: Counter[str] = Counter()
     for item in items:
         payload = _metadata_object(item.metadata_json)
-        value = payload.get(field)
-        key = str(value) if value is not None else "null"
-        counts[key] += 1
+        for key in _metadata_values(payload.get(field)):
+            counts[key] += 1
     total = len(items)
     return {
-        key: _cell(count, total, min_sample_size=5)
+        key: _cell(count, total, min_sample_size=min_sample_size)
         for key, count in sorted(counts.items())
     }
 
@@ -98,6 +98,10 @@ def build_cluster_diagnostics(
         "quality_tier",
         "scope_check_status",
         "verification_status",
+        "scope_expanded",
+        "anomaly_kinds",
+        "declared_file_count",
+        "changed_file_count",
     )
     distributions = {
         field: {
@@ -110,21 +114,51 @@ def build_cluster_diagnostics(
             for key, cell in metadata_distribution(
                 member_items,
                 field=field,
+                min_sample_size=min_correlation_sample_size,
             ).items()
         }
         for field in metadata_fields
     }
-    return {
+    representatives = _representative_ids(
+        member_ids=partition.snapshot_item_ids,
+        medoid=medoid,
+        coordinates=coordinates,
+        membership_strengths=membership_strengths,
+    )
+    boundary_items = _boundary_ids(
+        member_ids=partition.snapshot_item_ids,
+        medoid=medoid,
+        coordinates=coordinates,
+        membership_strengths=membership_strengths,
+    )
+    diagnostics: dict[str, object] = {
         "cluster_label": partition.cluster_label,
         "membership_digest": partition.membership_digest,
         "size": size,
         "size_percent": cluster_size_percent(size, total_items),
         "medoid_snapshot_item_id": medoid,
         "average_membership_strength": avg_strength,
-        "representatives": list(partition.snapshot_item_ids[:5]),
+        "representatives": list(representatives),
+        "boundary_items": list(boundary_items),
         "metadata_distributions": distributions,
         "min_correlation_sample_size": min_correlation_sample_size,
     }
+    if partition.cluster_label == NOISE_LABEL:
+        diagnostics["noise_items"] = [
+            {
+                "snapshot_item_id": item.snapshot_item_id,
+                "flags": _flags_dict(
+                    noise_explorer_flags(
+                        item=item,
+                        membership_strength=membership_strengths.get(
+                            item.snapshot_item_id
+                        ),
+                    )
+                ),
+            }
+            for item in sorted(member_items, key=lambda entry: entry.snapshot_item_id)
+        ]
+    return diagnostics
 
 
 def noise_explorer_flags(
@@ -197,6 +231,84 @@ def _metadata_object(text: str) -> dict[str, object]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _metadata_values(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ("null",)
+    if isinstance(value, list):
+        normalized = tuple(sorted({str(item) for item in value}))
+        return normalized or ("none",)
+    if isinstance(value, bool):
+        return ("true" if value else "false",)
+    return (str(value),)
+
+
+def _representative_ids(
+    *,
+    member_ids: Sequence[str],
+    medoid: str,
+    coordinates: Mapping[str, tuple[float, ...]],
+    membership_strengths: Mapping[str, float | None],
+    limit: int = 5,
+) -> tuple[str, ...]:
+    if not member_ids:
+        return ()
+    ordered = sorted(
+        (item_id for item_id in member_ids if item_id != medoid),
+        key=lambda item_id: (
+            -_strength(membership_strengths.get(item_id)),
+            _distance_from(item_id, medoid, coordinates),
+            item_id,
+        ),
+    )
+    return tuple(([medoid] if medoid else []) + ordered)[:limit]
+
+
+def _boundary_ids(
+    *,
+    member_ids: Sequence[str],
+    medoid: str,
+    coordinates: Mapping[str, tuple[float, ...]],
+    membership_strengths: Mapping[str, float | None],
+    limit: int = 5,
+) -> tuple[str, ...]:
+    ordered = sorted(
+        member_ids,
+        key=lambda item_id: (
+            _strength(membership_strengths.get(item_id)),
+            -_distance_from(item_id, medoid, coordinates),
+            item_id,
+        ),
+    )
+    return tuple(ordered[:limit])
+
+
+def _strength(value: float | None) -> float:
+    return value if value is not None else 1.0
+
+
+def _distance_from(
+    item_id: str,
+    anchor_id: str,
+    coordinates: Mapping[str, tuple[float, ...]],
+) -> float:
+    item = coordinates.get(item_id)
+    anchor = coordinates.get(anchor_id)
+    if item is None or anchor is None:
+        return float("inf")
+    return _euclidean(item, anchor)
+
+
+def _flags_dict(flags: NoiseExplorerFlags) -> dict[str, bool]:
+    return {
+        "short_text": flags.short_text,
+        "long_text": flags.long_text,
+        "multiple_paragraphs": flags.multiple_paragraphs,
+        "high_conjunction_count": flags.high_conjunction_count,
+        "template_match": flags.template_match,
+        "low_membership_strength": flags.low_membership_strength,
+    }
 
 
 def _cell(numerator: int, denominator: int, *, min_sample_size: int) -> CorrelationCell:

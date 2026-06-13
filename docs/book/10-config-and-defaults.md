@@ -349,7 +349,10 @@ contracts.
 
 Optional intent corpus clustering uses `[tool.codeclone.analytics]`. Install
 `codeclone[analytics]` before running `codeclone analytics …`. Paths resolve
-under the repository root. Full key list:
+under the repository root. The historical audit source is inherited from the
+top-level `[tool.codeclone].audit_path`; it is not duplicated in the analytics
+table. `embedding_provider` currently accepts only `fastembed`, and
+`default_cluster_selection_method` accepts `eom` or `leaf`. Full key list:
 [Corpus Analytics](27-corpus-analytics.md#configuration).
 
 Refs:

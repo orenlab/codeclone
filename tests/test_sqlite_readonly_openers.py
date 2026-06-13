@@ -12,11 +12,14 @@ from pathlib import Path
 
 import pytest
 
+from codeclone.analytics.exceptions import AnalyticsStoreError
+from codeclone.analytics.schema import open_analytics_db, open_analytics_db_readonly
 from codeclone.audit.schema import (
     open_audit_db,
     open_audit_db_readonly,
 )
 from codeclone.audit.validation import AuditSchemaError
+from codeclone.contracts import CORPUS_ANALYTICS_STORE_SCHEMA_VERSION
 from codeclone.memory.schema import open_memory_db, open_memory_db_readonly
 from codeclone.surfaces.mcp._workspace_intent_schema import (
     IntentRegistrySchemaError,
@@ -110,6 +113,55 @@ def test_intent_readonly_opener_rejects_stale_schema_without_migration(
         ).fetchone() == ("1",)
     finally:
         raw.close()
+
+
+def test_analytics_readonly_opener_requires_writable_migration(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "analytics.sqlite3"
+    writable = open_analytics_db(db_path)
+    try:
+        writable.execute(
+            "UPDATE analytics_meta SET value='1.0' WHERE key='schema_version'"
+        )
+        writable.commit()
+    finally:
+        writable.close()
+
+    with pytest.raises(AnalyticsStoreError, match="requires writable migration"):
+        open_analytics_db_readonly(db_path)
+
+    migrated = open_analytics_db(db_path)
+    try:
+        assert migrated.execute(
+            "SELECT value FROM analytics_meta WHERE key='schema_version'"
+        ).fetchone() == (CORPUS_ANALYTICS_STORE_SCHEMA_VERSION,)
+        triggers = {
+            row[0]
+            for row in migrated.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            )
+        }
+        assert "analytics_generation_delete_guard" in triggers
+        assert "analytics_assignment_update_guard" in triggers
+    finally:
+        migrated.close()
+
+
+def test_analytics_schema_rejects_orphan_embedding_metadata(tmp_path: Path) -> None:
+    conn = open_analytics_db(tmp_path / "analytics.sqlite3")
+    try:
+        with pytest.raises(sqlite3.IntegrityError, match="unknown"):
+            conn.execute(
+                """
+                INSERT INTO embedding_items (
+                    embedding_generation_id, snapshot_item_id,
+                    vector_row_key, vector_digest, dimensions
+                ) VALUES ('missing-generation', 'missing-item', 'row', 'digest', 1)
+                """
+            )
+    finally:
+        conn.close()
 
 
 @pytest.mark.parametrize(

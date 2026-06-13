@@ -43,6 +43,18 @@ allow_model_download = true
     assert config.allow_model_download is True
 
 
+def test_analytics_uses_configured_audit_path(tmp_path: Path) -> None:
+    _write_pyproject(
+        tmp_path,
+        """
+[tool.codeclone]
+audit_path = "evidence/controller.db"
+""",
+    )
+    config = resolve_analytics_config(tmp_path)
+    assert config.audit_db_path == tmp_path / "evidence/controller.db"
+
+
 def test_analytics_unknown_key_rejected(tmp_path: Path) -> None:
     _write_pyproject(
         tmp_path,
@@ -52,4 +64,27 @@ unexpected = true
 """,
     )
     with pytest.raises(ValueError, match="unexpected"):
+        resolve_analytics_config(tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("embedding_provider", '"unsupported"'),
+        ("default_cluster_selection_method", '"other"'),
+    ],
+)
+def test_analytics_rejects_unsupported_runtime_choices(
+    tmp_path: Path,
+    key: str,
+    value: str,
+) -> None:
+    _write_pyproject(
+        tmp_path,
+        f"""
+[tool.codeclone.analytics]
+{key} = {value}
+""",
+    )
+    with pytest.raises(ValueError, match=key):
         resolve_analytics_config(tmp_path)

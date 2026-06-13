@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..config.analytics import AnalyticsConfig, resolve_analytics_config
-from ..observability import operation
+from ..observability import span
 from ..report.meta import current_report_timestamp_utc
 from ..utils.json_io import json_text
 from .clustering.canonicalize import (
@@ -25,10 +25,16 @@ from .clustering.diagnostics import (
     compute_centroids,
     nearest_cluster_ids,
 )
-from .clustering.models import NOISE_LABEL, ClusteringParameters
-from .clustering.pipeline import run_clustering_pipeline
+from .clustering.models import (
+    NOISE_LABEL,
+    ClusteringParameters,
+    ClusteringPipelineResult,
+    ClusterPartition,
+)
+from .clustering.pipeline import resolve_effective_parameters, run_clustering_pipeline
 from .clustering.sweep import (
     SweepCandidateResult,
+    clustering_algorithm_manifest,
     iter_sweep_candidates,
     rank_sweep_results,
     run_digest,
@@ -44,9 +50,9 @@ from .corpus.snapshot import build_intent_snapshot
 from .embedding.generation import (
     EmbeddingBatchResult,
     generate_embeddings_for_snapshot,
-    load_snapshot_vectors,
 )
 from .exceptions import AnalyticsWorkflowError
+from .integrity import load_validated_snapshot_vectors, validate_persisted_run
 from .store.protocols import SnapshotBuildResult
 from .store.sqlite import SqliteCorpusAnalyticsStore
 from .store.vectors_lancedb import AnalyticsVectorStore
@@ -73,7 +79,7 @@ def run_snapshot(
     representation_kind: str,
     config: AnalyticsConfig | None = None,
 ) -> SnapshotBuildResult:
-    with operation(name="analytics.snapshot", surface="cli"):
+    with span(name="analytics.snapshot"):
         return build_intent_snapshot(
             root_path=root_path,
             representation_kind=representation_kind,
@@ -100,7 +106,7 @@ def run_embed(
             if known:
                 msg = f"{msg}; known snapshots: {known}"
             raise AnalyticsWorkflowError(msg)
-        with operation(name="analytics.embed", surface="cli"):
+        with span(name="analytics.embed"):
             return generate_embeddings_for_snapshot(
                 store=store,
                 vector_store=vector_store,
@@ -128,12 +134,14 @@ def run_clustering(
         dimension=resolved_config.embedding_dimension,
     )
     try:
-        with operation(name="analytics.cluster", surface="cli"):
+        with span(name="analytics.cluster"):
             items = store.list_items(snapshot_id)
             if not items:
                 raise AnalyticsWorkflowError("snapshot has no corpus items")
-            vectors = load_snapshot_vectors(
+            vectors = load_validated_snapshot_vectors(
+                store=store,
                 vector_store=vector_store,
+                snapshot_id=snapshot_id,
                 embedding_generation_id=embedding_generation_id,
                 items=items,
             )
@@ -184,6 +192,11 @@ def select_cluster_run(
         run = store.get_clustering_run(clustering_run_id)
         if run is None:
             raise AnalyticsWorkflowError(f"unknown clustering run: {clustering_run_id}")
+        validate_persisted_run(
+            store=store,
+            snapshot_id=run.snapshot_id,
+            clustering_run_id=clustering_run_id,
+        )
         store.set_selected_run(
             snapshot_id=run.snapshot_id,
             embedding_generation_id=run.embedding_generation_id,
@@ -203,7 +216,9 @@ def run_build(
     config: AnalyticsConfig | None = None,
 ) -> BuildResult:
     resolved_config = config or resolve_analytics_config(root_path)
-    with operation(name="analytics.build", surface="cli"):
+    if use_recommended and not sweep:
+        raise AnalyticsWorkflowError("--use-recommended requires --sweep")
+    with span(name="analytics.build"):
         snapshot = run_snapshot(
             root_path=root_path,
             representation_kind=representation_kind,
@@ -235,8 +250,6 @@ def run_build(
                         break
             finally:
                 store.close()
-        if use_recommended and recommended is None and run_ids:
-            recommended = run_ids[0]
         return BuildResult(
             snapshot_id=snapshot.snapshot_id,
             embedding_generation_id=embed.embedding_generation_id,
@@ -259,6 +272,10 @@ def _run_sweep(
         n_samples=len(item_ids),
         n_features=len(vectors[0]) if vectors else 0,
     )
+    if not candidates:
+        raise AnalyticsWorkflowError(
+            "corpus is too small for the configured clustering sweep"
+        )
     run_ids: list[str] = []
     scored: list[SweepCandidateResult] = []
     for candidate in candidates:
@@ -320,17 +337,16 @@ def _execute_single_run(
     config: AnalyticsConfig,
     recommended_by_heuristic: bool,
 ) -> str:
-    pipeline = run_clustering_pipeline(
-        snapshot_item_ids=item_ids,
-        embeddings=vectors,
-        requested=requested,
-        random_seed=config.cluster_random_seed,
+    effective = resolve_effective_parameters(
+        requested,
+        n_samples=len(item_ids),
+        n_features=len(vectors[0]) if vectors else 0,
     )
-    if pipeline is None:
+    if effective is None:
         raise AnalyticsWorkflowError("clustering parameters produced no valid run")
     run_id = f"run-{uuid.uuid4().hex[:16]}"
     created_at = current_report_timestamp_utc()
-    effective = pipeline.effective_parameters
+    algorithm_manifest = clustering_algorithm_manifest()
     run = ClusteringRunRecord(
         clustering_run_id=run_id,
         snapshot_id=snapshot_id,
@@ -352,6 +368,7 @@ def _execute_single_run(
                 "cluster_selection_method": effective.cluster_selection_method,
                 "n_samples": effective.n_samples,
                 "n_features": effective.n_features,
+                "algorithm_manifest": algorithm_manifest,
             },
             sort_keys=True,
         ),
@@ -361,18 +378,76 @@ def _execute_single_run(
             embedding_generation_id=embedding_generation_id,
             effective=effective,
             random_seed=config.cluster_random_seed,
+            algorithm_manifest=algorithm_manifest,
         ),
         recommended_by_heuristic=recommended_by_heuristic,
         selected_by_maintainer=False,
-        status="completed",
+        status="running",
         created_at_utc=created_at,
-        finished_at_utc=current_report_timestamp_utc(),
+        finished_at_utc=None,
         error_message=None,
     )
     store.insert_clustering_run(run)
-    partitions = canonicalize_partitions(pipeline.partitions)
+    store.commit()
+    try:
+        pipeline = run_clustering_pipeline(
+            snapshot_item_ids=item_ids,
+            embeddings=vectors,
+            requested=requested,
+            random_seed=config.cluster_random_seed,
+        )
+        if pipeline is None:
+            raise AnalyticsWorkflowError("clustering parameters produced no valid run")
+        coordinates = dict(zip(item_ids, pipeline.reduced_coordinates, strict=True))
+        partitions = canonicalize_partitions(
+            pipeline.partitions,
+            coordinates=coordinates,
+        )
+        _persist_run_artifacts(
+            store=store,
+            run_id=run_id,
+            item_ids=item_ids,
+            items=items,
+            pipeline=pipeline,
+            partitions=partitions,
+            coordinates=coordinates,
+            config=config,
+        )
+        store.update_clustering_run(
+            replace(
+                run,
+                status="completed",
+                finished_at_utc=current_report_timestamp_utc(),
+            )
+        )
+        store.commit()
+    except Exception as exc:
+        store.rollback()
+        store.update_clustering_run(
+            replace(
+                run,
+                status="failed",
+                finished_at_utc=current_report_timestamp_utc(),
+                error_message=str(exc),
+            )
+        )
+        store.commit()
+        raise
+    return run_id
+
+
+def _persist_run_artifacts(
+    *,
+    store: SqliteCorpusAnalyticsStore,
+    run_id: str,
+    item_ids: list[str],
+    items: Sequence[CorpusItemRecord],
+    pipeline: ClusteringPipelineResult,
+    partitions: Sequence[ClusterPartition],
+    coordinates: dict[str, tuple[float, ...]],
+    config: AnalyticsConfig,
+) -> None:
     membership_map = partition_membership_map(partitions)
-    coordinates = dict(zip(item_ids, pipeline.reduced_coordinates, strict=True))
     items_by_id = {item.snapshot_item_id: item for item in items}
     strength_by_id = dict(zip(item_ids, pipeline.membership_strengths, strict=True))
     assignments: list[ClusterAssignmentRecord] = []
@@ -405,12 +480,15 @@ def _execute_single_run(
             min_correlation_sample_size=config.min_correlation_sample_size,
         )
         if partition.cluster_label != NOISE_LABEL:
-            diagnostics["nearest_clusters"] = list(
-                nearest_cluster_ids(
-                    cluster_label=partition.cluster_label,
-                    centroids=centroids,
-                )
+            nearest_labels = nearest_cluster_ids(
+                cluster_label=partition.cluster_label,
+                centroids=centroids,
             )
+            diagnostics["nearest_clusters"] = [
+                display_id
+                for label in nearest_labels
+                if (display_id := display_map.get(label)) is not None
+            ]
         summaries.append(
             ClusterSummaryRecord(
                 clustering_run_id=run_id,
@@ -422,7 +500,6 @@ def _execute_single_run(
             )
         )
     store.insert_cluster_summaries(summaries)
-    return run_id
 
 
 __all__ = [

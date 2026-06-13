@@ -140,10 +140,16 @@ Refs:
 - Corpus Analytics commands are terminal-only, offline clustering of historical
   intents (requires `codeclone[analytics]`):
     - `codeclone analytics snapshot|embed|cluster|build|clusters|cluster-show|outliers`
-    - `build` runs snapshot → embed → cluster; `--use-recommended` selects the
-      heuristic sweep winner.
+    - `build` runs snapshot → embed → cluster. `--use-recommended` requires
+      `--sweep` and renders the heuristic winner; it does not mark a maintainer
+      selection.
+    - `cluster --select-run RUN_ID` is the only CLI action that sets
+      `selected_by_maintainer=true`.
     - Representations: `description` (default) or `description_with_frame`.
     - Artifacts live under `.codeclone/analytics/` (SQLite metadata + LanceDB vectors).
+    - Expected capability, schema, ownership, and integrity errors exit `2`
+      without a traceback. Inspection/export commands require only the base
+      install and open analytics metadata read-only.
     - Full contract: [Corpus Analytics](27-corpus-analytics.md).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.

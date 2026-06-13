@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -23,11 +24,16 @@ from ...analytics.contracts import (
     INTENT_REPRESENTATION_DESCRIPTION,
     INTENT_REPRESENTATION_DESCRIPTION_WITH_FRAME,
 )
-from ...analytics.exceptions import AnalyticsCapabilityError, AnalyticsWorkflowError
+from ...analytics.exceptions import (
+    AnalyticsCapabilityError,
+    AnalyticsError,
+    AnalyticsWorkflowError,
+)
 from ...analytics.export.json_export import (
     export_clustering_json,
     export_sweep_comparison_json,
 )
+from ...analytics.integrity import validate_persisted_run
 from ...analytics.report.html import render_analytics_html
 from ...analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from ...analytics.workflow import (
@@ -39,8 +45,14 @@ from ...analytics.workflow import (
     select_cluster_run,
 )
 from ...config.analytics import resolve_analytics_config
+from ...config.observability import resolve_observability_config
 from ...contracts import ExitCode
-from ...utils.json_io import write_json_document_atomically
+from ...observability import bootstrap, operation, shutdown, span
+from ...utils.json_io import (
+    json_text,
+    write_json_document_atomically,
+    write_json_text_atomically,
+)
 
 
 def _representation_kind(raw: str) -> str:
@@ -89,8 +101,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     cluster = sub.add_parser("cluster", help="Cluster embedded snapshot")
     _add_root(cluster)
-    cluster.add_argument("--snapshot-id", required=True)
-    cluster.add_argument("--embedding-generation-id", required=True)
+    cluster.add_argument("--snapshot-id")
+    cluster.add_argument("--embedding-generation-id")
     cluster.add_argument("--sweep", action="store_true")
     cluster.add_argument("--select-run", dest="select_run", default=None)
 
@@ -143,14 +155,14 @@ def _run_snapshot_command(args: argparse.Namespace, root: Path) -> int:
     if args.output_json is not None:
         write_json_document_atomically(args.output_json, payload)
     else:
-        print(payload)
+        _print_json(payload)
     return ExitCode.SUCCESS
 
 
 def _run_embed_command(args: argparse.Namespace, root: Path) -> int:
     _require_capability("embed")
     embed_result = run_embed(root_path=root, snapshot_id=args.snapshot_id)
-    print(
+    _print_json(
         {
             "embedding_generation_id": embed_result.embedding_generation_id,
             "item_count": embed_result.item_count,
@@ -163,8 +175,13 @@ def _run_cluster_command(args: argparse.Namespace, root: Path) -> int:
     if args.select_run:
         _require_capability("base")
         select_cluster_run(root_path=root, clustering_run_id=args.select_run)
-        print({"selected_run_id": args.select_run})
+        _print_json({"selected_run_id": args.select_run})
         return ExitCode.SUCCESS
+    if not args.snapshot_id or not args.embedding_generation_id:
+        raise AnalyticsWorkflowError(
+            "--snapshot-id and --embedding-generation-id are required "
+            "unless --select-run is used"
+        )
     _require_capability("cluster")
     run_ids = run_clustering(
         root_path=root,
@@ -172,7 +189,7 @@ def _run_cluster_command(args: argparse.Namespace, root: Path) -> int:
         embedding_generation_id=args.embedding_generation_id,
         sweep=args.sweep,
     )
-    print({"clustering_run_ids": list(run_ids)})
+    _print_json({"clustering_run_ids": list(run_ids)})
     return ExitCode.SUCCESS
 
 
@@ -183,7 +200,7 @@ def _write_build_exports(
     build_result: BuildResult,
 ) -> None:
     config = resolve_analytics_config(root)
-    store = SqliteCorpusAnalyticsStore.open(config.db_path)
+    store = SqliteCorpusAnalyticsStore.open_readonly(config.db_path)
     try:
         snapshot = store.get_snapshot(build_result.snapshot_id)
         if snapshot is None:
@@ -193,36 +210,41 @@ def _write_build_exports(
             if build_result.clustering_run_ids
             else None
         )
-        if args.json_out is not None and primary_run_id is not None:
-            if args.sweep and not args.use_recommended:
-                text = export_sweep_comparison_json(
+        with span(name="analytics.report"):
+            if args.json_out is not None and primary_run_id is not None:
+                if args.sweep and not args.use_recommended:
+                    text = export_sweep_comparison_json(
+                        store=store,
+                        snapshot_id=build_result.snapshot_id,
+                        embedding_generation_id=build_result.embedding_generation_id,
+                    )
+                else:
+                    text = export_clustering_json(
+                        store=store,
+                        snapshot_id=build_result.snapshot_id,
+                        clustering_run_id=primary_run_id,
+                    )
+                args.json_out.parent.mkdir(parents=True, exist_ok=True)
+                write_json_text_atomically(args.json_out, text)
+            if args.html_out is not None and primary_run_id is not None:
+                run = store.get_clustering_run(primary_run_id)
+                if run is None:
+                    raise AnalyticsWorkflowError("clustering run missing after build")
+                rendered = render_analytics_html(
                     store=store,
-                    snapshot_id=build_result.snapshot_id,
-                    embedding_generation_id=build_result.embedding_generation_id,
+                    snapshot=snapshot,
+                    run=run,
+                    comparison_only=args.sweep and not args.use_recommended,
                 )
-            else:
-                text = export_clustering_json(
-                    store=store,
-                    snapshot_id=build_result.snapshot_id,
-                    clustering_run_id=primary_run_id,
-                )
-            args.json_out.write_text(text, encoding="utf-8")
-        if args.html_out is not None and primary_run_id is not None:
-            run = store.get_clustering_run(primary_run_id)
-            if run is None:
-                raise AnalyticsWorkflowError("clustering run missing after build")
-            html = render_analytics_html(
-                store=store,
-                snapshot=snapshot,
-                run=run,
-                comparison_only=args.sweep and not args.use_recommended,
-            )
-            args.html_out.write_text(html, encoding="utf-8")
+                args.html_out.parent.mkdir(parents=True, exist_ok=True)
+                write_json_text_atomically(args.html_out, rendered)
     finally:
         store.close()
 
 
 def _run_build_command(args: argparse.Namespace, root: Path) -> int:
+    if args.use_recommended and not args.sweep:
+        raise AnalyticsWorkflowError("--use-recommended requires --sweep")
     _require_capability("full")
     build_result = run_build(
         root_path=root,
@@ -232,7 +254,7 @@ def _run_build_command(args: argparse.Namespace, root: Path) -> int:
     )
     if args.json_out is not None or args.html_out is not None:
         _write_build_exports(args=args, root=root, build_result=build_result)
-    print(
+    _print_json(
         {
             "snapshot_id": build_result.snapshot_id,
             "embedding_generation_id": build_result.embedding_generation_id,
@@ -248,8 +270,10 @@ def _run_clusters_command(args: argparse.Namespace, root: Path) -> int:
     config = resolve_analytics_config(root)
     store = SqliteCorpusAnalyticsStore.open_readonly(config.db_path)
     try:
+        if store.get_snapshot(args.snapshot_id) is None:
+            raise AnalyticsWorkflowError(f"unknown snapshot: {args.snapshot_id}")
         runs = store.list_clustering_runs(snapshot_id=args.snapshot_id)
-        print(
+        _print_json(
             [
                 {
                     "clustering_run_id": run.clustering_run_id,
@@ -276,9 +300,10 @@ def _run_cluster_show_command(args: argparse.Namespace, root: Path) -> int:
             clustering_run_id=args.run_id,
         )
         if args.output is not None:
-            args.output.write_text(text, encoding="utf-8")
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            write_json_text_atomically(args.output, text)
         else:
-            print(text)
+            print(text, end="")
     finally:
         store.close()
     return ExitCode.SUCCESS
@@ -289,13 +314,18 @@ def _run_outliers_command(args: argparse.Namespace, root: Path) -> int:
     config = resolve_analytics_config(root)
     store = SqliteCorpusAnalyticsStore.open_readonly(config.db_path)
     try:
+        validate_persisted_run(
+            store=store,
+            snapshot_id=args.snapshot_id,
+            clustering_run_id=args.run_id,
+        )
         assignments = store.list_assignments(args.run_id)
         noise = [
             item.snapshot_item_id
             for item in assignments
             if item.cluster_label == NOISE_LABEL
         ]
-        print({"noise_items": noise})
+        _print_json({"noise_items": noise})
     finally:
         store.close()
     return ExitCode.SUCCESS
@@ -318,18 +348,23 @@ def analytics_main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
-    handler = _COMMAND_HANDLERS.get(args.command)
-    if handler is None:
-        parser.error(f"unknown command: {args.command}")
-        return ExitCode.INTERNAL_ERROR
+    if not root.is_dir():
+        print(f"repository root is not a directory: {root}", file=sys.stderr)
+        return ExitCode.CONTRACT_ERROR
+    handler = _COMMAND_HANDLERS[args.command]
     try:
-        return handler(args, root)
-    except AnalyticsCapabilityError as exc:
+        bootstrap(resolve_observability_config(), root=root)
+        with operation(name=f"cli.analytics.{args.command}", surface="cli"):
+            return handler(args, root)
+    except (AnalyticsError, OSError, ValueError, sqlite3.Error) as exc:
         print(str(exc), file=sys.stderr)
         return ExitCode.CONTRACT_ERROR
-    except AnalyticsWorkflowError as exc:
-        print(str(exc), file=sys.stderr)
-        return ExitCode.CONTRACT_ERROR
+    finally:
+        shutdown()
+
+
+def _print_json(payload: object) -> None:
+    print(json_text(payload, sort_keys=True))
 
 
 __all__ = ["analytics_main"]

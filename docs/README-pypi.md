@@ -65,7 +65,7 @@ Engineering Memory, Corpus Analytics, and runtime diagnostics:
 
 ```bash
 uv tool install "codeclone[analytics]"
-codeclone analytics build --root . --use-recommended
+codeclone analytics build --root . --sweep --use-recommended
 codeclone memory trajectory dashboard --root .
 CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
 codeclone observability trace --root . --html /tmp/codeclone-observer.html

@@ -56,13 +56,13 @@ def select_trajectory_for_intent(
 
     finish_candidates = [item for item in candidates if _has_verified_finish(item)]
     pool = finish_candidates if finish_candidates else list(candidates)
-    pool.sort(
+    selected = max(
+        pool,
         key=lambda item: (
-            -_terminal_audit_sequence(item),
+            _terminal_audit_sequence(item),
             item.id,
-        )
+        ),
     )
-    selected = pool[0]
     discarded = tuple(
         sorted(
             trajectory.id for trajectory in candidates if trajectory.id != selected.id

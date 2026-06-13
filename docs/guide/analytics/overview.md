@@ -19,10 +19,13 @@ uv sync --extra analytics
 Build snapshot, embeddings, and a recommended clustering run in one step:
 
 ```bash
-codeclone analytics build --root . --use-recommended
+codeclone analytics build --root . --sweep --use-recommended
 ```
 
-Write artifacts to explicit paths:
+`--use-recommended` requires `--sweep`. It renders the heuristic winner for
+inspection; it does **not** set `selected_by_maintainer`.
+
+Write a detailed single-run report to explicit paths:
 
 ```bash
 codeclone analytics build \
@@ -30,6 +33,16 @@ codeclone analytics build \
   --representation description \
   --html-out /tmp/corpus-clusters.html \
   --json-out /tmp/corpus-clusters.json
+```
+
+Write a sweep comparison without choosing a primary detail view:
+
+```bash
+codeclone analytics build \
+  --root . \
+  --sweep \
+  --html-out /tmp/corpus-sweep.html \
+  --json-out /tmp/corpus-sweep.json
 ```
 
 ## Step-by-step
@@ -51,12 +64,38 @@ codeclone analytics cluster \
 codeclone analytics clusters --root . --snapshot-id SNAPSHOT_ID
 codeclone analytics cluster-show \
   --root . --snapshot-id SNAPSHOT_ID --run-id RUN_ID
+
+# 5. Record an explicit maintainer choice
+codeclone analytics cluster --root . --select-run RUN_ID
 ```
 
 ## Configuration
 
 Defaults live in `[tool.codeclone.analytics]` inside `pyproject.toml`. See
 [Corpus Analytics contract](../../book/27-corpus-analytics.md) for the full table.
+The historical audit source follows top-level `[tool.codeclone].audit_path`.
+
+## Reproducibility
+
+Exports persist snapshot and embedding manifests, vector digests, requested and
+effective parameters, fixed PCA/HDBSCAN settings, package versions, and the
+random seed. Unless the model revision and artifact fingerprint are known,
+CodeClone explicitly reports that full vector reproducibility is not guaranteed
+from the model id alone.
+
+Existing embedding generations created under an incompatible embedding contract
+are rejected. Run `embed` again for the same snapshot to create a compatible
+generation.
+
+## Failure behavior
+
+- Expected input, capability, schema, and artifact-integrity errors exit with
+  code `2` and no traceback.
+- A clustering run is persisted as `running`, then becomes `completed` or
+  `failed`; failed runs contain no committed assignments or summaries.
+- JSON and HTML outputs are written atomically.
+- Snapshot, embed, cluster, and report spans are recorded only when
+  `CODECLONE_OBSERVABILITY_ENABLED=1`.
 
 ## What this is not
 

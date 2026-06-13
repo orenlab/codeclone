@@ -41,10 +41,10 @@ Current contract versions:
 - `EXPERIENCE_DISTILLATION_VERSION = "experience-v1"` (derived Experience rows)
 - `SEMANTIC_INDEX_FORMAT_VERSION = "1"` (LanceDB sidecar; separate from SQLite memory schema)
 - `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.0"` (dev-only telemetry SQLite)
-- `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.0"` (corpus analytics SQLite)
-- `CORPUS_EXPORT_SCHEMA_VERSION = "1.0"` (clustering JSON export)
-- `CORPUS_REPRESENTATION_CONTRACT_VERSION = "1"` (intent representation payloads)
-- `CORPUS_EMBEDDING_CONTRACT_VERSION = "1"` (analytics embedding sidecar)
+- `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.1"` (corpus analytics SQLite)
+- `CORPUS_EXPORT_SCHEMA_VERSION = "1.1"` (clustering JSON export)
+- `CORPUS_REPRESENTATION_CONTRACT_VERSION = "2"` (intent representation payloads)
+- `CORPUS_EMBEDDING_CONTRACT_VERSION = "2"` (analytics embedding sidecar)
 
 Refs:
 
@@ -79,6 +79,15 @@ Version bump rules:
   SQLite layout or export semantics change incompatibly; rebuild analytics
   artifacts rather than treating them as analysis truth (
   see [27-corpus-analytics.md](27-corpus-analytics.md))
+    - store `1.1` adds migration-time orphan checks, relationship guards, and
+      unique vector/display keys;
+    - export `1.1` includes complete snapshot/generation/run manifests,
+      assignments, diagnostics, noise, and sweep candidates;
+    - representation `2` hashes raw representation-owned inputs before
+      normalization and excludes live registry state from source identity;
+    - embedding `2` defines vector digests over canonical little-endian
+      float32 bytes. Older embedding generations are rejected and must be
+      regenerated.
 
 Operational compatibility rules:
 
@@ -135,6 +144,8 @@ Refs:
 | Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`           |
 | Semantic index format bump     | LanceDB sidecar invalidated; run `memory semantic rebuild`     |
 | Platform Observability bump    | Local diagnostic store reader/writer must migrate together     |
+| Corpus analytics store bump    | Writable open migrates supported stores; read-only open rejects stale schema |
+| Corpus embedding contract bump | Existing generations must be regenerated before clustering     |
 
 ## Determinism / canonicalization
 

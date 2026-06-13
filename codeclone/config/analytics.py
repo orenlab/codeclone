@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
+from ..audit.validation import DEFAULT_AUDIT_PATH
 from ..utils.repo_paths import RepoPathPolicy, resolve_under_repo_root
 from .analytics_specs import ANALYTICS_NESTED_TABLE_KEY
 from .memory import resolve_memory_config
@@ -38,14 +40,14 @@ class AnalyticsPyprojectTable(BaseModel):
     vectors_path: str | None = None
     embedding_model: str | None = None
     embedding_dimension: int | None = Field(default=None, gt=0)
-    embedding_provider: str | None = None
+    embedding_provider: Literal["fastembed"] | None = None
     embedding_cache_dir: str | None = None
     min_correlation_sample_size: int | None = Field(default=None, gt=0)
     cluster_random_seed: int | None = None
     default_pca_dimensions: int | None = Field(default=None, gt=0)
     default_min_cluster_size: int | None = Field(default=None, gt=0)
     default_min_samples: int | None = Field(default=None, gt=0)
-    default_cluster_selection_method: str | None = None
+    default_cluster_selection_method: Literal["eom", "leaf"] | None = None
     allow_model_download: bool | None = None
 
 
@@ -53,6 +55,7 @@ class AnalyticsPyprojectTable(BaseModel):
 class AnalyticsConfig:
     db_path: Path
     vectors_path: Path
+    audit_db_path: Path
     embedding_model: str
     embedding_dimension: int
     embedding_provider: str
@@ -72,23 +75,15 @@ def _resolve_path(root_path: Path, raw: str | None, default_relative: str) -> Pa
     return resolve_under_repo_root(root_path, selected, policy=policy)
 
 
-def _load_pyproject_table(root_path: Path) -> AnalyticsPyprojectTable | None:
-    payload = load_pyproject_config(root_path)
-    raw = payload.get(ANALYTICS_NESTED_TABLE_KEY)
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        msg = "tool.codeclone.analytics must be a table"
-        raise TypeError(msg)
-    try:
-        return AnalyticsPyprojectTable.model_validate(raw)
-    except ValidationError as exc:
-        raise ValueError(str(exc)) from exc
-
-
 def resolve_analytics_config(root_path: Path) -> AnalyticsConfig:
     resolved_root = root_path.resolve()
-    table = _load_pyproject_table(resolved_root)
+    payload = load_pyproject_config(resolved_root)
+    raw_table = payload.get(ANALYTICS_NESTED_TABLE_KEY)
+    table = (
+        AnalyticsPyprojectTable.model_validate(raw_table)
+        if isinstance(raw_table, dict)
+        else None
+    )
     # The FastEmbed model artifact is a multi-hundred-MB download; analytics
     # vectors are kept separate (own LanceDB sidecar + embedding_generation_id),
     # but the model weights are shared with Engineering Memory rather than
@@ -105,6 +100,15 @@ def resolve_analytics_config(root_path: Path) -> AnalyticsConfig:
             resolved_root,
             table.vectors_path if table is not None else None,
             DEFAULT_ANALYTICS_VECTORS_RELATIVE,
+        ),
+        audit_db_path=_resolve_path(
+            resolved_root,
+            (
+                str(payload["audit_path"])
+                if payload.get("audit_path") is not None
+                else None
+            ),
+            DEFAULT_AUDIT_PATH,
         ),
         embedding_model=(
             table.embedding_model

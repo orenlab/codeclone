@@ -55,6 +55,23 @@ def _l2_normalize(matrix: list[list[float]]) -> list[list[float]]:
     return normalized
 
 
+def _validate_embedding_matrix(embeddings: Sequence[Sequence[float]]) -> int:
+    if not embeddings:
+        return 0
+    width = len(embeddings[0])
+    if width <= 0:
+        raise ValueError("embedding vectors must not be empty")
+    for index, row in enumerate(embeddings):
+        if len(row) != width:
+            raise ValueError(
+                f"embedding dimension mismatch at row {index}: "
+                f"actual={len(row)}, expected={width}"
+            )
+        if not all(math.isfinite(float(value)) for value in row):
+            raise ValueError(f"embedding row {index} contains non-finite values")
+    return width
+
+
 def _load_sklearn_pca() -> Any:  # Any: optional sklearn import boundary
     try:
         decomposition = importlib.import_module("sklearn.decomposition")
@@ -89,7 +106,7 @@ def run_clustering_pipeline(
     if not snapshot_item_ids:
         return None
     n_samples = len(snapshot_item_ids)
-    n_features = len(embeddings[0]) if embeddings else 0
+    n_features = _validate_embedding_matrix(embeddings)
     effective = resolve_effective_parameters(
         requested,
         n_samples=n_samples,

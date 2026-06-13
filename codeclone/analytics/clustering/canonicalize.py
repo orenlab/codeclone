@@ -15,6 +15,8 @@ from .models import NOISE_LABEL, ClusterPartition
 
 def canonicalize_partitions(
     partitions: Sequence[ClusterPartition],
+    *,
+    coordinates: dict[str, tuple[float, ...]],
 ) -> tuple[ClusterPartition, ...]:
     """Assign display order: size desc, medoid asc, membership_digest asc."""
     non_noise = [part for part in partitions if part.cluster_label != NOISE_LABEL]
@@ -22,7 +24,10 @@ def canonicalize_partitions(
     non_noise.sort(
         key=lambda part: (
             -len(part.snapshot_item_ids),
-            part.snapshot_item_ids[0] if part.snapshot_item_ids else "",
+            medoid_item_id(
+                member_ids=part.snapshot_item_ids,
+                coordinates=coordinates,
+            ),
             part.membership_digest,
         )
     )
