@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP SECURITY, DETERMINISM, AND TEST LOCKS. -->
+
 # MCP Security, Determinism, and Tests
 
 Tool inventory and payload contracts:
@@ -7,16 +8,14 @@ Tool inventory and payload contracts:
 
 ## Security model
 
-| Property          | Guarantee                                                                                                                                                        |
-|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Default transport | Local `stdio`                                                                                                                                                    |
-| Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                              |
-| Lazy loading      | Base installs and CI do not require MCP packages                                                                                                                 |
+| Property          | Guarantee                                                                                                                                                                                                                                                  |
+|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Default transport | Local `stdio`                                                                                                                                                                                                                                              |
+| Remote exposure   | Explicit `--allow-remote` required for non-loopback                                                                                                                                                                                                        |
+| Lazy loading      | Base installs and CI do not require MCP packages                                                                                                                                                                                                           |
 | Read-only         | Never mutates source, baseline, cache, or canonical report artifacts; may write the ephemeral workspace intent registry under `.codeclone/`, optional audit/observability DBs, Engineering Memory **draft** rows, and projection job metadata when enabled |
 
 ---
-
-
 
 ## Determinism
 
@@ -28,8 +27,6 @@ Tool inventory and payload contracts:
 
 ---
 
-
-
 ## Locked by tests
 
 - `tests/test_mcp_service.py`
@@ -39,8 +36,6 @@ Tool inventory and payload contracts:
 - `tests/test_observability_query.py`
 
 ---
-
-
 
 ## See also
 

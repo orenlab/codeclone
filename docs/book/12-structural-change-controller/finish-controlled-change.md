@@ -64,7 +64,6 @@ On `start_controlled_change` / `finish_controlled_change`, hygiene uses
 `dirty_attribution`, path classification arrays, and expanded `dirty_snapshot`.
 Findings/hotspots tools still honor all three levels.
 
-
 ### Response payloads agents should read
 
 | Field                           | Use                                                                                                   |

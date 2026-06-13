@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP payload cheat sheet. class: guide max-lines: 40 -->
+
 # Payload cheat sheet
 
 !!! warning "Non-normative"

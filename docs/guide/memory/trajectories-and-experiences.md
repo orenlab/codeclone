@@ -72,5 +72,6 @@ surface. To turn it into a reviewable draft, use
 `manage_engineering_memory(action="promote_experience", experience_id="...")`.
 Promotion is idempotent and does not approve the draft.
 
-The normative contracts are [Trajectory quality and passport](../../book/13-engineering-memory/trajectory-quality-and-passport.md)
+The normative contracts
+are [Trajectory quality and passport](../../book/13-engineering-memory/trajectory-quality-and-passport.md)
 and [Experience layer](../../book/13-engineering-memory/experience-layer.md).

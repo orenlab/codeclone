@@ -3,6 +3,7 @@
      does-not-own: contract details (→ book/), architecture (→ guide/explanation/how-it-works.md),
        MCP tool reference (→ guide/mcp/README.md).
      rule: other pages link HERE for install — never duplicate install blocks. -->
+
 # Getting Started
 
 Install CodeClone, run your first analysis, set up CI gating, and connect
@@ -268,6 +269,7 @@ See [Config and defaults](book/10-config-and-defaults.md).
 - [Baseline contract](book/07-baseline.md) — trust model and schema
 - [MCP interface contract](book/25-mcp-interface/index.md) — tool surface and guarantees
 - [Engineering Memory recipes](guide/mcp/workflows/memory-recipes.md) — scoped context and governed drafts
-- [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md) — workflow evidence and recurring patterns
+- [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md) — workflow evidence and recurring
+  patterns
 - [Platform Observability](guide/observability/diagnostics.md) — diagnose CodeClone's own runtime
 - [Report contract](book/05-report.md) — canonical JSON schema

@@ -1,35 +1,33 @@
-
 ## What ships in the plugin
 
-| Component | Path | Purpose |
-|-----------|------|---------|
-| `.cursor-plugin/plugin.json` | Manifest | `skills/`, `rules/`, `agents/`, `hooks/hooks.json`, `mcp.json` |
-| `mcp.json` | MCP | `python3` + `./scripts/launch_mcp.py` — resolves `codeclone-mcp` (`.venv` → Poetry → `PATH`) |
-| Skills (6) | `skills/*/` | See table below |
-| Agent | `agents/structural-reviewer.md` | Invoke id: **`codeclone-structural-reviewer`** |
-| Rules (3) | `rules/*.mdc` | See **Rules** |
-| Hooks | `hooks/hooks.json` | Dispatches via `hooks/run_hook.py` (plugin manifest; optional project install) |
-| `scripts/install-project-hooks.py` | Installer | Writes `.cursor/hooks.json` + `.cursor/codeclone-hooks.json` |
-| `assets/` | Branding | Logo and icon |
+| Component                          | Path                            | Purpose                                                                                      |
+|------------------------------------|---------------------------------|----------------------------------------------------------------------------------------------|
+| `.cursor-plugin/plugin.json`       | Manifest                        | `skills/`, `rules/`, `agents/`, `hooks/hooks.json`, `mcp.json`                               |
+| `mcp.json`                         | MCP                             | `python3` + `./scripts/launch_mcp.py` — resolves `codeclone-mcp` (`.venv` → Poetry → `PATH`) |
+| Skills (6)                         | `skills/*/`                     | See table below                                                                              |
+| Agent                              | `agents/structural-reviewer.md` | Invoke id: **`codeclone-structural-reviewer`**                                               |
+| Rules (3)                          | `rules/*.mdc`                   | See **Rules**                                                                                |
+| Hooks                              | `hooks/hooks.json`              | Dispatches via `hooks/run_hook.py` (plugin manifest; optional project install)               |
+| `scripts/install-project-hooks.py` | Installer                       | Writes `.cursor/hooks.json` + `.cursor/codeclone-hooks.json`                                 |
+| `assets/`                          | Branding                        | Logo and icon                                                                                |
 
 ### Skills (directory vs chat command)
 
 Chat commands use the `name:` field in each `SKILL.md` (not always the folder
 name on disk):
 
-| Folder on disk | Chat command (`name`) | Primary MCP flow |
-|----------------|----------------------|------------------|
-| `production-triage/` | `/codeclone-production-triage` | `analyze_repository` → `get_production_triage` |
-| `codeclone-hotspots/` | `/codeclone-hotspots` | `analyze_repository` → hotspots / `check_*` |
-| `blast-radius/` | `/codeclone-blast-radius` | `analyze_repository` → `get_blast_radius` (read-only) |
-| `codeclone-review/` | `/codeclone-review` | Full review loop (conservative first) |
-| `codeclone-change-control/` | `/codeclone-change-control` | `start_controlled_change` → edit → `finish_controlled_change` |
-| `codeclone-engineering-memory/` | `/codeclone-engineering-memory` | `get_relevant_memory`, `query_engineering_memory`, drafts |
+| Folder on disk                  | Chat command (`name`)           | Primary MCP flow                                              |
+|---------------------------------|---------------------------------|---------------------------------------------------------------|
+| `production-triage/`            | `/codeclone-production-triage`  | `analyze_repository` → `get_production_triage`                |
+| `codeclone-hotspots/`           | `/codeclone-hotspots`           | `analyze_repository` → hotspots / `check_*`                   |
+| `blast-radius/`                 | `/codeclone-blast-radius`       | `analyze_repository` → `get_blast_radius` (read-only)         |
+| `codeclone-review/`             | `/codeclone-review`             | Full review loop (conservative first)                         |
+| `codeclone-change-control/`     | `/codeclone-change-control`     | `start_controlled_change` → edit → `finish_controlled_change` |
+| `codeclone-engineering-memory/` | `/codeclone-engineering-memory` | `get_relevant_memory`, `query_engineering_memory`, drafts     |
 
 Codex plugin ships the overlapping subset (review, hotspots, change-control,
 engineering-memory) but **not** standalone production-triage or blast-radius
 skills.
-
 
 ## Install
 
@@ -90,7 +88,6 @@ ignores `/.cursor/` in `.gitignore`.
     plugin from the `orenlab/codeclone-cursor` storefront through Cursor's own
     marketplace UI.
 
-
 ## Skills
 
 ### codeclone-production-triage
@@ -140,7 +137,6 @@ approve/reject: VS Code **Memory** view only (MCP agents cannot approve).
 
 Full contract: [Engineering Memory](../../../book/13-engineering-memory/index.md).
 
-
 ## Agent
 
 ### codeclone-structural-reviewer
@@ -151,14 +147,12 @@ intent or modify files. The structural reviewer agent uses CodeClone MCP tools
 exclusively for evidence, does not modify files or declare change intent, and
 does not treat report-only signals as CI failures or vulnerability claims.
 
-
 ## Distribution
 
 - **Monorepo source:** `plugins/cursor-codeclone/`
 - **Marketplace source:** `https://github.com/orenlab/codeclone-cursor`
 - **Install:** Cursor marketplace panel; local symlink only for development
 - **Standalone releases:** ship full `plugins/codeclone/scripts/launch_mcp.py` body
-
 
 ## Runtime model
 

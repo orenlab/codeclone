@@ -1,4 +1,5 @@
 <!-- doc-scope: Claude Desktop bundle setup. class: guide max-lines: 160 -->
+
 # Claude Desktop setup
 
 Local `.mcpb` bundle that launches `codeclone-mcp` over stdio. Same canonical MCP

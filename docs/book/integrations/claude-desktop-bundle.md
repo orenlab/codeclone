@@ -1,4 +1,5 @@
 <!-- doc-scope: Claude Desktop Bundle contract. class: contract max-lines: 150 -->
+
 # Claude Desktop Bundle
 
 This contract covers the Claude Desktop `.mcpb` package. Claude Code uses the
@@ -11,7 +12,6 @@ separate [Claude Code plugin](claude-code-plugin.md) and marketplace workflow.
 3. If you want to bypass auto-discovery, set **CodeClone launcher command** in
    the bundle settings to an absolute path.
 
-
 ## Settings
 
 | Setting                        | Purpose                                                                                                     |
@@ -19,7 +19,6 @@ separate [Claude Code plugin](claude-code-plugin.md) and marketplace workflow.
 | **Workspace root path**        | Optional absolute project root; launcher prefers that workspace `.venv` when Claude starts outside the repo |
 | **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp`                                                           |
 | **Advanced launcher args**     | JSON array of extra args (transport is always stdio)                                                        |
-
 
 ## Runtime model
 
@@ -43,12 +42,10 @@ Engineering Memory and optional semantic search follow the server contract in
 [Engineering Memory](../13-engineering-memory/index.md) (`query_engineering_memory`,
 `get_relevant_memory`; semantic off by default in pyproject).
 
-
 ## Privacy
 
 Local wrapper only — no telemetry, no cloud sync, no remote listener.
 See [Privacy Policy](../../privacy-policy.md).
-
 
 ## Design rules
 
@@ -62,7 +59,6 @@ See [Privacy Policy](../../privacy-policy.md).
 - **Small and deterministic**: package only the wrapper, manifest, icon, and
   documentation needed for local installation.
 
-
 ## Non-guarantees
 
 - Bundle presentation inside Claude Desktop may evolve with MCPB client UX.
@@ -70,13 +66,11 @@ See [Privacy Policy](../../privacy-policy.md).
   the explicit launcher setting remains stable.
 - The bundle does not guarantee automatic updates or remote install flows.
 
-
 ## Current limits
 
 - expects either a workspace launcher, a user-local/global launcher, or an
   explicitly configured absolute launcher path
 - local install surface, not a hosted service layer
-
 
 ## Source of truth
 

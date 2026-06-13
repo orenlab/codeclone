@@ -325,7 +325,7 @@ instead of duplicating tables.
 | Workspace intent registry        | `resolve_intent_registry_config`                 | Documented env > `[tool.codeclone]` registry keys > defaults                               |
 | MCP workspace intent TTL / lease | `resolved_ttl_seconds`, `resolved_lease_seconds` | Explicit MCP tool parameter > env > built-in default                                       |
 | Finish hygiene strict mode       | `_strict_finish_enabled`                         | Env only (no pyproject key)                                                                |
-| Platform Observability           | `resolve_observability_config`                   | Env only; disabled by default, no pyproject table                                           |
+| Platform Observability           | `resolve_observability_config`                   | Env only; disabled by default, no pyproject table                                          |
 | Cursor / IDE hooks               | hook helpers                                     | Env > repo config file (where noted) > built-in default                                    |
 
 There is no generic `CODECLONE_MEMORY__*` nested env convention. Each variable
@@ -344,16 +344,16 @@ Platform Observability is environment-only and disabled by default. It has no
 [Platform Observability](26-platform-observability.md) for the data and trust
 contracts.
 
-| Variable | Values | Effect |
-|---|---|---|
-| `CODECLONE_OBSERVABILITY_ENABLED` | truthy / falsy | Enable local operation/span instrumentation. |
-| `CODECLONE_OBSERVABILITY_FORCE` | truthy / falsy | Lift the CI collection guard; does not enable collection by itself. |
-| `CODECLONE_OBSERVABILITY_PROFILE` | truthy / falsy | Capture process metrics; requires `codeclone[perf]`. |
-| `CODECLONE_OBSERVABILITY_PERSIST` | truthy / falsy | Persist completed operations; default true when enabled. |
-| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES` | truthy / falsy | Capture bounded size/token estimates; default true. |
-| `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT` | reserved | Rejected; raw payload snapshots are unsupported. |
-| `CODECLONE_OBSERVABILITY_CORRELATION_ID` | internal ID | Worker handoff for cross-process correlation; set by CodeClone. |
-| `CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID` | internal ID | Worker handoff for the parent operation; set by CodeClone. |
+| Variable                                        | Values         | Effect                                                              |
+|-------------------------------------------------|----------------|---------------------------------------------------------------------|
+| `CODECLONE_OBSERVABILITY_ENABLED`               | truthy / falsy | Enable local operation/span instrumentation.                        |
+| `CODECLONE_OBSERVABILITY_FORCE`                 | truthy / falsy | Lift the CI collection guard; does not enable collection by itself. |
+| `CODECLONE_OBSERVABILITY_PROFILE`               | truthy / falsy | Capture process metrics; requires `codeclone[perf]`.                |
+| `CODECLONE_OBSERVABILITY_PERSIST`               | truthy / falsy | Persist completed operations; default true when enabled.            |
+| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES` | truthy / falsy | Capture bounded size/token estimates; default true.                 |
+| `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT`      | reserved       | Rejected; raw payload snapshots are unsupported.                    |
+| `CODECLONE_OBSERVABILITY_CORRELATION_ID`        | internal ID    | Worker handoff for cross-process correlation; set by CodeClone.     |
+| `CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID`   | internal ID    | Worker handoff for the parent operation; set by CodeClone.          |
 
 The internal correlation variables are launcher/worker protocol, not operator
 tuning knobs.
@@ -363,16 +363,16 @@ tuning knobs.
 Overrides `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` for the
 listed field only. Paths resolve under the repository root like pyproject paths.
 
-| Variable                                         | Values                                          | Overrides                              | Effect                                                                         |
-|--------------------------------------------------|-------------------------------------------------|----------------------------------------|--------------------------------------------------------------------------------|
-| `CODECLONE_MEMORY_DB_PATH`                       | repo-relative or absolute path under root       | `memory.db_path`                       | SQLite Engineering Memory store location                                       |
+| Variable                                         | Values                                          | Overrides                              | Effect                                                                                    |
+|--------------------------------------------------|-------------------------------------------------|----------------------------------------|-------------------------------------------------------------------------------------------|
+| `CODECLONE_MEMORY_DB_PATH`                       | repo-relative or absolute path under root       | `memory.db_path`                       | SQLite Engineering Memory store location                                                  |
 | `CODECLONE_PROJECTION_REBUILD_POLICY`            | `off`, `enqueue_when_stale`                     | `memory.projection_rebuild_policy`     | When accepted MCP finish may enqueue async trajectory/semantic/Experience projection jobs |
-| `CODECLONE_MEMORY_SEMANTIC_ENABLED`              | `true` / `false`                                | `memory.semantic.enabled`              | Turn semantic index sidecar on or off                                          |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER`   | `diagnostic`, `fastembed`, `local_model`, `api` | `memory.semantic.embedding_provider`   | Embedding backend for semantic rebuild/search                                  |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL`      | model name string                               | `memory.semantic.embedding_model`      | Provider model id (for example FastEmbed model name)                           |
-| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`  | path                                            | `memory.semantic.embedding_cache_dir`  | Local ONNX/model cache directory for FastEmbed                                 |
-| `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`                                | `memory.semantic.allow_model_download` | When `false`, FastEmbed requires a pre-populated cache                         |
-| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | path                                            | `memory.semantic.index_path`           | LanceDB semantic sidecar directory                                             |
+| `CODECLONE_MEMORY_SEMANTIC_ENABLED`              | `true` / `false`                                | `memory.semantic.enabled`              | Turn semantic index sidecar on or off                                                     |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_PROVIDER`   | `diagnostic`, `fastembed`, `local_model`, `api` | `memory.semantic.embedding_provider`   | Embedding backend for semantic rebuild/search                                             |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_MODEL`      | model name string                               | `memory.semantic.embedding_model`      | Provider model id (for example FastEmbed model name)                                      |
+| `CODECLONE_MEMORY_SEMANTIC_EMBEDDING_CACHE_DIR`  | path                                            | `memory.semantic.embedding_cache_dir`  | Local ONNX/model cache directory for FastEmbed                                            |
+| `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`                                | `memory.semantic.allow_model_download` | When `false`, FastEmbed requires a pre-populated cache                                    |
+| `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | path                                            | `memory.semantic.index_path`           | LanceDB semantic sidecar directory                                                        |
 
 Memory keys without a documented env override (for example
 `projection_rebuild_spawn_worker`) are pyproject-only.

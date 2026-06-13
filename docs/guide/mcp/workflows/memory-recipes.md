@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP memory recipes. class: guide max-lines: 130 -->
+
 # Engineering Memory recipes (MCP)
 
 Ranked scope context and governed drafts — **not** a second analyzer. Normative
@@ -11,11 +12,11 @@ Session-local review markers live in [Session & coverage](session-and-coverage.m
 When the store is missing, default `mcp_sync_policy=bootstrap_if_missing` ingests
 from the latest MCP run on the first scoped `get_relevant_memory`.
 
-| Step | Tool / action |
-|------|----------------|
-| Analyze | `analyze_repository(root=<abs>)` |
+| Step                     | Tool / action                                                    |
+|--------------------------|------------------------------------------------------------------|
+| Analyze                  | `analyze_repository(root=<abs>)`                                 |
 | Optional explicit ingest | `manage_engineering_memory(action=refresh_from_run, root=<abs>)` |
-| Offline init | `codeclone memory init` (CI/offline; same ingest contract) |
+| Offline init             | `codeclone memory init` (CI/offline; same ingest contract)       |
 
 ## 2. Scope context after `start_controlled_change`
 
@@ -58,14 +59,14 @@ enqueue projection rebuild when configured.
 
 ## 5. Search and drill-down
 
-| Goal | Call |
-|------|------|
-| Keyword search | `query_engineering_memory(mode=search, query=..., root=<abs>, filters={match_mode: any\|all})` |
-| Semantic blend | same + `semantic=true` when semantic index is built |
-| One path | `query_engineering_memory(mode=for_path, path=..., root=<abs>)` |
-| Trajectory detail | `query_engineering_memory(mode=trajectory_get, record_id=<trajectory-id>, root=<abs>)` |
-| Trajectory dashboard | `query_engineering_memory(mode=trajectory_dashboard, root=<abs>)` |
-| Playbook | `help(topic=engineering_memory)` |
+| Goal                 | Call                                                                                           |
+|----------------------|------------------------------------------------------------------------------------------------|
+| Keyword search       | `query_engineering_memory(mode=search, query=..., root=<abs>, filters={match_mode: any\|all})` |
+| Semantic blend       | same + `semantic=true` when semantic index is built                                            |
+| One path             | `query_engineering_memory(mode=for_path, path=..., root=<abs>)`                                |
+| Trajectory detail    | `query_engineering_memory(mode=trajectory_get, record_id=<trajectory-id>, root=<abs>)`         |
+| Trajectory dashboard | `query_engineering_memory(mode=trajectory_dashboard, root=<abs>)`                              |
+| Playbook             | `help(topic=engineering_memory)`                                                               |
 
 ## 6. Semantic index maintenance
 

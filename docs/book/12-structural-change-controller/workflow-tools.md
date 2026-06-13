@@ -45,6 +45,7 @@ trusted baseline.
 Budget payloads use `null` for disabled numeric thresholds rather than sentinel
 values. Boolean policy gates are named `forbid_*`, for example
 `forbid_dead_code_regression`.
+
 ## Verify Ergonomics
 
 `check_patch_contract(mode="verify")` includes three ergonomic features that
@@ -80,6 +81,7 @@ calling `validate_review_claims` is meaningful for the verification profile.
 It is `true` for `python_structural` and `governance_config` profiles, `false`
 for `documentation_only`, `non_python_patch`, `state_artifact_change`, and
 non-accepted outcomes.
+
 ## Workflow consolidation
 
 The atomic change control workflow requires 7–11 MCP tool calls per edit

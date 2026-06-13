@@ -2,6 +2,7 @@
      owns: every defined term used across docs and codebase.
      does-not-own: architecture (→ 02), pipeline (→ 03).
      rule: new terms go HERE, nowhere else. -->
+
 # 01. Terminology
 
 ## Purpose

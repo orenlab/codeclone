@@ -16,6 +16,7 @@ adapters over that core — non-MCP surfaces must not import
 
 Long context sections are bounded and include summaries with `total`, `shown`,
 and `truncated`.
+
 ## Review Receipt Payload
 
 `create_review_receipt` returns `format="markdown"` by default and can return a

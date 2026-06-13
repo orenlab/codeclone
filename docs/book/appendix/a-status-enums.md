@@ -1,6 +1,7 @@
 <!-- doc-scope: APPENDIX — status enums and typed contracts.
      owns: enum value tables for intent, registry, verify, and profile statuses.
      does-not-own: main chapter content — reference back-links only. -->
+
 # Appendix A. Status Enums
 
 ## Purpose

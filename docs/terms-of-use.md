@@ -2,6 +2,7 @@
      owns: terms of use text.
      does-not-own: MCP read-only contract (→ book/25), security model (→ book/21).
      rule: cross-link to contracts, do not restate them. -->
+
 # Terms of Use
 
 These terms describe the intended operational and integration boundaries of

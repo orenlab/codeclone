@@ -2,6 +2,7 @@
      owns: privacy policy text.
      does-not-own: MCP read-only contract (→ book/25, book/21).
      rule: cross-link to contracts, do not restate them. -->
+
 # Privacy Policy
 
 This page describes the privacy behavior of CodeClone's local integration

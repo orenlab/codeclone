@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP prompt patterns. class: guide max-lines: 120 -->
+
 # MCP prompt patterns
 
 ## Prompt patterns

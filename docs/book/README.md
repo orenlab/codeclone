@@ -3,6 +3,7 @@
      does-not-own: chapter content.
      rule: other files (index.md, nav) link here — they do NOT duplicate this TOC.
        Do not add chapter summaries — keep it a pure link list. -->
+
 # CodeClone Contracts Book
 
 This book is the contract-level documentation for CodeClone v2.x.
@@ -47,8 +48,10 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 ### Change control
 
 - [12-structural-change-controller/index.md](12-structural-change-controller/index.md) — overview
-- [12-structural-change-controller/finish-controlled-change.md](12-structural-change-controller/finish-controlled-change.md) — finish pipeline
-- [12-structural-change-controller/finish-hygiene.md](12-structural-change-controller/finish-hygiene.md) — hygiene blocking vs advisory
+- [12-structural-change-controller/finish-controlled-change.md](12-structural-change-controller/finish-controlled-change.md) —
+  finish pipeline
+- [12-structural-change-controller/finish-hygiene.md](12-structural-change-controller/finish-hygiene.md) — hygiene
+  blocking vs advisory
 - [12-structural-change-controller/patch-trail.md](12-structural-change-controller/patch-trail.md) — Patch Trail
 - [13-engineering-memory/index.md](13-engineering-memory/index.md) — evidence-linked repository memory
 - [14-claim-guard.md](14-claim-guard.md) — review claim validation
@@ -75,7 +78,8 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [25-mcp-interface/index.md](25-mcp-interface/index.md) — MCP interface contract
 - [25-mcp-interface/tools/workflow.md](25-mcp-interface/tools/workflow.md) — workflow tools
 - [25-mcp-interface/resources.md](25-mcp-interface/resources.md) — resource URIs
-- [25-mcp-interface/tools/platform-observability.md](25-mcp-interface/tools/platform-observability.md) — bounded diagnostics tool
+- [25-mcp-interface/tools/platform-observability.md](25-mcp-interface/tools/platform-observability.md) — bounded
+  diagnostics tool
 
 ### Integrations
 

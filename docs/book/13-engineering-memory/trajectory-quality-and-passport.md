@@ -42,14 +42,14 @@ High complexity is not a defect and does not reduce quality by itself.
 
 Quality score version `2` is the minimum of six components:
 
-| Component | Scoring |
-|---|---|
-| Outcome | accepted `100`, accepted external `85`, partial `55`, abandoned `40`, blocked `30`, violated `20` |
-| Verification | accepted `100`, accepted external `85`, unverified `50`, violated/blocked `0`, not reached `40` |
-| Scope | clean `100`, expanded `85`, partial `70`, violated `0` |
-| Incidents | `max(0, 100 - 10 × incident_count)` |
-| Anomalies | starts at `100`; error costs `12`, warning costs `5` |
-| Receipt | change-control trajectory with receipt `100`, without `85`; non-change workflow `100` |
+| Component    | Scoring                                                                                           |
+|--------------|---------------------------------------------------------------------------------------------------|
+| Outcome      | accepted `100`, accepted external `85`, partial `55`, abandoned `40`, blocked `30`, violated `20` |
+| Verification | accepted `100`, accepted external `85`, unverified `50`, violated/blocked `0`, not reached `40`   |
+| Scope        | clean `100`, expanded `85`, partial `70`, violated `0`                                            |
+| Incidents    | `max(0, 100 - 10 × incident_count)`                                                               |
+| Anomalies    | starts at `100`; error costs `12`, warning costs `5`                                              |
+| Receipt      | change-control trajectory with receipt `100`, without `85`; non-change workflow `100`             |
 
 When patch-trail verification is unavailable, the verification component falls
 back to quality tier: verified `100`, corrected `90`, routine `85`, partial

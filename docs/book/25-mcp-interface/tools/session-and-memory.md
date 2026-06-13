@@ -8,9 +8,9 @@
 
 ### Platform observability
 
-| Tool                             | Key parameters                                  | Purpose                                                                 |
-|----------------------------------|-------------------------------------------------|-------------------------------------------------------------------------|
-| `query_platform_observability`   | `root`, `section`, `window`, `detail_level`, `limit` | Bounded, read-only slices of CodeClone's own runtime telemetry |
+| Tool                           | Key parameters                                       | Purpose                                                        |
+|--------------------------------|------------------------------------------------------|----------------------------------------------------------------|
+| `query_platform_observability` | `root`, `section`, `window`, `detail_level`, `limit` | Bounded, read-only slices of CodeClone's own runtime telemetry |
 
 This tool is **development-only**. It reports numeric operation/span,
 database-cost, payload, agent-context, and pipeline diagnostics for CodeClone

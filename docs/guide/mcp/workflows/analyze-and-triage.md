@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP analyze and triage. class: guide max-lines: 120 -->
+
 # Analyze & triage
 
 ### Phase 1: Analyze

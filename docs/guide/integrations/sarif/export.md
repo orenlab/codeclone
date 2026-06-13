@@ -1,4 +1,3 @@
-
 ## Purpose
 
 Explain how CodeClone projects canonical findings into SARIF and what IDEs or
@@ -6,7 +5,6 @@ code-scanning tools can rely on.
 
 SARIF is a deterministic projection layer. The canonical source of truth
 remains the report document.
-
 
 ## What SARIF is good for here
 
@@ -21,7 +19,6 @@ It is not the source of truth for:
 - report integrity digest
 - gating semantics
 - baseline compatibility
-
 
 ## See also
 

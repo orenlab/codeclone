@@ -34,22 +34,22 @@ When auto-sync runs, the response includes a `memory_sync` object (`status`,
 
 Mode router for inspection and search.
 
-| `mode`       | Required inputs                       | Purpose                                   |
-|--------------|---------------------------------------|-------------------------------------------|
-| `search`     | `query`; optional `semantic=true`     | FTS keyword search; optional vector blend |
-| `get`        | `record_id`                           | Single record + subjects + evidence       |
-| `for_path`   | `path`                                | Path-linked records                       |
-| `for_symbol` | `symbol`                              | Symbol-linked records                     |
-| `stale`      | —                                     | Stale inventory                           |
-| `coverage`   | `scope` (non-empty, not project root) | Coverage metrics for paths                |
-| `status`     | —                                     | Store status (like CLI `status`)          |
-| `drafts`     | optional `limit`                      | Draft inbox (compact by default)          |
-| `trajectory_status` | —                              | Trajectory projection run metadata        |
-| `trajectory_search` | `query`; optional `filters.include_routine` | Search stored trajectories |
-| `trajectory_get`    | `record_id` (trajectory id)    | One trajectory + steps (always full)      |
-| `trajectory_anomalies` | optional `filters.include_routine` | Detected trajectory contract anomalies |
-| `trajectory_agents`    | optional `filters.include_routine` | Aggregate quality/outcomes by exact agent label |
-| `trajectory_dashboard` | optional `filters.include_routine` | Combined status, agent, and anomaly view |
+| `mode`                 | Required inputs                             | Purpose                                         |
+|------------------------|---------------------------------------------|-------------------------------------------------|
+| `search`               | `query`; optional `semantic=true`           | FTS keyword search; optional vector blend       |
+| `get`                  | `record_id`                                 | Single record + subjects + evidence             |
+| `for_path`             | `path`                                      | Path-linked records                             |
+| `for_symbol`           | `symbol`                                    | Symbol-linked records                           |
+| `stale`                | —                                           | Stale inventory                                 |
+| `coverage`             | `scope` (non-empty, not project root)       | Coverage metrics for paths                      |
+| `status`               | —                                           | Store status (like CLI `status`)                |
+| `drafts`               | optional `limit`                            | Draft inbox (compact by default)                |
+| `trajectory_status`    | —                                           | Trajectory projection run metadata              |
+| `trajectory_search`    | `query`; optional `filters.include_routine` | Search stored trajectories                      |
+| `trajectory_get`       | `record_id` (trajectory id)                 | One trajectory + steps (always full)            |
+| `trajectory_anomalies` | optional `filters.include_routine`          | Detected trajectory contract anomalies          |
+| `trajectory_agents`    | optional `filters.include_routine`          | Aggregate quality/outcomes by exact agent label |
+| `trajectory_dashboard` | optional `filters.include_routine`          | Combined status, agent, and anomaly view        |
 
 List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
 to **compact** payloads: statement preview, `statement_length`, no `payload`.
@@ -58,12 +58,12 @@ Use `mode=get` or `detail_level=full` for complete statements and payload.
 
 Scoped retrieval keeps four typed lanes:
 
-| Lane             | Meaning                                      | `compact`                                                     | `full`                                      |
-|------------------|----------------------------------------------|---------------------------------------------------------------|---------------------------------------------|
-| `records[]`      | Durable asserted/project memory              | Preview; relevance-first bounded `subjects`; count/truncation | Full statement, subjects, record payload    |
-| `experiences[]`  | Advisory patterns distilled from trajectories | Preview; agent-family count, multi-agent flag, dominant facet | Full agent facets and trajectory evidence ids |
-| `trajectories[]` | Prior workflow examples/evidence             | Bounded preview; no steps or `quality_contract`               | Full contract/subjects; use `trajectory_get` for steps |
-| `coverage`       | Availability of record/trajectory/experience context | Same factual coverage metadata                                | Same factual coverage metadata              |
+| Lane             | Meaning                                              | `compact`                                                     | `full`                                                 |
+|------------------|------------------------------------------------------|---------------------------------------------------------------|--------------------------------------------------------|
+| `records[]`      | Durable asserted/project memory                      | Preview; relevance-first bounded `subjects`; count/truncation | Full statement, subjects, record payload               |
+| `experiences[]`  | Advisory patterns distilled from trajectories        | Preview; agent-family count, multi-agent flag, dominant facet | Full agent facets and trajectory evidence ids          |
+| `trajectories[]` | Prior workflow examples/evidence                     | Bounded preview; no steps or `quality_contract`               | Full contract/subjects; use `trajectory_get` for steps |
+| `coverage`       | Availability of record/trajectory/experience context | Same factual coverage metadata                                | Same factual coverage metadata                         |
 
 `subject_count` and `subjects_truncated=true` mean more linked subjects exist;
 they do not downgrade or discard the record. Each compact trajectory retains
@@ -85,18 +85,18 @@ CLI equivalent: `codeclone memory search QUERY --match any|all`.
 
 #### `manage_engineering_memory`
 
-| `action`                 | Required params                                     | Effect                                                     |
-|--------------------------|-----------------------------------------------------|------------------------------------------------------------|
-| `refresh_from_run`       | optional `run_id` (defaults to latest MCP run)      | Force ingest from MCP run report                           |
-| `rebuild_semantic_index` | (none)                                              | Rebuild LanceDB sidecar when `memory.semantic.enabled`     |
-| `rebuild_trajectories`   | (none)                                              | Rebuild trajectory projections from audit event core       |
-| `enqueue_projection_rebuild` | (none)                                              | Queue trajectory + semantic + Experience projection job    |
-| `projection_rebuild_status` | (none)                                           | Latest projection job status                               |
-| `run_projection_jobs_once` | (none)                                           | Run one queued projection job inline                       |
-| `record_candidate`       | `record_type`, `statement`, **`subject_path`**      | Creates **draft** record                                   |
-| `promote_experience`     | `experience_id`                                     | Convert advisory Experience into human-reviewable draft    |
-| `validate_claims`        | `text`                                              | Memory-layer claim guard (warnings/errors)                 |
-| `propose_from_receipt`   | optional `text`, `intent_id`                        | Draft proposals from finish-like payload (atomic fallback) |
+| `action`                     | Required params                                | Effect                                                     |
+|------------------------------|------------------------------------------------|------------------------------------------------------------|
+| `refresh_from_run`           | optional `run_id` (defaults to latest MCP run) | Force ingest from MCP run report                           |
+| `rebuild_semantic_index`     | (none)                                         | Rebuild LanceDB sidecar when `memory.semantic.enabled`     |
+| `rebuild_trajectories`       | (none)                                         | Rebuild trajectory projections from audit event core       |
+| `enqueue_projection_rebuild` | (none)                                         | Queue trajectory + semantic + Experience projection job    |
+| `projection_rebuild_status`  | (none)                                         | Latest projection job status                               |
+| `run_projection_jobs_once`   | (none)                                         | Run one queued projection job inline                       |
+| `record_candidate`           | `record_type`, `statement`, **`subject_path`** | Creates **draft** record                                   |
+| `promote_experience`         | `experience_id`                                | Convert advisory Experience into human-reviewable draft    |
+| `validate_claims`            | `text`                                         | Memory-layer claim guard (warnings/errors)                 |
+| `propose_from_receipt`       | optional `text`, `intent_id`                   | Draft proposals from finish-like payload (atomic fallback) |
 
 IDE channel only (VS Code launches MCP with `--ide-governance-channel`):
 

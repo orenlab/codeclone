@@ -1,6 +1,7 @@
 <!-- doc-scope: BOOK CHARTER — goals, contract rule, reading paths.
      owns: what the book is, "code wins" rule, reading-path suggestions.
      does-not-own: the TOC (→ README.md), terminology (→ 01), architecture map (→ 02). -->
+
 # 00. Intro
 
 ## Purpose

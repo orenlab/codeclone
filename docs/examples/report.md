@@ -1,6 +1,7 @@
 <!-- doc-scope: SAMPLE REPORT viewer page.
      owns: live sample report embed/link, generation instructions for readers.
      does-not-own: report contract (→ book/05), build workflow (→ publishing.md). -->
+
 # Sample Report
 
 This page links to a live example report generated from the current `codeclone`

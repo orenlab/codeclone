@@ -66,7 +66,8 @@ Version bump rules:
   distillation** versions when their derived identity/formula changes; rebuild
   derived rows rather than migrating source evidence
 - bump **semantic index format** when LanceDB projection or stored row fields change
-  incompatibly — forces index rebuild, not SQLite migration (see [13-engineering-memory/index.md](13-engineering-memory/index.md))
+  incompatibly — forces index rebuild, not SQLite migration (
+  see [13-engineering-memory/index.md](13-engineering-memory/index.md))
 - bump **Platform Observability schema** only for incompatible telemetry-store
   changes; it remains separate from reports, gates, baselines, and memory facts
   (see [26-platform-observability.md](26-platform-observability.md))

@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP session architecture. class: guide max-lines: 130 -->
+
 # MCP architecture
 
 ## Where MCP fits

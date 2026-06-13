@@ -1,4 +1,3 @@
-
 ## What it is for
 
 The extension helps you:
@@ -15,7 +14,6 @@ The extension helps you:
 - inspect report-only Overloaded Module candidates without treating them like findings
 
 It does not create a second truth model and it does not mutate the repository.
-
 
 ## Install requirements
 
@@ -52,7 +50,6 @@ When you run the CLI inside an interactive VS Code terminal, CodeClone may also
 show a one-time extension hint after the summary. It is suppressed in quiet,
 CI, and non-interactive runs, and is remembered per CodeClone version next to
 the resolved project cache path.
-
 
 ## Main views
 
@@ -92,7 +89,6 @@ actions, and human approve/reject through the IDE governance channel
 extension launches MCP with `--ide-governance-channel` and registers a
 `SecretStorage` governance key on connect.
 
-
 ## Review model
 
 The extension stays source-first:
@@ -110,7 +106,6 @@ The extension stays source-first:
 `Open in HTML Report` exists as an explicit bridge to the richer human report,
 not as the primary IDE workflow.
 
-
 ## Blast radius, session, and audit commands
 
 The extension also exposes structural change-controller helpers over MCP:
@@ -126,7 +121,6 @@ The extension also exposes structural change-controller helpers over MCP:
   and workspace intent registry state for the MCP process)
 
 These commands require workspace trust and an active MCP connection.
-
 
 ## Engineering Memory in the IDE
 
@@ -155,14 +149,12 @@ deterministic diagnostic provider. See
 Trajectory semantics:
 [Trajectory quality and passport](../../../book/13-engineering-memory/trajectory-quality-and-passport.md).
 
-
 ## Open Triage
 
 **Open Triage** (`orenlab.codeclone.openTriage`) calls `get_production_triage` for
 the current run before opening the markdown panel. Repeated opens reuse the cached
 payload for 5 seconds when the run is unchanged and not marked stale; concurrent
 opens share one in-flight request.
-
 
 ## First-run path
 

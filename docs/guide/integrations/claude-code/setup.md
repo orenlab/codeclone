@@ -1,4 +1,5 @@
 <!-- doc-scope: Claude Code plugin setup. class: guide max-lines: 170 -->
+
 # Claude Code setup
 
 CodeClone ships a native Claude Code plugin through the public
@@ -76,11 +77,11 @@ a local MCP definition over the same canonical CodeClone server.
 
 Claude Code namespaces installed plugin skills:
 
-| Task | Invocation |
-|---|---|
-| Repository review | `/codeclone:codeclone-review` |
-| Hotspot snapshot | `/codeclone:codeclone-hotspots` |
-| Controlled edit | `/codeclone:codeclone-change-control` |
+| Task               | Invocation                                |
+|--------------------|-------------------------------------------|
+| Repository review  | `/codeclone:codeclone-review`             |
+| Hotspot snapshot   | `/codeclone:codeclone-hotspots`           |
+| Controlled edit    | `/codeclone:codeclone-change-control`     |
 | Engineering Memory | `/codeclone:codeclone-engineering-memory` |
 
 ## Update or remove

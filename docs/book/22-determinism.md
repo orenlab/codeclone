@@ -2,6 +2,7 @@
      owns: determinism guarantees, non-determinism sources, sorted-iteration rules.
      does-not-own: CFG semantics (→ 04), fingerprint version (→ 24),
        benchmarking (→ 20). -->
+
 # 22. Determinism
 
 ## Purpose

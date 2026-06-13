@@ -5,6 +5,7 @@
        CFG semantics (→ book/04), report schema (→ book/05).
      rule: this is a MAP — 1-2 sentences per topic + link into Reference.
        Do not shadow-copy book chapters here. -->
+
 # How CodeClone Works
 
 > This page is a narrative architecture overview.
@@ -169,15 +170,15 @@ Exit codes: [09-exit-codes](../../book/09-exit-codes.md).
 Every output surface — CLI, HTML, MCP, IDE — is a projection of the same
 canonical report. No surface adds a second analysis engine.
 
-| Surface | Role | Contract |
-|---------|------|----------|
-| CLI | Scripting and CI | [CLI](../../book/11-cli.md) |
-| MCP | Read-only agent/client integration | [MCP interface](../../book/25-mcp-interface/index.md) |
-| VS Code | Guided IDE review | [VS Code](../integrations/vscode/setup.md) |
-| Claude Desktop | Local `.mcpb` bundle | [Claude Desktop](../integrations/claude-desktop/setup.md) |
-| Codex | Marketplace plugin with skills | [Codex](../integrations/codex/setup.md) |
-| Cursor | Plugin with skills, rules, hooks | [Cursor](../integrations/cursor/install-and-skills.md) |
-| SARIF | IDE code scanning | [SARIF](../integrations/sarif/export.md) |
+| Surface        | Role                               | Contract                                                  |
+|----------------|------------------------------------|-----------------------------------------------------------|
+| CLI            | Scripting and CI                   | [CLI](../../book/11-cli.md)                               |
+| MCP            | Read-only agent/client integration | [MCP interface](../../book/25-mcp-interface/index.md)     |
+| VS Code        | Guided IDE review                  | [VS Code](../integrations/vscode/setup.md)                |
+| Claude Desktop | Local `.mcpb` bundle               | [Claude Desktop](../integrations/claude-desktop/setup.md) |
+| Codex          | Marketplace plugin with skills     | [Codex](../integrations/codex/setup.md)                   |
+| Cursor         | Plugin with skills, rules, hooks   | [Cursor](../integrations/cursor/install-and-skills.md)    |
+| SARIF          | IDE code scanning                  | [SARIF](../integrations/sarif/export.md)                  |
 
 ---
 

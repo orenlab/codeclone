@@ -1,4 +1,5 @@
 <!-- doc-scope: SARIF contract. class: contract max-lines: 150 -->
+
 # SARIF
 
 ## Source files
@@ -6,7 +7,6 @@
 - `codeclone/report/renderers/sarif.py`
 - `codeclone/report/document/builder.py`
 - `codeclone/report/findings.py`
-
 
 ## Design model
 
@@ -18,7 +18,6 @@ That means:
 - finding identities come from canonical finding IDs
 - severity/confidence/category data comes from canonical report payloads
 - SARIF ordering remains deterministic
-
 
 ## Path model
 
@@ -34,7 +33,6 @@ Current behavior:
 - `run.invocations[*].workingDirectory` mirrors the scan root URI when available
 - `run.automationDetails.id` is unique per run
 
-
 ## Result model
 
 Current SARIF output includes:
@@ -48,7 +46,6 @@ Current SARIF output includes:
 
 Coverage Join may materialize coverage design findings only when the canonical
 report already contains valid `metrics.families.coverage_join` facts.
-
 
 ## Validation and tests
 

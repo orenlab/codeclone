@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP troubleshooting. class: guide max-lines: 120 -->
+
 # MCP troubleshooting
 
 ## Troubleshooting

@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP client setup. class: guide max-lines: 120 -->
+
 # MCP client setup
 
 ## Client setup

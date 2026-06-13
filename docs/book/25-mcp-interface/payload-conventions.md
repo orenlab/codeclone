@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP payload conventions. class: contract max-lines: 150 -->
+
 # MCP payload conventions
 
 ## Payload conventions

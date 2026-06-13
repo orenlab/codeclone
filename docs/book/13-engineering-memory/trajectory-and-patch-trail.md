@@ -85,7 +85,7 @@ Module ownership:
 | `codeclone/memory/trajectory/patch_trail_projector.py` | Rebuild Patch Trail from audit event cores                     |
 | `codeclone/memory/trajectory/projector.py`             | Deterministic trajectory projection (`trajectory-v3`)          |
 | `codeclone/memory/trajectory/quality.py`               | Contract-quality and separate complexity scoring               |
-| `codeclone/memory/trajectory/analytics.py`             | Dashboard, anomaly, and per-agent aggregates                    |
+| `codeclone/memory/trajectory/analytics.py`             | Dashboard, anomaly, and per-agent aggregates                   |
 | `codeclone/memory/trajectory/store.py`                 | SQLite persistence, supersede, rebuild orchestration           |
 | `codeclone/memory/trajectory/retrieval.py`             | Scoped ranking + `patch_trail_summary`                         |
 | `codeclone/memory/trajectory/export_context.py`        | Export v2 context: precedents, citations, scope paths          |
@@ -129,13 +129,13 @@ Export profiles (schema contracts): `agent-change-control-v1`,
 Export row schema version is **`2`** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`). Each row
 includes:
 
-| Field                           | Source                                                                |
-|---------------------------------|-----------------------------------------------------------------------|
-| `context.memory_precedents`     | Active memory records overlapping trajectory/path scope               |
-| `context.trajectory_precedents` | Prior workflows with path overlap                                     |
-| `citations`                     | Claim-validation event cores + report digests                         |
-| `scope.paths`                   | Resolved from Patch Trail / declare / check event cores               |
-| `patch_trail_summary`           | When persisted in `memory_trajectory_patch_trails`                    |
+| Field                           | Source                                                                                                                            |
+|---------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
+| `context.memory_precedents`     | Active memory records overlapping trajectory/path scope                                                                           |
+| `context.trajectory_precedents` | Prior workflows with path overlap                                                                                                 |
+| `citations`                     | Claim-validation event cores + report digests                                                                                     |
+| `scope.paths`                   | Resolved from Patch Trail / declare / check event cores                                                                           |
+| `patch_trail_summary`           | When persisted in `memory_trajectory_patch_trails`                                                                                |
 | `projection_version`            | `trajectory-v1`, `trajectory-v2`, or active `trajectory-v3`; v2 adds Patch Trail digest and v3 adds quality score + agent subject |
 
 Rebuild supersedes older projection rows for the same workflow (one canonical
@@ -170,14 +170,14 @@ Scoped ranking adds a small boost when query scope paths intersect
 
 `query_engineering_memory` modes:
 
-| Mode                | Scope         | Notes                                                 |
-|---------------------|---------------|-------------------------------------------------------|
-| `trajectory_status` | project       | Projection run manifest                               |
-| `trajectory_search` | query text    | Requires `query`; excludes `run:*` routine by default |
-| `trajectory_get`    | trajectory id | `record_id` = trajectory id                           |
-| `trajectory_anomalies` | project    | Contract anomalies, optionally including routine runs |
-| `trajectory_agents` | project       | Outcome and quality aggregates by exact agent label   |
-| `trajectory_dashboard` | project    | Combined status, agent, and anomaly payload           |
+| Mode                   | Scope         | Notes                                                 |
+|------------------------|---------------|-------------------------------------------------------|
+| `trajectory_status`    | project       | Projection run manifest                               |
+| `trajectory_search`    | query text    | Requires `query`; excludes `run:*` routine by default |
+| `trajectory_get`       | trajectory id | `record_id` = trajectory id                           |
+| `trajectory_anomalies` | project       | Contract anomalies, optionally including routine runs |
+| `trajectory_agents`    | project       | Outcome and quality aggregates by exact agent label   |
+| `trajectory_dashboard` | project       | Combined status, agent, and anomaly payload           |
 
 Filter: `filters.include_routine=true` on `trajectory_search` includes single-event
 `run:*` analysis workflows.

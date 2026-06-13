@@ -3,6 +3,7 @@
      does-not-own: full book TOC (book/README.md), install instructions
        (getting-started.md), local preview commands (publishing.md).
      rule: keep under 90 lines. Add links, not content. -->
+
 # CodeClone Docs
 
 > Structural Change Controller for AI-assisted Python development —
@@ -30,11 +31,11 @@ patch against the declared boundary, and generates an auditable review receipt.
 
 ## Getting Started
 
-| Goal                  | Start here                                   |
-|-----------------------|----------------------------------------------|
-| First install and run | [Getting started](getting-started.md)        |
+| Goal                  | Start here                                        |
+|-----------------------|---------------------------------------------------|
+| First install and run | [Getting started](getting-started.md)             |
 | Understand the model  | [How it works](guide/explanation/how-it-works.md) |
-| Terminology lookup    | [Terminology](book/01-terminology.md)        |
+| Terminology lookup    | [Terminology](book/01-terminology.md)             |
 
 ## CI and Gating
 
@@ -47,25 +48,25 @@ patch against the declared boundary, and generates an auditable review receipt.
 
 ## AI Agent Governance
 
-| Goal                               | Start here                                                              |
-|------------------------------------|-------------------------------------------------------------------------|
-| MCP usage (workflows, setup)       | [MCP guide](guide/mcp/README.md)                                        |
-| Change controller workflow         | [Structural Change Controller](book/12-structural-change-controller/index.md) |
-| Engineering Memory (scope context) | [Engineering Memory](book/13-engineering-memory/index.md)                     |
-| Trajectories and recurring patterns | [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md)   |
-| MCP interface contract             | [MCP interface](book/25-mcp-interface/index.md)                               |
-| Diagnose CodeClone runtime         | [Platform Observability](guide/observability/diagnostics.md)                  |
+| Goal                                | Start here                                                                    |
+|-------------------------------------|-------------------------------------------------------------------------------|
+| MCP usage (workflows, setup)        | [MCP guide](guide/mcp/README.md)                                              |
+| Change controller workflow          | [Structural Change Controller](book/12-structural-change-controller/index.md) |
+| Engineering Memory (scope context)  | [Engineering Memory](book/13-engineering-memory/index.md)                     |
+| Trajectories and recurring patterns | [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md)  |
+| MCP interface contract              | [MCP interface](book/25-mcp-interface/index.md)                               |
+| Diagnose CodeClone runtime          | [Platform Observability](guide/observability/diagnostics.md)                  |
 
 ## IDE and Agent Clients
 
-| Surface               | Guide (how to) | Contract (guarantees) |
-|-----------------------|----------------|------------------------|
-| VS Code extension     | [Setup](guide/integrations/vscode/setup.md) | [VS Code contract](book/integrations/vs-code-extension.md) |
-| Cursor plugin         | [Install & skills](guide/integrations/cursor/install-and-skills.md) | [Cursor contract](book/integrations/cursor-plugin.md) |
-| Claude Code plugin    | [Install](guide/integrations/claude-code/setup.md) | [Claude Code contract](book/integrations/claude-code-plugin.md) |
-| Codex plugin          | [Install](guide/integrations/codex/setup.md) | [Codex contract](book/integrations/codex-plugin.md) |
-| Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md) | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
-| SARIF & code scanning | [Export](guide/integrations/sarif/export.md) | [SARIF contract](book/integrations/sarif.md) |
+| Surface               | Guide (how to)                                                      | Contract (guarantees)                                                 |
+|-----------------------|---------------------------------------------------------------------|-----------------------------------------------------------------------|
+| VS Code extension     | [Setup](guide/integrations/vscode/setup.md)                         | [VS Code contract](book/integrations/vs-code-extension.md)            |
+| Cursor plugin         | [Install & skills](guide/integrations/cursor/install-and-skills.md) | [Cursor contract](book/integrations/cursor-plugin.md)                 |
+| Claude Code plugin    | [Install](guide/integrations/claude-code/setup.md)                  | [Claude Code contract](book/integrations/claude-code-plugin.md)       |
+| Codex plugin          | [Install](guide/integrations/codex/setup.md)                        | [Codex contract](book/integrations/codex-plugin.md)                   |
+| Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md)                 | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
+| SARIF & code scanning | [Export](guide/integrations/sarif/export.md)                        | [SARIF contract](book/integrations/sarif.md)                          |
 
 ## Reports
 

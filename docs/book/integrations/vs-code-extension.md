@@ -1,4 +1,5 @@
 <!-- doc-scope: VS Code Extension contract. class: contract max-lines: 150 -->
+
 # VS Code Extension
 
 ## Trust model
@@ -25,7 +26,6 @@ the local MCP launcher.
     `codeclone.mcp.args`) are machine-scoped. Analysis-depth settings are
     resource-scoped so they can vary by workspace or folder.
 
-
 ## Settings
 
 Authoritative definitions: `extensions/vscode-codeclone/package.json` →
@@ -33,45 +33,45 @@ Authoritative definitions: `extensions/vscode-codeclone/package.json` →
 
 ### Launcher (machine-scoped)
 
-| Setting | Default | Notes |
-|---------|---------|-------|
-| `codeclone.mcp.command` | `auto` | Workspace venv, then `PATH`. User/remote settings. |
-| `codeclone.mcp.args` | `[]` | Extra launcher argv. The extension injects `--ide-governance-channel` for Memory governance and session/audit tools (do not duplicate in args). |
+| Setting                 | Default | Notes                                                                                                                                           |
+|-------------------------|---------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| `codeclone.mcp.command` | `auto`  | Workspace venv, then `PATH`. User/remote settings.                                                                                              |
+| `codeclone.mcp.args`    | `[]`    | Extra launcher argv. The extension injects `--ide-governance-channel` for Memory governance and session/audit tools (do not duplicate in args). |
 
 ### Analysis (resource-scoped)
 
-| Setting | Default | Notes |
-|---------|---------|-------|
-| `codeclone.analysis.profile` | `defaults` | `defaults`, `deeperReview`, or `custom`. |
-| `codeclone.analysis.cachePolicy` | `reuse` | `reuse` or `off`. |
-| `codeclone.analysis.changedDiffRef` | `HEAD` | Git ref for **Review Changes**. |
-| `codeclone.analysis.coverageXml` | `""` | Explicit Cobertura path for Coverage Join. |
-| `codeclone.analysis.autoDetectCoverageXml` | `true` | Use workspace-root `coverage.xml` when path empty. |
-| `codeclone.analysis.minLoc` | `10` | Custom thresholds — only when `profile=custom`. |
-| `codeclone.analysis.minStmt` | `6` | Same. |
-| `codeclone.analysis.blockMinLoc` | `20` | Same. |
-| `codeclone.analysis.blockMinStmt` | `8` | Same. |
-| `codeclone.analysis.segmentMinLoc` | `20` | Same. |
-| `codeclone.analysis.segmentMinStmt` | `10` | Same. |
+| Setting                                    | Default    | Notes                                              |
+|--------------------------------------------|------------|----------------------------------------------------|
+| `codeclone.analysis.profile`               | `defaults` | `defaults`, `deeperReview`, or `custom`.           |
+| `codeclone.analysis.cachePolicy`           | `reuse`    | `reuse` or `off`.                                  |
+| `codeclone.analysis.changedDiffRef`        | `HEAD`     | Git ref for **Review Changes**.                    |
+| `codeclone.analysis.coverageXml`           | `""`       | Explicit Cobertura path for Coverage Join.         |
+| `codeclone.analysis.autoDetectCoverageXml` | `true`     | Use workspace-root `coverage.xml` when path empty. |
+| `codeclone.analysis.minLoc`                | `10`       | Custom thresholds — only when `profile=custom`.    |
+| `codeclone.analysis.minStmt`               | `6`        | Same.                                              |
+| `codeclone.analysis.blockMinLoc`           | `20`       | Same.                                              |
+| `codeclone.analysis.blockMinStmt`          | `8`        | Same.                                              |
+| `codeclone.analysis.segmentMinLoc`         | `20`       | Same.                                              |
+| `codeclone.analysis.segmentMinStmt`        | `10`       | Same.                                              |
 
 ### UI (window-scoped)
 
-| Setting | Default | Notes |
-|---------|---------|-------|
-| `codeclone.ui.showStatusBar` | `true` | Workspace-level status bar item. |
+| Setting                      | Default | Notes                            |
+|------------------------------|---------|----------------------------------|
+| `codeclone.ui.showStatusBar` | `true`  | Workspace-level status bar item. |
 
 ### Engineering Memory search (resource-scoped)
 
 These map to MCP `query_engineering_memory` parameters from
 `extensions/vscode-codeclone/src/memorySearch.js` (`readMemorySearchSettings`).
 
-| Setting | Default | MCP mapping | Notes |
-|---------|---------|-------------|-------|
-| `codeclone.memory.searchSemantic` | `true` | `semantic` on `mode=search` only | Extension **asks** for semantic blend by default. Server still needs `[tool.codeclone.memory.semantic] enabled`, a built sidecar, and a provider. Use `codeclone[semantic-local]` + `embedding_provider="fastembed"` for semantic-quality recall; otherwise FTS-only or diagnostic/degraded results report `semantic.used: false` / provider details. |
-| `codeclone.memory.searchIncludeDrafts` | `false` | `include_drafts` (search) | Drafts are still included automatically on `for_path` per memory contract. |
-| `codeclone.memory.searchIncludeStale` | `false` | `include_stale` (search and `for_path`) | |
-| `codeclone.memory.searchMaxResults` | `20` | `max_results` (clamped 5–50) | |
-| `codeclone.memory.searchDetailLevel` | `compact` | `detail_level`: `compact` or `full` | `mode=get` always returns full records. Not exposed in **Configure Memory Search** (settings UI only). |
+| Setting                                | Default   | MCP mapping                             | Notes                                                                                                                                                                                                                                                                                                                                                 |
+|----------------------------------------|-----------|-----------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `codeclone.memory.searchSemantic`      | `true`    | `semantic` on `mode=search` only        | Extension **asks** for semantic blend by default. Server still needs `[tool.codeclone.memory.semantic] enabled`, a built sidecar, and a provider. Use `codeclone[semantic-local]` + `embedding_provider="fastembed"` for semantic-quality recall; otherwise FTS-only or diagnostic/degraded results report `semantic.used: false` / provider details. |
+| `codeclone.memory.searchIncludeDrafts` | `false`   | `include_drafts` (search)               | Drafts are still included automatically on `for_path` per memory contract.                                                                                                                                                                                                                                                                            |
+| `codeclone.memory.searchIncludeStale`  | `false`   | `include_stale` (search and `for_path`) |                                                                                                                                                                                                                                                                                                                                                       |
+| `codeclone.memory.searchMaxResults`    | `20`      | `max_results` (clamped 5–50)            |                                                                                                                                                                                                                                                                                                                                                       |
+| `codeclone.memory.searchDetailLevel`   | `compact` | `detail_level`: `compact` or `full`     | `mode=get` always returns full records. Not exposed in **Configure Memory Search** (settings UI only).                                                                                                                                                                                                                                                |
 
 !!! important "Extension default differs from server default"
     `searchSemantic` defaults to **`true` in VS Code** so the IDE requests semantic
@@ -84,7 +84,6 @@ These map to MCP `query_engineering_memory` parameters from
     `searchIncludeStale`, and `searchMaxResults` at `ConfigurationTarget.WorkspaceFolder`.
     `searchDetailLevel` is settings-editor only. Search queries must be 2–200 characters
     without control characters (`sanitizeSearchQuery`).
-
 
 ## State boundaries
 
@@ -99,7 +98,6 @@ used by the extension for a workspace.
 **Reviewed markers** — session-local workflow markers only. They are in-memory
 only, do not update baseline state, do not rewrite findings, and do not change
 canonical report truth.
-
 
 ## Design rules
 
@@ -125,7 +123,6 @@ canonical report truth.
 - **Restricted Mode honesty**: explain requirements without pretending
   analysis is available before trust is granted.
 
-
 ## Non-guarantees
 
 - Exact view grouping and copy may evolve between extension releases.
@@ -133,7 +130,6 @@ canonical report truth.
   extension remains faithful to MCP and canonical report semantics.
 - Explorer decoration styling, review-loop polish, and other non-contract UI
   details may evolve without changing the extension contract.
-
 
 ## Source of truth
 

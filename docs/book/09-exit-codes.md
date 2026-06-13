@@ -2,6 +2,7 @@
      owns: exit codes (0, 2, 3, 5), failure-mode classification.
      does-not-own: CLI flag details (→ 11), config keys (→ 10).
      rule: this is the CANONICAL exit-code table. CLI chapter references it. -->
+
 # 09. Contracts: Exit Codes
 
 ## Purpose

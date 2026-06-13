@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP change control workflow. class: guide max-lines: 120 -->
+
 # Change control workflow
 
 Primary MCP edit cycle (sole sequence diagram for change control in the guide):
@@ -24,14 +25,15 @@ sequenceDiagram
 
 ## Tool tiers
 
-| Tier | Tools | When |
-|------|-------|------|
-| Normal | `start_controlled_change`, `finish_controlled_change` | Every edit cycle |
-| Queue/recovery | `manage_change_intent` (promote, recover, …) | Multi-agent / crash |
-| Advanced | `get_blast_radius`, `check_patch_contract`, … | Debugging only |
+| Tier           | Tools                                                 | When                |
+|----------------|-------------------------------------------------------|---------------------|
+| Normal         | `start_controlled_change`, `finish_controlled_change` | Every edit cycle    |
+| Queue/recovery | `manage_change_intent` (promote, recover, …)          | Multi-agent / crash |
+| Advanced       | `get_blast_radius`, `check_patch_contract`, …         | Debugging only      |
 
 Normative tool params: [MCP workflow tools](../../../book/25-mcp-interface/tools/workflow.md).
-Finish pipeline and hygiene: [finish_controlled_change](../../../book/12-structural-change-controller/finish-controlled-change.md),
+Finish pipeline and
+hygiene: [finish_controlled_change](../../../book/12-structural-change-controller/finish-controlled-change.md),
 [Finish hygiene](../../../book/12-structural-change-controller/finish-hygiene.md).
 
 ## Related recipes

@@ -27,6 +27,7 @@ queries:
 | Verify ergonomics         | Live in `2.1.0a1` | MCP `check_patch_contract`                                                         |
 | MCP payload token budget  | Live in `2.1.0a1` | Audit trail, CLI `--audit`, `--session-stats`                                      |
 | Patch Trail               | Live in `2.1.0a1` | MCP `finish_controlled_change(patch_trail_detail=…)`; audit `patch_trail.computed` |
+
 ## Contract
 
 - The canonical report remains the source of truth.
@@ -41,21 +42,21 @@ queries:
 - Tools derive responses from existing run/report facts rather than LLM
   inference.
 - Report-only context is review context, not an edit prohibition.
-!!! note "Claim Guard"
-    Full pattern catalog: [Claim Guard](../14-claim-guard.md).
+  !!! note "Claim Guard"
+  Full pattern catalog: [Claim Guard](../14-claim-guard.md).
 
 ## Chapters
 
-| Topic | Contract |
-|-------|----------|
-| CLI `--blast-radius`, `--patch-verify` | [CLI controller queries](cli-controller-queries.md) |
-| Blast radius & review receipt | [Blast radius & receipt](blast-radius-and-receipt.md) |
-| Intent registry & queue | [Intent registry & queue](intent-registry-and-queue.md) |
-| Verification profiles | [Verification profiles](verification-profiles.md) |
-| Patch contract verify | [Patch contract verify](patch-contract-verify.md) |
-| Workflow tools | [Workflow tools](workflow-tools.md) |
-| `finish_controlled_change` | [finish_controlled_change](finish-controlled-change.md) |
-| Finish hygiene | [Finish hygiene](finish-hygiene.md) |
-| Patch Trail | [Patch Trail](patch-trail.md) |
-| Payload semantics | [Payload semantics](payload-semantics.md) |
-| Token budget | [Token budget](token-budget.md) |
+| Topic                                  | Contract                                                |
+|----------------------------------------|---------------------------------------------------------|
+| CLI `--blast-radius`, `--patch-verify` | [CLI controller queries](cli-controller-queries.md)     |
+| Blast radius & review receipt          | [Blast radius & receipt](blast-radius-and-receipt.md)   |
+| Intent registry & queue                | [Intent registry & queue](intent-registry-and-queue.md) |
+| Verification profiles                  | [Verification profiles](verification-profiles.md)       |
+| Patch contract verify                  | [Patch contract verify](patch-contract-verify.md)       |
+| Workflow tools                         | [Workflow tools](workflow-tools.md)                     |
+| `finish_controlled_change`             | [finish_controlled_change](finish-controlled-change.md) |
+| Finish hygiene                         | [Finish hygiene](finish-hygiene.md)                     |
+| Patch Trail                            | [Patch Trail](patch-trail.md)                           |
+| Payload semantics                      | [Payload semantics](payload-semantics.md)               |
+| Token budget                           | [Token budget](token-budget.md)                         |

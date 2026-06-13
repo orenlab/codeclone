@@ -11,15 +11,15 @@ privacy, configuration, and trust boundaries.
 
 ## Parameters
 
-| Parameter | Contract |
-|---|---|
-| `root` | Absolute repository root. |
-| `section` | One supported diagnostics section. |
+| Parameter      | Contract                                                                 |
+|----------------|--------------------------------------------------------------------------|
+| `root`         | Absolute repository root.                                                |
+| `section`      | One supported diagnostics section.                                       |
 | `detail_level` | `compact`, `normal`, or `full`; `full` currently downgrades to `normal`. |
-| `limit` | Row cap, clamped to `1..50`. |
-| `window` | `latest` or a correlation ID. |
-| `operation_id` | Reserved; reported in `ignored_parameters`. |
-| `span_id` | Reserved; reported in `ignored_parameters`. |
+| `limit`        | Row cap, clamped to `1..50`.                                             |
+| `window`       | `latest` or a correlation ID.                                            |
+| `operation_id` | Reserved; reported in `ignored_parameters`.                              |
+| `span_id`      | Reserved; reported in `ignored_parameters`.                              |
 
 Supported sections:
 

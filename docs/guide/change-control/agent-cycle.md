@@ -1,4 +1,5 @@
 <!-- doc-scope: Agent edit cycle recipe. class: guide max-lines: 120 -->
+
 # Agent edit cycle
 
 Same sequence as [MCP change control workflow](../mcp/workflows/change-control.md).

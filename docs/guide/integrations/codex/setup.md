@@ -1,4 +1,3 @@
-
 ## Install
 
 Install the plugin from the Codex marketplace:
@@ -44,7 +43,6 @@ Manual MCP registration without the plugin:
 ```bash
 codex mcp add codeclone -- codeclone-mcp --transport stdio
 ```
-
 
 ## Skills
 

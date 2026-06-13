@@ -1,6 +1,7 @@
 <!-- doc-scope: HEALTH SCORE MODEL and evolution policy.
      owns: score formula, grade thresholds, dimension weights, evolution rules.
      does-not-own: gate flags (→ 16), report schema (→ 05). -->
+
 # 15. Health Score
 
 ## Purpose

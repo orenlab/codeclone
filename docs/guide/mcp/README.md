@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP GUIDE HUB. class: guide max-lines: 90 -->
+
 # MCP for AI Agents
 
 Use CodeClone through `codeclone-mcp` — same pipeline and report as the CLI.
@@ -17,29 +18,29 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 
 ## Setup
 
-| Step | Page |
-|------|------|
-| Register a client | [Client setup](client-setup.md) |
+| Step                 | Page                                          |
+|----------------------|-----------------------------------------------|
+| Register a client    | [Client setup](client-setup.md)               |
 | Launcher & transport | [Server & transport](server-and-transport.md) |
-| Layer diagram | [Architecture](architecture.md) |
-| Common failures | [Troubleshooting](troubleshooting.md) |
+| Layer diagram        | [Architecture](architecture.md)               |
+| Common failures      | [Troubleshooting](troubleshooting.md)         |
 
 ## Workflows (recommended order)
 
-| Phase | Recipe |
-|-------|--------|
-| 1. Baseline-aware triage | [Analyze & triage](workflows/analyze-and-triage.md) |
-| 2. Focused inspection | [Drill down & checks](workflows/drill-down-and-checks.md) |
-| 3. Governed edits | [Change control](workflows/change-control.md) |
-| 4. Durable scope context | [Memory recipes](workflows/memory-recipes.md) |
-| 5. Coverage & session | [Session & coverage](workflows/session-and-coverage.md) |
+| Phase                    | Recipe                                                    |
+|--------------------------|-----------------------------------------------------------|
+| 1. Baseline-aware triage | [Analyze & triage](workflows/analyze-and-triage.md)       |
+| 2. Focused inspection    | [Drill down & checks](workflows/drill-down-and-checks.md) |
+| 3. Governed edits        | [Change control](workflows/change-control.md)             |
+| 4. Durable scope context | [Memory recipes](workflows/memory-recipes.md)             |
+| 5. Coverage & session    | [Session & coverage](workflows/session-and-coverage.md)   |
 
 ## Reference shortcuts
 
-| Need | Page |
-|------|------|
-| Prompt patterns | [Prompt patterns](prompts.md) |
-| Payload field cheat sheet | [Payload cheatsheet](payload-cheatsheet.md) |
-| Change control contract | [Structural Change Controller](../../book/12-structural-change-controller/index.md) |
-| Engineering Memory contract | [Engineering Memory](../../book/13-engineering-memory/index.md) |
-| Runtime diagnostics | [Platform Observability](../observability/diagnostics.md) |
+| Need                        | Page                                                                                |
+|-----------------------------|-------------------------------------------------------------------------------------|
+| Prompt patterns             | [Prompt patterns](prompts.md)                                                       |
+| Payload field cheat sheet   | [Payload cheatsheet](payload-cheatsheet.md)                                         |
+| Change control contract     | [Structural Change Controller](../../book/12-structural-change-controller/index.md) |
+| Engineering Memory contract | [Engineering Memory](../../book/13-engineering-memory/index.md)                     |
+| Runtime diagnostics         | [Platform Observability](../observability/diagnostics.md)                           |

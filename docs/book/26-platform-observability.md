@@ -40,14 +40,14 @@ The observer:
 Configuration is environment-only. There is no `[tool.codeclone]`
 observability table.
 
-| Variable | Meaning |
-|---|---|
-| `CODECLONE_OBSERVABILITY_ENABLED=1` | Enable instrumentation. |
-| `CODECLONE_OBSERVABILITY_FORCE=1` | Permit observation in CI; it does not enable instrumentation by itself. |
-| `CODECLONE_OBSERVABILITY_PROFILE=1` | Capture optional process metrics; requires `codeclone[perf]`. |
-| `CODECLONE_OBSERVABILITY_PERSIST=0` | Instrument without persisting completed operations. |
-| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES=0` | Disable request/response size and token estimates. |
-| `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT=1` | Reserved and rejected: raw payload snapshots are not supported. |
+| Variable                                          | Meaning                                                                 |
+|---------------------------------------------------|-------------------------------------------------------------------------|
+| `CODECLONE_OBSERVABILITY_ENABLED=1`               | Enable instrumentation.                                                 |
+| `CODECLONE_OBSERVABILITY_FORCE=1`                 | Permit observation in CI; it does not enable instrumentation by itself. |
+| `CODECLONE_OBSERVABILITY_PROFILE=1`               | Capture optional process metrics; requires `codeclone[perf]`.           |
+| `CODECLONE_OBSERVABILITY_PERSIST=0`               | Instrument without persisting completed operations.                     |
+| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES=0` | Disable request/response size and token estimates.                      |
+| `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT=1`      | Reserved and rejected: raw payload snapshots are not supported.         |
 
 An explicit `CODECLONE_OBSERVABILITY_ENABLED=1` is sufficient in CI.
 `CODECLONE_OBSERVABILITY_FORCE` never enables observation by itself and is

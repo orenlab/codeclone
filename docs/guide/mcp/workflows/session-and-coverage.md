@@ -1,4 +1,5 @@
 <!-- doc-scope: MCP session tools. class: guide max-lines: 120 -->
+
 # Session & coverage
 
 ## Coverage review

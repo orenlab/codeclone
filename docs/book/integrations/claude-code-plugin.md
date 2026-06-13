@@ -1,4 +1,5 @@
 <!-- doc-scope: Claude Code Plugin contract. class: contract max-lines: 160 -->
+
 # Claude Code Plugin
 
 ## Distribution contract
@@ -9,13 +10,13 @@ dedicated `orenlab/codeclone-claude-code` storefront.
 
 The distribution repository contains:
 
-| Path | Role |
-|---|---|
-| `.claude-plugin/marketplace.json` | Marketplace catalog named `orenlab-codeclone` |
-| `plugins/codeclone/.claude-plugin/plugin.json` | Plugin identity and metadata |
-| `plugins/codeclone/.mcp.json` | Local stdio MCP definition |
-| `plugins/codeclone/skills/` | Review, hotspots, change control, and memory |
-| `plugins/codeclone/scripts/launch_mcp.py` | Standalone workspace-first launcher |
+| Path                                           | Role                                          |
+|------------------------------------------------|-----------------------------------------------|
+| `.claude-plugin/marketplace.json`              | Marketplace catalog named `orenlab-codeclone` |
+| `plugins/codeclone/.claude-plugin/plugin.json` | Plugin identity and metadata                  |
+| `plugins/codeclone/.mcp.json`                  | Local stdio MCP definition                    |
+| `plugins/codeclone/skills/`                    | Review, hotspots, change control, and memory  |
+| `plugins/codeclone/scripts/launch_mcp.py`      | Standalone workspace-first launcher           |
 
 ## Installation contract
 

@@ -38,7 +38,7 @@ controlled edits.
 | 26    | Patch Trail persistence + scoped retrieval                    | `memory_trajectory_patch_trails`; `patch_trail_summary` on scoped retrieval              |
 | 28    | Incremental projection jobs                                   | Watermarked trajectory rebuild, semantic hash-skip, coalesced worker                     |
 | Live  | Trajectory quality and passport analytics                     | Quality/complexity contract, anomalies, agents, dashboard                                |
-| Live  | Experience Layer                                               | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
+| Live  | Experience Layer                                              | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.6`**).

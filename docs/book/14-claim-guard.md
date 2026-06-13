@@ -3,6 +3,7 @@
        patch_health_delta handling.
      does-not-own: change controller (→ 12), engineering memory (→ 13),
        MCP tool schemas (→ 25). -->
+
 # 14. Claim Guard
 
 ## Purpose

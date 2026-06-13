@@ -1,4 +1,5 @@
 <!-- doc-scope: Codex Plugin contract. class: contract max-lines: 150 -->
+
 # Codex Plugin
 
 ## What ships in the plugin
@@ -13,7 +14,6 @@
 | `skills/codeclone-change-control/`     | Intent-first change workflow skill      |
 | `skills/codeclone-engineering-memory/` | Engineering memory read/write skill     |
 | `assets/`                              | Plugin branding                         |
-
 
 ## Runtime model
 
@@ -37,14 +37,12 @@ codex plugin marketplace add orenlab/codeclone-codex
 codex plugin add codeclone@orenlab-codeclone
 ```
 
-
 ## Read-only contract
 
 Repository truth stays read-only: MCP must not mutate source files, baselines,
 analysis cache, or canonical report artifacts. Change-control and session tools
 may write ephemeral coordination state through the configured workspace intent
 registry (file or SQLite backend) and optional audit records when enabled.
-
 
 ## Design rules
 
@@ -63,7 +61,6 @@ registry (file or SQLite backend) and optional audit records when enabled.
 - **Shell-free launch**: the bundled launcher must stay argv-based and
   local-stdio-only.
 
-
 ## Non-guarantees
 
 - Codex plugin UI presentation may evolve independently of the plugin manifest
@@ -71,14 +68,12 @@ registry (file or SQLite backend) and optional audit records when enabled.
 - Users who already configured `codeclone-mcp` manually may still prefer the
   direct MCP path over the bundled plugin MCP definition.
 
-
 ## Current limits
 
 - If you already registered `codeclone-mcp` manually, keep only one setup path
   to avoid duplicate MCP surfaces.
 - The bundled `.mcp.json` prefers `.venv`, then a Poetry env, then `PATH`.
 - The bundled launcher stays shell-free and local-stdio-only.
-
 
 ## Further reading
 

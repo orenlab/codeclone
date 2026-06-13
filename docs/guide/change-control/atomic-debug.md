@@ -1,4 +1,5 @@
 <!-- doc-scope: Atomic change control debug path. class: guide max-lines: 120 -->
+
 # Atomic debug path
 
 For legacy MCP servers or step-by-step debugging:
