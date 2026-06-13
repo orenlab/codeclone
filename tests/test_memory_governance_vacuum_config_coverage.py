@@ -12,7 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from codeclone.config.memory import MemoryConfig, _memory_choice, _memory_int
+from codeclone.config.memory import (
+    MemoryConfig,
+    _memory_choice,
+    _memory_int,
+    resolve_memory_config,
+)
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.governance import (
     _contains_unnegated_phrase,
@@ -55,6 +60,8 @@ def _memory_config() -> MemoryConfig:
         projection_rebuild_policy="off",
         projection_rebuild_running_timeout_seconds=1800,
         projection_rebuild_spawn_worker=True,
+        projection_rebuild_coalesce_window_seconds=60,
+        projection_rebuild_coalesce_min_delta=25,
         trajectories_enabled=True,
         trajectory_retention_days=365,
         trajectory_export_enabled=False,
@@ -62,6 +69,24 @@ def _memory_config() -> MemoryConfig:
         trajectory_export_max_record_bytes=65536,
         trajectory_export_max_file_bytes=10485760,
     )
+
+
+def test_resolve_memory_config_coalesce_defaults(tmp_path: Path) -> None:
+    config = resolve_memory_config(tmp_path)
+    assert config.projection_rebuild_coalesce_window_seconds == 60
+    assert config.projection_rebuild_coalesce_min_delta == 25
+
+
+def test_resolve_memory_config_coalesce_overrides(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone.memory]\n"
+        "projection_rebuild_coalesce_window_seconds = 120\n"
+        "projection_rebuild_coalesce_min_delta = 5\n",
+        encoding="utf-8",
+    )
+    config = resolve_memory_config(tmp_path)
+    assert config.projection_rebuild_coalesce_window_seconds == 120
+    assert config.projection_rebuild_coalesce_min_delta == 5
 
 
 def test_governance_phrase_and_pattern_negation_helpers() -> None:

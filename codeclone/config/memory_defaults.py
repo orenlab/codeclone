@@ -42,6 +42,15 @@ DEFAULT_MEMORY_TRAJECTORY_EXPORT_MAX_FILE_BYTES: Final = 10_485_760
 DEFAULT_MEMORY_PROJECTION_REBUILD_POLICY: Final[MemoryProjectionRebuildPolicy] = "off"
 DEFAULT_MEMORY_PROJECTION_REBUILD_RUNNING_TIMEOUT_SECONDS: Final = 1800
 DEFAULT_MEMORY_PROJECTION_REBUILD_SPAWN_WORKER: Final = True
+# Coalesce sub-threshold projection rebuilds: defer the worker spawn until the
+# window elapses since the last reindex, batching bursts into one model load.
+# 0 disables coalescing (spawn immediately, legacy behavior). Only consulted
+# under projection_rebuild_policy="enqueue_when_stale".
+DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_WINDOW_SECONDS: Final = 60
+# A reindex bypasses the coalesce window when the active-record delta since the
+# last applied stimulus reaches this magnitude (a large content change is worth
+# an immediate model load). Counts memory records only, not audit events.
+DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_MIN_DELTA: Final = 25
 
 DEFAULT_INGEST_CONTRACT_CONSTANTS_PATHS: Final[tuple[str, ...]] = ()
 DEFAULT_INGEST_DOCUMENT_LINK_PATHS: Final[tuple[str, ...]] = ()
@@ -96,6 +105,8 @@ __all__ = [
     "DEFAULT_MEMORY_MAX_RECORDS",
     "DEFAULT_MEMORY_MAX_STATEMENT_CHARS",
     "DEFAULT_MEMORY_MCP_SYNC_POLICY",
+    "DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_MIN_DELTA",
+    "DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_WINDOW_SECONDS",
     "DEFAULT_MEMORY_PROJECTION_REBUILD_POLICY",
     "DEFAULT_MEMORY_PROJECTION_REBUILD_RUNNING_TIMEOUT_SECONDS",
     "DEFAULT_MEMORY_PROJECTION_REBUILD_SPAWN_WORKER",

@@ -805,7 +805,7 @@ DESIGN FINDINGS
 INTEGRITY
 ```
 
-## Engineering Memory schema (`1.6`)
+## Engineering Memory schema (`1.7`)
 
 SQLite database at `.codeclone/memory/engineering_memory.sqlite3` (default).
 Schema version stored in `memory_meta.schema_version`.
@@ -820,7 +820,7 @@ Core tables:
 | `memory_fts`             | FTS5 search index (schema 1.1+)                             |
 | `memory_revisions`       | Governance audit trail                                      |
 | `memory_ingestion_runs`  | Init/refresh run metadata                                   |
-| `memory_projection_jobs` | Coalesced trajectory/semantic/Experience jobs (schema 1.3+) |
+| `memory_projection_jobs` | Coalesced trajectory/semantic/Experience jobs (schema 1.3+); `flush_claimed_by` flush-scheduling slot (schema 1.7+) |
 
 Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection
 **`trajectory-v3`**):

@@ -33,7 +33,7 @@ Current contract versions:
 - `CACHE_VERSION = "2.8"`
 - `REPORT_SCHEMA_VERSION = "2.11"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
-- `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.6"`
+- `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.7"`
 - `PATCH_TRAIL_SCHEMA_VERSION = "1"` (finish-time Patch Trail JSON; audit + SQLite sidecar)
 - `TRAJECTORY_EXPORT_SCHEMA_VERSION = "2"` (JSONL export rows; `codeclone/memory/trajectory/profiles.py`)
 - `TRAJECTORY_PROJECTION_VERSION = "trajectory-v3"` (derived trajectory rows)
@@ -61,7 +61,8 @@ Version bump rules:
 - bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
 - bump **engineering memory schema** for SQLite DDL / governed record-shape changes
   (`codeclone/memory/schema_migrate.py`) — **`1.4`** added Patch Trail
-  persistence, **`1.5`** quality scoring, and **`1.6`** Experience tables
+  persistence, **`1.5`** quality scoring, **`1.6`** Experience tables, and
+  **`1.7`** the projection-job flush-scheduling column (`flush_claimed_by`)
 - bump **patch trail schema** (`PATCH_TRAIL_SCHEMA_VERSION`) when finish-time Patch
   Trail JSON shape changes incompatibly
 - bump **trajectory export schema** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`) when JSONL

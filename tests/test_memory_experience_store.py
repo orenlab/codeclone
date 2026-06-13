@@ -87,7 +87,7 @@ def _experience(
 
 def test_fresh_db_is_at_current_schema_version(conn: sqlite3.Connection) -> None:
     assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
-    assert ENGINEERING_MEMORY_SCHEMA_VERSION == "1.6"
+    assert ENGINEERING_MEMORY_SCHEMA_VERSION == "1.7"
 
 
 def test_replace_and_list_round_trip(conn: sqlite3.Connection) -> None:

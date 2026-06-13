@@ -21,6 +21,12 @@ def _table_exists(conn: sqlite3.Connection, name: str) -> bool:
     return row is not None
 
 
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {
+        str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+    }
+
+
 def test_fresh_memory_schema_contains_projection_jobs_table(tmp_path: Path) -> None:
     db_path = tmp_path / "memory.sqlite3"
     conn = sqlite3.connect(db_path)
@@ -47,6 +53,42 @@ def test_memory_schema_migrates_1_2_to_1_3_projection_jobs(tmp_path: Path) -> No
         assert _table_exists(conn, "memory_projection_jobs")
         migration = conn.execute(
             "SELECT version FROM memory_schema_migrations WHERE version='1.3'"
+        ).fetchone()
+        assert migration is not None
+    finally:
+        conn.close()
+
+
+def test_fresh_projection_jobs_table_has_flush_claimed_by(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        assert "flush_claimed_by" in _columns(conn, "memory_projection_jobs")
+    finally:
+        conn.close()
+
+
+def test_memory_schema_migrates_1_6_to_1_7_adds_flush_claimed_by(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        create_schema_v1(conn)
+        # Simulate a pre-1.7 database whose projection-jobs table predates the
+        # flush_claimed_by column.
+        conn.execute("ALTER TABLE memory_projection_jobs DROP COLUMN flush_claimed_by")
+        set_meta(conn, "schema_version", "1.6")
+        conn.commit()
+        assert "flush_claimed_by" not in _columns(conn, "memory_projection_jobs")
+
+        ensure_schema(conn)
+
+        assert get_meta(conn, "schema_version") == ENGINEERING_MEMORY_SCHEMA_VERSION
+        assert "flush_claimed_by" in _columns(conn, "memory_projection_jobs")
+        migration = conn.execute(
+            "SELECT version FROM memory_schema_migrations WHERE version='1.7'"
         ).fetchone()
         assert migration is not None
     finally:

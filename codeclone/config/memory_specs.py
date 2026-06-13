@@ -22,6 +22,8 @@ from .memory_defaults import (
     DEFAULT_MEMORY_MAX_RECORDS,
     DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
     DEFAULT_MEMORY_MCP_SYNC_POLICY,
+    DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_MIN_DELTA,
+    DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_WINDOW_SECONDS,
     DEFAULT_MEMORY_PROJECTION_REBUILD_POLICY,
     DEFAULT_MEMORY_PROJECTION_REBUILD_RUNNING_TIMEOUT_SECONDS,
     DEFAULT_MEMORY_PROJECTION_REBUILD_SPAWN_WORKER,
@@ -57,6 +59,8 @@ MEMORY_CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = {
     "projection_rebuild_policy": ConfigKeySpec(expected_type=str),
     "projection_rebuild_running_timeout_seconds": ConfigKeySpec(expected_type=int),
     "projection_rebuild_spawn_worker": ConfigKeySpec(expected_type=bool),
+    "projection_rebuild_coalesce_window_seconds": ConfigKeySpec(expected_type=int),
+    "projection_rebuild_coalesce_min_delta": ConfigKeySpec(expected_type=int),
     "trajectories_enabled": ConfigKeySpec(expected_type=bool),
     "trajectory_retention_days": ConfigKeySpec(expected_type=int),
     "trajectory_export_enabled": ConfigKeySpec(expected_type=bool),
@@ -89,6 +93,12 @@ MEMORY_CONFIG_DEFAULTS: Final[dict[str, object]] = {
         DEFAULT_MEMORY_PROJECTION_REBUILD_RUNNING_TIMEOUT_SECONDS
     ),
     "projection_rebuild_spawn_worker": DEFAULT_MEMORY_PROJECTION_REBUILD_SPAWN_WORKER,
+    "projection_rebuild_coalesce_window_seconds": (
+        DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_WINDOW_SECONDS
+    ),
+    "projection_rebuild_coalesce_min_delta": (
+        DEFAULT_MEMORY_PROJECTION_REBUILD_COALESCE_MIN_DELTA
+    ),
     "trajectories_enabled": DEFAULT_MEMORY_TRAJECTORIES_ENABLED,
     "trajectory_retention_days": DEFAULT_MEMORY_TRAJECTORY_RETENTION_DAYS,
     "trajectory_export_enabled": DEFAULT_MEMORY_TRAJECTORY_EXPORT_ENABLED,

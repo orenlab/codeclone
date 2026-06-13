@@ -172,6 +172,8 @@ class MemoryConfig:
     projection_rebuild_policy: MemoryProjectionRebuildPolicy
     projection_rebuild_running_timeout_seconds: int
     projection_rebuild_spawn_worker: bool
+    projection_rebuild_coalesce_window_seconds: int
+    projection_rebuild_coalesce_min_delta: int
     trajectories_enabled: bool
     trajectory_retention_days: int
     trajectory_export_enabled: bool
@@ -380,6 +382,14 @@ def resolve_memory_config(
         projection_rebuild_spawn_worker=_memory_bool(
             merged["projection_rebuild_spawn_worker"],
             key="projection_rebuild_spawn_worker",
+        ),
+        projection_rebuild_coalesce_window_seconds=_memory_int(
+            merged["projection_rebuild_coalesce_window_seconds"],
+            key="projection_rebuild_coalesce_window_seconds",
+        ),
+        projection_rebuild_coalesce_min_delta=_memory_int(
+            merged["projection_rebuild_coalesce_min_delta"],
+            key="projection_rebuild_coalesce_min_delta",
         ),
         trajectories_enabled=_memory_bool(
             merged["trajectories_enabled"], key="trajectories_enabled"
