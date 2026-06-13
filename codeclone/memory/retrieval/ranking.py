@@ -39,6 +39,11 @@ _CHANGE_HOTSPOT_PENALTY = 0.35
 # Finish-hook module-role drafts are workflow reminders, not durable module
 # descriptions. Keep them visible while placing substantive memory first.
 _WORKFLOW_CONTEXT_PENALTY = 0.65
+# Reciprocal Rank Fusion damping constant. 60 is the widely used default; a
+# larger K flattens the gap between adjacent ranks. Used by hybrid search to
+# fuse the lexical (BM25) and vector rankings without letting metadata boosts
+# override a strong retrieval-engine match.
+_RRF_K = 60
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,4 +149,28 @@ def relevance_score(
     return round(score, 4)
 
 
-__all__ = ["RankingContext", "relevance_score", "retrieval_lane"]
+def reciprocal_rank_fusion(
+    *, lexical_rank: int | None = None, vector_rank: int | None = None
+) -> float:
+    """Fuse a record's lexical (BM25) and vector ranks into one score.
+
+    Each present rank contributes ``1 / (_RRF_K + rank)`` (0-based); a record
+    missing from a list simply omits that term. Higher is better. This keeps the
+    retrieval engines' own rank order as the lead signal — the caller adds
+    curation metadata only as a tie-break — so a strong lexical or vector match
+    is never buried by metadata boosts.
+    """
+    score = 0.0
+    if lexical_rank is not None:
+        score += 1.0 / (_RRF_K + lexical_rank)
+    if vector_rank is not None:
+        score += 1.0 / (_RRF_K + vector_rank)
+    return score
+
+
+__all__ = [
+    "RankingContext",
+    "reciprocal_rank_fusion",
+    "relevance_score",
+    "retrieval_lane",
+]

@@ -44,7 +44,12 @@ from ..trajectory.retrieval import (
     trajectory_subject_keys,
 )
 from .context_coverage import build_context_coverage
-from .ranking import RankingContext, relevance_score, retrieval_lane
+from .ranking import (
+    RankingContext,
+    reciprocal_rank_fusion,
+    relevance_score,
+    retrieval_lane,
+)
 from .semantic import audit_event_row
 
 if TYPE_CHECKING:
@@ -537,9 +542,17 @@ def _rank_records(
     context: RankingContext,
     max_records: int,
     detail_level: MemoryDetailLevel,
-    proximity: Mapping[str, float] | None = None,
+    lexical_ranks: Mapping[str, int] | None = None,
+    vector_ranks: Mapping[str, int] | None = None,
 ) -> tuple[list[dict[str, object]], bool]:
-    proximity_map = proximity or {}
+    # Fusion mode (hybrid search) supplies the lexical (BM25) and/or vector
+    # rankings. There the metadata relevance_score is only a deterministic
+    # tie-break, so the vector signal must NOT also be folded into it via
+    # semantic_proximity (avoid double-counting). Scoped retrieval supplies
+    # neither map and keeps relevance_score as the sole ordering signal.
+    fusion_enabled = lexical_ranks is not None or vector_ranks is not None
+    lexical_map = lexical_ranks or {}
+    vector_map = vector_ranks or {}
     candidate_ids = tuple(record.id for record in candidates)
     subjects_by_id = store.list_subjects_for_memories(candidate_ids)
     evidence_counts = store.count_evidence_for_memories(candidate_ids)
@@ -552,7 +565,6 @@ def _rank_records(
             subjects=subjects,
             context=context,
             evidence_count=evidence_count,
-            semantic_proximity=proximity_map.get(record.id, 0.0),
         )
         if score <= 0.0 and (context.scope_paths or context.symbols):
             continue
@@ -560,10 +572,17 @@ def _rank_records(
     relations = _record_relations(
         store, project_id=project_id, record_ids=[item[1].id for item in base]
     )
-    scored: list[tuple[float, str, dict[str, object]]] = []
+    scored: list[tuple[float, float, str, dict[str, object]]] = []
     for score, record, subjects, evidence_count in base:
         record_relations = relations.get(record.id)
         adjusted = _apply_conflict_penalty(score, record_relations)
+        if fusion_enabled:
+            primary = reciprocal_rank_fusion(
+                lexical_rank=lexical_map.get(record.id),
+                vector_rank=vector_map.get(record.id),
+            )
+        else:
+            primary = adjusted
         summary = _serialize_record_summary(
             record=record,
             subjects=subjects,
@@ -574,10 +593,10 @@ def _rank_records(
         )
         if record_relations is not None:
             summary["relations"] = record_relations
-        scored.append((adjusted, record.id, summary))
-    scored.sort(key=lambda item: (-item[0], item[1]))
+        scored.append((primary, adjusted, record.id, summary))
+    scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
     truncated = len(scored) > max_records
-    return [item[2] for item in scored[:max_records]], truncated
+    return [item[3] for item in scored[:max_records]], truncated
 
 
 def _coverage_summary(
@@ -1481,6 +1500,18 @@ def _handle_semantic_search_mode(
         )
     ]
     context = RankingContext.from_scope(scope_paths=(), symbols=(), blast_dependents=())
+    # Reciprocal-rank-fusion inputs: the FTS list is already BM25-ordered, and
+    # the vector hits are ranked by descending proximity (id breaks ties for
+    # determinism). _rank_records fuses these and uses metadata only to break
+    # ties, so a strong lexical/vector match is no longer re-sorted away by
+    # metadata boosts.
+    lexical_ranks = {record.id: rank for rank, record in enumerate(fts_records)}
+    vector_ranks = {
+        record_id: rank
+        for rank, record_id in enumerate(
+            sorted(proximity, key=lambda rid: (-proximity[rid], rid))
+        )
+    }
     payload_records, truncated = _rank_records(
         store,
         project_id=project_id,
@@ -1488,7 +1519,8 @@ def _handle_semantic_search_mode(
         context=context,
         max_records=max_results,
         detail_level=detail_level,
-        proximity=proximity,
+        lexical_ranks=lexical_ranks,
+        vector_ranks=vector_ranks,
     )
     return {
         "mode": "search",

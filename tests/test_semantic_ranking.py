@@ -6,7 +6,11 @@
 from __future__ import annotations
 
 from codeclone.memory.models import MemorySubject
-from codeclone.memory.retrieval.ranking import RankingContext, relevance_score
+from codeclone.memory.retrieval.ranking import (
+    RankingContext,
+    reciprocal_rank_fusion,
+    relevance_score,
+)
 from tests.memory_fixtures import make_module_record
 
 
@@ -45,6 +49,24 @@ def test_default_proximity_matches_explicit_zero() -> None:
         semantic_proximity=0.0,
     )
     assert implicit == explicit
+
+
+def test_rrf_rewards_membership_in_both_lists() -> None:
+    # A record matched by both engines outranks one matched by a single engine,
+    # even when the single-engine match sits at the very top (rank 0).
+    both = reciprocal_rank_fusion(lexical_rank=2, vector_rank=2)
+    assert both > reciprocal_rank_fusion(lexical_rank=0)
+    assert both > reciprocal_rank_fusion(vector_rank=0)
+
+
+def test_rrf_rewards_a_better_rank() -> None:
+    assert reciprocal_rank_fusion(lexical_rank=0) > reciprocal_rank_fusion(
+        lexical_rank=5
+    )
+
+
+def test_rrf_absent_from_both_lists_is_zero() -> None:
+    assert reciprocal_rank_fusion() == 0.0
 
 
 def test_scoped_shortcircuit_beats_semantic() -> None:

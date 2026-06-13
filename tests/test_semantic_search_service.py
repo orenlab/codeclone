@@ -195,6 +195,46 @@ def test_semantic_hits_searches_each_source_with_its_own_budget() -> None:
     assert trajectory_hits == []
 
 
+def test_rank_records_lets_rrf_lead_over_metadata(tmp_path: Path) -> None:
+    from codeclone.memory.retrieval import service as retrieval_service
+    from codeclone.memory.retrieval.ranking import RankingContext
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        # module_role carries a smaller type boost than document_link, so under
+        # the old metadata-led ordering doc_link would sort first.
+        lexical_top = seed_module_role(
+            store,
+            project_id=project.id,
+            file_path="codeclone/a.py",
+            statement="alpha",
+        )
+        meta_rich = seed_document_link(
+            store,
+            project_id=project.id,
+            doc_file="codeclone/b.py",
+            ref_path="codeclone/b.py",
+            statement="beta",
+        )
+        context = RankingContext.from_scope(
+            scope_paths=(), symbols=(), blast_dependents=()
+        )
+        payload, _truncated = retrieval_service._rank_records(
+            store,
+            project_id=project.id,
+            candidates=[lexical_top, meta_rich],
+            context=context,
+            max_records=10,
+            detail_level="compact",
+            lexical_ranks={lexical_top.id: 0, meta_rich.id: 1},
+            vector_ranks={},
+        )
+
+    ids = [item["id"] for item in payload]
+    # RRF leads: the BM25 rank-0 match wins even though document_link has the
+    # higher metadata boost. Metadata only breaks ties.
+    assert ids == [lexical_top.id, meta_rich.id]
+
+
 def test_unavailable_index_falls_back_to_fts(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (root, project, store, db_path):
         fts = seed_module_role(
