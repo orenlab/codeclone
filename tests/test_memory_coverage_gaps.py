@@ -477,6 +477,15 @@ def test_memory_index_source_without_path_subject() -> None:
         type="contract_note",
         statement="recover semantic index without path subject",
     )
+    subjects = [
+        MemorySubject(
+            id="s-test",
+            memory_id=record.id,
+            subject_kind="test",
+            subject_key="tests/test_mod.py",
+            relation="about",
+        )
+    ]
     store = type(
         "_Store",
         (),
@@ -484,15 +493,9 @@ def test_memory_index_source_without_path_subject() -> None:
             "query_records": lambda self, query: [record][
                 query.offset : query.offset + 250
             ],
-            "list_subjects_for_memory": lambda self, _mid: [
-                MemorySubject(
-                    id="s-test",
-                    memory_id=record.id,
-                    subject_kind="test",
-                    subject_key="tests/test_mod.py",
-                    relation="about",
-                )
-            ],
+            "list_subjects_for_memories": lambda self, memory_ids: dict.fromkeys(
+                memory_ids, subjects
+            ),
         },
     )()
     source = MemoryIndexSource(cast(Any, store), project_id=project_id)
