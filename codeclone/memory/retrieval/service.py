@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Literal, cast
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
+from ...observability import is_observability_enabled, record_counter, span
 from ..embedding import embed_query
 from ..enums import LinkRelation, MemoryConfidence, MemoryRecordType, MemoryStatus
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
@@ -1303,13 +1304,38 @@ def _semantic_hits(
     # Search each lane with its own top-k budget so a dense source (e.g. audit)
     # cannot crowd memory hits out of one shared top-k (#3). The index applies
     # the source filter, so results arrive already lane-scoped.
-    vector = embed_query(provider, query)
+    # The embed is the expensive step (lazy model load); give it its own span so
+    # embedding load time is observable separately from the vector search.
+    with span(name="retrieval.embed_query"):
+        vector = embed_query(provider, query)
     proximity: dict[str, float] = {}
     for hit in index.search(vector, k=k, source="memory"):
         proximity.setdefault(hit.source_id, hit.score)
     audit_hits = list(index.search(vector, k=k, source="audit"))
     trajectory_hits = list(index.search(vector, k=k, source="trajectory"))
     return proximity, audit_hits, trajectory_hits
+
+
+def _record_search_telemetry(
+    *,
+    fts_records: Sequence[MemoryRecord],
+    proximity: Mapping[str, float],
+    audit_hits: Sequence[SemanticHit],
+    trajectory_hits: Sequence[SemanticHit],
+    candidates: Sequence[MemoryRecord],
+) -> None:
+    # Lane-hit telemetry for the hybrid search, attributed to the active span.
+    # No-op outside an observability span; the caller guards the call so the
+    # set-math below is skipped entirely when observability is disabled.
+    candidate_ids = {record.id for record in candidates}
+    overlap = sum(1 for record in fts_records if record.id in proximity)
+    filtered = sum(1 for record_id in proximity if record_id not in candidate_ids)
+    record_counter("retrieval.fts_hits", len(fts_records))
+    record_counter("retrieval.vector_memory_hits", len(proximity))
+    record_counter("retrieval.vector_audit_hits", len(audit_hits))
+    record_counter("retrieval.vector_trajectory_hits", len(trajectory_hits))
+    record_counter("retrieval.fts_vector_overlap", overlap)
+    record_counter("retrieval.semantic_filtered", filtered)
 
 
 def _hydrate_audit_events(
@@ -1500,6 +1526,14 @@ def _handle_semantic_search_mode(
             )
             if status is not None
             else _semantic_disabled_block()
+        )
+    if is_observability_enabled():
+        _record_search_telemetry(
+            fts_records=fts_records,
+            proximity=proximity,
+            audit_hits=audit_hits,
+            trajectory_hits=trajectory_hits,
+            candidates=candidates,
         )
     effective_stale = include_stale or "stale" in statuses
     visible = [

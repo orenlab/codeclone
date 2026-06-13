@@ -480,6 +480,18 @@ def record_db_query(sql: str) -> None:
         span_handle.add_db_fingerprint(fingerprint)
 
 
+def record_counter(key: str, value: int = 1) -> None:
+    """Add ``value`` to the named counter on the active span. No-op outside a
+    span (or when disabled). Companion to ``record_db_query`` for non-SQL
+    counters — e.g. retrieval lane hits emitted by the memory query path.
+    Performance telemetry only — never audit or contract truth.
+    """
+    span_handle = _CURRENT_SPAN.get()
+    if span_handle is None:
+        return
+    span_handle.add_counter(key, value)
+
+
 def instrument_db_connection(conn: sqlite3.Connection) -> None:
     """Attach the per-span DB-query counter to ``conn``. No-op (and no per-query
     trace overhead) when observability is disabled for this process.
@@ -498,6 +510,7 @@ __all__ = [
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",
+    "record_counter",
     "record_db_query",
     "record_elapsed_span",
     "shutdown",

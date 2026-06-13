@@ -5,8 +5,11 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+
+import pytest
 
 from codeclone.memory.embedding import EmbeddingProvider
 from codeclone.memory.exceptions import MemorySemanticUnavailableError
@@ -15,6 +18,7 @@ from codeclone.memory.semantic.models import SemanticHit, SemanticIndexStatus
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from tests.memory_fixtures import (
     insert_audit_event,
+    make_module_record,
     memory_store,
     seed_document_link,
     seed_module_role,
@@ -271,6 +275,36 @@ def test_semantic_search_degrades_to_fts_when_model_unavailable(tmp_path: Path) 
     assert block["used"] is False
     assert "model unavailable" in str(block["reason"])
     assert fts.id in _record_ids(result)
+
+
+def test_record_search_telemetry_emits_lane_counters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.retrieval import service as service_module
+
+    captured: dict[str, int] = {}
+    monkeypatch.setattr(
+        service_module,
+        "record_counter",
+        lambda key, value=1: captured.__setitem__(key, value),
+    )
+    record_a = dataclasses.replace(make_module_record("proj", "codeclone/a.py"), id="a")
+    record_b = dataclasses.replace(make_module_record("proj", "codeclone/b.py"), id="b")
+    service_module._record_search_telemetry(
+        fts_records=[record_a, record_b],
+        proximity={"b": 0.9, "c": 0.8},  # b overlaps FTS; c is vector-only
+        audit_hits=[SemanticHit(source_id="e1", source="audit", score=0.5)],
+        trajectory_hits=[],
+        candidates=[record_a, record_b],  # c was dropped by the filter
+    )
+    assert captured == {
+        "retrieval.fts_hits": 2,
+        "retrieval.vector_memory_hits": 2,
+        "retrieval.vector_audit_hits": 1,
+        "retrieval.vector_trajectory_hits": 0,
+        "retrieval.fts_vector_overlap": 1,
+        "retrieval.semantic_filtered": 1,
+    }
 
 
 def test_unavailable_index_falls_back_to_fts(tmp_path: Path) -> None:

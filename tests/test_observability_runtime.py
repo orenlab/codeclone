@@ -10,6 +10,7 @@ import sys
 from collections.abc import Iterator
 from pathlib import Path
 
+import orjson
 import pytest
 
 from codeclone.config.observability import ObservabilityConfig
@@ -17,6 +18,7 @@ from codeclone.observability import (
     bootstrap,
     is_observability_enabled,
     operation,
+    record_counter,
     shutdown,
     span,
 )
@@ -79,6 +81,28 @@ def test_enabled_persists_operation_and_nested_spans(tmp_path: Path) -> None:
         assert by_name["inner"][2] == by_name["semantic.reindex"][1]
     finally:
         conn.close()
+
+
+def test_record_counter_attributes_to_active_span(tmp_path: Path) -> None:
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    with operation(name="search", surface="mcp"), span(name="root"):
+        record_counter("retrieval.fts_hits", 3)
+        record_counter("retrieval.fts_hits", 2)  # accumulates onto the same key
+        record_counter("retrieval.vector_memory_hits")  # default value 1
+    # Outside any span the counter is inert (no raise, nothing recorded).
+    record_counter("retrieval.fts_hits", 99)
+    shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        (counters_json,) = conn.execute(
+            "SELECT counters_json FROM platform_spans WHERE name='root'"
+        ).fetchone()
+    finally:
+        conn.close()
+    counters = orjson.loads(counters_json)
+    assert counters["retrieval.fts_hits"] == 5
+    assert counters["retrieval.vector_memory_hits"] == 1
 
 
 def test_cross_process_correlation_and_parent(tmp_path: Path) -> None:
