@@ -420,7 +420,7 @@ def materialize_corpus_item(
         representation_kind=representation_kind,
         normalized_text=normalized.text,
     )
-    metadata_json = json_text(item.metadata, sort_keys=True)
+    metadata_json = json_text(_materialized_metadata(item), sort_keys=True)
     overlay_json = (
         json_text(item.registry_overlay, sort_keys=True)
         if item.registry_overlay is not None
@@ -438,6 +438,27 @@ def materialize_corpus_item(
         overlay_json,
         rep_version,
     )
+
+
+def _materialized_metadata(item: HistoricalIntentSourceItem) -> dict[str, object]:
+    metadata = dict(item.metadata)
+    provenance = {
+        key: dict(value) if isinstance(value, dict) else value
+        for key, value in item.provenance.items()
+    }
+    trajectory = provenance.get("trajectory")
+    if not isinstance(trajectory, dict):
+        trajectory = {}
+        provenance["trajectory"] = trajectory
+    trajectory["selected"] = trajectory.get("selected_trajectory_id") is not None
+    patch_trail = provenance.get("patch_trail")
+    if not isinstance(patch_trail, dict):
+        patch_trail = {}
+        provenance["patch_trail"] = patch_trail
+    patch_trail["present"] = patch_trail.get("digest") is not None
+    provenance["registry_overlay"] = {"present": item.registry_overlay is not None}
+    metadata["provenance"] = provenance
+    return metadata
 
 
 def default_source_schema_versions() -> dict[str, str]:

@@ -42,8 +42,8 @@ IDE_GOVERNANCE_PROTOCOL_VERSION: Final = 2
 # Corpus analytics store (.codeclone/analytics/corpus_clustering.sqlite3) and
 # derived export/representation contracts. Bump independently from memory schema.
 CORPUS_ANALYTICS_STORE_SCHEMA_VERSION: Final = "1.1"
-CORPUS_EXPORT_SCHEMA_VERSION: Final = "1.1"
-CORPUS_REPRESENTATION_CONTRACT_VERSION: Final = "2"
+CORPUS_EXPORT_SCHEMA_VERSION: Final = "1.2"
+CORPUS_REPRESENTATION_CONTRACT_VERSION: Final = "3"
 CORPUS_NORMALIZER_VERSION: Final = "1"
 CORPUS_EMBEDDING_CONTRACT_VERSION: Final = "2"
 CORPUS_AGENT_LABEL_CONTRACT_VERSION: Final = "1"

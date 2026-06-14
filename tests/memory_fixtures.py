@@ -199,6 +199,10 @@ def memory_project_db_paths(root: Path) -> tuple[MemoryProject, Path]:
     db_path = resolve_memory_db_path(root, config)
     db_path.parent.mkdir(parents=True, exist_ok=True)
     project = resolve_project_identity(root)
+    resolved_root = root.resolve()
+    if not db_path.resolve().is_relative_to(resolved_root):
+        msg = f"memory db path must stay under test root: {db_path}"
+        raise ValueError(msg)
     return project, db_path
 
 
@@ -206,20 +210,22 @@ def load_memory_init_report_document(
     *,
     registry_items: list[str] | None = None,
     fallback_root: Path | None = None,
+    use_repo_cached_report: bool = False,
 ) -> dict[str, object]:
-    report_path = REPO_ROOT / ".codeclone" / "report.json"
-    if report_path.is_file():
-        loaded = read_json_object(report_path)
-        if registry_items is not None:
-            inventory = loaded.get("inventory")
-            if isinstance(inventory, dict):
-                registry = inventory.get("file_registry")
-                if isinstance(registry, dict):
-                    registry["items"] = registry_items
-        return loaded
+    if use_repo_cached_report:
+        report_path = REPO_ROOT / ".codeclone" / "report.json"
+        if report_path.is_file():
+            loaded = read_json_object(report_path)
+            if registry_items is not None:
+                inventory = loaded.get("inventory")
+                if isinstance(inventory, dict):
+                    registry = inventory.get("file_registry")
+                    if isinstance(registry, dict):
+                        registry["items"] = registry_items
+            return loaded
     if fallback_root is None:
-        msg = "cached report.json not available and no fallback_root provided"
-        raise FileNotFoundError(msg)
+        msg = "fallback_root is required for isolated memory ingest tests"
+        raise ValueError(msg)
     items = registry_items or ["pkg/a.py"]
     first_item = items[0]
     return {

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib
+import json
 import math
 import types
 from dataclasses import replace
@@ -29,12 +30,17 @@ from codeclone.analytics.clustering.canonicalize import (
 )
 from codeclone.analytics.clustering.diagnostics import (
     build_cluster_diagnostics,
+    build_item_preview,
     cluster_size_percent,
     compute_centroids,
     correlation_rate,
+    linear_percentile,
+    metadata_display_value,
     metadata_distribution,
     nearest_cluster_ids,
     noise_explorer_flags,
+    numeric_field_summary,
+    truncate_preview,
 )
 from codeclone.analytics.clustering.models import (
     ClusteringParameters,
@@ -183,6 +189,56 @@ def test_registry_not_in_normalized_text(tmp_path: Path) -> None:
     assert before[6] == after[6]
 
 
+def test_new_snapshot_materializes_explicit_provenance_v3() -> None:
+    source = HistoricalIntentSourceItem(
+        project_id="project",
+        intent_id="intent",
+        source_record_key_value="source",
+        source_content_digest="digest",
+        provenance={
+            "trajectory": {"selected_trajectory_id": None},
+            "patch_trail": {"digest": None},
+        },
+        metadata={"agent_family": "codex"},
+        registry_overlay=None,
+        representation_input=IntentRepresentationInput(
+            description="Add interpretability",
+            intent_kind=None,
+            declared_path_families=(),
+            declared_constraints=(),
+        ),
+    )
+    materialized = materialize_corpus_item(
+        snapshot_id="snapshot",
+        lane="intent",
+        representation_kind=INTENT_REPRESENTATION_DESCRIPTION,
+        item=source,
+    )
+    metadata = json.loads(materialized[7])
+    assert materialized[9] == "3"
+    assert metadata["provenance"]["trajectory"]["selected"] is False
+    assert metadata["provenance"]["patch_trail"]["present"] is False
+    assert metadata["provenance"]["registry_overlay"]["present"] is False
+
+    with_overlay = materialize_corpus_item(
+        snapshot_id="snapshot",
+        lane="intent",
+        representation_kind=INTENT_REPRESENTATION_DESCRIPTION,
+        item=replace(
+            source,
+            provenance={
+                "trajectory": {"selected_trajectory_id": "trajectory"},
+                "patch_trail": {"digest": "trail-digest"},
+            },
+            registry_overlay={},
+        ),
+    )
+    enriched = json.loads(with_overlay[7])["provenance"]
+    assert enriched["trajectory"]["selected"] is True
+    assert enriched["patch_trail"]["present"] is True
+    assert enriched["registry_overlay"]["present"] is True
+
+
 def test_registry_overlay_does_not_change_source_digest(tmp_path: Path) -> None:
     root = _seed_intent_repo(tmp_path, description="Stable historical intent")
     registry_db = root / ".codeclone" / "db" / "intents.sqlite3"
@@ -234,6 +290,144 @@ def test_registry_overlay_does_not_change_source_digest(tmp_path: Path) -> None:
     )
     assert before_digest == after_digest
     assert after_items[0].registry_overlay is not None
+
+
+def test_item_preview_and_numeric_summary_contracts() -> None:
+    short = _corpus_item(
+        "short",
+        text="x" * 240,
+        metadata_json=(
+            '{"agent_family":"codex","anomaly_kinds":[],'
+            '"declared_file_count":0,"changed_file_count":3}'
+        ),
+    )
+    long = _corpus_item(
+        "long",
+        text="y" * 241,
+        metadata_json=(
+            '{"agent_family":null,"anomaly_kinds":["scope"],"declared_file_count":11}'
+        ),
+    )
+    assert truncate_preview(short.normalized_text) == short.normalized_text
+    truncated = truncate_preview(long.normalized_text)
+    assert len(truncated) == 240
+    assert truncated.endswith("\u2026")
+    assert metadata_display_value({}, "agent_family").kind == "unknown"
+    assert (
+        metadata_display_value(
+            {"anomaly_kinds": []},
+            "anomaly_kinds",
+        ).kind
+        == "confirmed_none"
+    )
+    preview = build_item_preview(
+        long,
+        None,
+        source_kind="intent_historical",
+        source_record_id=long.intent_id,
+    )
+    assert preview.intent_id == long.intent_id
+    assert preview.normalized_text_preview == truncated
+
+    declared = numeric_field_summary((short, long), field="declared_file_count")
+    assert declared.known_count == 2
+    assert declared.unknown_count == 0
+    assert declared.median == 5.5
+    assert declared.buckets == {"0": 1, "1-3": 0, "4-10": 0, "11+": 1}
+    changed = numeric_field_summary((short, long), field="changed_file_count")
+    assert changed.known_count == 1
+    assert changed.unknown_count == 1
+    assert changed.median == 3.0
+    assert linear_percentile([], 50) is None
+    assert linear_percentile([2], 50) == 2.0
+    assert linear_percentile([1, 2, 3, 4], 25) == 1.75
+    assert linear_percentile([1, 2, 3], 50) == 2.0
+    assert linear_percentile([1, 1, 3, 3], 50) == 2.0
+
+
+def test_interpretation_value_and_bucket_edge_contracts() -> None:
+    assert (
+        metadata_display_value(
+            {"declared_constraints": []},
+            "declared_constraints",
+        ).kind
+        == "empty_collection"
+    )
+    assert (
+        metadata_display_value(
+            {"agent_family": ["codex", "claude", "codex"]},
+            "agent_family",
+        ).display
+        == "claude, codex"
+    )
+    assert metadata_display_value(
+        {"scope_expanded": True}, "scope_expanded"
+    ).display == ("true")
+    assert metadata_display_value(
+        {"scope_expanded": False}, "scope_expanded"
+    ).display == ("false")
+    with pytest.raises(ValueError, match="between 0 and 100"):
+        linear_percentile([1], -1)
+
+    descriptions = (
+        _corpus_item("short", text="x" * 39),
+        _corpus_item("medium", text="x" * 40),
+        _corpus_item("long", text="x" * 120),
+        _corpus_item("very-long", text="x" * 400),
+    )
+    assert numeric_field_summary(
+        descriptions,
+        field="description_length",
+    ).buckets == {
+        "0-39": 1,
+        "40-119": 1,
+        "120-399": 1,
+        "400+": 1,
+    }
+    file_counts = (
+        _corpus_item("one", metadata_json='{"declared_file_count":1}'),
+        _corpus_item("four", metadata_json='{"declared_file_count":4}'),
+    )
+    assert numeric_field_summary(
+        file_counts,
+        field="declared_file_count",
+    ).buckets == {"0": 0, "1-3": 1, "4-10": 1, "11+": 0}
+    assert (
+        numeric_field_summary(
+            (_corpus_item("unknown"),),
+            field="changed_file_count",
+        ).mean
+        is None
+    )
+
+    non_intent_preview = build_item_preview(
+        descriptions[0],
+        None,
+        source_kind="trajectory",
+        source_record_id="trajectory-id",
+    )
+    assert non_intent_preview.intent_id is None
+    assert intent_historical._materialized_metadata(
+        HistoricalIntentSourceItem(
+            project_id="project",
+            intent_id="intent",
+            source_record_key_value="source",
+            source_content_digest="digest",
+            provenance={},
+            metadata={},
+            registry_overlay=None,
+            representation_input=IntentRepresentationInput(
+                description="description",
+                intent_kind=None,
+                declared_path_families=(),
+                declared_constraints=(),
+            ),
+        )
+    )["provenance"] == {
+        "trajectory": {"selected": False},
+        "patch_trail": {"present": False},
+        "registry_overlay": {"present": False},
+    }
 
 
 def test_source_content_digest_hashes_raw_inputs_before_normalization() -> None:

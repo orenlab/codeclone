@@ -920,8 +920,88 @@ ordinary failures, and validates row keys, dimensions, and float32 digests
 before clustering. Crash residue is detected as an integrity error rather than
 accepted as a completed generation.
 
+### Corpus analytics JSON export (`1.2`)
+
+`CORPUS_EXPORT_SCHEMA_VERSION = "1.2"` is an additive interpretation contract
+over store schema `1.1`; it does not migrate the SQLite database.
+
+```text
+export
+├── schema_version = "1.2"
+├── interpretation_contract_version = "1.0"
+├── snapshot
+├── embedding_generation | null
+├── embedding_items[]
+├── clustering_run
+│   ├── validity
+│   ├── presentation
+│   └── partition_metrics | diagnostic_facts
+├── clusters[]                 # full mode only
+│   └── interpretation
+│       ├── representative_previews[]
+│       ├── boundary_previews[]
+│       ├── categorical_correlations
+│       ├── numeric_summaries
+│       ├── provenance_completeness
+│       └── machine_inspectability_signals
+├── assignments[]              # full mode only
+├── noise_items[]              # full mode only
+└── content_disclosure
+```
+
+`clustering_run.validity.failed_invariants` is a deterministic ordered subset
+of `V1` through `V10`. `presentation.projection_mode` is
+`full_interpretation` only when every invariant passes; otherwise it is
+`limited_diagnostic`, `partition_metrics` is omitted, `score` is `null`, and
+cluster/item interpretation arrays are absent.
+
+Sweep comparison exports every persisted run for the requested snapshot and
+embedding generation. Each candidate has a sibling `comparison` object:
+
+```json
+{
+  "score": null,
+  "rank": null,
+  "recommended_by_heuristic": false,
+  "dominant_cluster_ratio": null,
+  "dominant_assigned_ratio": null,
+  "largest_cluster_size": null
+}
+```
+
+Only technically valid candidates receive non-null comparison metrics, score,
+and rank. `comparison_summary` records total, valid, invalid, recommended, and
+maintainer-selected run identity.
+
+`content_disclosure` is derived from the final payload. Its preview scopes are
+`cluster_representatives`, `cluster_boundaries`, and `noise_items`; the
+contract limit is 240 Unicode code points. Default `items[]` entries do not
+contain normalized text previews.
+
+### Corpus representation contract (`3`)
+
+New intent snapshots persist explicit provenance booleans inside
+`corpus_items.metadata_json`:
+
+```json
+{
+  "provenance": {
+    "trajectory": {"selected": false},
+    "patch_trail": {"present": false},
+    "registry_overlay": {"present": false}
+  }
+}
+```
+
+Trajectory and Patch Trail identity evidence retains its existing digest
+behavior. Registry-overlay content and presence remain advisory and excluded
+from source identity. Contract-2 snapshots are immutable and are interpreted
+with conservative legacy rules; they are not rewritten.
+
 See [Corpus Analytics](../27-corpus-analytics.md) for CLI, configuration, and trust
-boundaries.
+boundaries, and
+[Report Interpretability](../27-corpus-analytics.md#report-interpretability-slice-11)
+for validity and privacy rules.
 
 ## Refs
 

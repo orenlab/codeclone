@@ -456,7 +456,7 @@ def test_exports_are_complete_and_report_span_is_observable(
 
     html_text = html_out.read_text(encoding="utf-8")
     assert "Corpus Analytics Cluster Report" in html_text
-    assert "Metadata correlations" in html_text
+    assert "Categorical correlations" in html_text
     assert "Numerator" in html_text
     assert "Denominator" in html_text
     assert "Full vector reproducibility is not guaranteed" in html_text

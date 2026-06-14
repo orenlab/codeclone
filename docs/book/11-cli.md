@@ -147,10 +147,18 @@ Refs:
       `selected_by_maintainer=true`.
     - Representations: `description` (default) or `description_with_frame`.
     - Artifacts live under `.codeclone/analytics/` (SQLite metadata + LanceDB vectors).
+    - JSON export schema `1.2` and HTML use one interpretation projection:
+      formally valid runs receive full metrics/previews; invalid or failed runs
+      remain inspectable as limited diagnostics with invariant codes.
+    - Sweep output includes every persisted candidate for the generation.
+      Invalid candidates are unranked and show dominant metrics as unavailable.
+      `cluster-show` may therefore export a resolved run that is not eligible
+      for full interpretation.
     - Expected capability, schema, ownership, and integrity errors exit `2`
       without a traceback. Inspection/export commands require only the base
       install and open analytics metadata read-only.
-    - Full contract: [Corpus Analytics](27-corpus-analytics.md).
+    - Full contract:
+      [Corpus Analytics](27-corpus-analytics.md#report-interpretability-slice-11).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.

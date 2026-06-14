@@ -79,6 +79,17 @@ Added
   and runtime observability spans. Analytics embeddings and their lifecycle are
   separate from the Engineering Memory semantic index;
   `[tool.codeclone.analytics]` configures paths and clustering defaults.
+* **Corpus Analytics interpretability (Slice 1.1).** JSON export schema `1.2`
+  and the self-contained HTML report now separate formal technical validity
+  from human interpretation. Valid runs expose dominant-cluster ratios,
+  bounded representative/boundary/noise previews, numeric summaries,
+  categorical correlations, small-cluster provenance completeness, and
+  explicit preview disclosure. Invalid and failed runs remain inspectable in a
+  limited diagnostic mode without partition metrics, previews, score, or rank;
+  sweep comparison includes every persisted candidate. Representation contract
+  `3` materializes explicit trajectory, Patch Trail, and registry-overlay
+  presence facts for new snapshots without adding live registry state to source
+  identity.
 
 Changed
 

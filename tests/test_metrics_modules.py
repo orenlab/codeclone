@@ -693,6 +693,12 @@ def test_depth_profile_uses_nearest_rank_p95() -> None:
     assert p95_depth == 3
 
 
+def test_depth_profile_empty_graph_returns_zeros() -> None:
+    avg_depth, p95_depth = depth_profile({})
+    assert avg_depth == 0.0
+    assert p95_depth == 0
+
+
 def test_health_dependency_tail_pressure_is_adaptive() -> None:
     def _health_inputs(
         *,

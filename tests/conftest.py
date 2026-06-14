@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable, Generator
+from contextlib import suppress
 
 import pytest
 
@@ -34,6 +35,19 @@ def _reset_observability_runtime() -> Generator[None, None, None]:
     from codeclone.observability.runtime import shutdown
 
     shutdown()
+    _close_leaked_sqlite_connections()
+
+
+def _close_leaked_sqlite_connections() -> None:
+    """Best-effort cleanup for sqlite3 handles left open by a test body."""
+    import gc
+    import sqlite3
+
+    for obj in gc.get_objects():
+        if type(obj) is sqlite3.Connection:
+            with suppress(Exception):
+                obj.close()
+    gc.collect()
 
 
 @pytest.fixture

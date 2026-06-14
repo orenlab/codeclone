@@ -4,6 +4,9 @@ Corpus Analytics is an optional, offline analytics lane for clustering
 historical change-control intents. It reconstructs an intent corpus from
 retained controller evidence, creates immutable-by-contract snapshots, writes
 separate analytics embeddings, and runs deterministic PCA + HDBSCAN clustering.
+Slice 1.1 adds an interpretation plane over those persisted facts: formal
+technical-validity assessment, bounded previews, partition metrics, provenance
+completeness, and full-versus-limited report projection.
 
 It is **derived evidence, not authority**. Corpus Analytics never changes the
 canonical structural report, reports/gates/baselines, cache compatibility,
@@ -26,19 +29,24 @@ flowchart LR
     S --> E["Embedding generation<br/>separate LanceDB sidecar"]
     E --> C["L2 normalize<br/>PCA(full)<br/>HDBSCAN(euclidean)"]
     C --> D["Persisted assignments<br/>summaries and diagnostics"]
-    D --> J["JSON export"]
-    D --> H["Self-contained HTML"]
-    S -. "never authorizes or gates" .-> X["Structural report<br/>baseline, gates, memory governance"]
+    D --> V{"V1-V10<br/>technically valid?"}
+    V -->|" yes "| F["Full interpretation<br/>metrics, previews, provenance"]
+    V -->|" no "| L["Limited diagnostic<br/>status, validity, safe raw counts"]
+    F --> J["JSON export 1.2"]
+    F --> H["Self-contained HTML"]
+    L --> J
+    L --> H
+    S -. " never authorizes or gates " .-> X["Structural report<br/>baseline, gates, memory governance"]
 ```
 
 Source ownership is explicit:
 
-| Fact | Owner |
-|------|-------|
-| Original description and declaration order | Earliest audit `intent.declared` by `audit_sequence` |
-| Declared/changed files and verification facts | Patch Trail |
-| Outcome, quality tier, labels, anomalies | Selected current-version trajectory |
-| Lease/status and other live coordination state | Optional registry overlay |
+| Fact                                           | Owner                                                |
+|------------------------------------------------|------------------------------------------------------|
+| Original description and declaration order     | Earliest audit `intent.declared` by `audit_sequence` |
+| Declared/changed files and verification facts  | Patch Trail                                          |
+| Outcome, quality tier, labels, anomalies       | Selected current-version trajectory                  |
+| Lease/status and other live coordination state | Optional registry overlay                            |
 
 The registry overlay is exported for inspection when present, but it never
 changes normalized text, representation identity, or `source_digest`.
@@ -52,22 +60,21 @@ sequenceDiagram
     participant SQL as Analytics SQLite
     participant V as Analytics LanceDB
     participant O as Platform Observability
-
-    U->>CLI: snapshot --root .
-    CLI->>O: analytics.snapshot span
-    CLI->>SQL: snapshot + corpus items
-    U->>CLI: embed --snapshot-id SNAPSHOT
-    CLI->>O: analytics.embed span
-    CLI->>V: float32 vectors
-    CLI->>SQL: generation + row keys + digests
-    U->>CLI: cluster --snapshot-id ... --embedding-generation-id ...
-    CLI->>O: analytics.cluster span
-    CLI->>SQL: running run
-    CLI->>V: validated vectors
-    CLI->>SQL: completed assignments and summaries
-    U->>CLI: cluster-show or build outputs
-    CLI->>O: analytics.report span
-    CLI-->>U: atomic JSON / HTML
+    U ->> CLI: snapshot --root .
+    CLI ->> O: analytics.snapshot span
+    CLI ->> SQL: snapshot + corpus items
+    U ->> CLI: embed --snapshot-id SNAPSHOT
+    CLI ->> O: analytics.embed span
+    CLI ->> V: float32 vectors
+    CLI ->> SQL: generation + row keys + digests
+    U ->> CLI: cluster --snapshot-id ... --embedding-generation-id ...
+    CLI ->> O: analytics.cluster span
+    CLI ->> SQL: running run
+    CLI ->> V: validated vectors
+    CLI ->> SQL: completed assignments and summaries
+    U ->> CLI: cluster-show or build outputs
+    CLI ->> O: analytics.report span
+    CLI -->> U: atomic JSON / HTML
 ```
 
 Every clustering run is inserted as `running`. A successful run atomically
@@ -84,12 +91,12 @@ pip install "codeclone[analytics]"
 
 Capability tiers:
 
-| Tier | Packages | Commands |
-|------|----------|----------|
-| `base` | core only | `snapshot`, `clusters`, `cluster-show`, `outliers`, `cluster --select-run` |
-| `embed` | FastEmbed + LanceDB | `embed` |
-| `cluster` | scikit-learn + external `hdbscan` | clustering and sweep |
-| `full` | all of the above | `build` |
+| Tier      | Packages                          | Commands                                                                   |
+|-----------|-----------------------------------|----------------------------------------------------------------------------|
+| `base`    | core only                         | `snapshot`, `clusters`, `cluster-show`, `outliers`, `cluster --select-run` |
+| `embed`   | FastEmbed + LanceDB               | `embed`                                                                    |
+| `cluster` | scikit-learn + external `hdbscan` | clustering and sweep                                                       |
+| `full`    | all of the above                  | `build`                                                                    |
 
 Missing optional dependencies are contract errors (exit `2`) with an install
 hint. Inspection/export commands do not import FastEmbed.
@@ -105,21 +112,21 @@ resolve from the repository root; absolute paths are allowed but are represented
 as `<external>` in snapshot manifests so user-specific paths do not enter
 portable identity.
 
-| Key | Default | Contract |
-|-----|---------|----------|
-| `db_path` | `.codeclone/analytics/corpus_clustering.sqlite3` | Analytics metadata store |
-| `vectors_path` | `.codeclone/analytics/corpus_vectors` | Dedicated LanceDB vectors |
-| `embedding_model` | `BAAI/bge-small-en-v1.5` | FastEmbed model id |
-| `embedding_dimension` | `384` | Vector width |
-| `embedding_provider` | `fastembed` | Only supported provider in Slice 1 |
-| `embedding_cache_dir` | memory semantic cache | Shared model artifact cache, not shared vectors |
-| `min_correlation_sample_size` | `5` | Correlation denominator guard |
-| `cluster_random_seed` | `42` | PCA deterministic seed |
-| `default_pca_dimensions` | `64` | Requested PCA width |
-| `default_min_cluster_size` | `8` | HDBSCAN default |
-| `default_min_samples` | `3` | HDBSCAN default |
-| `default_cluster_selection_method` | `eom` | `eom` or `leaf` |
-| `allow_model_download` | memory semantic setting | Whether FastEmbed may download |
+| Key                                | Default                                          | Contract                                        |
+|------------------------------------|--------------------------------------------------|-------------------------------------------------|
+| `db_path`                          | `.codeclone/analytics/corpus_clustering.sqlite3` | Analytics metadata store                        |
+| `vectors_path`                     | `.codeclone/analytics/corpus_vectors`            | Dedicated LanceDB vectors                       |
+| `embedding_model`                  | `BAAI/bge-small-en-v1.5`                         | FastEmbed model id                              |
+| `embedding_dimension`              | `384`                                            | Vector width                                    |
+| `embedding_provider`               | `fastembed`                                      | Only supported provider in Slice 1              |
+| `embedding_cache_dir`              | memory semantic cache                            | Shared model artifact cache, not shared vectors |
+| `min_correlation_sample_size`      | `5`                                              | Correlation denominator guard                   |
+| `cluster_random_seed`              | `42`                                             | PCA deterministic seed                          |
+| `default_pca_dimensions`           | `64`                                             | Requested PCA width                             |
+| `default_min_cluster_size`         | `8`                                              | HDBSCAN default                                 |
+| `default_min_samples`              | `3`                                              | HDBSCAN default                                 |
+| `default_cluster_selection_method` | `eom`                                            | `eom` or `leaf`                                 |
+| `allow_model_download`             | memory semantic setting                          | Whether FastEmbed may download                  |
 
 The historical audit database follows top-level
 `[tool.codeclone].audit_path`. This prevents Analytics from silently reading a
@@ -142,9 +149,18 @@ normalizer version, and sorted source/provenance digests. It excludes:
 - absolute source paths;
 - live registry overlay state.
 
-Representation contract `2` hashes raw representation-owned fields **before**
-normalization. For `description_with_frame`, that includes description, intent
-kind, declared path families, and typed declared constraints.
+Representation contract `3` retains the contract-2 raw-input hashing rules and
+materializes explicit provenance presence facts for new snapshots:
+
+- `provenance.trajectory.selected`;
+- `provenance.patch_trail.present`;
+- `provenance.registry_overlay.present`.
+
+For `description_with_frame`, representation identity includes description,
+intent kind, declared path families, and typed declared constraints before
+normalization. Registry-overlay content and presence remain outside
+`source_digest`; existing contract-2 snapshots are immutable and are not
+backfilled.
 
 Cluster membership identity is:
 
@@ -249,19 +265,101 @@ The noise explorer emits only observable text/membership flags:
 `high_conjunction_count`, `template_match`, and
 `low_membership_strength`. It does not invent semantic classes.
 
+## Report Interpretability (Slice 1.1)
+
+The report layer does not decide whether a cluster is semantically meaningful.
+It first evaluates formal persisted-data invariants, then projects only the
+facts that those invariants permit.
+
+```mermaid
+flowchart TD
+    P["Persisted snapshot, run, assignments, summaries"] --> A["assess_partition_validity"]
+    A -->|" V1-V10 pass "| OK["full_interpretation"]
+    A -->|" one or more fail "| BAD["limited_diagnostic"]
+    OK --> M["Partition metrics<br/>dominant ratios and size histogram"]
+    OK --> I["Cluster interpretation<br/>previews, correlations, numeric summaries"]
+    OK --> R["Small-cluster provenance completeness"]
+    BAD --> D["Validity codes + presentation banner<br/>safe diagnostic_facts only"]
+    M --> X["Shared JSON / HTML projection"]
+    I --> X
+    R --> X
+    D --> X
+```
+
+Technical validity covers:
+
+| Invariant | Formal check                                                             |
+|-----------|--------------------------------------------------------------------------|
+| `V1`      | assignments exactly cover snapshot items with no duplicate item ids      |
+| `V2`      | assignment labels and unique summaries are fully linked, including noise |
+| `V3`      | every summary size and membership digest matches its members             |
+| `V4`      | every assignment carries its summary membership digest                   |
+| `V5`      | non-noise clusters satisfy effective `min_cluster_size`                  |
+| `V6a`     | persisted numeric values used by interpretation are finite or `null`     |
+| `V7`      | run is completed and carries the canonical algorithm manifest            |
+| `V8`      | embedding generation metadata covers the snapshot item set               |
+| `V9`      | representative and boundary ids exist and belong to their cluster        |
+| `V10`     | every decoded persisted JSON field has the expected object shape         |
+
+An invalid run is still inspectable. JSON and HTML expose its invariant codes,
+status, presentation banner, and only the raw counts allowed by the safe-output
+matrix. They omit `partition_metrics`, cluster interpretation, item previews,
+and heuristic score. A missing embedding-generation record is represented as
+`embedding_generation: null` with an empty `embedding_items` array.
+
+Presentation is separate from validity:
+
+- `maintainer_selected` is explicit persisted provenance, not taxonomy truth;
+- `heuristic_recommended` is sweep evidence, not a semantic verdict;
+- `candidate_only` is a valid run selected by neither mechanism;
+- `technically_invalid` always forces `limited_diagnostic`.
+
+Full interpretation includes the largest-cluster ratio against the whole corpus
+and against assigned non-noise items, a fixed cluster-size histogram,
+representative and boundary previews, categorical correlations, numeric
+summaries for file counts and description length, and observable
+machine-inspectability signals. Small clusters (up to 15 items) also show
+provenance completeness.
+
+Previews are normalized corpus text, truncated to 240 Unicode code points.
+They appear only for representatives, boundary items, and noise exploration.
+JSON keeps raw strings with ordinary JSON escaping; HTML escapes text at render
+time. `content_disclosure` is computed from the previews actually emitted and
+lists their scopes. Default exports never attach text previews to every
+`items[]` entry.
+
+Export schema `1.2` adds:
+
+- `interpretation_contract_version = "1.0"` and `content_disclosure`;
+- `clustering_run.validity` and `clustering_run.presentation`;
+- `partition_metrics` in full mode or `diagnostic_facts` in limited mode;
+- per-cluster `interpretation` blocks in full mode;
+- candidate-local nullable `comparison` facts and top-level
+  `comparison_summary`.
+
+Sweep comparison includes every persisted run for the requested snapshot and
+embedding generation, including failed or otherwise invalid runs. Only valid
+runs receive a score and rank. Invalid dominant ratios and largest-cluster size
+are `null` in JSON and `unavailable` in HTML.
+
+For the wire layout, see
+[Schema Layouts](appendix/b-schema-layouts.md#corpus-analytics-json-export-12).
+For compatibility rules, see
+[Compatibility and Versioning](24-compatibility-and-versioning.md).
+
 ## CLI And Reports
 
 The approved direct namespace is `codeclone analytics`:
 
-| Command | Purpose |
-|---------|---------|
-| `snapshot` | Build an intent corpus snapshot |
-| `embed` | Generate a separate analytics embedding generation |
-| `cluster` | Run one configuration or a bounded sweep |
-| `build` | Run snapshot → embed → cluster |
-| `clusters` | List runs for a snapshot |
-| `cluster-show` | Export one completed run as JSON |
-| `outliers` | Emit noise assignment ids |
+| Command        | Purpose                                                             |
+|----------------|---------------------------------------------------------------------|
+| `snapshot`     | Build an intent corpus snapshot                                     |
+| `embed`        | Generate a separate analytics embedding generation                  |
+| `cluster`      | Run one configuration or a bounded sweep                            |
+| `build`        | Run snapshot → embed → cluster                                      |
+| `clusters`     | List runs for a snapshot                                            |
+| `cluster-show` | Export a resolved run as full interpretation or limited diagnostics |
+| `outliers`     | Emit noise assignment ids                                           |
 
 `build --sweep --use-recommended` renders the heuristic winner but does not
 record a maintainer selection. `--use-recommended` without `--sweep` is rejected
@@ -269,14 +367,16 @@ before dependency checks or artifact creation.
 
 Output behavior:
 
-- single-run JSON contains snapshot/generation manifests, embedding references,
-  run and algorithm manifest, clusters, assignments, noise, item metadata, and
-  compatible sweep summaries;
-- sweep JSON contains every completed candidate with full assignments,
-  diagnostics, and recommendation/selection flags;
+- single-run JSON contains snapshot/generation manifests, validity,
+  presentation, and either full interpretation or limited diagnostic facts;
+- sweep JSON contains every persisted candidate, nullable comparison fields,
+  and aggregate valid/invalid/recommendation/selection counts;
 - sweep HTML without `--use-recommended` is comparison-only;
-- detailed HTML includes overview, cluster index, representative/boundary
-  groups, correlations with denominators, and the noise explorer;
+- detailed full-mode HTML includes dominant ratios, cluster index, escaped
+  representative/boundary previews, split categorical/numeric metadata,
+  provenance completeness, and the noise explorer;
+- detailed limited-mode HTML includes the technical-invalid banner and safe
+  diagnostic overview, without cluster interpretation panels;
 - JSON and HTML are self-contained and written atomically to explicit output
   paths.
 
@@ -317,6 +417,8 @@ development telemetry only; see
 - `tests/test_analytics_foundation.py`
 - `tests/test_analytics_trajectory_selection.py`
 - `tests/test_analytics_integration.py`
+- `tests/test_analytics_integrity.py`
+- `tests/test_analytics_reporting.py`
 - `tests/test_analytics_cli.py`
 - `tests/test_config_analytics.py`
 - `tests/test_sqlite_readonly_openers.py`

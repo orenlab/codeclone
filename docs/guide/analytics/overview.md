@@ -45,6 +45,39 @@ codeclone analytics build \
   --json-out /tmp/corpus-sweep.json
 ```
 
+## Reading the reports
+
+Corpus Analytics separates formal technical validity from human
+interpretation:
+
+```mermaid
+flowchart LR
+    R["Persisted clustering run"] --> V{"V1-V10 pass?"}
+    V -->|"yes"| F["Full interpretation<br/>metrics, previews, provenance"]
+    V -->|"no"| L["Limited diagnostic<br/>codes, status, safe counts"]
+    F --> O["JSON 1.2 / HTML"]
+    L --> O
+```
+
+A valid run can still be only a candidate. The banner distinguishes
+maintainer-selected, heuristically recommended, candidate-only, and technically
+invalid runs; none of those labels claims a semantic taxonomy.
+
+Full reports show dominant-cluster ratios against both the whole corpus and
+assigned non-noise items, bounded representative/boundary previews, numeric
+summaries, categorical correlations, provenance completeness for small
+clusters, and observable noise flags. Sweep comparison includes failed and
+invalid runs as limited rows with `unavailable` metrics rather than silently
+dropping them.
+
+Normalized text previews are capped at 240 Unicode code points. JSON keeps raw
+strings; HTML escapes them. The export `content_disclosure` block reports
+whether previews were actually emitted and in which scopes. See
+[Report Interpretability](../../book/27-corpus-analytics.md#report-interpretability-slice-11)
+for the invariants and safe-output rules, and
+[JSON export schema](../../book/appendix/b-schema-layouts.md#corpus-analytics-json-export-12)
+for the wire shape.
+
 ## Step-by-step
 
 ```bash
@@ -93,6 +126,10 @@ generation.
   code `2` and no traceback.
 - A clustering run is persisted as `running`, then becomes `completed` or
   `failed`; failed runs contain no committed assignments or summaries.
+- Resolved invalid or failed runs remain exportable in limited diagnostic mode;
+  they never receive partition metrics, previews, score, or rank.
+- A missing embedding-generation record is rendered explicitly as unavailable
+  metadata rather than fabricated from the run.
 - JSON and HTML outputs are written atomically.
 - Snapshot, embed, cluster, and report spans are recorded only when
   `CODECLONE_OBSERVABILITY_ENABLED=1`.

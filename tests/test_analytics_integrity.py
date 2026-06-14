@@ -6,11 +6,13 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from typing import cast
 
 import pytest
 
+from codeclone.analytics.clustering.sweep import clustering_algorithm_manifest
 from codeclone.analytics.contracts import (
     ClusterAssignmentRecord,
     ClusteringRunRecord,
@@ -23,7 +25,9 @@ from codeclone.analytics.contracts import (
 from codeclone.analytics.corpus.keys import membership_digest
 from codeclone.analytics.exceptions import AnalyticsWorkflowError
 from codeclone.analytics.integrity import (
+    assess_partition_validity,
     load_validated_snapshot_vectors,
+    validate_cluster_diagnostic_refs,
     validate_generation_metadata,
     validate_persisted_run,
 )
@@ -95,12 +99,19 @@ def _embedding_item(item_id: str = "item-a") -> EmbeddingItemRecord:
 
 
 def _run() -> ClusteringRunRecord:
+    effective_parameters = {
+        "pca_dimensions": 2,
+        "min_cluster_size": 1,
+        "min_samples": 1,
+        "cluster_selection_method": "eom",
+        "algorithm_manifest": clustering_algorithm_manifest(),
+    }
     return ClusteringRunRecord(
         clustering_run_id="run",
         snapshot_id="snapshot",
         embedding_generation_id="embedding",
         requested_parameters_json="{}",
-        effective_parameters_json="{}",
+        effective_parameters_json=json.dumps(effective_parameters, sort_keys=True),
         random_seed=42,
         run_digest="run-digest",
         recommended_by_heuristic=False,
@@ -124,7 +135,14 @@ class _Store:
             ClusterAssignmentRecord("run", "item-a", 0, 1.0, digest),
         )
         self.summaries: tuple[ClusterSummaryRecord, ...] = (
-            ClusterSummaryRecord("run", 0, 1, digest, 1, "{}"),
+            ClusterSummaryRecord(
+                "run",
+                0,
+                1,
+                digest,
+                1,
+                '{"boundary_items":[],"representatives":["item-a"]}',
+            ),
         )
 
     def get_snapshot(self, _snapshot_id: str) -> CorpusSnapshotRecord | None:
@@ -357,4 +375,210 @@ def test_persisted_run_accepts_complete_contract() -> None:
             clustering_run_id="run",
         )
         == _run()
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("min_cluster_size", ("V5",)),
+        ("non_finite", ("V6a",)),
+        ("manifest", ("V7",)),
+        ("generation", ("V8",)),
+        ("reference", ("V9",)),
+        ("json", ("V10",)),
+    ],
+)
+def test_partition_validity_reports_deterministic_interpretation_failures(
+    mutation: str,
+    expected: tuple[str, ...],
+) -> None:
+    store = _Store()
+    if mutation == "min_cluster_size":
+        effective = json.loads(_run().effective_parameters_json)
+        effective["min_cluster_size"] = 2
+        store.run = replace(
+            _run(),
+            effective_parameters_json=json.dumps(effective, sort_keys=True),
+        )
+    elif mutation == "non_finite":
+        store.assignments = (
+            replace(store.assignments[0], membership_strength=float("nan")),
+        )
+    elif mutation == "manifest":
+        effective = json.loads(_run().effective_parameters_json)
+        effective["algorithm_manifest"]["pca_solver"] = "randomized"
+        store.run = replace(
+            _run(),
+            effective_parameters_json=json.dumps(effective, sort_keys=True),
+        )
+    elif mutation == "generation":
+        store.generation = None
+    elif mutation == "reference":
+        store.summaries = (
+            replace(
+                store.summaries[0],
+                diagnostics_json=(
+                    '{"boundary_items":[],"representatives":["missing"]}'
+                ),
+            ),
+        )
+    else:
+        store.items = (replace(store.items[0], metadata_json="[]"),)
+
+    first = assess_partition_validity(
+        store=_as_store(store),
+        snapshot_id="snapshot",
+        clustering_run_id="run",
+    )
+    second = assess_partition_validity(
+        store=_as_store(store),
+        snapshot_id="snapshot",
+        clustering_run_id="run",
+    )
+    assert first == second
+    assert first.technically_valid is False
+    assert first.failed_invariants == expected
+
+
+def test_noise_summary_participates_in_link_and_digest_integrity() -> None:
+    store = _Store()
+    digest = membership_digest(["item-a"])
+    store.assignments = (ClusterAssignmentRecord("run", "item-a", -1, 0.2, digest),)
+    store.summaries = (ClusterSummaryRecord("run", -1, None, digest, 1, "{}"),)
+    assert assess_partition_validity(
+        store=_as_store(store),
+        snapshot_id="snapshot",
+        clustering_run_id="run",
+    ).technically_valid
+
+    store.summaries = ()
+    assert assess_partition_validity(
+        store=_as_store(store),
+        snapshot_id="snapshot",
+        clustering_run_id="run",
+    ).failed_invariants == ("V2",)
+
+
+def test_diagnostic_reference_validator_rejects_each_broken_shape() -> None:
+    item = _item()
+    validate_cluster_diagnostic_refs(
+        cluster_label=-1,
+        diagnostics={},
+        items_by_id={},
+        assigned_item_ids=(),
+    )
+    with pytest.raises(AnalyticsWorkflowError, match="is not a list"):
+        validate_cluster_diagnostic_refs(
+            cluster_label=0,
+            diagnostics={"representatives": "bad", "boundary_items": []},
+            items_by_id={item.snapshot_item_id: item},
+            assigned_item_ids=(item.snapshot_item_id,),
+        )
+    with pytest.raises(AnalyticsWorkflowError, match="duplicates"):
+        validate_cluster_diagnostic_refs(
+            cluster_label=0,
+            diagnostics={
+                "representatives": [item.snapshot_item_id, item.snapshot_item_id],
+                "boundary_items": [],
+            },
+            items_by_id={item.snapshot_item_id: item},
+            assigned_item_ids=(item.snapshot_item_id,),
+        )
+    with pytest.raises(AnalyticsWorkflowError, match="invalid reference"):
+        validate_cluster_diagnostic_refs(
+            cluster_label=0,
+            diagnostics={"representatives": ["foreign"], "boundary_items": []},
+            items_by_id={item.snapshot_item_id: item},
+            assigned_item_ids=(item.snapshot_item_id,),
+        )
+
+
+def test_validity_assessment_context_errors_are_hard_failures() -> None:
+    store = _Store()
+    store.snapshot = None
+    with pytest.raises(AnalyticsWorkflowError, match="unknown snapshot"):
+        assess_partition_validity(
+            store=_as_store(store),
+            snapshot_id="snapshot",
+            clustering_run_id="run",
+        )
+    store.snapshot = _snapshot()
+    store.run = None
+    with pytest.raises(AnalyticsWorkflowError, match="unknown clustering run"):
+        assess_partition_validity(
+            store=_as_store(store),
+            snapshot_id="snapshot",
+            clustering_run_id="run",
+        )
+    store.run = replace(_run(), snapshot_id="other")
+    with pytest.raises(AnalyticsWorkflowError, match="belongs to snapshot"):
+        assess_partition_validity(
+            store=_as_store(store),
+            snapshot_id="snapshot",
+            clustering_run_id="run",
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        ("effective_malformed", ("V10",)),
+        ("manifest_missing", ("V10",)),
+        ("diagnostics_malformed", ("V10",)),
+        ("overlay_scalar", ("V10",)),
+        ("negative_label", ("V2",)),
+        ("duplicate_summary", ("V2",)),
+        ("diagnostic_nonfinite", ("V6a",)),
+    ],
+)
+def test_validity_shape_and_numeric_edges(
+    mutation: str,
+    expected: tuple[str, ...],
+) -> None:
+    store = _Store()
+    if mutation == "effective_malformed":
+        store.run = replace(_run(), effective_parameters_json="{")
+    elif mutation == "manifest_missing":
+        store.run = replace(
+            _run(),
+            effective_parameters_json='{"min_cluster_size":1}',
+        )
+    elif mutation == "diagnostics_malformed":
+        store.summaries = (replace(store.summaries[0], diagnostics_json="[]"),)
+    elif mutation == "overlay_scalar":
+        store.items = (replace(store.items[0], registry_overlay_json="[]"),)
+    elif mutation == "negative_label":
+        digest = membership_digest(["item-a"])
+        store.assignments = (ClusterAssignmentRecord("run", "item-a", -2, 1.0, digest),)
+        store.summaries = (
+            ClusterSummaryRecord(
+                "run",
+                -2,
+                1,
+                digest,
+                1,
+                '{"boundary_items":[],"representatives":["item-a"]}',
+            ),
+        )
+    elif mutation == "duplicate_summary":
+        store.summaries = (store.summaries[0], store.summaries[0])
+    else:
+        store.summaries = (
+            replace(
+                store.summaries[0],
+                diagnostics_json=(
+                    '{"boundary_items":[],"metadata_distributions":'
+                    '{"agent_family":{"codex":{"rate":NaN}}},'
+                    '"representatives":["item-a"]}'
+                ),
+            ),
+        )
+    assert (
+        assess_partition_validity(
+            store=_as_store(store),
+            snapshot_id="snapshot",
+            clustering_run_id="run",
+        ).failed_invariants
+        == expected
     )
