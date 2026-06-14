@@ -56,10 +56,17 @@ from .messages.params import (
     CategoryParam,
     ChangedFilesParam,
     ChangedPathsParam,
+    ChangedScopeParam,
     ClaimsTextParam,
     CloneTypeParam,
     CompareFocusParam,
     ConfirmationNonceParam,
+    ContextBudgetParam,
+    ContextDepthParam,
+    ContextDetailLevelParam,
+    ContextModeParam,
+    ContextPathsParam,
+    ContextSymbolsParam,
     CoverageMinParam,
     CoverageXmlParam,
     CreateReceiptParam,
@@ -68,6 +75,7 @@ from .messages.params import (
     DirtyScopePolicyParam,
     ExcludeReviewedParam,
     ExpectedEffectsParam,
+    FacetIncludeParam,
     FamilyParam,
     FilesParam,
     FindingFamilyParam,
@@ -548,6 +556,39 @@ def build_mcp_server(
             run_id=run_id,
             depth=depth,
             include=include,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_IMPLEMENTATION_CONTEXT,
+        description=mcp_tools.GET_IMPLEMENTATION_CONTEXT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_implementation_context(
+        root: RootParam,
+        paths: ContextPathsParam = None,
+        symbols: ContextSymbolsParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        changed_scope: ChangedScopeParam = False,
+        mode: ContextModeParam = "implementation",
+        include: FacetIncludeParam = None,
+        depth: ContextDepthParam = 1,
+        detail_level: ContextDetailLevelParam = "compact",
+        budget: ContextBudgetParam = 50,
+        run_id: RunIdParam = None,
+    ) -> dict[str, object]:
+        return service.get_implementation_context(
+            root=root,
+            paths=paths,
+            symbols=symbols,
+            intent_id=intent_id,
+            changed_scope=changed_scope,
+            mode=mode,
+            include=include,
+            depth=depth,
+            detail_level=detail_level,
+            budget=budget,
+            run_id=run_id,
         )
 
     @tool(

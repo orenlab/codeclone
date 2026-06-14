@@ -975,6 +975,188 @@ def test_mcp_service_run_summary_detects_workspace_drift(
     assert latest["drifted_files"] == ["pkg/dup.py"]
 
 
+def test_mcp_service_get_implementation_context_projects_path_facts(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    package.joinpath("__init__.py").write_text("", "utf-8")
+    package.joinpath("target.py").write_text(
+        (
+            "def public_api(value: int) -> int:\n"
+            "    total = value + 1\n"
+            "    total += 2\n"
+            "    total += 3\n"
+            "    return total\n"
+        ),
+        "utf-8",
+    )
+    package.joinpath("source.py").write_text(
+        (
+            "from pkg.target import public_api\n\n"
+            "def consume(value: int) -> int:\n"
+            "    total = public_api(value)\n"
+            "    total += 1\n"
+            "    total += 2\n"
+            "    return total\n"
+        ),
+        "utf-8",
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            api_surface=True,
+            min_loc=1,
+            min_stmt=1,
+        )
+    )
+
+    context = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/target.py"],
+        include=[
+            "module_role",
+            "importers",
+            "public_surface",
+            "blast_radius",
+            "tests",
+        ],
+        detail_level="normal",
+        budget=20,
+        run_id=str(summary["run_id"]),
+    )
+    repeated = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/target.py"],
+        include=[
+            "module_role",
+            "importers",
+            "public_surface",
+            "blast_radius",
+            "tests",
+        ],
+        detail_level="normal",
+        budget=20,
+        run_id=str(summary["run_id"]),
+    )
+
+    assert context == repeated
+    assert context["status"] == "ok"
+    assert context["mode"] == "implementation"
+    subject = cast("dict[str, object]", context["subject"])
+    assert subject["resolved_from"] == "explicit_paths"
+    assert subject["paths"] == ["pkg/target.py"]
+    analysis = cast("dict[str, object]", context["analysis"])
+    assert analysis["run_id"] == service._runs.get(str(summary["run_id"])).run_id
+    assert len(str(analysis["context_artifact_digest"])) == 64
+    assert len(str(analysis["context_projection_digest"])) == 64
+    assert analysis["context_contract_version"] == "1"
+    assert analysis["call_graph_status"] == "unavailable"
+    freshness = cast("dict[str, object]", analysis["freshness"])
+    assert freshness == {
+        "status": "fresh",
+        "drifted_files": [],
+        "added_files": [],
+        "deleted_files": [],
+        "topology_drift": False,
+        "strength": "mtime_size",
+    }
+    structural = cast("dict[str, object]", context["structural_context"])
+    importers = cast("list[dict[str, object]]", structural["importers"])
+    assert importers[0]["source_module"] == "pkg.source"
+    assert importers[0]["source_path"] == "pkg/source.py"
+    public_surface = cast(
+        "list[dict[str, object]]",
+        structural["public_surface"],
+    )
+    assert public_surface[0]["qualname"] == "pkg.target:public_api"
+    assert cast("dict[str, object]", structural["blast_radius"])["radius_level"] in {
+        "low",
+        "medium",
+        "high",
+    }
+
+
+def test_mcp_service_get_implementation_context_status_and_errors(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    assert (
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["pkg/target.py"],
+        )["status"]
+        == "needs_analysis"
+    )
+    _write_clone_fixture(tmp_path)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    assert service.get_implementation_context(root=str(tmp_path))["status"] == (
+        "no_current_work"
+    )
+    with pytest.raises(MCPServiceContractError, match="repo-relative"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=[str((tmp_path / "pkg" / "dup.py").resolve())],
+        )
+    with pytest.raises(MCPServiceContractError, match="repo-relative"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["../outside.py"],
+        )
+    with pytest.raises(MCPServiceContractError, match="facet"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["pkg/dup.py"],
+            include=["invented"],
+        )
+    with pytest.raises(MCPServiceContractError, match="mutually exclusive"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["pkg/dup.py"],
+            changed_scope=True,
+        )
+
+
+def test_mcp_service_get_implementation_context_reports_full_freshness(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    target = tmp_path / "pkg" / "dup.py"
+    target.write_text(target.read_text("utf-8") + "\n# changed\n", "utf-8")
+    (tmp_path / "pkg" / "added.py").write_text("VALUE = 1\n", "utf-8")
+
+    context = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/dup.py"],
+        run_id=str(summary["run_id"]),
+    )
+
+    analysis = cast("dict[str, object]", context["analysis"])
+    freshness = cast("dict[str, object]", analysis["freshness"])
+    assert freshness["status"] == "drifted"
+    assert freshness["drifted_files"] == ["pkg/dup.py"]
+    assert freshness["added_files"] == ["pkg/added.py"]
+    assert freshness["deleted_files"] == []
+    assert freshness["topology_drift"] is True
+
+
 def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:
     service, audit, record = _mcp_session_with_registered_run(
         tmp_path,

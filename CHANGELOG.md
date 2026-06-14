@@ -14,7 +14,14 @@ Added
   governed agent edit cycle from 7–11 MCP calls to 3–4. It combines workspace
   checks, intent declaration, blast-radius mapping, bounded edit scope, patch
   verification, review-claim validation, and deterministic review receipts.
-  CodeClone now exposes 32 agent-visible MCP tools by default.
+  CodeClone now exposes 33 agent-visible MCP tools by default.
+* Live Implementation Context. The new read-only
+  get_implementation_context tool projects bounded structural facts for
+  repo-relative paths from one existing run. It reports workspace freshness,
+  cache origin, imports/importers, public surface, blast radius, and test
+  anchors, with separate deterministic digests for the off-report context
+  artifact and the exact bounded projection. Context evidence never authorizes
+  edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and
   recover operations. Renewable leases, ownership classification, optional
@@ -32,7 +39,7 @@ Added
   incidents, citations, and review evidence. The current trajectory-v3
   projection adds quality passports, complexity scoring, anomaly detection,
   agent profiles, dashboards, semantic retrieval, and deterministic Patch Trail
-  summaries. Engineering Memory schema 1.6 persists trajectory and Patch
+  summaries. Engineering Memory schema 1.7 persists trajectory and Patch
   Trail evidence.
 * Experience Layer. Deterministic experience-v1 patterns are distilled
   from canonical trajectories across all outcomes and exposed through a

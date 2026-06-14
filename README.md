@@ -208,8 +208,10 @@ report facts.
 ## AI agents and IDE integrations
 
 The MCP server is triage-first: analyze the repository, narrow the problem, inspect evidence, start a controlled
-change, and finish with verification. Bounded tools and resources keep the full report out of agent context until
-deeper evidence is requested.
+change, and finish with verification. `get_implementation_context` projects bounded, drift-aware structural context
+for repo-relative paths from the existing run, with separate digests for the source artifact and exact response.
+It is evidence for planning, never edit authorization. Bounded tools and resources keep the full report out of agent
+context until deeper evidence is requested.
 
 ```bash
 codeclone-mcp --transport stdio
@@ -223,18 +225,19 @@ and memory operations update only their explicit state stores.
 > Analysis tools require an absolute repository root. Keep `stdio` as the default transport for local clients.
 > Exposing HTTP beyond loopback requires explicit `--allow-remote`.
 
-| Surface | Install or source | Documentation |
-|---|---|---|
-| **VS Code extension** | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone) | [Setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/) |
-| **Cursor plugin** | [Cursor storefront](https://github.com/orenlab/codeclone-cursor) | [Install](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
-| **Claude Code plugin** | [Claude Code marketplace](https://github.com/orenlab/codeclone-claude-code) | [Install](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/) |
-| **Codex plugin** | [Codex marketplace](https://github.com/orenlab/codeclone-codex) | [Install](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/) |
-| **Claude Desktop bundle** | [Bundle repository](https://github.com/orenlab/codeclone-claude-desktop) | [Setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/) |
+| Surface                   | Install or source                                                                            | Documentation                                                                                |
+|---------------------------|----------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| **VS Code extension**     | [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone) | [Setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)                |
+| **Cursor plugin**         | [Cursor storefront](https://github.com/orenlab/codeclone-cursor)                             | [Install](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
+| **Claude Code plugin**    | [Claude Code marketplace](https://github.com/orenlab/codeclone-claude-code)                  | [Install](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/)         |
+| **Codex plugin**          | [Codex marketplace](https://github.com/orenlab/codeclone-codex)                              | [Install](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)               |
+| **Claude Desktop bundle** | [Bundle repository](https://github.com/orenlab/codeclone-claude-desktop)                     | [Setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)        |
 
 Every client uses the same `codeclone-mcp` interface and canonical structural facts.
 
 [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/) ·
-[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/)
+[MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/) ·
+[Implementation-context tools](https://orenlab.github.io/codeclone/book/25-mcp-interface/tools/analysis/)
 
 ## Quick workflows
 
@@ -321,31 +324,18 @@ reference, integration setup, and maintainer material:
 - **PyPI:** <https://pypi.org/project/codeclone/>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **Discussions:** <https://github.com/orenlab/codeclone/discussions>
-- **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE)
-  · [MIT documentation license](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT)
-  · [License scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
+- **Licenses:** [MPL-2.0](https://github.com/orenlab/codeclone/blob/main/LICENSE) · [MIT documentation license](https://github.com/orenlab/codeclone/blob/main/LICENSE-MIT) · [License scope map](https://github.com/orenlab/codeclone/blob/main/LICENSES.md)
 
 <!-- Shields -->
-
 [pypi-shield]: https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1
-
 [status-shield]: https://img.shields.io/pypi/status/codeclone?style=flat-square&color=6366f1
-
 [downloads-shield]: https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1
-
 [python-shield]: https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1
-
 [license-shield]: https://img.shields.io/badge/license-MPL--2.0-6366f1?style=flat-square
-
 [tests-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests
-
 [benchmark-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?style=flat-square&label=benchmark
 <!-- Links -->
-
 [pypi-link]: https://pypi.org/project/codeclone/
-
 [license-link]: #license
-
 [tests-link]: https://github.com/orenlab/codeclone/actions/workflows/tests.yml
-
 [benchmark-link]: https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml

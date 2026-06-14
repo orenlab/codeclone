@@ -84,6 +84,10 @@
       "signature": "(self, *, topic: 'HelpTopic', detail: 'HelpDetail' = 'compact') -> 'dict[str, object]'"
     },
     {
+      "name": "get_implementation_context",
+      "signature": "(self, *, root: 'str', paths: 'Sequence[str] | None' = None, symbols: 'Sequence[str] | None' = None, intent_id: 'str | None' = None, changed_scope: 'bool' = False, mode: 'str' = 'implementation', include: 'Sequence[str] | None' = None, depth: 'int' = 1, detail_level: 'str' = 'compact', budget: 'int' = 50, run_id: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "get_production_triage",
       "signature": "(self, *, run_id: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
     },

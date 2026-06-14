@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal, get_args
 
 from pydantic import Field
 
@@ -23,6 +23,73 @@ RunIdParam = Annotated[
 RunIdRequiredParam = Annotated[
     str,
     Field(description="8-char or full run id from analyze response."),
+]
+Facet = Literal[
+    "module_role",
+    "imports",
+    "importers",
+    "callers",
+    "callees",
+    "references",
+    "public_surface",
+    "blast_radius",
+    "tests",
+    "contract_tests",
+    "test_callers",
+    "docs",
+    "memory",
+    "memory_conflicts",
+    "definition_sites",
+    "persistence_path_callers",
+    "serialization_path_callers",
+    "deserialization_path_callers",
+    "store_api_consumers",
+    "scope",
+    "review_context",
+    "baseline_sensitive_findings",
+    "version_constants",
+    "dataflow",
+]
+VALID_FACETS = frozenset(get_args(Facet))
+ContextPathsParam = Annotated[
+    list[str] | None,
+    Field(description="Repo-relative implementation-context subject paths."),
+]
+ContextSymbolsParam = Annotated[
+    list[str] | None,
+    Field(description="Fully-qualified symbols to resolve as context subjects."),
+]
+ChangedScopeParam = Annotated[
+    bool,
+    Field(description="Use the current git-dirty scope as the context subject."),
+]
+ContextModeParam = Annotated[
+    Literal["implementation", "impact", "contract"],
+    Field(description="implementation, impact, or contract context mode."),
+]
+FacetIncludeParam = Annotated[
+    list[Facet] | None,
+    Field(description="Optional closed set of implementation-context facets."),
+]
+ContextDepthParam = Annotated[
+    int,
+    Field(
+        ge=0,
+        le=3,
+        description="Bounded structural traversal depth from 0 through 3.",
+    ),
+]
+ContextDetailLevelParam = Annotated[
+    Literal["compact", "normal", "full"],
+    Field(description="compact, normal, or full context detail level."),
+]
+ContextBudgetParam = Annotated[
+    int,
+    Field(
+        ge=1,
+        le=200,
+        description="Global maximum emitted context entries (1-200).",
+    ),
 ]
 AnalysisModeParam = Annotated[
     str,
@@ -164,8 +231,8 @@ HelpTopicParam = Annotated[
         description=(
             "workflow, analysis_profile, suppressions, baseline, coverage, "
             "latest_runs, review_state, changed_scope, change_control, "
-            "trust_boundaries, engineering_memory, verification_profiles, "
-            "observability"
+            "trust_boundaries, engineering_memory, implementation_context, "
+            "verification_profiles, observability"
         )
     ),
 ]

@@ -146,6 +146,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_run_summary",
         "get_production_triage",
         "get_blast_radius",
+        "get_implementation_context",
         "get_relevant_memory",
         "query_engineering_memory",
         "manage_engineering_memory",
@@ -186,6 +187,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_run_summary",
                 "get_production_triage",
                 "get_blast_radius",
+                "get_implementation_context",
                 "get_relevant_memory",
                 "query_engineering_memory",
                 "check_patch_contract",
@@ -229,6 +231,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
+    assert "bounded implementation context" in str(
+        tools["get_implementation_context"].description
+    )
+    assert "without re-analysis" in str(tools["get_implementation_context"].description)
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
     assert "optional claims" in str(tools["finish_controlled_change"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
@@ -452,6 +458,26 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert blast_radius["radius_level"] in {"low", "medium", "high"}
     assert "review_context" in blast_radius
     assert "do_not_touch_summary" in blast_radius
+
+    implementation_context = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_implementation_context",
+                {
+                    "root": abs_root,
+                    "run_id": run_id,
+                    "paths": ["pkg/dup.py"],
+                    "budget": 20,
+                },
+            )
+        )
+    )
+    assert implementation_context["status"] == "ok"
+    assert implementation_context["mode"] == "implementation"
+    assert "freshness" in cast(
+        "dict[str, object]",
+        implementation_context["analysis"],
+    )
 
     change_intent = _structured_tool_result(
         asyncio.run(

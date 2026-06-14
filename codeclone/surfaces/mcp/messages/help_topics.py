@@ -525,6 +525,53 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "as privileged.",
         ),
     ),
+    "implementation_context": MCPHelpTopicSpec(
+        summary=(
+            "get_implementation_context projects bounded, deterministic context "
+            "from one existing analysis run. It does not re-analyze, authorize "
+            "edits, or replace start_controlled_change."
+        ),
+        key_points=(
+            (
+                "Step 2 resolves explicit repo-relative paths and returns "
+                "established module, import, importer, API-surface, blast-radius, "
+                "cache-origin, and workspace-freshness facts."
+            ),
+            (
+                "analysis.freshness compares the run manifest with live "
+                "mtime+size and, when available, the git DirtySnapshot delta."
+            ),
+            (
+                "context_artifact_digest authenticates the off-report context "
+                "artifact; context_projection_digest authenticates this bounded "
+                "request and response projection."
+            ),
+            (
+                "Unknown facets and paths outside the repository are contract "
+                "errors. Every emitted collection is bounded by one global budget."
+            ),
+            (
+                "Intent overlays, memory fusion, symbol subjects, inferred current "
+                "work, and call/reference evidence are additive later phases."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "get_implementation_context",
+            "start_controlled_change",
+        ),
+        doc_links=(MCP_INTERFACE_DOC_LINK, MCP_GUIDE_DOC_LINK),
+        warnings=(
+            "freshness strength is mtime+size plus optional git delta, not a "
+            "content hash of every source file.",
+            "The tool is context evidence only; edit_allowed remains authoritative.",
+        ),
+        anti_patterns=(
+            "Treating implementation context as edit authorization.",
+            "Ignoring freshness.status=drifted and editing against a stale run.",
+            "Describing unresolved or unavailable relationship evidence as fact.",
+        ),
+    ),
     "observability": MCPHelpTopicSpec(
         summary=(
             "query_platform_observability: read-only, dev-only diagnostics over "

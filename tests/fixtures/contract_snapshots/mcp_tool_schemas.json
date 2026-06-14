@@ -1548,6 +1548,167 @@
     }
   },
   {
+    "name": "get_implementation_context",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative implementation-context subject paths.",
+          "title": "Paths"
+        },
+        "symbols": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Fully-qualified symbols to resolve as context subjects.",
+          "title": "Symbols"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "changed_scope": {
+          "default": false,
+          "description": "Use the current git-dirty scope as the context subject.",
+          "title": "Changed Scope",
+          "type": "boolean"
+        },
+        "mode": {
+          "default": "implementation",
+          "description": "implementation, impact, or contract context mode.",
+          "enum": [
+            "implementation",
+            "impact",
+            "contract"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "include": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "module_role",
+                  "imports",
+                  "importers",
+                  "callers",
+                  "callees",
+                  "references",
+                  "public_surface",
+                  "blast_radius",
+                  "tests",
+                  "contract_tests",
+                  "test_callers",
+                  "docs",
+                  "memory",
+                  "memory_conflicts",
+                  "definition_sites",
+                  "persistence_path_callers",
+                  "serialization_path_callers",
+                  "deserialization_path_callers",
+                  "store_api_consumers",
+                  "scope",
+                  "review_context",
+                  "baseline_sensitive_findings",
+                  "version_constants",
+                  "dataflow"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional closed set of implementation-context facets.",
+          "title": "Include"
+        },
+        "depth": {
+          "default": 1,
+          "description": "Bounded structural traversal depth from 0 through 3.",
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Depth",
+          "type": "integer"
+        },
+        "detail_level": {
+          "default": "compact",
+          "description": "compact, normal, or full context detail level.",
+          "enum": [
+            "compact",
+            "normal",
+            "full"
+          ],
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "budget": {
+          "default": 50,
+          "description": "Global maximum emitted context entries (1-200).",
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Budget",
+          "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "get_implementation_contextArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "get_production_triage",
     "input_schema": {
       "properties": {
@@ -1796,7 +1957,7 @@
     "input_schema": {
       "properties": {
         "topic": {
-          "description": "workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, verification_profiles, observability",
+          "description": "workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, implementation_context, verification_profiles, observability",
           "title": "Topic",
           "type": "string"
         },

@@ -43,6 +43,13 @@ GET_BLAST_RADIUS: Final = (
     "performed."
 )
 
+GET_IMPLEMENTATION_CONTEXT: Final = (
+    "Return deterministic, bounded implementation context from one existing "
+    "analysis run. Step 2 resolves explicit repo-relative paths and projects "
+    "established module, dependency, API-surface, blast-radius, cache-origin, "
+    "and workspace-freshness facts without re-analysis or edit authorization."
+)
+
 GET_RELEVANT_MEMORY: Final = (
     "Return ranked, evidence-linked engineering memory for the declared "
     "edit scope. Requires absolute root (same as analyze_repository). "
@@ -108,7 +115,7 @@ HELP: Final = (
     "anti_patterns; normal adds warnings. Topics: workflow, analysis_profile, "
     "suppressions, baseline, coverage, latest_runs, review_state, "
     "changed_scope, change_control, trust_boundaries, engineering_memory, "
-    "verification_profiles, observability."
+    "implementation_context, verification_profiles, observability."
 )
 
 QUERY_PLATFORM_OBSERVABILITY: Final = (
@@ -285,6 +292,7 @@ TITLE_ANALYZE_CHANGED_PATHS: Final = "Analyze Changed Paths"
 TITLE_GET_RUN_SUMMARY: Final = "Get Run Summary"
 TITLE_GET_PRODUCTION_TRIAGE: Final = "Get Production Triage"
 TITLE_GET_BLAST_RADIUS: Final = "Get Blast Radius"
+TITLE_GET_IMPLEMENTATION_CONTEXT: Final = "Get Implementation Context"
 TITLE_GET_RELEVANT_MEMORY: Final = "Get Relevant Memory"
 TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"
 TITLE_MANAGE_ENGINEERING_MEMORY: Final = "Manage Engineering Memory"

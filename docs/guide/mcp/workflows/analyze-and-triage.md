@@ -63,6 +63,25 @@ analyze_changed_paths(root=<abs>, changed_paths=[...] or git_diff_ref="HEAD~1")
   -> generate_pr_summary
 ```
 
+## Implementation context
+
+After analysis and triage, ask for bounded context around the files you expect
+to inspect:
+
+```
+get_implementation_context(
+  root=<abs>,
+  paths=["codeclone/surfaces/mcp/service.py"],
+  mode="implementation",
+)
+```
+
+The response combines canonical structural facts with a live freshness delta.
+Use `context_artifact_digest` to identify the source context artifact and
+`context_projection_digest` when citing the exact bounded response. If
+`freshness.status` is `drifted`, analyze again. This step informs scope; only
+`start_controlled_change` can return `edit_allowed=true`.
+
     | Tier | Tools | When to use |
     |------|-------|-------------|
     | Normal workflow | `analyze_repository`, `start_controlled_change`, `finish_controlled_change` | Every edit cycle |

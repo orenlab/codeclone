@@ -64,6 +64,12 @@ class _QueryServiceMixin:
     ) -> dict[str, object]:
         return self._run_dict("get_blast_radius", **params)
 
+    def get_implementation_context(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_implementation_context", **params)
+
     def get_workspace_session_stats(
         self: _RunDictService,
         **params: object,
@@ -349,6 +355,19 @@ def _apply_public_method_signatures() -> None:
             _kwonly("run_id", "str | None", None),
             _kwonly("depth", "str", "direct"),
             _kwonly("include", "Sequence[str] | None", None),
+        ),
+        "get_implementation_context": (
+            _kwonly("root", "str"),
+            _kwonly("paths", "Sequence[str] | None", None),
+            _kwonly("symbols", "Sequence[str] | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("changed_scope", "bool", False),
+            _kwonly("mode", "str", "implementation"),
+            _kwonly("include", "Sequence[str] | None", None),
+            _kwonly("depth", "int", 1),
+            _kwonly("detail_level", "str", "compact"),
+            _kwonly("budget", "int", 50),
+            _kwonly("run_id", "str | None", None),
         ),
         "check_patch_contract": (
             _kwonly("mode", "str"),

@@ -40,13 +40,15 @@ Current contract versions:
 - `TRAJECTORY_QUALITY_SCORE_VERSION = "2"` (quality contract formula)
 - `EXPERIENCE_DISTILLATION_VERSION = "experience-v1"` (derived Experience rows)
 - `SEMANTIC_INDEX_FORMAT_VERSION = "2"` (LanceDB sidecar; separate from SQLite memory schema)
-- `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.0"` (dev-only telemetry SQLite)
+- `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.1"` (dev-only telemetry SQLite)
 - `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.2"` (corpus analytics SQLite)
 - `CORPUS_EXPORT_SCHEMA_VERSION = "1.3"` (clustering JSON export)
 - `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION = "1"` (profile manifests)
 - `CORPUS_CONTROL_PLANE_CONTRACT_VERSION = "1.0"` (profile/selection export)
 - `CORPUS_REPRESENTATION_CONTRACT_VERSION = "3"` (intent representation payloads)
 - `CORPUS_EMBEDDING_CONTRACT_VERSION = "2"` (analytics embedding sidecar)
+- `CONTEXT_CONTRACT_VERSION = "1"` (implementation-context payload; subsystem-local)
+- `CALL_RESOLUTION_VERSION = "1"` (implementation-context relationship resolver; subsystem-local)
 
 Refs:
 
@@ -112,6 +114,11 @@ Operational compatibility rules:
 - adding or changing an MCP tool is a package-versioned interface change and
   requires tests, docs, changelog, and tool-schema snapshot updates; it does not
   bump the canonical report schema unless report JSON changes
+- implementation-context payload/resolver changes bump their subsystem-local
+  versions in `codeclone/surfaces/mcp/_implementation_context.py`; the
+  `context_artifact_digest` and `context_projection_digest` use canonical
+  sorted-key JSON and bare-hex SHA-256. Off-report manifests and relationship
+  projections do not bump the report schema.
 
 Baseline regeneration is required when:
 
@@ -144,18 +151,18 @@ Refs:
 
 ## Failure modes
 
-| Change type                    | User impact                                                    |
-|--------------------------------|----------------------------------------------------------------|
-| Baseline schema bump           | Older unsupported baselines become untrusted until regenerated |
-| Fingerprint bump               | Clone IDs change; baseline regeneration required               |
-| Cache schema bump              | Old caches are ignored and rebuilt automatically               |
-| Report schema bump             | Downstream report consumers must update                        |
-| Metrics-baseline schema bump   | Dedicated metrics-baseline files must be regenerated           |
-| Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`           |
-| Semantic index format bump     | LanceDB sidecar invalidated; run `memory semantic rebuild`     |
-| Platform Observability bump    | Local diagnostic store reader/writer must migrate together     |
+| Change type                    | User impact                                                                  |
+|--------------------------------|------------------------------------------------------------------------------|
+| Baseline schema bump           | Older unsupported baselines become untrusted until regenerated               |
+| Fingerprint bump               | Clone IDs change; baseline regeneration required                             |
+| Cache schema bump              | Old caches are ignored and rebuilt automatically                             |
+| Report schema bump             | Downstream report consumers must update                                      |
+| Metrics-baseline schema bump   | Dedicated metrics-baseline files must be regenerated                         |
+| Engineering Memory schema bump | Older DBs migrate or re-init per `schema_migrate.py`                         |
+| Semantic index format bump     | LanceDB sidecar invalidated; run `memory semantic rebuild`                   |
+| Platform Observability bump    | Local diagnostic store reader/writer must migrate together                   |
 | Corpus analytics store bump    | Writable open migrates supported stores; read-only open rejects stale schema |
-| Corpus embedding contract bump | Existing generations must be regenerated before clustering     |
+| Corpus embedding contract bump | Existing generations must be regenerated before clustering                   |
 
 ## Determinism / canonicalization
 

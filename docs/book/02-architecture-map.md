@@ -21,7 +21,8 @@ Main ownership layers:
 - Baseline/cache persistence contracts
 - Canonical report document and deterministic projections
 - HTML render-only surface
-- Read-only MCP surface with structural change control and claim validation
+- Read-only MCP surface with implementation context, structural change control,
+  and claim validation
 - IDE/client surfaces over MCP
 
 ## Data model
@@ -41,10 +42,10 @@ Main ownership layers:
 | Canonical report        | `codeclone/report/document/*`, `codeclone/report/gates/*`, `codeclone/report/*.py`                                                                               | Canonical report payload, derived projections, explainability, suggestions, gate reasons                                                                                                                                                |
 | Deterministic renderers | `codeclone/report/renderers/*`                                                                                                                                   | Text/Markdown/SARIF/JSON projections over the canonical report                                                                                                                                                                          |
 | HTML render layer       | `codeclone/report/html/*`                                                                                                                                        | Render-only HTML view over canonical report/meta facts                                                                                                                                                                                  |
-| MCP surface             | `codeclone/surfaces/mcp/*`, `codeclone/surfaces/mcp/messages/*`                                                                                                  | Read-only MCP tools/resources, change-control projections, Engineering Memory retrieval/governance, dev-only Platform Observability slices, and centralized agent-facing copy                                                           |
+| MCP surface             | `codeclone/surfaces/mcp/*`, `codeclone/surfaces/mcp/messages/*`                                                                                                  | Read-only MCP tools/resources, run-bound implementation-context projections, change-control projections, Engineering Memory retrieval/governance, dev-only Platform Observability slices, and centralized agent-facing copy             |
 | Engineering Memory      | `codeclone/memory/*`, `codeclone/config/memory*.py`                                                                                                              | Local SQLite store, scoped retrieval, semantic sidecar, trajectory + Patch Trail projection, Experience distillation, coalesced rebuild jobs, staleness, governance, and CLI/MCP surfaces over deterministic report/git/doc/audit facts |
 | Platform Observability  | `codeclone/observability/*`                                                                                                                                      | Opt-in operation/span telemetry, local SQLite store, bounded MCP slicer, and CLI JSON/HTML diagnostics; never analysis truth or a gate input                                                                                            |
-| Corpus Analytics        | `codeclone/analytics/*`, `codeclone/config/analytics.py`                                                                                                         | Optional offline intent corpus clustering (`codeclone[analytics]`); audit/trajectory ingestion, separate analytics embeddings, SQLite + LanceDB under `.codeclone/analytics/`; never report/gate/memory authority                      |
+| Corpus Analytics        | `codeclone/analytics/*`, `codeclone/config/analytics.py`                                                                                                         | Optional offline intent corpus clustering (`codeclone[analytics]`); audit/trajectory ingestion, separate analytics embeddings, SQLite + LanceDB under `.codeclone/analytics/`; never report/gate/memory authority                       |
 | Controller insights     | `codeclone/controller_insights/*`                                                                                                                                | Shared session-stats and audit-trail payloads for CLI `--session-stats` / `--audit` and IDE-only MCP `get_workspace_session_stats` / `get_controller_audit_trail`                                                                       |
 | Audit trail             | `codeclone/audit/*`                                                                                                                                              | Optional controller event and MCP payload footprint recording under `.codeclone/db/` when enabled                                                                                                                                       |
 | Client surfaces         | `extensions/vscode-codeclone/*`, `extensions/claude-desktop-codeclone/*`, `plugins/codeclone/*`, `plugins/cursor-codeclone/*`, `plugins/claude-code-codeclone/*` | Native clients/install surfaces over `codeclone-mcp`                                                                                                                                                                                    |
@@ -66,8 +67,10 @@ Refs:
 - Baseline and cache are persistence contracts, not analysis truth.
 - Cache is optimization-only and fail-open.
 - MCP is read-only and must not create a second analysis truth path. Change
-  control and claim guard are projections over stored run/report semantics, not
-  new analyzers.
+  control, implementation context, and claim guard are projections over stored
+  run/report semantics, not new analyzers. Implementation-context manifests and
+  future relationship adjacency remain in-memory/off-report and cannot change
+  canonical report identity.
 - VS Code, Claude Desktop, Claude Code, Codex, and Cursor surfaces are clients
   over MCP, not second analyzers.
 

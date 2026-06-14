@@ -39,10 +39,13 @@ graph LR
         T["Transport<br/><small>stdio · streamable-http</small>"]
         SVC["Service<br/><small>tool routing, shutdown</small>"]
         SESS["Session<br/><small>runs, intents, markers</small>"]
+        CTX["Implementation context<br/><small>bounded · drift-aware</small>"]
     end
 
     T --> SVC --> SESS
     SESS -->|" reads "| RP["Canonical Report"]
+    SESS --> CTX
+    CTX -->|" binds "| RP
     SESS -->|" writes "| WIR["Workspace intents<br/>file or sqlite backend"]
     style Server stroke: #6366f1, stroke-width: 2px
     style WIR fill: #fef9c3
@@ -92,6 +95,8 @@ Current server characteristics:
 - Change intent, blast-radius cache, and workspace registry state do not
   enter canonical report integrity, baseline, or cache artifacts.
 - Run history is process-local and does not survive restart.
+- `get_implementation_context` reads one existing run and reports live
+  workspace drift; it never auto-analyzes or authorizes an edit.
 - MCP accepts cache policies `reuse` and `off`; `refresh` is rejected at runtime.
 - Missing optional MCP dependency is surfaced explicitly by the launcher.
 - `metrics_detail(family="security_surfaces")` exposes a compact, report-only
@@ -104,11 +109,11 @@ Current server characteristics:
 
 ## Tools
 
-Current tool set: **32 tools** for agent clients, organized by workflow phase.
+Current tool set: **33 tools** for agent clients, organized by workflow phase.
 
 When the MCP server starts with `--ide-governance-channel` (CodeClone VS Code
 extension), two additional read-only tools register:
-`get_workspace_session_stats` and `get_controller_audit_trail` (**34 tools**
+`get_workspace_session_stats` and `get_controller_audit_trail` (**35 tools**
 total). They are not listed in generic agent tool catalogs; payloads mirror CLI
 `--session-stats` and `--audit` via `codeclone/controller_insights/`.
 
@@ -117,9 +122,10 @@ graph LR
     A["1. Analyze"] --> T["2. Triage"]
     T --> D["3. Drill down"]
     T --> F["4. Focused checks"]
-    D --> CC["5. Change control"]
-    F --> CC
-    CC --> S["6. Session"]
+    D --> C["5. Implementation context"]
+    F --> C
+    C --> CC["6. Change control"]
+    CC --> S["7. Session"]
     style A fill: #dbeafe
     style T fill: #dbeafe
     style CC fill: #f0fdf4

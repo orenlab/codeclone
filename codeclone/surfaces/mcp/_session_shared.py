@@ -135,6 +135,7 @@ HelpTopic = Literal[
     "change_control",
     "trust_boundaries",
     "engineering_memory",
+    "implementation_context",
     "verification_profiles",
 ]
 HelpDetail = Literal["compact", "normal"]
@@ -252,6 +253,7 @@ _VALID_HELP_TOPICS = frozenset(
         "trust_boundaries",
         "observability",
         "engineering_memory",
+        "implementation_context",
         "verification_profiles",
     }
 )
