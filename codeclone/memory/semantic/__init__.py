@@ -10,6 +10,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
+from .chunking import (
+    SEMANTIC_CHUNK_STRATEGY_VERSION,
+    collapse_trajectory_hits,
+    expand_projection,
+    resolve_passage_chunker,
+    trajectory_chunk_row_id,
+)
 from .models import (
     SemanticHit,
     SemanticIndexStatus,
@@ -179,6 +186,7 @@ def _resolve_backend(
 __all__ = [
     "INDEXED_AUDIT_EVENTS",
     "INDEXED_MEMORY_TYPES",
+    "SEMANTIC_CHUNK_STRATEGY_VERSION",
     "AuditIndexSource",
     "IndexSource",
     "MemoryIndexSource",
@@ -196,14 +204,18 @@ __all__ = [
     "UnavailableSemanticIndex",
     "build_semantic_index_sources",
     "close_semantic_index",
+    "collapse_trajectory_hits",
     "execute_semantic_index_rebuild",
+    "expand_projection",
     "is_indexed_audit_event",
     "is_indexed_memory_type",
     "project_audit_event",
     "project_memory_record",
     "project_trajectory",
     "rebuild_semantic_index",
+    "resolve_passage_chunker",
     "resolve_semantic_index",
     "resolve_semantic_index_writer",
     "text_hash",
+    "trajectory_chunk_row_id",
 ]

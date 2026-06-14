@@ -37,12 +37,17 @@ class SemanticRow(BaseModel):
 
     The final record/event is always re-loaded from SQLite / the audit DB;
     this row only carries the vector and the filter/identity columns.
+    Trajectory rows may be chunked: ``parent_id`` points at the trajectory id
+    while ``id`` is the chunk row id.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str = Field(min_length=1)
     source: SemanticSource
+    parent_id: str | None = None
+    chunk_index: int | None = None
+    chunk_count: int | None = None
     project_id: str | None = None
     subject_path: str | None = None
     kind: str = Field(min_length=1)
@@ -74,6 +79,9 @@ class SemanticHit(BaseModel):
     source_id: str = Field(min_length=1)
     source: SemanticSource
     score: float
+    parent_id: str | None = None
+    chunk_index: int | None = None
+    chunk_count: int | None = None
 
 
 class SemanticIndexStatus(BaseModel):

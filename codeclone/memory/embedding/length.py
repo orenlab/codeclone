@@ -46,6 +46,18 @@ class TokenOverflowStats:
     max_overflow_tokens: int
 
 
+@dataclass(frozen=True, slots=True)
+class PassageTokenCounts:
+    raw: int
+    effective: int
+
+
+@dataclass(frozen=True, slots=True)
+class TruncationStats:
+    documents: int
+    max_dropped_tokens: int
+
+
 @runtime_checkable
 class TokenEstimatingProvider(Protocol):
     """Optional provider surface for batch planning and projection probes."""
@@ -53,6 +65,35 @@ class TokenEstimatingProvider(Protocol):
     def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]: ...
 
     def max_sequence_tokens(self) -> int | None: ...
+
+
+@runtime_checkable
+class ProjectionTokenProber(Protocol):
+    """Probe surface for semantic projection length measurement."""
+
+    def probe_passage_token_counts(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[PassageTokenCounts, ...]: ...
+
+    def max_sequence_tokens(self) -> int | None: ...
+
+    @property
+    def estimator_label(self) -> str: ...
+
+
+def truncation_stats(
+    raw_counts: Sequence[int],
+    effective_counts: Sequence[int],
+) -> TruncationStats:
+    documents = 0
+    max_dropped = 0
+    for raw, effective in zip(raw_counts, effective_counts, strict=True):
+        dropped = raw - effective
+        if dropped > 0:
+            documents += 1
+            max_dropped = max(max_dropped, dropped)
+    return TruncationStats(documents=documents, max_dropped_tokens=max_dropped)
 
 
 def estimate_tokens_from_chars(char_count: int) -> int:
@@ -133,6 +174,13 @@ class PlanningTextTokenEstimator:
     def max_sequence_tokens(self) -> int | None:
         return self.model_max_tokens
 
+    def probe_passage_token_counts(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[PassageTokenCounts, ...]:
+        counts = self.estimate_token_counts(texts)
+        return tuple(PassageTokenCounts(raw=count, effective=count) for count in counts)
+
     @property
     def estimator_label(self) -> str:
         return self.mode
@@ -172,9 +220,12 @@ def estimate_document_tokens(
 
 __all__ = [
     "LengthDistribution",
+    "PassageTokenCounts",
     "PlanningTextTokenEstimator",
+    "ProjectionTokenProber",
     "TokenEstimatingProvider",
     "TokenOverflowStats",
+    "TruncationStats",
     "estimate_char_counts",
     "estimate_document_tokens",
     "estimate_token_counts_from_chars",
@@ -184,4 +235,5 @@ __all__ = [
     "resolve_semantic_model_max_tokens",
     "resolve_token_estimator",
     "token_overflow_stats",
+    "truncation_stats",
 ]

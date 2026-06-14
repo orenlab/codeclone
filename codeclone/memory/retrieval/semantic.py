@@ -14,6 +14,11 @@ from typing import TYPE_CHECKING, Protocol, cast
 from ...audit.schema import open_audit_db_readonly
 from ...audit.validation import AuditSchemaError
 from ..embedding import embed_query
+from ..semantic.chunking import (
+    TRAJECTORY_SEARCH_OVERSAMPLE,
+    collapse_trajectory_hits,
+    trajectory_parent_id,
+)
 from ..semantic.models import SemanticSearchResult
 
 if TYPE_CHECKING:
@@ -47,7 +52,17 @@ def semantic_search(
     """
     vector = embed_query(provider, query)
     results: list[SemanticSearchResult] = []
-    for hit in index.search(vector, k=limit):
+    memory_hits = list(index.search(vector, k=limit, source="memory"))
+    audit_hits = list(index.search(vector, k=limit, source="audit"))
+    trajectory_raw = list(
+        index.search(
+            vector,
+            k=max(limit, limit * TRAJECTORY_SEARCH_OVERSAMPLE),
+            source="trajectory",
+        )
+    )
+    trajectory_hits = collapse_trajectory_hits(trajectory_raw, k=limit)
+    for hit in [*memory_hits, *audit_hits, *trajectory_hits]:
         if hit.source == "memory":
             hydrated = (
                 _hydrate_memory(hit, store, preview_chars)
@@ -111,12 +126,13 @@ def _hydrate_trajectory(
     if not callable(find_trajectory):
         return None
     typed_find = cast("Callable[[str], Trajectory | None]", find_trajectory)
-    trajectory = typed_find(hit.source_id)
+    trajectory_id = trajectory_parent_id(hit)
+    trajectory = typed_find(trajectory_id)
     if trajectory is None:
         return None
     return SemanticSearchResult(
         source="trajectory",
-        source_id=hit.source_id,
+        source_id=trajectory_id,
         score=hit.score,
         kind="trajectory",
         status=trajectory.outcome,

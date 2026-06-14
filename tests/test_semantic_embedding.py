@@ -32,6 +32,7 @@ class _FakeTextEmbedding:
         vector_value: float = 1.0,
         vectors: list[object] | None = None,
         raise_on_embed: bool = False,
+        inner_model: object | None = None,
     ) -> None:
         self.model_name = model_name
         self.cache_dir = cache_dir
@@ -40,6 +41,7 @@ class _FakeTextEmbedding:
         self.vectors = vectors
         self.raise_on_embed = raise_on_embed
         self.inputs: list[str] = []
+        self.model = inner_model or SimpleNamespace(tokenizer=None)
 
     def embed(self, texts: list[str]) -> list[object]:
         if self.raise_on_embed:
@@ -58,6 +60,7 @@ def _install_fake_fastembed(
     raise_on_init: bool = False,
     raise_on_embed: bool = False,
     expose_text_embedding: bool = True,
+    inner_model: object | None = None,
 ) -> list[_FakeTextEmbedding]:
     import importlib
 
@@ -87,6 +90,7 @@ def _install_fake_fastembed(
                     vector_value=vector_value,
                     vectors=vectors,
                     raise_on_embed=raise_on_embed,
+                    inner_model=inner_model,
                 )
                 created.append(self)
 
@@ -94,6 +98,33 @@ def _install_fake_fastembed(
 
     monkeypatch.setattr(importlib, "import_module", _fake_import_module)
     return created
+
+
+def _resolve_fastembed_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    inner_model: object | None = None,
+    vector_value: float = 1.0,
+    vectors: list[object] | None = None,
+    raise_on_init: bool = False,
+    raise_on_embed: bool = False,
+    expose_text_embedding: bool = True,
+) -> tuple[Any, list[_FakeTextEmbedding]]:
+    from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
+
+    created = _install_fake_fastembed(
+        monkeypatch,
+        vector_value=vector_value,
+        vectors=vectors,
+        raise_on_init=raise_on_init,
+        raise_on_embed=raise_on_embed,
+        expose_text_embedding=expose_text_embedding,
+        inner_model=inner_model,
+    )
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+    return provider, created
 
 
 def test_deterministic_embedding_is_stable_and_correct_dimension() -> None:
@@ -337,3 +368,215 @@ def test_fastembed_max_sequence_tokens_without_model_load(
     assert isinstance(provider, FastEmbedEmbeddingProvider)
 
     assert provider.max_sequence_tokens() == 512
+
+
+class _FakeEncoding:
+    def __init__(self, length: int) -> None:
+        self.ids = list(range(length))
+
+
+class _FakeTokenizer:
+    def __init__(self) -> None:
+        self._truncated = True
+        self.truncation = SimpleNamespace(max_length=512)
+
+    def no_truncation(self) -> None:
+        self._truncated = False
+
+    def enable_truncation(self, *, max_length: int) -> None:
+        self._truncated = True
+        self.truncation = SimpleNamespace(max_length=max_length)
+
+    def encode(self, text: str, *, add_special_tokens: bool) -> _FakeEncoding:
+        return self.encode_batch([text])[0]
+
+    def decode(self, ids: list[int]) -> str:
+        return "x" * len(ids)
+
+    def encode_batch(self, texts: list[str]) -> list[_FakeEncoding]:
+        length = 512 if self._truncated else 1000
+        return [_FakeEncoding(length) for _ in texts]
+
+
+class _FakeInnerModel:
+    def __init__(self) -> None:
+        self.tokenizer = _FakeTokenizer()
+
+    def tokenize(self, documents: list[str]) -> list[_FakeEncoding]:
+        return self.tokenizer.encode_batch(documents)
+
+
+def test_fastembed_probe_passage_token_counts_reports_raw_and_effective(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=_FakeInnerModel(),
+    )
+    assert provider.estimator_label == "fastembed_tokenizer"
+
+    (counts,) = provider.probe_passage_token_counts(["x" * 4000])
+    assert counts.raw == 1000
+    assert counts.effective == 512
+    assert created
+
+
+def test_fastembed_chunk_text_splits_long_document(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _WindowEncoding:
+        def __init__(self, length: int) -> None:
+            self.ids = list(range(length))
+
+    class _ChunkTokenizer:
+        _SPECIAL_TOKENS = 2
+
+        def __init__(self) -> None:
+            self._truncated = True
+            self.truncation = SimpleNamespace(max_length=512)
+
+        def no_truncation(self) -> None:
+            self._truncated = False
+
+        def enable_truncation(self, *, max_length: int) -> None:
+            self._truncated = True
+            self.truncation = SimpleNamespace(max_length=max_length)
+
+        def encode(self, text: str, *, add_special_tokens: bool) -> _WindowEncoding:
+            content_tokens = len(text)
+            if add_special_tokens:
+                return _WindowEncoding(content_tokens + self._SPECIAL_TOKENS)
+            return _WindowEncoding(content_tokens)
+
+        def decode(self, ids: list[int]) -> str:
+            return f"chunk-{len(ids)}"
+
+    class _ChunkInnerModel:
+        def __init__(self) -> None:
+            self.tokenizer = _ChunkTokenizer()
+
+        def tokenize(self, documents: list[str]) -> list[_WindowEncoding]:
+            return [
+                self.tokenizer.encode(document, add_special_tokens=True)
+                for document in documents
+            ]
+
+    provider, created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=_ChunkInnerModel(),
+    )
+    chunks = provider.chunk_text("x" * 4000)
+    assert len(chunks) == 8
+    assert chunks[0] == "chunk-501"
+    assert chunks[-1] == "chunk-493"
+    assert sum(int(chunk.removeprefix("chunk-")) for chunk in chunks) == 4000
+    assert created
+
+
+class _PassageBoundaryTokenizer:
+    SPECIAL_TOKENS = 2
+
+    def __init__(self) -> None:
+        self._truncated = True
+        self.truncation = SimpleNamespace(max_length=512)
+
+    def no_truncation(self) -> None:
+        self._truncated = False
+
+    def enable_truncation(self, *, max_length: int) -> None:
+        self._truncated = True
+        self.truncation = SimpleNamespace(max_length=max_length)
+
+    def encode(self, text: str, *, add_special_tokens: bool) -> _FakeEncoding:
+        content_tokens = len(text.encode("utf-8"))
+        if add_special_tokens:
+            return _FakeEncoding(content_tokens + self.SPECIAL_TOKENS)
+        return _FakeEncoding(content_tokens)
+
+    def decode(self, ids: list[int]) -> str:
+        return "a" * len(ids)
+
+
+def _boundary_fastembed_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Any, list[_FakeTextEmbedding]]:
+    class _BoundaryInnerModel:
+        def __init__(self) -> None:
+            self.tokenizer = _PassageBoundaryTokenizer()
+
+        def tokenize(self, documents: list[str]) -> list[_FakeEncoding]:
+            return [
+                self.tokenizer.encode(document, add_special_tokens=True)
+                for document in documents
+            ]
+
+    return _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=_BoundaryInnerModel(),
+    )
+
+
+@pytest.mark.parametrize(
+    ("content_len", "expected_chunks"),
+    [
+        (499, 1),
+        (500, 1),
+        (501, 1),
+        (502, 2),
+        (503, 2),
+    ],
+)
+def test_passage_chunk_boundary_token_counts(
+    monkeypatch: pytest.MonkeyPatch,
+    content_len: int,
+    expected_chunks: int,
+) -> None:
+    provider, _created = _boundary_fastembed_provider(monkeypatch)
+    text = "a" * content_len
+    chunks = provider.chunk_text(text)
+    assert len(chunks) == expected_chunks
+    tokenizer = _PassageBoundaryTokenizer()
+    for chunk in chunks:
+        raw = len(tokenizer.encode(f"passage: {chunk}", add_special_tokens=True).ids)
+        assert raw <= 512
+
+
+def test_passage_chunks_cover_every_source_token_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.semantic.chunking import expand_projection
+    from codeclone.memory.semantic.models import SemanticProjection
+    from codeclone.memory.semantic.projection import text_hash
+
+    provider, _created = _boundary_fastembed_provider(monkeypatch)
+    text = "/repo/codeclone/memory/semantic/chunking.py - " + ("x" * 1200)
+    tokenizer = _PassageBoundaryTokenizer()
+    source_token_count = len(tokenizer.encode(text, add_special_tokens=False).ids)
+    chunks = provider.chunk_text(text)
+    chunk_token_counts = [
+        len(tokenizer.encode(chunk, add_special_tokens=False).ids) for chunk in chunks
+    ]
+    assert sum(chunk_token_counts) == source_token_count
+    assert all(count <= 501 for count in chunk_token_counts)
+    projection = SemanticProjection(
+        source="trajectory",
+        source_id="traj-1",
+        kind="trajectory",
+        text=text,
+        text_hash=text_hash(text),
+    )
+    units = expand_projection(projection, provider)
+    assert len(units) > 1
+    assert all(
+        len(tokenizer.encode(f"passage: {unit.text}", add_special_tokens=True).ids)
+        <= 512
+        for unit in units
+    )
+
+
+def test_passage_chunk_boundaries_are_deterministic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, _created = _boundary_fastembed_provider(monkeypatch)
+    text = "deterministic " * 400
+    assert provider.chunk_text(text) == provider.chunk_text(text)

@@ -10,18 +10,20 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
-from ...config.memory import MemoryConfig
+from ...config.memory import MemoryConfig, SemanticConfig
 from ...observability import SpanHandle, is_observability_enabled, span
 from ...observability.reason_kind import ReasonKind
 from ..embedding import resolve_embedding_provider
 from ..embedding.batching import EmbedBatchLimits
 from ..embedding.length import (
+    ProjectionTokenProber,
     resolve_planning_token_estimator,
 )
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
 from ..sqlite_store import SqliteEngineeringMemoryStore
+from .chunking import PassageChunker, resolve_passage_chunker
 from .projection_probe import SemanticProjectionProbePayload, probe_semantic_projections
 from .rebuild import RebuildReport, rebuild_semantic_index
 from .sources import (
@@ -263,6 +265,7 @@ def execute_semantic_projection_probe(
     config: MemoryConfig,
     store: SqliteEngineeringMemoryStore | None = None,
     project: MemoryProject | None = None,
+    exact_tokens: bool = False,
 ) -> SemanticProjectionProbePayload | dict[str, object]:
     """Measure semantic projection length distribution per lane without embedding."""
     if not config.semantic.enabled:
@@ -271,7 +274,14 @@ def execute_semantic_projection_probe(
             "status": "skipped",
             "reason": "disabled",
         }
-    token_estimator = resolve_planning_token_estimator(config.semantic)
+    token_prober = _resolve_projection_token_prober(
+        config.semantic,
+        exact_tokens=exact_tokens,
+    )
+    passage_chunker = _resolve_projection_passage_chunker(
+        config.semantic,
+        exact_tokens=exact_tokens,
+    )
     owns_store = store is None
     active_store = store
     try:
@@ -292,11 +302,35 @@ def execute_semantic_projection_probe(
                 store=active_store,
                 project=resolved_project,
             ),
-            token_estimator=token_estimator,
+            token_prober=token_prober,
+            passage_chunker=passage_chunker,
         )
     finally:
         if owns_store and active_store is not None:
             active_store.close()
+
+
+def _resolve_projection_token_prober(
+    config: SemanticConfig,
+    *,
+    exact_tokens: bool = False,
+) -> ProjectionTokenProber:
+    if exact_tokens and config.embedding_provider == "fastembed":
+        provider = resolve_embedding_provider(config)
+        if isinstance(provider, ProjectionTokenProber):
+            return provider
+    return resolve_planning_token_estimator(config)
+
+
+def _resolve_projection_passage_chunker(
+    config: SemanticConfig,
+    *,
+    exact_tokens: bool = False,
+) -> PassageChunker | None:
+    if not exact_tokens or config.embedding_provider != "fastembed":
+        return None
+    provider = resolve_embedding_provider(config)
+    return resolve_passage_chunker(provider)
 
 
 __all__ = [

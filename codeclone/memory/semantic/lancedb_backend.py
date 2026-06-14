@@ -93,6 +93,9 @@ def _schema(pa: ModuleType, dimension: int) -> object:
         [
             pa.field("id", pa.string()),
             pa.field("source", pa.string()),
+            pa.field("parent_id", pa.string()),
+            pa.field("chunk_index", pa.int32()),
+            pa.field("chunk_count", pa.int32()),
             pa.field("project_id", pa.string()),
             pa.field("subject_path", pa.string()),
             pa.field("kind", pa.string()),
@@ -104,10 +107,29 @@ def _schema(pa: ModuleType, dimension: int) -> object:
     )
 
 
+def _schema_matches(table: _LanceTable, *, dimension: int) -> bool:
+    try:
+        vector_type = table.schema.field("vector").type
+        parent_field = table.schema.field("parent_id")
+        chunk_index_field = table.schema.field("chunk_index")
+        chunk_count_field = table.schema.field("chunk_count")
+    except (AttributeError, KeyError, ValueError):
+        return False
+    return (
+        getattr(vector_type, "list_size", None) == dimension
+        and parent_field is not None
+        and chunk_index_field is not None
+        and chunk_count_field is not None
+    )
+
+
 def _to_record(row: SemanticRow) -> dict[str, object]:
     return {
         "id": row.id,
         "source": row.source,
+        "parent_id": row.parent_id,
+        "chunk_index": row.chunk_index,
+        "chunk_count": row.chunk_count,
         "project_id": row.project_id,
         "subject_path": row.subject_path,
         "kind": row.kind,
@@ -116,6 +138,20 @@ def _to_record(row: SemanticRow) -> dict[str, object]:
         "embedding_model": row.embedding_model,
         "vector": list(row.vector),
     }
+
+
+def _optional_int(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    return int(str(value))
+
+
+def _optional_str(value: object) -> str | None:
+    if value is None:
+        return None
+    return str(value)
 
 
 def _sql_quote(value: str) -> str:
@@ -156,7 +192,7 @@ class LanceDbSemanticIndex:
             if create:
                 return self._create_table()
             return None
-        if self._schema_matches(table):
+        if _schema_matches(table, dimension=self._dimension):
             return table
         self._unavailable_reason = _SCHEMA_MISMATCH_REASON
         if not create:
@@ -179,11 +215,7 @@ class LanceDbSemanticIndex:
         )
 
     def _schema_matches(self, table: _LanceTable) -> bool:
-        try:
-            vector_type = table.schema.field("vector").type
-        except (AttributeError, KeyError, ValueError):
-            return False
-        return getattr(vector_type, "list_size", None) == self._dimension
+        return _schema_matches(table, dimension=self._dimension)
 
     def search(
         self, vector: Sequence[float], *, k: int, source: SemanticSource | None = None
@@ -201,6 +233,9 @@ class LanceDbSemanticIndex:
                 SemanticHit(
                     source_id=str(row["id"]),
                     source=cast(SemanticSource, str(row["source"])),
+                    parent_id=_optional_str(row.get("parent_id")),
+                    chunk_index=_optional_int(row.get("chunk_index")),
+                    chunk_count=_optional_int(row.get("chunk_count")),
                     # lancedb returns L2 _distance (smaller is closer); map to a
                     # bounded proximity score where higher means more similar.
                     score=1.0 / (1.0 + _as_float(distance)),

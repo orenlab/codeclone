@@ -321,6 +321,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sem_probe.add_argument(
         "--json", action="store_true", help="Emit probe payload as JSON."
     )
+    sem_probe.add_argument(
+        "--exact-tokens",
+        action="store_true",
+        help=(
+            "Measure raw/effective token counts via the embedding model tokenizer "
+            "(loads FastEmbed when configured)."
+        ),
+    )
 
     trajectory_parser = subparsers.add_parser(
         "trajectory",
@@ -1330,7 +1338,11 @@ def _run_semantic_probe(
 ) -> int:
     config = resolve_memory_config(root_path)
     try:
-        payload = execute_semantic_projection_probe(root_path=root_path, config=config)
+        payload = execute_semantic_projection_probe(
+            root_path=root_path,
+            config=config,
+            exact_tokens=bool(getattr(args, "exact_tokens", False)),
+        )
     except MemoryContractError as exc:
         console.print(str(exc))
         console.print("Run: codeclone memory init")
@@ -1360,14 +1372,29 @@ def _run_semantic_probe(
         chars = stats.get("chars", {})
         tokens = stats.get("tokens", {})
         overflow = stats.get("token_overflow", {})
+        truncation = stats.get("truncation", {})
+        raw_tokens = tokens.get("raw", {}) if isinstance(tokens, dict) else {}
+        effective_tokens = (
+            tokens.get("effective", {}) if isinstance(tokens, dict) else {}
+        )
         console.print(f"  {lane}: {stats.get('documents', 0)} documents")
         console.print(
             "    chars p50/p95/max: "
             f"{chars.get('p50')}/{chars.get('p95')}/{chars.get('max')}"
         )
         console.print(
-            "    tokens p50/p95/max: "
-            f"{tokens.get('p50')}/{tokens.get('p95')}/{tokens.get('max')}"
+            "    raw tokens p50/p95/max: "
+            f"{raw_tokens.get('p50')}/{raw_tokens.get('p95')}/{raw_tokens.get('max')}"
+        )
+        console.print(
+            "    effective tokens p50/p95/max: "
+            f"{effective_tokens.get('p50')}/{effective_tokens.get('p95')}/"
+            f"{effective_tokens.get('max')}"
+        )
+        console.print(
+            "    truncated: "
+            f"{truncation.get('documents', 0)} "
+            f"(max_dropped={truncation.get('max_dropped_tokens', 0)})"
         )
         console.print(
             "    over_model_limit: "

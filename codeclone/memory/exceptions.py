@@ -36,6 +36,10 @@ class MemorySemanticUnavailableError(MemoryError):
     """
 
 
+class SemanticChunkingInvariantError(MemoryContractError):
+    """Raised when passage model input still exceeds the token window after chunking."""
+
+
 __all__ = [
     "MemoryCapacityError",
     "MemoryContractError",
@@ -43,4 +47,5 @@ __all__ = [
     "MemoryInitLockError",
     "MemorySchemaError",
     "MemorySemanticUnavailableError",
+    "SemanticChunkingInvariantError",
 ]

@@ -853,11 +853,33 @@ Migration path: `codeclone/memory/schema_migrate.py`.
 See [Engineering Memory](../13-engineering-memory/index.md) for lifecycle and agent
 surfaces.
 
-## Semantic index sidecar (format `1`)
+## Semantic index sidecar (format `2`)
 
 Optional LanceDB directory (default `.codeclone/memory/semantic_index.lance`).
 Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`1`**).
+`codeclone/contracts/__init__.py` (currently **`2`**).
+
+Table columns (PyArrow):
+
+| Column             | Type            | Notes                                              |
+|--------------------|-----------------|----------------------------------------------------|
+| `id`               | string          | Row id; chunk rows use `trajectory:{id}:chunk:NNN` |
+| `source`           | string          | `memory` / `audit` / `trajectory`                  |
+| `parent_id`        | string (nullable) | Trajectory id for chunk rows; null for single-row  |
+| `chunk_index`      | int32 (nullable)  | Zero-based chunk index                             |
+| `chunk_count`      | int32 (nullable)  | Total chunks for the parent trajectory              |
+| `project_id`       | string          |                                                    |
+| `subject_path`     | string          |                                                    |
+| `kind`             | string          |                                                    |
+| `status`           | string          |                                                    |
+| `text_hash`        | string          | Chunk text hash (idempotent upsert key)            |
+| `embedding_model`  | string          |                                                    |
+| `vector`           | float32 list    | Fixed embedding dimension                          |
+
+Trajectory projections longer than the embedding model window are split into
+deterministic token-aligned chunks (strategy version
+`SEMANTIC_CHUNK_STRATEGY_VERSION` in `codeclone/memory/semantic/chunking.py`).
+Retrieval collapses chunk hits to one score per parent trajectory.
 
 - **Not** governed by `ENGINEERING_MEMORY_SCHEMA_VERSION` — bumping memory SQLite
   schema does not automatically invalidate the vector sidecar.

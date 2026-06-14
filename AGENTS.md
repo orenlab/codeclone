@@ -260,7 +260,7 @@ doc.** Current central values (verified at write time):
 | `REPORT_SCHEMA_VERSION`                 | `2.11`          |
 | `METRICS_BASELINE_SCHEMA_VERSION`       | `1.2`           |
 | `ENGINEERING_MEMORY_SCHEMA_VERSION`     | `1.6`           |
-| `SEMANTIC_INDEX_FORMAT_VERSION`         | `1`             |
+| `SEMANTIC_INDEX_FORMAT_VERSION`         | `2`             |
 | `PATCH_TRAIL_SCHEMA_VERSION`            | `1`             |
 | `PLATFORM_OBSERVABILITY_SCHEMA_VERSION` | `1.0`           |
 | `TRAJECTORY_PROJECTION_VERSION`         | `trajectory-v3` |

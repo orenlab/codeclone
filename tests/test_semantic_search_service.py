@@ -193,10 +193,10 @@ def test_semantic_hits_searches_each_source_with_its_own_budget() -> None:
         k=7,
     )
 
-    # Each lane is searched independently with the full k budget, so a dense
-    # source (e.g. audit) cannot crowd another lane out of one shared top-k.
+    # Each lane is searched independently. Trajectory oversamples before
+    # parent collapse so chunk rows do not under-fill the lane budget.
     assert len(captured) == 3
-    assert dict(captured) == {"memory": 7, "audit": 7, "trajectory": 7}
+    assert dict(captured) == {"memory": 7, "audit": 7, "trajectory": 28}
     assert proximity == {}
     assert audit_hits == []
     assert trajectory_hits == []

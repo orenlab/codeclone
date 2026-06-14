@@ -27,6 +27,11 @@ from ..paths import (
     subject_matches_scope,
 )
 from ..search_index import SearchMatchMode
+from ..semantic.chunking import (
+    TRAJECTORY_SEARCH_OVERSAMPLE,
+    collapse_trajectory_hits,
+    trajectory_parent_id,
+)
 from ..sqlite_store import SqliteEngineeringMemoryStore
 from ..status_report import build_memory_status_report
 from ..trajectory.analytics import (
@@ -1312,7 +1317,12 @@ def _semantic_hits(
     for hit in index.search(vector, k=k, source="memory"):
         proximity.setdefault(hit.source_id, hit.score)
     audit_hits = list(index.search(vector, k=k, source="audit"))
-    trajectory_hits = list(index.search(vector, k=k, source="trajectory"))
+    trajectory_raw = index.search(
+        vector,
+        k=max(k, k * TRAJECTORY_SEARCH_OVERSAMPLE),
+        source="trajectory",
+    )
+    trajectory_hits = collapse_trajectory_hits(trajectory_raw, k=k)
     return proximity, audit_hits, trajectory_hits
 
 
@@ -1370,7 +1380,8 @@ def _hydrate_trajectory_hits(
 ) -> list[dict[str, object]]:
     trajectories: list[dict[str, object]] = []
     for hit in hits:
-        trajectory = store.find_trajectory(hit.source_id)
+        trajectory_id = trajectory_parent_id(hit)
+        trajectory = store.find_trajectory(trajectory_id)
         if trajectory is None or trajectory.project_id != project_id:
             continue
         payload = (
@@ -1382,6 +1393,10 @@ def _hydrate_trajectory_hits(
             )
         )
         payload["semantic_score"] = hit.score
+        if hit.chunk_index is not None:
+            payload["matched_chunk_index"] = hit.chunk_index
+        if hit.chunk_count is not None:
+            payload["matched_chunk_count"] = hit.chunk_count
         trajectories.append(payload)
     return trajectories
 

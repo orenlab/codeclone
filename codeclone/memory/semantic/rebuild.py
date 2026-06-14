@@ -21,14 +21,19 @@ from ..embedding.batching import (
     score_lengths,
 )
 from ..embedding.length import estimate_char_counts, estimate_document_tokens
-from .models import SemanticProjection, SemanticRow, SemanticRowFingerprint
+from .chunking import (
+    IndexedSemanticUnit,
+    PassageChunker,
+    expand_projection,
+    resolve_passage_chunker,
+)
+from .models import SemanticRow, SemanticRowFingerprint
 
 if TYPE_CHECKING:
     from ..embedding import EmbeddingProvider
     from . import SemanticIndexWriter
     from .sources import IndexSource
 
-DEFAULT_EMBED_BATCH_SIZE = 64
 # Source projections fingerprinted per round-trip before embedding the changed
 # subset — bounds the changed/unchanged partition for very large corpora.
 _FINGERPRINT_PAGE_SIZE = 256
@@ -69,6 +74,7 @@ def rebuild_semantic_index(
     updated on the write hot path.
     """
     limits = embed_batch_limits or EmbedBatchLimits()
+    chunker = resolve_passage_chunker(provider)
     by_source: dict[str, int] = {}
     seen_ids: set[str] = set()
     embedded = 0
@@ -81,17 +87,16 @@ def rebuild_semantic_index(
                 source,
                 writer=writer,
                 provider=provider,
+                chunker=chunker,
                 embed_batch_limits=limits,
             )
         if stats.seen_ids:
-            by_source[source.name()] = len(stats.seen_ids)
+            by_source[source.name()] = _count_source_documents(source)
             seen_ids |= stats.seen_ids
         embedded += stats.embedded
         skipped += stats.skipped_unchanged
     deleted = 0
     with span(name="memory.semantic.reconcile") as reconcile_span:
-        # Reconcile deletions: known_ids projects ids only (no vectors), so the
-        # delete pass stays cheap even on a large index.
         stale = writer.known_ids() - seen_ids
         if stale:
             writer.delete(sorted(stale))
@@ -108,30 +113,38 @@ def rebuild_semantic_index(
     )
 
 
+def _count_source_documents(source: IndexSource) -> int:
+    return sum(1 for _ in source.iter_projections())
+
+
 def _index_source(
     source: IndexSource,
     *,
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
+    chunker: PassageChunker,
     embed_batch_limits: EmbedBatchLimits,
 ) -> _SourceIndexStats:
     seen: set[str] = set()
     embedded = 0
     skipped = 0
     for page in chunked(source.iter_projections(), _FINGERPRINT_PAGE_SIZE):
-        ids = [projection.source_id for projection in page]
-        seen.update(ids)
-        fingerprints = writer.row_fingerprints(ids)
+        units: list[IndexedSemanticUnit] = []
+        for projection in page:
+            units.extend(expand_projection(projection, chunker))
+        row_ids = [unit.row_id for unit in units]
+        seen.update(row_ids)
+        fingerprints = writer.row_fingerprints(row_ids)
         changed = [
-            projection
-            for projection in page
+            unit
+            for unit in units
             if _needs_embed(
-                fingerprints.get(projection.source_id),
-                projection,
+                fingerprints.get(unit.row_id),
+                unit,
                 provider.model_id,
             )
         ]
-        skipped += len(page) - len(changed)
+        skipped += len(units) - len(changed)
         embedded += _embed_and_upsert(
             changed,
             writer=writer,
@@ -146,25 +159,31 @@ def _index_source(
 
 
 def _embed_and_upsert(
-    projections: Sequence[SemanticProjection],
+    units: Sequence[IndexedSemanticUnit],
     *,
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
     embed_batch_limits: EmbedBatchLimits,
 ) -> int:
-    if not projections:
+    if not units:
         return 0
-    texts = [projection.text for projection in projections]
+    texts = [unit.text for unit in units]
     char_counts = estimate_char_counts(texts)
     token_counts = estimate_document_tokens(provider, texts)
-    scored: tuple[LengthScoredItem[SemanticProjection], ...] = score_lengths(
-        list(projections),
+    scored: tuple[LengthScoredItem[IndexedSemanticUnit], ...] = score_lengths(
+        list(units),
         char_counts=char_counts,
         token_counts=token_counts,
-        source_kinds=[projection.source for projection in projections],
-        source_ids=[projection.source_id for projection in projections],
+        source_kinds=[unit.source for unit in units],
+        source_ids=[
+            (
+                f"{unit.parent_id or unit.row_id}:"
+                f"{unit.chunk_index if unit.chunk_index is not None else 0}"
+            )
+            for unit in units
+        ],
     )
-    batches: list[EmbedBatchPlan[SemanticProjection]] = pack_adaptive_batches(
+    batches: list[EmbedBatchPlan[IndexedSemanticUnit]] = pack_adaptive_batches(
         scored, limits=embed_batch_limits
     )
     embedded = 0
@@ -174,10 +193,10 @@ def _embed_and_upsert(
             embed_span.set_counter(
                 "max_padded_tokens", embed_batch_limits.max_padded_tokens
             )
-            embed_span.set_counter("pending", len(projections))
+            embed_span.set_counter("pending", len(units))
             embed_span.set_counter("batches", len(batches))
         for batch in batches:
-            batch_projections = [item.item for item in batch.items]
+            batch_units = [item.item for item in batch.items]
             infer_counters = {
                 "documents": len(batch.items),
                 "total_chars": batch.total_chars,
@@ -189,18 +208,16 @@ def _embed_and_upsert(
             }
             vectors = embed_documents(
                 provider,
-                [projection.text for projection in batch_projections],
+                [unit.text for unit in batch_units],
                 infer_counters=infer_counters,
             )
             writer.upsert(
                 [
-                    _row(projection, vector, provider.model_id)
-                    for projection, vector in zip(
-                        batch_projections, vectors, strict=True
-                    )
+                    _row(unit, vector, provider.model_id)
+                    for unit, vector in zip(batch_units, vectors, strict=True)
                 ]
             )
-            embedded += len(batch_projections)
+            embedded += len(batch_units)
         if is_observability_enabled():
             embed_span.set_counter("embedded", embedded)
     return embedded
@@ -208,37 +225,39 @@ def _embed_and_upsert(
 
 def _needs_embed(
     fingerprint: SemanticRowFingerprint | None,
-    projection: SemanticProjection,
+    unit: IndexedSemanticUnit,
     model_id: str,
 ) -> bool:
     if fingerprint is None:
         return True
     return (
-        fingerprint.text_hash != projection.text_hash
+        fingerprint.text_hash != unit.text_hash
         or fingerprint.embedding_model != model_id
     )
 
 
 def _row(
-    projection: SemanticProjection,
+    unit: IndexedSemanticUnit,
     vector: Sequence[float],
     model_id: str,
 ) -> SemanticRow:
     return SemanticRow(
-        id=projection.source_id,
-        source=projection.source,
-        project_id=projection.project_id,
-        subject_path=projection.subject_path,
-        kind=projection.kind,
-        status=projection.status,
-        text_hash=projection.text_hash,
+        id=unit.row_id,
+        source=unit.source,
+        parent_id=unit.parent_id,
+        chunk_index=unit.chunk_index,
+        chunk_count=unit.chunk_count,
+        project_id=unit.project_id,
+        subject_path=unit.subject_path,
+        kind=unit.kind,
+        status=unit.status,
+        text_hash=unit.text_hash,
         embedding_model=model_id,
         vector=tuple(vector),
     )
 
 
 __all__ = [
-    "DEFAULT_EMBED_BATCH_SIZE",
     "RebuildReport",
     "rebuild_semantic_index",
 ]

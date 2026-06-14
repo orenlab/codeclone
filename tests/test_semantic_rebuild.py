@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 
+import pytest
+
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
 from codeclone.memory.semantic import RebuildReport, rebuild_semantic_index
 from codeclone.memory.semantic.models import (
@@ -158,3 +160,41 @@ def test_rebuild_available_source_with_empty_projections() -> None:
     assert report.indexed == 0
     assert report.by_source == {}
     assert writer.rows == []
+
+
+class _FixedChunker:
+    def __init__(self, chunks: tuple[str, ...]) -> None:
+        self._chunks = chunks
+
+    def chunk_text(self, text: str) -> tuple[str, ...]:
+        return self._chunks
+
+
+def test_rebuild_indexes_trajectory_chunks(monkeypatch: pytest.MonkeyPatch) -> None:
+    import codeclone.memory.semantic.rebuild as rebuild_mod
+
+    monkeypatch.setattr(
+        rebuild_mod,
+        "resolve_passage_chunker",
+        lambda _provider: _FixedChunker(("chunk-a", "chunk-b")),
+    )
+    writer = _FakeWriter()
+    provider = DeterministicHashEmbeddingProvider(dimension=16)
+    projection = SemanticProjection(
+        source="trajectory",
+        source_id="traj-1",
+        kind="trajectory",
+        text="long trajectory",
+        text_hash=text_hash("long trajectory"),
+    )
+    source = _FakeSource("trajectory", [projection])
+
+    report = rebuild_semantic_index(writer=writer, provider=provider, sources=[source])
+
+    assert report.indexed == 2
+    assert report.by_source == {"trajectory": 1}
+    assert {row.id for row in writer.rows} == {
+        "trajectory:traj-1:chunk:000",
+        "trajectory:traj-1:chunk:001",
+    }
+    assert all(row.parent_id == "traj-1" for row in writer.rows)

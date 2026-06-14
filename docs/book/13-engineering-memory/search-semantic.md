@@ -127,6 +127,20 @@ Search responses include a top-level **`semantic`** object:
 | `index_version` | `SEMANTIC_INDEX_FORMAT_VERSION` when used             |
 | `reason`        | Degrade reason when `used` is false                   |
 
+`codeclone memory semantic probe` uses the cheap planning estimator by default.
+Pass `--exact-tokens` to load the FastEmbed tokenizer and report raw/effective
+token counts plus truncation stats on the texts that rebuild would embed.
+For trajectory, `--exact-tokens` also applies the same chunking as rebuild and
+reports `chunking {source_documents, index_units, multi_chunk_sources}`; lane
+`documents` counts index units, not raw projections. When any index unit still
+overflows the model window, `overflow_examples` lists up to five offenders.
+Chunking reserves model special tokens in the payload budget and fails closed
+with `SemanticChunkingInvariantError` when a chunk cannot be proven to fit.
+
+Format **`2`** indexes long trajectory projections as multiple chunk rows linked
+by `parent_id`; hybrid search collapses chunk hits to the best score per
+trajectory.
+
 When semantic hits audit rows, `payload.audit_events` lists hydrated incidents
 (event type, bounded summary preview, score) alongside memory records.
 

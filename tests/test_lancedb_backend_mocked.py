@@ -29,9 +29,11 @@ class _FakeSchema:
         self._list_size = list_size
 
     def field(self, name: str) -> object:
-        if name != "vector":
-            raise KeyError(name)
-        return type("Field", (), {"type": _FakeVectorType(self._list_size)})()
+        if name == "vector":
+            return type("Field", (), {"type": _FakeVectorType(self._list_size)})()
+        if name in {"parent_id", "chunk_index", "chunk_count"}:
+            return type("Field", (), {"type": object()})()
+        raise KeyError(name)
 
 
 class _FakeMergeInsert:
@@ -181,6 +183,7 @@ def _install_fake_lancedb(
     pa_mod.field = _field  # type: ignore[attr-defined]
     pa_mod.list_ = lambda _item, _size: object()  # type: ignore[attr-defined]
     pa_mod.string = lambda: object()  # type: ignore[attr-defined]
+    pa_mod.int32 = lambda: object()  # type: ignore[attr-defined]
     pa_mod.float32 = lambda: object()  # type: ignore[attr-defined]
 
     original = importlib.import_module
@@ -256,7 +259,7 @@ def test_lancedb_backend_mocked_close_releases_available_handles(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     fake_db = _install_fake_lancedb(monkeypatch)
-    index = LanceDbSemanticIndex(path=tmp_path / "idx.lance", dimension=4)
+    index = LanceDbSemanticIndex(path=tmp_path / "idx.lance", dimension=4, create=True)
     table = fake_db._table
     assert table is not None
 
@@ -277,7 +280,7 @@ def test_lancedb_helper_and_schema_failure_edges(
     lancedb_backend._close_if_available(object())
 
     _install_fake_lancedb(monkeypatch)
-    index = LanceDbSemanticIndex(path=tmp_path / "idx.lance", dimension=4)
+    index = LanceDbSemanticIndex(path=tmp_path / "idx.lance", dimension=4, create=True)
 
     class _BrokenSchema:
         def field(self, _name: str) -> object:

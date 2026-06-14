@@ -16,7 +16,10 @@ from ...budget.estimator import (
     estimate_texts_token_counts,
 )
 from ...observability import is_observability_enabled, span
-from ..exceptions import MemorySemanticUnavailableError
+from ..exceptions import MemorySemanticUnavailableError, SemanticChunkingInvariantError
+from .length import PassageTokenCounts
+
+_PASSAGE_PREFIX = "passage: "
 
 _KNOWN_MODEL_MAX_TOKENS: dict[str, int] = {
     "baai/bge-small-en-v1.5": 512,
@@ -29,6 +32,99 @@ _KNOWN_MODEL_MAX_TOKENS: dict[str, int] = {
 
 def known_model_max_tokens(model_name: str) -> int:
     return _KNOWN_MODEL_MAX_TOKENS.get(model_name.lower(), 512)
+
+
+def _tokenizer_max_length(tokenizer: object) -> int | None:
+    truncation = getattr(tokenizer, "truncation", None)
+    if truncation is None:
+        return None
+    max_length = getattr(truncation, "max_length", None)
+    if isinstance(max_length, int) and max_length > 0:
+        return max_length
+    return None
+
+
+def _encoding_length(encoding: object) -> int:
+    ids = getattr(encoding, "ids", None)
+    if isinstance(ids, list):
+        return len(ids)
+    return 0
+
+
+def _tokenizer_encode_ops(
+    tokenizer: object,
+) -> (
+    tuple[
+        Callable[..., object],
+        Callable[[list[int]], str],
+        Callable[[], None],
+        Callable[..., None],
+    ]
+    | None
+):
+    encode = getattr(tokenizer, "encode", None)
+    decode = getattr(tokenizer, "decode", None)
+    no_truncation = getattr(tokenizer, "no_truncation", None)
+    enable_truncation = getattr(tokenizer, "enable_truncation", None)
+    if not all(
+        callable(value) for value in (encode, decode, no_truncation, enable_truncation)
+    ):
+        return None
+    return (
+        cast("Callable[..., object]", encode),
+        cast("Callable[[list[int]], str]", decode),
+        cast("Callable[[], None]", no_truncation),
+        cast("Callable[..., None]", enable_truncation),
+    )
+
+
+def _restore_tokenizer_truncation(tokenizer: object, *, max_length: int) -> None:
+    enable_truncation = getattr(tokenizer, "enable_truncation", None)
+    if callable(enable_truncation):
+        enable_truncation(max_length=max_length)
+
+
+def _special_token_count(encode: Callable[..., object]) -> int:
+    with_special = _encoding_length(encode("x", add_special_tokens=True))
+    without_special = _encoding_length(encode("x", add_special_tokens=False))
+    return max(0, with_special - without_special)
+
+
+def _passage_prefix_token_count(encode: Callable[..., object]) -> int:
+    return _encoding_length(encode(_PASSAGE_PREFIX, add_special_tokens=False))
+
+
+def _passage_model_input_token_count(
+    encode: Callable[..., object],
+    chunk_text: str,
+) -> int:
+    return _encoding_length(
+        encode(f"{_PASSAGE_PREFIX}{chunk_text}", add_special_tokens=True)
+    )
+
+
+def _chunk_payload_token_budget(
+    encode: Callable[..., object],
+    *,
+    model_max_tokens: int,
+) -> int:
+    special_tokens = _special_token_count(encode)
+    prefix_tokens = _passage_prefix_token_count(encode)
+    return max(1, model_max_tokens - special_tokens - prefix_tokens)
+
+
+def _verify_chunk_passage_input(
+    encode: Callable[..., object],
+    chunk_text: str,
+    *,
+    model_max_tokens: int,
+) -> None:
+    raw_tokens = _passage_model_input_token_count(encode, chunk_text)
+    if raw_tokens > model_max_tokens:
+        raise SemanticChunkingInvariantError(
+            "passage chunk exceeds model token window: "
+            f"raw_tokens={raw_tokens}, model_max_tokens={model_max_tokens}"
+        )
 
 
 class _TextEmbeddingModel(Protocol):
@@ -126,6 +222,94 @@ class FastEmbedEmbeddingProvider:
                     if isinstance(max_length, int) and max_length > 0:
                         return max_length
         return known_model_max_tokens(self.model_name)
+
+    @property
+    def estimator_label(self) -> str:
+        return "fastembed_tokenizer"
+
+    def probe_passage_token_counts(
+        self,
+        texts: Sequence[str],
+    ) -> tuple[PassageTokenCounts, ...]:
+        prefixed = [f"passage: {text}" for text in texts]
+        inner = self._inner_text_model()
+        tokenizer = inner.tokenizer
+        tokenize = getattr(inner, "tokenize", None)
+        if tokenizer is None or tokenize is None:
+            counts = estimate_texts_token_counts(
+                prefixed,
+                estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
+            )
+            return tuple(
+                PassageTokenCounts(raw=count, effective=count) for count in counts
+            )
+        max_length = _tokenizer_max_length(tokenizer) or known_model_max_tokens(
+            self.model_name
+        )
+        encode_batch = getattr(tokenizer, "encode_batch", None)
+        encode_ops = _tokenizer_encode_ops(tokenizer)
+        if encode_ops is not None and callable(encode_batch):
+            _, _, no_truncation, enable_truncation = encode_ops
+            no_truncation()
+            raw_encodings = encode_batch(prefixed)
+            raw_counts = tuple(_encoding_length(encoding) for encoding in raw_encodings)
+            enable_truncation(max_length=max_length)
+            effective_encodings = tokenize(prefixed)
+            effective_counts = tuple(
+                _encoding_length(encoding) for encoding in effective_encodings
+            )
+            return tuple(
+                PassageTokenCounts(raw=raw, effective=effective)
+                for raw, effective in zip(raw_counts, effective_counts, strict=True)
+            )
+        effective_counts = self.estimate_token_counts(texts)
+        return tuple(
+            PassageTokenCounts(raw=count, effective=count) for count in effective_counts
+        )
+
+    def chunk_text(self, text: str) -> tuple[str, ...]:
+        inner = self._inner_text_model()
+        tokenizer = inner.tokenizer
+        if tokenizer is None:
+            return (text,)
+        max_length = _tokenizer_max_length(tokenizer) or known_model_max_tokens(
+            self.model_name
+        )
+        encode_ops = _tokenizer_encode_ops(tokenizer)
+        if encode_ops is None:
+            return (text,)
+        encode, decode, no_truncation, _enable_truncation = encode_ops
+        no_truncation()
+        try:
+            if _passage_model_input_token_count(encode, text) <= max_length:
+                _verify_chunk_passage_input(encode, text, model_max_tokens=max_length)
+                return (text,)
+            content_encoding = encode(text, add_special_tokens=False)
+            content_ids = list(getattr(content_encoding, "ids", ()))
+            payload_budget = _chunk_payload_token_budget(
+                encode,
+                model_max_tokens=max_length,
+            )
+            chunks: list[str] = []
+            start = 0
+            while start < len(content_ids):
+                end = min(start + payload_budget, len(content_ids))
+                while end > start:
+                    chunk = str(decode(content_ids[start:end]))
+                    if _passage_model_input_token_count(encode, chunk) <= max_length:
+                        break
+                    end -= 1
+                if end <= start:
+                    raise SemanticChunkingInvariantError(
+                        "unable to fit passage chunk within model token window "
+                        f"at content offset {start}"
+                    )
+                _verify_chunk_passage_input(encode, chunk, model_max_tokens=max_length)
+                chunks.append(chunk)
+                start = end
+            return tuple(chunks)
+        finally:
+            _restore_tokenizer_truncation(tokenizer, max_length=max_length)
 
     def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
         prefixed = [f"passage: {text}" for text in texts]
