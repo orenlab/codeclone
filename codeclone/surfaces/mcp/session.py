@@ -20,6 +20,7 @@ from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
+from ._implementation_context import build_unit_location_inventory
 from ._intent import IntentRecord
 from ._session_baseline import (
     resolve_clone_baseline_state,
@@ -278,6 +279,10 @@ class MCPSession(
             processing_result = process(
                 boot=boot, discovery=discovery_result, cache=cache
             )
+        unit_inventory = build_unit_location_inventory(
+            root=root_path,
+            units=processing_result.units,
+        )
         with span(name="pipeline.analyze"):
             analysis_result = analyze(
                 boot=boot,
@@ -462,6 +467,7 @@ class MCPSession(
             metrics_diff=metrics_diff,
             manifest=run_manifest,
             dirty_snapshot=run_dirty_snapshot,
+            unit_inventory=unit_inventory,
         )
         changed_projection = self._build_changed_projection(provisional_record)
         summary = self._augment_summary_with_changed(
@@ -493,6 +499,7 @@ class MCPSession(
             metrics_diff=metrics_diff,
             manifest=run_manifest,
             dirty_snapshot=run_dirty_snapshot,
+            unit_inventory=unit_inventory,
         )
         self._runs.register(record)
         self._emit_analysis_completed_audit(

@@ -976,13 +976,19 @@ def test_mcp_service_run_summary_detects_workspace_drift(
     assert latest["drifted_files"] == ["pkg/dup.py"]
 
 
+def _write_context_module(root: Path, relative_path: str, source: str) -> None:
+    target = root / relative_path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.parent.joinpath("__init__.py").write_text("", "utf-8")
+    target.write_text(source, "utf-8")
+
+
 def test_mcp_service_get_implementation_context_projects_path_facts(
     tmp_path: Path,
 ) -> None:
-    package = tmp_path / "pkg"
-    package.mkdir()
-    package.joinpath("__init__.py").write_text("", "utf-8")
-    package.joinpath("target.py").write_text(
+    _write_context_module(
+        tmp_path,
+        "pkg/target.py",
         (
             "def public_api(value: int) -> int:\n"
             "    total = value + 1\n"
@@ -990,9 +996,10 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
             "    total += 3\n"
             "    return total\n"
         ),
-        "utf-8",
     )
-    package.joinpath("source.py").write_text(
+    _write_context_module(
+        tmp_path,
+        "pkg/source.py",
         (
             "from pkg.target import public_api\n\n"
             "def consume(value: int) -> int:\n"
@@ -1001,7 +1008,6 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
             "    total += 2\n"
             "    return total\n"
         ),
-        "utf-8",
     )
     service = CodeCloneMCPService(history_limit=4)
     summary = service.analyze_repository(
@@ -1079,6 +1085,72 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
         "medium",
         "high",
     }
+
+
+def test_mcp_service_get_implementation_context_resolves_symbols(
+    tmp_path: Path,
+) -> None:
+    _write_context_module(
+        tmp_path,
+        "pkg/internal.py",
+        (
+            "def _private_impl(value: int) -> int:\n"
+            "    total = value + 1\n"
+            "    total += 2\n"
+            "    total += 3\n"
+            "    return total\n"
+        ),
+    )
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            min_loc=1,
+            min_stmt=1,
+        )
+    )
+    record = service._runs.get(str(summary["run_id"]))
+
+    assert record.unit_inventory
+    assert record.unit_inventory[0].path == "pkg/internal.py"
+    context = service.get_implementation_context(
+        root=str(tmp_path),
+        symbols=["pkg.internal:_private_impl", "pkg.internal:missing"],
+        include=["module_role"],
+        run_id=str(summary["run_id"]),
+    )
+
+    subject = cast("dict[str, object]", context["subject"])
+    assert subject["resolved_from"] == "explicit_symbols"
+    assert subject["paths"] == ["pkg/internal.py"]
+    assert subject["symbols"] == [
+        "pkg.internal:_private_impl",
+        "pkg.internal:missing",
+    ]
+    assert subject["unresolved_symbols"] == ["pkg.internal:missing"]
+    assert subject["resolved_symbols"] == [
+        {
+            "qualname": "pkg.internal:_private_impl",
+            "path": "pkg/internal.py",
+            "start_line": 1,
+            "end_line": 5,
+            "tier": "structural",
+            "source": "unit_inventory",
+        }
+    ]
+
+    missing = service.get_implementation_context(
+        root=str(tmp_path),
+        symbols=["pkg.internal:missing"],
+        include=["module_role"],
+        run_id=str(summary["run_id"]),
+    )
+    assert missing["status"] == "subject_not_found"
+    missing_subject = cast("dict[str, object]", missing["subject"])
+    assert missing_subject["resolved_symbols"] == []
+    assert missing_subject["unresolved_symbols"] == ["pkg.internal:missing"]
 
 
 def test_mcp_service_get_implementation_context_status_and_errors(

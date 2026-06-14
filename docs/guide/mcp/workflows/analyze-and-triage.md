@@ -82,6 +82,20 @@ Use `context_artifact_digest` to identify the source context artifact and
 `freshness.status` is `drifted`, analyze again. This step informs scope; only
 `start_controlled_change` can return `edit_allowed=true`.
 
+Exact qualnames are also valid subjects:
+
+```
+get_implementation_context(
+  root=<abs>,
+  symbols=["codeclone.surfaces.mcp.service:CodeCloneMCPService"],
+  mode="implementation",
+)
+```
+
+Symbol resolution uses the analyzed Unit inventory plus public API rows.
+Inspect both `subject.resolved_symbols` and `subject.unresolved_symbols`;
+CodeClone reports unknown qualnames instead of inferring a likely match.
+
 Once an intent is active, pass its `intent_id` with the same explicit paths.
 The response then shows the declared scope, review context, do-not-touch
 boundaries, and guards beside lane-separated memory evidence. Use

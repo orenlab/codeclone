@@ -533,9 +533,14 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         key_points=(
             (
-                "Explicit repo-relative paths return "
+                "Explicit repo-relative paths or exact qualnames return "
                 "established module, import, importer, API-surface, blast-radius, "
                 "cache-origin, and workspace-freshness facts."
+            ),
+            (
+                "Symbol subjects resolve against a deterministic off-report "
+                "Unit plus API-surface location index. Unknown qualnames are "
+                "reported in subject.unresolved_symbols and are never guessed."
             ),
             (
                 "An active intent adds the declared allowed files/related paths, "
@@ -561,8 +566,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "errors. Every emitted collection is bounded by one global budget."
             ),
             (
-                "Symbol subjects, inferred current work, and call/reference "
-                "evidence are additive later phases."
+                "Inferred current work and call/reference evidence are additive "
+                "later phases."
             ),
         ),
         recommended_tools=(

@@ -19,6 +19,7 @@ from ._implementation_context import (
     DEFAULT_IMPACT_FACETS,
     DEFAULT_IMPLEMENTATION_FACETS,
     build_implementation_context,
+    resolve_context_symbols,
 )
 from ._intent import IntentRecord, IntentStatus
 from ._session_shared import (
@@ -102,7 +103,31 @@ class _MCPSessionContextMixin:
             root_path=root_path,
             paths=paths or (),
         )
-        if not normalized_paths:
+        normalized_symbols = tuple(
+            sorted({symbol.strip() for symbol in symbols or () if symbol.strip()})
+        )
+        resolved_symbols, unresolved_symbols = resolve_context_symbols(
+            record,
+            normalized_symbols,
+        )
+        symbol_paths = tuple(
+            sorted(
+                {
+                    str(item["path"])
+                    for item in resolved_symbols
+                    if str(item.get("path", "")).strip()
+                }
+            )
+        )
+        effective_paths = tuple(sorted({*normalized_paths, *symbol_paths}))
+        subject_resolved_from = (
+            "explicit_mixed"
+            if normalized_paths and normalized_symbols
+            else "explicit_symbols"
+            if normalized_symbols
+            else "explicit_paths"
+        )
+        if not effective_paths and not normalized_symbols:
             return {
                 "status": "no_current_work",
                 "root": str(root_path),
@@ -111,9 +136,8 @@ class _MCPSessionContextMixin:
                     "report_digest": record.run_id,
                 },
                 "message": (
-                    "Step 3 requires explicit paths. Intent scope can bound the "
-                    "answer, but subject inference, symbols, and changed_scope "
-                    "ship in later steps."
+                    "Explicit paths or symbols are required until current-work "
+                    "subject inference ships in Phase 30 Step 5."
                 ),
             }
         normalized_include = self._validated_context_include(
@@ -123,26 +147,38 @@ class _MCPSessionContextMixin:
         )
         session = cast("_ContextSessionDependencies", self)
         transitive = depth > 1 or mode == "impact"
-        blast_result = session._blast_radius_result(
-            record=record,
-            files=normalized_paths,
-            depth="transitive" if transitive else "direct",
-            forbidden_patterns=(intent.scope.forbidden if intent is not None else ()),
-            allowed_scope=(intent.scope.allowed_paths if intent is not None else ()),
-        )
-        blast_payload = blast_radius_to_payload(blast_result)
+        if effective_paths:
+            blast_result = session._blast_radius_result(
+                record=record,
+                files=effective_paths,
+                depth="transitive" if transitive else "direct",
+                forbidden_patterns=(
+                    intent.scope.forbidden if intent is not None else ()
+                ),
+                allowed_scope=(
+                    intent.scope.allowed_paths if intent is not None else ()
+                ),
+            )
+            blast_payload = blast_radius_to_payload(blast_result)
+        else:
+            blast_payload = {}
         memory_result = None
         if {"docs", "memory"}.intersection(normalized_include):
             memory_result = session.get_relevant_memory(
                 root=str(root_path),
-                scope=normalized_paths,
+                scope=effective_paths or None,
+                symbols=normalized_symbols or None,
                 max_records=min(budget, 20),
                 include_drafts=True,
                 detail_level=detail_level,
             )
         return build_implementation_context(
             record=record,
-            paths=normalized_paths,
+            paths=effective_paths,
+            symbols=normalized_symbols,
+            subject_resolved_from=subject_resolved_from,
+            resolved_symbols=resolved_symbols,
+            unresolved_symbols=unresolved_symbols,
             mode=mode,
             include=normalized_include,
             depth=depth,
@@ -241,10 +277,6 @@ class _MCPSessionContextMixin:
         if mode == "contract":
             raise MCPServiceContractError(
                 f"Context mode {mode!r} is not available until its owning phase."
-            )
-        if symbols:
-            raise MCPServiceContractError(
-                "Symbol subjects are not available until Phase 30 Step 4."
             )
         if changed_scope:
             raise MCPServiceContractError(

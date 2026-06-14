@@ -11,13 +11,14 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final
 
 import orjson
 
 from ...paths import classify_source_kind
 from ._blast_radius import _path_to_module
-from ._session_shared import MCPRunRecord
+from ._session_shared import MCPRunRecord, MCPUnitLocation
 from ._workspace_drift import compute_drift
 from .messages.params import Facet
 
@@ -74,6 +75,10 @@ def build_implementation_context(
     *,
     record: MCPRunRecord,
     paths: Sequence[str],
+    symbols: Sequence[str],
+    subject_resolved_from: str,
+    resolved_symbols: Sequence[Mapping[str, object]],
+    unresolved_symbols: Sequence[str],
     mode: str,
     include: Sequence[Facet],
     depth: int,
@@ -85,6 +90,18 @@ def build_implementation_context(
 ) -> dict[str, object]:
     """Build the path-owned implementation-context response."""
     normalized_paths = tuple(sorted(set(paths)))
+    normalized_symbols = tuple(sorted(set(symbols)))
+    normalized_resolved_symbols = tuple(
+        sorted(
+            (dict(item) for item in resolved_symbols),
+            key=lambda item: (
+                str(item.get("qualname", "")),
+                str(item.get("path", "")),
+                _as_int(item.get("start_line")),
+            ),
+        )
+    )
+    normalized_unresolved_symbols = tuple(sorted(set(unresolved_symbols)))
     include_set = frozenset(include)
     entry_budget = _EntryBudget(remaining=budget)
     dependency_rows = _dependency_rows(record)
@@ -213,13 +230,20 @@ def build_implementation_context(
     }
     unavailable_facets = sorted(include_set - IMPLEMENTED_CONTEXT_FACETS)
     payload: dict[str, object] = {
-        "status": "ok",
+        "status": (
+            "subject_not_found"
+            if normalized_symbols
+            and not normalized_resolved_symbols
+            and not normalized_paths
+            else "ok"
+        ),
         "mode": mode,
         "subject": {
-            "resolved_from": "explicit_paths",
+            "resolved_from": subject_resolved_from,
             "paths": list(normalized_paths),
-            "symbols": [],
-            "resolved_symbols": [],
+            "symbols": list(normalized_symbols),
+            "resolved_symbols": list(normalized_resolved_symbols),
+            "unresolved_symbols": list(normalized_unresolved_symbols),
         },
         "analysis": analysis,
         "structural_context": structural_context,
@@ -267,6 +291,66 @@ def build_implementation_context(
         )
     )
     return payload
+
+
+def build_unit_location_inventory(
+    *,
+    root: Path,
+    units: Sequence[Mapping[str, object]],
+) -> tuple[MCPUnitLocation, ...]:
+    """Project analyzed units into a deterministic, repository-relative index."""
+    locations: set[MCPUnitLocation] = set()
+    for unit in units:
+        qualname = str(unit.get("qualname", "")).strip()
+        path = _repo_relative_location(root, unit.get("filepath"))
+        start_line = _as_int(unit.get("start_line"))
+        end_line = _as_int(unit.get("end_line"))
+        if not qualname or path is None or start_line <= 0:
+            continue
+        locations.add(
+            MCPUnitLocation(
+                qualname=qualname,
+                path=path,
+                start_line=start_line,
+                end_line=max(start_line, end_line),
+            )
+        )
+    return tuple(
+        sorted(
+            locations,
+            key=lambda item: (
+                item.qualname,
+                item.path,
+                item.start_line,
+                item.end_line,
+            ),
+        )
+    )
+
+
+def resolve_context_symbols(
+    record: MCPRunRecord,
+    symbols: Sequence[str],
+) -> tuple[tuple[dict[str, object], ...], tuple[str, ...]]:
+    """Resolve exact qualnames against the off-report Unit/API location index."""
+    requested = tuple(sorted({symbol.strip() for symbol in symbols if symbol.strip()}))
+    by_qualname: dict[str, list[dict[str, object]]] = {}
+    for row in _unit_location_index(record):
+        by_qualname.setdefault(str(row["qualname"]), []).append(row)
+    resolved = tuple(
+        {
+            "qualname": symbol,
+            "path": str(row["path"]),
+            "start_line": _as_int(row["start_line"]),
+            "end_line": _as_int(row.get("end_line")),
+            "tier": "structural",
+            "source": str(row["source"]),
+        }
+        for symbol in requested
+        for row in by_qualname.get(symbol, ())
+    )
+    unresolved = tuple(symbol for symbol in requested if symbol not in by_qualname)
+    return resolved, unresolved
 
 
 def _implementation_evidence(
@@ -492,7 +576,7 @@ def _public_surface_rows(
     rows: list[dict[str, object]] = []
     for raw in _as_sequence(api_surface.get("items")):
         item = _as_mapping(raw)
-        path = str(item.get("relative_path", "")).strip()
+        path = _report_item_path(record, item)
         if path not in paths:
             continue
         row: dict[str, object] = {
@@ -600,7 +684,14 @@ def _context_artifact_digest(
                 }
                 for path in sorted(manifest)
             ],
-            "unit_location_index": [],
+            "unit_location_index": [
+                {
+                    "qualname": str(row["qualname"]),
+                    "path": str(row["path"]),
+                    "start_line": _as_int(row["start_line"]),
+                }
+                for row in _unit_location_index(record)
+            ],
             "relationship_records": [],
         }
     )
@@ -644,6 +735,67 @@ def _report_families(record: MCPRunRecord) -> Mapping[str, object]:
     return _as_mapping(metrics.get("families"))
 
 
+def _unit_location_index(
+    record: MCPRunRecord,
+) -> tuple[dict[str, object], ...]:
+    rows: dict[tuple[str, str, int], dict[str, object]] = {}
+    for location in record.unit_inventory:
+        key = (location.qualname, location.path, location.start_line)
+        rows[key] = {
+            "qualname": location.qualname,
+            "path": location.path,
+            "start_line": location.start_line,
+            "end_line": location.end_line,
+            "source": "unit_inventory",
+        }
+    api_surface = _as_mapping(_report_families(record).get("api_surface"))
+    for raw in _as_sequence(api_surface.get("items")):
+        item = _as_mapping(raw)
+        qualname = str(item.get("qualname", "")).strip()
+        path = _report_item_path(record, item)
+        start_line = _as_int(item.get("start_line"))
+        if not qualname or not path or start_line <= 0:
+            continue
+        key = (qualname, path, start_line)
+        rows[key] = {
+            "qualname": qualname,
+            "path": path,
+            "start_line": start_line,
+            "end_line": max(start_line, _as_int(item.get("end_line"))),
+            "source": "api_surface",
+        }
+    return tuple(
+        rows[key]
+        for key in sorted(
+            rows,
+            key=lambda item: (item[0], item[1], item[2]),
+        )
+    )
+
+
+def _report_item_path(
+    record: MCPRunRecord,
+    item: Mapping[str, object],
+) -> str:
+    raw = item.get("relative_path") or item.get("filepath")
+    path = _repo_relative_location(record.root, raw)
+    return path or ""
+
+
+def _repo_relative_location(root: Path, raw: object) -> str | None:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    root_path = root.resolve()
+    candidate = Path(text)
+    if not candidate.is_absolute():
+        candidate = root_path / candidate
+    try:
+        return candidate.resolve().relative_to(root_path).as_posix()
+    except (OSError, ValueError):
+        return None
+
+
 def _digest(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(
         orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
@@ -678,4 +830,6 @@ __all__ = [
     "DEFAULT_IMPLEMENTATION_FACETS",
     "IMPLEMENTED_CONTEXT_FACETS",
     "build_implementation_context",
+    "build_unit_location_inventory",
+    "resolve_context_symbols",
 ]

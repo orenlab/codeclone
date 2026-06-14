@@ -24,6 +24,8 @@ Added
   allowed/review/do-not-touch boundaries, while impact mode adds transitive
   dependency context and baseline-sensitive findings. Engineering Memory,
   tests, docs, trajectories, and Experiences remain lane-separated evidence.
+  Exact qualname subjects resolve through an off-report Unit and API-surface
+  location index, with unknown symbols reported explicitly rather than guessed.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and

@@ -614,6 +614,14 @@ class MCPGateRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class MCPUnitLocation:
+    qualname: str
+    path: str
+    start_line: int
+    end_line: int
+
+
+@dataclass(frozen=True, slots=True)
 class MCPRunRecord:
     run_id: str
     root: Path
@@ -635,6 +643,7 @@ class MCPRunRecord:
     metrics_diff: MetricsDiff | None
     manifest: Mapping[str, FileStat] | None = None
     dirty_snapshot: DirtySnapshot | None = None
+    unit_inventory: tuple[MCPUnitLocation, ...] = ()
 
 
 class CodeCloneMCPRunStore:
