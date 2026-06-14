@@ -15,16 +15,21 @@ from .entries import (
     ClassMetricsDict,
     DeadCandidateDict,
     FileStat,
+    FunctionRelationshipFactsDict,
     ModuleApiSurfaceDict,
     ModuleDepDict,
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    RelationshipRecordDict,
     RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     SegmentDict,
     SourceStatsDict,
     UnitDict,
+    _as_relationship_kind,
+    _as_relationship_origin_lane,
+    _as_relationship_resolution_status,
 )
 
 
@@ -259,6 +264,55 @@ def _is_runtime_reachability_fact_dict(
     )
 
 
+def _is_relationship_record_dict(
+    value: object,
+) -> TypeGuard[RelationshipRecordDict]:
+    if not isinstance(value, dict):
+        return False
+    relation_kind = _as_relationship_kind(value.get("relation_kind"))
+    resolution_status = _as_relationship_resolution_status(
+        value.get("resolution_status")
+    )
+    origin_lane = _as_relationship_origin_lane(value.get("origin_lane"))
+    target_qualname = value.get("target_qualname")
+    expression = value.get("expression")
+    resolution_rule = value.get("resolution_rule")
+    line = value.get("line")
+    if (
+        relation_kind is None
+        or resolution_status is None
+        or origin_lane is None
+        or not isinstance(value.get("source_qualname"), str)
+        or not isinstance(value.get("path"), str)
+        or not isinstance(line, int)
+        or line < 1
+        or (expression is not None and not isinstance(expression, str))
+        or (resolution_rule is not None and not isinstance(resolution_rule, str))
+    ):
+        return False
+    if resolution_status == "resolved":
+        return isinstance(target_qualname, str)
+    return target_qualname is None
+
+
+def _is_function_relationship_facts_dict(
+    value: object,
+) -> TypeGuard[FunctionRelationshipFactsDict]:
+    if not isinstance(value, dict):
+        return False
+    source_qualname = value.get("source_qualname")
+    relationships = value.get("relationships")
+    return (
+        isinstance(source_qualname, str)
+        and isinstance(relationships, list)
+        and all(
+            _is_relationship_record_dict(record)
+            and record["source_qualname"] == source_qualname
+            for record in relationships
+        )
+    )
+
+
 def _is_string_list(value: object) -> TypeGuard[list[str]]:
     return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
@@ -281,11 +335,13 @@ __all__ = [
     "_is_class_metrics_dict",
     "_is_dead_candidate_dict",
     "_is_file_stat_dict",
+    "_is_function_relationship_facts_dict",
     "_is_module_api_surface_dict",
     "_is_module_dep_dict",
     "_is_module_docstring_coverage_dict",
     "_is_module_typing_coverage_dict",
     "_is_public_symbol_dict",
+    "_is_relationship_record_dict",
     "_is_runtime_reachability_fact_dict",
     "_is_security_surface_dict",
     "_is_segment_dict",

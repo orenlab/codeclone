@@ -33,6 +33,30 @@ class Unit:
     side_effect_order_profile: str = "none"
 
 
+RelationshipKind = Literal["call", "reference"]
+RelationshipResolutionStatus = Literal["resolved", "unresolved"]
+RelationshipOriginLane = Literal["production", "test"]
+
+
+@dataclass(frozen=True, slots=True)
+class RelationshipRecord:
+    relation_kind: RelationshipKind
+    resolution_status: RelationshipResolutionStatus
+    origin_lane: RelationshipOriginLane
+    source_qualname: str
+    target_qualname: str | None
+    path: str
+    line: int
+    expression: str | None = None
+    resolution_rule: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FunctionRelationshipFacts:
+    source_qualname: str
+    relationships: tuple[RelationshipRecord, ...]
+
+
 @dataclass(frozen=True, slots=True)
 class BlockUnit:
     block_hash: str

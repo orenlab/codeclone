@@ -32,11 +32,13 @@ from .entries import (
     ClassMetricsDict,
     DeadCandidateDict,
     FileStat,
+    FunctionRelationshipFactsDict,
     ModuleApiSurfaceDict,
     ModuleDepDict,
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    RelationshipRecordDict,
     RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     SegmentDict,
@@ -44,6 +46,9 @@ from .entries import (
     StructuralFindingGroupDict,
     StructuralFindingOccurrenceDict,
     UnitDict,
+    _as_relationship_kind,
+    _as_relationship_origin_lane,
+    _as_relationship_resolution_status,
     _as_runtime_reachability_confidence,
     _as_runtime_reachability_edge_kind,
     _as_runtime_reachability_framework,
@@ -143,10 +148,18 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         obj=obj,
         filepath=filepath,
     )
+    function_relationship_facts = _decode_optional_wire_function_relationship_facts(
+        obj=obj,
+        filepath=filepath,
+    )
     coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
     if coupled_classes_map is None:
         return None
-    if runtime_reachability is None or security_surfaces is None:
+    if (
+        runtime_reachability is None
+        or security_surfaces is None
+        or function_relationship_facts is None
+    ):
         return None
 
     for metric in class_metrics:
@@ -178,6 +191,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         api_surface=api_surface,
         runtime_reachability=runtime_reachability,
         security_surfaces=security_surfaces,
+        function_relationship_facts=function_relationship_facts,
         source_stats=source_stats,
         structural_findings=(
             _normalize_cached_structural_groups(structural_findings, filepath=filepath)
@@ -387,6 +401,89 @@ def _decode_optional_wire_runtime_reachability(
         key="rr",
         filepath=filepath,
         decode_item=_decode_wire_runtime_reachability,
+    )
+
+
+def _decode_optional_wire_function_relationship_facts(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> list[FunctionRelationshipFactsDict] | None:
+    raw_facts = obj.get("fr")
+    if raw_facts is None:
+        return []
+    facts_rows = _as_list(raw_facts)
+    if facts_rows is None:
+        return None
+    decoded: list[FunctionRelationshipFactsDict] = []
+    for facts_raw in facts_rows:
+        facts_row = _decode_wire_row(facts_raw, valid_lengths={2})
+        if facts_row is None:
+            return None
+        source_qualname = _as_str(facts_row[0])
+        relationships_raw = _as_list(facts_row[1])
+        if source_qualname is None or relationships_raw is None:
+            return None
+        relationships: list[RelationshipRecordDict] = []
+        for relationship_raw in relationships_raw:
+            relationship = _decode_wire_relationship_record(
+                relationship_raw,
+                source_qualname=source_qualname,
+                filepath=filepath,
+            )
+            if relationship is None:
+                return None
+            relationships.append(relationship)
+        decoded.append(
+            FunctionRelationshipFactsDict(
+                source_qualname=source_qualname,
+                relationships=relationships,
+            )
+        )
+    return decoded
+
+
+def _decode_wire_relationship_record(
+    value: object,
+    *,
+    source_qualname: str,
+    filepath: str,
+) -> RelationshipRecordDict | None:
+    row = _decode_wire_row(value, valid_lengths={7})
+    if row is None:
+        return None
+    relation_kind = _as_relationship_kind(_as_str(row[0]))
+    resolution_status = _as_relationship_resolution_status(_as_str(row[1]))
+    origin_lane = _as_relationship_origin_lane(_as_str(row[2]))
+    target_qualname = row[3]
+    line = _as_int(row[4])
+    expression = row[5]
+    resolution_rule = row[6]
+    if (
+        relation_kind is None
+        or resolution_status is None
+        or origin_lane is None
+        or line is None
+        or line < 1
+        or (target_qualname is not None and not isinstance(target_qualname, str))
+        or (expression is not None and not isinstance(expression, str))
+        or (resolution_rule is not None and not isinstance(resolution_rule, str))
+    ):
+        return None
+    if resolution_status == "resolved" and not isinstance(target_qualname, str):
+        return None
+    if resolution_status == "unresolved" and target_qualname is not None:
+        return None
+    return RelationshipRecordDict(
+        relation_kind=relation_kind,
+        resolution_status=resolution_status,
+        origin_lane=origin_lane,
+        source_qualname=source_qualname,
+        target_qualname=target_qualname,
+        path=filepath,
+        line=line,
+        expression=expression,
+        resolution_rule=resolution_rule,
     )
 
 

@@ -30,7 +30,7 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.8"`
+- `CACHE_VERSION = "2.9"`
 - `REPORT_SCHEMA_VERSION = "2.11"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
 - `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.7"`
@@ -61,6 +61,8 @@ Version bump rules:
 - bump **baseline schema** only for clone-baseline JSON layout/type changes
 - bump **fingerprint version** when clone identity semantics change
 - bump **cache schema** for cache wire-format or compatibility-semantics changes
+  — `2.9` adds rebuildable, off-report per-function call/reference facts as a
+  sibling projection without changing serialized `Unit` rows
 - bump **report schema** for canonical report document shape/meaning changes
 - bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
 - bump **engineering memory schema** for SQLite DDL / governed record-shape changes

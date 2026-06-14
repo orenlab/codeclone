@@ -27,14 +27,17 @@ from codeclone.cache._validators import (
     _is_api_param_spec_dict,
     _is_class_metrics_dict,
     _is_dead_candidate_dict,
+    _is_function_relationship_facts_dict,
     _is_module_api_surface_dict,
     _is_module_dep_dict,
     _is_public_symbol_dict,
+    _is_relationship_record_dict,
     _is_runtime_reachability_fact_dict,
     _is_security_surface_dict,
 )
 from codeclone.cache._wire_decode import (
     _decode_optional_wire_api_surface,
+    _decode_optional_wire_function_relationship_facts,
     _decode_optional_wire_module_ints,
     _decode_optional_wire_source_stats,
     _decode_wire_api_param_spec,
@@ -46,6 +49,7 @@ from codeclone.cache._wire_decode import (
     _decode_wire_file_sections,
     _decode_wire_module_dep,
     _decode_wire_name_sections,
+    _decode_wire_relationship_record,
     _decode_wire_runtime_reachability,
     _decode_wire_security_surface,
     _decode_wire_segment,
@@ -61,6 +65,9 @@ from codeclone.cache.entries import (
     CacheEntry,
     ModuleApiSurfaceDict,
     SourceStatsDict,
+    _as_relationship_kind,
+    _as_relationship_origin_lane,
+    _as_relationship_resolution_status,
     _as_runtime_reachability_confidence,
     _as_runtime_reachability_edge_kind,
     _as_runtime_reachability_framework,
@@ -82,12 +89,15 @@ from codeclone.cache.projection import (
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
 from codeclone.contracts.errors import CacheError
+from codeclone.core._types import _unit_to_group_item
 from codeclone.models import (
     ApiParamSpec,
     BlockUnit,
     FileMetrics,
+    FunctionRelationshipFacts,
     ModuleApiSurface,
     PublicSymbol,
+    RelationshipRecord,
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentUnit,
@@ -184,6 +194,252 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     assert entry["units"][0]["qualname"] == "mod:func"
     assert loaded.load_status == CacheStatus.OK
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_roundtrip_preserves_function_relationship_facts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    filepath = str((root / "pkg" / "module.py").resolve())
+    cache_path = root / "cache.json"
+    cache = Cache(cache_path, root=root)
+    facts = FunctionRelationshipFacts(
+        source_qualname="pkg.module:source",
+        relationships=(
+            RelationshipRecord(
+                relation_kind="reference",
+                resolution_status="resolved",
+                origin_lane="production",
+                source_qualname="pkg.module:source",
+                target_qualname="pkg.target:handler",
+                path=filepath,
+                line=7,
+                expression="handler",
+                resolution_rule="cross_module_import",
+            ),
+            RelationshipRecord(
+                relation_kind="call",
+                resolution_status="unresolved",
+                origin_lane="test",
+                source_qualname="pkg.module:source",
+                target_qualname=None,
+                path=filepath,
+                line=11,
+                expression="factory()",
+                resolution_rule="dynamic_call",
+            ),
+        ),
+    )
+    cache.put_file_entry(
+        filepath,
+        {"mtime_ns": 1, "size": 10},
+        [_make_unit(filepath)],
+        [],
+        [],
+        function_relationship_facts=(facts,),
+    )
+    cache.save()
+
+    loaded = Cache(cache_path, root=root)
+    loaded.load()
+    entry = loaded.get_file_entry(filepath)
+
+    assert entry is not None
+    assert entry["function_relationship_facts"] == [
+        {
+            "source_qualname": "pkg.module:source",
+            "relationships": [
+                {
+                    "relation_kind": "call",
+                    "resolution_status": "unresolved",
+                    "origin_lane": "test",
+                    "source_qualname": "pkg.module:source",
+                    "target_qualname": None,
+                    "path": filepath,
+                    "line": 11,
+                    "expression": "factory()",
+                    "resolution_rule": "dynamic_call",
+                },
+                {
+                    "relation_kind": "reference",
+                    "resolution_status": "resolved",
+                    "origin_lane": "production",
+                    "source_qualname": "pkg.module:source",
+                    "target_qualname": "pkg.target:handler",
+                    "path": filepath,
+                    "line": 7,
+                    "expression": "handler",
+                    "resolution_rule": "cross_module_import",
+                },
+            ],
+        }
+    ]
+
+
+def test_cache_rejects_malformed_function_relationship_wire() -> None:
+    entry = _decode_wire_file_entry(
+        {
+            "st": [1, 10],
+            "fr": [
+                [
+                    "pkg.module:source",
+                    [["call", "unresolved", "production", "not-null", 7, "f()", None]],
+                ]
+            ],
+        },
+        "pkg/module.py",
+    )
+
+    assert entry is None
+
+
+def test_relationship_cache_helpers_enforce_two_axis_contract() -> None:
+    resolved = {
+        "relation_kind": "call",
+        "resolution_status": "resolved",
+        "origin_lane": "production",
+        "source_qualname": "pkg.module:source",
+        "target_qualname": "pkg.target:handler",
+        "path": "pkg/module.py",
+        "line": 7,
+        "expression": "handler()",
+        "resolution_rule": "cross_module_import",
+    }
+    unresolved = {
+        **resolved,
+        "resolution_status": "unresolved",
+        "target_qualname": None,
+    }
+
+    assert _as_relationship_kind("call") == "call"
+    assert _as_relationship_kind("reference") == "reference"
+    assert _as_relationship_kind("other") is None
+    assert _as_relationship_resolution_status("resolved") == "resolved"
+    assert _as_relationship_resolution_status("unresolved") == "unresolved"
+    assert _as_relationship_resolution_status("other") is None
+    assert _as_relationship_origin_lane("production") == "production"
+    assert _as_relationship_origin_lane("test") == "test"
+    assert _as_relationship_origin_lane("other") is None
+    assert _is_relationship_record_dict(resolved)
+    assert _is_relationship_record_dict(unresolved)
+    assert not _is_relationship_record_dict(object())
+    assert not _is_relationship_record_dict({**resolved, "line": 0})
+    assert not _is_relationship_record_dict({**resolved, "target_qualname": None})
+    assert not _is_relationship_record_dict(
+        {**unresolved, "target_qualname": "pkg.target:handler"}
+    )
+    assert not _is_relationship_record_dict({**resolved, "expression": 1})
+    assert not _is_relationship_record_dict({**resolved, "resolution_rule": 1})
+    assert _is_function_relationship_facts_dict(
+        {
+            "source_qualname": "pkg.module:source",
+            "relationships": [resolved, unresolved],
+        }
+    )
+    assert not _is_function_relationship_facts_dict(object())
+    assert not _is_function_relationship_facts_dict(
+        {
+            "source_qualname": "pkg.module:other",
+            "relationships": [resolved],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        object(),
+        ["call", "resolved", "production", None, 7, None, None],
+        ["call", "unresolved", "production", "pkg.target:f", 7, None, None],
+        ["other", "resolved", "production", "pkg.target:f", 7, None, None],
+        ["call", "resolved", "other", "pkg.target:f", 7, None, None],
+        ["call", "resolved", "production", "pkg.target:f", 0, None, None],
+        ["call", "resolved", "production", "pkg.target:f", 7, 1, None],
+        ["call", "resolved", "production", "pkg.target:f", 7, None, 1],
+    ],
+)
+def test_decode_wire_relationship_record_rejects_invalid_rows(row: object) -> None:
+    assert (
+        _decode_wire_relationship_record(
+            row,
+            source_qualname="pkg.module:source",
+            filepath="pkg/module.py",
+        )
+        is None
+    )
+
+
+def test_decode_optional_wire_relationship_facts_rejects_invalid_container() -> None:
+    assert (
+        _decode_optional_wire_function_relationship_facts(
+            obj={"fr": "invalid"},
+            filepath="pkg/module.py",
+        )
+        is None
+    )
+    assert (
+        _decode_optional_wire_function_relationship_facts(
+            obj={"fr": [["pkg.module:source", "invalid"]]},
+            filepath="pkg/module.py",
+        )
+        is None
+    )
+
+
+def test_cache_rejects_relationship_source_mismatch(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    facts = FunctionRelationshipFacts(
+        source_qualname="pkg.module:source",
+        relationships=(
+            RelationshipRecord(
+                relation_kind="call",
+                resolution_status="resolved",
+                origin_lane="production",
+                source_qualname="pkg.module:other",
+                target_qualname="pkg.target:handler",
+                path="pkg/module.py",
+                line=7,
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="source_qualname must match its facts container",
+    ):
+        cache.put_file_entry(
+            "pkg/module.py",
+            {"mtime_ns": 1, "size": 10},
+            [],
+            [],
+            [],
+            function_relationship_facts=(facts,),
+        )
+
+
+def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
+    unit = _make_unit("pkg/module.py")
+
+    assert _unit_to_group_item(unit) == {
+        "qualname": "mod:func",
+        "filepath": "pkg/module.py",
+        "start_line": 1,
+        "end_line": 2,
+        "loc": 2,
+        "stmt_count": 1,
+        "fingerprint": "abc",
+        "loc_bucket": "0-19",
+        "cyclomatic_complexity": 1,
+        "nesting_depth": 0,
+        "risk": "low",
+        "raw_hash": "",
+        "entry_guard_count": 0,
+        "entry_guard_terminal_profile": "none",
+        "entry_guard_has_side_effect_before": False,
+        "terminal_kind": "fallthrough",
+        "try_finally_profile": "none",
+        "side_effect_order_profile": "none",
+    }
 
 
 def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:

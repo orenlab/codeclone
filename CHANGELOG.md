@@ -29,6 +29,8 @@ Added
   Zero-argument queries now resolve active intent scope or bounded live dirty
   paths, related module roles collapse with explicit relation tags, and one
   safety-first global budget reports all ordinary and safety omissions.
+  Cache schema 2.9 adds a separate, rebuildable per-function relationship-fact
+  projection without changing Unit serialization or canonical report identity.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and
