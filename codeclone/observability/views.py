@@ -28,6 +28,9 @@ class SpanView:
     dedupe_key: str | None = None
     counters: Mapping[str, int] = field(default_factory=dict)
     rss_delta_mb: float | None = None
+    rss_mb: float | None = None
+    peak_rss_mb: float | None = None
+    peak_rss_delta_mb: float | None = None
     started_at_utc: str = ""
     # Top-N literal-free SQL shapes seen on this span -> occurrence count.
     db_fingerprints: Mapping[str, int] = field(default_factory=dict)
@@ -51,6 +54,9 @@ class SpanCostView:
     duration_ms: float
     reason_kind: str | None = None
     rss_delta_mb: float | None = None
+    rss_mb: float | None = None
+    peak_rss_mb: float | None = None
+    peak_rss_delta_mb: float | None = None
     produced: int = 0
     skipped: int = 0
     no_op: bool = False
@@ -72,6 +78,9 @@ class OperationView:
     request_tokens: int | None = None
     response_tokens: int | None = None
     rss_delta_mb: float | None = None
+    rss_mb: float | None = None
+    peak_rss_mb: float | None = None
+    peak_rss_delta_mb: float | None = None
     spans: tuple[SpanView, ...] = ()
     children: tuple[OperationView, ...] = ()
     cpu_user_ms: float | None = None
@@ -180,6 +189,8 @@ class AggregatesView:
     slowest_span: SpanCostView | None = None
     semantic_costs: tuple[SpanCostView, ...] = ()
     peak_memory_span: SpanCostView | None = None
+    max_rss_absolute_mb: float | None = None
+    max_peak_rss_mb: float | None = None
     db_costs: tuple[DbCostRow, ...] = ()
     agent: AgentView | None = None
     waste: tuple[WasteItem, ...] = ()

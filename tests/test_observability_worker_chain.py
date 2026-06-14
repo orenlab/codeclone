@@ -91,22 +91,14 @@ def test_run_projection_job_emits_operation_and_spans(tmp_path: Path) -> None:
     by_name = {row[0]: row for row in span_rows}
     assert set(by_name) == {
         "memory.trajectory.rebuild",
-        "memory.semantic.reindex",
         "memory.experience.distill",
     }
-    # All spans hang off the single job operation.
+    # Semantic spans emit from execute_semantic_index_rebuild (not the worker shell).
+    # This test mocks that call, so only trajectory and experience spans appear.
     assert len({row[3] for row in span_rows}) == 1
-    # Empty memory DB has no applied stimulus -> first index, deterministic.
     assert by_name["memory.trajectory.rebuild"][1] == "first_index"
-    # Semantic has no deterministic reason_kind signal yet -> unclassified (NULL),
-    # which is intentionally NOT counted as an "unknown expensive rebuild".
-    assert by_name["memory.semantic.reindex"][1] is None
     assert orjson.loads(by_name["memory.trajectory.rebuild"][2]) == {
         "workflows_seen": 7
-    }
-    assert orjson.loads(by_name["memory.semantic.reindex"][2]) == {
-        "embedded": 1423,
-        "skipped_unchanged": 11,
     }
     assert orjson.loads(by_name["memory.experience.distill"][2]) == {
         "experiences_distilled": 3

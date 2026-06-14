@@ -38,6 +38,11 @@ from codeclone.observability.views import (
 from codeclone.surfaces.cli.observability import observability_main
 
 
+def _assert_html_contains(html: str, *needles: str) -> None:
+    missing = [needle for needle in needles if needle not in html]
+    assert not missing, f"missing html fragments: {missing}"
+
+
 def _trace() -> TraceView:
     span = SpanView(
         span_id="s1",
@@ -134,7 +139,7 @@ def test_render_trace_html_shows_db_query_shapes() -> None:
 def _cockpit_trace() -> TraceView:
     reindex = SpanView(
         span_id="sx",
-        name="memory.semantic.reindex",
+        name="memory.semantic.rebuild",
         duration_ms=850.0,
         status="ok",
         reason_kind="content_changed",
@@ -166,12 +171,12 @@ def _cockpit_trace() -> TraceView:
     )
     costly = SpanCostView(
         span_id="sx",
-        name="memory.semantic.reindex",
+        name="memory.semantic.rebuild",
         surface="memory",
         operation_id="W",
         operation_name="memory.projection.job",
         duration_ms=850.0,
-        reason_kind="content_changed",
+        reason_kind="manual_rebuild",
         produced=0,
         skipped=1423,
         no_op=True,
@@ -207,28 +212,29 @@ def _cockpit_trace() -> TraceView:
 def test_render_cockpit_sections() -> None:
     html = render_trace_html(_cockpit_trace())
     # Section trajectory: summary -> chain -> memory cost -> MCP matrix.
-    assert "Runtime summary" in html
-    assert "Correlated event chains" in html
-    assert "Memory pipeline cost" in html
-    assert "MCP tool matrix" in html
-    # Cross-process correlation: a breadcrumb chains finish -> worker, and the
-    # worker nests under it via the indent rail (not a card inside a card).
-    assert "finish_controlled_change" in html
-    assert "memory.projection.job" in html
-    assert "→" in html
-    assert 'class="kids"' in html
-    # The reindex ran but embedded nothing -> flagged as a costly no-op.
-    assert "no-op" in html
-    assert "Hottest span" in html
-    # MCP matrix carries request bytes and response tokens, not just response bytes.
-    assert "51 B" in html
-    assert "469" in html
+    _assert_html_contains(
+        html,
+        "Runtime summary",
+        "Correlated event chains",
+        "Memory pipeline cost",
+        "MCP tool matrix",
+        "finish_controlled_change",
+        "memory.projection.job",
+        "→",
+        'class="kids"',
+        'class="hirow"',
+        'class="hmono"',
+        "no-op",
+        "Hottest span",
+        "51 B",
+        "469",
+    )
 
 
 def test_render_peak_memory_contributor() -> None:
     consumer = SpanCostView(
         span_id="s",
-        name="memory.semantic.reindex",
+        name="memory.semantic.rebuild",
         surface="memory",
         operation_id="W",
         operation_name="memory.projection.job",
@@ -248,7 +254,7 @@ def test_render_peak_memory_contributor() -> None:
     html = render_trace_html(trace)
     # The peak-memory highlight names the consumer + its share, not a bare number.
     assert "Top memory consumer" in html
-    assert "memory.semantic.reindex" in html
+    assert "memory.semantic.rebuild" in html
     assert "80%" in html  # 480 / 600 = 80%
 
 
@@ -337,7 +343,7 @@ def test_render_waste_section() -> None:
                 ),
                 WasteItem(
                     kind="no-op",
-                    subject="memory.semantic.reindex",
+                    subject="memory.semantic.rebuild",
                     surface="memory",
                     detail="ran 800ms, skipped 826",
                     severity=800.0,
@@ -362,7 +368,7 @@ def test_render_db_cost() -> None:
             operation_count=1,
             db_costs=(
                 DbCostRow(
-                    span_name="memory.semantic.reindex",
+                    span_name="memory.semantic.rebuild",
                     surface="memory",
                     span_count=2,
                     total_queries=1306,
@@ -374,7 +380,7 @@ def test_render_db_cost() -> None:
     )
     html = render_trace_html(trace)
     assert "DB cost" in html
-    assert "memory.semantic.reindex" in html
+    assert "memory.semantic.rebuild" in html
     assert "1306" in html
     assert "653" in html  # 1306 / 2 queries per call
 
@@ -518,7 +524,7 @@ def test_html_format_helpers_and_semantic_cost_rows() -> None:
 
     costly = SpanCostView(
         span_id="s1",
-        name="memory.semantic.reindex",
+        name="memory.semantic.rebuild",
         surface="memory",
         operation_id="op",
         operation_name="memory.projection.job",

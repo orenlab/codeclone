@@ -11,12 +11,14 @@ from typing import Literal, TypedDict
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig
+from ...observability import SpanHandle, is_observability_enabled, span
+from ...observability.reason_kind import ReasonKind
 from ..embedding import resolve_embedding_provider
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
 from ..sqlite_store import SqliteEngineeringMemoryStore
-from .rebuild import rebuild_semantic_index
+from .rebuild import DEFAULT_EMBED_BATCH_SIZE, RebuildReport, rebuild_semantic_index
 from .sources import (
     AuditIndexSource,
     IndexSource,
@@ -108,6 +110,37 @@ def _rebuild_empty_counts() -> RebuildSemanticIndexCounts:
     }
 
 
+def _rebuild_reason_kind(report: RebuildReport) -> ReasonKind:
+    if report.indexed == 0:
+        return "first_index"
+    if report.embedded > 0 or report.deleted > 0:
+        return "content_changed"
+    if report.skipped_unchanged > 0:
+        # Full reconcile with hash-skip only — operator or scheduler triggered
+        # rebuild but the index was already current (no embed/prune work).
+        return "manual_rebuild"
+    return "manual_rebuild"
+
+
+def _apply_rebuild_counters(
+    rebuild_span: SpanHandle,
+    report: RebuildReport,
+    *,
+    dimensions: int,
+    batch_size: int,
+) -> None:
+    if not is_observability_enabled():
+        return
+    rebuild_span.set_counter("indexed", report.indexed)
+    rebuild_span.set_counter("embedded", report.embedded)
+    rebuild_span.set_counter("skipped_unchanged", report.skipped_unchanged)
+    rebuild_span.set_counter("deleted", report.deleted)
+    rebuild_span.set_counter("embedding_dimensions", dimensions)
+    rebuild_span.set_counter("embedding_batch_size", batch_size)
+    for lane, count in sorted(report.by_source.items()):
+        rebuild_span.set_counter(f"lane_{lane}", count)
+
+
 def execute_semantic_index_rebuild(
     *,
     root_path: Path,
@@ -122,83 +155,94 @@ def execute_semantic_index_rebuild(
     """
     base = _rebuild_base_payload(config)
     empty = _rebuild_empty_counts()
-    if not config.semantic.enabled:
-        return {
-            **base,
-            **empty,
-            "status": "skipped",
-            "reason": "disabled",
-            "embedding_model": None,
-        }
-    try:
-        provider = resolve_embedding_provider(config.semantic)
-    except MemorySemanticUnavailableError as exc:
-        return {
-            **base,
-            **empty,
-            "status": "unavailable",
-            "reason": str(exc),
-            "embedding_model": None,
-        }
-    from . import close_semantic_index, resolve_semantic_index_writer
+    with span(name="memory.semantic.rebuild") as rebuild_span:
+        if not config.semantic.enabled:
+            return {
+                **base,
+                **empty,
+                "status": "skipped",
+                "reason": "disabled",
+                "embedding_model": None,
+            }
+        with span(name="memory.semantic.bootstrap"):
+            try:
+                provider = resolve_embedding_provider(config.semantic)
+            except MemorySemanticUnavailableError as exc:
+                return {
+                    **base,
+                    **empty,
+                    "status": "unavailable",
+                    "reason": str(exc),
+                    "embedding_model": None,
+                }
+            from . import close_semantic_index, resolve_semantic_index_writer
 
-    writer = resolve_semantic_index_writer(config.semantic)
-    if writer is None:
-        return {
-            **base,
-            **empty,
-            "status": "unavailable",
-            "reason": "lancedb_not_installed",
-            "embedding_model": None,
-        }
-    owns_store = store is None
-    active_store = store
-    try:
-        resolved_project = project or resolve_project_identity(root_path)
-        if active_store is None:
-            db_path = resolve_memory_db_path(root_path, config)
-            if not db_path.exists():
-                raise MemoryContractError(
-                    f"Engineering memory database not found: {db_path}. "
-                    "Run memory init or "
-                    "manage_engineering_memory(action='refresh_from_run')."
-                )
-            active_store = SqliteEngineeringMemoryStore(db_path)
-        report = rebuild_semantic_index(
-            writer=writer,
-            provider=provider,
-            sources=build_semantic_index_sources(
-                root_path=root_path,
-                config=config,
-                store=active_store,
-                project=resolved_project,
-            ),
+            writer = resolve_semantic_index_writer(config.semantic)
+            if writer is None:
+                return {
+                    **base,
+                    **empty,
+                    "status": "unavailable",
+                    "reason": "lancedb_not_installed",
+                    "embedding_model": None,
+                }
+        owns_store = store is None
+        active_store = store
+        report: RebuildReport | None = None
+        try:
+            resolved_project = project or resolve_project_identity(root_path)
+            if active_store is None:
+                db_path = resolve_memory_db_path(root_path, config)
+                if not db_path.exists():
+                    raise MemoryContractError(
+                        f"Engineering memory database not found: {db_path}. "
+                        "Run memory init or "
+                        "manage_engineering_memory(action='refresh_from_run')."
+                    )
+                active_store = SqliteEngineeringMemoryStore(db_path)
+            report = rebuild_semantic_index(
+                writer=writer,
+                provider=provider,
+                sources=build_semantic_index_sources(
+                    root_path=root_path,
+                    config=config,
+                    store=active_store,
+                    project=resolved_project,
+                ),
+            )
+        except MemorySemanticUnavailableError as exc:
+            # The embedding model loads lazily, so an unavailable model surfaces at
+            # the first embed here rather than at resolve. Report it the same way an
+            # unresolved provider does instead of letting the rebuild raise.
+            return {
+                **base,
+                **empty,
+                "status": "unavailable",
+                "reason": str(exc),
+                "embedding_model": None,
+            }
+        finally:
+            close_semantic_index(writer)
+            if owns_store and active_store is not None:
+                active_store.close()
+        assert report is not None
+        rebuild_span.set_reason_kind(_rebuild_reason_kind(report))
+        _apply_rebuild_counters(
+            rebuild_span,
+            report,
+            dimensions=config.semantic.dimension,
+            batch_size=DEFAULT_EMBED_BATCH_SIZE,
         )
-    except MemorySemanticUnavailableError as exc:
-        # The embedding model loads lazily, so an unavailable model surfaces at
-        # the first embed here rather than at resolve. Report it the same way an
-        # unresolved provider does instead of letting the rebuild raise.
         return {
             **base,
-            **empty,
-            "status": "unavailable",
-            "reason": str(exc),
-            "embedding_model": None,
+            "status": "ok",
+            "indexed": report.indexed,
+            "deleted": report.deleted,
+            "embedded": report.embedded,
+            "skipped_unchanged": report.skipped_unchanged,
+            "by_source": dict(sorted(report.by_source.items())),
+            "embedding_model": provider.model_id,
         }
-    finally:
-        close_semantic_index(writer)
-        if owns_store and active_store is not None:
-            active_store.close()
-    return {
-        **base,
-        "status": "ok",
-        "indexed": report.indexed,
-        "deleted": report.deleted,
-        "embedded": report.embedded,
-        "skipped_unchanged": report.skipped_unchanged,
-        "by_source": dict(sorted(report.by_source.items())),
-        "embedding_model": provider.model_id,
-    }
 
 
 __all__ = [

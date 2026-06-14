@@ -10,6 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from ...observability import is_observability_enabled, span
 from ...utils.iterutils import chunked
 from ..embedding import embed_documents
 from .models import SemanticProjection, SemanticRow, SemanticRowFingerprint
@@ -66,25 +67,32 @@ def rebuild_semantic_index(
     for source in sources:
         if not source.available():
             continue
-        stats = _index_source(
-            source,
-            writer=writer,
-            provider=provider,
-            embed_batch_size=embed_batch_size,
-        )
+        with span(name=f"memory.semantic.source.{source.name()}"):
+            stats = _index_source(
+                source,
+                writer=writer,
+                provider=provider,
+                embed_batch_size=embed_batch_size,
+            )
         if stats.seen_ids:
             by_source[source.name()] = len(stats.seen_ids)
             seen_ids |= stats.seen_ids
         embedded += stats.embedded
         skipped += stats.skipped_unchanged
-    # Reconcile deletions: known_ids projects ids only (no vectors), so the
-    # delete pass stays cheap even on a large index.
-    stale = writer.known_ids() - seen_ids
-    if stale:
-        writer.delete(sorted(stale))
+    deleted = 0
+    with span(name="memory.semantic.reconcile") as reconcile_span:
+        # Reconcile deletions: known_ids projects ids only (no vectors), so the
+        # delete pass stays cheap even on a large index.
+        stale = writer.known_ids() - seen_ids
+        if stale:
+            writer.delete(sorted(stale))
+        deleted = len(stale)
+        if is_observability_enabled():
+            reconcile_span.set_counter("indexed", len(seen_ids))
+            reconcile_span.set_counter("deleted", deleted)
     return RebuildReport(
         indexed=len(seen_ids),
-        deleted=len(stale),
+        deleted=deleted,
         embedded=embedded,
         skipped_unchanged=skipped,
         by_source=by_source,
@@ -135,16 +143,26 @@ def _embed_and_upsert(
     provider: EmbeddingProvider,
     batch_size: int,
 ) -> int:
+    if not projections:
+        return 0
     embedded = 0
-    for batch in chunked(projections, batch_size):
-        vectors = embed_documents(provider, [projection.text for projection in batch])
-        writer.upsert(
-            [
-                _row(projection, vector, provider.model_id)
-                for projection, vector in zip(batch, vectors, strict=True)
-            ]
-        )
-        embedded += len(batch)
+    with span(name="memory.semantic.embed") as embed_span:
+        if is_observability_enabled():
+            embed_span.set_counter("batch_size", batch_size)
+            embed_span.set_counter("pending", len(projections))
+        for batch in chunked(projections, batch_size):
+            vectors = embed_documents(
+                provider, [projection.text for projection in batch]
+            )
+            writer.upsert(
+                [
+                    _row(projection, vector, provider.model_id)
+                    for projection, vector in zip(batch, vectors, strict=True)
+                ]
+            )
+            embedded += len(batch)
+        if is_observability_enabled():
+            embed_span.set_counter("embedded", embedded)
     return embedded
 
 
@@ -180,6 +198,7 @@ def _row(
 
 
 __all__ = [
+    "DEFAULT_EMBED_BATCH_SIZE",
     "RebuildReport",
     "rebuild_semantic_index",
 ]

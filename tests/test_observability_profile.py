@@ -35,11 +35,13 @@ def _reset_runtime() -> Iterator[None]:
 
 def test_build_profile_sample_computes_delta_from_baseline() -> None:
     assert build_profile_sample(None) is None
-    sample = build_profile_sample((0, 0.0, 0.0))
+    sample = build_profile_sample((0, 0.0, 0.0, 0))
     assert sample is not None
     # rss_delta vs a zero baseline is the full current RSS — positive and real.
     assert sample.rss_mb is not None and sample.rss_mb > 0
     assert sample.rss_delta_mb is not None and sample.rss_delta_mb > 0
+    assert sample.peak_rss_mb is not None and sample.peak_rss_mb > 0
+    assert sample.peak_rss_delta_mb is not None and sample.peak_rss_delta_mb > 0
     assert sample.thread_count is not None and sample.thread_count > 0
 
 
@@ -52,18 +54,22 @@ def test_profile_true_populates_resource_snapshot(tmp_path: Path) -> None:
     conn = open_observability_store(observability_store_path(tmp_path))
     try:
         op_row = conn.execute(
-            "SELECT rss_mb, thread_count FROM platform_operations"
+            "SELECT rss_mb, peak_rss_mb, thread_count FROM platform_operations"
         ).fetchone()
         span_row = conn.execute(
-            "SELECT rss_mb, rss_delta_mb, thread_count FROM platform_spans"
+            "SELECT rss_mb, rss_delta_mb, peak_rss_mb, peak_rss_delta_mb, "
+            "thread_count FROM platform_spans"
         ).fetchone()
     finally:
         conn.close()
     assert op_row[0] is not None
     assert op_row[1] is not None and op_row[1] > 0
+    assert op_row[2] is not None and op_row[2] > 0
     assert span_row[0] is not None
     assert span_row[1] is not None
     assert span_row[2] is not None and span_row[2] > 0
+    assert span_row[3] is not None and span_row[3] >= 0
+    assert span_row[4] is not None and span_row[4] > 0
 
 
 def test_profile_false_leaves_columns_null(tmp_path: Path) -> None:
@@ -121,7 +127,7 @@ def test_profile_helpers_return_none_without_psutil(
     monkeypatch.setattr(builtins, "__import__", _import)
     assert worker_bootstrap_sample() is None
     assert capture_rss_cpu() is None
-    assert build_profile_sample((0, 0.0, 0.0)) is None
+    assert build_profile_sample((0, 0.0, 0.0, 0)) is None
 
 
 def test_profile_open_fds_degrades_gracefully(
@@ -141,6 +147,6 @@ def test_profile_open_fds_degrades_gracefully(
     mock_psutil.Process.return_value = process
     monkeypatch.setitem(sys.modules, "psutil", mock_psutil)
 
-    sample = build_profile_sample((512 * 1024, 0.0, 0.0))
+    sample = build_profile_sample((512 * 1024, 0.0, 0.0, 256 * 1024))
     assert sample is not None
     assert sample.open_fds is None

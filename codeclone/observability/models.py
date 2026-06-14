@@ -25,6 +25,8 @@ class ProfileSample:
 
     rss_mb: float | None = None
     rss_delta_mb: float | None = None
+    peak_rss_mb: float | None = None
+    peak_rss_delta_mb: float | None = None
     cpu_user_ms: float | None = None
     cpu_system_ms: float | None = None
     open_fds: int | None = None

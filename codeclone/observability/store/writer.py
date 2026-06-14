@@ -17,24 +17,25 @@ import sqlite3
 from ...utils.json_io import json_text
 from ..models import OperationRecord, ProfileSample, SpanRecord
 
-_PROFILE_NULL: tuple[None, None, None, None, None, None] = (None,) * 6
+_PROFILE_NULL: tuple[None, ...] = (None,) * 8
 
 _OPERATION_SQL = (
     "INSERT OR REPLACE INTO platform_operations("
     "operation_id, parent_operation_id, correlation_id, surface, name, "
     "started_at_utc, duration_ms, status, error_kind, session_id, "
     "repo_root_digest, request_bytes, response_bytes, request_tokens, "
-    "response_tokens, rss_mb, rss_delta_mb, cpu_user_ms, cpu_system_ms, "
-    "open_fds, thread_count) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "response_tokens, rss_mb, rss_delta_mb, peak_rss_mb, peak_rss_delta_mb, "
+    "cpu_user_ms, cpu_system_ms, open_fds, thread_count) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 _SPAN_SQL = (
     "INSERT OR REPLACE INTO platform_spans("
     "span_id, operation_id, parent_span_id, name, started_at_utc, duration_ms, "
     "status, reason_kind, reason, dedupe_key, counters_json, db_fingerprints, "
-    "rss_mb, rss_delta_mb, cpu_user_ms, cpu_system_ms, open_fds, thread_count) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "rss_mb, rss_delta_mb, peak_rss_mb, peak_rss_delta_mb, cpu_user_ms, "
+    "cpu_system_ms, open_fds, thread_count) "
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
 )
 
 
@@ -46,6 +47,8 @@ def _profile_cols(
     return (
         profile.rss_mb,
         profile.rss_delta_mb,
+        profile.peak_rss_mb,
+        profile.peak_rss_delta_mb,
         profile.cpu_user_ms,
         profile.cpu_system_ms,
         profile.open_fds,

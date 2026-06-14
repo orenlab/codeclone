@@ -45,6 +45,7 @@ _DEFAULT_WINDOW = 20
 # Counters whose presence marks a span as *meant* to do productive work; when
 # they are all present-and-zero the span ran but touched nothing (a no-op).
 _PRODUCTIVE_COUNTER_KEYS = ("embedded", "workflows_seen", "experiences_distilled")
+_MEMORY_PIPELINE_PREFIX = "memory."
 _SEMANTIC_COST_LIMIT = 8
 _DB_FINGERPRINT_ROW_LIMIT = 15
 
@@ -82,6 +83,14 @@ def _parse_counters(raw: object) -> dict[str, int]:
     )
 
 
+def _optional_float(row: sqlite3.Row, key: str) -> float | None:
+    columns = row.keys()
+    if key not in columns:
+        return None
+    value = row[key]
+    return float(value) if value is not None else None
+
+
 def _span_view(row: sqlite3.Row) -> SpanView:
     # sqlite3.Row membership (`x in row`) tests values, so probe column names via
     # keys() to stay tolerant of stores written before db_fingerprints existed.
@@ -96,7 +105,10 @@ def _span_view(row: sqlite3.Row) -> SpanView:
         reason=row["reason"],
         dedupe_key=row["dedupe_key"],
         counters=_parse_counters(row["counters_json"]),
-        rss_delta_mb=row["rss_delta_mb"],
+        rss_delta_mb=_optional_float(row, "rss_delta_mb"),
+        rss_mb=_optional_float(row, "rss_mb"),
+        peak_rss_mb=_optional_float(row, "peak_rss_mb"),
+        peak_rss_delta_mb=_optional_float(row, "peak_rss_delta_mb"),
         started_at_utc=str(row["started_at_utc"]),
         db_fingerprints=_parse_counters(
             row["db_fingerprints"] if "db_fingerprints" in columns else None
@@ -140,7 +152,10 @@ def _operation_view(
         response_bytes=row["response_bytes"],
         request_tokens=row["request_tokens"],
         response_tokens=row["response_tokens"],
-        rss_delta_mb=row["rss_delta_mb"],
+        rss_delta_mb=_optional_float(row, "rss_delta_mb"),
+        rss_mb=_optional_float(row, "rss_mb"),
+        peak_rss_mb=_optional_float(row, "peak_rss_mb"),
+        peak_rss_delta_mb=_optional_float(row, "peak_rss_delta_mb"),
         spans=spans,
         children=children,
         cpu_user_ms=row["cpu_user_ms"],
@@ -227,6 +242,11 @@ def _build_forest(
     return tuple(build(root) for root in sorted(children_ids[None], key=_order))
 
 
+def _is_memory_pipeline_span(name: str) -> bool:
+    """Memory-product spans may run under CLI/MCP operations — classify by name."""
+    return name.startswith(_MEMORY_PIPELINE_PREFIX)
+
+
 def _span_cost_view(op: OperationView, span: SpanView) -> SpanCostView:
     """Flatten a span with its owning operation's identity and classify whether
     it did productive work (see ``SpanCostView.no_op``)."""
@@ -243,6 +263,9 @@ def _span_cost_view(op: OperationView, span: SpanView) -> SpanCostView:
         duration_ms=span.duration_ms,
         reason_kind=span.reason_kind,
         rss_delta_mb=span.rss_delta_mb,
+        rss_mb=span.rss_mb,
+        peak_rss_mb=span.peak_rss_mb,
+        peak_rss_delta_mb=span.peak_rss_delta_mb,
         produced=produced,
         skipped=int(span.counters.get("skipped_unchanged", 0)),
         no_op=bool(productive) and produced == 0,
@@ -470,10 +493,41 @@ def _aggregates(
         (_span_cost_view(op, span) for op in flat for span in op.spans),
         key=lambda s: (-s.duration_ms, s.operation_id, s.span_id),
     )
-    semantic_costs = tuple(s for s in span_costs if s.surface == "memory")
+    semantic_costs = tuple(s for s in span_costs if _is_memory_pipeline_span(s.name))
     memory_ranked = sorted(
-        (s for s in span_costs if s.rss_delta_mb is not None),
-        key=lambda s: (-(s.rss_delta_mb or 0.0), s.operation_id, s.span_id),
+        (
+            s
+            for s in span_costs
+            if any(
+                value is not None
+                for value in (
+                    s.peak_rss_mb,
+                    s.peak_rss_delta_mb,
+                    s.rss_mb,
+                    s.rss_delta_mb,
+                )
+            )
+        ),
+        key=lambda s: (
+            -(s.peak_rss_mb or s.rss_mb or 0.0),
+            -(s.peak_rss_delta_mb or s.rss_delta_mb or 0.0),
+            s.operation_id,
+            s.span_id,
+        ),
+    )
+    rss_abs = [v.rss_mb for v in flat if v.rss_mb is not None]
+    rss_abs.extend(
+        span.rss_mb
+        for spans in spans_by_op.values()
+        for span in spans
+        if span.rss_mb is not None
+    )
+    peak_rss = [v.peak_rss_mb for v in flat if v.peak_rss_mb is not None]
+    peak_rss.extend(
+        span.peak_rss_mb
+        for spans in spans_by_op.values()
+        for span in spans
+        if span.peak_rss_mb is not None
     )
     mcp_tools = _mcp_tool_aggregates(flat)
     cpu_ranked = sorted(flat, key=lambda v: (-_cpu_ms(v), v.operation_id))
@@ -489,6 +543,8 @@ def _aggregates(
         slowest_span=span_costs[0] if span_costs else None,
         semantic_costs=semantic_costs[:_SEMANTIC_COST_LIMIT],
         peak_memory_span=memory_ranked[0] if memory_ranked else None,
+        max_rss_absolute_mb=max(rss_abs) if rss_abs else None,
+        max_peak_rss_mb=max(peak_rss) if peak_rss else None,
         db_costs=_db_costs(flat),
         agent=_agent_view(flat),
         waste=_waste(semantic_costs, mcp_tools),

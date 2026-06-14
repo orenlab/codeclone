@@ -94,7 +94,11 @@ color:var(--mute);font-weight:600;margin:0 0 4px 2px}
 .shint{color:var(--mute);font-size:12px;margin:0 0 11px 2px}
 .panel{background:var(--surface);border:1px solid var(--border);
 border-radius:11px;overflow:hidden}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
+gap:10px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;
+margin-bottom:12px}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .card{background:var(--surface);border:1px solid var(--border);
 border-radius:11px;padding:14px 16px}
 .card .v{font-size:24px;font-weight:600;letter-spacing:-0.02em;
@@ -104,6 +108,19 @@ letter-spacing:0.07em;margin-top:4px}
 .card.warn{border-color:var(--warn-soft)}
 .card.warn .v{color:var(--warn)}
 .card.accent .v{color:var(--accent)}
+.hipanel{padding:6px 16px 10px}
+.hirow{display:grid;grid-template-columns:minmax(128px,152px) minmax(0,1fr) auto;
+align-items:start;gap:10px 16px;padding:12px 0;border-top:1px solid var(--border)}
+.hirow:first-child{border-top:none}
+.hilabel{color:var(--mute);font-size:11px;text-transform:uppercase;
+letter-spacing:0.05em;padding-top:2px}
+.hibody{min-width:0}
+.hiprimary{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.hmono{font-family:var(--mono);font-size:13px;line-height:1.45}
+.hctx{font-family:var(--mono);font-size:11.5px;color:var(--mute);margin-top:4px;
+line-height:1.45}
+.himetric{font-family:var(--mono);font-size:13px;font-weight:600;white-space:nowrap;
+text-align:right;padding-top:2px;line-height:1.45}
 .lead{padding:4px 16px}
 .lrow{display:grid;grid-template-columns:158px minmax(0,1fr) auto;align-items:center;
 gap:14px;padding:11px 0;border-top:1px solid var(--border)}
@@ -254,8 +271,32 @@ def _counters(counters: Mapping[str, int]) -> str:
     return f'<span class="counters">{items}</span>'
 
 
-def _rss_text(value: float | None) -> str:
-    return "" if value is None or value < 0.05 else f"Δ{_mb(value)}"
+def _rss_text(
+    delta: float | None,
+    *,
+    end: float | None = None,
+    peak: float | None = None,
+    peak_delta: float | None = None,
+) -> str:
+    parts: list[str] = []
+    if end is not None and end >= 0.05:
+        parts.append(f"end {_mb(end)}")
+    if peak is not None and peak >= 0.05:
+        parts.append(f"peak {_mb(peak)}")
+    if peak_delta is not None and peak_delta >= 0.05:
+        parts.append(f"peakΔ{_mb(peak_delta)}")
+    elif delta is not None and delta >= 0.05:
+        parts.append(f"Δ{_mb(delta)}")
+    return " · ".join(parts)
+
+
+def _view_rss_text(view: OperationView | SpanView | SpanCostView) -> str:
+    return _rss_text(
+        view.rss_delta_mb,
+        end=view.rss_mb,
+        peak=view.peak_rss_mb,
+        peak_delta=view.peak_rss_delta_mb,
+    )
 
 
 def _payload(op: OperationView) -> str:
@@ -306,11 +347,21 @@ def _table(headers: tuple[tuple[str, bool], ...], rows: str) -> str:
     )
 
 
-def _lead_row(label: str, value_html: str, metric: str) -> str:
+def _highlight_row(
+    label: str,
+    *,
+    badge_html: str,
+    primary: str,
+    metric_html: str,
+    context: str | None = None,
+    chips_html: str = "",
+) -> str:
+    ctx = f'<div class="hctx">in {_esc(context)}</div>' if context else ""
     return (
-        f'<div class="lrow"><span class="llabel">{_esc(label)}</span>'
-        f'<span class="lval">{value_html}</span>'
-        f'<span class="lmetric">{_esc(metric)}</span></div>'
+        f'<div class="hirow"><span class="hilabel">{_esc(label)}</span>'
+        f'<div class="hibody"><div class="hiprimary">{badge_html}'
+        f'<span class="hmono">{_esc(primary)}</span>{chips_html}</div>{ctx}</div>'
+        f'<div class="himetric">{metric_html}</div></div>'
     )
 
 
@@ -319,45 +370,73 @@ def _highlights(agg: AggregatesView) -> str:
     if agg.slowest:
         op = agg.slowest[0]
         rows.append(
-            _lead_row(
+            _highlight_row(
                 "Slowest operation",
-                f"{_surface_badge(op.surface)}"
-                f'<span class="lname">{_esc(op.name)}</span>',
-                _ms(op.duration_ms),
+                badge_html=_surface_badge(op.surface),
+                primary=op.name,
+                metric_html=_esc(_ms(op.duration_ms)),
             )
         )
     if agg.slowest_span is not None:
         span = agg.slowest_span
-        reason = _reason_chip(span.reason_kind)
         rows.append(
-            _lead_row(
+            _highlight_row(
                 "Hottest span",
-                f"{_surface_badge(span.surface)}"
-                f'<span class="lname">{_esc(span.name)}</span>'
-                f'<span class="lin">in {_esc(span.operation_name)}</span>{reason}',
-                _ms(span.duration_ms),
+                badge_html=_surface_badge(span.surface),
+                primary=span.name,
+                context=span.operation_name,
+                chips_html=_reason_chip(span.reason_kind),
+                metric_html=_esc(_ms(span.duration_ms)),
             )
         )
-    if agg.peak_memory_span is not None and agg.max_rss_delta_mb:
-        # Name who took the memory, not just how much — the metric becomes a
-        # conclusion ("X grew the RSS", with its share of the peak).
+    if agg.peak_memory_span is not None and (
+        agg.max_rss_delta_mb or agg.max_peak_rss_mb or agg.max_rss_absolute_mb
+    ):
         peak = agg.peak_memory_span
-        share = round((peak.rss_delta_mb or 0.0) / agg.max_rss_delta_mb * 100)
+        metric = (
+            peak.peak_rss_mb
+            or peak.rss_mb
+            or peak.peak_rss_delta_mb
+            or peak.rss_delta_mb
+        )
+        denom = (
+            agg.max_peak_rss_mb
+            or agg.max_rss_absolute_mb
+            or agg.max_rss_delta_mb
+            or 1.0
+        )
+        share = round((metric or 0.0) / denom * 100)
+        detail = _rss_text(
+            peak.rss_delta_mb,
+            end=peak.rss_mb,
+            peak=peak.peak_rss_mb,
+            peak_delta=peak.peak_rss_delta_mb,
+        )
         rows.append(
-            _lead_row(
+            _highlight_row(
                 "Top memory consumer",
-                f"{_surface_badge(peak.surface)}"
-                f'<span class="lname">{_esc(peak.name)}</span>'
-                f'<span class="lin">in {_esc(peak.operation_name)}</span>',
-                f"{_mb(peak.rss_delta_mb)} · {share}%",
+                badge_html=_surface_badge(peak.surface),
+                primary=peak.name,
+                context=peak.operation_name,
+                metric_html=f"{_esc(detail)} · {share}%",
+            )
+        )
+    elif agg.max_peak_rss_mb is not None:
+        rows.append(
+            _highlight_row(
+                "Process peak RSS",
+                badge_html="",
+                primary="high-water resident set",
+                metric_html=_esc(_mb(agg.max_peak_rss_mb)),
             )
         )
     elif agg.max_rss_delta_mb is not None:
         rows.append(
-            _lead_row(
+            _highlight_row(
                 "Peak memory Δ",
-                '<span class="lname">resident set growth</span>',
-                _mb(agg.max_rss_delta_mb),
+                badge_html="",
+                primary="resident set growth",
+                metric_html=_esc(_mb(agg.max_rss_delta_mb)),
             )
         )
     if agg.heaviest_cpu is not None:
@@ -365,14 +444,14 @@ def _highlights(agg: AggregatesView) -> str:
         cpu_ms = (op.cpu_user_ms or 0.0) + (op.cpu_system_ms or 0.0)
         ratio = cpu_ms / op.duration_ms if op.duration_ms else 0.0
         rows.append(
-            _lead_row(
+            _highlight_row(
                 "Heaviest CPU",
-                f"{_surface_badge(op.surface)}"
-                f'<span class="lname">{_esc(op.name)}</span>',
-                f"{_ms(cpu_ms)} · {ratio:.1f}x wall",
+                badge_html=_surface_badge(op.surface),
+                primary=op.name,
+                metric_html=f"{_esc(_ms(cpu_ms))} · {ratio:.1f}x wall",
             )
         )
-    return f'<div class="panel lead">{"".join(rows)}</div>' if rows else ""
+    return f'<div class="panel hipanel">{"".join(rows)}</div>' if rows else ""
 
 
 def _summary(trace: TraceView) -> str:
@@ -384,14 +463,21 @@ def _summary(trace: TraceView) -> str:
     )
     unknown = agg.unknown_expensive_rebuild_count
     cards = (
-        '<div class="grid">'
+        '<div class="stats">'
         + _stat(str(agg.operation_count), "operations", "accent")
+        + _stat(_mb(agg.max_peak_rss_mb or agg.max_rss_absolute_mb), "peak rss")
         + _stat(_mb(agg.max_rss_delta_mb), "peak rss Δ")
         + _stat(str(costly), "costly no-ops", "warn" if costly else "")
         + _stat(str(unknown), "unknown reason", "warn" if unknown else "")
         + "</div>"
     )
-    return _section("Runtime summary", cards + _highlights(agg))
+    highlights = _highlights(agg)
+    body = cards + highlights if highlights else cards
+    return _section(
+        "Runtime summary",
+        body,
+        subtitle="Headline counters, then where time and memory actually went.",
+    )
 
 
 def _waste_row(item: WasteItem) -> str:
@@ -443,7 +529,7 @@ def _op_row(op: OperationView, group_max: float) -> str:
         f'{_surface_badge(op.surface)}<span class="opname">{_esc(op.name)}</span>'
         f"</span>{_bar(op.duration_ms, group_max)}"
         f'<span class="dur">{_ms(op.duration_ms)}</span>'
-        f'<span class="mem">{_rss_text(op.rss_delta_mb)}</span>'
+        f'<span class="mem">{_view_rss_text(op)}</span>'
         f'<span class="extra">{_payload(op)}</span></div>'
     )
 
@@ -456,7 +542,7 @@ def _span_row(span: SpanView, op_duration: float) -> str:
         f'<span class="spanname">{_esc(span.name)}</span></span>'
         f"{_bar(span.duration_ms, op_duration, color=color)}"
         f'<span class="dur">{_ms(span.duration_ms)}</span>'
-        f'<span class="mem">{_rss_text(span.rss_delta_mb)}</span>'
+        f'<span class="mem">{_view_rss_text(span)}</span>'
         f'<span class="extra">{_reason_chip(span.reason_kind)}</span>'
         f"{_counters(span.counters)}</div>"
     )
@@ -515,7 +601,7 @@ def _semantic_row(span: SpanCostView) -> str:
         f'<td class="r">{span.produced}</td>'
         f'<td class="r">{span.skipped}</td>'
         f'<td class="r">{_ms(span.duration_ms)}</td>'
-        f'<td class="r">{_mb(span.rss_delta_mb)}</td>'
+        f'<td class="r">{_view_rss_text(span)}</td>'
         f"<td>{verdict}</td></tr>"
     )
 
@@ -531,14 +617,14 @@ def _semantic(agg: AggregatesView) -> str:
         ("Produced", True),
         ("Skipped", True),
         ("Duration", True),
-        ("RSS Δ", True),
+        ("Memory", True),
         ("Verdict", False),
     )
     return _section(
         "Memory pipeline cost",
         _table(headers, rows),
-        subtitle="Reindex and rebuild spans — flags work that ran but "
-        "produced nothing.",
+        subtitle="Semantic and memory-product spans — flags work that ran but "
+        "produced nothing (including CLI-triggered rebuilds).",
     )
 
 
@@ -630,7 +716,7 @@ def _agent(agg: AggregatesView) -> str:
     if view is None:
         return ""
     cards = (
-        '<div class="grid">'
+        '<div class="stats">'
         + _stat(_tokens(view.response_tokens), "context pressure (tok)", "accent")
         + _stat(_tokens(view.request_tokens), "sent (tok)")
         + _stat(str(view.mcp_calls), "mcp calls")

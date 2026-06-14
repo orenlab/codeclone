@@ -182,22 +182,12 @@ def run_projection_job(
             trajectory_span.set_counter(
                 "workflows_seen", _payload_int(trajectory_payload, "workflows_seen")
             )
-        with span(name="memory.semantic.reindex") as semantic_span:
-            semantic_payload = execute_semantic_index_rebuild(
-                root_path=root_path,
-                config=config,
-                store=store,
-                project=project,
-            )
-            semantic_span.set_counter(
-                "embedded", _payload_int(semantic_payload, "embedded")
-            )
-            semantic_span.set_counter(
-                "skipped_unchanged",
-                _payload_int(semantic_payload, "skipped_unchanged"),
-            )
-        # Experiences distill from the trajectories rebuilt above — same job, run
-        # right after so the corpus is fresh.
+        semantic_payload = execute_semantic_index_rebuild(
+            root_path=root_path,
+            config=config,
+            store=store,
+            project=project,
+        )
         with span(name="memory.experience.distill") as experience_span:
             experience_payload = execute_experience_distillation(
                 root_path=root_path,

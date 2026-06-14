@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Protocol, cast
 
+from ...observability import is_observability_enabled, span
 from ..exceptions import MemorySemanticUnavailableError
 
 
@@ -65,7 +66,9 @@ class FastEmbedEmbeddingProvider:
         return cast("Callable[..., object]", text_embedding)
 
     def _get_model(self) -> _TextEmbeddingModel:
-        if self._model is None:
+        if self._model is not None:
+            return self._model
+        with span(name="memory.embedding.model_load"):
             try:
                 model = self._text_embedding(
                     model_name=self.model_name,
@@ -96,21 +99,24 @@ class FastEmbedEmbeddingProvider:
         return self._embed_prefixed([f"passage: {text}" for text in texts])
 
     def _embed_prefixed(self, texts: Sequence[str]) -> list[list[float]]:
-        try:
-            raw_vectors = list(self._get_model().embed(list(texts)))
-        except Exception as exc:
-            raise MemorySemanticUnavailableError(
-                f"fastembed embedding failed for model {self.model_name}: {exc}"
-            ) from exc
-        vectors = [self._coerce_vector(vector) for vector in raw_vectors]
-        for vector in vectors:
-            if len(vector) != self.dimension:
+        with span(name="memory.embedding.infer") as infer_span:
+            if is_observability_enabled():
+                infer_span.set_counter("batch", len(texts))
+            try:
+                raw_vectors = list(self._get_model().embed(list(texts)))
+            except Exception as exc:
                 raise MemorySemanticUnavailableError(
-                    "fastembed embedding dimension mismatch: "
-                    f"expected {self.dimension}, got {len(vector)} for "
-                    f"{self.model_name}"
-                )
-        return vectors
+                    f"fastembed embedding failed for model {self.model_name}: {exc}"
+                ) from exc
+            vectors = [self._coerce_vector(vector) for vector in raw_vectors]
+            for vector in vectors:
+                if len(vector) != self.dimension:
+                    raise MemorySemanticUnavailableError(
+                        "fastembed embedding dimension mismatch: "
+                        f"expected {self.dimension}, got {len(vector)} for "
+                        f"{self.model_name}"
+                    )
+            return vectors
 
     @staticmethod
     def _coerce_vector(raw_vector: object) -> list[float]:

@@ -119,7 +119,7 @@ def test_profile_columns_persist(tmp_path: Path) -> None:
     try:
         span = _span(
             "p",
-            name="memory.semantic.reindex",
+            name="memory.semantic.rebuild",
             duration_ms=18200.0,
             profile=ProfileSample(rss_delta_mb=6144.0),
         )

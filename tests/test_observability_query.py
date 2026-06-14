@@ -75,7 +75,7 @@ def _seed(tmp_path: Path) -> None:
                     SpanRecord(
                         span_id="r",
                         operation_id="J",
-                        name="memory.semantic.reindex",
+                        name="memory.semantic.rebuild",
                         started_at_utc="2026-06-12T00:00:01Z",
                         duration_ms=2120.0,
                         status="ok",
@@ -230,7 +230,7 @@ def test_correlated_chains_flattens_root_and_children(tmp_path: Path) -> None:
         r for r in _rows(out["rows"]) if r["root"] == "mcp.finish_controlled_change"
     )
     assert "memory.projection.job" in _texts(chain["children"])
-    assert "memory.semantic.reindex" in _texts(chain["children"])
+    assert "memory.semantic.rebuild" in _texts(chain["children"])
     assert chain["peak_rss_delta_mb"] == 440.0
 
 
@@ -300,7 +300,7 @@ def test_projection_helpers_and_diagnostic_edges(
         spans=(
             SpanView(
                 span_id="span",
-                name="memory.semantic.reindex",
+                name="memory.semantic.rebuild",
                 duration_ms=9.0,
                 status="ok",
                 rss_delta_mb=3.0,
@@ -310,7 +310,7 @@ def test_projection_helpers_and_diagnostic_edges(
     )
     semantic = SpanCostView(
         span_id="semantic",
-        name="memory.semantic.reindex",
+        name="memory.semantic.rebuild",
         surface="memory",
         operation_id="root",
         operation_name=root.name,

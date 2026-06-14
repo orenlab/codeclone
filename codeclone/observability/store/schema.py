@@ -44,6 +44,8 @@ CREATE TABLE IF NOT EXISTS platform_operations (
     response_tokens INTEGER,
     rss_mb REAL,
     rss_delta_mb REAL,
+    peak_rss_mb REAL,
+    peak_rss_delta_mb REAL,
     cpu_user_ms REAL,
     cpu_system_ms REAL,
     open_fds INTEGER,
@@ -65,6 +67,8 @@ CREATE TABLE IF NOT EXISTS platform_spans (
     db_fingerprints TEXT,
     rss_mb REAL,
     rss_delta_mb REAL,
+    peak_rss_mb REAL,
+    peak_rss_delta_mb REAL,
     cpu_user_ms REAL,
     cpu_system_ms REAL,
     open_fds INTEGER,
@@ -98,11 +102,34 @@ def _ensure_span_columns(conn: sqlite3.Connection) -> None:
     existing = {row[1] for row in conn.execute("PRAGMA table_info(platform_spans)")}
     if "db_fingerprints" not in existing:
         conn.execute("ALTER TABLE platform_spans ADD COLUMN db_fingerprints TEXT")
+    _ensure_peak_rss_columns(conn, table="platform_spans", existing=existing)
+
+
+def _ensure_peak_rss_columns(
+    conn: sqlite3.Connection, *, table: str, existing: set[str] | None = None
+) -> None:
+    columns = (
+        existing
+        if existing is not None
+        else {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    )
+    if "peak_rss_mb" not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN peak_rss_mb REAL")
+    if "peak_rss_delta_mb" not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN peak_rss_delta_mb REAL")
+
+
+def _ensure_operation_columns(conn: sqlite3.Connection) -> None:
+    existing = {
+        row[1] for row in conn.execute("PRAGMA table_info(platform_operations)")
+    }
+    _ensure_peak_rss_columns(conn, table="platform_operations", existing=existing)
 
 
 def create_observability_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(_SCHEMA)
     _ensure_span_columns(conn)
+    _ensure_operation_columns(conn)
     conn.execute(
         "INSERT OR REPLACE INTO platform_meta(key, value) VALUES('schema_version', ?)",
         (PLATFORM_OBSERVABILITY_SCHEMA_VERSION,),

@@ -15,6 +15,7 @@ from codeclone.memory.exceptions import (
     MemoryContractError,
     MemorySemanticUnavailableError,
 )
+from codeclone.memory.semantic.rebuild import RebuildReport
 from codeclone.memory.semantic.rebuild_workflow import execute_semantic_index_rebuild
 
 from .memory_fixtures import memory_store
@@ -132,3 +133,32 @@ def test_execute_semantic_rebuild_unavailable_when_model_fails_at_embed(
         )
     assert payload["status"] == "unavailable"
     assert "model unavailable" in str(payload["reason"])
+
+
+def test_rebuild_reason_kind_warm_skip_is_manual_rebuild() -> None:
+    from codeclone.memory.semantic import rebuild_workflow as wf
+
+    report = RebuildReport(
+        indexed=1502,
+        embedded=0,
+        skipped_unchanged=1502,
+        by_source={"memory": 238, "audit": 673, "trajectory": 591},
+    )
+    assert wf._rebuild_reason_kind(report) == "manual_rebuild"
+
+
+def test_rebuild_reason_kind_embed_or_prune_is_content_changed() -> None:
+    from codeclone.memory.semantic import rebuild_workflow as wf
+
+    assert (
+        wf._rebuild_reason_kind(
+            RebuildReport(indexed=10, embedded=3, skipped_unchanged=7)
+        )
+        == "content_changed"
+    )
+    assert (
+        wf._rebuild_reason_kind(
+            RebuildReport(indexed=10, embedded=0, deleted=2, skipped_unchanged=8)
+        )
+        == "content_changed"
+    )

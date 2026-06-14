@@ -22,7 +22,7 @@ flowchart LR
     C --> E["Bounded MCP diagnostics"]
     D --> F["Human diagnosis"]
     E --> F
-    B -. "must not influence" .-> G["Analysis, findings, gates,<br/>baseline, cache, permissions"]
+    B -. " must not influence " .-> G["Analysis, findings, gates,<br/>baseline, cache, permissions"]
 ```
 
 The observer:
@@ -58,26 +58,54 @@ model but are not automatic pruning guarantees in the current release.
 
 ## Data model
 
-The local schema version is `1.0`. A completed operation and its spans are
+The local schema version is `1.1`. A completed operation and its spans are
 written in one transaction.
 
 An operation records stable identifiers, parent/correlation IDs, surface,
 operation name, timestamps, duration, status, bounded error classification,
 session and root digests, request/response sizes, token estimates, and optional
-process metrics.
+process metrics (`rss_mb`, `rss_delta_mb`, `peak_rss_mb`, `peak_rss_delta_mb`,
+CPU time, thread count, open file descriptors when `codeclone[perf]` is
+installed).
 
 A span records its parent, duration, reason kind, deduplication state, numeric
-counters, optional process metrics, and at most eight normalized SQL
+counters, the same optional process metrics, and at most eight normalized SQL
 fingerprints. SQL literals are removed before persistence.
 
-Reindex reasons are classified as:
+### Engineering Memory and semantic rebuild spans
 
-- `content_changed`
+When observability is enabled, `codeclone memory …` commands record a CLI
+operation (`cli.memory.{command}` or `cli.memory.semantic.{action}`) and
+nested product spans:
+
+| Span                                                 | When                                                 |
+|------------------------------------------------------|------------------------------------------------------|
+| `memory.semantic.rebuild`                            | Semantic index rebuild (CLI, MCP, projection worker) |
+| `memory.semantic.bootstrap`                          | Provider and LanceDB writer resolution               |
+| `memory.semantic.source.{memory\|audit\|trajectory}` | Per-source projection scan                           |
+| `memory.semantic.embed`                              | Changed-row embedding batches                        |
+| `memory.semantic.reconcile`                          | Stale-id deletion                                    |
+| `memory.semantic.search`                             | CLI semantic search                                  |
+| `memory.embedding.model_load`                        | First FastEmbed ONNX load in-process                 |
+| `memory.embedding.infer`                             | FastEmbed batch inference                            |
+| `memory.embedding.documents`                         | Document embedding helper                            |
+| `memory.embedding.query`                             | Query embedding helper                               |
+
+The rebuild span carries counters such as `indexed`, `embedded`,
+`skipped_unchanged`, `deleted`, `embedding_dimensions`, `embedding_batch_size`,
+and `lane_{source}` tallies.
+
+Semantic rebuild reasons are classified as:
+
+- `content_changed` — rows were embedded and/or stale ids pruned
+- `manual_rebuild` — full reconcile but index already current (hash-skip only)
 - `schema_version_changed`
 - `model_changed`
-- `manual_rebuild`
 - `first_index`
 - `unknown`
+
+Memory pipeline cost rows include `memory.*` product spans regardless of
+whether they ran under a `memory`, `cli`, or `mcp` operation surface.
 
 ## CLI projection
 

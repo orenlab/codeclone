@@ -57,6 +57,13 @@ from ...memory.trajectory.export import (
     resolve_export_output_path,
 )
 from ...memory.vacuum import run_memory_vacuum
+from ...observability import (
+    bootstrap,
+    is_observability_enabled,
+    operation,
+    shutdown,
+    span,
+)
 from .memory_analysis import load_report_for_memory_init
 from .memory_render import (
     memory_console,
@@ -102,6 +109,51 @@ def memory_main(argv: list[str]) -> int:
     if not root_path.is_dir():
         console.print(f"Repository root does not exist: {root_path}")
         return int(ExitCode.CONTRACT_ERROR)
+    return _run_memory_with_observability(
+        root_path=root_path,
+        args=args,
+        handler=lambda: _dispatch_memory_command(
+            console=console, root_path=root_path, args=args
+        ),
+    )
+
+
+def _memory_operation_name(args: argparse.Namespace) -> str:
+    command = str(args.command)
+    if command == "semantic":
+        return f"cli.memory.semantic.{args.semantic_action}"
+    if command == "trajectory":
+        return f"cli.memory.trajectory.{args.trajectory_action}"
+    if command == "jobs":
+        return f"cli.memory.jobs.{args.jobs_action}"
+    return f"cli.memory.{command}"
+
+
+def _run_memory_with_observability(
+    *,
+    root_path: Path,
+    args: argparse.Namespace,
+    handler: Callable[[], int],
+) -> int:
+    from ...config.observability import resolve_observability_config
+
+    config = resolve_observability_config()
+    if not config.enabled:
+        return handler()
+    owns_observability = not is_observability_enabled()
+    if owns_observability:
+        bootstrap(config, root=root_path)
+    try:
+        with operation(name=_memory_operation_name(args), surface="cli"):
+            return handler()
+    finally:
+        if owns_observability:
+            shutdown()
+
+
+def _dispatch_memory_command(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
     if args.command == "status":
         return _render_status(console=console, root_path=root_path)
     if args.command == "init":
@@ -130,7 +182,6 @@ def memory_main(argv: list[str]) -> int:
         return _run_trajectory(console=console, root_path=root_path, args=args)
     if args.command == "jobs":
         return _run_jobs(console=console, root_path=root_path, args=args)
-    parser.print_help()
     return int(ExitCode.CONTRACT_ERROR)
 
 
@@ -1245,6 +1296,10 @@ def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
         console.print(
             f"Rebuilt semantic index: {ok['indexed']} indexed, {ok['deleted']} pruned."
         )
+        console.print(
+            "  embedded: "
+            f"{ok['embedded']}, skipped unchanged: {ok['skipped_unchanged']}"
+        )
         for name, count in sorted(ok["by_source"].items()):
             console.print(f"  {name}: {count}")
         return int(ExitCode.SUCCESS)
@@ -1274,23 +1329,27 @@ def _run_semantic_search(
         )
     db_path = resolve_memory_db_path(root_path, config)
     store = SqliteEngineeringMemoryStore(db_path) if db_path.exists() else None
+    from ...memory.semantic import close_semantic_index
+
     try:
-        results = semantic_search(
-            index=index,
-            provider=provider,
-            store=store,
-            audit_db_path=resolve_audit_path(
-                root_path=root_path, value=DEFAULT_AUDIT_PATH
-            ),
-            query=str(args.query),
-            limit=max(1, int(args.limit)),
-            preview_chars=DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS,
-        )
+        with span(name="memory.semantic.search"):
+            results = semantic_search(
+                index=index,
+                provider=provider,
+                store=store,
+                audit_db_path=resolve_audit_path(
+                    root_path=root_path, value=DEFAULT_AUDIT_PATH
+                ),
+                query=str(args.query),
+                limit=max(1, int(args.limit)),
+                preview_chars=DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS,
+            )
     except MemorySemanticUnavailableError as exc:
         # The embedding model loads lazily, so an unavailable model surfaces at
         # the first embed rather than at provider resolution.
         return _semantic_unavailable(console, f"Semantic search unavailable: {exc}.")
     finally:
+        close_semantic_index(index)
         if store is not None:
             store.close()
     if bool(args.json):

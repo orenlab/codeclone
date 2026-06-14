@@ -174,7 +174,7 @@ def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
     try:
         with (
             operation(name="memory.projection.job", surface="memory"),
-            span(name="memory.semantic.reindex"),
+            span(name="memory.semantic.rebuild"),
         ):
             conn = sqlite3.connect(":memory:")
             instrument_db_connection(conn)
@@ -190,7 +190,7 @@ def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
     try:
         row = obs.execute(
             "SELECT counters_json FROM platform_spans "
-            "WHERE name='memory.semantic.reindex'"
+            "WHERE name='memory.semantic.rebuild'"
         ).fetchone()
     finally:
         obs.close()

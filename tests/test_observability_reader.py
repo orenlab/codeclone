@@ -57,7 +57,7 @@ def _seed(tmp_path: Path) -> None:
                     SpanRecord(
                         span_id="s1",
                         operation_id="B",
-                        name="memory.semantic.reindex",
+                        name="memory.semantic.rebuild",
                         started_at_utc="2026-06-09T00:00:02Z",
                         duration_ms=18200.0,
                         status="ok",
@@ -106,7 +106,7 @@ def test_build_trace_view_tree_and_aggregates(tmp_path: Path) -> None:
     child = root.children[0]
     assert child.operation_id == "B"
     assert {span.name for span in child.spans} == {
-        "memory.semantic.reindex",
+        "memory.semantic.rebuild",
         "memory.trajectory.rebuild",
     }
 
@@ -121,12 +121,12 @@ def test_build_trace_view_tree_and_aggregates(tmp_path: Path) -> None:
     assert agg.mcp_tools[0].p95_response_bytes == 900
 
     assert agg.slowest_span is not None
-    assert agg.slowest_span.name == "memory.semantic.reindex"
+    assert agg.slowest_span.name == "memory.semantic.rebuild"
     assert agg.slowest_span.operation_name == "memory.projection.job"
     assert agg.slowest_span.produced == 1423
     assert agg.slowest_span.no_op is False
     assert [s.name for s in agg.semantic_costs] == [
-        "memory.semantic.reindex",
+        "memory.semantic.rebuild",
         "memory.trajectory.rebuild",
     ]
 
@@ -141,11 +141,11 @@ def test_build_trace_view_tree_and_aggregates(tmp_path: Path) -> None:
     job_row = rows[("memory.projection.job", "operation")]
     assert job_row.depth == 1
     assert job_row.offset_ms == 1000.0
-    assert rows[("memory.semantic.reindex", "span")].depth == 2
+    assert rows[("memory.semantic.rebuild", "span")].depth == 2
 
     # Top memory consumer: the reindex span carries the largest rss delta.
     assert agg.peak_memory_span is not None
-    assert agg.peak_memory_span.name == "memory.semantic.reindex"
+    assert agg.peak_memory_span.name == "memory.semantic.rebuild"
     assert agg.peak_memory_span.rss_delta_mb == 6144.0
 
 
@@ -195,7 +195,7 @@ def test_no_op_span_and_mcp_payload_percentiles(tmp_path: Path) -> None:
                     SpanRecord(
                         span_id="sx",
                         operation_id="W",
-                        name="memory.semantic.reindex",
+                        name="memory.semantic.rebuild",
                         started_at_utc="2026-06-09T00:00:02Z",
                         duration_ms=850.0,
                         status="ok",
@@ -216,7 +216,7 @@ def test_no_op_span_and_mcp_payload_percentiles(tmp_path: Path) -> None:
     assert tool.p95_response_tokens == 469
 
     costly = trace.aggregates.semantic_costs[0]
-    assert costly.name == "memory.semantic.reindex"
+    assert costly.name == "memory.semantic.rebuild"
     # embedded present and zero -> the reindex ran but produced nothing.
     assert costly.no_op is True
     assert costly.produced == 0
@@ -229,6 +229,50 @@ def test_no_op_span_and_mcp_payload_percentiles(tmp_path: Path) -> None:
     assert agent.response_tokens == 469
     assert agent.consumers[0].name == "finish_controlled_change"
     assert agent.consumers[0].response_tokens == 469
+
+
+def test_cli_semantic_rebuild_span_in_pipeline_costs(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="C",
+                correlation_id="C",
+                surface="cli",
+                name="cli.memory.semantic.rebuild",
+                started_at_utc="2026-06-09T00:00:01Z",
+                duration_ms=1380.0,
+                status="ok",
+                spans=(
+                    SpanRecord(
+                        span_id="sr",
+                        operation_id="C",
+                        name="memory.semantic.rebuild",
+                        started_at_utc="2026-06-09T00:00:01Z",
+                        duration_ms=1380.0,
+                        status="ok",
+                        reason_kind="manual_rebuild",
+                        counters={
+                            "embedded": 0,
+                            "skipped_unchanged": 1502,
+                            "indexed": 1502,
+                        },
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+
+    trace = _read_trace(tmp_path, correlation_id="C")
+    costs = trace.aggregates.semantic_costs
+    assert len(costs) == 1
+    assert costs[0].name == "memory.semantic.rebuild"
+    assert costs[0].surface == "cli"
+    assert costs[0].no_op is True
+    assert costs[0].reason_kind == "manual_rebuild"
+    assert costs[0].skipped == 1502
 
 
 def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
@@ -248,7 +292,7 @@ def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
                     SpanRecord(
                         span_id="s1",
                         operation_id="W",
-                        name="memory.semantic.reindex",
+                        name="memory.semantic.rebuild",
                         started_at_utc="2026-06-09T00:00:01Z",
                         duration_ms=800.0,
                         status="ok",
@@ -277,9 +321,9 @@ def test_db_costs_aggregate_per_span(tmp_path: Path) -> None:
     assert costs[0].total_queries == 1875
     assert costs[0].total_writes == 768
     by_name = {row.span_name: row for row in costs}
-    assert by_name["memory.semantic.reindex"].total_queries == 1306
-    assert by_name["memory.semantic.reindex"].total_writes == 0
-    assert by_name["memory.semantic.reindex"].max_queries == 1306
+    assert by_name["memory.semantic.rebuild"].total_queries == 1306
+    assert by_name["memory.semantic.rebuild"].total_writes == 0
+    assert by_name["memory.semantic.rebuild"].max_queries == 1306
 
 
 def test_db_fingerprints_aggregate_per_shape(tmp_path: Path) -> None:
@@ -362,7 +406,7 @@ def test_waste_ranks_no_op_and_high_payload(tmp_path: Path) -> None:
                     SpanRecord(
                         span_id="s",
                         operation_id="W",
-                        name="memory.semantic.reindex",
+                        name="memory.semantic.rebuild",
                         started_at_utc="2026-06-09T00:00:01Z",
                         duration_ms=800.0,
                         status="ok",
@@ -379,7 +423,7 @@ def test_waste_ranks_no_op_and_high_payload(tmp_path: Path) -> None:
     waste = trace.aggregates.waste
     assert {w.kind for w in waste} == {"no-op", "high payload"}
     noop = next(w for w in waste if w.kind == "no-op")
-    assert noop.subject == "memory.semantic.reindex"
+    assert noop.subject == "memory.semantic.rebuild"
     assert "skipped 826" in noop.detail
     high = next(w for w in waste if w.kind == "high payload")
     assert high.subject == "get_relevant_memory"

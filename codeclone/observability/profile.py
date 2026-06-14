@@ -14,12 +14,14 @@ effort and must never break the work it measures.
 
 from __future__ import annotations
 
+import sys
 import time
 from datetime import datetime, timezone
 
 from .models import ProfileSample
 
 _BYTES_PER_MB = 1024 * 1024
+ProfileBaseline = tuple[int, float, float, int | None]
 
 
 def worker_bootstrap_sample() -> tuple[str, float] | None:
@@ -56,9 +58,32 @@ def capture_rss_cpu() -> tuple[int, float, float] | None:
     return memory.rss, cpu.user, cpu.system
 
 
-def build_profile_sample(
-    baseline: tuple[int, float, float] | None,
-) -> ProfileSample | None:
+def capture_process_peak_rss() -> int | None:
+    """Process high-water RSS via ``getrusage`` (monotonic since process start).
+
+    Returns ``None`` when ``resource.getrusage`` is unavailable.
+    """
+    try:
+        import resource
+    except ImportError:
+        return None
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    peak = int(usage.ru_maxrss)
+    if sys.platform == "darwin":
+        return peak
+    return peak * 1024
+
+
+def capture_profile_baseline() -> ProfileBaseline | None:
+    """Capture RSS/CPU plus the process peak-RSS watermark at span/operation start."""
+    snapshot = capture_rss_cpu()
+    if snapshot is None:
+        return None
+    base_rss, base_user, base_system = snapshot
+    return base_rss, base_user, base_system, capture_process_peak_rss()
+
+
+def build_profile_sample(baseline: ProfileBaseline | None) -> ProfileSample | None:
     """Build a ``ProfileSample`` as the delta from ``baseline`` to now.
 
     Returns ``None`` when no baseline was captured or psutil is unavailable.
@@ -69,10 +94,17 @@ def build_profile_sample(
         import psutil
     except ImportError:
         return None
-    base_rss, base_user, base_system = baseline
+    base_rss, base_user, base_system, base_peak = baseline
     process = psutil.Process()
     memory = process.memory_info()
     cpu = process.cpu_times()
+    end_peak = capture_process_peak_rss()
+    peak_rss_mb: float | None = None
+    peak_rss_delta_mb: float | None = None
+    if end_peak is not None:
+        peak_rss_mb = end_peak / _BYTES_PER_MB
+        if base_peak is not None:
+            peak_rss_delta_mb = max(0, end_peak - base_peak) / _BYTES_PER_MB
     try:
         open_fds: int | None = process.num_fds()
     except (AttributeError, NotImplementedError, OSError):
@@ -81,6 +113,8 @@ def build_profile_sample(
     return ProfileSample(
         rss_mb=memory.rss / _BYTES_PER_MB,
         rss_delta_mb=(memory.rss - base_rss) / _BYTES_PER_MB,
+        peak_rss_mb=peak_rss_mb,
+        peak_rss_delta_mb=peak_rss_delta_mb,
         cpu_user_ms=(cpu.user - base_user) * 1000.0,
         cpu_system_ms=(cpu.system - base_system) * 1000.0,
         open_fds=open_fds,
@@ -88,4 +122,11 @@ def build_profile_sample(
     )
 
 
-__all__ = ["build_profile_sample", "capture_rss_cpu", "worker_bootstrap_sample"]
+__all__ = [
+    "ProfileBaseline",
+    "build_profile_sample",
+    "capture_process_peak_rss",
+    "capture_profile_baseline",
+    "capture_rss_cpu",
+    "worker_bootstrap_sample",
+]

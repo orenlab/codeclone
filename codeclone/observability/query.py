@@ -244,6 +244,23 @@ def _chain_peak_rss(op: OperationView) -> float | None:
     return max(values) if values else None
 
 
+def _chain_peak_rss_absolute(op: OperationView) -> float | None:
+    values: list[float] = [
+        candidate for candidate in (op.peak_rss_mb, op.rss_mb) if candidate is not None
+    ]
+    for span in op.spans:
+        values.extend(
+            candidate
+            for candidate in (span.peak_rss_mb, span.rss_mb)
+            if candidate is not None
+        )
+    for child in op.children:
+        child_peak = _chain_peak_rss_absolute(child)
+        if child_peak is not None:
+            values.append(child_peak)
+    return max(values) if values else None
+
+
 def _correlated_chains(trace: TraceView, cap: int) -> list[dict[str, object]]:
     return [
         {
@@ -251,6 +268,7 @@ def _correlated_chains(trace: TraceView, cap: int) -> list[dict[str, object]]:
             "children": _chain_descendant_names(root)[:_CHAIN_CHILD_CAP],
             "duration_ms": round(root.duration_ms, 1),
             "peak_rss_delta_mb": _round1(_chain_peak_rss(root)),
+            "peak_rss_mb": _round1(_chain_peak_rss_absolute(root)),
         }
         for root in trace.operation_tree[:cap]
     ]
@@ -258,17 +276,27 @@ def _correlated_chains(trace: TraceView, cap: int) -> list[dict[str, object]]:
 
 def _memory_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
     span = agg.peak_memory_span
+    if span is None:
+        return None
+    peak = span.peak_rss_mb or span.rss_mb
+    delta = span.peak_rss_delta_mb or span.rss_delta_mb
+    if peak is None and delta is None:
+        return None
     if (
-        span is None
-        or span.rss_delta_mb is None
-        or span.rss_delta_mb < _MEMORY_HEAVY_MB
+        delta is not None
+        and delta < _MEMORY_HEAVY_MB
+        and (peak is None or peak < _MEMORY_HEAVY_MB)
     ):
         return None
+    detail = []
+    if peak is not None:
+        detail.append(f"peak {round(peak)} MB")
+    if delta is not None:
+        detail.append(f"Δ{round(delta)} MB")
     return {
         "kind": "memory",
         "message": (
-            f"{span.name} used {round(span.rss_delta_mb)} MB "
-            f"(produced {span.produced})."
+            f"{span.name} used {' · '.join(detail)} (produced {span.produced})."
         ),
     }
 
@@ -314,6 +342,7 @@ def _summary_body(trace: TraceView) -> dict[str, object]:
     return {
         "operations": agg.operation_count,
         "peak_rss_delta_mb": _round1(agg.max_rss_delta_mb),
+        "peak_rss_mb": _round1(agg.max_peak_rss_mb),
         "context_pressure_tokens": agg.agent.response_tokens if agg.agent else 0,
         "costly_noops": sum(1 for s in agg.semantic_costs if s.no_op),
         "top_diagnostics": _top_diagnostics(agg),

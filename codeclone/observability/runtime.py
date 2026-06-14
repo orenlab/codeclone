@@ -323,17 +323,19 @@ def payload_capture_enabled() -> bool:
     )
 
 
-def _profile_baseline() -> tuple[int, float, float] | None:
-    """Capture an rss/cpu baseline when profiling is on (else None, no psutil)."""
+def _profile_baseline() -> tuple[int, float, float, int | None] | None:
+    """Capture an rss/cpu/peak baseline when profiling is on (else None, no psutil)."""
     runtime = _RUNTIME
     if _ENABLED and runtime is not None and runtime.config.profile:
-        from .profile import capture_rss_cpu
+        from .profile import capture_profile_baseline
 
-        return capture_rss_cpu()
+        return capture_profile_baseline()
     return None
 
 
-def _profile_sample(baseline: tuple[int, float, float] | None) -> ProfileSample | None:
+def _profile_sample(
+    baseline: tuple[int, float, float, int | None] | None,
+) -> ProfileSample | None:
     if baseline is None:
         return None
     from .profile import build_profile_sample

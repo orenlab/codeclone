@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from ...observability import is_observability_enabled, span
 from ..exceptions import MemorySemanticUnavailableError
 
 if TYPE_CHECKING:
@@ -82,19 +83,25 @@ class DeterministicHashEmbeddingProvider:
 
 
 def embed_query(provider: EmbeddingProvider, text: str) -> list[float]:
-    if isinstance(provider, _QueryEmbeddingProvider):
-        return provider.embed_query(text)
-    (vector,) = provider.embed([text])
-    return vector
+    with span(name="memory.embedding.query") as embed_span:
+        if is_observability_enabled():
+            embed_span.set_counter("chars", len(text))
+        if isinstance(provider, _QueryEmbeddingProvider):
+            return provider.embed_query(text)
+        (vector,) = provider.embed([text])
+        return vector
 
 
 def embed_documents(
     provider: EmbeddingProvider,
     texts: Sequence[str],
 ) -> list[list[float]]:
-    if isinstance(provider, _DocumentEmbeddingProvider):
-        return provider.embed_documents(texts)
-    return provider.embed(texts)
+    with span(name="memory.embedding.documents") as embed_span:
+        if is_observability_enabled():
+            embed_span.set_counter("count", len(texts))
+        if isinstance(provider, _DocumentEmbeddingProvider):
+            return provider.embed_documents(texts)
+        return provider.embed(texts)
 
 
 def _resolve_fastembed_provider(config: SemanticConfig) -> EmbeddingProvider:
