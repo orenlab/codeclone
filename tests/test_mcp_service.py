@@ -918,6 +918,61 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
             latest["findings"],
         )["new_by_source_kind"]
     )
+    record = service._runs.get(str(summary["run_id"]))
+    assert record.manifest is not None
+    assert set(record.manifest) == {"pkg/__init__.py", "pkg/dup.py"}
+    assert record.dirty_snapshot is not None
+    assert summary["drifted_files"] == []
+    assert latest["drifted_files"] == []
+
+
+def test_mcp_service_run_summary_detects_workspace_drift(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    _write_clone_fixture(tmp_path)
+    subprocess.run(
+        ["git", "add", "pkg"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "fixture"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@e.com",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@e.com",
+        },
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    target = tmp_path / "pkg" / "dup.py"
+    stat_at_run = target.stat()
+    content_at_run = target.read_text("utf-8")
+    target.write_text(
+        content_at_run.replace("value + 1", "value + 9", 1),
+        "utf-8",
+    )
+    os.utime(
+        target,
+        ns=(stat_at_run.st_atime_ns, stat_at_run.st_mtime_ns),
+    )
+
+    latest = service.get_run_summary(run_id=str(summary["run_id"]))
+
+    assert latest["drifted_files"] == ["pkg/dup.py"]
 
 
 def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:

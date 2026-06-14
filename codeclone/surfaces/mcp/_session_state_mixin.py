@@ -75,6 +75,7 @@ from ._session_shared import (
     load_pyproject_config,
     paginate,
 )
+from ._workspace_drift import compute_drift
 from ._workspace_intents import remove_workspace_intent
 
 
@@ -573,6 +574,7 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             security_surfaces = _helpers._summary_security_surfaces_payload(record)
             if security_surfaces:
                 payload["security_surfaces"] = security_surfaces
+            payload["drifted_files"] = list(compute_drift(record).drifted_files)
         payload["next_tool"] = "get_production_triage"
         if record is not None:
             _helpers.attach_workspace_hygiene_tips(payload, root=record.root)

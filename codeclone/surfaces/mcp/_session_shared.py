@@ -15,12 +15,13 @@ from dataclasses import dataclass
 from json import JSONDecodeError
 from pathlib import Path
 from threading import RLock
-from typing import Final, Literal, TypeVar
+from typing import TYPE_CHECKING, Final, Literal, TypeVar
 
 import orjson
 
 from ... import __version__
 from ...baseline import Baseline
+from ...cache.entries import FileStat
 from ...cache.store import Cache
 from ...cache.versioning import CacheStatus
 from ...config.pyproject_loader import (
@@ -102,6 +103,9 @@ from ...utils.coerce import as_int as _as_int
 from ...utils.git_diff import validate_git_diff_ref
 from .messages.help_topics import HELP_TOPIC_SPECS as _HELP_TOPIC_SPECS
 from .payloads import paginate, resolve_finding_id, short_id
+
+if TYPE_CHECKING:
+    from ._workspace_hygiene import DirtySnapshot
 
 AnalysisMode = Literal["full", "clones_only"]
 CachePolicy = Literal["reuse", "off"]
@@ -627,6 +631,8 @@ class MCPRunRecord:
     new_func: frozenset[str]
     new_block: frozenset[str]
     metrics_diff: MetricsDiff | None
+    manifest: Mapping[str, FileStat] | None = None
+    dirty_snapshot: DirtySnapshot | None = None
 
 
 class CodeCloneMCPRunStore:

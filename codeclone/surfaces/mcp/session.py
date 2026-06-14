@@ -74,6 +74,8 @@ from ._session_shared import (
 )
 from ._session_state_mixin import _MCPSessionStateMixin
 from ._session_workflow_mixin import _MCPSessionWorkflowMixin
+from ._workspace_drift import build_run_manifest
+from ._workspace_hygiene import collect_dirty_snapshot
 
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
@@ -229,6 +231,7 @@ class MCPSession(
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)
         root_path = _helpers._resolve_root(request.root)
+        run_dirty_snapshot = collect_dirty_snapshot(root_path)
         analysis_started_at_utc = _current_report_timestamp_utc()
         changed_paths = self._resolve_request_changed_paths(
             root_path=root_path,
@@ -265,6 +268,10 @@ class MCPSession(
             )
         with span(name="pipeline.discover"):
             discovery_result = discover(boot=boot, cache=cache)
+        run_manifest = build_run_manifest(
+            root=root_path,
+            filepaths=discovery_result.all_file_paths,
+        )
         with span(name="pipeline.process"):
             processing_result = process(
                 boot=boot, discovery=discovery_result, cache=cache
@@ -451,6 +458,8 @@ class MCPSession(
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
             metrics_diff=metrics_diff,
+            manifest=run_manifest,
+            dirty_snapshot=run_dirty_snapshot,
         )
         changed_projection = self._build_changed_projection(provisional_record)
         summary = self._augment_summary_with_changed(
@@ -480,6 +489,8 @@ class MCPSession(
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
             metrics_diff=metrics_diff,
+            manifest=run_manifest,
+            dirty_snapshot=run_dirty_snapshot,
         )
         self._runs.register(record)
         self._emit_analysis_completed_audit(
