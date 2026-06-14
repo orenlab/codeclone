@@ -30,9 +30,24 @@ DEFAULT_IMPLEMENTATION_FACETS: Final[tuple[Facet, ...]] = (
     "public_surface",
     "blast_radius",
     "tests",
+    "docs",
+    "memory",
 )
-IMPLEMENTED_STEP2_FACETS: Final[frozenset[Facet]] = frozenset(
-    DEFAULT_IMPLEMENTATION_FACETS
+DEFAULT_IMPACT_FACETS: Final[tuple[Facet, ...]] = (
+    "blast_radius",
+    "importers",
+    "public_surface",
+    "baseline_sensitive_findings",
+    "tests",
+    "review_context",
+    "memory",
+)
+IMPLEMENTED_CONTEXT_FACETS: Final[frozenset[Facet]] = frozenset(
+    {
+        *DEFAULT_IMPLEMENTATION_FACETS,
+        *DEFAULT_IMPACT_FACETS,
+        "scope",
+    }
 )
 
 
@@ -59,13 +74,16 @@ def build_implementation_context(
     *,
     record: MCPRunRecord,
     paths: Sequence[str],
+    mode: str,
     include: Sequence[Facet],
     depth: int,
     detail_level: str,
     budget: int,
     blast_radius: Mapping[str, object],
+    memory_result: Mapping[str, object] | None,
+    change_control: Mapping[str, object] | None,
 ) -> dict[str, object]:
-    """Build the Step-2 path-only implementation context response."""
+    """Build the path-owned implementation-context response."""
     normalized_paths = tuple(sorted(set(paths)))
     include_set = frozenset(include)
     entry_budget = _EntryBudget(remaining=budget)
@@ -133,7 +151,7 @@ def build_implementation_context(
         structural_context["blast_radius"] = _bounded_blast_radius(
             blast_radius,
             budget=entry_budget,
-            depth=depth,
+            depth=2 if mode == "impact" else depth,
         )
 
     if "tests" in include_set:
@@ -146,6 +164,28 @@ def build_implementation_context(
             structural_context,
             key="tests",
             items=test_importers,
+            budget=entry_budget,
+        )
+
+    if "baseline_sensitive_findings" in include_set:
+        _attach_bounded(
+            structural_context,
+            key="baseline_sensitive_findings",
+            items=_baseline_sensitive_findings(
+                record,
+                relevant_paths=_blast_zone_paths(
+                    paths=normalized_paths,
+                    blast_radius=blast_radius,
+                ),
+            ),
+            budget=entry_budget,
+        )
+
+    if "review_context" in include_set:
+        _attach_bounded(
+            structural_context,
+            key="review_context",
+            items=_mapping_rows(blast_radius.get("review_context")),
             budget=entry_budget,
         )
 
@@ -171,10 +211,10 @@ def build_implementation_context(
         "call_graph_status": "unavailable",
         "failed_files": [],
     }
-    unavailable_facets = sorted(include_set - IMPLEMENTED_STEP2_FACETS)
+    unavailable_facets = sorted(include_set - IMPLEMENTED_CONTEXT_FACETS)
     payload: dict[str, object] = {
         "status": "ok",
-        "mode": "implementation",
+        "mode": mode,
         "subject": {
             "resolved_from": "explicit_paths",
             "paths": list(normalized_paths),
@@ -197,16 +237,26 @@ def build_implementation_context(
             "Re-run after analyze_repository when analysis.freshness.status is drifted."
         ],
     }
+    if memory_result is not None:
+        payload["implementation_evidence"] = _implementation_evidence(
+            memory_result,
+            include=include_set,
+            budget=entry_budget,
+        )
+    if change_control is not None:
+        payload["change_control"] = dict(change_control)
     if unavailable_facets:
         payload["unavailable_facets"] = unavailable_facets
     request_projection: dict[str, object] = {
         "subject": payload["subject"],
-        "mode": "implementation",
+        "mode": mode,
         "include": sorted(include),
         "depth": depth,
         "detail_level": detail_level,
         "budget": budget,
-        "intent_id": None,
+        "intent_id": (
+            str(change_control.get("intent_id")) if change_control is not None else None
+        ),
         "freshness_status": drift.status,
     }
     analysis["context_projection_digest"] = _digest(
@@ -217,6 +267,127 @@ def build_implementation_context(
         )
     )
     return payload
+
+
+def _implementation_evidence(
+    memory_result: Mapping[str, object],
+    *,
+    include: frozenset[Facet],
+    budget: _EntryBudget,
+) -> dict[str, object]:
+    records = _mapping_rows(memory_result.get("records"))
+    test_records = tuple(row for row in records if row.get("type") == "test_anchor")
+    doc_records = tuple(row for row in records if row.get("type") == "document_link")
+    general_records = tuple(
+        row
+        for row in records
+        if row.get("type") not in {"document_link", "test_anchor"}
+    )
+    payload: dict[str, object] = {
+        "scope_resolved_from": memory_result.get("scope_resolved_from"),
+        "retrieval_policy": dict(_as_mapping(memory_result.get("retrieval_policy"))),
+    }
+    if "memory" in include:
+        _attach_bounded(payload, key="memory", items=general_records, budget=budget)
+        _attach_bounded(
+            payload,
+            key="trajectories",
+            items=_mapping_rows(memory_result.get("trajectories")),
+            budget=budget,
+        )
+        _attach_bounded(
+            payload,
+            key="experiences",
+            items=_mapping_rows(memory_result.get("experiences")),
+            budget=budget,
+        )
+    if "tests" in include:
+        _attach_bounded(payload, key="test_anchors", items=test_records, budget=budget)
+    if "docs" in include:
+        _attach_bounded(payload, key="doc_anchors", items=doc_records, budget=budget)
+    return payload
+
+
+def _baseline_sensitive_findings(
+    record: MCPRunRecord,
+    *,
+    relevant_paths: frozenset[str],
+) -> tuple[dict[str, object], ...]:
+    findings = _as_mapping(record.report_document.get("findings"))
+    groups = _as_mapping(findings.get("groups"))
+    rows: list[dict[str, object]] = []
+    for family, family_payload in sorted(groups.items()):
+        for category, category_payload in sorted(_as_mapping(family_payload).items()):
+            for raw_group in _as_sequence(category_payload):
+                group = _as_mapping(raw_group)
+                paths = _finding_paths(group)
+                novelty = str(group.get("novelty", "")).strip()
+                if not relevant_paths.intersection(paths) or novelty not in {
+                    "known",
+                    "new",
+                }:
+                    continue
+                rows.append(
+                    {
+                        "id": str(group.get("id", "")).strip(),
+                        "family": str(family),
+                        "category": str(category),
+                        "kind": str(group.get("kind", "")).strip(),
+                        "severity": str(group.get("severity", "")).strip(),
+                        "novelty": novelty,
+                        "paths": list(paths),
+                        "evidence": "structural",
+                    }
+                )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                0 if row["novelty"] == "new" else 1,
+                str(row["severity"]),
+                str(row["family"]),
+                str(row["category"]),
+                str(row["id"]),
+            ),
+        )
+    )
+
+
+def _finding_paths(group: Mapping[str, object]) -> tuple[str, ...]:
+    paths = {
+        str(
+            item.get("relative_path") or item.get("path") or item.get("file") or ""
+        ).strip()
+        for item in _mapping_rows(group.get("items"))
+    }
+    return tuple(sorted(path for path in paths if path))
+
+
+def _blast_zone_paths(
+    *,
+    paths: Sequence[str],
+    blast_radius: Mapping[str, object],
+) -> frozenset[str]:
+    return frozenset(
+        {
+            *paths,
+            *(
+                str(item)
+                for key in (
+                    "direct_dependents",
+                    "transitive_dependents",
+                    "clone_cohort_members",
+                    "in_dependency_cycle",
+                )
+                for item in _as_sequence(blast_radius.get(key))
+                if str(item).strip()
+            ),
+        }
+    )
+
+
+def _mapping_rows(value: object) -> tuple[dict[str, object], ...]:
+    return tuple(dict(_as_mapping(item)) for item in _as_sequence(value))
 
 
 def _dependency_rows(record: MCPRunRecord) -> tuple[dict[str, object], ...]:
@@ -503,7 +674,8 @@ def _as_int(value: object) -> int:
 __all__ = [
     "CALL_RESOLUTION_VERSION",
     "CONTEXT_CONTRACT_VERSION",
+    "DEFAULT_IMPACT_FACETS",
     "DEFAULT_IMPLEMENTATION_FACETS",
-    "IMPLEMENTED_STEP2_FACETS",
+    "IMPLEMENTED_CONTEXT_FACETS",
     "build_implementation_context",
 ]

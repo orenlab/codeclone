@@ -24,12 +24,13 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 
 ## Implementation context
 
-`get_implementation_context` is a read-only projection over one stored run. In
-the initial path-owned slice, pass explicit repo-relative `paths` and use
-`mode="implementation"`. Default facets include module role, direct imports,
-importers, public API rows, blast radius, and test importers. One global
-`budget` bounds all emitted entries; each collection carries deterministic
-`total`, `shown`, and `truncated` counts.
+`get_implementation_context` is a read-only projection over one stored run.
+Pass explicit repo-relative `paths`; use `mode="implementation"` for editing
+orientation or `mode="impact"` for transitive dependency context and
+baseline-sensitive findings. Default implementation facets include module role,
+direct imports, importers, public API rows, blast radius, tests, docs, and
+memory. One global `budget` bounds emitted evidence; each collection carries
+deterministic `total`, `shown`, and `truncated` counts.
 
 ```mermaid
 flowchart LR
@@ -49,7 +50,18 @@ returns `needs_analysis`; invalid facets and paths outside the root raise a
 contract error. `freshness.status="drifted"` means analyze again before relying
 on the projection. The tool never changes `edit_allowed`.
 
-Symbol subjects, intent overlays, inferred changed scope, memory fusion, and
-call/reference relationships are additive Phase 30 slices. Until their owning
-slice lands, requesting them is rejected or reported unavailable rather than
-fabricated.
+With `intent_id`, the selected active intent pins the source run and adds a
+`change_control` block:
+
+- `allowed_files` and `allowed_related` from the declared scope;
+- report-derived `review_context`;
+- explicit and built-in `do_not_touch` boundaries;
+- the original guards and `authorization_source="start_controlled_change"`.
+
+Engineering Memory remains evidence, not authority. Its records, test anchors,
+doc anchors, trajectories, and Experiences are projected into separate bounded
+lanes with the memory retrieval policy intact.
+
+Symbol subjects, inferred changed scope, and call/reference relationships are
+additive Phase 30 slices. Until their owning slice lands, requesting them is
+rejected or reported unavailable rather than fabricated.

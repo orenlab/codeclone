@@ -16,11 +16,14 @@ from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
 from ._implementation_context import (
+    DEFAULT_IMPACT_FACETS,
     DEFAULT_IMPLEMENTATION_FACETS,
     build_implementation_context,
 )
+from ._intent import IntentRecord, IntentStatus
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
 )
@@ -39,13 +42,18 @@ class _ContextSessionDependencies(Protocol):
         record: MCPRunRecord,
         files: Sequence[str],
         depth: str,
+        forbidden_patterns: Sequence[str] = (),
+        allowed_scope: Sequence[str] = (),
     ) -> BlastRadiusResult: ...
 
     def _latest_run_for_root(self, root_path: Path) -> MCPRunRecord | None: ...
 
+    def get_relevant_memory(self, **params: object) -> dict[str, object]: ...
+
 
 class _MCPSessionContextMixin:
     _runs: CodeCloneMCPRunStore
+    _active_intents: dict[str, IntentRecord]
 
     def get_implementation_context(
         self,
@@ -63,7 +71,12 @@ class _MCPSessionContextMixin:
         run_id: str | None = None,
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
-        record = self._context_record(root_path=root_path, run_id=run_id)
+        intent = self._context_intent(intent_id)
+        record = self._context_record(
+            root_path=root_path,
+            run_id=run_id,
+            intent=intent,
+        )
         if record is None:
             return {
                 "status": "needs_analysis",
@@ -98,25 +111,50 @@ class _MCPSessionContextMixin:
                     "report_digest": record.run_id,
                 },
                 "message": (
-                    "Step 2 requires explicit paths. Subject inference, symbols, "
-                    "intent scope, and changed_scope ship in later steps."
+                    "Step 3 requires explicit paths. Intent scope can bound the "
+                    "answer, but subject inference, symbols, and changed_scope "
+                    "ship in later steps."
                 ),
             }
-        normalized_include = self._validated_context_include(include)
+        normalized_include = self._validated_context_include(
+            include,
+            mode=mode,
+            has_intent=intent is not None,
+        )
         session = cast("_ContextSessionDependencies", self)
+        transitive = depth > 1 or mode == "impact"
         blast_result = session._blast_radius_result(
             record=record,
             files=normalized_paths,
-            depth="transitive" if depth > 1 else "direct",
+            depth="transitive" if transitive else "direct",
+            forbidden_patterns=(intent.scope.forbidden if intent is not None else ()),
+            allowed_scope=(intent.scope.allowed_paths if intent is not None else ()),
         )
+        blast_payload = blast_radius_to_payload(blast_result)
+        memory_result = None
+        if {"docs", "memory"}.intersection(normalized_include):
+            memory_result = session.get_relevant_memory(
+                root=str(root_path),
+                scope=normalized_paths,
+                max_records=min(budget, 20),
+                include_drafts=True,
+                detail_level=detail_level,
+            )
         return build_implementation_context(
             record=record,
             paths=normalized_paths,
+            mode=mode,
             include=normalized_include,
             depth=depth,
             detail_level=detail_level,
             budget=budget,
-            blast_radius=blast_radius_to_payload(blast_result),
+            blast_radius=blast_payload,
+            memory_result=memory_result,
+            change_control=(
+                self._context_change_control(intent, blast_payload)
+                if intent is not None
+                else None
+            ),
         )
 
     def _context_record(
@@ -124,7 +162,28 @@ class _MCPSessionContextMixin:
         *,
         root_path: Path,
         run_id: str | None,
+        intent: IntentRecord | None,
     ) -> MCPRunRecord | None:
+        if intent is not None:
+            if run_id is not None and run_id not in {
+                intent.run_id,
+                _helpers._short_run_id(intent.run_id),
+            }:
+                raise MCPServiceContractError(
+                    "Selected run_id does not match the active intent run."
+                )
+            try:
+                record = self._runs.get(intent.run_id)
+            except MCPRunNotFoundError as exc:
+                raise MCPServiceContractError(
+                    "The active intent's analysis run is no longer available. "
+                    "Analyze again and declare a new intent."
+                ) from exc
+            if record.root.resolve() != root_path.resolve():
+                raise MCPServiceContractError(
+                    "Active intent does not belong to the supplied root."
+                )
+            return record
         if run_id is None:
             session = cast("_ContextSessionDependencies", self)
             return session._latest_run_for_root(root_path)
@@ -135,6 +194,21 @@ class _MCPSessionContextMixin:
                 f"Run root: {record.root}; requested root: {root_path}."
             )
         return record
+
+    def _context_intent(self, intent_id: str | None) -> IntentRecord | None:
+        if intent_id is None:
+            return None
+        intent = self._active_intents.get(intent_id)
+        if intent is None:
+            raise MCPServiceContractError(
+                f"Unknown implementation-context intent_id: {intent_id!r}."
+            )
+        if intent.status is not IntentStatus.ACTIVE:
+            raise MCPServiceContractError(
+                "Implementation context requires an active intent; "
+                f"{intent_id!r} is {intent.status.value}."
+            )
+        return intent
 
     def _validate_context_request(
         self,
@@ -164,17 +238,13 @@ class _MCPSessionContextMixin:
             raise MCPServiceContractError(
                 f"Invalid context {field_name} {value!r}. Expected one of: {expected}."
             )
-        if mode != "implementation":
+        if mode == "contract":
             raise MCPServiceContractError(
                 f"Context mode {mode!r} is not available until its owning phase."
             )
         if symbols:
             raise MCPServiceContractError(
                 "Symbol subjects are not available until Phase 30 Step 4."
-            )
-        if intent_id is not None:
-            raise MCPServiceContractError(
-                "Intent-bounded context is not available until Phase 30 Step 3."
             )
         if changed_scope:
             raise MCPServiceContractError(
@@ -188,14 +258,28 @@ class _MCPSessionContextMixin:
             raise MCPServiceContractError(
                 f"Context budget must be between 1 and {_MAX_CONTEXT_BUDGET}."
             )
-        self._validated_context_include(include)
+        self._validated_context_include(
+            include,
+            mode=mode,
+            has_intent=intent_id is not None,
+        )
 
     def _validated_context_include(
         self,
         include: Sequence[str] | None,
+        *,
+        mode: str,
+        has_intent: bool,
     ) -> tuple[Facet, ...]:
         if include is None:
-            return DEFAULT_IMPLEMENTATION_FACETS
+            defaults = (
+                DEFAULT_IMPACT_FACETS
+                if mode == "impact"
+                else DEFAULT_IMPLEMENTATION_FACETS
+            )
+            if has_intent:
+                return (*defaults, "scope")
+            return defaults
         requested = frozenset(include)
         invalid = sorted(requested.difference(VALID_FACETS))
         if invalid:
@@ -205,6 +289,29 @@ class _MCPSessionContextMixin:
                 f"{', '.join(invalid)}. Expected values: {expected}."
             )
         return cast("tuple[Facet, ...]", tuple(sorted(requested)))
+
+    def _context_change_control(
+        self,
+        intent: IntentRecord,
+        blast_payload: dict[str, object],
+    ) -> dict[str, object]:
+        review_context = blast_payload.get("review_context")
+        do_not_touch = blast_payload.get("do_not_touch")
+        return {
+            "intent_id": intent.intent_id,
+            "intent_status": intent.status.value,
+            "edit_allowed": intent.status is IntentStatus.ACTIVE,
+            "authorization_source": "start_controlled_change",
+            "allowed_files": list(intent.scope.allowed_files),
+            "allowed_related": list(intent.scope.allowed_related),
+            "review_context": (
+                list(review_context) if isinstance(review_context, list) else []
+            ),
+            "do_not_touch": (
+                list(do_not_touch) if isinstance(do_not_touch, list) else []
+            ),
+            "guards": list(intent.guards),
+        }
 
     def _normalize_context_paths(
         self,

@@ -533,9 +533,19 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         key_points=(
             (
-                "Step 2 resolves explicit repo-relative paths and returns "
+                "Explicit repo-relative paths return "
                 "established module, import, importer, API-surface, blast-radius, "
                 "cache-origin, and workspace-freshness facts."
+            ),
+            (
+                "An active intent adds the declared allowed files/related paths, "
+                "review context, do-not-touch boundaries, and guards. This block "
+                "mirrors start_controlled_change; it does not create permission."
+            ),
+            (
+                "mode=impact expands transitive dependency context and projects "
+                "baseline-sensitive findings. Scoped memory, test anchors, docs, "
+                "trajectories, and Experiences stay in separate evidence lanes."
             ),
             (
                 "analysis.freshness compares the run manifest with live "
@@ -551,8 +561,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "errors. Every emitted collection is bounded by one global budget."
             ),
             (
-                "Intent overlays, memory fusion, symbol subjects, inferred current "
-                "work, and call/reference evidence are additive later phases."
+                "Symbol subjects, inferred current work, and call/reference "
+                "evidence are additive later phases."
             ),
         ),
         recommended_tools=(

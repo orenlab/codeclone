@@ -82,6 +82,13 @@ Use `context_artifact_digest` to identify the source context artifact and
 `freshness.status` is `drifted`, analyze again. This step informs scope; only
 `start_controlled_change` can return `edit_allowed=true`.
 
+Once an intent is active, pass its `intent_id` with the same explicit paths.
+The response then shows the declared scope, review context, do-not-touch
+boundaries, and guards beside lane-separated memory evidence. Use
+`mode="impact"` when you need transitive dependency context and
+baseline-sensitive findings. The context tool mirrors authorization evidence;
+it does not grant or widen authorization.
+
     | Tier | Tools | When to use |
     |------|-------|-------------|
     | Normal workflow | `analyze_repository`, `start_controlled_change`, `finish_controlled_change` | Every edit cycle |

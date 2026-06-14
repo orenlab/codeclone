@@ -63,6 +63,7 @@ from codeclone.surfaces.mcp.session import (
     MCPServiceError,
 )
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
+from tests.memory_fixtures import cli_memory_repo
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 
@@ -1155,6 +1156,87 @@ def test_mcp_service_get_implementation_context_reports_full_freshness(
     assert freshness["added_files"] == ["pkg/added.py"]
     assert freshness["deleted_files"] == []
     assert freshness["topology_drift"] is True
+
+
+def test_mcp_service_get_implementation_context_intent_memory_and_impact(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        package = root / "pkg"
+        package.mkdir(exist_ok=True)
+        package.joinpath("__init__.py").write_text("", "utf-8")
+        package.joinpath("mod.py").write_text(
+            "def public_api(value: int) -> int:\n    return value + 1\n",
+            "utf-8",
+        )
+        service = CodeCloneMCPService(history_limit=4)
+        service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="record_candidate",
+            record_type="document_link",
+            statement="Implementation contract documentation.",
+            subject_path="pkg/mod.py",
+        )
+        summary = service.analyze_repository(
+            MCPAnalysisRequest(
+                root=str(root.resolve()),
+                respect_pyproject=False,
+                cache_policy="off",
+                api_surface=True,
+                min_loc=1,
+                min_stmt=1,
+            )
+        )
+        started = service.start_controlled_change(
+            root=str(root.resolve()),
+            scope={
+                "allowed_files": ["pkg/mod.py"],
+                "allowed_related": ["tests/test_mod.py"],
+                "forbidden": ["codeclone.baseline.json"],
+            },
+            intent="inspect impact",
+        )
+
+        context = service.get_implementation_context(
+            root=str(root.resolve()),
+            paths=["pkg/mod.py"],
+            intent_id=str(started["intent_id"]),
+            mode="impact",
+            include=[
+                "blast_radius",
+                "baseline_sensitive_findings",
+                "memory",
+                "docs",
+                "scope",
+                "review_context",
+            ],
+            budget=40,
+            run_id=str(summary["run_id"]),
+        )
+
+        assert context["status"] == "ok"
+        assert context["mode"] == "impact"
+        change_control = cast("dict[str, object]", context["change_control"])
+        assert change_control["edit_allowed"] is True
+        assert change_control["authorization_source"] == "start_controlled_change"
+        assert change_control["allowed_files"] == ["pkg/mod.py"]
+        assert change_control["allowed_related"] == ["tests/test_mod.py"]
+        assert cast("list[dict[str, object]]", change_control["do_not_touch"])
+        evidence = cast("dict[str, object]", context["implementation_evidence"])
+        assert evidence["scope_resolved_from"] == "explicit"
+        assert cast("list[dict[str, object]]", evidence["memory"])
+        assert cast("list[dict[str, object]]", evidence["doc_anchors"])
+        structural = cast("dict[str, object]", context["structural_context"])
+        assert cast("dict[str, object]", structural["blast_radius"])["depth"] == (
+            "transitive"
+        )
+
+        with pytest.raises(MCPServiceContractError, match="Unknown"):
+            service.get_implementation_context(
+                root=str(root.resolve()),
+                paths=["pkg/mod.py"],
+                intent_id="intent-missing",
+            )
 
 
 def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:

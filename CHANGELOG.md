@@ -20,8 +20,11 @@ Added
   repo-relative paths from one existing run. It reports workspace freshness,
   cache origin, imports/importers, public surface, blast radius, and test
   anchors, with separate deterministic digests for the off-report context
-  artifact and the exact bounded projection. Context evidence never authorizes
-  edits; edit_allowed remains authoritative.
+  artifact and the exact bounded projection. Active intents add explicit
+  allowed/review/do-not-touch boundaries, while impact mode adds transitive
+  dependency context and baseline-sensitive findings. Engineering Memory,
+  tests, docs, trajectories, and Experiences remain lane-separated evidence.
+  Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and
   recover operations. Renewable leases, ownership classification, optional
