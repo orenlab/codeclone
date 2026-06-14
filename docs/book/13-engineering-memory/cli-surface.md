@@ -9,7 +9,8 @@ All commands live under `codeclone memory` and accept `--root` (default `.`).
 | `for-path PATH [--limit N]`                                                            | Records linked to a repo-relative path                |
 | `search QUERY [--match any\|all] [--semantic] [--active-only] [--limit N]`             | FTS search; optional semantic blend                   |
 | `semantic status`                                                                      | Index availability, provider, row counts              |
-| `semantic rebuild`                                                                     | Rebuild LanceDB sidecar from memory + audit           |
+| `semantic rebuild`                                                                     | Rebuild LanceDB sidecar from memory + audit + trajectory |
+| `semantic probe [--exact-tokens] [--json]`                                             | Projection length stats (index-unit aware for trajectory) |
 | `semantic search QUERY [--limit N]`                                                    | Search with semantic ranking (index required)         |
 | `stale [--limit N]`                                                                    | List stale records and reasons                        |
 | `vacuum [--dry-run]`                                                                   | Retention purge per config                            |

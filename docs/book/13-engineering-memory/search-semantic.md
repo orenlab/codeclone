@@ -104,6 +104,11 @@ with a readable audit DB — projected from **`controller_events.summary` only**
 
 Empty audit summaries are skipped.
 
+**Trajectory passports** when trajectories are enabled — projected via
+`project_trajectory()` from bounded trajectory fields (summary, outcome, subjects;
+see `codeclone/memory/semantic/projection.py`). Long texts become multiple index
+units under format **`2`** (below).
+
 #### Surfaces
 
 | Surface                                                        | Semantic flag                                                |
@@ -113,6 +118,7 @@ Empty audit summaries are skipped.
 | `codeclone memory search --semantic`                           | CLI                                                          |
 | `codeclone memory semantic search`                             | CLI (requires built index)                                   |
 | `codeclone memory semantic rebuild`                            | CLI (build sidecar)                                          |
+| `codeclone memory semantic probe [--exact-tokens] [--json]`    | CLI — per-lane projection length stats                       |
 | VS Code `codeclone.memory.searchSemantic` (default **`true`**) | Passes MCP `semantic` on IDE search; server opt-in unchanged |
 | `get_relevant_memory`                                          | **No** semantic parameter (scoped ranking only)              |
 
@@ -127,19 +133,22 @@ Search responses include a top-level **`semantic`** object:
 | `index_version` | `SEMANTIC_INDEX_FORMAT_VERSION` when used             |
 | `reason`        | Degrade reason when `used` is false                   |
 
-`codeclone memory semantic probe` uses the cheap planning estimator by default.
-Pass `--exact-tokens` to load the FastEmbed tokenizer and report raw/effective
-token counts plus truncation stats on the texts that rebuild would embed.
-For trajectory, `--exact-tokens` also applies the same chunking as rebuild and
-reports `chunking {source_documents, index_units, multi_chunk_sources}`; lane
-`documents` counts index units, not raw projections. When any index unit still
-overflows the model window, `overflow_examples` lists up to five offenders.
-Chunking reserves model special tokens in the payload budget and fails closed
-with `SemanticChunkingInvariantError` when a chunk cannot be proven to fit.
+`codeclone memory semantic probe` emits per-lane stats under
+`lanes.{memory,audit,trajectory}`. Default estimator is cheap planning; pass
+`--exact-tokens` to load the FastEmbed tokenizer and measure passage-prefixed
+texts that rebuild would embed. With `--exact-tokens`, trajectory uses the same
+chunker as rebuild: `lanes.trajectory.chunking` reports
+`{source_documents, index_units, multi_chunk_sources}` and `documents` counts
+index units (not raw projections). Lane-level `overflow_examples` (up to five)
+list index units still above the model window. Chunking reserves passage prefix
+and model special tokens; rebuild fails closed with
+`SemanticChunkingInvariantError` when a chunk cannot be proven to fit.
 
 Format **`2`** indexes long trajectory projections as multiple chunk rows linked
-by `parent_id`; hybrid search collapses chunk hits to the best score per
-trajectory.
+by `parent_id` (single-chunk trajectories keep the trajectory id as `id`).
+Hybrid search oversamples trajectory `k × TRAJECTORY_SEARCH_OVERSAMPLE` (4),
+collapses chunk hits to the best score per trajectory, and sets
+`matched_chunk_index` / `matched_chunk_count` on the returned trajectory hit.
 
 When semantic hits audit rows, `payload.audit_events` lists hydrated incidents
 (event type, bounded summary preview, score) alongside memory records.
@@ -149,6 +158,7 @@ Refs:
 - `codeclone/memory/retrieval/service.py:_handle_semantic_search_mode`
 - `codeclone/memory/semantic/__init__.py:resolve_semantic_index`
 - `tests/test_semantic_projection.py`, `tests/test_semantic_rebuild.py`,
+  `tests/test_semantic_chunking.py`, `tests/test_semantic_projection_probe.py`,
   `tests/test_mcp_memory_semantic.py`, `tests/test_cli_memory_semantic.py`
 
 ---

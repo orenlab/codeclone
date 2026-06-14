@@ -80,6 +80,7 @@ or project-wide dumps.
 - `tests/test_mcp_service.py` (memory tool wiring)
 - `tests/test_mcp_server.py` (tool registration)
 - `tests/test_semantic_projection.py`, `tests/test_semantic_rebuild.py`,
+  `tests/test_semantic_chunking.py`, `tests/test_semantic_projection_probe.py`,
   `tests/test_semantic_embedding.py`, `tests/test_semantic_index_null.py`
 - `tests/test_cli_memory_semantic.py`, `tests/test_mcp_memory_semantic.py`
 - `tests/test_config_semantic.py`, `tests/test_semantic_determinism_gate.py`

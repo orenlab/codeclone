@@ -879,6 +879,7 @@ Table columns (PyArrow):
 Trajectory projections longer than the embedding model window are split into
 deterministic token-aligned chunks (strategy version
 `SEMANTIC_CHUNK_STRATEGY_VERSION` in `codeclone/memory/semantic/chunking.py`).
+Single-chunk trajectories keep the trajectory id as `id` with null chunk fields.
 Retrieval collapses chunk hits to one score per parent trajectory.
 
 - **Not** governed by `ENGINEERING_MEMORY_SCHEMA_VERSION` — bumping memory SQLite
