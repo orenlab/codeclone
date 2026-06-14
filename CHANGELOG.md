@@ -26,6 +26,9 @@ Added
   tests, docs, trajectories, and Experiences remain lane-separated evidence.
   Exact qualname subjects resolve through an off-report Unit and API-surface
   location index, with unknown symbols reported explicitly rather than guessed.
+  Zero-argument queries now resolve active intent scope or bounded live dirty
+  paths, related module roles collapse with explicit relation tags, and one
+  safety-first global budget reports all ordinary and safety omissions.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and

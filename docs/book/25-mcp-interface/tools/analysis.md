@@ -25,13 +25,17 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 ## Implementation context
 
 `get_implementation_context` is a read-only projection over one stored run.
-Pass explicit repo-relative `paths`, exact qualnames in `symbols`, or both. Use
-`mode="implementation"` for editing orientation or `mode="impact"` for
+Pass explicit repo-relative `paths`, exact qualnames in `symbols`, or both. With
+no explicit subject, CodeClone uses an active intent's `allowed_files`; without
+an intent it uses the bounded live git-dirty set. A clean tree returns
+`no_current_work`, never whole-repository context. Set `changed_scope=true` to
+select the dirty set explicitly; combining it with explicit paths or symbols is
+a contract error.
+
+Use `mode="implementation"` for editing orientation or `mode="impact"` for
 transitive dependency context and baseline-sensitive findings. Default
-implementation facets include module role, direct imports, importers, public API
-rows, blast radius, tests, docs, and memory. One global `budget` bounds emitted
-evidence; each collection carries deterministic `total`, `shown`, and
-`truncated` counts.
+implementation facets include module role, imports/importers, public API rows,
+blast radius, tests, docs, and memory.
 
 ```mermaid
 flowchart LR
@@ -63,6 +67,18 @@ Engineering Memory remains evidence, not authority. Its records, test anchors,
 doc anchors, trajectories, and Experiences are projected into separate bounded
 lanes with the memory retrieval policy intact.
 
+Import, importer, and test-importer roles are collapsed by module/path into
+`structural_context.related_modules`. Each entry carries deterministic
+`relations` such as `imports`, `imported_by`, or `tested_by`, so one neighbor is
+not repeated in several lanes.
+
+`budget` is one global evidence-entry cap, not a per-facet limit. Every bounded
+collection reports `total`, `shown`, `truncated`, and `omitted`. Intent
+`do_not_touch` and review-required entries consume the budget first. The
+effective limit expands up to the server hard cap so a small requested budget
+cannot hide safety context. If safety entries alone exceed that cap, the
+response uses `status="safety_context_overflow"` and reports the omitted count.
+
 Symbol lookup uses an off-report, in-memory index built from analyzed function
 units and public API rows. `subject.resolved_symbols` reports exact file and line
 locations; `subject.unresolved_symbols` reports unknown qualnames without
@@ -70,6 +86,5 @@ guessing. A symbol-only query that resolves nothing returns
 `status="subject_not_found"`. This index contributes to
 `context_artifact_digest` but never changes the canonical report digest.
 
-Inferred changed scope and call/reference relationships are additive Phase 30
-slices. Until their owning slice lands, requesting them is rejected or reported
-unavailable rather than fabricated.
+Call/reference relationships are an additive Phase 30 slice. Until that owning
+slice lands, they are reported unavailable rather than fabricated.

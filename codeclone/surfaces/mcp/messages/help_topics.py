@@ -543,6 +543,11 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "reported in subject.unresolved_symbols and are never guessed."
             ),
             (
+                "Subject precedence is explicit paths/symbols, then active "
+                "intent allowed_files, then the bounded live git-dirty set. A "
+                "clean tree with no subject returns no_current_work."
+            ),
+            (
                 "An active intent adds the declared allowed files/related paths, "
                 "review context, do-not-touch boundaries, and guards. This block "
                 "mirrors start_controlled_change; it does not create permission."
@@ -562,12 +567,14 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "request and response projection."
             ),
             (
-                "Unknown facets and paths outside the repository are contract "
-                "errors. Every emitted collection is bounded by one global budget."
+                "Import, importer, and test-importer roles collapse into "
+                "related_modules entries with explicit relations. One global "
+                "budget bounds evidence and reports every omission."
             ),
             (
-                "Inferred current work and call/reference evidence are additive "
-                "later phases."
+                "Safety context consumes budget first. If safety entries exceed "
+                "the hard cap, status=safety_context_overflow makes the omission "
+                "explicit. Call/reference evidence is an additive later phase."
             ),
         ),
         recommended_tools=(
@@ -585,6 +592,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             "Treating implementation context as edit authorization.",
             "Ignoring freshness.status=drifted and editing against a stale run.",
             "Describing unresolved or unavailable relationship evidence as fact.",
+            "Assuming a truncated collection is complete without reading its summary.",
         ),
     ),
     "observability": MCPHelpTopicSpec(

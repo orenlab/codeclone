@@ -19,11 +19,12 @@ import orjson
 from ...paths import classify_source_kind
 from ._blast_radius import _path_to_module
 from ._session_shared import MCPRunRecord, MCPUnitLocation
-from ._workspace_drift import compute_drift
+from ._workspace_drift import WorkspaceDrift, compute_drift
 from .messages.params import Facet
 
 CONTEXT_CONTRACT_VERSION: Final = "1"
 CALL_RESOLUTION_VERSION: Final = "1"
+MAX_CONTEXT_TOTAL_ITEMS: Final = 200
 DEFAULT_IMPLEMENTATION_FACETS: Final[tuple[Facet, ...]] = (
     "module_role",
     "imports",
@@ -54,7 +55,9 @@ IMPLEMENTED_CONTEXT_FACETS: Final[frozenset[Facet]] = frozenset(
 
 @dataclass(slots=True)
 class _EntryBudget:
+    limit: int
     remaining: int
+    emitted: int = 0
 
     def take(
         self,
@@ -64,11 +67,36 @@ class _EntryBudget:
         shown = min(total, self.remaining)
         projected = [dict(item) for item in items[:shown]]
         self.remaining -= shown
+        self.emitted += shown
         return projected, {
             "total": total,
             "shown": shown,
             "truncated": shown < total,
+            "omitted": total - shown,
         }
+
+    def take_values(
+        self,
+        items: Sequence[str],
+    ) -> tuple[list[str], dict[str, object]]:
+        total = len(items)
+        shown = min(total, self.remaining)
+        projected = list(items[:shown])
+        self.remaining -= shown
+        self.emitted += shown
+        return projected, {
+            "total": total,
+            "shown": shown,
+            "truncated": shown < total,
+            "omitted": total - shown,
+        }
+
+    @property
+    def used(self) -> int:
+        return self.emitted
+
+    def reserve(self, count: int) -> None:
+        self.remaining = max(0, self.remaining - max(0, count))
 
 
 def build_implementation_context(
@@ -77,6 +105,7 @@ def build_implementation_context(
     paths: Sequence[str],
     symbols: Sequence[str],
     subject_resolved_from: str,
+    subject_source_summary: Mapping[str, object],
     resolved_symbols: Sequence[Mapping[str, object]],
     unresolved_symbols: Sequence[str],
     mode: str,
@@ -103,7 +132,35 @@ def build_implementation_context(
     )
     normalized_unresolved_symbols = tuple(sorted(set(unresolved_symbols)))
     include_set = frozenset(include)
-    entry_budget = _EntryBudget(remaining=budget)
+    (
+        entry_budget,
+        projected_change_control,
+        safety_summary,
+        safety_overflow,
+    ) = _initialize_context_budget(
+        requested_budget=budget,
+        change_control=change_control,
+    )
+    subject = _project_subject(
+        paths=normalized_paths,
+        symbols=normalized_symbols,
+        resolved_symbols=normalized_resolved_symbols,
+        unresolved_symbols=normalized_unresolved_symbols,
+        resolved_from=subject_resolved_from,
+        source_summary=subject_source_summary,
+        budget=entry_budget,
+    )
+    if projected_change_control is not None:
+        _project_change_control_scope(
+            projected_change_control,
+            change_control=change_control or {},
+            budget=entry_budget,
+        )
+    drift = compute_drift(record)
+    freshness = _project_freshness(
+        drift=drift,
+        budget=entry_budget,
+    )
     dependency_rows = _dependency_rows(record)
     module_paths = _module_path_index(record)
     selected_modules = frozenset(_path_to_module(path) for path in normalized_paths)
@@ -131,24 +188,25 @@ def build_implementation_context(
         selected_modules=selected_modules,
         module_paths=module_paths,
     )
-    if "imports" in include_set:
-        _attach_bounded(
-            structural_context,
-            key="direct_imports",
-            items=imports,
-            budget=entry_budget,
-        )
-
     importers = _importers_for_modules(
         dependency_rows=dependency_rows,
         selected_modules=selected_modules,
         module_paths=module_paths,
     )
-    if "importers" in include_set:
+    if {"imports", "importers", "tests"}.intersection(include_set):
         _attach_bounded(
             structural_context,
-            key="importers",
-            items=importers,
+            key="related_modules",
+            items=_collapsed_related_modules(
+                imports=imports if "imports" in include_set else (),
+                importers=(
+                    importers
+                    if {"importers", "tests"}.intersection(include_set)
+                    else ()
+                ),
+                include_production_importers="importers" in include_set,
+                include_test_importers="tests" in include_set,
+            ),
             budget=entry_budget,
         )
 
@@ -171,19 +229,6 @@ def build_implementation_context(
             depth=2 if mode == "impact" else depth,
         )
 
-    if "tests" in include_set:
-        test_importers = tuple(
-            item
-            for item in importers
-            if str(item.get("source_kind", "")) in {"tests", "fixtures"}
-        )
-        _attach_bounded(
-            structural_context,
-            key="tests",
-            items=test_importers,
-            budget=entry_budget,
-        )
-
     if "baseline_sensitive_findings" in include_set:
         _attach_bounded(
             structural_context,
@@ -198,7 +243,7 @@ def build_implementation_context(
             budget=entry_budget,
         )
 
-    if "review_context" in include_set:
+    if "review_context" in include_set and change_control is None:
         _attach_bounded(
             structural_context,
             key="review_context",
@@ -206,7 +251,6 @@ def build_implementation_context(
             budget=entry_budget,
         )
 
-    drift = compute_drift(record)
     analysis = {
         "run_id": record.run_id,
         "report_digest": record.run_id,
@@ -216,14 +260,7 @@ def build_implementation_context(
         ),
         "context_contract_version": CONTEXT_CONTRACT_VERSION,
         "call_resolution_version": CALL_RESOLUTION_VERSION,
-        "freshness": {
-            "status": drift.status,
-            "drifted_files": list(drift.drifted_files),
-            "added_files": list(drift.added_files),
-            "deleted_files": list(drift.deleted_files),
-            "topology_drift": drift.topology_drift,
-            "strength": drift.strength,
-        },
+        "freshness": freshness,
         "cache_mode": _cache_mode(record),
         "call_graph_status": "unavailable",
         "failed_files": [],
@@ -231,22 +268,26 @@ def build_implementation_context(
     unavailable_facets = sorted(include_set - IMPLEMENTED_CONTEXT_FACETS)
     payload: dict[str, object] = {
         "status": (
-            "subject_not_found"
+            "safety_context_overflow"
+            if safety_overflow
+            else "subject_not_found"
             if normalized_symbols
             and not normalized_resolved_symbols
             and not normalized_paths
             else "ok"
         ),
         "mode": mode,
-        "subject": {
-            "resolved_from": subject_resolved_from,
-            "paths": list(normalized_paths),
-            "symbols": list(normalized_symbols),
-            "resolved_symbols": list(normalized_resolved_symbols),
-            "unresolved_symbols": list(normalized_unresolved_symbols),
-        },
+        "subject": subject,
         "analysis": analysis,
         "structural_context": structural_context,
+        "budget_summary": {
+            "requested": budget,
+            "effective": entry_budget.limit,
+            "emitted": entry_budget.used,
+            "remaining": entry_budget.remaining,
+            "hard_cap": MAX_CONTEXT_TOTAL_ITEMS,
+            "safety": safety_summary,
+        },
         "dataflow": {
             "writers": {"status": "not_available", "tier": "dataflow"},
             "readers": {"status": "not_available", "tier": "dataflow"},
@@ -267,12 +308,20 @@ def build_implementation_context(
             include=include_set,
             budget=entry_budget,
         )
-    if change_control is not None:
-        payload["change_control"] = dict(change_control)
+    if projected_change_control is not None:
+        payload["change_control"] = projected_change_control
     if unavailable_facets:
         payload["unavailable_facets"] = unavailable_facets
+    budget_summary = _as_mapping(payload["budget_summary"])
+    if isinstance(budget_summary, dict):
+        budget_summary["emitted"] = entry_budget.used
+        budget_summary["remaining"] = entry_budget.remaining
     request_projection: dict[str, object] = {
-        "subject": payload["subject"],
+        "subject": {
+            "resolved_from": subject_resolved_from,
+            "paths": list(normalized_paths),
+            "symbols": list(normalized_symbols),
+        },
         "mode": mode,
         "include": sorted(include),
         "depth": depth,
@@ -351,6 +400,265 @@ def resolve_context_symbols(
     )
     unresolved = tuple(symbol for symbol in requested if symbol not in by_qualname)
     return resolved, unresolved
+
+
+def _initialize_context_budget(
+    *,
+    requested_budget: int,
+    change_control: Mapping[str, object] | None,
+) -> tuple[_EntryBudget, dict[str, object] | None, dict[str, object], bool]:
+    if change_control is None:
+        budget = _EntryBudget(limit=requested_budget, remaining=requested_budget)
+        return (
+            budget,
+            None,
+            _summary_from_counts(total=0, shown=0),
+            False,
+        )
+    do_not_touch = _sorted_safety_rows(change_control.get("do_not_touch"))
+    review_context = _sorted_safety_rows(change_control.get("review_context"))
+    do_not_total = _summary_total(
+        change_control.get("do_not_touch_summary"),
+        fallback=len(do_not_touch),
+    )
+    review_total = _summary_total(
+        change_control.get("review_context_summary"),
+        fallback=len(review_context),
+    )
+    safety_total = do_not_total + review_total
+    effective_limit = min(
+        MAX_CONTEXT_TOTAL_ITEMS,
+        max(requested_budget, safety_total),
+    )
+    budget = _EntryBudget(limit=effective_limit, remaining=effective_limit)
+    projected = {
+        key: value
+        for key, value in change_control.items()
+        if key
+        not in {
+            "allowed_files",
+            "allowed_related",
+            "do_not_touch",
+            "do_not_touch_summary",
+            "guards",
+            "review_context",
+            "review_context_summary",
+        }
+    }
+    shown_do_not, _ = budget.take(do_not_touch)
+    shown_review, _ = budget.take(review_context)
+    shown_total = len(shown_do_not) + len(shown_review)
+    budget.reserve(max(0, safety_total - shown_total))
+    projected["do_not_touch"] = shown_do_not
+    projected["do_not_touch_summary"] = _summary_from_counts(
+        total=do_not_total,
+        shown=len(shown_do_not),
+    )
+    projected["review_context"] = shown_review
+    projected["review_context_summary"] = _summary_from_counts(
+        total=review_total,
+        shown=len(shown_review),
+    )
+    safety_summary = _summary_from_counts(
+        total=safety_total,
+        shown=shown_total,
+    )
+    safety_overflow = (
+        safety_total > MAX_CONTEXT_TOTAL_ITEMS or safety_total > shown_total
+    )
+    return budget, projected, safety_summary, safety_overflow
+
+
+def _project_subject(
+    *,
+    paths: Sequence[str],
+    symbols: Sequence[str],
+    resolved_symbols: Sequence[Mapping[str, object]],
+    unresolved_symbols: Sequence[str],
+    resolved_from: str,
+    source_summary: Mapping[str, object],
+    budget: _EntryBudget,
+) -> dict[str, object]:
+    shown_paths, paths_summary = budget.take_values(paths)
+    shown_symbols, symbols_summary = budget.take_values(symbols)
+    shown_resolved, resolved_summary = budget.take(resolved_symbols)
+    shown_unresolved, unresolved_summary = budget.take_values(unresolved_symbols)
+    return {
+        "resolved_from": resolved_from,
+        "paths": shown_paths,
+        "paths_summary": paths_summary,
+        "symbols": shown_symbols,
+        "symbols_summary": symbols_summary,
+        "resolved_symbols": shown_resolved,
+        "resolved_symbols_summary": resolved_summary,
+        "unresolved_symbols": shown_unresolved,
+        "unresolved_symbols_summary": unresolved_summary,
+        "source_summary": dict(source_summary),
+    }
+
+
+def _project_change_control_scope(
+    projected: dict[str, object],
+    *,
+    change_control: Mapping[str, object],
+    budget: _EntryBudget,
+) -> None:
+    for key in ("allowed_files", "allowed_related", "guards"):
+        values = tuple(
+            sorted(
+                {
+                    str(item)
+                    for item in _as_sequence(change_control.get(key))
+                    if str(item).strip()
+                }
+            )
+        )
+        shown, summary = budget.take_values(values)
+        projected[key] = shown
+        projected[f"{key}_summary"] = summary
+
+
+def _project_freshness(
+    *,
+    drift: WorkspaceDrift,
+    budget: _EntryBudget,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "status": drift.status,
+        "topology_drift": drift.topology_drift,
+        "strength": drift.strength,
+    }
+    for key, values in (
+        ("drifted_files", drift.drifted_files),
+        ("added_files", drift.added_files),
+        ("deleted_files", drift.deleted_files),
+    ):
+        shown, summary = budget.take_values(values)
+        payload[key] = shown
+        payload[f"{key}_summary"] = summary
+    return payload
+
+
+def _collapsed_related_modules(
+    *,
+    imports: Sequence[Mapping[str, object]],
+    importers: Sequence[Mapping[str, object]],
+    include_production_importers: bool,
+    include_test_importers: bool,
+) -> tuple[dict[str, object], ...]:
+    rows: dict[tuple[str, str], dict[str, object]] = {}
+    for item in imports:
+        _append_related_relation(
+            rows,
+            path=str(item.get("target_path") or ""),
+            module=str(item.get("target_module") or ""),
+            source_kind=classify_source_kind(str(item.get("target_path") or "")),
+            relation={
+                "kind": "imports",
+                "evidence": "structural",
+                "import_type": str(item.get("import_type") or ""),
+                "line": _as_int(item.get("line")),
+            },
+        )
+    for item in importers:
+        source_kind = str(item.get("source_kind") or "")
+        is_test = source_kind in {"tests", "fixtures"}
+        if (is_test and not include_test_importers) or (
+            not is_test and not include_production_importers
+        ):
+            continue
+        _append_related_relation(
+            rows,
+            path=str(item.get("source_path") or ""),
+            module=str(item.get("source_module") or ""),
+            source_kind=source_kind,
+            relation={
+                "kind": "tested_by" if is_test else "imported_by",
+                "evidence": "structural",
+                "import_type": str(item.get("import_type") or ""),
+                "line": _as_int(item.get("line")),
+            },
+        )
+    return tuple(
+        sorted(
+            rows.values(),
+            key=lambda row: (
+                _as_int(row.get("relevance_rank")),
+                str(row.get("path", "")),
+                str(row.get("module", "")),
+            ),
+        )
+    )
+
+
+def _append_related_relation(
+    rows: dict[tuple[str, str], dict[str, object]],
+    *,
+    path: str,
+    module: str,
+    source_kind: str,
+    relation: Mapping[str, object],
+) -> None:
+    key = (path, module)
+    row = rows.setdefault(
+        key,
+        {
+            "path": path or None,
+            "module": module,
+            "source_kind": source_kind,
+            "relations": [],
+            "relevance_rank": 3,
+        },
+    )
+    relations = row["relations"]
+    if not isinstance(relations, list):
+        return
+    normalized_relation = dict(relation)
+    if normalized_relation not in relations:
+        relations.append(normalized_relation)
+        relations.sort(
+            key=lambda item: (
+                str(item.get("kind", "")),
+                str(item.get("import_type", "")),
+                _as_int(item.get("line")),
+            )
+        )
+    relation_rank = {
+        "tested_by": 0,
+        "imported_by": 1,
+        "imports": 2,
+    }.get(str(relation.get("kind", "")), 3)
+    row["relevance_rank"] = min(
+        _as_int(row.get("relevance_rank")),
+        relation_rank,
+    )
+
+
+def _sorted_safety_rows(value: object) -> tuple[dict[str, object], ...]:
+    return tuple(
+        sorted(
+            _mapping_rows(value),
+            key=lambda row: (
+                str(row.get("path", "")),
+                str(row.get("category", "")),
+                str(row.get("reason", "")),
+                str(row.get("severity", "")),
+            ),
+        )
+    )
+
+
+def _summary_total(value: object, *, fallback: int) -> int:
+    return max(fallback, _as_int(_as_mapping(value).get("total")))
+
+
+def _summary_from_counts(*, total: int, shown: int) -> dict[str, object]:
+    return {
+        "total": total,
+        "shown": shown,
+        "truncated": shown < total,
+        "omitted": max(0, total - shown),
+    }
 
 
 def _implementation_evidence(

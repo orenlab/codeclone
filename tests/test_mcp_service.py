@@ -24,10 +24,12 @@ import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._claim_guard as mcp_claim_guard_mod
+import codeclone.surfaces.mcp._implementation_context as mcp_context_projection_mod
 import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
+import codeclone.surfaces.mcp._session_context_mixin as mcp_context_session_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
 import codeclone.surfaces.mcp._session_intent_mixin as mcp_session_intent_mod
@@ -1066,15 +1068,37 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
     assert freshness == {
         "status": "fresh",
         "drifted_files": [],
+        "drifted_files_summary": {
+            "total": 0,
+            "shown": 0,
+            "truncated": False,
+            "omitted": 0,
+        },
         "added_files": [],
+        "added_files_summary": {
+            "total": 0,
+            "shown": 0,
+            "truncated": False,
+            "omitted": 0,
+        },
         "deleted_files": [],
+        "deleted_files_summary": {
+            "total": 0,
+            "shown": 0,
+            "truncated": False,
+            "omitted": 0,
+        },
         "topology_drift": False,
         "strength": "mtime_size",
     }
     structural = cast("dict[str, object]", context["structural_context"])
-    importers = cast("list[dict[str, object]]", structural["importers"])
-    assert importers[0]["source_module"] == "pkg.source"
-    assert importers[0]["source_path"] == "pkg/source.py"
+    related = cast("list[dict[str, object]]", structural["related_modules"])
+    source_relation = next(item for item in related if item["path"] == "pkg/source.py")
+    assert source_relation["module"] == "pkg.source"
+    assert (
+        cast("list[dict[str, object]]", source_relation["relations"])[0]["kind"]
+        == "imported_by"
+    )
     public_surface = cast(
         "list[dict[str, object]]",
         structural["public_surface"],
@@ -1155,6 +1179,7 @@ def test_mcp_service_get_implementation_context_resolves_symbols(
 
 def test_mcp_service_get_implementation_context_status_and_errors(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = CodeCloneMCPService(history_limit=2)
     assert (
@@ -1175,6 +1200,29 @@ def test_mcp_service_get_implementation_context_status_and_errors(
     assert service.get_implementation_context(root=str(tmp_path))["status"] == (
         "no_current_work"
     )
+    monkeypatch.setattr(
+        mcp_context_session_mod,
+        "collect_dirty_snapshot",
+        lambda _root: mcp_workspace_hygiene_mod.DirtySnapshot(
+            git_available=True,
+            captured_at_utc="2026-06-14T00:00:00Z",
+            entries=(
+                mcp_workspace_hygiene_mod.DirtySnapshotEntry(
+                    path="pkg/dup.py",
+                    status_xy=" M",
+                    digest=None,
+                    digest_status="unavailable",
+                ),
+            ),
+        ),
+    )
+    current_work = service.get_implementation_context(
+        root=str(tmp_path),
+        include=["module_role"],
+    )
+    current_subject = cast("dict[str, object]", current_work["subject"])
+    assert current_subject["resolved_from"] == "changed_scope"
+    assert current_subject["paths"] == ["pkg/dup.py"]
     with pytest.raises(MCPServiceContractError, match="repo-relative"):
         service.get_implementation_context(
             root=str(tmp_path),
@@ -1268,6 +1316,23 @@ def test_mcp_service_get_implementation_context_intent_memory_and_impact(
             },
             intent="inspect impact",
         )
+        inferred = service.get_implementation_context(
+            root=str(root.resolve()),
+            intent_id=str(started["intent_id"]),
+            include=["module_role", "scope"],
+            budget=1,
+        )
+        inferred_subject = cast("dict[str, object]", inferred["subject"])
+        assert inferred_subject["resolved_from"] == "intent_scope"
+        assert (
+            cast("dict[str, object]", inferred_subject["source_summary"])["total"] == 1
+        )
+        inferred_budget = cast("dict[str, object]", inferred["budget_summary"])
+        safety = cast("dict[str, object]", inferred_budget["safety"])
+        assert cast("int", inferred_budget["effective"]) >= cast(
+            "int",
+            safety["total"],
+        )
 
         context = service.get_implementation_context(
             root=str(root.resolve()),
@@ -1309,6 +1374,59 @@ def test_mcp_service_get_implementation_context_intent_memory_and_impact(
                 paths=["pkg/mod.py"],
                 intent_id="intent-missing",
             )
+
+
+def test_implementation_context_safety_overflow_is_explicit(tmp_path: Path) -> None:
+    record = _dummy_run_record(tmp_path, "context-safety")
+    safety_rows = [
+        {
+            "path": f"pkg/forbidden_{index:03d}.py",
+            "reason": "declared forbidden path",
+            "category": "explicit_forbidden",
+            "severity": "hard",
+        }
+        for index in range(201)
+    ]
+
+    payload = mcp_context_projection_mod.build_implementation_context(
+        record=record,
+        paths=(),
+        symbols=(),
+        subject_resolved_from="changed_scope",
+        subject_source_summary={
+            "total": 0,
+            "shown": 0,
+            "truncated": False,
+            "omitted": 0,
+        },
+        resolved_symbols=(),
+        unresolved_symbols=(),
+        mode="implementation",
+        include=(),
+        depth=1,
+        detail_level="compact",
+        budget=1,
+        blast_radius={},
+        memory_result=None,
+        change_control={
+            "intent_id": "intent-safety",
+            "edit_allowed": True,
+            "do_not_touch": safety_rows,
+            "do_not_touch_summary": {"total": 201},
+            "review_context": [],
+            "review_context_summary": {"total": 0},
+        },
+    )
+
+    assert payload["status"] == "safety_context_overflow"
+    budget_summary = cast("dict[str, object]", payload["budget_summary"])
+    assert budget_summary["effective"] == 200
+    assert budget_summary["safety"] == {
+        "total": 201,
+        "shown": 200,
+        "truncated": True,
+        "omitted": 1,
+    }
 
 
 def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:

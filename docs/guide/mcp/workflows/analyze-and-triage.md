@@ -82,6 +82,15 @@ Use `context_artifact_digest` to identify the source context artifact and
 `freshness.status` is `drifted`, analyze again. This step informs scope; only
 `start_controlled_change` can return `edit_allowed=true`.
 
+With no explicit subject, the tool resolves current work deterministically:
+
+1. active intent `allowed_files`;
+2. otherwise the bounded live git-dirty set;
+3. otherwise `status="no_current_work"`.
+
+Use `changed_scope=true` to request the dirty set explicitly. Do not combine it
+with `paths` or `symbols`.
+
 Exact qualnames are also valid subjects:
 
 ```
@@ -95,6 +104,12 @@ get_implementation_context(
 Symbol resolution uses the analyzed Unit inventory plus public API rows.
 Inspect both `subject.resolved_symbols` and `subject.unresolved_symbols`;
 CodeClone reports unknown qualnames instead of inferring a likely match.
+
+Structural import, importer, and test-importer roles appear as collapsed
+`related_modules` entries with explicit `relations`. Read each collection's
+summary: the global budget is shared across the response. Safety context is
+allocated first; `safety_context_overflow` means even the hard cap could not
+show every safety entry.
 
 Once an intent is active, pass its `intent_id` with the same explicit paths.
 The response then shows the declared scope, review context, do-not-touch
