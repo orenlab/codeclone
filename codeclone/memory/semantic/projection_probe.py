@@ -12,8 +12,9 @@ from typing import Literal, TypedDict
 
 from ..embedding.length import (
     LengthDistribution,
+    PlanningTextTokenEstimator,
+    TokenEstimatingProvider,
     length_distribution,
-    resolve_token_estimator,
     token_overflow_stats,
 )
 from .sources import IndexSource
@@ -59,10 +60,9 @@ class _LaneSamples:
 def probe_semantic_projections(
     *,
     sources: Sequence[IndexSource],
-    provider: object,
+    token_estimator: TokenEstimatingProvider,
 ) -> SemanticProjectionProbePayload:
-    estimator = resolve_token_estimator(provider)
-    model_max = estimator.max_sequence_tokens()
+    model_max = token_estimator.max_sequence_tokens()
     by_lane: dict[SemanticLane, _LaneSamples] = {
         "memory": _LaneSamples([], []),
         "audit": _LaneSamples([], []),
@@ -76,18 +76,24 @@ def probe_semantic_projections(
         for projection in source.iter_projections():
             text = projection.text
             char_count = len(text)
-            (token_count,) = estimator.estimate_token_counts([text])
+            (token_count,) = token_estimator.estimate_token_counts([text])
             samples.char_counts.append(char_count)
             samples.token_counts.append(token_count)
     return {
         "action": "probe_semantic_projections",
-        "estimator": type(estimator).__name__,
+        "estimator": _probe_estimator_label(token_estimator),
         "model_max_tokens": model_max,
         "lanes": {
             lane: _lane_payload(samples, model_max_tokens=model_max)
             for lane, samples in by_lane.items()
         },
     }
+
+
+def _probe_estimator_label(token_estimator: TokenEstimatingProvider) -> str:
+    if isinstance(token_estimator, PlanningTextTokenEstimator):
+        return token_estimator.estimator_label
+    return "chars_approx"
 
 
 def _lane_name(name: str) -> SemanticLane:

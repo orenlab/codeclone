@@ -309,3 +309,31 @@ def test_fastembed_provider_fails_clear_when_extra_missing(
     config = SemanticConfig(embedding_provider="fastembed")
     with pytest.raises(MemorySemanticUnavailableError, match="semantic-fastembed"):
         resolve_embedding_provider(config)
+
+
+def test_fastembed_estimate_tokens_without_model_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
+
+    created = _install_fake_fastembed(monkeypatch, vector_value=0.0)
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+
+    (count,) = provider.estimate_token_counts(["hello"])
+    assert count == 4  # ceil(len("passage: hello") / 4)
+    assert created == []
+
+
+def test_fastembed_max_sequence_tokens_without_model_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
+
+    _install_fake_fastembed(monkeypatch)
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = resolve_embedding_provider(config)
+    assert isinstance(provider, FastEmbedEmbeddingProvider)
+
+    assert provider.max_sequence_tokens() == 512

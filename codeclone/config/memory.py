@@ -36,6 +36,7 @@ from .memory_defaults import (
     DEFAULT_SEMANTIC_INDEX_AUDIT,
     DEFAULT_SEMANTIC_INDEX_PATH,
     DEFAULT_SEMANTIC_MAX_RESULTS,
+    DEFAULT_SEMANTIC_PROJECTION_TOKEN_ESTIMATOR,
     MEMORY_ENV_DB_PATH,
     MEMORY_ENV_PROJECTION_REBUILD_POLICY,
     MEMORY_ENV_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
@@ -49,6 +50,7 @@ from .memory_defaults import (
     MemoryProjectionRebuildPolicy,
     SemanticBackend,
     SemanticEmbeddingProvider,
+    SemanticProjectionTokenEstimator,
 )
 from .memory_specs import (
     INGEST_NESTED_TABLE_KEY,
@@ -105,6 +107,9 @@ class SemanticConfig(BaseModel):
     embed_max_padded_tokens_per_batch: int = Field(
         default=DEFAULT_SEMANTIC_EMBED_MAX_PADDED_TOKENS_PER_BATCH,
         gt=0,
+    )
+    projection_token_estimator: SemanticProjectionTokenEstimator = (
+        DEFAULT_SEMANTIC_PROJECTION_TOKEN_ESTIMATOR
     )
 
     @model_validator(mode="before")

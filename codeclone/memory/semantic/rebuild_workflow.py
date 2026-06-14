@@ -15,6 +15,9 @@ from ...observability import SpanHandle, is_observability_enabled, span
 from ...observability.reason_kind import ReasonKind
 from ..embedding import resolve_embedding_provider
 from ..embedding.batching import EmbedBatchLimits
+from ..embedding.length import (
+    resolve_planning_token_estimator,
+)
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
@@ -268,14 +271,7 @@ def execute_semantic_projection_probe(
             "status": "skipped",
             "reason": "disabled",
         }
-    try:
-        provider = resolve_embedding_provider(config.semantic)
-    except MemorySemanticUnavailableError as exc:
-        return {
-            "action": "probe_semantic_projections",
-            "status": "unavailable",
-            "reason": str(exc),
-        }
+    token_estimator = resolve_planning_token_estimator(config.semantic)
     owns_store = store is None
     active_store = store
     try:
@@ -296,7 +292,7 @@ def execute_semantic_projection_probe(
                 store=active_store,
                 project=resolved_project,
             ),
-            provider=provider,
+            token_estimator=token_estimator,
         )
     finally:
         if owns_store and active_store is not None:

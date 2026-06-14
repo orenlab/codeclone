@@ -8,10 +8,25 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-# Conservative chars-per-token for technical text when no tokenizer is available.
-_CHARS_PER_TOKEN_HEURISTIC = 3
+from ...budget.estimator import (
+    TOKEN_ESTIMATOR_CHARS_APPROX,
+    TokenEstimatorMode,
+    approx_tokens_from_chars,
+    estimate_texts_token_counts,
+)
+
+if TYPE_CHECKING:
+    from ...config.memory import SemanticConfig
+
+_KNOWN_EMBEDDING_MODEL_MAX_TOKENS: dict[str, int] = {
+    "baai/bge-small-en-v1.5": 512,
+    "baai/bge-small-en": 512,
+    "baai/bge-base-en-v1.5": 512,
+    "baai/bge-base-en": 512,
+    "baai/bge-large-en-v1.5": 512,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +56,7 @@ class TokenEstimatingProvider(Protocol):
 
 
 def estimate_tokens_from_chars(char_count: int) -> int:
-    return max(1, char_count // _CHARS_PER_TOKEN_HEURISTIC)
+    return approx_tokens_from_chars(char_count)
 
 
 def estimate_char_counts(texts: Sequence[str]) -> tuple[int, ...]:
@@ -49,7 +64,10 @@ def estimate_char_counts(texts: Sequence[str]) -> tuple[int, ...]:
 
 
 def estimate_token_counts_from_chars(texts: Sequence[str]) -> tuple[int, ...]:
-    return tuple(estimate_tokens_from_chars(len(text)) for text in texts)
+    return estimate_texts_token_counts(
+        texts,
+        estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
+    )
 
 
 def token_overflow_stats(
@@ -97,19 +115,52 @@ def _percentile(ordered: Sequence[int], percentile: float) -> int:
     return ordered[index]
 
 
+@dataclass(frozen=True, slots=True)
+class PlanningTextTokenEstimator:
+    """Cheap token planning via the shared budget estimator contract."""
+
+    mode: TokenEstimatorMode
+    model_max_tokens: int | None
+    encoding: str = "o200k_base"
+
+    def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
+        return estimate_texts_token_counts(
+            texts,
+            encoding=self.encoding,
+            estimator=self.mode,
+        )
+
+    def max_sequence_tokens(self) -> int | None:
+        return self.model_max_tokens
+
+    @property
+    def estimator_label(self) -> str:
+        return self.mode
+
+
+def resolve_semantic_model_max_tokens(config: SemanticConfig) -> int | None:
+    if config.embedding_provider == "fastembed":
+        model_name = config.embedding_model or "BAAI/bge-small-en-v1.5"
+        return _KNOWN_EMBEDDING_MODEL_MAX_TOKENS.get(model_name.lower(), 512)
+    return None
+
+
+def resolve_planning_token_estimator(
+    config: SemanticConfig,
+) -> PlanningTextTokenEstimator:
+    return PlanningTextTokenEstimator(
+        mode=config.projection_token_estimator,
+        model_max_tokens=resolve_semantic_model_max_tokens(config),
+    )
+
+
 def resolve_token_estimator(provider: object) -> TokenEstimatingProvider:
     if isinstance(provider, TokenEstimatingProvider):
         return provider
-    return _CharHeuristicTokenEstimator()
-
-
-@dataclass(frozen=True, slots=True)
-class _CharHeuristicTokenEstimator:
-    def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
-        return estimate_token_counts_from_chars(texts)
-
-    def max_sequence_tokens(self) -> int | None:
-        return None
+    return PlanningTextTokenEstimator(
+        mode=TOKEN_ESTIMATOR_CHARS_APPROX,
+        model_max_tokens=None,
+    )
 
 
 def estimate_document_tokens(
@@ -121,6 +172,7 @@ def estimate_document_tokens(
 
 __all__ = [
     "LengthDistribution",
+    "PlanningTextTokenEstimator",
     "TokenEstimatingProvider",
     "TokenOverflowStats",
     "estimate_char_counts",
@@ -128,6 +180,8 @@ __all__ = [
     "estimate_token_counts_from_chars",
     "estimate_tokens_from_chars",
     "length_distribution",
+    "resolve_planning_token_estimator",
+    "resolve_semantic_model_max_tokens",
     "resolve_token_estimator",
     "token_overflow_stats",
 ]

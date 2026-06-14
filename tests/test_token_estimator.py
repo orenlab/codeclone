@@ -11,7 +11,12 @@ from unittest.mock import patch
 
 import pytest
 
-from codeclone.budget.estimator import estimate_payload
+from codeclone.budget.estimator import (
+    approx_tokens_from_chars,
+    estimate_payload,
+    estimate_text_token,
+    estimate_texts_token_counts,
+)
 
 
 def test_estimate_payload_defaults_to_chars_approx() -> None:
@@ -137,3 +142,22 @@ def test_estimate_payload_with_unicode() -> None:
 def test_estimate_payload_rejects_unknown_estimator() -> None:
     with pytest.raises(ValueError, match="token estimator"):
         estimate_payload({"x": 1}, estimator="bad")  # type: ignore[arg-type]
+
+
+def test_estimate_text_token_defaults_to_chars_approx() -> None:
+    result = estimate_text_token("hello world")
+    assert result.method == "chars_approx"
+    assert result.tokens == approx_tokens_from_chars(len("hello world"))
+
+
+def test_estimate_texts_token_counts_batch() -> None:
+    counts = estimate_texts_token_counts(["ab", "abcd"])
+    assert counts == (
+        approx_tokens_from_chars(2),
+        approx_tokens_from_chars(4),
+    )
+
+
+def test_estimate_text_token_rejects_unknown_estimator() -> None:
+    with pytest.raises(ValueError, match="token estimator"):
+        estimate_text_token("x", estimator="bad")  # type: ignore[arg-type]

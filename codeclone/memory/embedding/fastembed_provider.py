@@ -11,9 +11,12 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, cast
 
+from ...budget.estimator import (
+    TOKEN_ESTIMATOR_CHARS_APPROX,
+    estimate_texts_token_counts,
+)
 from ...observability import is_observability_enabled, span
 from ..exceptions import MemorySemanticUnavailableError
-from .length import estimate_token_counts_from_chars
 
 _KNOWN_MODEL_MAX_TOKENS: dict[str, int] = {
     "baai/bge-small-en-v1.5": 512,
@@ -22,6 +25,10 @@ _KNOWN_MODEL_MAX_TOKENS: dict[str, int] = {
     "baai/bge-base-en": 512,
     "baai/bge-large-en-v1.5": 512,
 }
+
+
+def known_model_max_tokens(model_name: str) -> int:
+    return _KNOWN_MODEL_MAX_TOKENS.get(model_name.lower(), 512)
 
 
 class _TextEmbeddingModel(Protocol):
@@ -108,23 +115,32 @@ class FastEmbedEmbeddingProvider:
     def _inner_text_model(self) -> _TokenizingTextModel:
         return cast(_TokenizingTextModel, self._get_model().model)
 
-    def max_sequence_tokens(self) -> int | None:
-        inner = self._inner_text_model()
-        tokenizer = inner.tokenizer
-        if tokenizer is not None:
-            truncation = getattr(tokenizer, "truncation", None)
-            if truncation is not None:
-                max_length = getattr(truncation, "max_length", None)
-                if isinstance(max_length, int) and max_length > 0:
-                    return max_length
-        return _KNOWN_MODEL_MAX_TOKENS.get(self.model_name.lower(), 512)
+    def max_sequence_tokens(self) -> int | None:  # codeclone: ignore[dead-code]
+        if self._model is not None:
+            inner = self._inner_text_model()
+            tokenizer = inner.tokenizer
+            if tokenizer is not None:
+                truncation = getattr(tokenizer, "truncation", None)
+                if truncation is not None:
+                    max_length = getattr(truncation, "max_length", None)
+                    if isinstance(max_length, int) and max_length > 0:
+                        return max_length
+        return known_model_max_tokens(self.model_name)
 
     def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
         prefixed = [f"passage: {text}" for text in texts]
+        if self._model is None:
+            return estimate_texts_token_counts(
+                prefixed,
+                estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
+            )
         inner = self._inner_text_model()
         tokenize = getattr(inner, "tokenize", None)
         if tokenize is None:
-            return estimate_token_counts_from_chars(prefixed)
+            return estimate_texts_token_counts(
+                prefixed,
+                estimator=TOKEN_ESTIMATOR_CHARS_APPROX,
+            )
         encodings = tokenize(prefixed)
         return tuple(len(getattr(encoding, "ids", ())) for encoding in encodings)
 
@@ -183,4 +199,4 @@ class FastEmbedEmbeddingProvider:
         return [float(value) for value in raw_vector]
 
 
-__all__ = ["FastEmbedEmbeddingProvider"]
+__all__ = ["FastEmbedEmbeddingProvider", "known_model_max_tokens"]

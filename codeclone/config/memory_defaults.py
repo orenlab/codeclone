@@ -13,6 +13,7 @@ MemoryMcpSyncPolicy = Literal["off", "bootstrap_if_missing", "refresh_when_stale
 MemoryProjectionRebuildPolicy = Literal["off", "enqueue_when_stale"]
 SemanticBackend = Literal["lancedb"]
 SemanticEmbeddingProvider = Literal["diagnostic", "fastembed", "local_model", "api"]
+SemanticProjectionTokenEstimator = Literal["chars_approx", "tiktoken"]
 
 DEFAULT_MEMORY_BACKEND: Final[MemoryBackend] = "sqlite"
 DEFAULT_MEMORY_DB_PATH: Final = ".codeclone/memory/engineering_memory.sqlite3"
@@ -73,6 +74,9 @@ DEFAULT_SEMANTIC_MAX_RESULTS: Final = 20
 DEFAULT_SEMANTIC_INDEX_AUDIT: Final = True
 DEFAULT_SEMANTIC_EMBED_MAX_DOCUMENTS_PER_BATCH: Final = 64
 DEFAULT_SEMANTIC_EMBED_MAX_PADDED_TOKENS_PER_BATCH: Final = 8192
+DEFAULT_SEMANTIC_PROJECTION_TOKEN_ESTIMATOR: Final[SemanticProjectionTokenEstimator] = (
+    "chars_approx"
+)
 
 MEMORY_ENV_DB_PATH: Final = "CODECLONE_MEMORY_DB_PATH"
 MEMORY_ENV_SEMANTIC_ENABLED: Final = "CODECLONE_MEMORY_SEMANTIC_ENABLED"
@@ -137,6 +141,7 @@ __all__ = [
     "DEFAULT_SEMANTIC_INDEX_AUDIT",
     "DEFAULT_SEMANTIC_INDEX_PATH",
     "DEFAULT_SEMANTIC_MAX_RESULTS",
+    "DEFAULT_SEMANTIC_PROJECTION_TOKEN_ESTIMATOR",
     "MEMORY_ENV_DB_PATH",
     "MEMORY_ENV_PROJECTION_REBUILD_POLICY",
     "MEMORY_ENV_SEMANTIC_ALLOW_MODEL_DOWNLOAD",
@@ -150,4 +155,5 @@ __all__ = [
     "MemoryProjectionRebuildPolicy",
     "SemanticBackend",
     "SemanticEmbeddingProvider",
+    "SemanticProjectionTokenEstimator",
 ]

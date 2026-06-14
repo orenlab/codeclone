@@ -81,7 +81,7 @@ class DeterministicHashEmbeddingProvider:
     def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
         return estimate_token_counts_from_chars(texts)
 
-    def max_sequence_tokens(self) -> int | None:
+    def max_sequence_tokens(self) -> int | None:  # codeclone: ignore[dead-code]
         return None
 
     def _embed_one(self, text: str) -> list[float]:

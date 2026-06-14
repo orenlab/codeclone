@@ -17,7 +17,7 @@ no ASCII escaping) before counting.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -54,6 +54,20 @@ def estimate_payload(
     falls back to approximation without failing audit writes.
     """
     text = _canonical_json(payload)
+    return estimate_text_token(
+        text,
+        encoding=encoding,
+        estimator=estimator,
+    )
+
+
+def estimate_text_token(
+    text: str,
+    *,
+    encoding: str = "o200k_base",
+    estimator: TokenEstimatorMode = TOKEN_ESTIMATOR_CHARS_APPROX,
+) -> TokenEstimate:
+    """Estimate token count for raw text using the shared estimator contract."""
     characters = len(text)
     if estimator not in TOKEN_ESTIMATOR_MODES:
         expected = ", ".join(sorted(TOKEN_ESTIMATOR_MODES))
@@ -65,6 +79,24 @@ def estimate_payload(
             characters=characters,
         )
     return _chars_approx_estimate(characters)
+
+
+def estimate_texts_token_counts(
+    texts: Sequence[str],
+    *,
+    encoding: str = "o200k_base",
+    estimator: TokenEstimatorMode = TOKEN_ESTIMATOR_CHARS_APPROX,
+) -> tuple[int, ...]:
+    """Batch token counts for raw text using the shared estimator contract."""
+    return tuple(
+        estimate_text_token(text, encoding=encoding, estimator=estimator).tokens
+        for text in texts
+    )
+
+
+def approx_tokens_from_chars(characters: int) -> int:
+    """Rough approximation: 1 token ~ 4 characters."""
+    return -(-characters // 4)  # ceil division
 
 
 def _canonical_json(payload: Mapping[str, object]) -> str:
@@ -112,14 +144,9 @@ def _chars_approx_estimate(characters: int) -> TokenEstimate:
     return TokenEstimate(
         encoding=TOKEN_ESTIMATOR_CHARS_APPROX,
         characters=characters,
-        tokens=_approx_tokens(characters),
+        tokens=approx_tokens_from_chars(characters),
         method=TOKEN_ESTIMATOR_CHARS_APPROX,
     )
-
-
-def _approx_tokens(characters: int) -> int:
-    """Rough approximation: 1 token ~ 4 characters for JSON."""
-    return -(-characters // 4)  # ceil division
 
 
 __all__ = [
@@ -128,5 +155,8 @@ __all__ = [
     "TOKEN_ESTIMATOR_TIKTOKEN",
     "TokenEstimate",
     "TokenEstimatorMode",
+    "approx_tokens_from_chars",
     "estimate_payload",
+    "estimate_text_token",
+    "estimate_texts_token_counts",
 ]

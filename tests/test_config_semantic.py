@@ -27,6 +27,7 @@ def test_semantic_defaults_when_table_absent(tmp_path: Path) -> None:
     assert semantic.index_audit is True
     assert semantic.embed_max_documents_per_batch == 64
     assert semantic.embed_max_padded_tokens_per_batch == 8192
+    assert semantic.projection_token_estimator == "chars_approx"
     # index_path is normalized to an absolute path under the repo root.
     assert semantic.index_path == str(
         tmp_path / ".codeclone/memory/semantic_index.lance"

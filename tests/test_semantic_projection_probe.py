@@ -8,19 +8,11 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 
-from codeclone.memory.embedding.length import length_distribution
+from codeclone.memory.embedding.length import PlanningTextTokenEstimator
 from codeclone.memory.semantic.models import SemanticProjection
 from codeclone.memory.semantic.projection import text_hash
 from codeclone.memory.semantic.projection_probe import probe_semantic_projections
 from codeclone.memory.semantic.sources import IndexSource
-
-
-class _TokenEstimator:
-    def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
-        return tuple(max(1, len(text) // 4) for text in texts)
-
-    def max_sequence_tokens(self) -> int | None:
-        return 512
 
 
 class _FakeSource(IndexSource):
@@ -49,6 +41,8 @@ def _projection(source: str, source_id: str, text: str) -> SemanticProjection:
 
 
 def test_length_distribution_percentiles() -> None:
+    from codeclone.memory.embedding.length import length_distribution
+
     dist = length_distribution([10, 20, 30, 40, 100])
     assert dist.min == 10
     assert dist.p50 == 30
@@ -56,6 +50,10 @@ def test_length_distribution_percentiles() -> None:
 
 
 def test_probe_semantic_projections_reports_lane_stats() -> None:
+    estimator = PlanningTextTokenEstimator(
+        mode="chars_approx",
+        model_max_tokens=512,
+    )
     payload = probe_semantic_projections(
         sources=[
             _FakeSource(
@@ -67,9 +65,10 @@ def test_probe_semantic_projections_reports_lane_stats() -> None:
                 [_projection("trajectory", "t1", "x" * 4000)],
             ),
         ],
-        provider=_TokenEstimator(),
+        token_estimator=estimator,
     )
     assert payload["action"] == "probe_semantic_projections"
+    assert payload["estimator"] == "chars_approx"
     assert payload["model_max_tokens"] == 512
     assert payload["lanes"]["memory"]["documents"] == 1
     assert payload["lanes"]["trajectory"]["documents"] == 1
