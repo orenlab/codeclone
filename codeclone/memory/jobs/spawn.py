@@ -37,8 +37,11 @@ def _worker_env() -> dict[str, str] | None:
     }
 
 
-def spawn_projection_jobs_worker(*, root_path: Path) -> SpawnWorkerResult:
-    root = root_path.resolve()
+def _run_once_argv(root: Path, *, not_before_utc: str | None = None) -> list[str]:
+    """Argv for the ``memory jobs run-once`` worker subprocess. A non-empty
+    ``not_before_utc`` adds ``--not-before <utc>`` so the worker defers its model
+    load and corpus drain until that deadline (delayed single-shot flush).
+    """
     argv = [
         sys.executable,
         "-m",
@@ -49,6 +52,16 @@ def spawn_projection_jobs_worker(*, root_path: Path) -> SpawnWorkerResult:
         "--root",
         str(root),
     ]
+    if not_before_utc:
+        argv += ["--not-before", not_before_utc]
+    return argv
+
+
+def spawn_projection_jobs_worker(
+    *, root_path: Path, not_before_utc: str | None = None
+) -> SpawnWorkerResult:
+    root = root_path.resolve()
+    argv = _run_once_argv(root, not_before_utc=not_before_utc)
     try:
         proc = subprocess.Popen(
             argv,
@@ -67,16 +80,7 @@ def run_projection_jobs_worker_sync(
     *, root_path: Path
 ) -> subprocess.CompletedProcess[str]:
     root = root_path.resolve()
-    argv = [
-        sys.executable,
-        "-m",
-        "codeclone.main",
-        "memory",
-        "jobs",
-        "run-once",
-        "--root",
-        str(root),
-    ]
+    argv = _run_once_argv(root)
     return subprocess.run(
         argv,
         cwd=root,

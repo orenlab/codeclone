@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -199,11 +201,45 @@ def execute_enqueue_projection_rebuild(
     }
 
 
+# Defensive ceiling on the trailing-flush sleep so a malformed/runaway deadline
+# can never park a worker indefinitely; the real window is clamped far lower at
+# the enqueue layer.
+_MAX_FLUSH_SLEEP_SECONDS = 3600
+
+
+def _flush_sleep_seconds(
+    not_before_utc: str | None, *, now: datetime | None = None
+) -> float:
+    """Seconds a delayed flush worker should sleep before draining, derived from
+    the ISO-8601 ``not_before_utc`` deadline. 0 when absent/past/malformed;
+    capped at ``_MAX_FLUSH_SLEEP_SECONDS``.
+    """
+    if not not_before_utc:
+        return 0.0
+    current = now or datetime.now(timezone.utc)
+    try:
+        deadline = datetime.fromisoformat(not_before_utc.replace("Z", "+00:00"))
+    except ValueError:
+        return 0.0
+    if deadline.tzinfo is None:
+        deadline = deadline.replace(tzinfo=timezone.utc)
+    remaining = (deadline - current).total_seconds()
+    return min(max(0.0, remaining), float(_MAX_FLUSH_SLEEP_SECONDS))
+
+
 def execute_run_projection_jobs_once(
     *,
     root_path: Path,
     config: MemoryConfig | None = None,
+    not_before_utc: str | None = None,
 ) -> dict[str, object]:
+    # Delayed single-shot flush: a coalescing spawn parks the worker until its
+    # deadline BEFORE any bootstrap/store-open or model load, so the wait holds
+    # no DB lock and is not counted as observed work. Sleeping here (not in the
+    # worker body) keeps the bootstrap-before-store-open order below intact.
+    delay = _flush_sleep_seconds(not_before_utc)
+    if delay > 0:
+        time.sleep(delay)
     # Bootstrap observability BEFORE opening the store: open_memory_db attaches
     # the per-span DB-query counter only while observability is enabled, so a
     # store opened pre-bootstrap stays uninstrumented and the worker's whole
@@ -227,6 +263,9 @@ def execute_run_projection_jobs_once(
                 running_timeout_seconds=(
                     resolved_config.projection_rebuild_running_timeout_seconds
                 ),
+                # A delayed worker slept above; its spawn->job gap is intentional,
+                # so suppress the cold-start bootstrap span (see worker.py).
+                emit_bootstrap_span=not_before_utc is None,
             )
         finally:
             store.close()

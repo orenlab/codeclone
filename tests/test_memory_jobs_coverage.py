@@ -10,6 +10,7 @@ import json
 import sqlite3
 import subprocess
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +23,7 @@ from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.jobs.models import ProjectionJobRecord
 from codeclone.memory.jobs.spawn import (
+    _run_once_argv,
     run_projection_jobs_worker_sync,
     spawn_projection_jobs_worker,
 )
@@ -43,6 +45,7 @@ from codeclone.memory.jobs.store import (
 )
 from codeclone.memory.jobs.worker import run_projection_job, run_projection_jobs_once
 from codeclone.memory.jobs.workflow import (
+    _flush_sleep_seconds,
     execute_enqueue_projection_rebuild,
     execute_projection_rebuild_status,
     execute_run_projection_jobs_once,
@@ -697,3 +700,130 @@ def test_store_reclaims_invalid_timestamp_and_blocks_parallel_claim(
             )
         finally:
             conn.close()
+
+
+def test_run_once_argv_omits_not_before_by_default() -> None:
+    argv = _run_once_argv(Path("/repo"))
+    assert argv[-2:] == ["--root", "/repo"]
+    assert "--not-before" not in argv
+
+
+def test_run_once_argv_appends_not_before_when_set() -> None:
+    argv = _run_once_argv(Path("/repo"), not_before_utc="2026-06-14T00:00:00Z")
+    assert argv[-2:] == ["--not-before", "2026-06-14T00:00:00Z"]
+
+
+def test_spawn_projection_jobs_worker_passes_not_before(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    mock_proc = MagicMock()
+    mock_proc.pid = 11
+    with patch(
+        "codeclone.memory.jobs.spawn.subprocess.Popen",
+        return_value=mock_proc,
+    ) as popen:
+        spawn_projection_jobs_worker(
+            root_path=root, not_before_utc="2026-06-14T01:02:03Z"
+        )
+    argv = popen.call_args.args[0]
+    assert argv[-2:] == ["--not-before", "2026-06-14T01:02:03Z"]
+
+
+def test_flush_sleep_seconds_zero_when_absent_or_past() -> None:
+    now = datetime(2026, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
+    assert _flush_sleep_seconds(None, now=now) == 0.0
+    assert _flush_sleep_seconds("", now=now) == 0.0
+    past = (now - timedelta(seconds=30)).isoformat()
+    assert _flush_sleep_seconds(past, now=now) == 0.0
+
+
+def test_flush_sleep_seconds_malformed_is_zero() -> None:
+    now = datetime(2026, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
+    assert _flush_sleep_seconds("not-a-timestamp", now=now) == 0.0
+
+
+def test_flush_sleep_seconds_future_returns_remaining() -> None:
+    now = datetime(2026, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
+    future = (now + timedelta(seconds=45)).isoformat()
+    assert _flush_sleep_seconds(future, now=now) == pytest.approx(45.0)
+
+
+def test_flush_sleep_seconds_naive_deadline_treated_as_utc() -> None:
+    now = datetime(2026, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
+    naive_future = "2026-06-14T12:00:20"
+    assert _flush_sleep_seconds(naive_future, now=now) == pytest.approx(20.0)
+
+
+def test_flush_sleep_seconds_capped_at_max() -> None:
+    now = datetime(2026, 6, 14, 12, 0, 0, tzinfo=timezone.utc)
+    far = (now + timedelta(days=10)).isoformat()
+    assert _flush_sleep_seconds(far, now=now) == 3600.0
+
+
+def test_run_projection_job_suppresses_bootstrap_span_when_delayed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID", "op-parent")
+    monkeypatch.setenv("CODECLONE_OBSERVABILITY_CORRELATION_ID", "corr-1")
+    emit = MagicMock()
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.worker._emit_worker_bootstrap_span", emit
+    )
+    project = MagicMock()
+    project.id = "project"
+    config = MagicMock()
+    store = MagicMock()
+    skipped = {"status": "skipped"}
+    patches = (
+        patch(
+            "codeclone.memory.jobs.worker.execute_trajectory_rebuild",
+            return_value=skipped,
+        ),
+        patch(
+            "codeclone.memory.jobs.worker.execute_semantic_index_rebuild",
+            return_value=skipped,
+        ),
+        patch(
+            "codeclone.memory.jobs.worker.execute_experience_distillation",
+            return_value=skipped,
+        ),
+    )
+    with patches[0], patches[1], patches[2]:
+        run_projection_job(
+            store,
+            job_id="job-delayed",
+            root_path=Path("/tmp"),
+            config=config,
+            project=project,
+            stimulus={},
+            emit_bootstrap_span=False,
+        )
+    emit.assert_not_called()
+    with patches[0], patches[1], patches[2]:
+        run_projection_job(
+            store,
+            job_id="job-eager",
+            root_path=Path("/tmp"),
+            config=config,
+            project=project,
+            stimulus={},
+            emit_bootstrap_span=True,
+        )
+    emit.assert_called_once()
+
+
+def test_execute_run_projection_jobs_once_sleeps_until_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.jobs import workflow
+
+    sleeps: list[float] = []
+    monkeypatch.setattr("time.sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(workflow, "_flush_sleep_seconds", lambda *_a, **_k: 12.5)
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        payload = workflow.execute_run_projection_jobs_once(
+            root_path=root, not_before_utc="2026-06-14T12:00:00Z"
+        )
+    assert sleeps == [12.5]
+    assert payload["action"] == "run_projection_jobs_once"

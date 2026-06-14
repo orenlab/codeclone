@@ -148,6 +148,7 @@ def run_projection_job(
     config: MemoryConfig,
     project: MemoryProject,
     stimulus: Mapping[str, object],
+    emit_bootstrap_span: bool = True,
 ) -> tuple[ProjectionJobStatus, dict[str, object], str | None]:
     conn = store.connection
     correlation_id, parent_operation_id = _correlation_handoff()
@@ -159,7 +160,10 @@ def run_projection_job(
     ):
         # Only a spawned worker (one that carries the env handoff) has a real
         # cold-start to attribute; an in-process run shares the caller's process.
-        if parent_operation_id is not None:
+        # A delayed flush worker slept before this point, so its "bootstrap" gap
+        # is intentional idle time, not cold-start — suppress it to avoid a
+        # multi-second phantom span in the waterfall.
+        if parent_operation_id is not None and emit_bootstrap_span:
             _emit_worker_bootstrap_span()
         watermark = _trajectory_incremental_watermark(conn, project_id=project.id)
         with span(
@@ -232,6 +236,7 @@ def run_projection_jobs_once(
     config: MemoryConfig,
     project: MemoryProject,
     running_timeout_seconds: int,
+    emit_bootstrap_span: bool = True,
 ) -> ProjectionWorkerResult:
     conn = store.connection
     claimed = _claim_next(
@@ -259,6 +264,7 @@ def run_projection_jobs_once(
             config=config,
             project=project,
             stimulus=stimulus,
+            emit_bootstrap_span=emit_bootstrap_span,
         )
     except Exception as exc:
         complete_projection_job(

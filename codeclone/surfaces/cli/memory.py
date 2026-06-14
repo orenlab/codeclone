@@ -395,6 +395,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Claim and run one pending projection rebuild job.",
     )
     _add_root(jobs_run)
+    jobs_run.add_argument(
+        "--not-before",
+        dest="not_before",
+        default=None,
+        help=(
+            "ISO-8601 UTC deadline to defer the run until before loading the "
+            "embedding model (coalesced trailing-edge flush)."
+        ),
+    )
     jobs_list = jobs_sub.add_parser("list", help="List recent projection jobs.")
     _add_root(jobs_list)
     jobs_list.add_argument("--limit", type=int, default=20)
@@ -1112,11 +1121,13 @@ def _run_jobs_enqueue(
 def _run_jobs_run_once(
     *, console: PrinterLike, root_path: Path, args: argparse.Namespace
 ) -> int:
-    del args
+    not_before = getattr(args, "not_before", None)
     return _run_jobs_json(
         console=console,
         root_path=root_path,
-        action=lambda: execute_run_projection_jobs_once(root_path=root_path),
+        action=lambda: execute_run_projection_jobs_once(
+            root_path=root_path, not_before_utc=not_before
+        ),
         fail_on=frozenset({"failed"}),
     )
 
