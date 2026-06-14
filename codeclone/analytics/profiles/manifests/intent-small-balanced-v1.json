@@ -1,0 +1,38 @@
+{
+  "manifest_schema_version": "1",
+  "profile_id": "intent-small-balanced-v1",
+  "profile_version": "1.0.0",
+  "lane": "intent",
+  "representation_kinds": [
+    "intent.description.v1",
+    "intent.description_with_frame.v1"
+  ],
+  "label": "Small intent corpus — balanced inspection",
+  "description": "Balanced lens for routine inspection: moderate cluster count, capped dominant share, moderate noise band.",
+  "applicability": {
+    "corpus_size_class": "small_intent",
+    "min_record_count": 50,
+    "max_record_count": 500,
+    "embedding_contract_versions": ["2"]
+  },
+  "primary_space": {
+    "pca_dimensions": [32, 64, 128],
+    "min_cluster_size": [5, 8, 12],
+    "min_samples": [1, 3, 5],
+    "cluster_selection_method": ["eom", "leaf"]
+  },
+  "suitability": {
+    "min_non_noise_cluster_count": 3,
+    "max_non_noise_cluster_count": 24,
+    "max_dominant_cluster_ratio": 0.45,
+    "max_noise_ratio": 0.50,
+    "min_non_noise_count": 80
+  },
+  "ranking": {
+    "base_score_weight": 1.0,
+    "cluster_count_weight": 0.0,
+    "cluster_count_direction": "neutral",
+    "noise_weight": 0.0,
+    "noise_direction": "prefer_lower"
+  }
+}

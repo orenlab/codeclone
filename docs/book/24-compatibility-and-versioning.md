@@ -41,8 +41,10 @@ Current contract versions:
 - `EXPERIENCE_DISTILLATION_VERSION = "experience-v1"` (derived Experience rows)
 - `SEMANTIC_INDEX_FORMAT_VERSION = "1"` (LanceDB sidecar; separate from SQLite memory schema)
 - `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.0"` (dev-only telemetry SQLite)
-- `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.1"` (corpus analytics SQLite)
-- `CORPUS_EXPORT_SCHEMA_VERSION = "1.2"` (clustering JSON export)
+- `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.2"` (corpus analytics SQLite)
+- `CORPUS_EXPORT_SCHEMA_VERSION = "1.3"` (clustering JSON export)
+- `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION = "1"` (profile manifests)
+- `CORPUS_CONTROL_PLANE_CONTRACT_VERSION = "1.0"` (profile/selection export)
 - `CORPUS_REPRESENTATION_CONTRACT_VERSION = "3"` (intent representation payloads)
 - `CORPUS_EMBEDDING_CONTRACT_VERSION = "2"` (analytics embedding sidecar)
 
@@ -80,9 +82,13 @@ Version bump rules:
   SQLite layout or export semantics change incompatibly; rebuild analytics
   artifacts rather than treating them as analysis truth (
   see [27-corpus-analytics.md](27-corpus-analytics.md))
-    - store `1.1` adds migration-time orphan checks, relationship guards, and
-      unique vector/display keys;
-    - export `1.2` additively separates formal validity from interpretation,
+    - store `1.2` adds immutable manifest snapshots and profile batches,
+      batch-run memberships, suitability assessments, and append-only
+      selection events; writable migration chains `1.0 → 1.1 → 1.2`;
+    - export `1.3` adds control-plane contract `1.0`, profile context,
+      profile summary, profile recommendation, and active selection while
+      preserving Slice 1.1 comparison keys;
+    - export `1.2` separated formal validity from interpretation,
       exposes full-versus-limited projection, bounded preview disclosure,
       partition metrics, and nullable all-run sweep comparison facts;
     - representation `3` retains raw representation-owned input hashing and

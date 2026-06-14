@@ -7,9 +7,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, NamedTuple
 
 ClusteringRunStatus = Literal["pending", "running", "completed", "failed"]
+ProfileBatchStatus = Literal[
+    "running",
+    "completed",
+    "completed_partial",
+    "failed",
+]
 IntentRepresentationKind = Literal[
     "intent.description.v1",
     "intent.description_with_frame.v1",
@@ -110,9 +116,94 @@ class ClusterSummaryRecord:
     diagnostics_json: str
 
 
+@dataclass(frozen=True, slots=True)
+class ProfileManifestSnapshotRecord:
+    profile_manifest_digest: str
+    profile_id: str
+    profile_version: str
+    manifest_schema_version: str
+    canonical_manifest_json: str
+    label: str
+    description: str
+    created_at_utc: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBatchIdentity:
+    profile_batch_id: str
+    snapshot_id: str
+    embedding_generation_id: str
+    profile_id: str
+    profile_version: str
+    profile_manifest_digest: str
+    candidate_space_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBatchRecord:
+    profile_batch_id: str
+    snapshot_id: str
+    embedding_generation_id: str
+    profile_id: str
+    profile_manifest_digest: str
+    candidate_space_digest: str
+    started_at_utc: str
+    finished_at_utc: str | None
+    status: ProfileBatchStatus
+    candidate_count_planned: int
+    candidate_count_succeeded: int
+    candidate_count_failed: int
+    recommended_clustering_run_id: str | None
+    recommendation_rationale_json: str | None
+    batch_max_cluster_count: int | None
+    created_at_utc: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileBatchRunRecord:
+    profile_batch_id: str
+    clustering_run_id: str
+    candidate_ordinal: int
+    candidate_dedupe_key: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileAssessmentRecord:
+    profile_batch_id: str
+    clustering_run_id: str
+    profile_id: str
+    profile_version: str
+    profile_manifest_digest: str
+    suitable_for_profile: bool
+    rejection_reasons_json: str
+    observed_metrics_json: str | None
+    assessed_digest: str
+
+
+@dataclass(frozen=True, slots=True)
+class RunSelectionRecord:
+    selection_id: str
+    snapshot_id: str
+    embedding_generation_id: str
+    profile_batch_id: str | None
+    profile_id: str | None
+    profile_manifest_digest: str | None
+    selected_run_id: str
+    selected_at_utc: str
+    selected_by: str
+    rationale: str | None
+    supersedes_selection_id: str | None
+
+
+class ActiveSelectionResult(NamedTuple):
+    record: RunSelectionRecord | None
+    ambiguous: bool
+
+
 __all__ = [
     "INTENT_REPRESENTATION_DESCRIPTION",
     "INTENT_REPRESENTATION_DESCRIPTION_WITH_FRAME",
+    "ActiveSelectionResult",
     "ClusterAssignmentRecord",
     "ClusterSummaryRecord",
     "ClusteringRunRecord",
@@ -123,4 +214,11 @@ __all__ = [
     "EmbeddingGenerationRecord",
     "EmbeddingItemRecord",
     "IntentRepresentationKind",
+    "ProfileAssessmentRecord",
+    "ProfileBatchIdentity",
+    "ProfileBatchRecord",
+    "ProfileBatchRunRecord",
+    "ProfileBatchStatus",
+    "ProfileManifestSnapshotRecord",
+    "RunSelectionRecord",
 ]

@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..contracts import (
+    ActiveSelectionResult,
     ClusterAssignmentRecord,
     ClusteringRunRecord,
     ClusterSummaryRecord,
@@ -18,6 +19,11 @@ from ..contracts import (
     CorpusSnapshotRecord,
     EmbeddingGenerationRecord,
     EmbeddingItemRecord,
+    ProfileAssessmentRecord,
+    ProfileBatchRecord,
+    ProfileBatchRunRecord,
+    ProfileManifestSnapshotRecord,
+    RunSelectionRecord,
 )
 
 
@@ -79,13 +85,83 @@ class CorpusStore(Protocol):
         clustering_run_id: str,
     ) -> None: ...
 
-    def set_selected_run(
+    def insert_profile_manifest_snapshot(
+        self,
+        record: ProfileManifestSnapshotRecord,
+    ) -> None: ...
+
+    def get_profile_manifest_snapshot(
+        self,
+        profile_manifest_digest: str,
+    ) -> ProfileManifestSnapshotRecord | None: ...
+
+    def insert_profile_batch(self, record: ProfileBatchRecord) -> None: ...
+
+    def finalize_profile_batch(self, record: ProfileBatchRecord) -> None: ...
+
+    def get_profile_batch(
+        self,
+        profile_batch_id: str,
+    ) -> ProfileBatchRecord | None: ...
+
+    def get_latest_profile_batch(
         self,
         *,
         snapshot_id: str,
         embedding_generation_id: str,
+        profile_id: str,
+    ) -> ProfileBatchRecord | None: ...
+
+    def insert_profile_batch_run(self, record: ProfileBatchRunRecord) -> None: ...
+
+    def list_profile_batch_run_records(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ProfileBatchRunRecord, ...]: ...
+
+    def list_clustering_runs_for_batch(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ClusteringRunRecord, ...]: ...
+
+    def list_profile_batch_ids_for_run(
+        self,
+        *,
         clustering_run_id: str,
+    ) -> tuple[str, ...]: ...
+
+    def insert_profile_assessment(
+        self,
+        record: ProfileAssessmentRecord,
     ) -> None: ...
+
+    def get_profile_assessment(
+        self,
+        *,
+        profile_batch_id: str,
+        clustering_run_id: str,
+    ) -> ProfileAssessmentRecord | None: ...
+
+    def list_profile_assessments(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ProfileAssessmentRecord, ...]: ...
+
+    def get_active_run_selection(
+        self,
+        *,
+        snapshot_id: str,
+        embedding_generation_id: str,
+        profile_batch_id: str | None,
+    ) -> ActiveSelectionResult: ...
+
+    def record_run_selection_atomic(
+        self,
+        record: RunSelectionRecord,
+    ) -> RunSelectionRecord: ...
 
     def insert_cluster_assignments(
         self,

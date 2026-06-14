@@ -140,14 +140,23 @@ Refs:
 - Corpus Analytics commands are terminal-only, offline clustering of historical
   intents (requires `codeclone[analytics]`):
     - `codeclone analytics snapshot|embed|cluster|build|clusters|cluster-show|outliers`
+    - `codeclone analytics profiles list|show|validate`
     - `build` runs snapshot → embed → cluster. `--use-recommended` requires
-      `--sweep` and renders the heuristic winner; it does not mark a maintainer
-      selection.
-    - `cluster --select-run RUN_ID` is the only CLI action that sets
-      `selected_by_maintainer=true`.
+      `--sweep`. With `--profile`, it renders the profile-batch winner; without
+      a profile it renders the global heuristic winner.
+    - `--profile PROFILE_ID` implies sweep; `--profile auto` resolves only from
+      configured `default_profile_id`. No profile is applied implicitly.
+    - Single-run overrides: `--pca-dimensions`, `--min-cluster-size`,
+      `--min-samples`, `--cluster-selection-method`.
+    - Sweep-axis overrides: `--sweep-pca`, `--sweep-min-cluster-size`,
+      `--sweep-min-samples`, `--sweep-selection-method`. Any sweep-axis flag
+      implies `--sweep`.
+    - `cluster --select-run RUN_ID` appends a selection event.
+      `--selection-profile none|PROFILE_ID|PROFILE_BATCH_ID` controls scope;
+      `--selected-by` and `--selection-rationale` preserve governance context.
     - Representations: `description` (default) or `description_with_frame`.
     - Artifacts live under `.codeclone/analytics/` (SQLite metadata + LanceDB vectors).
-    - JSON export schema `1.2` and HTML use one interpretation projection:
+    - JSON export schema `1.3` and HTML use one interpretation projection:
       formally valid runs receive full metrics/previews; invalid or failed runs
       remain inspectable as limited diagnostics with invariant codes.
     - Sweep output includes every persisted candidate for the generation.
@@ -158,7 +167,7 @@ Refs:
       without a traceback. Inspection/export commands require only the base
       install and open analytics metadata read-only.
     - Full contract:
-      [Corpus Analytics](27-corpus-analytics.md#report-interpretability-slice-11).
+      [Corpus Analytics](27-corpus-analytics.md#profile-control-plane-slice-12).
 - Controller and workspace query flags are mutually exclusive where enforced:
     - `--blast-radius` and `--patch-verify` cannot be combined.
     - `--strictness {ci,strict,relaxed}` is valid only with `--patch-verify`.

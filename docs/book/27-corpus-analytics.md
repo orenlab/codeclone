@@ -4,9 +4,10 @@ Corpus Analytics is an optional, offline analytics lane for clustering
 historical change-control intents. It reconstructs an intent corpus from
 retained controller evidence, creates immutable-by-contract snapshots, writes
 separate analytics embeddings, and runs deterministic PCA + HDBSCAN clustering.
-Slice 1.1 adds an interpretation plane over those persisted facts: formal
-technical-validity assessment, bounded previews, partition metrics, provenance
-completeness, and full-versus-limited report projection.
+Slice 1.1 adds an interpretation plane over those persisted facts. Slice 1.2
+adds a control plane: versioned profile lenses, finite profile-scoped sweeps,
+separate suitability and ranking, immutable batch receipts, and append-only
+maintainer selection events.
 
 It is **derived evidence, not authority**. Corpus Analytics never changes the
 canonical structural report, reports/gates/baselines, cache compatibility,
@@ -30,9 +31,10 @@ flowchart LR
     E --> C["L2 normalize<br/>PCA(full)<br/>HDBSCAN(euclidean)"]
     C --> D["Persisted assignments<br/>summaries and diagnostics"]
     D --> V{"V1-V10<br/>technically valid?"}
-    V -->|" yes "| F["Full interpretation<br/>metrics, previews, provenance"]
+    V -->|" yes "| Q["Profile suitability<br/>optional lens, soft gates"]
+    Q --> F["Full interpretation<br/>metrics, previews, provenance"]
     V -->|" no "| L["Limited diagnostic<br/>status, validity, safe raw counts"]
-    F --> J["JSON export 1.2"]
+    F --> J["JSON export 1.3"]
     F --> H["Self-contained HTML"]
     L --> J
     L --> H
@@ -72,6 +74,13 @@ sequenceDiagram
     CLI ->> SQL: running run
     CLI ->> V: validated vectors
     CLI ->> SQL: completed assignments and summaries
+    opt --profile PROFILE
+        CLI ->> SQL: manifest snapshot + immutable profile batch
+        CLI ->> SQL: suitability assessments + profile recommendation
+    end
+    opt --select-run RUN
+        CLI ->> SQL: append-only selection event
+    end
     U ->> CLI: cluster-show or build outputs
     CLI ->> O: analytics.report span
     CLI -->> U: atomic JSON / HTML
@@ -126,6 +135,12 @@ portable identity.
 | `default_min_cluster_size`         | `8`                                              | HDBSCAN default                                 |
 | `default_min_samples`              | `3`                                              | HDBSCAN default                                 |
 | `default_cluster_selection_method` | `eom`                                            | `eom` or `leaf`                                 |
+| `default_profile_id`               | unset                                            | Used only by explicit `--profile auto`          |
+| `profile_paths`                    | `[]`                                             | Additional repo-contained manifest files        |
+| `sweep_pca_dimensions`             | `[32, 64, 128]`                                  | Non-profile sweep PCA axis                       |
+| `sweep_min_cluster_sizes`          | `[5, 8, 12, 15]`                                 | Non-profile sweep size axis                      |
+| `sweep_min_samples`                | `[1, 3, 5]`                                      | Non-profile sweep sample axis                    |
+| `sweep_selection_methods`          | `["eom", "leaf"]`                                | Non-profile sweep method axis                    |
 | `allow_model_download`             | memory semantic setting                          | Whether FastEmbed may download                  |
 
 The historical audit database follows top-level
@@ -174,10 +189,9 @@ membership digest. Noise remains an explicit non-display bucket.
 
 ## Storage And Integrity
 
-Current analytics store schema is `1.1`.
+Current analytics store schema is `1.2`.
 
-- Writable open migrates supported `1.0` stores after checking for orphan and
-  duplicate records.
+- Writable open migrates supported `1.0` stores through `1.1` to `1.2`.
 - Read-only open never migrates and rejects a stale schema.
 - SQLite relationship triggers reject orphan-producing inserts/updates/deletes.
 - Vector row keys and non-null display cluster ids are unique.
@@ -238,14 +252,81 @@ A sweep discards invalid small-corpus candidates and deduplicates requested
 settings that collapse to the same effective parameters. A corpus with no valid
 candidate fails explicitly instead of producing an empty successful sweep.
 
-Sweep ranking sets exactly one `recommended_by_heuristic=true`.
-`selected_by_maintainer` remains false until an explicit:
+Sweep ranking sets exactly one generation-wide
+`recommended_by_heuristic=true`. Maintainer selection is an append-only event:
 
 ```bash
-codeclone analytics cluster --root . --select-run RUN_ID
+codeclone analytics cluster --root . --select-run RUN_ID \
+  --selected-by "$USER" \
+  --selection-rationale "Best inspectable partition"
 ```
 
-Recommendation is evidence, not a human decision.
+The legacy `selected_by_maintainer` run field is synchronized only for global
+selection and is not authoritative. Recommendation is evidence, not a human
+decision.
+
+## Profile Control Plane (Slice 1.2)
+
+A profile is a versioned lens over completed clustering facts, not a property
+of a run and not a semantic taxonomy. The bundled registry contains stable,
+balanced, discovery, and outlier-oriented lenses. Inspect it with:
+
+```bash
+codeclone analytics profiles list --root .
+codeclone analytics profiles show --root . \
+  --profile-id intent-small-balanced-v1
+codeclone analytics profiles validate --root .
+```
+
+```mermaid
+flowchart LR
+    M["Validated manifest<br/>schema 1"] --> G["Finite deduplicated grid"]
+    G --> B["Immutable profile batch<br/>manifest + candidate-space digests"]
+    B --> R["Completed run memberships"]
+    R --> V["Technical validity<br/>V1-V10"]
+    V --> S["Profile suitability<br/>soft gates"]
+    S --> K["Profile-aware ranking<br/>suitable runs only"]
+    K --> P["Profile recommendation"]
+    P --> E["JSON 1.3 / HTML"]
+    H["Maintainer selection event"] --> E
+```
+
+Run a profile sweep explicitly:
+
+```bash
+codeclone analytics cluster \
+  --root . \
+  --snapshot-id SNAPSHOT_ID \
+  --embedding-generation-id GENERATION_ID \
+  --profile intent-small-discovery-v1
+```
+
+`--profile` implies `--sweep`. `--profile auto` uses
+`default_profile_id`; when `--profile` is absent, the default profile is never
+applied. Profile grids are authoritative for profile sweeps. For ordinary
+sweeps, `--sweep-pca`, `--sweep-min-cluster-size`,
+`--sweep-min-samples`, and `--sweep-selection-method` replace the matching
+configured axes. Single-run flags (`--pca-dimensions`,
+`--min-cluster-size`, `--min-samples`, `--cluster-selection-method`) are
+mutually exclusive with sweep mode.
+
+Every profile execution creates a new immutable batch receipt. Candidate
+failures are retained as failed runs but do not abort remaining candidates;
+the batch becomes `completed_partial` when at least one candidate succeeds.
+Technical validity, profile suitability, and maintainer acceptance remain
+three separate verdict levels.
+
+Profile-scoped selection names a batch directly, or resolves the latest batch
+for a profile:
+
+```bash
+codeclone analytics cluster --root . --select-run RUN_ID \
+  --selection-profile pbatch-0123456789abcdef
+```
+
+See [Schema Layouts](appendix/b-schema-layouts.md#corpus-analytics-store-12)
+for the immutable tables and
+[CLI](11-cli.md#public-surface) for the complete flag matrix.
 
 ## Diagnostics
 
@@ -314,6 +395,12 @@ Presentation is separate from validity:
 - `candidate_only` is a valid run selected by neither mechanism;
 - `technically_invalid` always forces `limited_diagnostic`.
 
+Slice 1.2 adds `profile_recommended`, `valid_but_profile_rejected`, and the
+comparison-level `no_profile_suitable_candidate` banner. Profile rejection
+never removes partition metrics or changes a technically valid run to limited
+diagnostic mode. Labels and descriptions come from the persisted manifest
+snapshot linked to the batch, not from the current working tree.
+
 Full interpretation includes the largest-cluster ratio against the whole corpus
 and against assigned non-noise items, a fixed cluster-size histogram,
 representative and boundary previews, categorical correlations, numeric
@@ -328,7 +415,7 @@ time. `content_disclosure` is computed from the previews actually emitted and
 lists their scopes. Default exports never attach text previews to every
 `items[]` entry.
 
-Export schema `1.2` adds:
+Export schema `1.2` introduced the interpretation fields:
 
 - `interpretation_contract_version = "1.0"` and `content_disclosure`;
 - `clustering_run.validity` and `clustering_run.presentation`;
@@ -337,13 +424,21 @@ Export schema `1.2` adds:
 - candidate-local nullable `comparison` facts and top-level
   `comparison_summary`.
 
+Export schema `1.3` preserves those keys and adds:
+
+- `interpretation_contract_version = "1.1"`;
+- `control_plane_contract_version = "1.0"`;
+- optional run-level `profile_context` and active `selection`;
+- optional sweep-level `profile_summary`;
+- candidate-local `profile_suitable` and `is_profile_recommended`.
+
 Sweep comparison includes every persisted run for the requested snapshot and
 embedding generation, including failed or otherwise invalid runs. Only valid
 runs receive a score and rank. Invalid dominant ratios and largest-cluster size
 are `null` in JSON and `unavailable` in HTML.
 
 For the wire layout, see
-[Schema Layouts](appendix/b-schema-layouts.md#corpus-analytics-json-export-12).
+[Schema Layouts](appendix/b-schema-layouts.md#corpus-analytics-json-export-13).
 For compatibility rules, see
 [Compatibility and Versioning](24-compatibility-and-versioning.md).
 
@@ -360,10 +455,14 @@ The approved direct namespace is `codeclone analytics`:
 | `clusters`     | List runs for a snapshot                                            |
 | `cluster-show` | Export a resolved run as full interpretation or limited diagnostics |
 | `outliers`     | Emit noise assignment ids                                           |
+| `profiles`     | List, show, or validate profile manifests                           |
 
-`build --sweep --use-recommended` renders the heuristic winner but does not
-record a maintainer selection. `--use-recommended` without `--sweep` is rejected
-before dependency checks or artifact creation.
+`build --sweep --use-recommended` renders the global heuristic winner.
+`build --profile PROFILE --use-recommended` renders the profile-batch winner,
+or the comparison view when no candidate satisfies the lens. Neither action
+records a maintainer selection. `--use-recommended` without explicit or
+profile-implied sweep is rejected before dependency checks or artifact
+creation.
 
 Output behavior:
 

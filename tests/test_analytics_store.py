@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib
 import math
+import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -26,8 +27,12 @@ from codeclone.analytics.exceptions import (
     AnalyticsStoreError,
     AnalyticsWorkflowError,
 )
+from codeclone.analytics.schema import ensure_analytics_schema
 from codeclone.analytics.store.protocols import CorpusStore
-from codeclone.analytics.store.sqlite import parse_json_object
+from codeclone.analytics.store.sqlite import (
+    SqliteCorpusAnalyticsStore,
+    parse_json_object,
+)
 from codeclone.analytics.store.vectors_lancedb import (
     AnalyticsVectorStore,
     vector_digest,
@@ -390,3 +395,136 @@ def test_embedding_provider_and_vector_loading_edges(
             embedding_generation_id="embedding",
             items=(_item(),),
         )
+
+
+@pytest.mark.parametrize("legacy_version", ["1.0", "1.1"])
+def test_store_migration_reaches_1_2_and_is_idempotent(
+    tmp_path: Path,
+    legacy_version: str,
+) -> None:
+    path = tmp_path / f"analytics-{legacy_version}.sqlite3"
+    store = SqliteCorpusAnalyticsStore.open(path)
+    store.close()
+    _remove_control_plane(path, legacy_version=legacy_version)
+
+    conn = sqlite3.connect(path)
+    try:
+        ensure_analytics_schema(conn)
+        ensure_analytics_schema(conn)
+        version = conn.execute(
+            "SELECT value FROM analytics_meta WHERE key='schema_version'"
+        ).fetchone()
+        tables = {
+            str(row[0])
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        }
+    finally:
+        conn.close()
+
+    assert version == ("1.2",)
+    assert {
+        "profile_manifest_snapshots",
+        "profile_batches",
+        "profile_batch_runs",
+        "profile_assessments",
+        "run_selections",
+    } <= tables
+
+
+def test_store_migration_backfills_one_legacy_selection(tmp_path: Path) -> None:
+    path = tmp_path / "analytics.sqlite3"
+    store = SqliteCorpusAnalyticsStore.open(path)
+    store.close()
+    _seed_legacy_selection(path)
+    _remove_control_plane(path, legacy_version="1.1")
+
+    migrated = SqliteCorpusAnalyticsStore.open(path)
+    try:
+        active = migrated.get_active_run_selection(
+            snapshot_id="snapshot",
+            embedding_generation_id="embedding",
+            profile_batch_id=None,
+        )
+    finally:
+        migrated.close()
+
+    assert active.ambiguous is False
+    assert active.record is not None
+    assert active.record.selection_id.startswith("sel-legacy-")
+    assert active.record.selected_run_id == "run"
+    assert active.record.selected_by == "legacy-migration"
+
+
+def _seed_legacy_selection(path: Path) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO corpus_snapshots (
+                snapshot_id, lane, representation_kind, representation_version,
+                source_stores_json, source_schema_versions_json,
+                record_count, source_digest, created_at_utc
+            ) VALUES ('snapshot', 'intent', 'intent.description.v1', '3',
+                      '{}', '{}', 0, 'digest', '2026-01-01T00:00:00Z')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO embedding_generations (
+                embedding_generation_id, provider_id, provider_package_version,
+                model_id, model_revision, model_artifact_fingerprint,
+                exact_model_artifact_reproducibility, dimensions,
+                embedding_contract_version, embedding_similarity_metric,
+                vector_preprocessing, created_at_utc
+            ) VALUES ('embedding', 'fastembed', '1', 'model', NULL, NULL,
+                      0, 2, '2', 'cosine', 'l2_normalize',
+                      '2026-01-01T00:00:00Z')
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO clustering_runs (
+                clustering_run_id, snapshot_id, embedding_generation_id,
+                requested_parameters_json, effective_parameters_json,
+                random_seed, run_digest, recommended_by_heuristic,
+                selected_by_maintainer, status, created_at_utc,
+                finished_at_utc, error_message
+            ) VALUES ('run', 'snapshot', 'embedding', '{}', '{}', 42,
+                      'run-digest', 0, 1, 'completed',
+                      '2026-01-01T00:00:00Z',
+                      '2026-01-01T00:00:01Z', NULL)
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _remove_control_plane(path: Path, *, legacy_version: str) -> None:
+    conn = sqlite3.connect(path)
+    try:
+        trigger_names = [
+            str(row[0])
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            )
+        ]
+        for name in trigger_names:
+            conn.execute(f'DROP TRIGGER IF EXISTS "{name}"')
+        conn.execute("DROP INDEX IF EXISTS idx_run_selections_scope")
+        conn.execute("DROP INDEX IF EXISTS idx_profile_batches_lens")
+        for table in (
+            "run_selections",
+            "profile_assessments",
+            "profile_batch_runs",
+            "profile_batches",
+            "profile_manifest_snapshots",
+        ):
+            conn.execute(f'DROP TABLE IF EXISTS "{table}"')
+        conn.execute(
+            "UPDATE analytics_meta SET value=? WHERE key='schema_version'",
+            (legacy_version,),
+        )
+        conn.commit()
+    finally:
+        conn.close()

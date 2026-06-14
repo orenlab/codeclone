@@ -886,7 +886,7 @@ stores.
 See [Platform Observability](../26-platform-observability.md) for configuration,
 privacy, query, and anti-inference rules.
 
-## Corpus analytics store (`1.1`)
+## Corpus analytics store (`1.2`)
 
 Optional SQLite database (default `.codeclone/analytics/corpus_clustering.sqlite3`)
 and LanceDB vector directory (default `.codeclone/analytics/corpus_vectors`).
@@ -902,16 +902,43 @@ Memory truth.
 | `clustering_runs`       | Requested/effective parameters, algorithm manifest, lifecycle status  |
 | `cluster_assignments`   | Per-run item label, strength, and membership digest                    |
 | `cluster_summaries`     | Canonical display id and persisted diagnostics per cluster/noise       |
+| `profile_manifest_snapshots` | Immutable canonical manifest values, labels, and descriptions     |
+| `profile_batches`       | One immutable execution receipt per profile sweep                      |
+| `profile_batch_runs`    | Ordered effective-parameter membership for each batch                  |
+| `profile_assessments`   | Technical-validity-aware suitability facts for batch members           |
+| `run_selections`        | Append-only global or profile-batch maintainer decisions               |
 | LanceDB sidecar         | Separate float32 vectors from Engineering Memory semantic index        |
 
 Store schema version: `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`1.1`**).
+`codeclone/contracts/__init__.py` (currently **`1.2`**).
 
-Writable open migrates `1.0` to `1.1` only after checking existing snapshots,
-embedding references, clustering assignments/summaries, vector row keys, and
-display ids. Read-only open never migrates and rejects stale schema. SQLite
-triggers prevent orphan-producing inserts, relationship updates, and parent
-deletes; unique indexes protect vector row keys and non-null display cluster ids.
+Writable open chains `1.0 → 1.1 → 1.2`; it never skips the intermediate
+integrity migration. Read-only open never migrates and rejects stale schema.
+SQLite triggers prevent orphan-producing inserts, relationship updates, and
+parent deletes; unique indexes protect vector row keys, non-null display
+cluster ids, and one effective candidate per profile batch.
+
+Profile state is an overlay over immutable clustering facts:
+
+```mermaid
+erDiagram
+    CORPUS_SNAPSHOTS ||--o{ CLUSTERING_RUNS : owns
+    EMBEDDING_GENERATIONS ||--o{ CLUSTERING_RUNS : supplies
+    PROFILE_MANIFEST_SNAPSHOTS ||--o{ PROFILE_BATCHES : fixes
+    PROFILE_BATCHES ||--o{ PROFILE_BATCH_RUNS : contains
+    CLUSTERING_RUNS ||--o{ PROFILE_BATCH_RUNS : participates
+    PROFILE_BATCHES ||--o{ PROFILE_ASSESSMENTS : assesses
+    CLUSTERING_RUNS ||--o{ PROFILE_ASSESSMENTS : receives
+    PROFILE_BATCHES o|--o{ RUN_SELECTIONS : scopes
+    CLUSTERING_RUNS ||--o{ RUN_SELECTIONS : selects
+```
+
+`clustering_runs` has no profile columns. A re-sweep creates a new
+`profile_batches` row with the exact manifest and candidate-space digests.
+`run_selections` supersedes earlier active heads in the same
+`(snapshot_id, embedding_generation_id, profile_batch_id)` scope. A null batch
+means global selection. The legacy `selected_by_maintainer` field is a
+global-scope mirror only.
 
 The SQLite transaction and LanceDB sidecar cannot share one physical
 transaction. The embedding workflow therefore writes metadata and vectors as
@@ -920,21 +947,25 @@ ordinary failures, and validates row keys, dimensions, and float32 digests
 before clustering. Crash residue is detected as an integrity error rather than
 accepted as a completed generation.
 
-### Corpus analytics JSON export (`1.2`)
+### Corpus analytics JSON export (`1.3`)
 
-`CORPUS_EXPORT_SCHEMA_VERSION = "1.2"` is an additive interpretation contract
-over store schema `1.1`; it does not migrate the SQLite database.
+`CORPUS_EXPORT_SCHEMA_VERSION = "1.3"` projects interpretation contract `1.1`
+and control-plane contract `1.0` over store schema `1.2`; it does not migrate
+the SQLite database.
 
 ```text
 export
-├── schema_version = "1.2"
-├── interpretation_contract_version = "1.0"
+├── schema_version = "1.3"
+├── interpretation_contract_version = "1.1"
+├── control_plane_contract_version = "1.0"
 ├── snapshot
 ├── embedding_generation | null
 ├── embedding_items[]
 ├── clustering_run
 │   ├── validity
 │   ├── presentation
+│   ├── profile_context?       # stored batch assessment + manifest snapshot
+│   ├── selection?             # active event for export scope
 │   └── partition_metrics | diagnostic_facts
 ├── clusters[]                 # full mode only
 │   └── interpretation
@@ -946,6 +977,7 @@ export
 │       └── machine_inspectability_signals
 ├── assignments[]              # full mode only
 ├── noise_items[]              # full mode only
+├── profile_summary?           # sweep export, sibling of comparison_summary
 └── content_disclosure
 ```
 
@@ -970,8 +1002,10 @@ embedding generation. Each candidate has a sibling `comparison` object:
 ```
 
 Only technically valid candidates receive non-null comparison metrics, score,
-and rank. `comparison_summary` records total, valid, invalid, recommended, and
-maintainer-selected run identity.
+and rank. Profile-scoped candidates add `profile_suitable` and
+`is_profile_recommended`. `comparison_summary` preserves its Slice 1.1 keys;
+`profile_summary` is a sibling with batch identity, manifest snapshot metadata,
+suitability counts, recommendation rationale, and active selection.
 
 `content_disclosure` is derived from the final payload. Its preview scopes are
 `cluster_representatives`, `cluster_boundaries`, and `noise_items`; the
@@ -1000,6 +1034,8 @@ with conservative legacy rules; they are not rewritten.
 
 See [Corpus Analytics](../27-corpus-analytics.md) for CLI, configuration, and trust
 boundaries, and
+[Profile Control Plane](../27-corpus-analytics.md#profile-control-plane-slice-12)
+for batch and selection semantics, and
 [Report Interpretability](../27-corpus-analytics.md#report-interpretability-slice-11)
 for validity and privacy rules.
 

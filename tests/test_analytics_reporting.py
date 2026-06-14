@@ -14,6 +14,7 @@ import pytest
 
 from codeclone.analytics.clustering.sweep import clustering_algorithm_manifest
 from codeclone.analytics.contracts import (
+    ActiveSelectionResult,
     ClusterAssignmentRecord,
     ClusteringRunRecord,
     ClusteringRunStatus,
@@ -22,6 +23,11 @@ from codeclone.analytics.contracts import (
     CorpusSnapshotRecord,
     EmbeddingGenerationRecord,
     EmbeddingItemRecord,
+    ProfileAssessmentRecord,
+    ProfileBatchRecord,
+    ProfileBatchRunRecord,
+    ProfileManifestSnapshotRecord,
+    RunSelectionRecord,
 )
 from codeclone.analytics.corpus.keys import membership_digest
 from codeclone.analytics.exceptions import AnalyticsWorkflowError
@@ -29,6 +35,7 @@ from codeclone.analytics.export import json_export
 from codeclone.analytics.integrity import PartitionValidityAssessment
 from codeclone.analytics.report import html as html_report
 from codeclone.analytics.report import interpret as interpret_report
+from codeclone.analytics.report.messages.profiles import profile_banner_message
 from codeclone.analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from codeclone.analytics.store.vectors_lancedb import vector_row_key
 from codeclone.contracts import CORPUS_EMBEDDING_CONTRACT_VERSION
@@ -191,6 +198,7 @@ class _ReportStore:
             ClusterSummaryRecord("run", 0, 1, cluster_digest, 1, diagnostics),
             ClusterSummaryRecord("run", -1, None, noise_digest, 1, noise_diagnostics),
         )
+        self.active_selection = ActiveSelectionResult(None, False)
 
     def get_snapshot(self, _snapshot_id: str) -> CorpusSnapshotRecord | None:
         return self.snapshot
@@ -236,6 +244,165 @@ class _ReportStore:
 
     def list_summaries(self, run_id: str) -> tuple[ClusterSummaryRecord, ...]:
         return self.summaries if run_id == "run" else ()
+
+    def get_active_run_selection(
+        self,
+        *,
+        snapshot_id: str,
+        embedding_generation_id: str,
+        profile_batch_id: str | None,
+    ) -> ActiveSelectionResult:
+        assert snapshot_id == "snapshot"
+        assert embedding_generation_id == "embedding"
+        assert profile_batch_id is None
+        return self.active_selection
+
+
+class _ProfileReportStore(_ReportStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.runs = (_run(),)
+        self.profile_batch = ProfileBatchRecord(
+            profile_batch_id="pbatch-profile",
+            snapshot_id="snapshot",
+            embedding_generation_id="embedding",
+            profile_id="intent-small-discovery-v1",
+            profile_manifest_digest="a" * 64,
+            candidate_space_digest="b" * 64,
+            started_at_utc="2026-01-01T00:00:00Z",
+            finished_at_utc="2026-01-01T00:00:02Z",
+            status="completed",
+            candidate_count_planned=1,
+            candidate_count_succeeded=1,
+            candidate_count_failed=0,
+            recommended_clustering_run_id=None,
+            recommendation_rationale_json=None,
+            batch_max_cluster_count=1,
+            created_at_utc="2026-01-01T00:00:00Z",
+        )
+        self.profile_assessment = ProfileAssessmentRecord(
+            profile_batch_id="pbatch-profile",
+            clustering_run_id="run",
+            profile_id="intent-small-discovery-v1",
+            profile_version="1.0.0",
+            profile_manifest_digest="a" * 64,
+            suitable_for_profile=False,
+            rejection_reasons_json='["dominant_ratio_above_max"]',
+            observed_metrics_json=(
+                '{"dominant_assigned_ratio":1.0,'
+                '"dominant_cluster_ratio":0.5,'
+                '"noise_ratio":0.5,'
+                '"non_noise_cluster_count":1,'
+                '"non_noise_count":1}'
+            ),
+            assessed_digest="assessment-digest",
+        )
+        self.profile_selection: RunSelectionRecord | None = None
+
+    def get_profile_batch(
+        self,
+        profile_batch_id: str,
+    ) -> ProfileBatchRecord | None:
+        return (
+            self.profile_batch
+            if profile_batch_id == self.profile_batch.profile_batch_id
+            else None
+        )
+
+    def get_latest_profile_batch(
+        self,
+        *,
+        snapshot_id: str,
+        embedding_generation_id: str,
+        profile_id: str,
+    ) -> ProfileBatchRecord | None:
+        assert snapshot_id == "snapshot"
+        assert embedding_generation_id == "embedding"
+        return (
+            self.profile_batch if profile_id == self.profile_batch.profile_id else None
+        )
+
+    def list_profile_batch_ids_for_run(
+        self,
+        *,
+        clustering_run_id: str,
+    ) -> tuple[str, ...]:
+        return (
+            (self.profile_batch.profile_batch_id,) if clustering_run_id == "run" else ()
+        )
+
+    def list_profile_batch_run_records(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ProfileBatchRunRecord, ...]:
+        assert profile_batch_id == self.profile_batch.profile_batch_id
+        return (
+            ProfileBatchRunRecord(
+                profile_batch_id=profile_batch_id,
+                clustering_run_id="run",
+                candidate_ordinal=0,
+                candidate_dedupe_key="2|1|1|eom",
+            ),
+        )
+
+    def list_clustering_runs_for_batch(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ClusteringRunRecord, ...]:
+        assert profile_batch_id == self.profile_batch.profile_batch_id
+        return self.runs
+
+    def get_profile_assessment(
+        self,
+        *,
+        profile_batch_id: str,
+        clustering_run_id: str,
+    ) -> ProfileAssessmentRecord | None:
+        if (
+            profile_batch_id == self.profile_batch.profile_batch_id
+            and clustering_run_id == "run"
+        ):
+            return self.profile_assessment
+        return None
+
+    def list_profile_assessments(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ProfileAssessmentRecord, ...]:
+        assert profile_batch_id == self.profile_batch.profile_batch_id
+        return (self.profile_assessment,)
+
+    def get_profile_manifest_snapshot(
+        self,
+        profile_manifest_digest: str,
+    ) -> ProfileManifestSnapshotRecord | None:
+        if profile_manifest_digest != self.profile_batch.profile_manifest_digest:
+            return None
+        return ProfileManifestSnapshotRecord(
+            profile_manifest_digest=profile_manifest_digest,
+            profile_id=self.profile_batch.profile_id,
+            profile_version="1.0.0",
+            manifest_schema_version="1",
+            canonical_manifest_json="{}",
+            label="Discovery lens",
+            description="Narrow candidate families.",
+            created_at_utc="2026-01-01T00:00:00Z",
+        )
+
+    def get_active_run_selection(
+        self,
+        *,
+        snapshot_id: str,
+        embedding_generation_id: str,
+        profile_batch_id: str | None,
+    ) -> ActiveSelectionResult:
+        assert snapshot_id == "snapshot"
+        assert embedding_generation_id == "embedding"
+        assert profile_batch_id == self.profile_batch.profile_batch_id
+        return ActiveSelectionResult(self.profile_selection, False)
 
 
 def _as_sqlite_store(store: _ReportStore) -> SqliteCorpusAnalyticsStore:
@@ -323,6 +490,72 @@ def test_clustering_export_serializes_optional_fields() -> None:
     assert payload["content_disclosure"]["contains_normalized_text_previews"] is True
 
 
+def test_profile_export_and_html_use_persisted_control_plane() -> None:
+    store = _ProfileReportStore()
+    store.profile_selection = replace(
+        _selection(),
+        profile_batch_id=store.profile_batch.profile_batch_id,
+        profile_id=store.profile_batch.profile_id,
+        profile_manifest_digest=store.profile_batch.profile_manifest_digest,
+    )
+    single = json.loads(
+        json_export.export_clustering_json(
+            store=_as_sqlite_store(store),
+            snapshot_id="snapshot",
+            clustering_run_id="run",
+            profile_batch_id=store.profile_batch.profile_batch_id,
+        )
+    )
+    run = single["clustering_run"]
+    assert single["schema_version"] == "1.3"
+    assert single["control_plane_contract_version"] == "1.0"
+    assert single["interpretation_contract_version"] == "1.1"
+    assert run["profile_context"]["label"] == "Discovery lens"
+    assert run["profile_context"]["suitability"]["suitable_for_profile"] is False
+    assert run["selection"]["is_active"] is True
+    assert run["selection"]["legacy_bool_mirror"] is False
+    assert run["presentation"]["banner_kind"] == "maintainer_selected"
+
+    store.profile_selection = None
+    rejected = html_report.render_analytics_html(
+        store=_as_sqlite_store(store),
+        snapshot=_snapshot(),
+        run=_run(),
+        profile_batch_id=store.profile_batch.profile_batch_id,
+    )
+    assert 'data-banner-kind="valid_but_profile_rejected"' in rejected
+    assert "Discovery lens" in rejected
+
+    store.profile_assessment = replace(
+        store.profile_assessment,
+        suitable_for_profile=True,
+        rejection_reasons_json="[]",
+    )
+    store.profile_batch = replace(
+        store.profile_batch,
+        recommended_clustering_run_id="run",
+        recommendation_rationale_json='{"profile_score":0.5}',
+    )
+    recommended = html_report.render_analytics_html(
+        store=_as_sqlite_store(store),
+        snapshot=_snapshot(),
+        run=_run(),
+        profile_batch_id=store.profile_batch.profile_batch_id,
+    )
+    assert 'data-banner-kind="profile_recommended"' in recommended
+
+    comparison = json.loads(
+        json_export.export_sweep_comparison_json(
+            store=_as_sqlite_store(store),
+            snapshot_id="snapshot",
+            embedding_generation_id="embedding",
+            profile_batch_id=store.profile_batch.profile_batch_id,
+        )
+    )
+    assert comparison["profile_summary"]["recommended_for_profile_run_id"] == "run"
+    assert comparison["candidates"][0]["comparison"]["is_profile_recommended"] is True
+
+
 def test_single_export_context_errors_are_hard_failures() -> None:
     store = _ReportStore()
     store.snapshot = None
@@ -394,7 +627,8 @@ def test_html_escapes_previews_and_marks_candidate_only() -> None:
         snapshot=_snapshot(),
         run=candidate,
     )
-    assert "Candidate run \u2014 not heuristically recommended" in rendered
+    assert profile_banner_message("candidate_only") in rendered
+    assert 'data-banner-kind="candidate_only"' in rendered
     assert "<script>" not in rendered
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in rendered
     assert "Provenance completeness" in rendered
@@ -444,6 +678,7 @@ def test_interpretation_helper_edge_contracts() -> None:
     selected = interpret_report.derive_presentation_status(
         run=replace(_run(), selected_by_maintainer=True),
         assessment=valid,
+        active_maintainer_selection=_selection(),
     )
     recommended = interpret_report.derive_presentation_status(
         run=_run(),
@@ -625,18 +860,30 @@ def test_sweep_projection_rejects_conflicting_decisions() -> None:
             embedding_generation_id="embedding",
         )
 
-    selected = replace(
-        _run(),
-        recommended_by_heuristic=False,
-        selected_by_maintainer=True,
-    )
-    store.runs = (selected, selected)
-    with pytest.raises(AnalyticsWorkflowError, match="multiple maintainer-selected"):
+    store.runs = (_run(),)
+    store.active_selection = ActiveSelectionResult(None, True)
+    with pytest.raises(AnalyticsWorkflowError, match="selection chain ambiguous"):
         interpret_report.build_sweep_comparison_projection(
             store=_as_sqlite_store(store),
             snapshot=_snapshot(),
             embedding_generation_id="embedding",
         )
+
+
+def _selection() -> RunSelectionRecord:
+    return RunSelectionRecord(
+        selection_id="selection",
+        snapshot_id="snapshot",
+        embedding_generation_id="embedding",
+        profile_batch_id=None,
+        profile_id=None,
+        profile_manifest_digest=None,
+        selected_run_id="run",
+        selected_at_utc="2026-01-01T00:00:02Z",
+        selected_by="maintainer",
+        rationale=None,
+        supersedes_selection_id=None,
+    )
 
 
 def test_html_projection_helper_empty_and_malformed_rows() -> None:

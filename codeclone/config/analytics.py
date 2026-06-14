@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..audit.validation import DEFAULT_AUDIT_PATH
 from ..utils.repo_paths import RepoPathPolicy, resolve_under_repo_root
@@ -29,6 +29,13 @@ DEFAULT_PCA_DIMENSIONS = 64
 DEFAULT_MIN_CLUSTER_SIZE = 8
 DEFAULT_MIN_SAMPLES = 3
 DEFAULT_CLUSTER_SELECTION_METHOD = "eom"
+DEFAULT_SWEEP_PCA_DIMENSIONS = (32, 64, 128)
+DEFAULT_SWEEP_MIN_CLUSTER_SIZES = (5, 8, 12, 15)
+DEFAULT_SWEEP_MIN_SAMPLES = (1, 3, 5)
+DEFAULT_SWEEP_SELECTION_METHODS: tuple[Literal["eom", "leaf"], ...] = (
+    "eom",
+    "leaf",
+)
 
 
 class AnalyticsPyprojectTable(BaseModel):
@@ -48,7 +55,58 @@ class AnalyticsPyprojectTable(BaseModel):
     default_min_cluster_size: int | None = Field(default=None, gt=0)
     default_min_samples: int | None = Field(default=None, gt=0)
     default_cluster_selection_method: Literal["eom", "leaf"] | None = None
+    default_profile_id: str | None = None
+    profile_paths: tuple[str, ...] = ()
+    sweep_pca_dimensions: tuple[int, ...] | None = None
+    sweep_min_cluster_sizes: tuple[int, ...] | None = None
+    sweep_min_samples: tuple[int, ...] | None = None
+    sweep_selection_methods: tuple[Literal["eom", "leaf"], ...] | None = None
     allow_model_download: bool | None = None
+
+    @field_validator(
+        "sweep_pca_dimensions",
+        "sweep_min_cluster_sizes",
+        "sweep_min_samples",
+    )
+    @classmethod
+    def _positive_sweep_axis(
+        cls,
+        value: tuple[int, ...] | None,
+    ) -> tuple[int, ...] | None:
+        if value is None:
+            return None
+        if not value or any(item <= 0 for item in value):
+            raise ValueError("analytics sweep axes require positive integers")
+        return tuple(sorted(set(value)))
+
+    @field_validator("sweep_selection_methods")
+    @classmethod
+    def _selection_methods(
+        cls,
+        value: tuple[Literal["eom", "leaf"], ...] | None,
+    ) -> tuple[Literal["eom", "leaf"], ...] | None:
+        if value is None:
+            return None
+        if not value:
+            raise ValueError("analytics sweep selection methods must not be empty")
+        return tuple(sorted(set(value)))
+
+    @field_validator("profile_paths")
+    @classmethod
+    def _profile_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not item.strip() for item in value):
+            raise ValueError("analytics profile paths must not be empty")
+        return value
+
+    @field_validator("default_profile_id")
+    @classmethod
+    def _default_profile_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("default_profile_id must not be empty")
+        return normalized
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +124,12 @@ class AnalyticsConfig:
     default_min_cluster_size: int
     default_min_samples: int
     default_cluster_selection_method: str
+    default_profile_id: str | None
+    profile_paths: tuple[Path, ...]
+    sweep_pca_dimensions: tuple[int, ...]
+    sweep_min_cluster_sizes: tuple[int, ...]
+    sweep_min_samples: tuple[int, ...]
+    sweep_selection_methods: tuple[Literal["eom", "leaf"], ...]
     allow_model_download: bool
 
 
@@ -73,6 +137,20 @@ def _resolve_path(root_path: Path, raw: str | None, default_relative: str) -> Pa
     policy = RepoPathPolicy(allow_absolute=True)
     selected = raw if raw is not None else default_relative
     return resolve_under_repo_root(root_path, selected, policy=policy)
+
+
+def _resolve_profile_paths(
+    root_path: Path,
+    raw_paths: tuple[str, ...],
+) -> tuple[Path, ...]:
+    policy = RepoPathPolicy(
+        allow_absolute=True,
+        must_exist=True,
+        must_be_file=True,
+    )
+    return tuple(
+        resolve_under_repo_root(root_path, raw, policy=policy) for raw in raw_paths
+    )
 
 
 def resolve_analytics_config(root_path: Path) -> AnalyticsConfig:
@@ -90,6 +168,18 @@ def resolve_analytics_config(root_path: Path) -> AnalyticsConfig:
     # re-downloaded into a second cache. Default the model cache + download
     # policy to the resolved memory semantic config (single source of truth).
     memory_semantic = resolve_memory_config(resolved_root).semantic
+    default_profile_id = table.default_profile_id if table is not None else None
+    profile_paths = _resolve_profile_paths(
+        resolved_root,
+        table.profile_paths if table is not None else (),
+    )
+    if default_profile_id is not None or profile_paths:
+        from ..analytics.profiles.registry import resolve_profile_registry
+
+        resolve_profile_registry(
+            profile_paths=profile_paths,
+            default_profile_id=default_profile_id,
+        )
     return AnalyticsConfig(
         db_path=_resolve_path(
             resolved_root,
@@ -160,6 +250,28 @@ def resolve_analytics_config(root_path: Path) -> AnalyticsConfig:
             if table is not None and table.default_cluster_selection_method is not None
             else DEFAULT_CLUSTER_SELECTION_METHOD
         ),
+        default_profile_id=default_profile_id,
+        profile_paths=profile_paths,
+        sweep_pca_dimensions=(
+            table.sweep_pca_dimensions
+            if table is not None and table.sweep_pca_dimensions is not None
+            else DEFAULT_SWEEP_PCA_DIMENSIONS
+        ),
+        sweep_min_cluster_sizes=(
+            table.sweep_min_cluster_sizes
+            if table is not None and table.sweep_min_cluster_sizes is not None
+            else DEFAULT_SWEEP_MIN_CLUSTER_SIZES
+        ),
+        sweep_min_samples=(
+            table.sweep_min_samples
+            if table is not None and table.sweep_min_samples is not None
+            else DEFAULT_SWEEP_MIN_SAMPLES
+        ),
+        sweep_selection_methods=(
+            table.sweep_selection_methods
+            if table is not None and table.sweep_selection_methods is not None
+            else DEFAULT_SWEEP_SELECTION_METHODS
+        ),
         allow_model_download=(
             table.allow_model_download
             if table is not None and table.allow_model_download is not None
@@ -172,6 +284,10 @@ __all__ = [
     "DEFAULT_ANALYTICS_DB_RELATIVE",
     "DEFAULT_ANALYTICS_VECTORS_RELATIVE",
     "DEFAULT_MIN_CORRELATION_SAMPLE_SIZE",
+    "DEFAULT_SWEEP_MIN_CLUSTER_SIZES",
+    "DEFAULT_SWEEP_MIN_SAMPLES",
+    "DEFAULT_SWEEP_PCA_DIMENSIONS",
+    "DEFAULT_SWEEP_SELECTION_METHODS",
     "AnalyticsConfig",
     "AnalyticsPyprojectTable",
     "resolve_analytics_config",

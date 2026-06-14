@@ -9,7 +9,10 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 
-from ...contracts import CORPUS_EXPORT_SCHEMA_VERSION
+from ...contracts import (
+    CORPUS_CONTROL_PLANE_CONTRACT_VERSION,
+    CORPUS_EXPORT_SCHEMA_VERSION,
+)
 from ...utils.json_io import json_text
 from ..contracts import (
     ClusteringRunRecord,
@@ -21,6 +24,7 @@ from ..contracts import (
 from ..exceptions import AnalyticsWorkflowError
 from ..report.interpret import (
     INTERPRETATION_CONTRACT_VERSION,
+    build_profile_summary,
     build_sweep_comparison_projection,
     content_disclosure,
     enrich_run_for_export,
@@ -41,6 +45,8 @@ def export_clustering_json(
     store: SqliteCorpusAnalyticsStore,
     snapshot_id: str,
     clustering_run_id: str,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
 ) -> str:
     snapshot, run = _owned_context(
         store=store,
@@ -48,9 +54,16 @@ def export_clustering_json(
         clustering_run_id=clustering_run_id,
     )
     generation = store.get_embedding_generation(run.embedding_generation_id)
-    projection = enrich_run_for_export(store=store, snapshot=snapshot, run=run)
+    projection = enrich_run_for_export(
+        store=store,
+        snapshot=snapshot,
+        run=run,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
     payload: dict[str, object] = {
         "schema_version": CORPUS_EXPORT_SCHEMA_VERSION,
+        "control_plane_contract_version": CORPUS_CONTROL_PLANE_CONTRACT_VERSION,
         "interpretation_contract_version": INTERPRETATION_CONTRACT_VERSION,
         "snapshot": _snapshot_dict(snapshot),
         "embedding_generation": _generation_dict(generation),
@@ -88,6 +101,8 @@ def export_sweep_comparison_json(
     store: SqliteCorpusAnalyticsStore,
     snapshot_id: str,
     embedding_generation_id: str,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
 ) -> str:
     snapshot = store.get_snapshot(snapshot_id)
     if snapshot is None:
@@ -97,9 +112,19 @@ def export_sweep_comparison_json(
         store=store,
         snapshot=snapshot,
         embedding_generation_id=embedding_generation_id,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
+    profile_summary = build_profile_summary(
+        store=store,
+        snapshot=snapshot,
+        embedding_generation_id=embedding_generation_id,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
     )
     payload: dict[str, object] = {
         "schema_version": CORPUS_EXPORT_SCHEMA_VERSION,
+        "control_plane_contract_version": CORPUS_CONTROL_PLANE_CONTRACT_VERSION,
         "interpretation_contract_version": INTERPRETATION_CONTRACT_VERSION,
         "snapshot": _snapshot_dict(snapshot),
         "embedding_generation": _generation_dict(generation),
@@ -117,6 +142,8 @@ def export_sweep_comparison_json(
         ),
         "reproducibility_statement": _reproducibility_statement(generation),
     }
+    if profile_summary is not None:
+        payload["profile_summary"] = profile_summary
     payload["content_disclosure"] = content_disclosure(payload)
     return json_text(payload, sort_keys=True, indent=True, trailing_newline=True)
 

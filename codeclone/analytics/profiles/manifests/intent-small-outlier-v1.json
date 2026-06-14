@@ -1,0 +1,38 @@
+{
+  "manifest_schema_version": "1",
+  "profile_id": "intent-small-outlier-v1",
+  "profile_version": "1.0.0",
+  "lane": "intent",
+  "representation_kinds": [
+    "intent.description.v1",
+    "intent.description_with_frame.v1"
+  ],
+  "label": "Small intent corpus — outlier-oriented",
+  "description": "Outlier lens: a few dense cores with substantial noise. Rejects too many tiny non-noise clusters.",
+  "applicability": {
+    "corpus_size_class": "small_intent",
+    "min_record_count": 50,
+    "max_record_count": 500,
+    "embedding_contract_versions": ["2"]
+  },
+  "primary_space": {
+    "pca_dimensions": [64, 128],
+    "min_cluster_size": [12, 15, 20],
+    "min_samples": [5],
+    "cluster_selection_method": ["eom"]
+  },
+  "suitability": {
+    "min_non_noise_cluster_count": 2,
+    "max_non_noise_cluster_count": 12,
+    "min_noise_ratio": 0.25,
+    "max_dominant_cluster_ratio": 0.70,
+    "min_non_noise_count": 30
+  },
+  "ranking": {
+    "base_score_weight": 0.4,
+    "cluster_count_weight": 0.2,
+    "cluster_count_direction": "prefer_lower",
+    "noise_weight": 0.4,
+    "noise_direction": "prefer_higher"
+  }
+}

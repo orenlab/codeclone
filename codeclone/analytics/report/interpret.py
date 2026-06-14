@@ -31,12 +31,23 @@ from ..contracts import (
     ClusterSummaryRecord,
     CorpusItemRecord,
     CorpusSnapshotRecord,
+    ProfileAssessmentRecord,
+    ProfileBatchRecord,
+    RunSelectionRecord,
 )
 from ..exceptions import AnalyticsWorkflowError
 from ..integrity import PartitionValidityAssessment, assess_partition_validity
+from ..metrics.partition_metrics import (
+    RunPartitionMetrics,
+    compute_run_partition_metrics,
+)
+from ..metrics.partition_metrics import (
+    _cluster_size_histogram as _partition_cluster_size_histogram,
+)
 from ..store.protocols import CorpusStore
+from .messages.profiles import profile_banner_message
 
-INTERPRETATION_CONTRACT_VERSION = "1.0"
+INTERPRETATION_CONTRACT_VERSION = "1.1"
 SMALL_CLUSTER_PROVENANCE_THRESHOLD = 15
 INSPECTABILITY_TRACKED_METADATA_FIELDS = (
     "agent_family",
@@ -79,25 +90,14 @@ class RunPresentationStatus:
     projection_mode: Literal["full_interpretation", "limited_diagnostic"]
     banner_kind: Literal[
         "maintainer_selected",
+        "profile_recommended",
         "heuristic_recommended",
+        "valid_but_profile_rejected",
+        "no_profile_suitable_candidate",
         "candidate_only",
         "technically_invalid",
     ]
     banner_message: str
-
-
-@dataclass(frozen=True, slots=True)
-class RunPartitionMetrics:
-    total_items: int
-    cluster_count: int
-    noise_count: int
-    non_noise_count: int
-    noise_ratio: float
-    dominant_cluster_ratio: float
-    dominant_assigned_ratio: float | None
-    dominant_cluster_label: int | None
-    cluster_size_distribution: tuple[int, ...]
-    cluster_size_histogram: dict[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +117,8 @@ def enrich_run_for_export(
     store: CorpusStore,
     snapshot: CorpusSnapshotRecord,
     run: ClusteringRunRecord,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
 ) -> dict[str, object]:
     if run.snapshot_id != snapshot.snapshot_id:
         raise AnalyticsWorkflowError(
@@ -130,10 +132,59 @@ def enrich_run_for_export(
         snapshot_id=snapshot.snapshot_id,
         clustering_run_id=run.clustering_run_id,
     )
-    presentation = derive_presentation_status(run=run, assessment=assessment)
+    batch = _resolve_profile_batch(
+        store=store,
+        snapshot=snapshot,
+        run=run,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
+    profile_assessment = (
+        store.get_profile_assessment(
+            profile_batch_id=batch.profile_batch_id,
+            clustering_run_id=run.clustering_run_id,
+        )
+        if batch is not None
+        else None
+    )
+    active_selection = _active_selection(
+        store=store,
+        snapshot_id=snapshot.snapshot_id,
+        embedding_generation_id=run.embedding_generation_id,
+        profile_batch_id=batch.profile_batch_id if batch is not None else None,
+    )
+    manifest = (
+        store.get_profile_manifest_snapshot(batch.profile_manifest_digest)
+        if batch is not None
+        else None
+    )
+    presentation = derive_presentation_status(
+        run=run,
+        assessment=assessment,
+        profile_assessment=profile_assessment,
+        profile_batch_active=batch is not None,
+        profile_recommended_run_id=(
+            batch.recommended_clustering_run_id if batch is not None else None
+        ),
+        active_maintainer_selection=active_selection,
+        profile_label=manifest.label if manifest is not None else None,
+    )
     run_payload = _run_payload(run)
     run_payload["validity"] = asdict(assessment)
     run_payload["presentation"] = asdict(presentation)
+    if batch is not None and profile_assessment is not None and manifest is not None:
+        run_payload["profile_context"] = _profile_context_payload(
+            batch=batch,
+            assessment=profile_assessment,
+            label=manifest.label,
+            description=manifest.description,
+            clustering_run_id=run.clustering_run_id,
+        )
+    if active_selection is not None:
+        run_payload["selection"] = _selection_payload(
+            selection=active_selection,
+            run=run,
+        )
     projection: dict[str, object] = {"run": run_payload}
     if not assessment.technically_valid:
         run_payload["score"] = None
@@ -190,46 +241,66 @@ def derive_presentation_status(
     *,
     run: ClusteringRunRecord,
     assessment: PartitionValidityAssessment,
+    profile_assessment: ProfileAssessmentRecord | None = None,
+    profile_batch_active: bool = False,
+    profile_recommended_run_id: str | None = None,
+    active_maintainer_selection: RunSelectionRecord | None = None,
+    profile_label: str | None = None,
 ) -> RunPresentationStatus:
     banner_kind: Literal[
         "maintainer_selected",
+        "profile_recommended",
         "heuristic_recommended",
+        "valid_but_profile_rejected",
         "candidate_only",
         "technically_invalid",
     ]
     if not assessment.technically_valid:
         banner_kind = "technically_invalid"
-        banner_message = (
-            "Technically invalid clustering run. Failed invariants: "
-            + ", ".join(assessment.failed_invariants)
-        )
-    elif run.selected_by_maintainer:
+    elif (
+        active_maintainer_selection is not None
+        and active_maintainer_selection.selected_run_id == run.clustering_run_id
+    ):
         banner_kind = "maintainer_selected"
-        banner_message = (
-            "Maintainer-selected run. Selection is review evidence, not taxonomy truth."
-        )
+    elif profile_batch_active and profile_recommended_run_id == run.clustering_run_id:
+        banner_kind = "profile_recommended"
+    elif (
+        profile_batch_active
+        and profile_assessment is not None
+        and not profile_assessment.suitable_for_profile
+    ):
+        banner_kind = "valid_but_profile_rejected"
     elif run.recommended_by_heuristic:
         banner_kind = "heuristic_recommended"
-        banner_message = (
-            "Heuristically recommended run. Recommendation is not a semantic verdict."
-        )
     else:
         banner_kind = "candidate_only"
-        banner_message = (
-            "Candidate run \u2014 not heuristically recommended or "
-            "maintainer-selected. "
-            "This partition is a valid clustering output for inspection only. "
-            "Do not treat it as the corpus taxonomy."
-        )
+    banner_message = profile_banner_message(
+        banner_kind,
+        failed_invariants=assessment.failed_invariants,
+        profile_label=profile_label,
+    )
+    selected = (
+        active_maintainer_selection is not None
+        and active_maintainer_selection.selected_run_id == run.clustering_run_id
+    )
     return RunPresentationStatus(
         technically_valid=assessment.technically_valid,
         failed_invariants=assessment.failed_invariants,
         recommended_by_heuristic=run.recommended_by_heuristic,
-        selected_by_maintainer=run.selected_by_maintainer,
+        selected_by_maintainer=selected,
         is_candidate_only=(
             assessment.technically_valid
             and not run.recommended_by_heuristic
-            and not run.selected_by_maintainer
+            and not selected
+            and not (
+                profile_batch_active
+                and profile_recommended_run_id == run.clustering_run_id
+            )
+            and not (
+                profile_batch_active
+                and profile_assessment is not None
+                and not profile_assessment.suitable_for_profile
+            )
         ),
         projection_mode=(
             "full_interpretation"
@@ -241,62 +312,37 @@ def derive_presentation_status(
     )
 
 
-def compute_run_partition_metrics(
-    assignments: Sequence[ClusterAssignmentRecord],
-    summaries: Sequence[ClusterSummaryRecord],
-) -> RunPartitionMetrics:
-    total_items = len(assignments)
-    noise_count = sum(
-        assignment.cluster_label == NOISE_LABEL for assignment in assignments
-    )
-    non_noise_summaries = [
-        summary for summary in summaries if summary.cluster_label != NOISE_LABEL
-    ]
-    ordered = sorted(
-        non_noise_summaries,
-        key=lambda summary: (
-            -summary.size,
-            summary.membership_digest,
-            summary.cluster_label,
-        ),
-    )
-    largest = ordered[0] if ordered else None
-    non_noise_count = total_items - noise_count
-    sizes = tuple(
-        sorted((summary.size for summary in non_noise_summaries), reverse=True)
-    )
-    return RunPartitionMetrics(
-        total_items=total_items,
-        cluster_count=len(non_noise_summaries),
-        noise_count=noise_count,
-        non_noise_count=non_noise_count,
-        noise_ratio=(noise_count / total_items) if total_items else 0.0,
-        dominant_cluster_ratio=(
-            largest.size / total_items if largest is not None and total_items else 0.0
-        ),
-        dominant_assigned_ratio=(
-            largest.size / non_noise_count
-            if largest is not None and non_noise_count
-            else None
-        ),
-        dominant_cluster_label=largest.cluster_label if largest is not None else None,
-        cluster_size_distribution=sizes,
-        cluster_size_histogram=_cluster_size_histogram(sizes),
-    )
-
-
 def build_sweep_comparison_projection(
     *,
     store: CorpusStore,
     snapshot: CorpusSnapshotRecord,
     embedding_generation_id: str,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
 ) -> tuple[list[dict[str, object]], dict[str, object]]:
-    rows: list[tuple[ClusteringRunRecord, dict[str, object], dict[str, object]]] = []
-    for run in store.list_clustering_runs(
-        snapshot_id=snapshot.snapshot_id,
+    batch = _resolve_comparison_batch(
+        store=store,
+        snapshot=snapshot,
         embedding_generation_id=embedding_generation_id,
-    ):
-        projection = enrich_run_for_export(store=store, snapshot=snapshot, run=run)
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
+    rows: list[tuple[ClusteringRunRecord, dict[str, object], dict[str, object]]] = []
+    runs = (
+        store.list_clustering_runs_for_batch(profile_batch_id=batch.profile_batch_id)
+        if batch is not None
+        else store.list_clustering_runs(
+            snapshot_id=snapshot.snapshot_id,
+            embedding_generation_id=embedding_generation_id,
+        )
+    )
+    for run in runs:
+        projection = enrich_run_for_export(
+            store=store,
+            snapshot=snapshot,
+            run=run,
+            profile_batch_id=batch.profile_batch_id if batch is not None else None,
+        )
         run_payload = _mapping(projection["run"])
         validity = _mapping(run_payload["validity"])
         valid = bool(validity.get("technically_valid"))
@@ -305,6 +351,11 @@ def build_sweep_comparison_projection(
             "score": None,
             "rank": None,
             "recommended_by_heuristic": valid and run.recommended_by_heuristic,
+            "is_profile_recommended": (
+                batch is not None
+                and batch.recommended_clustering_run_id == run.clustering_run_id
+            ),
+            "profile_suitable": _profile_suitable(run_payload),
             "dominant_cluster_ratio": metrics.get("dominant_cluster_ratio"),
             "dominant_assigned_ratio": metrics.get("dominant_assigned_ratio"),
             "largest_cluster_size": _largest_cluster_size(metrics),
@@ -330,23 +381,123 @@ def build_sweep_comparison_projection(
         for run, _projection, comparison in rows
         if comparison["recommended_by_heuristic"]
     ]
-    selections = [
-        run.clustering_run_id
-        for run, _projection, _comparison in rows
-        if run.selected_by_maintainer
-    ]
     if len(recommendations) > 1:
         raise AnalyticsWorkflowError("multiple valid heuristic recommendations")
-    if len(selections) > 1:
-        raise AnalyticsWorkflowError("multiple maintainer-selected runs")
+    active_selection = _active_selection(
+        store=store,
+        snapshot_id=snapshot.snapshot_id,
+        embedding_generation_id=embedding_generation_id,
+        profile_batch_id=batch.profile_batch_id if batch is not None else None,
+    )
     summary: dict[str, object] = {
         "candidate_count": len(rows),
         "technically_valid_count": len(ranked),
         "technically_invalid_count": len(rows) - len(ranked),
         "recommended_run_id": recommendations[0] if recommendations else None,
-        "selected_run_id": selections[0] if selections else None,
+        "selected_run_id": (
+            active_selection.selected_run_id if active_selection is not None else None
+        ),
     }
     return [projection for _run, projection, _comparison in rows], summary
+
+
+def build_profile_summary(
+    *,
+    store: CorpusStore,
+    snapshot: CorpusSnapshotRecord,
+    embedding_generation_id: str,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
+) -> dict[str, object] | None:
+    batch = _resolve_comparison_batch(
+        store=store,
+        snapshot=snapshot,
+        embedding_generation_id=embedding_generation_id,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
+    if batch is None:
+        return None
+    manifest = store.get_profile_manifest_snapshot(batch.profile_manifest_digest)
+    if manifest is None:
+        raise AnalyticsWorkflowError(
+            f"profile manifest snapshot missing: {batch.profile_manifest_digest}"
+        )
+    runs = store.list_clustering_runs_for_batch(profile_batch_id=batch.profile_batch_id)
+    assessments = store.list_profile_assessments(
+        profile_batch_id=batch.profile_batch_id
+    )
+    active_selection = _active_selection(
+        store=store,
+        snapshot_id=snapshot.snapshot_id,
+        embedding_generation_id=embedding_generation_id,
+        profile_batch_id=batch.profile_batch_id,
+    )
+    technically_valid_count = sum(
+        assess_partition_validity(
+            store=store,
+            snapshot_id=snapshot.snapshot_id,
+            clustering_run_id=run.clustering_run_id,
+        ).technically_valid
+        for run in runs
+    )
+    heuristic = [run.clustering_run_id for run in runs if run.recommended_by_heuristic]
+    if len(heuristic) > 1:
+        raise AnalyticsWorkflowError("multiple valid heuristic recommendations")
+    summary: dict[str, object] = {
+        "profile_batch_id": batch.profile_batch_id,
+        "profile_id": batch.profile_id,
+        "profile_version": manifest.profile_version,
+        "profile_manifest_digest": batch.profile_manifest_digest,
+        "label": manifest.label,
+        "description": manifest.description,
+        "candidate_count": batch.candidate_count_planned,
+        "candidate_count_failed": batch.candidate_count_failed,
+        "technically_valid_count": technically_valid_count,
+        "profile_suitable_count": sum(
+            assessment.suitable_for_profile for assessment in assessments
+        ),
+        "batch_status": batch.status,
+        "recommended_for_profile_run_id": (batch.recommended_clustering_run_id),
+        "recommended_by_heuristic_run_id": (heuristic[0] if heuristic else None),
+        "active_selected_run_id": (
+            active_selection.selected_run_id if active_selection is not None else None
+        ),
+        "recommendation_rationale": (
+            _json_mapping_or_none(batch.recommendation_rationale_json)
+            if batch.recommendation_rationale_json is not None
+            else None
+        ),
+    }
+    if not summary["profile_suitable_count"]:
+        summary["presentation"] = asdict(
+            derive_sweep_comparison_presentation(profile_summary=summary)
+        )
+    return summary
+
+
+def derive_sweep_comparison_presentation(
+    *,
+    profile_summary: Mapping[str, object],
+) -> RunPresentationStatus:
+    profile_label = (
+        str(profile_summary["label"])
+        if isinstance(profile_summary.get("label"), str)
+        else None
+    )
+    return RunPresentationStatus(
+        technically_valid=bool(profile_summary.get("technically_valid_count")),
+        failed_invariants=(),
+        recommended_by_heuristic=False,
+        selected_by_maintainer=False,
+        is_candidate_only=False,
+        projection_mode="full_interpretation",
+        banner_kind="no_profile_suitable_candidate",
+        banner_message=profile_banner_message(
+            "no_profile_suitable_candidate",
+            profile_label=profile_label,
+        ),
+    )
 
 
 def content_disclosure(payload: Mapping[str, object]) -> dict[str, object]:
@@ -693,6 +844,181 @@ def _run_payload(run: ClusteringRunRecord) -> dict[str, object]:
     }
 
 
+def _resolve_profile_batch(
+    *,
+    store: CorpusStore,
+    snapshot: CorpusSnapshotRecord,
+    run: ClusteringRunRecord,
+    profile_id: str | None,
+    profile_batch_id: str | None,
+) -> ProfileBatchRecord | None:
+    batch = _resolve_comparison_batch(
+        store=store,
+        snapshot=snapshot,
+        embedding_generation_id=run.embedding_generation_id,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
+    if batch is None and profile_id is None and profile_batch_id is None:
+        if not hasattr(store, "list_profile_batch_ids_for_run"):
+            return None
+        candidates = [
+            store.get_profile_batch(batch_id)
+            for batch_id in store.list_profile_batch_ids_for_run(
+                clustering_run_id=run.clustering_run_id
+            )
+        ]
+        matching = [candidate for candidate in candidates if candidate is not None]
+        batch = (
+            max(
+                matching,
+                key=lambda candidate: (
+                    candidate.started_at_utc,
+                    candidate.profile_batch_id,
+                ),
+            )
+            if matching
+            else None
+        )
+    if batch is None:
+        return None
+    return batch if _batch_contains_run(store, batch, run.clustering_run_id) else None
+
+
+def _resolve_comparison_batch(
+    *,
+    store: CorpusStore,
+    snapshot: CorpusSnapshotRecord,
+    embedding_generation_id: str,
+    profile_id: str | None,
+    profile_batch_id: str | None,
+) -> ProfileBatchRecord | None:
+    if profile_batch_id is not None:
+        if not hasattr(store, "get_profile_batch"):
+            return None
+        batch = store.get_profile_batch(profile_batch_id)
+        if batch is None:
+            raise AnalyticsWorkflowError(f"unknown profile batch: {profile_batch_id}")
+    elif profile_id is not None:
+        if not hasattr(store, "get_latest_profile_batch"):
+            return None
+        batch = store.get_latest_profile_batch(
+            snapshot_id=snapshot.snapshot_id,
+            embedding_generation_id=embedding_generation_id,
+            profile_id=profile_id,
+        )
+        if batch is None:
+            return None
+    else:
+        return None
+    if (
+        batch.snapshot_id != snapshot.snapshot_id
+        or batch.embedding_generation_id != embedding_generation_id
+    ):
+        raise AnalyticsWorkflowError(
+            "profile batch does not belong to requested corpus: "
+            f"{batch.profile_batch_id}"
+        )
+    if profile_id is not None and batch.profile_id != profile_id:
+        raise AnalyticsWorkflowError(
+            f"profile batch does not match profile: {profile_id}"
+        )
+    return batch
+
+
+def _batch_contains_run(
+    store: CorpusStore,
+    batch: ProfileBatchRecord,
+    clustering_run_id: str,
+) -> bool:
+    return any(
+        member.clustering_run_id == clustering_run_id
+        for member in store.list_profile_batch_run_records(
+            profile_batch_id=batch.profile_batch_id
+        )
+    )
+
+
+def _active_selection(
+    *,
+    store: CorpusStore,
+    snapshot_id: str,
+    embedding_generation_id: str,
+    profile_batch_id: str | None,
+) -> RunSelectionRecord | None:
+    if not hasattr(store, "get_active_run_selection"):
+        return None
+    result = store.get_active_run_selection(
+        snapshot_id=snapshot_id,
+        embedding_generation_id=embedding_generation_id,
+        profile_batch_id=profile_batch_id,
+    )
+    if result.ambiguous:
+        raise AnalyticsWorkflowError(
+            "selection chain ambiguous: multiple active selections"
+        )
+    return result.record
+
+
+def _profile_context_payload(
+    *,
+    batch: ProfileBatchRecord,
+    assessment: ProfileAssessmentRecord,
+    label: str,
+    description: str,
+    clustering_run_id: str,
+) -> dict[str, object]:
+    return {
+        "profile_id": assessment.profile_id,
+        "profile_version": assessment.profile_version,
+        "profile_manifest_digest": assessment.profile_manifest_digest,
+        "label": label,
+        "description": description,
+        "profile_batch_id": batch.profile_batch_id,
+        "suitability": {
+            "suitable_for_profile": assessment.suitable_for_profile,
+            "rejection_reasons": _json_string_list(assessment.rejection_reasons_json),
+            "observed": (
+                _json_mapping_or_none(assessment.observed_metrics_json)
+                if assessment.observed_metrics_json is not None
+                else None
+            ),
+        },
+        "is_profile_recommended": (
+            batch.recommended_clustering_run_id == clustering_run_id
+        ),
+    }
+
+
+def _selection_payload(
+    *,
+    selection: RunSelectionRecord,
+    run: ClusteringRunRecord,
+) -> dict[str, object]:
+    return {
+        "selection_id": selection.selection_id,
+        "profile_batch_id": selection.profile_batch_id,
+        "profile_id": selection.profile_id,
+        "profile_manifest_digest": selection.profile_manifest_digest,
+        "selected_by": selection.selected_by,
+        "selected_at_utc": selection.selected_at_utc,
+        "rationale": selection.rationale,
+        "is_active": selection.selected_run_id == run.clustering_run_id,
+        "legacy_bool_mirror": run.selected_by_maintainer,
+    }
+
+
+def _profile_suitable(run_payload: Mapping[str, object]) -> bool | None:
+    context = run_payload.get("profile_context")
+    if not isinstance(context, Mapping):
+        return None
+    suitability = context.get("suitability")
+    if not isinstance(suitability, Mapping):
+        return None
+    value = suitability.get("suitable_for_profile")
+    return bool(value) if isinstance(value, bool) else None
+
+
 def _assignment_payload(assignment: ClusterAssignmentRecord) -> dict[str, object]:
     return {
         "snapshot_item_id": assignment.snapshot_item_id,
@@ -700,6 +1026,12 @@ def _assignment_payload(assignment: ClusterAssignmentRecord) -> dict[str, object
         "membership_strength": assignment.membership_strength,
         "membership_digest": assignment.membership_digest,
     }
+
+
+def _cluster_size_histogram(sizes: Sequence[int]) -> dict[str, int]:
+    """Compatibility alias for the neutral partition-metrics helper."""
+
+    return _partition_cluster_size_histogram(sizes)
 
 
 def _preview_payload(preview: ItemPreview) -> dict[str, object]:
@@ -716,24 +1048,6 @@ def _preview_payload(preview: ItemPreview) -> dict[str, object]:
         "scope_check_status": asdict(preview.scope_check_status),
         "verification_status": asdict(preview.verification_status),
     }
-
-
-def _cluster_size_histogram(sizes: Sequence[int]) -> dict[str, int]:
-    result = {"1-3": 0, "4-7": 0, "8-15": 0, "16-31": 0, "32-63": 0, "64+": 0}
-    for size in sizes:
-        if size <= 3:
-            result["1-3"] += 1
-        elif size <= 7:
-            result["4-7"] += 1
-        elif size <= 15:
-            result["8-15"] += 1
-        elif size <= 31:
-            result["16-31"] += 1
-        elif size <= 63:
-            result["32-63"] += 1
-        else:
-            result["64+"] += 1
-    return result
 
 
 def _largest_cluster_size(metrics: Mapping[str, object]) -> int | None:
@@ -787,6 +1101,16 @@ def _json_mapping_or_none(text: str) -> dict[str, object] | None:
     except (json.JSONDecodeError, TypeError):
         return None
     return value if isinstance(value, dict) else None
+
+
+def _json_string_list(text: str) -> list[str]:
+    try:
+        value = json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str)]
 
 
 def _mapping(value: object) -> dict[str, object]:
@@ -874,9 +1198,11 @@ __all__ = [
     "ProvenanceCompletenessSummary",
     "RunPartitionMetrics",
     "RunPresentationStatus",
+    "build_profile_summary",
     "build_sweep_comparison_projection",
     "compute_run_partition_metrics",
     "content_disclosure",
     "derive_presentation_status",
+    "derive_sweep_comparison_presentation",
     "enrich_run_for_export",
 ]

@@ -10,16 +10,18 @@ import sys
 from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
+from typing import Literal
 
 from ...utils.json_io import json_text
 from ..corpus.keys import sha256_hex
+from ..profiles.models import ClusteringProfileManifest, ProfileSearchSpace
 from .models import ClusteringParameters, EffectiveClusteringParameters
 from .pipeline import resolve_effective_parameters
 
 SWEEP_PCA_DIMENSIONS = (32, 64, 128)
 SWEEP_MIN_CLUSTER_SIZES = (5, 8, 12, 15)
 SWEEP_MIN_SAMPLES = (1, 3, 5)
-SWEEP_SELECTION_METHODS = ("eom", "leaf")
+SWEEP_SELECTION_METHODS: tuple[Literal["eom", "leaf"], ...] = ("eom", "leaf")
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,13 +43,33 @@ def iter_sweep_candidates(
     *,
     n_samples: int,
     n_features: int,
+    grid: ProfileSearchSpace | None = None,
+) -> tuple[SweepCandidate, ...]:
+    selected_grid = grid or ProfileSearchSpace(
+        pca_dimensions=SWEEP_PCA_DIMENSIONS,
+        min_cluster_size=SWEEP_MIN_CLUSTER_SIZES,
+        min_samples=SWEEP_MIN_SAMPLES,
+        cluster_selection_method=SWEEP_SELECTION_METHODS,
+    )
+    return iter_grid_candidates(
+        grid=selected_grid,
+        n_samples=n_samples,
+        n_features=n_features,
+    )
+
+
+def iter_grid_candidates(
+    *,
+    grid: ProfileSearchSpace,
+    n_samples: int,
+    n_features: int,
 ) -> tuple[SweepCandidate, ...]:
     seen: set[str] = set()
     candidates: list[SweepCandidate] = []
-    for pca_dimensions in SWEEP_PCA_DIMENSIONS:
-        for min_cluster_size in SWEEP_MIN_CLUSTER_SIZES:
-            for min_samples in SWEEP_MIN_SAMPLES:
-                for method in SWEEP_SELECTION_METHODS:
+    for pca_dimensions in grid.pca_dimensions:
+        for min_cluster_size in grid.min_cluster_size:
+            for min_samples in grid.min_samples:
+                for method in grid.cluster_selection_method:
                     requested = ClusteringParameters(
                         pca_dimensions=pca_dimensions,
                         min_cluster_size=min_cluster_size,
@@ -59,30 +81,70 @@ def iter_sweep_candidates(
                         n_samples=n_samples,
                         n_features=n_features,
                     )
-                    if effective is None:
-                        continue
-                    dedupe_key = json_text(
-                        {
-                            "pca_dimensions": effective.pca_dimensions,
-                            "min_cluster_size": effective.min_cluster_size,
-                            "min_samples": effective.min_samples,
-                            "cluster_selection_method": (
-                                effective.cluster_selection_method
-                            ),
-                        },
-                        sort_keys=True,
-                    )
-                    if dedupe_key in seen:
-                        continue
-                    seen.add(dedupe_key)
-                    candidates.append(
-                        SweepCandidate(
-                            requested=requested,
-                            effective=effective,
-                            dedupe_key=dedupe_key,
-                        )
-                    )
-    return tuple(candidates)
+                    if effective is not None:
+                        dedupe_key = candidate_dedupe_key(effective)
+                        if dedupe_key not in seen:
+                            seen.add(dedupe_key)
+                            candidates.append(
+                                SweepCandidate(
+                                    requested=requested,
+                                    effective=effective,
+                                    dedupe_key=dedupe_key,
+                                )
+                            )
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda item: (
+                item.effective.pca_dimensions,
+                item.effective.min_cluster_size,
+                item.effective.min_samples,
+                item.effective.cluster_selection_method,
+            ),
+        )
+    )
+
+
+def iter_profile_candidates(
+    *,
+    profile: ClusteringProfileManifest,
+    n_samples: int,
+    n_features: int,
+) -> tuple[SweepCandidate, ...]:
+    return iter_grid_candidates(
+        grid=profile.primary_space,
+        n_samples=n_samples,
+        n_features=n_features,
+    )
+
+
+def candidate_dedupe_key(effective: EffectiveClusteringParameters) -> str:
+    return "|".join(
+        (
+            str(effective.pca_dimensions),
+            str(effective.min_cluster_size),
+            str(effective.min_samples),
+            effective.cluster_selection_method,
+        )
+    )
+
+
+def candidate_space_digest(
+    candidates: Sequence[SweepCandidate],
+    *,
+    fixed_parameters: dict[str, object] | None = None,
+) -> str:
+    return sha256_hex(
+        json_text(
+            {
+                "candidate_dedupe_keys": sorted(
+                    candidate.dedupe_key for candidate in candidates
+                ),
+                "fixed_parameters": fixed_parameters or {},
+            },
+            sort_keys=True,
+        )
+    )
 
 
 def rank_sweep_results(
@@ -171,7 +233,11 @@ __all__ = [
     "SWEEP_SELECTION_METHODS",
     "SweepCandidate",
     "SweepCandidateResult",
+    "candidate_dedupe_key",
+    "candidate_space_digest",
     "clustering_algorithm_manifest",
+    "iter_grid_candidates",
+    "iter_profile_candidates",
     "iter_sweep_candidates",
     "rank_sweep_results",
     "run_digest",

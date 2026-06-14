@@ -14,7 +14,12 @@ from ..clustering.models import NOISE_LABEL
 from ..contracts import ClusteringRunRecord, CorpusSnapshotRecord
 from ..exceptions import AnalyticsWorkflowError
 from ..store.sqlite import SqliteCorpusAnalyticsStore
-from .interpret import build_sweep_comparison_projection, enrich_run_for_export
+from .interpret import (
+    build_profile_summary,
+    build_sweep_comparison_projection,
+    enrich_run_for_export,
+)
+from .messages.profiles import profile_rejection_message
 
 
 def render_analytics_html(
@@ -23,6 +28,8 @@ def render_analytics_html(
     snapshot: CorpusSnapshotRecord,
     run: ClusteringRunRecord,
     comparison_only: bool = False,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
 ) -> str:
     if run.snapshot_id != snapshot.snapshot_id:
         raise AnalyticsWorkflowError(
@@ -30,15 +37,27 @@ def render_analytics_html(
         )
     generation = store.get_embedding_generation(run.embedding_generation_id)
     if comparison_only:
-        body = _render_comparison_table(store, snapshot, run)
+        body = _render_comparison_table(
+            store,
+            snapshot,
+            run,
+            profile_id=profile_id,
+            profile_batch_id=profile_batch_id,
+        )
         title = "Corpus Analytics Sweep Comparison"
         run_line = ""
         banner = ""
     else:
-        projection = enrich_run_for_export(store=store, snapshot=snapshot, run=run)
+        projection = enrich_run_for_export(
+            store=store,
+            snapshot=snapshot,
+            run=run,
+            profile_id=profile_id,
+            profile_batch_id=profile_batch_id,
+        )
         run_payload = _mapping(projection["run"])
         presentation = _mapping(run_payload.get("presentation"))
-        body = _render_detail_view(projection)
+        body = _render_profile_context(run_payload) + _render_detail_view(projection)
         title = "Corpus Analytics Cluster Report"
         run_line = f"<p>Run: <code>{html.escape(run.clustering_run_id)}</code></p>"
         banner = _render_run_banner(presentation)
@@ -96,7 +115,10 @@ def _render_run_banner(status: Mapping[str, object]) -> str:
     kind = str(status.get("banner_kind", "technically_invalid"))
     css = {
         "maintainer_selected": "success",
+        "profile_recommended": "success",
         "heuristic_recommended": "success",
+        "valid_but_profile_rejected": "warning",
+        "no_profile_suitable_candidate": "warning",
         "candidate_only": "warning",
         "technically_invalid": "error",
     }.get(kind, "warning")
@@ -112,11 +134,23 @@ def _render_comparison_table(
     store: SqliteCorpusAnalyticsStore,
     snapshot: CorpusSnapshotRecord,
     current_run: ClusteringRunRecord,
+    *,
+    profile_id: str | None = None,
+    profile_batch_id: str | None = None,
 ) -> str:
     candidates, summary = build_sweep_comparison_projection(
         store=store,
         snapshot=snapshot,
         embedding_generation_id=current_run.embedding_generation_id,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
+    )
+    profile_summary = build_profile_summary(
+        store=store,
+        snapshot=snapshot,
+        embedding_generation_id=current_run.embedding_generation_id,
+        profile_id=profile_id,
+        profile_batch_id=profile_batch_id,
     )
     rows: list[str] = []
     for projection in candidates:
@@ -138,10 +172,15 @@ def _render_comparison_table(
             f"<td>{_escaped(presentation.get('banner_kind'))}</td>"
             f"<td>{_escaped(presentation.get('projection_mode'))}</td>"
             f"<td>{_escaped(comparison.get('recommended_by_heuristic'))}</td>"
-            f"<td>{_escaped(run_payload.get('selected_by_maintainer'))}</td>"
+            f"<td>{_available(comparison.get('profile_suitable'))}</td>"
+            f"<td>{_escaped(comparison.get('is_profile_recommended'))}</td>"
+            f"<td>{_escaped(presentation.get('selected_by_maintainer'))}</td>"
             "</tr>"
         )
-    return (
+    profile_header = (
+        _render_profile_summary(profile_summary) if profile_summary is not None else ""
+    )
+    return profile_header + (
         "<h2>Candidate runs</h2>"
         '<p class="muted">Recommendation is heuristic evidence; maintainer '
         "selection remains an explicit separate decision.</p>"
@@ -152,8 +191,51 @@ def _render_comparison_table(
         "<th>Largest cluster</th><th>Dominant / corpus</th>"
         "<th>Dominant / assigned</th><th>Score</th><th>Rank</th>"
         "<th>Technically valid</th><th>Banner</th><th>Projection mode</th>"
-        "<th>Recommended</th><th>Maintainer selected</th>"
+        "<th>Recommended</th><th>Profile suitable</th>"
+        "<th>Profile recommended</th><th>Maintainer selected</th>"
         "</tr></thead><tbody>" + "".join(rows) + "</tbody></table>"
+    )
+
+
+def _render_profile_summary(summary: Mapping[str, object]) -> str:
+    presentation = _mapping(summary.get("presentation"))
+    banner = _render_run_banner(presentation) if presentation else ""
+    return (
+        '<section class="profile-context"><h2>Profile lens</h2>'
+        f"<p><strong>{_escaped(summary.get('label'))}</strong></p>"
+        f"<p>{_escaped(summary.get('description'))}</p>"
+        f"<p>Profile: <code>{_escaped(summary.get('profile_id'))}</code>; "
+        f"batch: <code>{_escaped(summary.get('profile_batch_id'))}</code>; "
+        f"suitable candidates: {_escaped(summary.get('profile_suitable_count'))}."
+        f"</p>{banner}</section>"
+    )
+
+
+def _render_profile_context(run_payload: Mapping[str, object]) -> str:
+    context = _mapping(run_payload.get("profile_context"))
+    if not context:
+        return ""
+    suitability = _mapping(context.get("suitability"))
+    raw_reasons = suitability.get("rejection_reasons")
+    reasons = (
+        [profile_rejection_message(str(code)) for code in raw_reasons]
+        if isinstance(raw_reasons, list)
+        else []
+    )
+    reason_html = (
+        "<ul>"
+        + "".join(f"<li>{html.escape(reason)}</li>" for reason in reasons)
+        + "</ul>"
+        if reasons
+        else "<p>Profile suitability checks passed.</p>"
+    )
+    return (
+        '<section class="profile-context"><h2>Profile lens</h2>'
+        f"<p><strong>{_escaped(context.get('label'))}</strong></p>"
+        f"<p>{_escaped(context.get('description'))}</p>"
+        f"<p>Suitable: {_escaped(suitability.get('suitable_for_profile'))}; "
+        f"profile recommended: {_escaped(context.get('is_profile_recommended'))}."
+        f"</p>{reason_html}</section>"
     )
 
 

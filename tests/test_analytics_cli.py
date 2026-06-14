@@ -28,9 +28,14 @@ from codeclone.analytics.exceptions import (
     AnalyticsCapabilityError,
     AnalyticsWorkflowError,
 )
+from codeclone.analytics.profiles.loader import (
+    canonical_manifest_json,
+    load_bundled_profiles,
+)
 from codeclone.analytics.store.protocols import SnapshotBuildResult
 from codeclone.analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from codeclone.analytics.workflow import BuildResult
+from codeclone.config.analytics import resolve_analytics_config
 from codeclone.contracts import ExitCode
 from codeclone.observability.store.schema import (
     observability_store_path,
@@ -139,8 +144,70 @@ def test_analytics_namespace_is_direct() -> None:
         "clusters",
         "embed",
         "outliers",
+        "profiles",
         "snapshot",
     }
+
+
+def test_clustering_mode_validation_and_grid_parsing() -> None:
+    profile_args = _clustering_args(profile="auto", pca_dimensions=32)
+    with pytest.raises(AnalyticsWorkflowError, match="profile sweep conflicts"):
+        analytics_cli._validate_clustering_mode_args(profile_args)
+
+    sweep_args = _clustering_args(sweep_pca="64,32,64")
+    analytics_cli._validate_clustering_mode_args(sweep_args)
+    assert sweep_args.sweep is True
+    config = resolve_analytics_config(Path.cwd())
+    grid = analytics_cli._sweep_grid_from_args(sweep_args, config=config)
+    assert grid is not None
+    assert grid.pca_dimensions == (32, 64)
+
+    selection_args = _clustering_args(
+        select_run="run",
+        snapshot_id="snapshot",
+    )
+    assert analytics_cli._clustering_execution_args_set(selection_args) is True
+
+
+def test_profiles_cli_list_show_validate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(analytics_cli, "_require_capability", lambda _value: None)
+
+    analytics_cli._run_profiles_command(
+        Namespace(profile_command="list"),
+        tmp_path,
+    )
+    listed = json.loads(capsys.readouterr().out)
+    assert [item["profile_id"] for item in listed["profiles"]] == sorted(
+        item["profile_id"] for item in listed["profiles"]
+    )
+    assert len(listed["profiles"]) == 4
+
+    profile_id = "intent-small-balanced-v1"
+    analytics_cli._run_profiles_command(
+        Namespace(profile_command="show", profile_id=profile_id),
+        tmp_path,
+    )
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["profile_id"] == profile_id
+    assert shown["source"].startswith("bundled:")
+    assert len(shown["manifest_digest"]) == 64
+
+    manifest_path = tmp_path / "profile.json"
+    manifest_path.write_text(
+        canonical_manifest_json(load_bundled_profiles()[profile_id]),
+        encoding="utf-8",
+    )
+    analytics_cli._run_profiles_command(
+        Namespace(profile_command="validate", path=manifest_path),
+        tmp_path,
+    )
+    validated = json.loads(capsys.readouterr().out)
+    assert validated["valid"] is True
+    assert validated["profile_id"] == profile_id
 
 
 def test_representation_and_capability_contracts(
@@ -326,10 +393,15 @@ def test_embed_and_cluster_commands_emit_results(
     }
 
     selected: list[str] = []
+
+    def fake_select(**kwargs: object) -> SimpleNamespace:
+        selected.append(str(kwargs["clustering_run_id"]))
+        return SimpleNamespace(selection_id="selection")
+
     monkeypatch.setattr(
         analytics_cli,
         "select_cluster_run",
-        lambda **kwargs: selected.append(str(kwargs["clustering_run_id"])),
+        fake_select,
     )
     assert (
         analytics_cli._run_cluster_command(
@@ -338,13 +410,17 @@ def test_embed_and_cluster_commands_emit_results(
                 snapshot_id=None,
                 embedding_generation_id=None,
                 sweep=False,
+                selected_by=None,
             ),
             tmp_path,
         )
         == ExitCode.SUCCESS
     )
     assert selected == ["run"]
-    assert json.loads(capsys.readouterr().out) == {"selected_run_id": "run"}
+    assert json.loads(capsys.readouterr().out) == {
+        "selected_run_id": "run",
+        "selection_id": "selection",
+    }
 
     monkeypatch.setattr(
         analytics_cli,
@@ -358,6 +434,7 @@ def test_embed_and_cluster_commands_emit_results(
                 snapshot_id="snapshot",
                 embedding_generation_id="embedding",
                 sweep=True,
+                selected_by=None,
             ),
             tmp_path,
         )
@@ -424,6 +501,7 @@ def test_clusters_command_rejects_unknown_snapshot_and_lists_runs(
             "clustering_run_id": "run",
             "recommended_by_heuristic": True,
             "selected_by_maintainer": False,
+            "profile_batch_ids": [],
             "status": "completed",
         }
     ]
@@ -608,3 +686,23 @@ def test_analytics_main_handles_invalid_root_and_expected_error(
         == ExitCode.CONTRACT_ERROR
     )
     assert "expected failure" in capsys.readouterr().err
+
+
+def _clustering_args(**overrides: object) -> Namespace:
+    values: dict[str, object] = {
+        "select_run": None,
+        "snapshot_id": None,
+        "embedding_generation_id": None,
+        "sweep": False,
+        "profile": None,
+        "pca_dimensions": None,
+        "min_cluster_size": None,
+        "min_samples": None,
+        "cluster_selection_method": None,
+        "sweep_pca": None,
+        "sweep_min_cluster_size": None,
+        "sweep_min_samples": None,
+        "sweep_selection_method": None,
+    }
+    values.update(overrides)
+    return Namespace(**values)

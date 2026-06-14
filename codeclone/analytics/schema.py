@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import sqlite3
 from pathlib import Path
 
@@ -18,6 +20,102 @@ from ..utils.sqlite_store import (
 from .exceptions import AnalyticsStoreError
 
 _ANALYTICS_META_TABLE = "analytics_meta"
+
+_CONTROL_PLANE_DDL = (
+    """
+    CREATE TABLE IF NOT EXISTS profile_manifest_snapshots (
+        profile_manifest_digest TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        profile_version TEXT NOT NULL,
+        manifest_schema_version TEXT NOT NULL,
+        canonical_manifest_json TEXT NOT NULL,
+        label TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at_utc TEXT NOT NULL
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS profile_batches (
+        profile_batch_id TEXT PRIMARY KEY,
+        snapshot_id TEXT NOT NULL,
+        embedding_generation_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        profile_manifest_digest TEXT NOT NULL,
+        candidate_space_digest TEXT NOT NULL,
+        started_at_utc TEXT NOT NULL,
+        finished_at_utc TEXT,
+        status TEXT NOT NULL,
+        candidate_count_planned INTEGER NOT NULL,
+        candidate_count_succeeded INTEGER NOT NULL DEFAULT 0,
+        candidate_count_failed INTEGER NOT NULL DEFAULT 0,
+        recommended_clustering_run_id TEXT,
+        recommendation_rationale_json TEXT,
+        batch_max_cluster_count INTEGER,
+        created_at_utc TEXT NOT NULL,
+        FOREIGN KEY (snapshot_id)
+            REFERENCES corpus_snapshots(snapshot_id),
+        FOREIGN KEY (embedding_generation_id)
+            REFERENCES embedding_generations(embedding_generation_id),
+        FOREIGN KEY (profile_manifest_digest)
+            REFERENCES profile_manifest_snapshots(profile_manifest_digest),
+        FOREIGN KEY (recommended_clustering_run_id)
+            REFERENCES clustering_runs(clustering_run_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS profile_batch_runs (
+        profile_batch_id TEXT NOT NULL,
+        clustering_run_id TEXT NOT NULL,
+        candidate_ordinal INTEGER NOT NULL,
+        candidate_dedupe_key TEXT NOT NULL,
+        PRIMARY KEY (profile_batch_id, clustering_run_id),
+        UNIQUE (profile_batch_id, candidate_dedupe_key),
+        FOREIGN KEY (profile_batch_id)
+            REFERENCES profile_batches(profile_batch_id),
+        FOREIGN KEY (clustering_run_id)
+            REFERENCES clustering_runs(clustering_run_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS profile_assessments (
+        profile_batch_id TEXT NOT NULL,
+        clustering_run_id TEXT NOT NULL,
+        profile_id TEXT NOT NULL,
+        profile_version TEXT NOT NULL,
+        profile_manifest_digest TEXT NOT NULL,
+        suitable_for_profile INTEGER NOT NULL,
+        rejection_reasons_json TEXT NOT NULL,
+        observed_metrics_json TEXT,
+        assessed_digest TEXT NOT NULL,
+        PRIMARY KEY (profile_batch_id, clustering_run_id),
+        FOREIGN KEY (profile_batch_id)
+            REFERENCES profile_batches(profile_batch_id),
+        FOREIGN KEY (clustering_run_id)
+            REFERENCES clustering_runs(clustering_run_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS run_selections (
+        selection_id TEXT PRIMARY KEY,
+        snapshot_id TEXT NOT NULL,
+        embedding_generation_id TEXT NOT NULL,
+        profile_batch_id TEXT,
+        profile_id TEXT,
+        profile_manifest_digest TEXT,
+        selected_run_id TEXT NOT NULL,
+        selected_at_utc TEXT NOT NULL,
+        selected_by TEXT NOT NULL,
+        rationale TEXT,
+        supersedes_selection_id TEXT,
+        FOREIGN KEY (selected_run_id)
+            REFERENCES clustering_runs(clustering_run_id),
+        FOREIGN KEY (supersedes_selection_id)
+            REFERENCES run_selections(selection_id),
+        FOREIGN KEY (profile_batch_id)
+            REFERENCES profile_batches(profile_batch_id)
+    )
+    """,
+)
 
 _DDL = (
     """
@@ -114,6 +212,7 @@ _DDL = (
         PRIMARY KEY (clustering_run_id, cluster_label)
     )
     """,
+    *_CONTROL_PLANE_DDL,
     f"""
     CREATE TABLE IF NOT EXISTS {_ANALYTICS_META_TABLE} (
         key TEXT PRIMARY KEY,
@@ -136,6 +235,19 @@ _INDEXES = (
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_cluster_summaries_display "
     "ON cluster_summaries(clustering_run_id, display_cluster_id) "
     "WHERE display_cluster_id IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS idx_profile_batches_lens "
+    "ON profile_batches("
+    "snapshot_id, embedding_generation_id, profile_id, started_at_utc"
+    ")",
+    "CREATE INDEX IF NOT EXISTS idx_run_selections_scope "
+    "ON run_selections("
+    "snapshot_id, embedding_generation_id, profile_batch_id, selected_at_utc"
+    ")",
+)
+
+_CONTROL_PLANE_INDEX_MARKERS = (
+    "idx_profile_batches_lens",
+    "idx_run_selections_scope",
 )
 
 _INTEGRITY_TRIGGERS = (
@@ -166,6 +278,10 @@ _INTEGRITY_TRIGGERS = (
         SELECT 1 FROM corpus_items WHERE snapshot_id=OLD.snapshot_id
     ) OR EXISTS (
         SELECT 1 FROM clustering_runs WHERE snapshot_id=OLD.snapshot_id
+    ) OR EXISTS (
+        SELECT 1 FROM profile_batches WHERE snapshot_id=OLD.snapshot_id
+    ) OR EXISTS (
+        SELECT 1 FROM run_selections WHERE snapshot_id=OLD.snapshot_id
     )
     BEGIN
         SELECT RAISE(ABORT, 'corpus snapshot is still referenced');
@@ -220,6 +336,12 @@ _INTEGRITY_TRIGGERS = (
     ) OR EXISTS (
         SELECT 1 FROM clustering_runs
         WHERE embedding_generation_id=OLD.embedding_generation_id
+    ) OR EXISTS (
+        SELECT 1 FROM profile_batches
+        WHERE embedding_generation_id=OLD.embedding_generation_id
+    ) OR EXISTS (
+        SELECT 1 FROM run_selections
+        WHERE embedding_generation_id=OLD.embedding_generation_id
     )
     BEGIN
         SELECT RAISE(ABORT, 'embedding generation is still referenced');
@@ -272,6 +394,18 @@ _INTEGRITY_TRIGGERS = (
     ) OR EXISTS (
         SELECT 1 FROM cluster_summaries
         WHERE clustering_run_id=OLD.clustering_run_id
+    ) OR EXISTS (
+        SELECT 1 FROM profile_batch_runs
+        WHERE clustering_run_id=OLD.clustering_run_id
+    ) OR EXISTS (
+        SELECT 1 FROM profile_assessments
+        WHERE clustering_run_id=OLD.clustering_run_id
+    ) OR EXISTS (
+        SELECT 1 FROM run_selections
+        WHERE selected_run_id=OLD.clustering_run_id
+    ) OR EXISTS (
+        SELECT 1 FROM profile_batches
+        WHERE recommended_clustering_run_id=OLD.clustering_run_id
     )
     BEGIN
         SELECT RAISE(ABORT, 'clustering run is still referenced');
@@ -337,11 +471,256 @@ _INTEGRITY_TRIGGERS = (
         SELECT RAISE(ABORT, 'summary has no matching run assignments');
     END
     """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_batch_guard
+    BEFORE INSERT ON profile_batches
+    WHEN NOT EXISTS (
+        SELECT 1 FROM corpus_snapshots WHERE snapshot_id=NEW.snapshot_id
+    ) OR NOT EXISTS (
+        SELECT 1 FROM embedding_generations
+        WHERE embedding_generation_id=NEW.embedding_generation_id
+    ) OR NEW.status != 'running'
+      OR NEW.candidate_count_planned <= 0
+      OR NEW.candidate_count_succeeded != 0
+      OR NEW.candidate_count_failed != 0
+      OR NEW.finished_at_utc IS NOT NULL
+      OR NEW.recommended_clustering_run_id IS NOT NULL
+      OR NEW.recommendation_rationale_json IS NOT NULL
+      OR NEW.batch_max_cluster_count IS NOT NULL
+    BEGIN
+        SELECT RAISE(ABORT, 'invalid profile batch');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_batch_update_guard
+    BEFORE UPDATE ON profile_batches
+    WHEN NEW.profile_batch_id != OLD.profile_batch_id
+      OR NEW.snapshot_id != OLD.snapshot_id
+      OR NEW.embedding_generation_id != OLD.embedding_generation_id
+      OR NEW.profile_id != OLD.profile_id
+      OR NEW.profile_manifest_digest != OLD.profile_manifest_digest
+      OR NEW.candidate_space_digest != OLD.candidate_space_digest
+      OR NEW.started_at_utc != OLD.started_at_utc
+      OR NEW.created_at_utc != OLD.created_at_utc
+      OR OLD.status != 'running'
+      OR NEW.status NOT IN ('completed', 'completed_partial', 'failed')
+      OR NEW.candidate_count_planned <= 0
+      OR NEW.candidate_count_succeeded < 0
+      OR NEW.candidate_count_failed < 0
+      OR NEW.finished_at_utc IS NULL
+      OR NEW.candidate_count_succeeded + NEW.candidate_count_failed
+         != NEW.candidate_count_planned
+      OR (
+          NEW.status = 'completed'
+          AND NEW.candidate_count_failed != 0
+      )
+      OR (
+          NEW.status = 'completed_partial'
+          AND (
+              NEW.candidate_count_succeeded = 0
+              OR NEW.candidate_count_failed = 0
+          )
+      )
+      OR (
+          NEW.status = 'failed'
+          AND NEW.candidate_count_succeeded != 0
+      )
+      OR (
+          (NEW.recommended_clustering_run_id IS NULL)
+          != (NEW.recommendation_rationale_json IS NULL)
+      )
+      OR (
+          NEW.recommended_clustering_run_id IS NOT NULL
+          AND NOT EXISTS (
+              SELECT 1 FROM profile_batch_runs
+              WHERE profile_batch_id=NEW.profile_batch_id
+                AND clustering_run_id=NEW.recommended_clustering_run_id
+          )
+      )
+    BEGIN
+        SELECT RAISE(ABORT, 'immutable profile batch identity changed');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_batch_run_guard
+    BEFORE INSERT ON profile_batch_runs
+    WHEN NEW.candidate_ordinal < 0
+      OR NOT EXISTS (
+        SELECT 1
+        FROM profile_batches AS batch
+        JOIN clustering_runs AS run
+          ON run.snapshot_id=batch.snapshot_id
+         AND run.embedding_generation_id=batch.embedding_generation_id
+        WHERE batch.profile_batch_id=NEW.profile_batch_id
+          AND run.clustering_run_id=NEW.clustering_run_id
+          AND batch.status='running'
+          AND run.status='completed'
+      )
+    BEGIN
+        SELECT RAISE(ABORT, 'profile batch run scope mismatch');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_assessment_guard
+    BEFORE INSERT ON profile_assessments
+    WHEN NEW.suitable_for_profile NOT IN (0, 1)
+      OR NOT EXISTS (
+        SELECT 1
+        FROM profile_batch_runs AS member
+        JOIN profile_batches AS batch
+          ON batch.profile_batch_id=member.profile_batch_id
+        JOIN profile_manifest_snapshots AS manifest
+          ON manifest.profile_manifest_digest=batch.profile_manifest_digest
+        WHERE member.profile_batch_id=NEW.profile_batch_id
+          AND member.clustering_run_id=NEW.clustering_run_id
+          AND batch.profile_id=NEW.profile_id
+          AND batch.profile_manifest_digest=NEW.profile_manifest_digest
+          AND batch.status='running'
+          AND manifest.profile_version=NEW.profile_version
+      )
+    BEGIN
+        SELECT RAISE(ABORT, 'profile assessment scope mismatch');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_run_selection_guard
+    BEFORE INSERT ON run_selections
+    WHEN NOT EXISTS (
+        SELECT 1 FROM clustering_runs AS run
+        WHERE run.clustering_run_id=NEW.selected_run_id
+          AND run.snapshot_id=NEW.snapshot_id
+          AND run.embedding_generation_id=NEW.embedding_generation_id
+    ) OR (
+        NEW.profile_batch_id IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1
+            FROM profile_batch_runs AS member
+            JOIN profile_batches AS batch
+              ON batch.profile_batch_id=member.profile_batch_id
+            WHERE member.profile_batch_id=NEW.profile_batch_id
+              AND member.clustering_run_id=NEW.selected_run_id
+              AND batch.profile_id=NEW.profile_id
+              AND batch.profile_manifest_digest=NEW.profile_manifest_digest
+        )
+    ) OR (
+        NEW.profile_batch_id IS NULL
+        AND (
+            NEW.profile_id IS NOT NULL
+            OR NEW.profile_manifest_digest IS NOT NULL
+        )
+    )
+    BEGIN
+        SELECT RAISE(ABORT, 'selection scope mismatch');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_manifest_update_guard
+    BEFORE UPDATE ON profile_manifest_snapshots
+    BEGIN
+        SELECT RAISE(ABORT, 'profile manifest snapshot is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_manifest_delete_guard
+    BEFORE DELETE ON profile_manifest_snapshots
+    BEGIN
+        SELECT RAISE(ABORT, 'profile manifest snapshot is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_batch_delete_guard
+    BEFORE DELETE ON profile_batches
+    BEGIN
+        SELECT RAISE(ABORT, 'profile batch is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_batch_run_update_guard
+    BEFORE UPDATE ON profile_batch_runs
+    BEGIN
+        SELECT RAISE(ABORT, 'profile batch membership is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_batch_run_delete_guard
+    BEFORE DELETE ON profile_batch_runs
+    BEGIN
+        SELECT RAISE(ABORT, 'profile batch membership is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_assessment_update_guard
+    BEFORE UPDATE ON profile_assessments
+    BEGIN
+        SELECT RAISE(ABORT, 'profile assessment is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_profile_assessment_delete_guard
+    BEFORE DELETE ON profile_assessments
+    BEGIN
+        SELECT RAISE(ABORT, 'profile assessment is immutable');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_run_selection_update_guard
+    BEFORE UPDATE ON run_selections
+    BEGIN
+        SELECT RAISE(ABORT, 'run selection is append-only');
+    END
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS analytics_run_selection_delete_guard
+    BEFORE DELETE ON run_selections
+    BEGIN
+        SELECT RAISE(ABORT, 'run selection is append-only');
+    END
+    """,
+)
+
+_CONTROL_PLANE_TRIGGER_MARKERS = (
+    "analytics_profile_batch_guard",
+    "analytics_profile_batch_update_guard",
+    "analytics_profile_batch_run_guard",
+    "analytics_profile_assessment_guard",
+    "analytics_run_selection_guard",
+    "analytics_profile_manifest_update_guard",
+    "analytics_profile_manifest_delete_guard",
+    "analytics_profile_batch_delete_guard",
+    "analytics_profile_batch_run_update_guard",
+    "analytics_profile_batch_run_delete_guard",
+    "analytics_profile_assessment_update_guard",
+    "analytics_profile_assessment_delete_guard",
+    "analytics_run_selection_update_guard",
+    "analytics_run_selection_delete_guard",
 )
 
 
-def _install_integrity_triggers(conn: sqlite3.Connection) -> None:
+def _install_indexes(
+    conn: sqlite3.Connection,
+    *,
+    include_control_plane: bool,
+) -> None:
+    for statement in _INDEXES:
+        if not include_control_plane and any(
+            marker in statement for marker in _CONTROL_PLANE_INDEX_MARKERS
+        ):
+            continue
+        conn.execute(statement)
+
+
+def _install_integrity_triggers(
+    conn: sqlite3.Connection,
+    *,
+    include_control_plane: bool = True,
+) -> None:
     for statement in _INTEGRITY_TRIGGERS:
+        if not include_control_plane and (
+            any(marker in statement for marker in _CONTROL_PLANE_TRIGGER_MARKERS)
+            or "profile_" in statement
+            or "run_selections" in statement
+        ):
+            continue
         conn.execute(statement)
 
 
@@ -422,14 +801,111 @@ def _migrate_1_0_to_1_1(conn: sqlite3.Connection) -> None:
                 f"cannot migrate analytics schema: {table} has {count} "
                 "invalid reference(s)"
             )
-    for statement in _INDEXES:
-        conn.execute(statement)
-    _install_integrity_triggers(conn)
+    _install_indexes(conn, include_control_plane=False)
+    _install_integrity_triggers(conn, include_control_plane=False)
     conn.execute(
         f"UPDATE {_ANALYTICS_META_TABLE} SET value=? WHERE key='schema_version'",
-        (CORPUS_ANALYTICS_STORE_SCHEMA_VERSION,),
+        ("1.1",),
     )
     conn.commit()
+
+
+def _migrate_1_1_to_1_2(conn: sqlite3.Connection) -> None:
+    for statement in _CONTROL_PLANE_DDL:
+        conn.execute(statement)
+    for trigger in (
+        "analytics_snapshot_delete_guard",
+        "analytics_generation_delete_guard",
+        "analytics_clustering_run_delete_guard",
+    ):
+        conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+    _install_indexes(conn, include_control_plane=True)
+    _install_integrity_triggers(conn)
+    _backfill_legacy_selections(conn)
+    conn.execute(
+        f"UPDATE {_ANALYTICS_META_TABLE} SET value=? WHERE key='schema_version'",
+        ("1.2",),
+    )
+    conn.commit()
+
+
+def _backfill_legacy_selections(conn: sqlite3.Connection) -> None:
+    scopes = conn.execute(
+        """
+        SELECT snapshot_id, embedding_generation_id, COUNT(*) AS selected_count
+        FROM clustering_runs
+        WHERE selected_by_maintainer=1
+        GROUP BY snapshot_id, embedding_generation_id
+        ORDER BY snapshot_id, embedding_generation_id
+        """
+    ).fetchall()
+    for snapshot_id, embedding_generation_id, selected_count in scopes:
+        existing = conn.execute(
+            """
+            SELECT 1 FROM run_selections
+            WHERE snapshot_id=? AND embedding_generation_id=?
+              AND profile_batch_id IS NULL
+            LIMIT 1
+            """,
+            (snapshot_id, embedding_generation_id),
+        ).fetchone()
+        if existing is not None:
+            continue
+        if int(selected_count) > 1:
+            scope = f"{snapshot_id}|{embedding_generation_id}"
+            suffix = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:16]
+            conn.execute(
+                f"INSERT OR REPLACE INTO {_ANALYTICS_META_TABLE}(key, value) "
+                "VALUES (?, ?)",
+                (
+                    f"diagnostic.LEGACY_SELECTION_AMBIGUOUS.{suffix}",
+                    json.dumps(
+                        {
+                            "code": "LEGACY_SELECTION_AMBIGUOUS",
+                            "snapshot_id": str(snapshot_id),
+                            "embedding_generation_id": str(embedding_generation_id),
+                            "selected_count": int(selected_count),
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ),
+            )
+            continue
+        run = conn.execute(
+            """
+            SELECT clustering_run_id, finished_at_utc, created_at_utc
+            FROM clustering_runs
+            WHERE snapshot_id=? AND embedding_generation_id=?
+              AND selected_by_maintainer=1
+            """,
+            (snapshot_id, embedding_generation_id),
+        ).fetchone()
+        if run is None:
+            continue
+        run_id = str(run[0])
+        identity = f"{snapshot_id}|{embedding_generation_id}|{run_id}"
+        selection_id = (
+            "sel-legacy-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+        )
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO run_selections (
+                selection_id, snapshot_id, embedding_generation_id,
+                profile_batch_id, profile_id, profile_manifest_digest,
+                selected_run_id, selected_at_utc, selected_by, rationale,
+                supersedes_selection_id
+            ) VALUES (?, ?, ?, NULL, NULL, NULL, ?, ?, ?, NULL, NULL)
+            """,
+            (
+                selection_id,
+                snapshot_id,
+                embedding_generation_id,
+                run_id,
+                str(run[1] or run[2]),
+                "legacy-migration",
+            ),
+        )
 
 
 def ensure_analytics_schema(conn: sqlite3.Connection) -> None:
@@ -438,6 +914,9 @@ def ensure_analytics_schema(conn: sqlite3.Connection) -> None:
     )
     if current == "1.0":
         _migrate_1_0_to_1_1(conn)
+        current = "1.1"
+    if current == "1.1":
+        _migrate_1_1_to_1_2(conn)
         return
     if current is not None and current != CORPUS_ANALYTICS_STORE_SCHEMA_VERSION:
         raise AnalyticsStoreError(f"unsupported analytics schema version: {current}")

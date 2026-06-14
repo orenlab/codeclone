@@ -119,7 +119,10 @@ packages = [
     "codeclone.analytics.corpus.representations",
     "codeclone.analytics.embedding",
     "codeclone.analytics.export",
+    "codeclone.analytics.metrics",
+    "codeclone.analytics.profiles",
     "codeclone.analytics.report",
+    "codeclone.analytics.report.messages",
     "codeclone.analytics.store",
     "codeclone.audit",
     "codeclone.baseline",
@@ -172,6 +175,7 @@ packages = [
 
 [tool.setuptools.package-data]
 codeclone = ["py.typed"]
+"codeclone.analytics.profiles" = ["manifests/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

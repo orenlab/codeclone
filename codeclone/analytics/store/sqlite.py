@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from ..contracts import (
+    ActiveSelectionResult,
     ClusterAssignmentRecord,
     ClusteringRunRecord,
     ClusterSummaryRecord,
@@ -20,6 +21,11 @@ from ..contracts import (
     CorpusSnapshotRecord,
     EmbeddingGenerationRecord,
     EmbeddingItemRecord,
+    ProfileAssessmentRecord,
+    ProfileBatchRecord,
+    ProfileBatchRunRecord,
+    ProfileManifestSnapshotRecord,
+    RunSelectionRecord,
 )
 from ..exceptions import AnalyticsStoreError
 from ..schema import open_analytics_db, open_analytics_db_readonly
@@ -298,23 +304,395 @@ class SqliteCorpusAnalyticsStore:
                 )
             )
 
-    def set_selected_run(
+    def insert_profile_manifest_snapshot(
+        self,
+        record: ProfileManifestSnapshotRecord,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT OR IGNORE INTO profile_manifest_snapshots (
+                profile_manifest_digest, profile_id, profile_version,
+                manifest_schema_version, canonical_manifest_json,
+                label, description, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.profile_manifest_digest,
+                record.profile_id,
+                record.profile_version,
+                record.manifest_schema_version,
+                record.canonical_manifest_json,
+                record.label,
+                record.description,
+                record.created_at_utc,
+            ),
+        )
+        existing = self.get_profile_manifest_snapshot(record.profile_manifest_digest)
+        normalized_existing = (
+            replace(existing, created_at_utc=record.created_at_utc)
+            if existing is not None
+            else None
+        )
+        if normalized_existing != record:
+            raise AnalyticsStoreError(
+                "profile manifest digest collision or snapshot mismatch"
+            )
+
+    def get_profile_manifest_snapshot(
+        self,
+        profile_manifest_digest: str,
+    ) -> ProfileManifestSnapshotRecord | None:
+        row = self._conn.execute(
+            """
+            SELECT * FROM profile_manifest_snapshots
+            WHERE profile_manifest_digest=?
+            """,
+            (profile_manifest_digest,),
+        ).fetchone()
+        return _profile_manifest_snapshot_from_row(row) if row is not None else None
+
+    def insert_profile_batch(self, record: ProfileBatchRecord) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO profile_batches (
+                profile_batch_id, snapshot_id, embedding_generation_id,
+                profile_id, profile_manifest_digest, candidate_space_digest,
+                started_at_utc, finished_at_utc, status,
+                candidate_count_planned, candidate_count_succeeded,
+                candidate_count_failed, recommended_clustering_run_id,
+                recommendation_rationale_json, batch_max_cluster_count,
+                created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            _profile_batch_values(record),
+        )
+
+    def finalize_profile_batch(self, record: ProfileBatchRecord) -> None:
+        cursor = self._conn.execute(
+            """
+            UPDATE profile_batches SET
+                finished_at_utc=?,
+                status=?,
+                candidate_count_succeeded=?,
+                candidate_count_failed=?,
+                recommended_clustering_run_id=?,
+                recommendation_rationale_json=?,
+                batch_max_cluster_count=?
+            WHERE profile_batch_id=?
+            """,
+            (
+                record.finished_at_utc,
+                record.status,
+                record.candidate_count_succeeded,
+                record.candidate_count_failed,
+                record.recommended_clustering_run_id,
+                record.recommendation_rationale_json,
+                record.batch_max_cluster_count,
+                record.profile_batch_id,
+            ),
+        )
+        if cursor.rowcount != 1:
+            raise AnalyticsStoreError(
+                f"unknown profile batch: {record.profile_batch_id}"
+            )
+
+    def get_profile_batch(
+        self,
+        profile_batch_id: str,
+    ) -> ProfileBatchRecord | None:
+        row = self._conn.execute(
+            "SELECT * FROM profile_batches WHERE profile_batch_id=?",
+            (profile_batch_id,),
+        ).fetchone()
+        return _profile_batch_from_row(row) if row is not None else None
+
+    def get_latest_profile_batch(
         self,
         *,
         snapshot_id: str,
         embedding_generation_id: str,
+        profile_id: str,
+    ) -> ProfileBatchRecord | None:
+        row = self._conn.execute(
+            """
+            SELECT * FROM profile_batches
+            WHERE snapshot_id=? AND embedding_generation_id=? AND profile_id=?
+            ORDER BY started_at_utc DESC, profile_batch_id ASC
+            LIMIT 1
+            """,
+            (snapshot_id, embedding_generation_id, profile_id),
+        ).fetchone()
+        return _profile_batch_from_row(row) if row is not None else None
+
+    def insert_profile_batch_run(self, record: ProfileBatchRunRecord) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO profile_batch_runs (
+                profile_batch_id, clustering_run_id,
+                candidate_ordinal, candidate_dedupe_key
+            ) VALUES (?, ?, ?, ?)
+            """,
+            (
+                record.profile_batch_id,
+                record.clustering_run_id,
+                record.candidate_ordinal,
+                record.candidate_dedupe_key,
+            ),
+        )
+
+    def list_profile_batch_run_records(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ProfileBatchRunRecord, ...]:
+        rows = self._conn.execute(
+            """
+            SELECT * FROM profile_batch_runs
+            WHERE profile_batch_id=?
+            ORDER BY candidate_ordinal ASC, candidate_dedupe_key ASC
+            """,
+            (profile_batch_id,),
+        ).fetchall()
+        return tuple(_profile_batch_run_from_row(row) for row in rows)
+
+    def list_clustering_runs_for_batch(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ClusteringRunRecord, ...]:
+        rows = self._conn.execute(
+            """
+            SELECT run.*
+            FROM profile_batch_runs AS member
+            JOIN clustering_runs AS run
+              ON run.clustering_run_id=member.clustering_run_id
+            WHERE member.profile_batch_id=?
+            ORDER BY member.candidate_ordinal ASC, member.candidate_dedupe_key ASC
+            """,
+            (profile_batch_id,),
+        ).fetchall()
+        return tuple(_run_from_row(row) for row in rows)
+
+    def list_profile_batch_ids_for_run(
+        self,
+        *,
         clustering_run_id: str,
+    ) -> tuple[str, ...]:
+        rows = self._conn.execute(
+            """
+            SELECT profile_batch_id FROM profile_batch_runs
+            WHERE clustering_run_id=?
+            ORDER BY profile_batch_id ASC
+            """,
+            (clustering_run_id,),
+        ).fetchall()
+        return tuple(str(row[0]) for row in rows)
+
+    def insert_profile_assessment(
+        self,
+        record: ProfileAssessmentRecord,
     ) -> None:
-        for run in self.list_clustering_runs(
+        self._conn.execute(
+            """
+            INSERT INTO profile_assessments (
+                profile_batch_id, clustering_run_id, profile_id,
+                profile_version, profile_manifest_digest,
+                suitable_for_profile, rejection_reasons_json,
+                observed_metrics_json, assessed_digest
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.profile_batch_id,
+                record.clustering_run_id,
+                record.profile_id,
+                record.profile_version,
+                record.profile_manifest_digest,
+                int(record.suitable_for_profile),
+                record.rejection_reasons_json,
+                record.observed_metrics_json,
+                record.assessed_digest,
+            ),
+        )
+
+    def get_profile_assessment(
+        self,
+        *,
+        profile_batch_id: str,
+        clustering_run_id: str,
+    ) -> ProfileAssessmentRecord | None:
+        row = self._conn.execute(
+            """
+            SELECT * FROM profile_assessments
+            WHERE profile_batch_id=? AND clustering_run_id=?
+            """,
+            (profile_batch_id, clustering_run_id),
+        ).fetchone()
+        return _profile_assessment_from_row(row) if row is not None else None
+
+    def list_profile_assessments(
+        self,
+        *,
+        profile_batch_id: str,
+    ) -> tuple[ProfileAssessmentRecord, ...]:
+        rows = self._conn.execute(
+            """
+            SELECT assessment.*
+            FROM profile_assessments AS assessment
+            JOIN profile_batch_runs AS member
+              ON member.profile_batch_id=assessment.profile_batch_id
+             AND member.clustering_run_id=assessment.clustering_run_id
+            WHERE assessment.profile_batch_id=?
+            ORDER BY member.candidate_ordinal ASC
+            """,
+            (profile_batch_id,),
+        ).fetchall()
+        return tuple(_profile_assessment_from_row(row) for row in rows)
+
+    def get_active_run_selection(
+        self,
+        *,
+        snapshot_id: str,
+        embedding_generation_id: str,
+        profile_batch_id: str | None,
+    ) -> ActiveSelectionResult:
+        rows = self._active_selection_rows(
             snapshot_id=snapshot_id,
             embedding_generation_id=embedding_generation_id,
-        ):
-            self.update_clustering_run(
-                replace(
-                    run,
-                    selected_by_maintainer=(run.clustering_run_id == clustering_run_id),
+            profile_batch_id=profile_batch_id,
+        )
+        return ActiveSelectionResult(
+            _run_selection_from_row(rows[0]) if rows else None,
+            len(rows) > 1,
+        )
+
+    def record_run_selection_atomic(
+        self,
+        record: RunSelectionRecord,
+    ) -> RunSelectionRecord:
+        if self._conn.in_transaction:
+            raise AnalyticsStoreError(
+                "atomic selection recording requires a clean transaction"
+            )
+        try:
+            self._conn.execute("BEGIN IMMEDIATE")
+            rows = self._active_selection_rows(
+                snapshot_id=record.snapshot_id,
+                embedding_generation_id=record.embedding_generation_id,
+                profile_batch_id=record.profile_batch_id,
+            )
+            if len(rows) > 1:
+                raise AnalyticsStoreError(
+                    "selection chain ambiguous: multiple active selections"
+                )
+            previous = _run_selection_from_row(rows[0]) if rows else None
+            persisted = replace(
+                record,
+                supersedes_selection_id=(
+                    previous.selection_id if previous is not None else None
+                ),
+            )
+            batch_mismatch = (
+                persisted.profile_batch_id is not None
+                and not self._run_in_profile_batch(
+                    profile_batch_id=persisted.profile_batch_id,
+                    clustering_run_id=persisted.selected_run_id,
                 )
             )
+            if batch_mismatch:
+                raise AnalyticsStoreError(
+                    "selected run is not a member of profile batch: "
+                    f"{persisted.profile_batch_id}"
+                )
+            self._insert_run_selection(persisted)
+            if persisted.profile_batch_id is None:
+                self._conn.execute(
+                    """
+                    UPDATE clustering_runs
+                    SET selected_by_maintainer=(
+                        clustering_run_id=?
+                    )
+                    WHERE snapshot_id=? AND embedding_generation_id=?
+                    """,
+                    (
+                        persisted.selected_run_id,
+                        persisted.snapshot_id,
+                        persisted.embedding_generation_id,
+                    ),
+                )
+            self._conn.commit()
+            return persisted
+        except BaseException:
+            self._conn.rollback()
+            raise
+
+    def _active_selection_rows(
+        self,
+        *,
+        snapshot_id: str,
+        embedding_generation_id: str,
+        profile_batch_id: str | None,
+    ) -> list[sqlite3.Row]:
+        return list(
+            self._conn.execute(
+                """
+                SELECT selection.*
+                FROM run_selections AS selection
+                WHERE selection.snapshot_id=?
+                  AND selection.embedding_generation_id=?
+                  AND selection.profile_batch_id IS ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM run_selections AS successor
+                      WHERE successor.supersedes_selection_id=
+                            selection.selection_id
+                  )
+                ORDER BY selection.selected_at_utc DESC,
+                         selection.selection_id ASC
+                """,
+                (snapshot_id, embedding_generation_id, profile_batch_id),
+            ).fetchall()
+        )
+
+    def _run_in_profile_batch(
+        self,
+        *,
+        profile_batch_id: str,
+        clustering_run_id: str,
+    ) -> bool:
+        return (
+            self._conn.execute(
+                """
+                SELECT 1 FROM profile_batch_runs
+                WHERE profile_batch_id=? AND clustering_run_id=?
+                """,
+                (profile_batch_id, clustering_run_id),
+            ).fetchone()
+            is not None
+        )
+
+    def _insert_run_selection(self, record: RunSelectionRecord) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO run_selections (
+                selection_id, snapshot_id, embedding_generation_id,
+                profile_batch_id, profile_id, profile_manifest_digest,
+                selected_run_id, selected_at_utc, selected_by, rationale,
+                supersedes_selection_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                record.selection_id,
+                record.snapshot_id,
+                record.embedding_generation_id,
+                record.profile_batch_id,
+                record.profile_id,
+                record.profile_manifest_digest,
+                record.selected_run_id,
+                record.selected_at_utc,
+                record.selected_by,
+                record.rationale,
+                record.supersedes_selection_id,
+            ),
+        )
 
     def insert_cluster_assignments(
         self,
@@ -494,6 +872,110 @@ def _summary_from_row(row: sqlite3.Row) -> ClusterSummaryRecord:
         membership_digest=str(row["membership_digest"]),
         size=int(row["size"]),
         diagnostics_json=str(row["diagnostics_json"]),
+    )
+
+
+def _profile_manifest_snapshot_from_row(
+    row: sqlite3.Row,
+) -> ProfileManifestSnapshotRecord:
+    return ProfileManifestSnapshotRecord(
+        profile_manifest_digest=str(row["profile_manifest_digest"]),
+        profile_id=str(row["profile_id"]),
+        profile_version=str(row["profile_version"]),
+        manifest_schema_version=str(row["manifest_schema_version"]),
+        canonical_manifest_json=str(row["canonical_manifest_json"]),
+        label=str(row["label"]),
+        description=str(row["description"]),
+        created_at_utc=str(row["created_at_utc"]),
+    )
+
+
+def _profile_batch_values(record: ProfileBatchRecord) -> tuple[object, ...]:
+    return (
+        record.profile_batch_id,
+        record.snapshot_id,
+        record.embedding_generation_id,
+        record.profile_id,
+        record.profile_manifest_digest,
+        record.candidate_space_digest,
+        record.started_at_utc,
+        record.finished_at_utc,
+        record.status,
+        record.candidate_count_planned,
+        record.candidate_count_succeeded,
+        record.candidate_count_failed,
+        record.recommended_clustering_run_id,
+        record.recommendation_rationale_json,
+        record.batch_max_cluster_count,
+        record.created_at_utc,
+    )
+
+
+def _profile_batch_from_row(row: sqlite3.Row) -> ProfileBatchRecord:
+    return ProfileBatchRecord(
+        profile_batch_id=str(row["profile_batch_id"]),
+        snapshot_id=str(row["snapshot_id"]),
+        embedding_generation_id=str(row["embedding_generation_id"]),
+        profile_id=str(row["profile_id"]),
+        profile_manifest_digest=str(row["profile_manifest_digest"]),
+        candidate_space_digest=str(row["candidate_space_digest"]),
+        started_at_utc=str(row["started_at_utc"]),
+        finished_at_utc=_optional_str(row["finished_at_utc"]),
+        status=str(row["status"]),  # type: ignore[arg-type]
+        candidate_count_planned=int(row["candidate_count_planned"]),
+        candidate_count_succeeded=int(row["candidate_count_succeeded"]),
+        candidate_count_failed=int(row["candidate_count_failed"]),
+        recommended_clustering_run_id=_optional_str(
+            row["recommended_clustering_run_id"]
+        ),
+        recommendation_rationale_json=_optional_str(
+            row["recommendation_rationale_json"]
+        ),
+        batch_max_cluster_count=(
+            int(row["batch_max_cluster_count"])
+            if row["batch_max_cluster_count"] is not None
+            else None
+        ),
+        created_at_utc=str(row["created_at_utc"]),
+    )
+
+
+def _profile_batch_run_from_row(row: sqlite3.Row) -> ProfileBatchRunRecord:
+    return ProfileBatchRunRecord(
+        profile_batch_id=str(row["profile_batch_id"]),
+        clustering_run_id=str(row["clustering_run_id"]),
+        candidate_ordinal=int(row["candidate_ordinal"]),
+        candidate_dedupe_key=str(row["candidate_dedupe_key"]),
+    )
+
+
+def _profile_assessment_from_row(row: sqlite3.Row) -> ProfileAssessmentRecord:
+    return ProfileAssessmentRecord(
+        profile_batch_id=str(row["profile_batch_id"]),
+        clustering_run_id=str(row["clustering_run_id"]),
+        profile_id=str(row["profile_id"]),
+        profile_version=str(row["profile_version"]),
+        profile_manifest_digest=str(row["profile_manifest_digest"]),
+        suitable_for_profile=bool(int(row["suitable_for_profile"])),
+        rejection_reasons_json=str(row["rejection_reasons_json"]),
+        observed_metrics_json=_optional_str(row["observed_metrics_json"]),
+        assessed_digest=str(row["assessed_digest"]),
+    )
+
+
+def _run_selection_from_row(row: sqlite3.Row) -> RunSelectionRecord:
+    return RunSelectionRecord(
+        selection_id=str(row["selection_id"]),
+        snapshot_id=str(row["snapshot_id"]),
+        embedding_generation_id=str(row["embedding_generation_id"]),
+        profile_batch_id=_optional_str(row["profile_batch_id"]),
+        profile_id=_optional_str(row["profile_id"]),
+        profile_manifest_digest=_optional_str(row["profile_manifest_digest"]),
+        selected_run_id=str(row["selected_run_id"]),
+        selected_at_utc=str(row["selected_at_utc"]),
+        selected_by=str(row["selected_by"]),
+        rationale=_optional_str(row["rationale"]),
+        supersedes_selection_id=_optional_str(row["supersedes_selection_id"]),
     )
 
 

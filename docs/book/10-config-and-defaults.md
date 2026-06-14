@@ -355,6 +355,13 @@ table. `embedding_provider` currently accepts only `fastembed`, and
 `default_cluster_selection_method` accepts `eom` or `leaf`. Full key list:
 [Corpus Analytics](27-corpus-analytics.md#configuration).
 
+Profile control-plane keys (`default_profile_id`, `profile_paths`, and the
+non-profile `sweep_*` axes) live in the same nested table and are documented in
+[Corpus Analytics — Configuration](27-corpus-analytics.md#configuration). Profile
+manifests are validated with the same schema as bundled profiles. Configured
+paths must resolve to readable files inside the repository. Profile sweeps use
+the manifest grid; the sweep keys configure only non-profile sweeps.
+
 Refs:
 
 - `codeclone/config/analytics.py:resolve_analytics_config`

@@ -90,6 +90,14 @@ Added
   `3` materializes explicit trajectory, Patch Trail, and registry-overlay
   presence facts for new snapshots without adding live registry state to source
   identity.
+* **Corpus Analytics profiles and selection control (Slice 1.2).** Added
+  versioned bundled and repository-local profile manifests, finite
+  profile-scoped sweeps, separate suitability and profile-aware ranking,
+  immutable profile batch receipts, configurable ordinary sweep grids, manual
+  clustering parameters, and append-only maintainer selection events. Store
+  schema is now `1.2`; JSON export schema `1.3` adds control-plane contract
+  `1.0`, profile context/summary, and active selection without changing
+  technical-validity semantics.
 
 Changed
 
