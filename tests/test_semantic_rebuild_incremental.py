@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
 
+from codeclone.memory.embedding.batching import EmbedBatchLimits
 from codeclone.memory.semantic.models import (
     SemanticHit,
     SemanticIndexStatus,
@@ -72,8 +73,19 @@ class _CountingProvider:
         self.embedded_texts += len(batch)
         return [[float(len(text)), 0.0, 0.0] for text in batch]
 
-    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+        *,
+        infer_counters: object | None = None,
+    ) -> list[list[float]]:
         return self.embed(texts)
+
+    def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
+        return tuple(max(1, len(text) // 4) for text in texts)
+
+    def max_sequence_tokens(self) -> int | None:
+        return None
 
 
 class _FakeSource:
@@ -188,7 +200,7 @@ def test_changed_rows_embedded_in_bounded_batches() -> None:
         writer=writer,
         provider=provider,
         sources=[_FakeSource(_corpus(10))],
-        embed_batch_size=3,
+        embed_batch_limits=EmbedBatchLimits(max_documents=3, max_padded_tokens=100_000),
     )
     # 10 new rows, batch size 3 -> 4 embed calls (3+3+3+1); peak RAM bounded.
     assert provider.embed_calls == 4

@@ -14,11 +14,13 @@ from ...config.memory import MemoryConfig
 from ...observability import SpanHandle, is_observability_enabled, span
 from ...observability.reason_kind import ReasonKind
 from ..embedding import resolve_embedding_provider
+from ..embedding.batching import EmbedBatchLimits
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..models import MemoryProject
 from ..project import resolve_memory_db_path, resolve_project_identity
 from ..sqlite_store import SqliteEngineeringMemoryStore
-from .rebuild import DEFAULT_EMBED_BATCH_SIZE, RebuildReport, rebuild_semantic_index
+from .projection_probe import SemanticProjectionProbePayload, probe_semantic_projections
+from .rebuild import RebuildReport, rebuild_semantic_index
 from .sources import (
     AuditIndexSource,
     IndexSource,
@@ -128,6 +130,7 @@ def _apply_rebuild_counters(
     *,
     dimensions: int,
     batch_size: int,
+    max_padded_tokens: int,
 ) -> None:
     if not is_observability_enabled():
         return
@@ -137,6 +140,7 @@ def _apply_rebuild_counters(
     rebuild_span.set_counter("deleted", report.deleted)
     rebuild_span.set_counter("embedding_dimensions", dimensions)
     rebuild_span.set_counter("embedding_batch_size", batch_size)
+    rebuild_span.set_counter("embedding_max_padded_tokens", max_padded_tokens)
     for lane, count in sorted(report.by_source.items()):
         rebuild_span.set_counter(f"lane_{lane}", count)
 
@@ -209,6 +213,10 @@ def execute_semantic_index_rebuild(
                     store=active_store,
                     project=resolved_project,
                 ),
+                embed_batch_limits=EmbedBatchLimits(
+                    max_documents=config.semantic.embed_max_documents_per_batch,
+                    max_padded_tokens=config.semantic.embed_max_padded_tokens_per_batch,
+                ),
             )
         except MemorySemanticUnavailableError as exc:
             # The embedding model loads lazily, so an unavailable model surfaces at
@@ -231,7 +239,8 @@ def execute_semantic_index_rebuild(
             rebuild_span,
             report,
             dimensions=config.semantic.dimension,
-            batch_size=DEFAULT_EMBED_BATCH_SIZE,
+            batch_size=config.semantic.embed_max_documents_per_batch,
+            max_padded_tokens=config.semantic.embed_max_padded_tokens_per_batch,
         )
         return {
             **base,
@@ -245,6 +254,55 @@ def execute_semantic_index_rebuild(
         }
 
 
+def execute_semantic_projection_probe(
+    *,
+    root_path: Path,
+    config: MemoryConfig,
+    store: SqliteEngineeringMemoryStore | None = None,
+    project: MemoryProject | None = None,
+) -> SemanticProjectionProbePayload | dict[str, object]:
+    """Measure semantic projection length distribution per lane without embedding."""
+    if not config.semantic.enabled:
+        return {
+            "action": "probe_semantic_projections",
+            "status": "skipped",
+            "reason": "disabled",
+        }
+    try:
+        provider = resolve_embedding_provider(config.semantic)
+    except MemorySemanticUnavailableError as exc:
+        return {
+            "action": "probe_semantic_projections",
+            "status": "unavailable",
+            "reason": str(exc),
+        }
+    owns_store = store is None
+    active_store = store
+    try:
+        resolved_project = project or resolve_project_identity(root_path)
+        if active_store is None:
+            db_path = resolve_memory_db_path(root_path, config)
+            if not db_path.exists():
+                raise MemoryContractError(
+                    f"Engineering memory database not found: {db_path}. "
+                    "Run memory init or "
+                    "manage_engineering_memory(action='refresh_from_run')."
+                )
+            active_store = SqliteEngineeringMemoryStore(db_path)
+        return probe_semantic_projections(
+            sources=build_semantic_index_sources(
+                root_path=root_path,
+                config=config,
+                store=active_store,
+                project=resolved_project,
+            ),
+            provider=provider,
+        )
+    finally:
+        if owns_store and active_store is not None:
+            active_store.close()
+
+
 __all__ = [
     "RebuildSemanticIndexOkPayload",
     "RebuildSemanticIndexPayload",
@@ -252,4 +310,5 @@ __all__ = [
     "RebuildSemanticIndexUnavailablePayload",
     "build_semantic_index_sources",
     "execute_semantic_index_rebuild",
+    "execute_semantic_projection_probe",
 ]

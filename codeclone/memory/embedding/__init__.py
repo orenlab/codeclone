@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ...observability import is_observability_enabled, span
 from ..exceptions import MemorySemanticUnavailableError
+from .length import estimate_token_counts_from_chars
 
 if TYPE_CHECKING:
     from ...config.memory import SemanticConfig
@@ -39,7 +40,12 @@ class _QueryEmbeddingProvider(Protocol):
 
 @runtime_checkable
 class _DocumentEmbeddingProvider(Protocol):
-    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]: ...
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+        *,
+        infer_counters: Mapping[str, int] | None = None,
+    ) -> list[list[float]]: ...
 
 
 class DeterministicHashEmbeddingProvider:
@@ -64,8 +70,19 @@ class DeterministicHashEmbeddingProvider:
     def embed_query(self, text: str) -> list[float]:
         return self._embed_one(text)
 
-    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+        *,
+        infer_counters: Mapping[str, int] | None = None,
+    ) -> list[list[float]]:
         return self.embed(texts)
+
+    def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
+        return estimate_token_counts_from_chars(texts)
+
+    def max_sequence_tokens(self) -> int | None:
+        return None
 
     def _embed_one(self, text: str) -> list[float]:
         values: list[float] = []
@@ -95,12 +112,14 @@ def embed_query(provider: EmbeddingProvider, text: str) -> list[float]:
 def embed_documents(
     provider: EmbeddingProvider,
     texts: Sequence[str],
+    *,
+    infer_counters: Mapping[str, int] | None = None,
 ) -> list[list[float]]:
     with span(name="memory.embedding.documents") as embed_span:
         if is_observability_enabled():
             embed_span.set_counter("count", len(texts))
         if isinstance(provider, _DocumentEmbeddingProvider):
-            return provider.embed_documents(texts)
+            return provider.embed_documents(texts, infer_counters=infer_counters)
         return provider.embed(texts)
 
 

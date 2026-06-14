@@ -26,6 +26,8 @@ from .memory_defaults import (
     DEFAULT_SEMANTIC_ALLOW_MODEL_DOWNLOAD,
     DEFAULT_SEMANTIC_BACKEND,
     DEFAULT_SEMANTIC_DIMENSION,
+    DEFAULT_SEMANTIC_EMBED_MAX_DOCUMENTS_PER_BATCH,
+    DEFAULT_SEMANTIC_EMBED_MAX_PADDED_TOKENS_PER_BATCH,
     DEFAULT_SEMANTIC_EMBEDDING_CACHE_DIR,
     DEFAULT_SEMANTIC_EMBEDDING_PROVIDER,
     DEFAULT_SEMANTIC_ENABLED,
@@ -96,6 +98,14 @@ class SemanticConfig(BaseModel):
     dimension: int = Field(default=DEFAULT_SEMANTIC_DIMENSION, gt=0)
     max_results: int = Field(default=DEFAULT_SEMANTIC_MAX_RESULTS, gt=0)
     index_audit: bool = DEFAULT_SEMANTIC_INDEX_AUDIT
+    embed_max_documents_per_batch: int = Field(
+        default=DEFAULT_SEMANTIC_EMBED_MAX_DOCUMENTS_PER_BATCH,
+        gt=0,
+    )
+    embed_max_padded_tokens_per_batch: int = Field(
+        default=DEFAULT_SEMANTIC_EMBED_MAX_PADDED_TOKENS_PER_BATCH,
+        gt=0,
+    )
 
     @model_validator(mode="before")
     @classmethod

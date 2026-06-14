@@ -7,16 +7,33 @@
 from __future__ import annotations
 
 import importlib
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, cast
 
 from ...observability import is_observability_enabled, span
 from ..exceptions import MemorySemanticUnavailableError
+from .length import estimate_token_counts_from_chars
+
+_KNOWN_MODEL_MAX_TOKENS: dict[str, int] = {
+    "baai/bge-small-en-v1.5": 512,
+    "baai/bge-small-en": 512,
+    "baai/bge-base-en-v1.5": 512,
+    "baai/bge-base-en": 512,
+    "baai/bge-large-en-v1.5": 512,
+}
 
 
 class _TextEmbeddingModel(Protocol):
+    model: object
+
     def embed(self, texts: list[str]) -> Iterable[object]: ...
+
+
+class _TokenizingTextModel(Protocol):
+    tokenizer: object | None
+
+    def tokenize(self, documents: list[str]) -> list[object]: ...
 
 
 class FastEmbedEmbeddingProvider:
@@ -88,6 +105,29 @@ class FastEmbedEmbeddingProvider:
             self._model = cast(_TextEmbeddingModel, model)
         return self._model
 
+    def _inner_text_model(self) -> _TokenizingTextModel:
+        return cast(_TokenizingTextModel, self._get_model().model)
+
+    def max_sequence_tokens(self) -> int | None:
+        inner = self._inner_text_model()
+        tokenizer = inner.tokenizer
+        if tokenizer is not None:
+            truncation = getattr(tokenizer, "truncation", None)
+            if truncation is not None:
+                max_length = getattr(truncation, "max_length", None)
+                if isinstance(max_length, int) and max_length > 0:
+                    return max_length
+        return _KNOWN_MODEL_MAX_TOKENS.get(self.model_name.lower(), 512)
+
+    def estimate_token_counts(self, texts: Sequence[str]) -> tuple[int, ...]:
+        prefixed = [f"passage: {text}" for text in texts]
+        inner = self._inner_text_model()
+        tokenize = getattr(inner, "tokenize", None)
+        if tokenize is None:
+            return estimate_token_counts_from_chars(prefixed)
+        encodings = tokenize(prefixed)
+        return tuple(len(getattr(encoding, "ids", ())) for encoding in encodings)
+
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         return self.embed_documents(texts)
 
@@ -95,13 +135,29 @@ class FastEmbedEmbeddingProvider:
         (vector,) = self._embed_prefixed([f"query: {text}"])
         return vector
 
-    def embed_documents(self, texts: Sequence[str]) -> list[list[float]]:
-        return self._embed_prefixed([f"passage: {text}" for text in texts])
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+        *,
+        infer_counters: Mapping[str, int] | None = None,
+    ) -> list[list[float]]:
+        return self._embed_prefixed(
+            [f"passage: {text}" for text in texts],
+            infer_counters=infer_counters,
+        )
 
-    def _embed_prefixed(self, texts: Sequence[str]) -> list[list[float]]:
+    def _embed_prefixed(
+        self,
+        texts: Sequence[str],
+        *,
+        infer_counters: Mapping[str, int] | None = None,
+    ) -> list[list[float]]:
         with span(name="memory.embedding.infer") as infer_span:
             if is_observability_enabled():
                 infer_span.set_counter("batch", len(texts))
+                if infer_counters is not None:
+                    for key, value in sorted(infer_counters.items()):
+                        infer_span.set_counter(key, value)
             try:
                 raw_vectors = list(self._get_model().embed(list(texts)))
             except Exception as exc:

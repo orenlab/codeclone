@@ -40,6 +40,7 @@ from ...memory.semantic.rebuild_workflow import (
     RebuildSemanticIndexOkPayload,
     RebuildSemanticIndexSkippedPayload,
     RebuildSemanticIndexUnavailablePayload,
+    execute_semantic_projection_probe,
 )
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ...memory.status_report import build_memory_status_report
@@ -312,6 +313,14 @@ def _build_parser() -> argparse.ArgumentParser:
     sem_search.add_argument("query", help="Free-text query.")
     sem_search.add_argument("--limit", type=int, default=10)
     sem_search.add_argument("--json", action="store_true", help="Emit results as JSON.")
+    sem_probe = semantic_sub.add_parser(
+        "probe",
+        help="Measure semantic projection length distribution per lane.",
+    )
+    _add_root(sem_probe)
+    sem_probe.add_argument(
+        "--json", action="store_true", help="Emit probe payload as JSON."
+    )
 
     trajectory_parser = subparsers.add_parser(
         "trajectory",
@@ -1249,6 +1258,8 @@ def _run_semantic(
         return _run_semantic_status(console=console, root_path=root_path)
     if action == "rebuild":
         return _run_semantic_rebuild(console=console, root_path=root_path)
+    if action == "probe":
+        return _run_semantic_probe(console=console, root_path=root_path, args=args)
     return _run_semantic_search(console=console, root_path=root_path, args=args)
 
 
@@ -1312,6 +1323,58 @@ def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
     return _semantic_unavailable(
         console, f"Semantic index rebuild unavailable: {unavailable['reason']}."
     )
+
+
+def _run_semantic_probe(
+    *, console: PrinterLike, root_path: Path, args: argparse.Namespace
+) -> int:
+    config = resolve_memory_config(root_path)
+    try:
+        payload = execute_semantic_projection_probe(root_path=root_path, config=config)
+    except MemoryContractError as exc:
+        console.print(str(exc))
+        console.print("Run: codeclone memory init")
+        return int(ExitCode.CONTRACT_ERROR)
+    if args.json:
+        console.print(json.dumps(payload, indent=2, sort_keys=True))
+        return int(ExitCode.SUCCESS)
+    if payload.get("status") in {"skipped", "unavailable"}:
+        reason = str(payload.get("reason", "unknown"))
+        return _semantic_unavailable(
+            console,
+            f"Semantic projection probe unavailable: {reason}.",
+        )
+    lanes_obj = payload.get("lanes")
+    if not isinstance(lanes_obj, dict):
+        return _semantic_unavailable(
+            console, "Semantic projection probe returned invalid payload."
+        )
+    lanes = lanes_obj
+    console.print("Semantic projection probe:")
+    console.print(f"  estimator: {payload.get('estimator')}")
+    console.print(f"  model_max_tokens: {payload.get('model_max_tokens')}")
+    for lane in ("memory", "audit", "trajectory"):
+        stats = lanes.get(lane, {})
+        if not stats:
+            continue
+        chars = stats.get("chars", {})
+        tokens = stats.get("tokens", {})
+        overflow = stats.get("token_overflow", {})
+        console.print(f"  {lane}: {stats.get('documents', 0)} documents")
+        console.print(
+            "    chars p50/p95/max: "
+            f"{chars.get('p50')}/{chars.get('p95')}/{chars.get('max')}"
+        )
+        console.print(
+            "    tokens p50/p95/max: "
+            f"{tokens.get('p50')}/{tokens.get('p95')}/{tokens.get('max')}"
+        )
+        console.print(
+            "    over_model_limit: "
+            f"{overflow.get('over_model_limit')} "
+            f"(max_overflow={overflow.get('max_overflow_tokens')})"
+        )
+    return int(ExitCode.SUCCESS)
 
 
 def _run_semantic_search(

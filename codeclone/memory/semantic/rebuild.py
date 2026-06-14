@@ -13,6 +13,14 @@ from typing import TYPE_CHECKING
 from ...observability import is_observability_enabled, span
 from ...utils.iterutils import chunked
 from ..embedding import embed_documents
+from ..embedding.batching import (
+    EmbedBatchLimits,
+    EmbedBatchPlan,
+    LengthScoredItem,
+    pack_adaptive_batches,
+    score_lengths,
+)
+from ..embedding.length import estimate_char_counts, estimate_document_tokens
 from .models import SemanticProjection, SemanticRow, SemanticRowFingerprint
 
 if TYPE_CHECKING:
@@ -50,7 +58,7 @@ def rebuild_semantic_index(
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
     sources: Sequence[IndexSource],
-    embed_batch_size: int = DEFAULT_EMBED_BATCH_SIZE,
+    embed_batch_limits: EmbedBatchLimits | None = None,
 ) -> RebuildReport:
     """Reconcile the semantic index against its sources by content hash.
 
@@ -60,6 +68,7 @@ def rebuild_semantic_index(
     the embedding model. The index is a derived, rebuildable sidecar, never
     updated on the write hot path.
     """
+    limits = embed_batch_limits or EmbedBatchLimits()
     by_source: dict[str, int] = {}
     seen_ids: set[str] = set()
     embedded = 0
@@ -72,7 +81,7 @@ def rebuild_semantic_index(
                 source,
                 writer=writer,
                 provider=provider,
-                embed_batch_size=embed_batch_size,
+                embed_batch_limits=limits,
             )
         if stats.seen_ids:
             by_source[source.name()] = len(stats.seen_ids)
@@ -104,7 +113,7 @@ def _index_source(
     *,
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
-    embed_batch_size: int,
+    embed_batch_limits: EmbedBatchLimits,
 ) -> _SourceIndexStats:
     seen: set[str] = set()
     embedded = 0
@@ -127,7 +136,7 @@ def _index_source(
             changed,
             writer=writer,
             provider=provider,
-            batch_size=embed_batch_size,
+            embed_batch_limits=embed_batch_limits,
         )
     return _SourceIndexStats(
         seen_ids=seen,
@@ -141,26 +150,57 @@ def _embed_and_upsert(
     *,
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
-    batch_size: int,
+    embed_batch_limits: EmbedBatchLimits,
 ) -> int:
     if not projections:
         return 0
+    texts = [projection.text for projection in projections]
+    char_counts = estimate_char_counts(texts)
+    token_counts = estimate_document_tokens(provider, texts)
+    scored: tuple[LengthScoredItem[SemanticProjection], ...] = score_lengths(
+        list(projections),
+        char_counts=char_counts,
+        token_counts=token_counts,
+        source_kinds=[projection.source for projection in projections],
+        source_ids=[projection.source_id for projection in projections],
+    )
+    batches: list[EmbedBatchPlan[SemanticProjection]] = pack_adaptive_batches(
+        scored, limits=embed_batch_limits
+    )
     embedded = 0
     with span(name="memory.semantic.embed") as embed_span:
         if is_observability_enabled():
-            embed_span.set_counter("batch_size", batch_size)
+            embed_span.set_counter("max_documents", embed_batch_limits.max_documents)
+            embed_span.set_counter(
+                "max_padded_tokens", embed_batch_limits.max_padded_tokens
+            )
             embed_span.set_counter("pending", len(projections))
-        for batch in chunked(projections, batch_size):
+            embed_span.set_counter("batches", len(batches))
+        for batch in batches:
+            batch_projections = [item.item for item in batch.items]
+            infer_counters = {
+                "documents": len(batch.items),
+                "total_chars": batch.total_chars,
+                "max_chars": batch.max_chars,
+                "total_tokens": batch.total_tokens,
+                "max_tokens": batch.max_tokens,
+                "padded_tokens": batch.padded_tokens,
+                "padding_amplification_permille": batch.padding_amplification_permille,
+            }
             vectors = embed_documents(
-                provider, [projection.text for projection in batch]
+                provider,
+                [projection.text for projection in batch_projections],
+                infer_counters=infer_counters,
             )
             writer.upsert(
                 [
                     _row(projection, vector, provider.model_id)
-                    for projection, vector in zip(batch, vectors, strict=True)
+                    for projection, vector in zip(
+                        batch_projections, vectors, strict=True
+                    )
                 ]
             )
-            embedded += len(batch)
+            embedded += len(batch_projections)
         if is_observability_enabled():
             embed_span.set_counter("embedded", embedded)
     return embedded
