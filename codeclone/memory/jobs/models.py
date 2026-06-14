@@ -35,6 +35,10 @@ class ProjectionJobRecord:
     stimulus_json: str
     result_json: str | None
     error_message: str | None
+    # PID@host of the single scheduled delayed-flush worker holding the coalesce
+    # slot for this pending job (None when no flush is scheduled). See
+    # try_claim_flush_slot in store.py.
+    flush_claimed_by: str | None = None
 
 
 __all__ = [

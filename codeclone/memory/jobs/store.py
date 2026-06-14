@@ -63,6 +63,7 @@ def _row_to_record(row: sqlite3.Row) -> ProjectionJobRecord:
         stimulus_json=str(row["stimulus_json"]),
         result_json=row["result_json"],
         error_message=row["error_message"],
+        flush_claimed_by=row["flush_claimed_by"],
     )
 
 
@@ -202,6 +203,54 @@ def has_live_running_job(
         (project_id,),
     ).fetchone()
     return row is not None
+
+
+def try_claim_flush_slot(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    claimant: str,
+    job_kind: ProjectionJobKind = PROJECTION_BUNDLE_KIND,
+) -> str | None:
+    """Atomically reserve the single delayed-flush worker slot on the pending
+    job. Returns the pending job id when THIS caller reserved it (the slot was
+    free or held by a dead worker); None when a live flush worker is already
+    scheduled or there is no pending job. The BEGIN IMMEDIATE guards against two
+    concurrent enqueues each spawning a sleeper for the same job.
+    """
+    _use_row_factory(conn)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute(
+            "SELECT id, flush_claimed_by FROM memory_projection_jobs "
+            "WHERE project_id=? AND job_kind=? AND status='pending'",
+            (project_id, job_kind),
+        ).fetchone()
+        if row is None or _pid_alive(row["flush_claimed_by"]):
+            conn.execute("COMMIT")
+            return None
+        job_id = str(row["id"])
+        conn.execute(
+            "UPDATE memory_projection_jobs SET flush_claimed_by=? WHERE id=?",
+            (claimant, job_id),
+        )
+        conn.execute("COMMIT")
+        return job_id
+    except sqlite3.Error:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def set_flush_claimed_by(
+    conn: sqlite3.Connection, *, job_id: str, claimant: str | None
+) -> None:
+    """Overwrite the flush-slot holder for a job (the spawned worker's PID@host
+    after a successful spawn, or None to release the slot on spawn failure)."""
+    conn.execute(
+        "UPDATE memory_projection_jobs SET flush_claimed_by=? WHERE id=?",
+        (claimant, job_id),
+    )
+    conn.commit()
 
 
 def claim_next_projection_job(
@@ -349,5 +398,7 @@ __all__ = [
     "list_projection_jobs",
     "new_projection_job_id",
     "pending_projection_job",
+    "set_flush_claimed_by",
+    "try_claim_flush_slot",
     "worker_claim_token",
 ]

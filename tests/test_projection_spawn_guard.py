@@ -171,7 +171,9 @@ def test_enqueue_records_spawn_op_b_under_finish(
     monkeypatch.setattr(jobs_workflow, "is_ci_environment", lambda: False)
     captured: dict[str, tuple[str, str] | None] = {}
 
-    def _fake_spawn(*, root_path: Path) -> SpawnWorkerResult:
+    def _fake_spawn(
+        *, root_path: Path, not_before_utc: str | None = None
+    ) -> SpawnWorkerResult:
         # The spawn handoff reads the active operation here; under op B it must
         # see B (not the finish op A), so the worker links parent=B.
         captured["ctx"] = current_operation_context()

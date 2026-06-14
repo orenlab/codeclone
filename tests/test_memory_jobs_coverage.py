@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import subprocess
 from dataclasses import replace
@@ -23,6 +24,7 @@ from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.jobs.models import ProjectionJobRecord
 from codeclone.memory.jobs.spawn import (
+    SpawnWorkerResult,
     _run_once_argv,
     run_projection_jobs_worker_sync,
     spawn_projection_jobs_worker,
@@ -41,10 +43,16 @@ from codeclone.memory.jobs.store import (
     latest_done_projection_job,
     list_projection_jobs,
     new_projection_job_id,
+    pending_projection_job,
+    set_flush_claimed_by,
+    try_claim_flush_slot,
     worker_claim_token,
 )
 from codeclone.memory.jobs.worker import run_projection_job, run_projection_jobs_once
 from codeclone.memory.jobs.workflow import (
+    _active_record_delta,
+    _add_seconds_utc,
+    _decide_flush,
     _flush_sleep_seconds,
     execute_enqueue_projection_rebuild,
     execute_projection_rebuild_status,
@@ -827,3 +835,251 @@ def test_execute_run_projection_jobs_once_sleeps_until_deadline(
         )
     assert sleeps == [12.5]
     assert payload["action"] == "run_projection_jobs_once"
+
+
+def test_active_record_delta_counts_record_change_only() -> None:
+    assert _active_record_delta({"active_record_count": 10}, None) == 0
+    assert _active_record_delta({"active_record_count": 10}, {}) == 0
+    assert (
+        _active_record_delta({"active_record_count": 10}, {"active_record_count": 4})
+        == 6
+    )
+    # Non-int / missing counts (e.g. audit-only stimulus) contribute nothing.
+    assert _active_record_delta({"event_core_count": 9}, {"event_core_count": 1}) == 0
+
+
+def test_add_seconds_utc_advances_and_tolerates_garbage() -> None:
+    assert _add_seconds_utc("2026-06-14T00:00:00Z", 60).startswith(
+        "2026-06-14T00:01:00"
+    )
+    # Malformed base falls back to now(); result is a parseable ISO string.
+    assert isinstance(_add_seconds_utc("nonsense", 60), str)
+
+
+def _seed_done_job(
+    conn: sqlite3.Connection,
+    project_id: str,
+    *,
+    applied_stimulus: dict[str, object],
+    finished_at: str = "2026-06-14T00:00:00Z",
+) -> None:
+    conn.execute(
+        "INSERT INTO memory_projection_jobs("
+        "id, project_id, job_kind, status, trigger, requested_at_utc, "
+        "finished_at_utc, attempt, stimulus_json, result_json"
+        ") VALUES (?, ?, 'projection_bundle', 'done', 'cli', ?, ?, 0, '{}', ?)",
+        (
+            new_projection_job_id(),
+            project_id,
+            "2026-06-13T00:00:00Z",
+            finished_at,
+            json.dumps({"applied_stimulus": applied_stimulus}),
+        ),
+    )
+    conn.commit()
+
+
+def test_decide_flush_immediate_paths(tmp_path: Path) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        conn = store.connection
+        base = resolve_memory_config(root)
+        stimulus = compute_projection_stimulus(
+            conn=conn, project=project, root_path=root, config=base
+        )
+        # Window disabled -> immediate.
+        disabled = replace(base, projection_rebuild_coalesce_window_seconds=0)
+        assert (
+            _decide_flush(
+                conn,
+                project=project,
+                stimulus=stimulus,
+                config=disabled,
+                trigger="mcp_finish",
+                force=False,
+            ).immediate
+            is True
+        )
+        # Explicit/cli trigger -> immediate even with a window.
+        windowed = replace(base, projection_rebuild_coalesce_window_seconds=60)
+        assert (
+            _decide_flush(
+                conn,
+                project=project,
+                stimulus=stimulus,
+                config=windowed,
+                trigger="cli",
+                force=False,
+            ).immediate
+            is True
+        )
+        # force -> immediate.
+        assert (
+            _decide_flush(
+                conn,
+                project=project,
+                stimulus=stimulus,
+                config=windowed,
+                trigger="mcp_finish",
+                force=True,
+            ).immediate
+            is True
+        )
+        # No prior reindex (first index) -> immediate.
+        assert (
+            _decide_flush(
+                conn,
+                project=project,
+                stimulus=stimulus,
+                config=windowed,
+                trigger="mcp_finish",
+                force=False,
+            ).immediate
+            is True
+        )
+
+
+def test_decide_flush_defers_below_threshold(tmp_path: Path) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        conn = store.connection
+        config = replace(
+            resolve_memory_config(root),
+            projection_rebuild_coalesce_window_seconds=60,
+            projection_rebuild_coalesce_min_delta=25,
+        )
+        stimulus = compute_projection_stimulus(
+            conn=conn, project=project, root_path=root, config=config
+        )
+        current_count = stimulus["active_record_count"]
+        _seed_done_job(
+            conn, project.id, applied_stimulus={"active_record_count": current_count}
+        )
+        decision = _decide_flush(
+            conn,
+            project=project,
+            stimulus=stimulus,
+            config=config,
+            trigger="mcp_finish",
+            force=False,
+        )
+        assert decision.immediate is False
+        assert decision.deadline_utc is not None
+        assert decision.deadline_utc.startswith("2026-06-14T00:01:00")
+
+
+def test_decide_flush_immediate_on_large_delta(tmp_path: Path) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        conn = store.connection
+        config = replace(
+            resolve_memory_config(root),
+            projection_rebuild_coalesce_window_seconds=60,
+            projection_rebuild_coalesce_min_delta=25,
+        )
+        stimulus = compute_projection_stimulus(
+            conn=conn, project=project, root_path=root, config=config
+        )
+        current_count = stimulus["active_record_count"]
+        assert isinstance(current_count, int)
+        _seed_done_job(
+            conn,
+            project.id,
+            applied_stimulus={"active_record_count": current_count + 50},
+        )
+        decision = _decide_flush(
+            conn,
+            project=project,
+            stimulus=stimulus,
+            config=config,
+            trigger="mcp_finish",
+            force=False,
+        )
+        assert decision.immediate is True
+
+
+def test_try_claim_flush_slot_lifecycle(tmp_path: Path) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        conn = store.connection
+        # No pending job yet.
+        assert try_claim_flush_slot(conn, project_id=project.id, claimant="1@h") is None
+        stimulus = compute_projection_stimulus(
+            conn=conn,
+            project=project,
+            root_path=root,
+            config=resolve_memory_config(root),
+        )
+        enqueue_projection_job(
+            conn, project=project, trigger="mcp_finish", stimulus=stimulus
+        )
+        live = worker_claim_token(pid=os.getpid())
+        # Free slot -> reserved by this caller.
+        job_id = try_claim_flush_slot(conn, project_id=project.id, claimant=live)
+        assert job_id is not None
+        reserved = pending_projection_job(conn, project_id=project.id)
+        assert reserved is not None and reserved.flush_claimed_by == live
+        # Live holder -> second claim is refused (strict single sleeper).
+        assert try_claim_flush_slot(conn, project_id=project.id, claimant="2@h") is None
+        # Dead holder -> reclaimable.
+        set_flush_claimed_by(conn, job_id=job_id, claimant="999999@h")
+        assert (
+            try_claim_flush_slot(conn, project_id=project.id, claimant=live) == job_id
+        )
+        # Release.
+        set_flush_claimed_by(conn, job_id=job_id, claimant=None)
+        released = pending_projection_job(conn, project_id=project.id)
+        assert released is not None and released.flush_claimed_by is None
+
+
+def test_enqueue_defers_and_guards_second_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.workflow.is_ci_environment", lambda: False
+    )
+    captured: list[str | None] = []
+
+    def _fake_spawn(
+        *, root_path: Path, not_before_utc: str | None = None
+    ) -> SpawnWorkerResult:
+        captured.append(not_before_utc)
+        return SpawnWorkerResult(spawned=True, reason=None, pid=os.getpid())
+
+    monkeypatch.setattr(
+        "codeclone.memory.jobs.workflow.spawn_projection_jobs_worker", _fake_spawn
+    )
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        config = replace(
+            resolve_memory_config(root),
+            projection_rebuild_policy="enqueue_when_stale",
+            projection_rebuild_coalesce_window_seconds=60,
+            projection_rebuild_coalesce_min_delta=25,
+        )
+        conn = store.connection
+        stimulus = compute_projection_stimulus(
+            conn=conn, project=project, root_path=root, config=config
+        )
+        # Prior reindex: stale (different digest) but no record delta -> deferred.
+        _seed_done_job(
+            conn,
+            project.id,
+            applied_stimulus={
+                "repo_root_digest": "stale-digest",
+                "active_record_count": stimulus["active_record_count"],
+            },
+        )
+        store.close()
+
+        first = execute_enqueue_projection_rebuild(
+            root_path=root, config=config, trigger="mcp_finish", spawn_worker=True
+        )
+        assert first["status"] == "enqueued"
+        assert first["flush_deferred"] is True
+        assert first["spawned"] is True
+        # The delayed worker was spawned with a future flush deadline.
+        assert captured[0] is not None
+
+        second = execute_enqueue_projection_rebuild(
+            root_path=root, config=config, trigger="mcp_finish", spawn_worker=True
+        )
+        assert second["flush_deferred"] is True
+        assert second["spawned"] is False
+        assert second["spawn_skipped_reason"] == "flush_already_scheduled"
+        assert second["coalesced"] is True
