@@ -21,7 +21,7 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis. Call help(topic=change_control|engineering_memory|verification_profiles) for edit/memory semantics. Before any repository file edit: analyze_repository → start_controlled_change → get_relevant_memory → edit in scope → finish_controlled_change. Accepted finish does not mean unchanged health — report verification.structural_delta and receipt advisories.",
+  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis. Call help(topic=change_control|engineering_memory|implementation_context|verification_profiles) for edit/memory/context semantics. Before any repository file edit: analyze_repository → start_controlled_change → get_relevant_memory → get_implementation_context(paths=…, intent_id=…) → edit in scope → finish_controlled_change. Accepted finish does not mean unchanged health — report verification.structural_delta and receipt advisories.",
   "interface": {
     "displayName": "CodeClone",
     "shortDescription": "Structural Change Controller for AI-assisted Python development.",

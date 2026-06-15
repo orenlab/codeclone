@@ -8,7 +8,13 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from tests.plugin_test_helpers import load_json, parse_frontmatter
+from tests.plugin_test_helpers import (
+    CODEX_CLAUDE_SYNC_SKILL_NAMES,
+    assert_claude_code_plugin_readme_contract,
+    assert_plugin_skills_match_codex,
+    assert_repo_doc_paths_exist,
+    load_json,
+)
 
 
 def test_claude_code_plugin_manifest_and_mcp_config() -> None:
@@ -38,29 +44,12 @@ def test_claude_code_plugin_manifest_and_mcp_config() -> None:
 
 def test_claude_code_plugin_skills_match_shared_contracts() -> None:
     root = Path(__file__).resolve().parents[1]
-    claude_skills = root / "plugins" / "claude-code-codeclone" / "skills"
-    codex_skills = root / "plugins" / "codeclone" / "skills"
-
-    for skill_name in (
-        "codeclone-review",
-        "codeclone-hotspots",
-        "codeclone-change-control",
-        "codeclone-engineering-memory",
-    ):
-        claude_text = (claude_skills / skill_name / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        codex_text = (codex_skills / skill_name / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        claude_frontmatter = parse_frontmatter(claude_text)
-        codex_frontmatter = parse_frontmatter(codex_text)
-        assert claude_frontmatter["name"] == codex_frontmatter["name"]
-        if skill_name == "codeclone-review":
-            assert "claude code" in claude_frontmatter["description"].lower()
-            assert "codex" in codex_frontmatter["description"].lower()
-            continue
-        assert claude_frontmatter == codex_frontmatter
+    assert_plugin_skills_match_codex(
+        plugin_skills_root=root / "plugins" / "claude-code-codeclone" / "skills",
+        codex_skills_root=root / "plugins" / "codeclone" / "skills",
+        skill_names=CODEX_CLAUDE_SYNC_SKILL_NAMES,
+        review_platform_keyword="claude code",
+    )
 
 
 def test_claude_code_marketplace_overlay_and_install_docs() -> None:
@@ -77,11 +66,9 @@ def test_claude_code_marketplace_overlay_and_install_docs() -> None:
     assert marketplace["name"] == "orenlab-codeclone"
     assert marketplace["metadata"]["description"]
     assert marketplace["plugins"][0]["source"] == "./plugins/codeclone"
-    assert "claude plugin marketplace add orenlab/codeclone-claude-code" in readme
-    assert "claude plugin install codeclone@orenlab-codeclone" in readme
-    assert 'uv tool install "codeclone[mcp]"' in readme
-
-    assert (
-        root / "docs" / "guide" / "integrations" / "claude-code" / "setup.md"
-    ).is_file()
-    assert (root / "docs" / "book" / "integrations" / "claude-code-plugin.md").is_file()
+    assert_claude_code_plugin_readme_contract(readme)
+    assert_repo_doc_paths_exist(
+        root,
+        "docs/guide/integrations/claude-code/setup.md",
+        "docs/book/integrations/claude-code-plugin.md",
+    )

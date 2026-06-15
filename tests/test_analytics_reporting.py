@@ -39,6 +39,7 @@ from codeclone.analytics.report.messages.profiles import profile_banner_message
 from codeclone.analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from codeclone.analytics.store.vectors_lancedb import vector_row_key
 from codeclone.contracts import CORPUS_EMBEDDING_CONTRACT_VERSION
+from tests.assertion_helpers import assert_all_contained
 
 
 def _snapshot() -> CorpusSnapshotRecord:
@@ -643,11 +644,14 @@ def test_html_comparison_and_context_errors() -> None:
         run=_run(),
         comparison_only=True,
     )
-    assert "Corpus Analytics Sweep Comparison" in rendered
-    assert "failed" in rendered
-    assert "Dominant / corpus" in rendered
-    assert "Projection mode" in rendered
-    assert "unavailable" in rendered
+    assert_all_contained(
+        rendered,
+        "Corpus Analytics Sweep Comparison",
+        "failed",
+        "Dominant / corpus",
+        "Projection mode",
+        "unavailable",
+    )
     assert "Reproducibility:" not in rendered
 
     with pytest.raises(AnalyticsWorkflowError, match="does not belong"):

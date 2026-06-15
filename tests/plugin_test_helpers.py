@@ -8,7 +8,24 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 from pathlib import Path
+from typing import Final
+
+CODEX_CURSOR_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = (
+    "codeclone-review",
+    "codeclone-hotspots",
+    "codeclone-change-control",
+    "codeclone-implementation-context",
+)
+
+CODEX_CLAUDE_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = (
+    "codeclone-review",
+    "codeclone-hotspots",
+    "codeclone-change-control",
+    "codeclone-engineering-memory",
+    "codeclone-implementation-context",
+)
 
 
 def load_json(path: Path) -> object:
@@ -96,3 +113,63 @@ def assert_codex_manifest_interface(
     assert isinstance(prompts, list)
     assert len(prompts) == 4
     assert all(isinstance(prompt, str) and 0 < len(prompt) <= 128 for prompt in prompts)
+
+
+def assert_plugin_skills_match_codex(
+    *,
+    plugin_skills_root: Path,
+    codex_skills_root: Path,
+    skill_names: Sequence[str],
+    review_platform_keyword: str,
+) -> None:
+    for skill_name in skill_names:
+        plugin_text = (plugin_skills_root / skill_name / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        codex_text = (codex_skills_root / skill_name / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        plugin_frontmatter = parse_frontmatter(plugin_text)
+        codex_frontmatter = parse_frontmatter(codex_text)
+        assert plugin_frontmatter["name"] == codex_frontmatter["name"]
+        if skill_name == "codeclone-review":
+            assert review_platform_keyword in plugin_frontmatter["description"].lower()
+            assert "codex" in codex_frontmatter["description"].lower()
+            continue
+        assert plugin_frontmatter == codex_frontmatter
+
+
+def assert_repo_doc_paths_exist(root: Path, *relative_paths: str) -> None:
+    for relative in relative_paths:
+        assert (root / relative).is_file(), relative
+
+
+def assert_codex_plugin_readme_contract(readme_text: str) -> None:
+    from tests.assertion_helpers import assert_all_contained
+
+    assert_all_contained(
+        readme_text,
+        "# CodeClone for Codex",
+        "codex plugin marketplace add orenlab/codeclone-codex",
+        "codex plugin add codeclone@orenlab-codeclone",
+        "codex mcp add codeclone -- codeclone-mcp --transport stdio",
+        "does not rewrite `~/.codex/config.toml`",
+        "prefers a workspace `.venv`",
+        "current Poetry environment",
+        "without relying on `sh -lc`",
+        'uv tool install "codeclone[mcp]"',
+        "codeclone-change-control",
+        "codeclone-implementation-context",
+        "Structural Change Controller for AI-assisted Python",
+    )
+
+
+def assert_claude_code_plugin_readme_contract(readme_text: str) -> None:
+    from tests.assertion_helpers import assert_all_contained
+
+    assert_all_contained(
+        readme_text,
+        "claude plugin marketplace add orenlab/codeclone-claude-code",
+        "claude plugin install codeclone@orenlab-codeclone",
+        'uv tool install "codeclone[mcp]"',
+    )

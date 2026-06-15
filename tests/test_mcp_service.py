@@ -1258,6 +1258,14 @@ def test_mcp_service_get_implementation_context_projects_call_context(
             "\n"
             "def caller(value: int) -> int:\n"
             "    return helper(value)\n"
+            "\n"
+            "\n"
+            "def other() -> int:\n"
+            "    return 1\n"
+            "\n"
+            "\n"
+            "def calls_other() -> int:\n"
+            "    return other()\n"
         ),
     )
     run_id = str(summary["run_id"])
@@ -1300,6 +1308,74 @@ def test_mcp_service_get_implementation_context_projects_call_context(
 
     analysis = cast("dict[str, object]", callers_ctx["analysis"])
     assert analysis["call_graph_status"] == "complete"
+    for row in callees + callers + test_callers:
+        path = str(row["path"])
+        assert not path.startswith("/")
+        assert "\\" not in path
+
+    precision_ctx = service.get_implementation_context(
+        root=str(tmp_path),
+        symbols=["pkg.svc:helper"],
+        include=["callers", "callees"],
+        run_id=run_id,
+    )
+    precision_context = cast("dict[str, object]", precision_ctx["call_context"])
+    precision_callers = {
+        str(row["source_qualname"])
+        for row in cast("list[dict[str, object]]", precision_context["callers"])
+    }
+    precision_callees = {
+        str(row["target_qualname"])
+        for row in cast("list[dict[str, object]]", precision_context["callees"])
+    }
+    assert "pkg.svc:caller" in precision_callers
+    assert "pkg.svc:calls_other" not in precision_callers
+    assert "pkg.svc:other" not in precision_callees
+
+
+def test_mcp_service_get_implementation_context_trajectories_facet_fetches_memory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, summary = _analyze_context_run(
+        tmp_path,
+        relative_path="pkg/svc.py",
+        source="def helper(value: int) -> int:\n    return value + 1\n",
+    )
+
+    def _fake_memory(*, root: str, **kwargs: object) -> dict[str, object]:
+        del root, kwargs
+        return {
+            "scope_resolved_from": "explicit_paths",
+            "retrieval_policy": {},
+            "records": [],
+            "trajectories": [{"trajectory_id": "traj-1", "summary": "prior fix"}],
+            "experiences": [{"experience_id": "exp-1", "statement": "pattern"}],
+        }
+
+    monkeypatch.setattr(service, "get_relevant_memory", _fake_memory)
+
+    traj_ctx = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/svc.py"],
+        include=["trajectories"],
+        run_id=str(summary["run_id"]),
+    )
+    traj_evidence = cast("dict[str, object]", traj_ctx["implementation_evidence"])
+    traj_summary = cast("dict[str, object]", traj_evidence["trajectories_summary"])
+    assert traj_summary["total"] == 1
+    assert "memory" not in traj_evidence
+
+    exp_ctx = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/svc.py"],
+        include=["experiences"],
+        run_id=str(summary["run_id"]),
+    )
+    exp_evidence = cast("dict[str, object]", exp_ctx["implementation_evidence"])
+    exp_summary = cast("dict[str, object]", exp_evidence["experiences_summary"])
+    assert exp_summary["total"] == 1
+    assert "memory" not in exp_evidence
 
 
 def test_mcp_service_get_implementation_context_contract_mode(tmp_path: Path) -> None:

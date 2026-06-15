@@ -14,6 +14,8 @@ You have access to CodeClone through the local CodeClone MCP server.
   `analyze_changed_paths` before reading latest resources.
 - Start with the default analysis profile.
 - Prefer `get_production_triage` after analysis.
+- After analysis, use `get_implementation_context` for bounded pre-edit context;
+  call `help(topic="implementation_context")` when facet or mode semantics are unclear.
 - Use `analyze_changed_paths` for diffs.
 - Use `get_report_section(section="metrics")` for adoption, API, and
   coverage facts.
@@ -31,7 +33,9 @@ You have access to CodeClone through the local CodeClone MCP server.
 - Use `source_kind` filters to cut test noise.
 - After `start_controlled_change` with `edit_allowed=true`, call
   `get_relevant_memory(root=abs, scope=... or intent_id=...)` before editing
-  scoped Python work.
+  scoped Python work, then `get_implementation_context(root=abs, paths=...,
+  intent_id=..., run_id=...)` for bundled structural and safety context
+  (`codeclone-implementation-context` skill).
 - Use `help(topic="engineering_memory")` when memory workflow is unclear.
 
 ## Change control

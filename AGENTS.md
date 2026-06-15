@@ -76,7 +76,9 @@ auditable receipt.
 CodeClone controls structural change through this deterministic lifecycle:
 
 1. declare intent and allowed scope;
-2. inspect blast radius, review context, and do-not-touch boundaries;
+2. inspect blast radius, review context, and do-not-touch boundaries
+   (`get_implementation_context` with `intent_id` after `start`, or `get_blast_radius`
+   for blast-only inspection — see `codeclone-implementation-context` skill in plugins);
 3. make the bounded edit only after permission is granted;
 4. reconcile actual changed files with declared scope;
 5. verify structural deltas and review claims against one canonical report;

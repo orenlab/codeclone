@@ -7,12 +7,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tests.plugin_test_helpers import assert_codex_manifest_interface, load_json
-
-
-def _assert_contains_all(text: str, needles: tuple[str, ...]) -> None:
-    for needle in needles:
-        assert needle in text
+from tests.assertion_helpers import assert_all_contained
+from tests.plugin_test_helpers import (
+    assert_codex_manifest_interface,
+    assert_codex_plugin_readme_contract,
+    assert_repo_doc_paths_exist,
+    load_json,
+)
 
 
 def _codeclone_package_version(root: Path) -> str:
@@ -99,15 +100,21 @@ def test_codex_plugin_skill_exists() -> None:
     change_control_skill_path = (
         plugin_root / "skills" / "codeclone-change-control" / "SKILL.md"
     )
+    implementation_context_skill_path = (
+        plugin_root / "skills" / "codeclone-implementation-context" / "SKILL.md"
+    )
     skill_text = skill_path.read_text(encoding="utf-8")
     hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
     change_control_skill_text = change_control_skill_path.read_text(encoding="utf-8")
+    implementation_context_skill_text = implementation_context_skill_path.read_text(
+        encoding="utf-8"
+    )
     manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
     assert isinstance(manifest, dict)
 
-    _assert_contains_all(
+    assert_all_contained(
         skill_text,
-        (
+        *(
             "name: codeclone-review",
             "conservative first pass",
             'help(topic="analysis_profile")',
@@ -117,9 +124,9 @@ def test_codex_plugin_skill_exists() -> None:
             "Do not fall back to CLI or local report files.",
         ),
     )
-    _assert_contains_all(
+    assert_all_contained(
         hotspot_skill_text,
-        (
+        *(
             "name: codeclone-hotspots",
             'get_report_section(section="metrics")',
             'help(topic="coverage")',
@@ -127,9 +134,9 @@ def test_codex_plugin_skill_exists() -> None:
             "Do not fall back to CLI or local report files.",
         ),
     )
-    _assert_contains_all(
+    assert_all_contained(
         change_control_skill_text,
-        (
+        *(
             "name: codeclone-change-control",
             "MANDATORY HARD GATE before ANY repository file write",
             "target Python repository",
@@ -146,9 +153,25 @@ def test_codex_plugin_skill_exists() -> None:
             "patch_trail",
         ),
     )
+    assert_all_contained(
+        implementation_context_skill_text,
+        *(
+            "name: codeclone-implementation-context",
+            "get_implementation_context",
+            'help(topic="implementation_context")',
+            "module:symbol",
+            "do_not_touch",
+            "review_context",
+            "get_relevant_memory",
+            "start_controlled_change",
+            "Do not fall back to CLI or local report files.",
+        ),
+    )
 
     assert "Use MCP tools only." in manifest["instructions"]
     assert "help(topic=change_control" in manifest["instructions"]
+    assert "implementation_context" in manifest["instructions"]
+    assert "get_implementation_context" in manifest["instructions"]
     assert "get_relevant_memory" in manifest["instructions"]
     assert "start_controlled_change" in manifest["instructions"]
     assert "finish_controlled_change" in manifest["instructions"]
@@ -159,18 +182,9 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     root = Path(__file__).resolve().parents[1]
     plugin_root = root / "plugins" / "codeclone"
     readme_text = (plugin_root / "README.md").read_text(encoding="utf-8")
-
-    assert "# CodeClone for Codex" in readme_text
-    assert "codex plugin marketplace add orenlab/codeclone-codex" in readme_text
-    assert "codex plugin add codeclone@orenlab-codeclone" in readme_text
-    assert "codex mcp add codeclone -- codeclone-mcp --transport stdio" in readme_text
-    assert "does not rewrite `~/.codex/config.toml`" in readme_text
-    assert "prefers a workspace `.venv`" in readme_text
-    assert "current Poetry environment" in readme_text
-    assert "without relying on `sh -lc`" in readme_text
-    assert 'uv tool install "codeclone[mcp]"' in readme_text
-    assert "codeclone-change-control" in readme_text
-    assert "Structural Change Controller for AI-assisted Python" in readme_text
-
-    assert (root / "docs" / "guide" / "integrations" / "codex" / "setup.md").is_file()
-    assert (root / "docs" / "terms-of-use.md").is_file()
+    assert_codex_plugin_readme_contract(readme_text)
+    assert_repo_doc_paths_exist(
+        root,
+        "docs/guide/integrations/codex/setup.md",
+        "docs/terms-of-use.md",
+    )

@@ -14,16 +14,17 @@ directly, including `Coverage Join` facts and the optional `coverage` help topic
 
 ## What ships here
 
-| File                                  | Purpose                                       |
-|---------------------------------------|-----------------------------------------------|
-| `.codex-plugin/plugin.json`           | Plugin metadata, prompts, and instructions    |
-| `.mcp.json`                           | Local stdio MCP definition                    |
-| `scripts/launch_mcp`                  | Shell-free workspace-first launcher bootstrap |
-| `skills/codeclone-review/`            | Conservative-first full review skill          |
-| `skills/codeclone-hotspots/`          | Quick hotspot discovery skill                 |
-| `skills/codeclone-change-control/`    | Intent-first change workflow skill            |
-| `skills/codeclone-engineering-memory/` | Engineering Memory retrieval and draft writes |
-| `assets/`                             | Plugin branding                               |
+| File                                       | Purpose                                       |
+|--------------------------------------------|-----------------------------------------------|
+| `.codex-plugin/plugin.json`                | Plugin metadata, prompts, and instructions    |
+| `.mcp.json`                                | Local stdio MCP definition                    |
+| `scripts/launch_mcp`                       | Shell-free workspace-first launcher bootstrap |
+| `skills/codeclone-review/`                 | Conservative-first full review skill          |
+| `skills/codeclone-hotspots/`               | Quick hotspot discovery skill                 |
+| `skills/codeclone-change-control/`         | Intent-first change workflow skill            |
+| `skills/codeclone-implementation-context/` | Bounded `get_implementation_context` playbook |
+| `skills/codeclone-engineering-memory/`     | Engineering Memory retrieval and draft writes |
+| `assets/`                                  | Plugin branding                               |
 
 `plugin.json` keeps the machine identifier as lowercase `codeclone`; the
 user-facing label stays in `interface.displayName` as `CodeClone`.

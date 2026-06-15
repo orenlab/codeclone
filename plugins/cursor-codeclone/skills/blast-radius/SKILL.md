@@ -23,20 +23,27 @@ analyze_repository(root=<absolute_path>)
 → get_blast_radius(files=[...], depth="transitive")
 ```
 
+For a **bundled** projection (blast zone + call_context + memory lanes + freshness
+
++ optional `change_control` with `intent_id`), prefer
+  `get_implementation_context` — see `codeclone-implementation-context` skill.
+  Use this blast-radius skill when you need **only** blast fields without the
+  full context bundle.
+
 ## Reading the result
 
-| Field | Meaning |
-|---|---|
-| `radius_level` | low / medium / high — overall risk bracket |
-| `origin` | The files you asked about |
-| `direct_dependents` | Files that directly import origin modules |
-| `transitive_dependents` | Files reachable through dependency chains |
-| `clone_cohort_members` | Files sharing clone groups with origin — comparison context, not edit targets |
-| `in_dependency_cycle` | Files involved in circular imports with origin |
-| `structural_risk` | Risk signals: high complexity, high coupling, low coverage, overloaded modules in the blast zone |
-| `do_not_touch` | Hard boundaries — paths that require separate explicit approval |
-| `review_context` | Supporting context for review — not a ban on editing |
-| `guardrails` | Actionable review reminders |
+| Field                   | Meaning                                                                                          |
+|-------------------------|--------------------------------------------------------------------------------------------------|
+| `radius_level`          | low / medium / high — overall risk bracket                                                       |
+| `origin`                | The files you asked about                                                                        |
+| `direct_dependents`     | Files that directly import origin modules                                                        |
+| `transitive_dependents` | Files reachable through dependency chains                                                        |
+| `clone_cohort_members`  | Files sharing clone groups with origin — comparison context, not edit targets                    |
+| `in_dependency_cycle`   | Files involved in circular imports with origin                                                   |
+| `structural_risk`       | Risk signals: high complexity, high coupling, low coverage, overloaded modules in the blast zone |
+| `do_not_touch`          | Hard boundaries — paths that require separate explicit approval                                  |
+| `review_context`        | Supporting context for review — not a ban on editing                                             |
+| `guardrails`            | Actionable review reminders                                                                      |
 
 ## Rules
 

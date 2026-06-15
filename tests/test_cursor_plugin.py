@@ -9,8 +9,10 @@ import re
 from pathlib import Path
 
 from tests.plugin_test_helpers import (
+    CODEX_CURSOR_SYNC_SKILL_NAMES,
     assert_cursor_change_control_rules,
     assert_plugin_branding_assets,
+    assert_plugin_skills_match_codex,
     load_json,
     parse_frontmatter,
 )
@@ -68,28 +70,12 @@ def test_cursor_rules_have_valid_frontmatter() -> None:
 
 def test_cursor_skills_match_codex_skills() -> None:
     root = Path(__file__).resolve().parents[1]
-    cursor_skills = root / "plugins" / "cursor-codeclone" / "skills"
-    codex_skills = root / "plugins" / "codeclone" / "skills"
-
-    for skill_name in (
-        "codeclone-review",
-        "codeclone-hotspots",
-        "codeclone-change-control",
-    ):
-        cursor_text = (cursor_skills / skill_name / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        codex_text = (codex_skills / skill_name / "SKILL.md").read_text(
-            encoding="utf-8"
-        )
-        cursor_frontmatter = parse_frontmatter(cursor_text)
-        codex_frontmatter = parse_frontmatter(codex_text)
-        if skill_name == "codeclone-review":
-            assert cursor_frontmatter["name"] == codex_frontmatter["name"]
-            assert "review" in cursor_frontmatter["description"].lower()
-            assert "codex" in codex_frontmatter["description"].lower()
-            continue
-        assert cursor_frontmatter == codex_frontmatter
+    assert_plugin_skills_match_codex(
+        plugin_skills_root=root / "plugins" / "cursor-codeclone" / "skills",
+        codex_skills_root=root / "plugins" / "codeclone" / "skills",
+        skill_names=CODEX_CURSOR_SYNC_SKILL_NAMES,
+        review_platform_keyword="review",
+    )
 
 
 def test_cursor_plugin_version_is_semver() -> None:

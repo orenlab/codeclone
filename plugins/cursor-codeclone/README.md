@@ -51,19 +51,20 @@ codeclone-mcp --help
 
 ## Skills
 
-| Skill                 | Command                        | Purpose                                                                |
-|-----------------------|--------------------------------|------------------------------------------------------------------------|
-| **Production Triage** | `/codeclone-production-triage` | Quick health snapshot: score, hotspots, regressions, next action       |
-| **Hotspots**          | `/codeclone-hotspots`          | Fast metric check: complexity, coupling, cohesion, clones              |
-| **Blast Radius**      | `/codeclone-blast-radius`      | Structural impact of changing specific files                           |
-| **Review**            | `/codeclone-review`            | Full structural review session with baseline-aware triage              |
-| **Change Control**    | `/codeclone-change-control`    | Intent-first edit workflow: declare, blast radius, edit, verify, clear |
-| **Engineering Memory** | `/codeclone-engineering-memory` | Scope memory before edits, search, draft `record_candidate`, finish proposals |
+| Skill                      | Command                             | Purpose                                                                            |
+|----------------------------|-------------------------------------|------------------------------------------------------------------------------------|
+| **Production Triage**      | `/codeclone-production-triage`      | Quick health snapshot: score, hotspots, regressions, next action                   |
+| **Hotspots**               | `/codeclone-hotspots`               | Fast metric check: complexity, coupling, cohesion, clones                          |
+| **Implementation Context** | `/codeclone-implementation-context` | Bounded structural, call-graph, contract, and change-control evidence from one run |
+| **Blast Radius**           | `/codeclone-blast-radius`           | Blast-only impact inspection (use implementation context for the full bundle)      |
+| **Review**                 | `/codeclone-review`                 | Full structural review session with baseline-aware triage                          |
+| **Change Control**         | `/codeclone-change-control`         | Intent-first edit workflow: declare, context, edit, verify, clear                  |
+| **Engineering Memory**     | `/codeclone-engineering-memory`     | Scope memory before edits, search, draft `record_candidate`, finish proposals      |
 
 ### Typical flow
 
 1. `/codeclone-production-triage` — understand the current state.
-2. `/codeclone-blast-radius` — check impact before editing.
+2. `/codeclone-implementation-context` — bounded context around files you will touch.
 3. `/codeclone-change-control` — edit with full structural verification.
 
 ---
@@ -80,11 +81,11 @@ deterministic findings with file paths and evidence, not opinions.
 
 Three rules ship in `rules/` (load via plugin discovery, not only manual symlinks):
 
-| File | Activation | Role |
-|------|------------|------|
-| `codeclone-workflow.mdc` | always | MCP-only, absolute `root`, tool preferences |
-| `change-control-gate.mdc` | always | Hard gate: `start` / `finish`, memory before finish when required |
-| `codeclone-python.mdc` | `**/*.py` | Analyze before structural edits; respect blast radius |
+| File                      | Activation | Role                                                              |
+|---------------------------|------------|-------------------------------------------------------------------|
+| `codeclone-workflow.mdc`  | always     | MCP-only, absolute `root`, tool preferences                       |
+| `change-control-gate.mdc` | always     | Hard gate: `start` / `finish`, memory before finish when required |
+| `codeclone-python.mdc`    | `**/*.py`  | Analyze before structural edits; respect blast radius             |
 
 Chat skill ids use the `name:` field in each `SKILL.md` (folders `production-triage/`
 and `blast-radius/` differ from ids `codeclone-production-triage` and
@@ -111,10 +112,10 @@ uv run python plugins/cursor-codeclone/scripts/install-project-hooks.py /path/to
 
 **Enforcement scope** (`.cursor/codeclone-hooks.json` or `CODECLONE_HOOKS_ENFORCE_SCOPE`):
 
-| Mode | Value | Blocks without `start_controlled_change` |
-|------|-------|------------------------------------------|
-| Python only | `python` (default) | `.py` / `.pyi` under the workspace |
-| Full repo | `repo` | any write under the workspace root |
+| Mode        | Value              | Blocks without `start_controlled_change` |
+|-------------|--------------------|------------------------------------------|
+| Python only | `python` (default) | `.py` / `.pyi` under the workspace       |
+| Full repo   | `repo`             | any write under the workspace root       |
 
 Hook behavior:
 
