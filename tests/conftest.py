@@ -6,14 +6,19 @@
 
 from __future__ import annotations
 
+import sqlite3
 import sys
 from collections.abc import Callable, Generator
-from contextlib import suppress
 
 import pytest
 
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
+from tests._sqlite_cleanup import (
+    close_tracked_sqlite_connections,
+    make_tracking_connect,
+    sweep_leaked_sqlite_connections_via_gc,
+)
 
 ReportMetaFactory = Callable[..., dict[str, object]]
 
@@ -30,24 +35,28 @@ def _clear_workspace_intent_store_cache() -> Generator[None, None, None]:
 
 
 @pytest.fixture(autouse=True)
-def _reset_observability_runtime() -> Generator[None, None, None]:
+def _track_sqlite_connections(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Generator[None, None, None]:
+    monkeypatch.setattr(
+        sqlite3,
+        "connect",
+        make_tracking_connect(sqlite3.connect),
+    )
+    yield
+
+
+@pytest.fixture(autouse=True)
+def _reset_observability_runtime(
+    request: pytest.FixtureRequest,
+) -> Generator[None, None, None]:
     yield
     from codeclone.observability.runtime import shutdown
 
     shutdown()
-    _close_leaked_sqlite_connections()
-
-
-def _close_leaked_sqlite_connections() -> None:
-    """Best-effort cleanup for sqlite3 handles left open by a test body."""
-    import gc
-    import sqlite3
-
-    for obj in gc.get_objects():
-        if type(obj) is sqlite3.Connection:
-            with suppress(Exception):
-                obj.close()
-    gc.collect()
+    close_tracked_sqlite_connections()
+    if request.node.get_closest_marker("needs_sqlite_cleanup") is not None:
+        sweep_leaked_sqlite_connections_via_gc()
 
 
 @pytest.fixture

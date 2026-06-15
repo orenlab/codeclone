@@ -180,6 +180,9 @@ codeclone = ["py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+markers = [
+    "needs_sqlite_cleanup: run expensive gc.get_objects() sqlite teardown after this test (fallback when connect tracking misses leaks)",
+]
 
 [tool.coverage.run]
 branch = true
