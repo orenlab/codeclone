@@ -16,6 +16,7 @@ from typing import Final
 
 import orjson
 
+from ...models import RelationshipRecord
 from ...paths import classify_source_kind
 from ._blast_radius import _path_to_module
 from ._session_shared import MCPRunRecord, MCPUnitLocation
@@ -29,6 +30,7 @@ DEFAULT_IMPLEMENTATION_FACETS: Final[tuple[Facet, ...]] = (
     "module_role",
     "imports",
     "importers",
+    "callees",
     "public_surface",
     "blast_radius",
     "tests",
@@ -38,6 +40,7 @@ DEFAULT_IMPLEMENTATION_FACETS: Final[tuple[Facet, ...]] = (
 DEFAULT_IMPACT_FACETS: Final[tuple[Facet, ...]] = (
     "blast_radius",
     "importers",
+    "callers",
     "public_surface",
     "baseline_sensitive_findings",
     "tests",
@@ -48,6 +51,8 @@ IMPLEMENTED_CONTEXT_FACETS: Final[frozenset[Facet]] = frozenset(
     {
         *DEFAULT_IMPLEMENTATION_FACETS,
         *DEFAULT_IMPACT_FACETS,
+        "references",
+        "test_callers",
         "scope",
     }
 )
@@ -97,6 +102,192 @@ class _EntryBudget:
 
     def reserve(self, count: int) -> None:
         self.remaining = max(0, self.remaining - max(0, count))
+
+
+# (facet, output_key, reverse_index, keyed_on_source, relation_kind, status, lane)
+_CALL_CONTEXT_LANES: Final[
+    tuple[tuple[Facet, str, bool, bool, str | None, str, str | None], ...]
+] = (
+    ("callers", "callers", True, True, "call", "resolved", "production"),
+    ("test_callers", "test_callers", True, True, None, "resolved", "test"),
+    ("callees", "callees", False, False, "call", "resolved", None),
+    ("callees", "unresolved", False, False, "call", "unresolved", None),
+    ("references", "references", False, False, "reference", "resolved", None),
+)
+
+
+def _relationship_indexes(
+    record: MCPRunRecord,
+) -> tuple[dict[str, list[RelationshipRecord]], dict[str, list[RelationshipRecord]]]:
+    """Forward (by source) and reverse (by resolved target) relationship indexes."""
+    by_source: dict[str, list[RelationshipRecord]] = {}
+    by_target: dict[str, list[RelationshipRecord]] = {}
+    for facts in record.relationship_facts:
+        for relation in facts.relationships:
+            by_source.setdefault(relation.source_qualname, []).append(relation)
+            if relation.target_qualname is not None:
+                by_target.setdefault(relation.target_qualname, []).append(relation)
+    return by_source, by_target
+
+
+def _relationship_row(
+    relation: RelationshipRecord,
+    *,
+    keyed_on_source: bool,
+) -> dict[str, object]:
+    row: dict[str, object] = {
+        "relation_kind": relation.relation_kind,
+        "resolution_status": relation.resolution_status,
+        "origin_lane": relation.origin_lane,
+        "evidence": f"{relation.resolution_status}_{relation.relation_kind}",
+        "path": relation.path,
+        "line": relation.line,
+    }
+    if keyed_on_source:
+        row["source_qualname"] = relation.source_qualname
+    else:
+        row["target_qualname"] = relation.target_qualname
+    if relation.resolution_status == "unresolved":
+        row["expression"] = relation.expression
+        row["resolution_rule"] = relation.resolution_rule
+    return row
+
+
+def _collect_relationship_rows(
+    index: Mapping[str, Sequence[RelationshipRecord]],
+    subject_qualnames: frozenset[str],
+    *,
+    keyed_on_source: bool,
+    relation_kind: str | None,
+    resolution_status: str,
+    origin_lane: str | None,
+) -> list[dict[str, object]]:
+    rows: dict[tuple[str, str, int], dict[str, object]] = {}
+    for qualname in subject_qualnames:
+        for relation in index.get(qualname, ()):
+            mismatched = (
+                (relation_kind is not None and relation.relation_kind != relation_kind)
+                or relation.resolution_status != resolution_status
+                or (origin_lane is not None and relation.origin_lane != origin_lane)
+            )
+            if mismatched:
+                continue
+            counterpart = (
+                relation.source_qualname
+                if keyed_on_source
+                else relation.target_qualname or relation.expression or ""
+            )
+            rows.setdefault(
+                (counterpart, relation.path, relation.line),
+                _relationship_row(relation, keyed_on_source=keyed_on_source),
+            )
+    return [rows[key] for key in sorted(rows)]
+
+
+def _project_call_context(
+    *,
+    record: MCPRunRecord,
+    subject_qualnames: frozenset[str],
+    include_set: frozenset[Facet],
+    budget: _EntryBudget,
+) -> dict[str, object]:
+    """Project bounded callers/callees/references/test_callers from run-record facts.
+
+    Reverse-index callers are production-lane resolved calls; test-origin callers
+    are a separate lane that never feeds production liveness (D11). Unresolved
+    calls are emitted as observations (target=null) alongside callees.
+    """
+    by_source, by_target = _relationship_indexes(record)
+    call_context: dict[str, object] = {}
+    for (
+        facet,
+        key,
+        reverse_index,
+        keyed_on_source,
+        relation_kind,
+        status,
+        lane,
+    ) in _CALL_CONTEXT_LANES:
+        if facet not in include_set:
+            continue
+        _attach_bounded(
+            call_context,
+            key=key,
+            items=_collect_relationship_rows(
+                by_target if reverse_index else by_source,
+                subject_qualnames,
+                keyed_on_source=keyed_on_source,
+                relation_kind=relation_kind,
+                resolution_status=status,
+                origin_lane=lane,
+            ),
+            budget=budget,
+        )
+    return call_context
+
+
+def _subject_qualnames(
+    record: MCPRunRecord,
+    *,
+    paths: Sequence[str],
+    resolved_symbols: Sequence[Mapping[str, object]],
+) -> frozenset[str]:
+    qualnames: set[str] = {
+        str(item["qualname"]) for item in resolved_symbols if item.get("qualname")
+    }
+    path_set = frozenset(paths)
+    for row in _unit_location_index(record):
+        if str(row["path"]) in path_set:
+            qualnames.add(str(row["qualname"]))
+    return frozenset(qualnames)
+
+
+def _call_graph_status(record: MCPRunRecord) -> tuple[str, list[str]]:
+    failed = sorted({failure.split(": ", 1)[0] for failure in record.failures})
+    return ("partial" if failed else "complete"), failed
+
+
+def _relationship_digest_records(record: MCPRunRecord) -> list[dict[str, object]]:
+    """Canonical relationship rows for the artifact digest (expression excluded)."""
+    rows: list[dict[str, object]] = [
+        {
+            "relation_kind": relation.relation_kind,
+            "resolution_status": relation.resolution_status,
+            "origin_lane": relation.origin_lane,
+            "source_qualname": relation.source_qualname,
+            "target_qualname": relation.target_qualname,
+            "path": relation.path,
+            "line": relation.line,
+            "resolution_rule": relation.resolution_rule,
+        }
+        for facts in record.relationship_facts
+        for relation in facts.relationships
+    ]
+    rows.sort(
+        key=lambda row: (
+            str(row["source_qualname"]),
+            str(row["relation_kind"]),
+            str(row["origin_lane"]),
+            str(row["target_qualname"] or ""),
+            str(row["path"]),
+            _as_int(row["line"]),
+        )
+    )
+    return rows
+
+
+def _context_uncertainties(call_graph_status: str) -> list[str]:
+    notes = [
+        "resolved call/reference edges are best-effort (cross-module imports, "
+        "same-module functions/methods, self/cls); dynamic dispatch and deep "
+        "aliasing stay unresolved observations — verify dispatch against source"
+    ]
+    if call_graph_status != "complete":
+        notes.append(
+            "call_graph_status is not complete: some files failed analysis and "
+            "their relationship edges are missing"
+        )
+    return notes
 
 
 def build_implementation_context(
@@ -251,6 +442,19 @@ def build_implementation_context(
             budget=entry_budget,
         )
 
+    call_graph_status, failed_files = _call_graph_status(record)
+    subject_qualnames = _subject_qualnames(
+        record,
+        paths=normalized_paths,
+        resolved_symbols=normalized_resolved_symbols,
+    )
+    call_context = _project_call_context(
+        record=record,
+        subject_qualnames=subject_qualnames,
+        include_set=include_set,
+        budget=entry_budget,
+    )
+
     analysis = {
         "run_id": record.run_id,
         "report_digest": record.run_id,
@@ -262,8 +466,8 @@ def build_implementation_context(
         "call_resolution_version": CALL_RESOLUTION_VERSION,
         "freshness": freshness,
         "cache_mode": _cache_mode(record),
-        "call_graph_status": "unavailable",
-        "failed_files": [],
+        "call_graph_status": call_graph_status,
+        "failed_files": failed_files,
     }
     unavailable_facets = sorted(include_set - IMPLEMENTED_CONTEXT_FACETS)
     payload: dict[str, object] = {
@@ -292,12 +496,7 @@ def build_implementation_context(
             "writers": {"status": "not_available", "tier": "dataflow"},
             "readers": {"status": "not_available", "tier": "dataflow"},
         },
-        "uncertainties": [
-            (
-                "call/reference relationships are not available in Step 2; "
-                "use structural imports and blast radius until v2 data ships"
-            )
-        ],
+        "uncertainties": _context_uncertainties(call_graph_status),
         "next_queries": [
             "Re-run after analyze_repository when analysis.freshness.status is drifted."
         ],
@@ -308,6 +507,8 @@ def build_implementation_context(
             include=include_set,
             budget=entry_budget,
         )
+    if call_context:
+        payload["call_context"] = call_context
     if projected_change_control is not None:
         payload["change_control"] = projected_change_control
     if unavailable_facets:
@@ -971,6 +1172,7 @@ def _context_artifact_digest(
 ) -> str:
     del dependency_rows
     manifest = record.manifest or {}
+    call_graph_status, failed_files = _call_graph_status(record)
     return _digest(
         {
             "canonicalization": {
@@ -982,8 +1184,8 @@ def _context_artifact_digest(
             "report_digest": record.run_id,
             "context_contract_version": CONTEXT_CONTRACT_VERSION,
             "call_resolution_version": CALL_RESOLUTION_VERSION,
-            "call_graph_status": "unavailable",
-            "failed_files": [],
+            "call_graph_status": call_graph_status,
+            "failed_files": failed_files,
             "manifest": [
                 {
                     "path": path,
@@ -1000,7 +1202,7 @@ def _context_artifact_digest(
                 }
                 for row in _unit_location_index(record)
             ],
-            "relationship_records": [],
+            "relationship_records": _relationship_digest_records(record),
         }
     )
 

@@ -1084,7 +1084,8 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
     assert len(str(analysis["context_artifact_digest"])) == 64
     assert len(str(analysis["context_projection_digest"])) == 64
     assert analysis["context_contract_version"] == "1"
-    assert analysis["call_graph_status"] == "unavailable"
+    assert analysis["call_graph_status"] == "complete"
+    assert analysis["failed_files"] == []
     freshness = cast("dict[str, object]", analysis["freshness"])
     assert freshness == {
         "status": "fresh",
@@ -1227,6 +1228,76 @@ def test_mcp_service_run_record_aggregates_relationship_facts(
     # Deterministic order on the aggregated run-record facts.
     sources = [facts.source_qualname for facts in record.relationship_facts]
     assert sources == sorted(sources)
+
+
+def test_mcp_service_get_implementation_context_projects_call_context(
+    tmp_path: Path,
+) -> None:
+    # Step 7b: callers/callees projected from run-record facts; production callers
+    # and test-origin callers are separate lanes (D11).
+    _write_context_module(
+        tmp_path,
+        "tests/test_svc.py",
+        (
+            "from pkg.svc import helper\n"
+            "\n"
+            "\n"
+            "def test_helper() -> None:\n"
+            "    assert helper(1) == 2\n"
+        ),
+    )
+    service, summary = _analyze_context_run(
+        tmp_path,
+        relative_path="pkg/svc.py",
+        source=(
+            "def helper(value: int) -> int:\n"
+            "    return value + 1\n"
+            "\n"
+            "\n"
+            "def caller(value: int) -> int:\n"
+            "    return helper(value)\n"
+        ),
+    )
+    run_id = str(summary["run_id"])
+
+    callees_ctx = service.get_implementation_context(
+        root=str(tmp_path),
+        symbols=["pkg.svc:caller"],
+        include=["callees"],
+        run_id=run_id,
+    )
+    callees = cast(
+        "list[dict[str, object]]",
+        cast("dict[str, object]", callees_ctx["call_context"])["callees"],
+    )
+    assert any(
+        row["target_qualname"] == "pkg.svc:helper"
+        and row["evidence"] == "resolved_call"
+        for row in callees
+    )
+
+    callers_ctx = service.get_implementation_context(
+        root=str(tmp_path),
+        symbols=["pkg.svc:helper"],
+        include=["callers", "test_callers"],
+        mode="impact",
+        run_id=run_id,
+    )
+    call_context = cast("dict[str, object]", callers_ctx["call_context"])
+    callers = cast("list[dict[str, object]]", call_context["callers"])
+    test_callers = cast("list[dict[str, object]]", call_context["test_callers"])
+    caller_sources = {row["source_qualname"] for row in callers}
+    test_sources = {row["source_qualname"] for row in test_callers}
+
+    assert "pkg.svc:caller" in caller_sources
+    assert all(row["origin_lane"] == "production" for row in callers)
+    # The test-origin reference shows only in the test lane, never in production
+    # callers — tests do not make production code live.
+    assert "tests.test_svc:test_helper" in test_sources
+    assert "tests.test_svc:test_helper" not in caller_sources
+
+    analysis = cast("dict[str, object]", callers_ctx["analysis"])
+    assert analysis["call_graph_status"] == "complete"
 
 
 def test_mcp_service_get_implementation_context_status_and_errors(

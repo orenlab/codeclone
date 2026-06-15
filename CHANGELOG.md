@@ -40,6 +40,11 @@ Added
   staticmethods), only when the target definition exists; cache schema 2.10.
   Per-function relationship facts now aggregate across files (cold and cached)
   onto the analysis result and the MCP run record, off the canonical report.
+  get_implementation_context now projects call_context (callers, callees,
+  references, test_callers) from those facts with relation_kind x
+  resolution_status evidence tags, separate production and test caller lanes,
+  unresolved call observations, and a complete/partial/unavailable
+  call_graph_status; relationship records are bound into context_artifact_digest.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and

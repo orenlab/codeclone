@@ -574,7 +574,16 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "Safety context consumes budget first. If safety entries exceed "
                 "the hard cap, status=safety_context_overflow makes the omission "
-                "explicit. Call/reference evidence is an additive later phase."
+                "explicit."
+            ),
+            (
+                "call_context projects callers, callees, references, and "
+                "test_callers from run-bound relationship facts. Each edge is "
+                "tagged relation_kind x resolution_status; production callers and "
+                "test-origin callers stay in separate lanes and test edges never "
+                "make production code live. Unresolved calls are observations "
+                "(target=null), and analysis.call_graph_status reports "
+                "complete/partial/unavailable."
             ),
         ),
         recommended_tools=(

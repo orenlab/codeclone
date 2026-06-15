@@ -34,8 +34,17 @@ a contract error.
 
 Use `mode="implementation"` for editing orientation or `mode="impact"` for
 transitive dependency context and baseline-sensitive findings. Default
-implementation facets include module role, imports/importers, public API rows,
-blast radius, tests, docs, and memory.
+implementation facets include module role, imports/importers, callees, public
+API rows, blast radius, tests, docs, and memory; `impact` adds callers.
+
+`call_context` projects callers, callees, references, and test_callers from
+run-bound relationship facts. Every edge is tagged `relation_kind` x
+`resolution_status` (the `evidence` tag, for example `resolved_call`).
+Production callers and test-origin callers stay in separate lanes, and a test
+edge never makes production code live. Unresolved calls are emitted as
+observations with `target_qualname: null`. `analysis.call_graph_status` reports
+`complete`, `partial`, or `unavailable`, and the relationship facts are bound
+into `context_artifact_digest`.
 
 ```mermaid
 flowchart LR
