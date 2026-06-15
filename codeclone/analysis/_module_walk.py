@@ -560,6 +560,17 @@ def _first_parameter_name(node: _qualnames.FunctionNode) -> str | None:
     return positional[0].arg if positional else None
 
 
+def _decorator_simple_names(node: _qualnames.FunctionNode) -> frozenset[str]:
+    names: set[str] = set()
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Attribute):
+            names.add(target.attr)
+    return frozenset(names)
+
+
 def _relationship_expression(node: ast.AST) -> str | None:
     try:
         expression = ast.unparse(node)
@@ -583,11 +594,14 @@ def _single_relationship_target(
 def _resolve_relationship_expression(
     node: ast.expr,
     *,
+    module_name: str,
     imports: _RelationshipImportIndex,
     caller_bindings: frozenset[str],
     top_level_function_names: frozenset[str],
     top_level_class_names: frozenset[str],
-    first_parameter_name: str | None,
+    local_method_qualnames: frozenset[str],
+    enclosing_class_local: str | None,
+    receiver_name: str | None,
 ) -> tuple[str | None, str]:
     if isinstance(node, ast.Name):
         import_targets = imports.symbol_bindings.get(node.id)
@@ -600,8 +614,10 @@ def _resolve_relationship_expression(
                 import_targets,
                 resolved_rule="imported_symbol",
             )
+        if node.id in caller_bindings:
+            return None, "unresolved_name"
         if node.id in top_level_function_names:
-            return None, "same_module_deferred"
+            return f"{module_name}:{node.id}", "same_module_function"
         return None, "unresolved_name"
 
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
@@ -619,10 +635,22 @@ def _resolve_relationship_expression(
             if target_module is not None:
                 return f"{target_module}:{node.attr}", rule
             return None, rule
-        if base_name in top_level_class_names:
-            return None, "same_module_deferred"
-        if first_parameter_name is not None and base_name == first_parameter_name:
-            return None, "self_or_cls_deferred"
+        # The receiver parameter (self/cls) is itself a caller binding, so the
+        # self/cls case must precede the generic caller-shadow guard below.
+        if (
+            receiver_name is not None
+            and enclosing_class_local is not None
+            and base_name == receiver_name
+        ):
+            candidate = f"{module_name}:{enclosing_class_local}.{node.attr}"
+            if candidate in local_method_qualnames:
+                return candidate, "self_or_cls_method"
+            return None, "unresolved_dynamic"
+        if base_name in top_level_class_names and base_name not in caller_bindings:
+            candidate = f"{module_name}:{base_name}.{node.attr}"
+            if candidate in local_method_qualnames:
+                return candidate, "same_module_class_method"
+            return None, "unresolved_dynamic"
     return None, "unresolved_dynamic"
 
 
@@ -695,11 +723,28 @@ def _collect_function_relationship_facts(
         for class_qualname, _node in collector.class_nodes
         if "." not in class_qualname
     )
+    local_method_qualnames = frozenset(
+        f"{module_name}:{local_name}"
+        for local_name, _node in collector.units
+        if "." in local_name
+    )
     facts: list[FunctionRelationshipFacts] = []
     for local_name, function_node in collector.units:
         source_qualname = f"{module_name}:{local_name}"
         caller_bindings = _caller_local_bindings(function_node)
-        first_parameter_name = _first_parameter_name(function_node)
+        # The enclosing class of a method is the qualname segment before its own
+        # name; top-level functions have none. The receiver (self/cls) is the
+        # first parameter, but only for non-static methods — a staticmethod's
+        # first parameter is an ordinary value, not a receiver.
+        enclosing_class_local = (
+            local_name.rsplit(".", 1)[0] if "." in local_name else None
+        )
+        receiver_name = (
+            _first_parameter_name(function_node)
+            if enclosing_class_local is not None
+            and "staticmethod" not in _decorator_simple_names(function_node)
+            else None
+        )
         scope_nodes = tuple(_iter_relationship_scope_nodes(function_node.body))
         calls = tuple(node for node in scope_nodes if isinstance(node, ast.Call))
         call_function_node_ids = {
@@ -709,11 +754,14 @@ def _collect_function_relationship_facts(
         for call in calls:
             target_qualname, resolution_rule = _resolve_relationship_expression(
                 call.func,
+                module_name=module_name,
                 imports=imports,
                 caller_bindings=caller_bindings,
                 top_level_function_names=top_level_function_names,
                 top_level_class_names=top_level_class_names,
-                first_parameter_name=first_parameter_name,
+                local_method_qualnames=local_method_qualnames,
+                enclosing_class_local=enclosing_class_local,
+                receiver_name=receiver_name,
             )
             records.append(
                 _relationship_record(
@@ -734,11 +782,14 @@ def _collect_function_relationship_facts(
                 continue
             target_qualname, resolution_rule = _resolve_relationship_expression(
                 node,
+                module_name=module_name,
                 imports=imports,
                 caller_bindings=caller_bindings,
                 top_level_function_names=top_level_function_names,
                 top_level_class_names=top_level_class_names,
-                first_parameter_name=first_parameter_name,
+                local_method_qualnames=local_method_qualnames,
+                enclosing_class_local=enclosing_class_local,
+                receiver_name=receiver_name,
             )
             if target_qualname is not None:
                 records.append(

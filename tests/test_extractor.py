@@ -27,6 +27,7 @@ from codeclone.models import (
     BlockUnit,
     ClassMetrics,
     FileMetrics,
+    FunctionRelationshipFacts,
     ModuleDep,
     RuntimeReachabilityFact,
     SegmentUnit,
@@ -2500,17 +2501,22 @@ def test_relationship_expression_resolution_branches(
         expression: str,
         *,
         caller_bindings: frozenset[str] = frozenset(),
-        first_parameter_name: str | None = None,
+        local_method_qualnames: frozenset[str] = frozenset({"pkg.module:Service.hook"}),
+        enclosing_class_local: str | None = None,
+        receiver_name: str | None = None,
     ) -> tuple[str | None, str]:
         node = ast.parse(expression, mode="eval").body
         assert isinstance(node, ast.expr)
         return module_walk_mod._resolve_relationship_expression(
             node,
+            module_name="pkg.module",
             imports=imports,
             caller_bindings=caller_bindings,
             top_level_function_names=frozenset({"local_function"}),
             top_level_class_names=frozenset({"Service"}),
-            first_parameter_name=first_parameter_name,
+            local_method_qualnames=local_method_qualnames,
+            enclosing_class_local=enclosing_class_local,
+            receiver_name=receiver_name,
         )
 
     assert resolve("handler") == ("pkg.handlers:handler", "imported_symbol")
@@ -2520,7 +2526,15 @@ def test_relationship_expression_resolution_branches(
     )
     assert resolve("shadowed") == (None, "local_shadowing")
     assert resolve("ambiguous") == (None, "ambiguous_import")
-    assert resolve("local_function") == (None, "same_module_deferred")
+    # same-module function (6c): resolved unless caller-shadowed.
+    assert resolve("local_function") == (
+        "pkg.module:local_function",
+        "same_module_function",
+    )
+    assert resolve(
+        "local_function",
+        caller_bindings=frozenset({"local_function"}),
+    ) == (None, "unresolved_name")
     assert resolve("unknown") == (None, "unresolved_name")
     assert resolve("helpers.decorate") == (
         "pkg.helpers:decorate",
@@ -2531,11 +2545,29 @@ def test_relationship_expression_resolution_branches(
         caller_bindings=frozenset({"helpers"}),
     ) == (None, "local_shadowing")
     assert resolve("modules.run") == (None, "ambiguous_import")
-    assert resolve("Service.hook") == (None, "same_module_deferred")
-    assert resolve("receiver.hook", first_parameter_name="receiver") == (
-        None,
-        "self_or_cls_deferred",
+    # same-module class method (6c): resolved only when the method exists and the
+    # class name is not locally shadowed.
+    assert resolve("Service.hook") == (
+        "pkg.module:Service.hook",
+        "same_module_class_method",
     )
+    assert resolve("Service.missing") == (None, "unresolved_dynamic")
+    assert resolve(
+        "Service.hook",
+        caller_bindings=frozenset({"Service"}),
+    ) == (None, "unresolved_dynamic")
+    # self/cls receiver method (6c): resolved against the enclosing class, keyed
+    # on the actual first-parameter name, only when the method exists.
+    assert resolve(
+        "receiver.hook",
+        enclosing_class_local="Service",
+        receiver_name="receiver",
+    ) == ("pkg.module:Service.hook", "self_or_cls_method")
+    assert resolve(
+        "receiver.missing",
+        enclosing_class_local="Service",
+        receiver_name="receiver",
+    ) == (None, "unresolved_dynamic")
     assert resolve("factory().hook") == (None, "unresolved_dynamic")
     assert module_walk_mod._single_relationship_target(
         None,
@@ -2562,7 +2594,25 @@ def test_relationship_expression_resolution_branches(
     assert record.resolution_status == "unresolved"
 
 
-def test_relationship_collection_marks_deferred_and_dynamic_calls() -> None:
+def _function_relationship_facts_for(
+    source: str, source_qualname: str
+) -> FunctionRelationshipFacts:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    return next(
+        facts
+        for facts in file_metrics.function_relationship_facts
+        if facts.source_qualname == source_qualname
+    )
+
+
+def test_relationship_collection_resolves_intra_module_and_self() -> None:
     source = """
 def local_function():
     return 1
@@ -2577,26 +2627,85 @@ class Service:
         receiver.hook()
         factory().hook()
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
-        source=source,
-        filepath="pkg/module.py",
-        module_name="pkg.module",
-        cfg=NormalizationConfig(),
-        min_loc=1,
-        min_stmt=1,
+    caller = _function_relationship_facts_for(source, "pkg.module:Service.caller")
+    resolved = {
+        record.resolution_rule: record.target_qualname
+        for record in caller.relationships
+        if record.relation_kind == "call" and record.resolution_status == "resolved"
+    }
+    # receiver.hook() resolves on the actual first-parameter name (not a hardcoded
+    # "self"); Service.hook() and receiver.hook() reach the same method via
+    # different rules.
+    assert resolved == {
+        "same_module_function": "pkg.module:local_function",
+        "same_module_class_method": "pkg.module:Service.hook",
+        "self_or_cls_method": "pkg.module:Service.hook",
+    }
+    assert any(
+        record.resolution_rule == "unresolved_dynamic"
+        and record.resolution_status == "unresolved"
+        for record in caller.relationships
     )
 
-    caller = next(
-        facts
-        for facts in file_metrics.function_relationship_facts
-        if facts.source_qualname == "pkg.module:Service.caller"
+
+@pytest.mark.parametrize(
+    ("source", "source_qualname"),
+    [
+        pytest.param(
+            """
+class Service:
+    def hook(self):
+        return 1
+
+    @staticmethod
+    def build(item):
+        return item.hook()
+""",
+            "pkg.module:Service.build",
+            id="staticmethod_first_param",
+        ),
+        pytest.param(
+            """
+class Service:
+    def hook(self):
+        return 1
+
+def helper(self):
+    return self.hook()
+""",
+            "pkg.module:helper",
+            id="top_level_self_param",
+        ),
+    ],
+)
+def test_relationship_non_receiver_first_parameter_stays_unresolved(
+    source: str, source_qualname: str
+) -> None:
+    # A staticmethod's first parameter and a top-level function's parameter named
+    # self are ordinary values, not receivers — self/cls resolution must not fire
+    # even though a Service.hook method exists.
+    facts = _function_relationship_facts_for(source, source_qualname)
+    assert all(
+        record.resolution_status == "unresolved" for record in facts.relationships
     )
-    rules = {record.resolution_rule for record in caller.relationships}
-    assert {
-        "same_module_deferred",
-        "self_or_cls_deferred",
-        "unresolved_dynamic",
-    } <= rules
+
+
+def test_relationship_classmethod_receiver_resolves_to_same_class() -> None:
+    source = """
+class Service:
+    def hook(self):
+        return 1
+
+    @classmethod
+    def make(cls):
+        return cls.hook()
+"""
+    make = _function_relationship_facts_for(source, "pkg.module:Service.make")
+    assert any(
+        record.target_qualname == "pkg.module:Service.hook"
+        and record.resolution_rule == "self_or_cls_method"
+        for record in make.relationships
+    )
 
 
 def test_test_relationship_lane_does_not_feed_flat_reachability() -> None:
