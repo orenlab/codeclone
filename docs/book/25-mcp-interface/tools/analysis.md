@@ -99,11 +99,11 @@ cannot hide safety context. If safety entries alone exceed that cap, the
 response uses `status="safety_context_overflow"` and reports the omitted count.
 
 Symbol lookup uses an off-report, in-memory index built from analyzed function
-units and public API rows. `subject.resolved_symbols` reports exact file and line
-locations; `subject.unresolved_symbols` reports unknown qualnames without
-guessing. A symbol-only query that resolves nothing returns
-`status="subject_not_found"`. This index contributes to
-`context_artifact_digest` but never changes the canonical report digest.
-
-Call/reference relationships are an additive Phase 30 slice. Until that owning
-slice lands, they are reported unavailable rather than fabricated.
+units and public API rows. Pass `module:symbol` qualnames with a colon separator
+(for example `pkg.mod:func`); dot notation is not accepted. Symbol-scoped
+`call_context` edges are limited to the resolved symbols, not every function in
+the same file. `subject.resolved_symbols` reports exact file and line locations;
+`subject.unresolved_symbols` reports unknown qualnames without guessing. A
+symbol-only query that resolves nothing returns `status="subject_not_found"`.
+This index contributes to `context_artifact_digest` but never changes the
+canonical report digest.

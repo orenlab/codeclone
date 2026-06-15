@@ -21,6 +21,7 @@ from ._implementation_context import (
     DEFAULT_IMPACT_FACETS,
     DEFAULT_IMPLEMENTATION_FACETS,
     MAX_CONTEXT_TOTAL_ITEMS,
+    MEMORY_BACKED_FACETS,
     build_implementation_context,
     resolve_context_symbols,
 )
@@ -162,7 +163,7 @@ class _MCPSessionContextMixin:
         else:
             blast_payload = {}
         memory_result = None
-        if {"docs", "memory"}.intersection(normalized_include):
+        if MEMORY_BACKED_FACETS.intersection(normalized_include):
             memory_result = session.get_relevant_memory(
                 root=str(root_path),
                 scope=subject.paths or None,

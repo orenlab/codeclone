@@ -61,6 +61,17 @@ DEFAULT_CONTRACT_FACETS: Final[tuple[Facet, ...]] = (
     "docs",
     "memory",
 )
+MEMORY_BACKED_FACETS: Final[frozenset[Facet]] = frozenset(
+    {
+        "docs",
+        "memory",
+        "trajectories",
+        "experiences",
+        "tests",
+        "contract_tests",
+        "memory_conflicts",
+    }
+)
 IMPLEMENTED_CONTEXT_FACETS: Final[frozenset[Facet]] = frozenset(
     {
         *DEFAULT_IMPLEMENTATION_FACETS,
@@ -69,6 +80,8 @@ IMPLEMENTED_CONTEXT_FACETS: Final[frozenset[Facet]] = frozenset(
         "references",
         "test_callers",
         "scope",
+        "trajectories",
+        "experiences",
     }
 )
 _CONTRACT_PATH_FACET_ROLES: Final[Mapping[Facet, str]] = {
@@ -151,17 +164,31 @@ def _relationship_indexes(
     return by_source, by_target
 
 
+def _repo_relative(path: str, root: Path) -> str:
+    """Render a relationship-fact path repo-relative so call_context rows and the
+    artifact digest stay machine-independent (relationship facts carry the
+    absolute analysis filepath; the rest of the tool is repo-relative)."""
+    candidate = Path(path)
+    if not candidate.is_absolute():
+        return path
+    try:
+        return candidate.relative_to(root).as_posix()
+    except ValueError:
+        return path
+
+
 def _relationship_row(
     relation: RelationshipRecord,
     *,
     keyed_on_source: bool,
+    root: Path,
 ) -> dict[str, object]:
     row: dict[str, object] = {
         "relation_kind": relation.relation_kind,
         "resolution_status": relation.resolution_status,
         "origin_lane": relation.origin_lane,
         "evidence": f"{relation.resolution_status}_{relation.relation_kind}",
-        "path": relation.path,
+        "path": _repo_relative(relation.path, root),
         "line": relation.line,
     }
     if keyed_on_source:
@@ -182,6 +209,7 @@ def _collect_relationship_rows(
     relation_kind: str | None,
     resolution_status: str,
     origin_lane: str | None,
+    root: Path,
 ) -> list[dict[str, object]]:
     rows: dict[tuple[str, str, int], dict[str, object]] = {}
     for qualname in subject_qualnames:
@@ -200,7 +228,7 @@ def _collect_relationship_rows(
             )
             rows.setdefault(
                 (counterpart, relation.path, relation.line),
-                _relationship_row(relation, keyed_on_source=keyed_on_source),
+                _relationship_row(relation, keyed_on_source=keyed_on_source, root=root),
             )
     return [rows[key] for key in sorted(rows)]
 
@@ -241,6 +269,7 @@ def _project_call_context(
                 relation_kind=relation_kind,
                 resolution_status=status,
                 origin_lane=lane,
+                root=record.root,
             ),
             budget=budget,
         )
@@ -252,10 +281,16 @@ def _subject_qualnames(
     *,
     paths: Sequence[str],
     resolved_symbols: Sequence[Mapping[str, object]],
+    resolved_from: str,
 ) -> frozenset[str]:
     qualnames: set[str] = {
         str(item["qualname"]) for item in resolved_symbols if item.get("qualname")
     }
+    # An explicit-symbol subject is the named symbols themselves; the symbol's
+    # file is recorded for file-level structural facts but must NOT pull every
+    # file-mate's call edges into a function-level call_context.
+    if resolved_from == "explicit_symbols":
+        return frozenset(qualnames)
     path_set = frozenset(paths)
     for row in _unit_location_index(record):
         if str(row["path"]) in path_set:
@@ -277,7 +312,7 @@ def _relationship_digest_records(record: MCPRunRecord) -> list[dict[str, object]
             "origin_lane": relation.origin_lane,
             "source_qualname": relation.source_qualname,
             "target_qualname": relation.target_qualname,
-            "path": relation.path,
+            "path": _repo_relative(relation.path, record.root),
             "line": relation.line,
             "resolution_rule": relation.resolution_rule,
         }
@@ -376,6 +411,7 @@ def _project_contracts(
                     relation_kind="call",
                     resolution_status="resolved",
                     origin_lane="production",
+                    root=record.root,
                 ),
                 budget=budget,
             )
@@ -545,6 +581,7 @@ def build_implementation_context(
         record,
         paths=normalized_paths,
         resolved_symbols=normalized_resolved_symbols,
+        resolved_from=subject_resolved_from,
     )
     call_context = _project_call_context(
         record=record,
@@ -990,12 +1027,14 @@ def _implementation_evidence(
     }
     if "memory" in include:
         _attach_bounded(payload, key="memory", items=general_records, budget=budget)
+    if {"memory", "trajectories"}.intersection(include):
         _attach_bounded(
             payload,
             key="trajectories",
             items=_mapping_rows(memory_result.get("trajectories")),
             budget=budget,
         )
+    if {"memory", "experiences"}.intersection(include):
         _attach_bounded(
             payload,
             key="experiences",

@@ -38,6 +38,8 @@ Facet = Literal[
     "test_callers",
     "docs",
     "memory",
+    "trajectories",
+    "experiences",
     "memory_conflicts",
     "definition_sites",
     "persistence_path_callers",
@@ -57,7 +59,12 @@ ContextPathsParam = Annotated[
 ]
 ContextSymbolsParam = Annotated[
     list[str] | None,
-    Field(description="Fully-qualified symbols to resolve as context subjects."),
+    Field(
+        description=(
+            "module:symbol qualnames to resolve as context subjects "
+            "(colon separator, for example pkg.mod:func)."
+        ),
+    ),
 ]
 ChangedScopeParam = Annotated[
     bool,

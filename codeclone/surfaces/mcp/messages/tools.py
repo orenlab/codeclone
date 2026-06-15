@@ -45,9 +45,10 @@ GET_BLAST_RADIUS: Final = (
 
 GET_IMPLEMENTATION_CONTEXT: Final = (
     "Return deterministic, bounded implementation context from one existing "
-    "analysis run. Step 2 resolves explicit repo-relative paths and projects "
-    "established module, dependency, API-surface, blast-radius, cache-origin, "
-    "and workspace-freshness facts without re-analysis or edit authorization."
+    "analysis run. Resolves explicit repo-relative paths and module:symbol "
+    "qualnames, then projects module, dependency, API-surface, call/reference, "
+    "blast-radius, cache-origin, and workspace-freshness facts without "
+    "re-analysis or edit authorization."
 )
 
 GET_RELEVANT_MEMORY: Final = (

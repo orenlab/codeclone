@@ -538,9 +538,11 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "cache-origin, and workspace-freshness facts."
             ),
             (
-                "Symbol subjects resolve against a deterministic off-report "
-                "Unit plus API-surface location index. Unknown qualnames are "
-                "reported in subject.unresolved_symbols and are never guessed."
+                "Symbol subjects use module:symbol qualnames (colon separator, "
+                "for example pkg.mod:func). They resolve against a deterministic "
+                "off-report Unit plus API-surface location index. Dot notation is "
+                "not accepted. Unknown qualnames are reported in "
+                "subject.unresolved_symbols and are never guessed."
             ),
             (
                 "Subject precedence is explicit paths/symbols, then active "
