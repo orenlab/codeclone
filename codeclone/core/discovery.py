@@ -7,16 +7,22 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from ..cache.store import Cache, file_stat_signature
 from ..models import (
     ClassMetrics,
     DeadCandidate,
+    FunctionRelationshipFacts,
     GroupItem,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    RelationshipKind,
+    RelationshipOriginLane,
+    RelationshipRecord,
+    RelationshipResolutionStatus,
     RuntimeReachabilityFact,
     SecuritySurface,
     StructuralFindingGroup,
@@ -39,6 +45,47 @@ from .discovery_cache import (
     load_cached_metrics_extended as _load_cached_metrics_extended,
 )
 from .discovery_cache import usable_cached_source_stats as _usable_cached_source_stats
+
+
+def _decode_cached_function_relationship_facts(
+    rows: Sequence[Mapping[str, object]],
+) -> list[FunctionRelationshipFacts]:
+    """Reconstruct typed relationship facts from a trusted cache entry.
+
+    Kept local to discovery (not in the shared cached-metrics decoder) so the
+    canonical ``load_cached_metrics_extended`` path stays byte-identical. The
+    cache is already integrity-validated on store, so this is a lean rehydration.
+    """
+    facts: list[FunctionRelationshipFacts] = []
+    for row in rows:
+        relationships = row.get("relationships")
+        source_qualname = row.get("source_qualname")
+        if not isinstance(relationships, list) or not isinstance(source_qualname, str):
+            continue
+        records = tuple(
+            RelationshipRecord(
+                relation_kind=cast(RelationshipKind, record["relation_kind"]),
+                resolution_status=cast(
+                    RelationshipResolutionStatus, record["resolution_status"]
+                ),
+                origin_lane=cast(RelationshipOriginLane, record["origin_lane"]),
+                source_qualname=str(record["source_qualname"]),
+                target_qualname=cast("str | None", record["target_qualname"]),
+                path=str(record["path"]),
+                line=cast(int, record["line"]),
+                expression=cast("str | None", record["expression"]),
+                resolution_rule=cast("str | None", record["resolution_rule"]),
+            )
+            for record in relationships
+            if isinstance(record, Mapping)
+        )
+        facts.append(
+            FunctionRelationshipFacts(
+                source_qualname=source_qualname, relationships=records
+            )
+        )
+    return facts
+
 
 DiscoveryBuffers = tuple[
     list[GroupItem],
@@ -94,11 +141,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         skipped_warnings,
     ) = _new_discovery_buffers()
     cached_sf: list[StructuralFindingGroup] = []
+    cached_relationship_facts: list[FunctionRelationshipFacts] = []
     cached_source_stats_by_file: list[tuple[str, int, int, int, int]] = []
-    cached_lines = 0
-    cached_functions = 0
-    cached_methods = 0
-    cached_classes = 0
+    cached_lines = cached_functions = cached_methods = cached_classes = 0
     all_file_paths: list[str] = []
 
     for filepath in iter_py_files(str(boot.root)):
@@ -163,6 +208,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     _decode_cached_structural_finding_group(group_dict, filepath)
                     for group_dict in cached.get("structural_findings") or []
                 )
+            cached_relationship_facts.extend(
+                _decode_cached_function_relationship_facts(
+                    cached.get("function_relationship_facts") or []
+                )
+            )
             continue
         files_to_process.append(filepath)
 
@@ -228,6 +278,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         files_to_process=tuple(files_to_process),
         skipped_warnings=tuple(sorted(skipped_warnings)),
         cached_structural_findings=tuple(cached_sf),
+        cached_function_relationship_facts=tuple(
+            sorted(cached_relationship_facts, key=lambda facts: facts.source_qualname)
+        ),
         cached_segment_report_projection=cached_segment_projection,
         cached_lines=cached_lines,
         cached_functions=cached_functions,

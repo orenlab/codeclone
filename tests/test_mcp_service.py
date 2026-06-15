@@ -985,6 +985,27 @@ def _write_context_module(root: Path, relative_path: str, source: str) -> None:
     target.write_text(source, "utf-8")
 
 
+def _analyze_context_run(
+    tmp_path: Path,
+    *,
+    relative_path: str,
+    source: str,
+    history_limit: int = 2,
+) -> tuple[CodeCloneMCPService, dict[str, object]]:
+    _write_context_module(tmp_path, relative_path, source)
+    service = CodeCloneMCPService(history_limit=history_limit)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            min_loc=1,
+            min_stmt=1,
+        )
+    )
+    return service, summary
+
+
 def test_mcp_service_get_implementation_context_projects_path_facts(
     tmp_path: Path,
 ) -> None:
@@ -1114,26 +1135,16 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
 def test_mcp_service_get_implementation_context_resolves_symbols(
     tmp_path: Path,
 ) -> None:
-    _write_context_module(
+    service, summary = _analyze_context_run(
         tmp_path,
-        "pkg/internal.py",
-        (
+        relative_path="pkg/internal.py",
+        source=(
             "def _private_impl(value: int) -> int:\n"
             "    total = value + 1\n"
             "    total += 2\n"
             "    total += 3\n"
             "    return total\n"
         ),
-    )
-    service = CodeCloneMCPService(history_limit=2)
-    summary = service.analyze_repository(
-        MCPAnalysisRequest(
-            root=str(tmp_path),
-            respect_pyproject=False,
-            cache_policy="off",
-            min_loc=1,
-            min_stmt=1,
-        )
     )
     record = service._runs.get(str(summary["run_id"]))
 
@@ -1175,6 +1186,47 @@ def test_mcp_service_get_implementation_context_resolves_symbols(
     missing_subject = cast("dict[str, object]", missing["subject"])
     assert missing_subject["resolved_symbols"] == []
     assert missing_subject["unresolved_symbols"] == ["pkg.internal:missing"]
+
+
+def test_mcp_service_run_record_aggregates_relationship_facts(
+    tmp_path: Path,
+) -> None:
+    # Step 7a: per-file relationship facts aggregate across files onto the MCP run
+    # record (off-report). A resolved intra-module call must appear, attributed to
+    # its caller.
+    service, summary = _analyze_context_run(
+        tmp_path,
+        relative_path="pkg/svc.py",
+        source=(
+            "def helper(value: int) -> int:\n"
+            "    return value + 1\n"
+            "\n"
+            "\n"
+            "def caller(value: int) -> int:\n"
+            "    return helper(value)\n"
+        ),
+    )
+    record = service._runs.get(str(summary["run_id"]))
+
+    edges = {
+        (
+            facts.source_qualname,
+            record_item.relation_kind,
+            record_item.target_qualname,
+            record_item.resolution_rule,
+        )
+        for facts in record.relationship_facts
+        for record_item in facts.relationships
+    }
+    assert (
+        "pkg.svc:caller",
+        "call",
+        "pkg.svc:helper",
+        "same_module_function",
+    ) in edges
+    # Deterministic order on the aggregated run-record facts.
+    sources = [facts.source_qualname for facts in record.relationship_facts]
+    assert sources == sorted(sources)
 
 
 def test_mcp_service_get_implementation_context_status_and_errors(

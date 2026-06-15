@@ -93,7 +93,13 @@ from ...findings.ids import (
     design_group_id,
     structural_group_id,
 )
-from ...models import CoverageJoinResult, MetricsDiff, ProjectMetrics, Suggestion
+from ...models import (
+    CoverageJoinResult,
+    FunctionRelationshipFacts,
+    MetricsDiff,
+    ProjectMetrics,
+    Suggestion,
+)
 from ...report.gates.evaluator import GateResult as GatingResult
 from ...report.gates.evaluator import MetricGateConfig
 from ...report.gates.evaluator import evaluate_gates as _evaluate_report_gates
@@ -644,6 +650,7 @@ class MCPRunRecord:
     manifest: Mapping[str, FileStat] | None = None
     dirty_snapshot: DirtySnapshot | None = None
     unit_inventory: tuple[MCPUnitLocation, ...] = ()
+    relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
 
 
 class CodeCloneMCPRunStore:

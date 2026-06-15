@@ -38,6 +38,8 @@ Added
   methods now resolve against the enclosing module and class (keyed on the
   actual first-parameter name, never a hardcoded self, and never for
   staticmethods), only when the target definition exists; cache schema 2.10.
+  Per-function relationship facts now aggregate across files (cold and cached)
+  onto the analysis result and the MCP run record, off the canonical report.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and

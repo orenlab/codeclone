@@ -90,6 +90,7 @@ from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
+from codeclone.core.discovery import _decode_cached_function_relationship_facts
 from codeclone.models import (
     ApiParamSpec,
     BlockUnit,
@@ -274,6 +275,22 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
             ],
         }
     ]
+
+    # Step 7a: discovery rehydrates the stored dicts back into typed models for
+    # cross-file aggregation. Round-trip must be faithful (storage sort order).
+    decoded = _decode_cached_function_relationship_facts(
+        entry["function_relationship_facts"]
+    )
+    assert len(decoded) == 1
+    assert decoded[0].source_qualname == "pkg.module:source"
+    assert tuple(
+        (record.relation_kind, record.target_qualname, record.resolution_rule)
+        for record in decoded[0].relationships
+    ) == (
+        ("call", None, "dynamic_call"),
+        ("reference", "pkg.target:handler", "cross_module_import"),
+    )
+    assert decoded[0].relationships[0].origin_lane == "test"
 
 
 def test_cache_derives_function_relationship_facts_from_file_metrics(

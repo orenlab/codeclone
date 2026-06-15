@@ -468,6 +468,7 @@ class MCPSession(
             manifest=run_manifest,
             dirty_snapshot=run_dirty_snapshot,
             unit_inventory=unit_inventory,
+            relationship_facts=processing_result.function_relationship_facts,
         )
         changed_projection = self._build_changed_projection(provisional_record)
         summary = self._augment_summary_with_changed(
@@ -500,6 +501,7 @@ class MCPSession(
             manifest=run_manifest,
             dirty_snapshot=run_dirty_snapshot,
             unit_inventory=unit_inventory,
+            relationship_facts=processing_result.function_relationship_facts,
         )
         self._runs.register(record)
         self._emit_analysis_completed_audit(
