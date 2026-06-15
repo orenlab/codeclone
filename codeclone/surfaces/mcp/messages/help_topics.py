@@ -558,6 +558,14 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "trajectories, and Experiences stay in separate evidence lanes."
             ),
             (
+                "mode=contract returns a truth-map: definition_sites, "
+                "version_constants, contract_tests, and memory_conflicts. "
+                "Persistence and serialization path callers are emitted only with "
+                "a typed or memory-backed anchor; without one they are marked "
+                "not_available rather than guessed from names or directories, and "
+                "true field readers/writers stay deferred to dataflow."
+            ),
+            (
                 "analysis.freshness compares the run manifest with live "
                 "mtime+size and, when available, the git DirtySnapshot delta."
             ),

@@ -45,6 +45,10 @@ Added
   resolution_status evidence tags, separate production and test caller lanes,
   unresolved call observations, and a complete/partial/unavailable
   call_graph_status; relationship records are bound into context_artifact_digest.
+  contract mode returns a truth-map (definition_sites, version_constants,
+  contract_tests, memory_conflicts) and persistence/serialization path callers
+  that are emitted only with a typed or memory-backed anchor and are otherwise
+  not_available rather than name- or directory-guessed.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and

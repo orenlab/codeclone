@@ -47,15 +47,36 @@ DEFAULT_IMPACT_FACETS: Final[tuple[Facet, ...]] = (
     "review_context",
     "memory",
 )
+DEFAULT_CONTRACT_FACETS: Final[tuple[Facet, ...]] = (
+    "definition_sites",
+    "version_constants",
+    "contract_tests",
+    "public_surface",
+    "callers",
+    "persistence_path_callers",
+    "serialization_path_callers",
+    "deserialization_path_callers",
+    "store_api_consumers",
+    "memory_conflicts",
+    "docs",
+    "memory",
+)
 IMPLEMENTED_CONTEXT_FACETS: Final[frozenset[Facet]] = frozenset(
     {
         *DEFAULT_IMPLEMENTATION_FACETS,
         *DEFAULT_IMPACT_FACETS,
+        *DEFAULT_CONTRACT_FACETS,
         "references",
         "test_callers",
         "scope",
     }
 )
+_CONTRACT_PATH_FACET_ROLES: Final[Mapping[Facet, str]] = {
+    "persistence_path_callers": "persistence",
+    "serialization_path_callers": "serialization",
+    "deserialization_path_callers": "deserialization",
+    "store_api_consumers": "store",
+}
 
 
 @dataclass(slots=True)
@@ -290,6 +311,83 @@ def _context_uncertainties(call_graph_status: str) -> list[str]:
     return notes
 
 
+def _contract_path_role(records: Sequence[Mapping[str, object]]) -> str | None:
+    """D18 anchor: a deterministic contract role for the subject, or None.
+
+    Priority is a typed contract registry, then a known protocol/interface
+    symbol, then an Engineering Memory module_role/contract_note — never a name
+    or directory heuristic. Phase 30 wires only the memory anchor: a module_role
+    record whose role_kind is a contract role (not the inventory_module default).
+    """
+    for row in records:
+        if row.get("type") != "module_role":
+            continue
+        role_kind = str(_as_mapping(row.get("payload")).get("role_kind", "")).strip()
+        if role_kind and role_kind != "inventory_module":
+            return role_kind
+    return None
+
+
+def _project_contracts(
+    *,
+    record: MCPRunRecord,
+    subject_paths: Sequence[str],
+    subject_qualnames: frozenset[str],
+    memory_result: Mapping[str, object] | None,
+    include_set: frozenset[Facet],
+    budget: _EntryBudget,
+) -> dict[str, object]:
+    """Project the contract truth-map: where the shape is defined, its pinned
+    contract tests and version constants, memory conflicts, and D18-gated
+    persistence/serialization path callers. Path-specific caller facets are
+    emitted only with a typed or memory-backed anchor; otherwise they are marked
+    not_available rather than name/dir-guessed (D13/D18)."""
+    contracts: dict[str, object] = {}
+    surface = _public_surface_rows(
+        record, paths=frozenset(subject_paths), detail_level="normal"
+    )
+    records = _mapping_rows((memory_result or {}).get("records"))
+    facet_items: dict[Facet, list[dict[str, object]]] = {
+        "definition_sites": [
+            row for row in surface if row["symbol_kind"] in {"class", "constant"}
+        ],
+        "version_constants": [
+            row for row in surface if row["symbol_kind"] == "constant"
+        ],
+        "contract_tests": [row for row in records if row.get("type") == "test_anchor"],
+        "memory_conflicts": [row for row in records if row.get("contradiction_note")],
+    }
+    for facet, items in facet_items.items():
+        if facet in include_set:
+            _attach_bounded(contracts, key=facet, items=items, budget=budget)
+    role = _contract_path_role(records)
+    _, by_target = _relationship_indexes(record)
+    for facet, facet_role in _CONTRACT_PATH_FACET_ROLES.items():
+        if facet not in include_set:
+            continue
+        if role == facet_role:
+            _attach_bounded(
+                contracts,
+                key=facet,
+                items=_collect_relationship_rows(
+                    by_target,
+                    subject_qualnames,
+                    keyed_on_source=True,
+                    relation_kind="call",
+                    resolution_status="resolved",
+                    origin_lane="production",
+                ),
+                budget=budget,
+            )
+        else:
+            contracts[facet] = {
+                "status": "not_available",
+                "reason": "no_typed_or_memory_anchor",
+                "tier": "resolvable",
+            }
+    return contracts
+
+
 def build_implementation_context(
     *,
     record: MCPRunRecord,
@@ -454,6 +552,14 @@ def build_implementation_context(
         include_set=include_set,
         budget=entry_budget,
     )
+    contracts = _project_contracts(
+        record=record,
+        subject_paths=normalized_paths,
+        subject_qualnames=subject_qualnames,
+        memory_result=memory_result,
+        include_set=include_set,
+        budget=entry_budget,
+    )
 
     analysis = {
         "run_id": record.run_id,
@@ -509,6 +615,8 @@ def build_implementation_context(
         )
     if call_context:
         payload["call_context"] = call_context
+    if contracts:
+        payload["contracts"] = contracts
     if projected_change_control is not None:
         payload["change_control"] = projected_change_control
     if unavailable_facets:

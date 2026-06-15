@@ -32,10 +32,20 @@ an intent it uses the bounded live git-dirty set. A clean tree returns
 select the dirty set explicitly; combining it with explicit paths or symbols is
 a contract error.
 
-Use `mode="implementation"` for editing orientation or `mode="impact"` for
-transitive dependency context and baseline-sensitive findings. Default
+Use `mode="implementation"` for editing orientation, `mode="impact"` for
+transitive dependency context and baseline-sensitive findings, or
+`mode="contract"` for the truth-map of where a shape is fixed. Default
 implementation facets include module role, imports/importers, callees, public
 API rows, blast radius, tests, docs, and memory; `impact` adds callers.
+
+`contract` mode returns a `contracts` block: `definition_sites` and
+`version_constants` (the classes and constants that define the shape),
+`contract_tests`, and `memory_conflicts`. Path-specific caller facets
+(`persistence_path_callers`, `serialization_path_callers`,
+`deserialization_path_callers`, `store_api_consumers`) are emitted only with a
+typed contract-registry, protocol, or Engineering Memory anchor; without one
+they report `status: "not_available"` rather than being guessed from names or
+directories. True field readers and writers remain a deferred `dataflow` tier.
 
 `call_context` projects callers, callees, references, and test_callers from
 run-bound relationship facts. Every edge is tagged `relation_kind` x

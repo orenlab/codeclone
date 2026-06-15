@@ -17,6 +17,7 @@ from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
 from ._implementation_context import (
+    DEFAULT_CONTRACT_FACETS,
     DEFAULT_IMPACT_FACETS,
     DEFAULT_IMPLEMENTATION_FACETS,
     MAX_CONTEXT_TOTAL_ITEMS,
@@ -37,6 +38,11 @@ _VALID_CONTEXT_MODES = frozenset({"implementation", "impact", "contract"})
 _VALID_CONTEXT_DETAIL_LEVELS = frozenset({"compact", "normal", "full"})
 _MAX_CONTEXT_BUDGET = MAX_CONTEXT_TOTAL_ITEMS
 _MAX_CONTEXT_DEPTH = 3
+_DEFAULT_FACETS_BY_MODE: dict[str, tuple[Facet, ...]] = {
+    "implementation": DEFAULT_IMPLEMENTATION_FACETS,
+    "impact": DEFAULT_IMPACT_FACETS,
+    "contract": DEFAULT_CONTRACT_FACETS,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,10 +274,6 @@ class _MCPSessionContextMixin:
             raise MCPServiceContractError(
                 f"Invalid context {field_name} {value!r}. Expected one of: {expected}."
             )
-        if mode == "contract":
-            raise MCPServiceContractError(
-                f"Context mode {mode!r} is not available until its owning phase."
-            )
         if isinstance(depth, bool) or not 0 <= depth <= _MAX_CONTEXT_DEPTH:
             raise MCPServiceContractError(
                 f"Context depth must be between 0 and {_MAX_CONTEXT_DEPTH}."
@@ -294,11 +296,7 @@ class _MCPSessionContextMixin:
         has_intent: bool,
     ) -> tuple[Facet, ...]:
         if include is None:
-            defaults = (
-                DEFAULT_IMPACT_FACETS
-                if mode == "impact"
-                else DEFAULT_IMPLEMENTATION_FACETS
-            )
+            defaults = _DEFAULT_FACETS_BY_MODE.get(mode, DEFAULT_IMPLEMENTATION_FACETS)
             if has_intent:
                 return (*defaults, "scope")
             return defaults

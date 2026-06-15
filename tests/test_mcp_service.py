@@ -991,6 +991,7 @@ def _analyze_context_run(
     relative_path: str,
     source: str,
     history_limit: int = 2,
+    api_surface: bool | None = None,
 ) -> tuple[CodeCloneMCPService, dict[str, object]]:
     _write_context_module(tmp_path, relative_path, source)
     service = CodeCloneMCPService(history_limit=history_limit)
@@ -1001,6 +1002,7 @@ def _analyze_context_run(
             cache_policy="off",
             min_loc=1,
             min_stmt=1,
+            api_surface=api_surface,
         )
     )
     return service, summary
@@ -1298,6 +1300,48 @@ def test_mcp_service_get_implementation_context_projects_call_context(
 
     analysis = cast("dict[str, object]", callers_ctx["analysis"])
     assert analysis["call_graph_status"] == "complete"
+
+
+def test_mcp_service_get_implementation_context_contract_mode(tmp_path: Path) -> None:
+    # Step 7c: contract mode projects the truth-map (definition_sites,
+    # version_constants) and D18-gated persistence path callers.
+    service, summary = _analyze_context_run(
+        tmp_path,
+        relative_path="pkg/schema.py",
+        api_surface=True,
+        source=(
+            'SCHEMA_VERSION = "1"\n'
+            "\n"
+            "\n"
+            "class Record:\n"
+            "    def to_dict(self) -> dict:\n"
+            "        return {}\n"
+        ),
+    )
+    context = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/schema.py"],
+        mode="contract",
+        run_id=str(summary["run_id"]),
+    )
+    assert context["status"] == "ok"
+    assert context["mode"] == "contract"
+    contracts = cast("dict[str, object]", context["contracts"])
+    definition_qualnames = {
+        row["qualname"]
+        for row in cast("list[dict[str, object]]", contracts["definition_sites"])
+    }
+    version_qualnames = {
+        row["qualname"]
+        for row in cast("list[dict[str, object]]", contracts["version_constants"])
+    }
+    assert "pkg.schema:SCHEMA_VERSION" in definition_qualnames
+    assert "pkg.schema:SCHEMA_VERSION" in version_qualnames
+    # D18: no typed/memory anchor, so path-specific callers are honestly unavailable
+    # rather than guessed from a name or directory.
+    persistence = cast("dict[str, object]", contracts["persistence_path_callers"])
+    assert persistence["status"] == "not_available"
+    assert persistence["reason"] == "no_typed_or_memory_anchor"
 
 
 def test_mcp_service_get_implementation_context_status_and_errors(
