@@ -21,10 +21,11 @@ auto-suppress. Pass absolute `root` to analysis tools.
 
 ## Tool tiers
 
-| Tier               | Tools                                                                                                     | Role                             |
-|--------------------|-----------------------------------------------------------------------------------------------------------|----------------------------------|
-| **Normal**         | `analyze_repository`, `start_controlled_change`, `get_implementation_context`, `finish_controlled_change` | Every edit cycle — use these     |
-| **Queue/recovery** | `manage_change_intent` (promote, recover, renew, reset)                                                   | Multi-agent wait, crash recovery |
+| Tier               | Tools                                                                                                                                 | Role                             |
+|--------------------|---------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
+| **Normal**         | `analyze_repository`, `start_controlled_change`, `get_relevant_memory`, `get_implementation_context`, `finish_controlled_change`       | Every edit cycle — use these     |
+| **Memory writes**  | `manage_engineering_memory` (`record_candidate`, `validate_claims`, `propose_memory` via finish)                                      | Draft notes before finish        |
+| **Queue/recovery** | `manage_change_intent` (promote, recover, renew, clear, list_workspace, gc_workspace, reset_workspace)                                | Multi-agent wait, crash recovery |
 | **Advanced**       | `get_blast_radius`, `check_patch_contract`, `validate_review_claims`, `create_review_receipt`             | Debugging or legacy servers only |
 
 Workflow tools orchestrate the same steps as atomic tools. They **never run
@@ -38,8 +39,8 @@ One edit cycle:
 ```
 1. analyze_repository(root=abs)           # before-run; skip if valid recent run
 2. start_controlled_change(...)           # see decision table — before first edit
-3. get_relevant_memory(root=abs, scope=... or intent_id=...)  # root required
-4. get_implementation_context(root=abs, paths=..., intent_id=..., run_id=...)  # see codeclone-implementation-context skill
+3. get_relevant_memory(root=abs, scope=... or intent_id=... or symbols=...)  # root required
+4. get_implementation_context(root=abs, paths=..., intent_id=...)  # see codeclone-implementation-context skill
 5. edit inside declared scope only
 6. analyze_repository(root=abs)           # after-run ONLY if finish will require it
 7. record engineering memory (MCP)        # REQUIRED before finish if §Incident memory
@@ -47,8 +48,9 @@ One edit cycle:
    # optional: propose_memory=true on accept for draft memory candidates
 ```
 
-Keep `run_id`, `intent_id`, and the before-run from step 1 through the cycle.
-Intent binds to the **before-run digest** — do not redeclare on the after-run.
+Keep `intent_id` and the before-run from step 1 through the cycle. With
+`intent_id`, the before-run is pinned automatically — `run_id` is optional and
+must match the intent-bound run if supplied.
 
 ### Engineering Memory (step 3)
 
@@ -60,8 +62,8 @@ auto-bootstraps when the store is missing and a session run exists; explicit
 
 | Need                                          | Tool                                                                                                                |
 |-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| Ranked scope context                          | `get_relevant_memory(root=abs, scope=… \| intent_id=…)`                                                             |
-| Bounded structural + call + contract evidence | `get_implementation_context(root=abs, paths=…, intent_id=…, run_id=…)` — `codeclone-implementation-context` skill   |
+| Ranked scope context                          | `get_relevant_memory(root=abs, scope=… \| intent_id=… \| symbols=…)`                                                |
+| Bounded structural + call + contract evidence | `get_implementation_context(root=abs, paths=…, intent_id=…)` — `codeclone-implementation-context` skill |
 | One path                                      | `query_engineering_memory(mode=for_path, path=…)`                                                                   |
 | Keyword search                                | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})`; optional `semantic=true` when index built |
 | Draft observation                             | `manage_engineering_memory(action=record_candidate, …)`                                                             |
@@ -114,11 +116,20 @@ hygiene    = git working tree ∩ declared scope
 permission = edit_allowed (with status gate)
 ```
 
-Before edit: call `get_implementation_context` with `intent_id`, the files you
-will edit, and the before-run `run_id` — it bundles blast zone, `call_context`,
+Before edit: call `get_implementation_context` with `intent_id` and explicit
+`paths` for files you will edit — it bundles blast zone, `call_context`,
 `change_control` (`do_not_touch` hard vs `review_context` advisory), and optional
 memory lanes. Use `get_blast_radius(transitive)` only for blast-only deep
 inspection when the bundled context is insufficient.
+
+### Shared worktree / freshness
+
+If `get_implementation_context` reports `analysis.freshness.status=drifted`, treat
+that as a **coordination signal** (another agent or parallel WIP may have changed
+the tree) — **not** a trigger to re-analyze in a loop. Verify conclusions that
+matter against the **source files** in your scope; continue when `edit_allowed`
+is true. Re-analyze once at verification boundaries (after-run before `finish`, or
+a deliberate new cycle). Full policy: `codeclone-implementation-context` skill.
 
 Declare in `start`: `allowed_files`, `allowed_related`, `forbidden`, `intent`,
 `expected_effects`. Outside scope → stop → user OK (unless already allowed) →

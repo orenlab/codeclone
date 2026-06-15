@@ -86,11 +86,17 @@ not approve via MCP.
 analyze_repository(root=<abs>)     # skip if valid recent run exists
 start_controlled_change(...)       # before the first file write
 get_relevant_memory(root=abs, ...) # root required; after edit_allowed=true
+get_implementation_context(...)    # after memory; intent_id pins before-run
 <edit only inside declared scope>
 analyze_repository(...)            # after-run when finish profile requires it
 record_candidate / propose_memory  # REQUIRED before finish if incident/complexity
 finish_controlled_change(...)      # same intent_id; pass changed_files / after_run_id
 ```
+
+If `get_implementation_context` reports `freshness.status=drifted`, treat it as a
+shared-worktree coordination signal — verify important facts against source files;
+do not re-analyze in a loop. Re-analyze once before `finish` when after-run is
+required. See `codeclone-implementation-context` skill.
 
 Use the **`codeclone-change-control`** skill for scope shapes, queue/promote,
 verification profiles, and atomic fallback when workflow tools are missing.

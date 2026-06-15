@@ -24,11 +24,10 @@ analyze_repository(root=<absolute_path>)
 ```
 
 For a **bundled** projection (blast zone + call_context + memory lanes + freshness
-
 + optional `change_control` with `intent_id`), prefer
-  `get_implementation_context` — see `codeclone-implementation-context` skill.
-  Use this blast-radius skill when you need **only** blast fields without the
-  full context bundle.
+`get_implementation_context` — see `codeclone-implementation-context` skill.
+Use this blast-radius skill when you need **only** blast fields without the
+full context bundle.
 
 ## Reading the result
 

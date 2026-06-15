@@ -11,18 +11,19 @@ the canonical report plus off-report context artifacts (symbol index, relationsh
 facts, freshness delta). It does **not** re-analyze, mutate repository state, or
 grant edit permission.
 
-Full contract: `help(topic="implementation_context")` and
-`docs/book/25-mcp-interface/tools/analysis.md`.
+Runtime contract (facets, budgets, response blocks): `help(topic="implementation_context")`
+and `docs/book/25-mcp-interface/tools/analysis.md`. This skill teaches **when and
+how** to call the tool safely — not every JSON field.
 
 ## When to use
 
 | Situation                              | Call pattern                                                                       |
 |----------------------------------------|------------------------------------------------------------------------------------|
-| After analyze, before declaring intent | `paths=[...]`, `mode="implementation"` — imports, API surface, callees, blast zone |
-| Inside an edit cycle, after `start`    | same `paths` + `intent_id` + before-run `run_id` — adds `change_control` block     |
+| After analyze, before declaring intent | `paths=[...]`, `mode="implementation"` — orientation around edit targets           |
+| Inside an edit cycle, after `start`    | `paths` + `intent_id` — adds `change_control` (before-run is pinned by intent)     |
 | Transitive / baseline-aware planning   | `mode="impact"` — callers, baseline-sensitive findings, review context             |
-| Contract / schema work                 | `mode="contract"` — definition sites, version constants, D18-gated path callers    |
-| Function-level call graph              | `symbols=["pkg.mod:func"]` + `include=["callers","callees"]`                       |
+| Contract / schema work                 | `mode="contract"` — truth-map when reported facets are available                   |
+| Function-level call graph              | `symbols=["pkg.mod:func"]` + `include=["callers","callees"]` when graph is complete |
 | Current WIP without listing paths      | `changed_scope=true` (never combine with `paths` or `symbols`)                     |
 
 ## When NOT to use
@@ -32,18 +33,25 @@ Full contract: `help(topic="implementation_context")` and
   mirrors it when `intent_id` is passed but never creates permission.
 - **Whole-repo triage** — use `get_production_triage`, `list_hotspots`, or `list_findings`.
 - **Memory governance alone** — change-control still requires `get_relevant_memory`
-  (step 3); context tool complements, does not replace it.
+  (step 3); see **Memory vs governance** below.
 - **Blast-only inspection** — use `get_blast_radius` when you need only blast fields
   without bundling call_context, memory lanes, or freshness (advanced/diagnostic).
-- **Stale run** — if `analysis.freshness.status` is `drifted`, re-analyze before
-  relying on the projection.
+
+## Memory vs governance
+
+The memory lane in implementation context is **bounded orientation** around your
+subject (docs, trajectories, experiences, test anchors). `get_relevant_memory`
+remains the **mandatory governance** step in the edit cycle — retrieval policy,
+conflicts, stale records, and contradiction handling. Do not skip step 3 because
+context returned a memory block.
 
 ## Prerequisites
 
 1. Valid MCP run for the same absolute `root`.
 2. Repo-relative `paths` inside the root, and/or `module:symbol` qualnames.
-3. Optional active `intent_id` from `start_controlled_change` (pins run + adds
-   `change_control`).
+3. Active `intent_id` from `start_controlled_change` when you need `change_control`
+   (pins the before-run automatically). Optional `run_id` must match that pinned run
+   or the request fails — do not pass the after-run id.
 
 ## Sequences
 
@@ -54,38 +62,38 @@ analyze_repository(root=abs)
 → get_implementation_context(root=abs, paths=["pkg/mod.py"], mode="implementation")
 ```
 
-Use before `start` to choose scope and spot dependents / callees.
+Use before `start` to choose scope and spot dependents.
 
 ### B. Normal edit cycle (with intent)
 
 ```
 1. analyze_repository(root=abs)                    # before-run
 2. start_controlled_change(...)
-3. get_relevant_memory(root=abs, intent_id=...)    # still required — see engineering-memory skill
+3. get_relevant_memory(root=abs, intent_id=...)    # required — engineering-memory skill
 4. get_implementation_context(
      root=abs,
-     paths=[...],                                 # files you will edit
+     paths=[...],
      intent_id=...,
-     run_id=<before-run id>,
      mode="implementation",
    )
 5. edit inside declared scope only
-6. analyze_repository → finish_controlled_change
+6. analyze_repository(root=abs)                  # after-run when profile requires it
+   → finish_controlled_change(..., after_run_id=...)
 ```
 
-Pass the **same before-run** `run_id` as the intent; do not redeclare intent on
-the after-run.
+Do not redeclare intent on the after-run. Re-use the **same** `intent_id` on finish.
 
 ### C. Impact or contract follow-up
 
 ```
-get_implementation_context(..., mode="impact")     # transitive blast + callers + baseline findings
-get_implementation_context(..., mode="contract")   # contracts{} truth-map
+get_implementation_context(..., mode="impact")
+get_implementation_context(..., mode="contract")
 ```
 
-`depth > 1` or `mode="impact"` uses transitive blast projection.
+`depth > 1` or `mode="impact"` uses transitive blast projection. Check facet
+availability in the response — see **Capability gates**.
 
-## Subject rules (code contract)
+## Subject rules
 
 **Resolution order** when `paths` / `symbols` are omitted:
 
@@ -95,7 +103,7 @@ get_implementation_context(..., mode="contract")   # contracts{} truth-map
 4. else `status="no_current_work"` — whole-repo context is never inferred.
 
 **Symbols:** `module:symbol` with a **colon** (for example `pkg.mod:func`). Dot
-notation (`pkg.mod.func`) is rejected → `subject.unresolved_symbols`. Inspect
+notation (`pkg.mod.func`) does not resolve → `subject.unresolved_symbols`. Inspect
 `subject.resolved_symbols` and `subject.unresolved_symbols`; never guess.
 
 **Symbol-scoped call graph:** explicit symbol subjects limit `call_context` to
@@ -105,37 +113,54 @@ resolved symbols only — not every function in the same file.
 `do_not_touch`, `review_context`, `guards`, and `edit_allowed` (mirror of start).
 `review_context` is **not** duplicated in `structural_context` when intent is present.
 
-## Modes and `include`
+When your query **subject** differs from declared intent scope, pass explicit
+`paths` plus `intent_id` so boundaries stay aligned with start.
 
-| `mode`           | Default facets (abbrev.)                                                                       |
-|------------------|------------------------------------------------------------------------------------------------|
-| `implementation` | module_role, imports, importers, callees, public_surface, blast_radius, tests, docs, memory    |
-| `impact`         | blast_radius, importers, callers, baseline_sensitive_findings, review_context, memory, …       |
-| `contract`       | definition_sites, version_constants, contract_tests, persistence/serialization path callers, … |
+## Mode choice
 
-With `intent_id` and default `include`, `scope` is added automatically. Pass
-`include=[...]` to request a closed facet set; unknown facet → contract error.
+| `mode`           | Use for                                                          |
+|------------------|------------------------------------------------------------------|
+| `implementation` | Default edit planning — imports, blast zone, callees, API surface |
+| `impact`         | Transitive deps, callers, baseline-sensitive findings            |
+| `contract`       | Definition sites, version constants, contract truth-map          |
 
-Memory-backed facets (`memory`, `docs`, `trajectories`, `experiences`, `tests`,
-`contract_tests`, `memory_conflicts`) load the memory store when requested.
-`trajectories` / `experiences` work **without** `include=["memory"]`.
+Default facets per mode, `include` closed sets, and memory-backed facet behavior:
+`help(topic="implementation_context")`.
 
-## Reading the response
+## Freshness and drift (multi-agent safe)
 
-| Block                      | Use                                                                            |
-|----------------------------|--------------------------------------------------------------------------------|
-| `structural_context`       | related_modules, blast_radius summary, module facts                            |
-| `call_context`             | callers, callees, references, test_callers — production vs test lanes separate |
-| `contracts`                | contract-mode truth-map (`mode="contract"`)                                    |
-| `implementation_evidence`  | memory, docs, trajectories, experiences, test_anchors                          |
-| `change_control`           | intent boundaries — only with `intent_id`                                      |
-| `analysis.freshness`       | `drifted` → re-analyze                                                         |
-| `budget_summary`           | one global cap (hard max 200); safety rows consume budget first                |
-| `dataflow`                 | always `not_available` — deferred tier, not a bug                              |
-| `contracts.*_path_callers` | `not_available` / `no_typed_or_memory_anchor` without D18 anchor               |
+`analysis.freshness.status` compares the stored run manifest to the live worktree.
+**`drifted`** means the tree changed after that run — common when another agent,
+an IDE edit, or parallel WIP touched files outside your intent.
 
-Always read each collection's `*_summary` (`truncated`, `omitted`) before claiming
-completeness.
+**Do not** re-analyze in a loop every time you see drift. In a shared worktree that
+races other agents and burns cycles without making your edit safer.
+
+**Instead:**
+
+- Treat drift as a **coordination signal**, not an automatic stop.
+- For conclusions that matter (imports, callers, blast radius, contract boundaries),
+  **verify against the source files** in your declared scope.
+- Continue editing when `edit_allowed` is true and you stay inside intent boundaries.
+- **Re-analyze once** at verification boundaries: after your edits, before
+  `finish_controlled_change` when the profile requires `after_run_id`, or when you
+  deliberately open a new cycle.
+
+Drift does not make run-bound context authoritative; it also does not force you to
+chase freshness mid-edit. Source code is the tie-breaker while the worktree is shared.
+
+## Capability gates
+
+Read response status fields before claiming completeness:
+
+| Signal | Meaning |
+|--------|---------|
+| `analysis.call_graph_status` | `complete` or `partial` — use `call_context`; if `partial`, read `uncertainties` |
+| `call_context` edges with `target_qualname: null` | Unresolved observations — not facts |
+| `mode="contract"` + `contracts` block | Truth-map when emitted; path-caller facets may be `not_available` without a typed or memory-backed anchor |
+| `dataflow` | Unavailable in context contract v1 — do not infer absence of readers/writers |
+| `*_summary.truncated` / `omitted` | Collection is bounded — do not claim full coverage |
+| `not_available` on any facet | Unsupported or gated capability — not an empty result |
 
 ## Safety semantics (do not collapse)
 
@@ -144,10 +169,6 @@ completeness.
 | `do_not_touch`         | **Hard boundary** — separate approval or scope expansion required |
 | `review_context`       | **Advisory** — review before editing; not a ban                   |
 | `clone_cohort_members` | Comparison context — not automatic edit targets                   |
-
-`start` blast summary and live `get_implementation_context` may differ when query
-**subject** ≠ declared intent scope or the tree drifted after start. Prefer live
-`get_implementation_context` with `intent_id` + explicit `paths` before editing.
 
 ## Digests
 
@@ -162,10 +183,12 @@ Cite digests when recording review evidence; they do not authorize edits.
 - Pass absolute `root`; MCP rejects relative roots.
 - CodeClone is the source of truth — do not reinterpret findings.
 - Do not fall back to CLI or local report files.
-- Do not treat unresolved call edges (`target_qualname: null`) as resolved facts.
-- Do not treat `not_available` contract or dataflow facets as "no callers exist".
+- Do not treat unresolved call edges as resolved facts.
+- Do not treat `not_available` facets as "no callers exist" or "no dataflow".
 - Do not treat truncated collections as complete without reading `*_summary`.
 - Do not use context output to expand declared scope or override `do_not_touch`.
+- Do not chase re-analysis on every `freshness.status=drifted` while another agent
+  may be editing the same worktree.
 
 ## Non-goals
 
@@ -173,3 +196,4 @@ Cite digests when recording review evidence; they do not authorize edits.
 - Replace `get_relevant_memory` in the mandatory edit pipeline.
 - Replace `get_blast_radius` when blast-only fields suffice.
 - Auto-fix or edit files based on context results.
+- Force a freshness race in multi-agent worktrees.

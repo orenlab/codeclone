@@ -30,7 +30,7 @@ Do not invent memory from local files or report dumps.
 
 | Moment                           | Tool                       | Parameters                                                  |
 |----------------------------------|----------------------------|-------------------------------------------------------------|
-| After `start`, before first edit | `get_relevant_memory`      | **`root` required**; `scope` or `intent_id` from active intent |
+| After `start`, before first edit | `get_relevant_memory`      | **`root` required**; `scope`, `intent_id`, or `symbols` |
 | One file deep-dive               | `query_engineering_memory` | `mode=for_path`, `path`                                     |
 | Symbol context                   | `query_engineering_memory` | `mode=for_symbol`, `symbol`                                 |
 | Keyword discovery                | `query_engineering_memory` | `mode=search`, `query`, `filters={match_mode:"any"\|"all"}`; optional `semantic=true` when index built |
@@ -44,7 +44,7 @@ Defaults exclude **stale**. Keyword `search` excludes drafts unless
 `for_symbol` include draft agent notes automatically so handoffs are visible.
 Draft records remain non-authoritative.
 
-### Optional semantic search (Phase 20)
+### Optional semantic search
 
 Repository default: `memory.semantic.enabled=false`. To use semantic blend:
 
@@ -122,13 +122,16 @@ Normal edit cycle (memory steps in **bold**):
 analyze_repository
 → start_controlled_change
 → get_relevant_memory          # after edit_allowed=true
+→ get_implementation_context   # after memory; see codeclone-implementation-context skill
 → edit in scope
 → analyze_repository           # when after_run required
 → record_candidate             # before finish if incident/complexity/decision
 → finish_controlled_change     # optional propose_memory=true
 ```
 
-Memory context is **advisory**. Blast radius `do_not_touch` remains a hard boundary.
+Memory context is **advisory**. Implementation context is **orientation evidence**
+— it does not replace memory governance or grant edit permission. Blast radius
+`do_not_touch` remains a hard boundary.
 
 ## Record types (common)
 
