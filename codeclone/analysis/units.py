@@ -36,6 +36,7 @@ from ._module_walk import (
     _build_suppression_index_for_source,
     _cohesion_ignored_method_names,
     _collect_dead_candidates,
+    _collect_function_relationship_facts,
     _collect_module_walk_data,
 )
 from .class_metrics import _class_metrics_for_node, _node_line_span
@@ -138,6 +139,13 @@ def extract_units_and_stats_from_source(
     non_runtime_decorator_aliases = _walk.non_runtime_decorator_aliases
     pydantic_module_aliases = _walk.pydantic_module_aliases
     cohesion_ignored_decorator_aliases = _walk.cohesion_ignored_decorator_aliases
+    function_relationship_facts = _collect_function_relationship_facts(
+        tree=tree,
+        module_name=module_name,
+        filepath=filepath,
+        collector=collector,
+        origin_lane="test" if is_test_file else "production",
+    )
 
     suppression_index = _build_suppression_index_for_source(
         source=source,
@@ -340,6 +348,7 @@ def extract_units_and_stats_from_source(
             typing_coverage=typing_coverage,
             docstring_coverage=docstring_coverage,
             api_surface=api_surface,
+            function_relationship_facts=function_relationship_facts,
         ),
         structural_findings,
     )

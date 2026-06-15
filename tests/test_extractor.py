@@ -2273,6 +2273,358 @@ def wrapper():
     assert "pkg.helpers:decorate" in file_metrics.referenced_qualnames
 
 
+def test_extract_collects_cross_module_relationships_by_caller() -> None:
+    source = """
+from pkg.runtime import run as imported_run
+from pkg.handlers import handler
+import pkg.helpers as helpers
+
+def source(value):
+    callback = handler
+    imported_run()
+    helpers.decorate(value)
+    factory()()
+    return callback
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert len(file_metrics.function_relationship_facts) == 1
+    facts = file_metrics.function_relationship_facts[0]
+    assert facts.source_qualname == "pkg.module:source"
+    resolved = {
+        (record.relation_kind, record.target_qualname, record.resolution_rule)
+        for record in facts.relationships
+        if record.resolution_status == "resolved"
+    }
+    assert (
+        "call",
+        "pkg.runtime:run",
+        "imported_symbol",
+    ) in resolved
+    assert (
+        "call",
+        "pkg.helpers:decorate",
+        "imported_module_attribute",
+    ) in resolved
+    assert (
+        "reference",
+        "pkg.handlers:handler",
+        "imported_symbol",
+    ) in resolved
+    unresolved_calls = [
+        record
+        for record in facts.relationships
+        if record.resolution_status == "unresolved"
+    ]
+    assert unresolved_calls
+    assert all(record.relation_kind == "call" for record in unresolved_calls)
+    assert all(record.origin_lane == "production" for record in facts.relationships)
+
+
+def test_relationship_resolution_guards_caller_local_shadowing() -> None:
+    source = """
+from pkg.runtime import run
+
+def by_parameter(run):
+    return run()
+
+def by_assignment():
+    run = lambda: 1
+    return run()
+
+def by_nested_definition():
+    def run():
+        return 1
+    return run()
+
+def by_local_import():
+    from pkg.other import run
+    return run()
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    records = [
+        record
+        for facts in file_metrics.function_relationship_facts
+        for record in facts.relationships
+        if record.expression == "run"
+    ]
+    assert len(records) == 4
+    assert all(record.relation_kind == "call" for record in records)
+    assert all(record.resolution_status == "unresolved" for record in records)
+    assert all(record.target_qualname is None for record in records)
+    assert all(record.resolution_rule == "local_shadowing" for record in records)
+
+
+def test_relationship_import_index_is_module_scoped_and_conservative() -> None:
+    tree = ast.parse(
+        """
+import pkg.alpha as alpha
+import pkg.one as duplicate
+import pkg.two as duplicate
+from pkg.handlers import handler
+from pkg.other import handler
+from pkg.runtime import *
+from .... import hidden
+
+shadowed = 1
+
+def declared():
+    import pkg.local as leaked
+    return leaked.run()
+
+try:
+    value = 1
+except Exception as captured:
+    value = 2
+
+match value:
+    case {"name": matched}:
+        pass
+"""
+    )
+
+    index = module_walk_mod._collect_relationship_import_index(
+        tree=tree,
+        module_name="pkg.module",
+    )
+
+    assert index.module_bindings["alpha"] == frozenset({"pkg.alpha"})
+    assert index.module_bindings["duplicate"] == frozenset({"pkg.one", "pkg.two"})
+    assert index.symbol_bindings["handler"] == frozenset(
+        {"pkg.handlers:handler", "pkg.other:handler"}
+    )
+    assert "leaked" not in index.module_bindings
+    assert {"shadowed", "declared", "captured", "matched"} <= set(
+        index.module_shadowed_names
+    )
+    assert module_walk_mod._collect_relationship_import_index(
+        tree=ast.Constant(value=1),
+        module_name="pkg.module",
+    ) == module_walk_mod._RelationshipImportIndex({}, {}, frozenset())
+
+
+def test_relationship_caller_bindings_cover_python_scope_forms() -> None:
+    outer = ast.parse(
+        """
+def outer():
+    inherited = 1
+
+    def inner(posonly, /, regular, *args, kwonly, **kwargs):
+        global global_name
+        nonlocal inherited
+        global_name = 1
+        inherited = 2
+        local = 3
+        for item in ():
+            pass
+        with resource() as opened:
+            pass
+        try:
+            pass
+        except Exception as captured:
+            pass
+        match regular:
+            case {"name": matched}:
+                pass
+        import pkg.local as local_module
+        from pkg.runtime import handler
+        def nested():
+            return None
+        class Inner:
+            pass
+        return local
+"""
+    ).body[0]
+    assert isinstance(outer, ast.FunctionDef)
+    inner = outer.body[1]
+    assert isinstance(inner, ast.FunctionDef)
+
+    bindings = module_walk_mod._caller_local_bindings(inner)
+
+    assert {
+        "posonly",
+        "regular",
+        "args",
+        "kwonly",
+        "kwargs",
+        "local",
+        "item",
+        "opened",
+        "captured",
+        "matched",
+        "local_module",
+        "handler",
+        "nested",
+        "Inner",
+    } <= set(bindings)
+    assert "global_name" not in bindings
+    assert "inherited" not in bindings
+    assert module_walk_mod._first_parameter_name(inner) == "posonly"
+    no_args = ast.parse("def empty():\n    return None\n").body[0]
+    assert isinstance(no_args, ast.FunctionDef)
+    assert module_walk_mod._first_parameter_name(no_args) is None
+
+
+def test_relationship_expression_resolution_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imports = module_walk_mod._RelationshipImportIndex(
+        symbol_bindings={
+            "handler": frozenset({"pkg.handlers:handler"}),
+            "ambiguous": frozenset({"pkg.one:run", "pkg.two:run"}),
+            "shadowed": frozenset({"pkg.runtime:shadowed"}),
+        },
+        module_bindings={
+            "helpers": frozenset({"pkg.helpers"}),
+            "modules": frozenset({"pkg.one", "pkg.two"}),
+        },
+        module_shadowed_names=frozenset({"shadowed"}),
+    )
+
+    def resolve(
+        expression: str,
+        *,
+        caller_bindings: frozenset[str] = frozenset(),
+        first_parameter_name: str | None = None,
+    ) -> tuple[str | None, str]:
+        node = ast.parse(expression, mode="eval").body
+        assert isinstance(node, ast.expr)
+        return module_walk_mod._resolve_relationship_expression(
+            node,
+            imports=imports,
+            caller_bindings=caller_bindings,
+            top_level_function_names=frozenset({"local_function"}),
+            top_level_class_names=frozenset({"Service"}),
+            first_parameter_name=first_parameter_name,
+        )
+
+    assert resolve("handler") == ("pkg.handlers:handler", "imported_symbol")
+    assert resolve("handler", caller_bindings=frozenset({"handler"})) == (
+        None,
+        "local_shadowing",
+    )
+    assert resolve("shadowed") == (None, "local_shadowing")
+    assert resolve("ambiguous") == (None, "ambiguous_import")
+    assert resolve("local_function") == (None, "same_module_deferred")
+    assert resolve("unknown") == (None, "unresolved_name")
+    assert resolve("helpers.decorate") == (
+        "pkg.helpers:decorate",
+        "imported_module_attribute",
+    )
+    assert resolve(
+        "helpers.decorate",
+        caller_bindings=frozenset({"helpers"}),
+    ) == (None, "local_shadowing")
+    assert resolve("modules.run") == (None, "ambiguous_import")
+    assert resolve("Service.hook") == (None, "same_module_deferred")
+    assert resolve("receiver.hook", first_parameter_name="receiver") == (
+        None,
+        "self_or_cls_deferred",
+    )
+    assert resolve("factory().hook") == (None, "unresolved_dynamic")
+    assert module_walk_mod._single_relationship_target(
+        None,
+        resolved_rule="unused",
+    ) == (None, "unresolved_name")
+
+    expression = ast.Name(id="handler", ctx=ast.Load())
+    monkeypatch.setattr(
+        ast,
+        "unparse",
+        lambda _node: (_ for _ in ()).throw(ValueError("broken")),
+    )
+    assert module_walk_mod._relationship_expression(expression) is None
+    record = module_walk_mod._relationship_record(
+        relation_kind="call",
+        origin_lane="production",
+        source_qualname="pkg.module:source",
+        target_qualname=None,
+        filepath="pkg/module.py",
+        node=expression,
+        resolution_rule="unresolved_name",
+    )
+    assert record.line == 1
+    assert record.resolution_status == "unresolved"
+
+
+def test_relationship_collection_marks_deferred_and_dynamic_calls() -> None:
+    source = """
+def local_function():
+    return 1
+
+class Service:
+    def hook(self):
+        return 1
+
+    def caller(receiver):
+        local_function()
+        Service.hook()
+        receiver.hook()
+        factory().hook()
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    caller = next(
+        facts
+        for facts in file_metrics.function_relationship_facts
+        if facts.source_qualname == "pkg.module:Service.caller"
+    )
+    rules = {record.resolution_rule for record in caller.relationships}
+    assert {
+        "same_module_deferred",
+        "self_or_cls_deferred",
+        "unresolved_dynamic",
+    } <= rules
+
+
+def test_test_relationship_lane_does_not_feed_flat_reachability() -> None:
+    source = """
+from prod import only_used_by_test
+
+def test_it():
+    assert only_used_by_test() == 1
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="tests/test_prod.py",
+        module_name="tests.test_prod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert file_metrics.referenced_qualnames == frozenset()
+    records = file_metrics.function_relationship_facts[0].relationships
+    assert any(
+        record.target_qualname == "prod:only_used_by_test"
+        and record.origin_lane == "test"
+        and record.resolution_status == "resolved"
+        for record in records
+    )
+
+
 def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:
     source = """
 __all__ = ["PublicClass"] + ("public_func",)

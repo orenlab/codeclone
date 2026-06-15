@@ -233,6 +233,7 @@ class FileMetrics:
     typing_coverage: ModuleTypingCoverage | None = None
     docstring_coverage: ModuleDocstringCoverage | None = None
     api_surface: ModuleApiSurface | None = None
+    function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

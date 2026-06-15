@@ -563,7 +563,7 @@ class Cache:
         source_stats: SourceStatsDict | None = None,
         file_metrics: FileMetrics | None = None,
         structural_findings: list[StructuralFindingGroup] | None = None,
-        function_relationship_facts: Sequence[FunctionRelationshipFacts] = (),
+        function_relationship_facts: Sequence[FunctionRelationshipFacts] | None = None,
     ) -> None:
         runtime_path = runtime_filepath_from_wire(
             wire_filepath_from_runtime(filepath, root=self.root),
@@ -575,12 +575,19 @@ class Cache:
         segment_rows = [
             _segment_dict_from_model(segment, runtime_path) for segment in segments
         ]
+        effective_relationship_facts = function_relationship_facts
+        if effective_relationship_facts is None:
+            effective_relationship_facts = (
+                file_metrics.function_relationship_facts
+                if file_metrics is not None
+                else ()
+            )
         function_relationship_fact_rows = [
             _function_relationship_facts_dict_from_model(
                 facts,
                 filepath=runtime_path,
             )
-            for facts in function_relationship_facts
+            for facts in effective_relationship_facts
         ]
 
         (

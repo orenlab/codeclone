@@ -276,6 +276,51 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
     ]
 
 
+def test_cache_derives_function_relationship_facts_from_file_metrics(
+    tmp_path: Path,
+) -> None:
+    filepath = str((tmp_path / "pkg" / "module.py").resolve())
+    facts = FunctionRelationshipFacts(
+        source_qualname="pkg.module:source",
+        relationships=(
+            RelationshipRecord(
+                relation_kind="call",
+                resolution_status="resolved",
+                origin_lane="production",
+                source_qualname="pkg.module:source",
+                target_qualname="pkg.target:handler",
+                path=filepath,
+                line=7,
+            ),
+        ),
+    )
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.put_file_entry(
+        filepath,
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        file_metrics=FileMetrics(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset(),
+            function_relationship_facts=(facts,),
+        ),
+    )
+
+    entry = cache.get_file_entry(filepath)
+
+    assert entry is not None
+    assert (
+        entry["function_relationship_facts"][0]["relationships"][0]["target_qualname"]
+        == "pkg.target:handler"
+    )
+
+
 def test_cache_rejects_malformed_function_relationship_wire() -> None:
     entry = _decode_wire_file_entry(
         {

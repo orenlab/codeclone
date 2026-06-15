@@ -10,10 +10,16 @@ import ast
 import tokenize
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Literal, NamedTuple
+from typing import TYPE_CHECKING, Literal, NamedTuple, TypeGuard
 
 from .. import qualnames as _qualnames
-from ..models import DeadCandidate, ModuleDep
+from ..models import (
+    DeadCandidate,
+    FunctionRelationshipFacts,
+    ModuleDep,
+    RelationshipOriginLane,
+    RelationshipRecord,
+)
 from .class_metrics import _node_line_span
 from .parser import (
     _build_declaration_token_index,
@@ -425,6 +431,337 @@ def _collect_load_reference_node(
     if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
         state.referenced_names.add(node.attr)
         state.attr_nodes.append(node)
+
+
+@dataclass(frozen=True, slots=True)
+class _RelationshipImportIndex:
+    symbol_bindings: dict[str, frozenset[str]]
+    module_bindings: dict[str, frozenset[str]]
+    module_shadowed_names: frozenset[str]
+
+
+def _iter_relationship_scope_nodes(body: list[ast.stmt]) -> Iterator[ast.AST]:
+    stack: list[ast.AST] = list(reversed(body))
+    while stack:
+        node = stack.pop()
+        yield node
+        if isinstance(
+            node,
+            ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda,
+        ):
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+
+def _freeze_relationship_bindings(
+    bindings: dict[str, set[str]],
+) -> dict[str, frozenset[str]]:
+    return {
+        name: frozenset(sorted(targets)) for name, targets in sorted(bindings.items())
+    }
+
+
+def _scope_declaration_binding_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+        return node.name
+    if isinstance(node, ast.ExceptHandler) and node.name:
+        return node.name
+    if isinstance(node, ast.MatchAs | ast.MatchStar) and node.name:
+        return node.name
+    return None
+
+
+def _collect_relationship_import_index(
+    *,
+    tree: ast.AST,
+    module_name: str,
+) -> _RelationshipImportIndex:
+    symbol_bindings: dict[str, set[str]] = {}
+    module_bindings: dict[str, set[str]] = {}
+    shadowed_names: set[str] = set()
+    if not isinstance(tree, ast.Module):
+        return _RelationshipImportIndex({}, {}, frozenset())
+
+    for node in _iter_relationship_scope_nodes(tree.body):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                alias_name = alias.asname or alias.name.split(".", 1)[0]
+                module_bindings.setdefault(alias_name, set()).add(alias.name)
+            continue
+        if isinstance(node, ast.ImportFrom):
+            target = _resolve_import_target(module_name, node)
+            if target:
+                for alias in node.names:
+                    if alias.name != "*":
+                        alias_name = alias.asname or alias.name
+                        symbol_bindings.setdefault(alias_name, set()).add(
+                            f"{target}:{alias.name}"
+                        )
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            shadowed_names.add(node.id)
+            continue
+        declaration_name = _scope_declaration_binding_name(node)
+        if declaration_name is not None:
+            shadowed_names.add(declaration_name)
+
+    return _RelationshipImportIndex(
+        symbol_bindings=_freeze_relationship_bindings(symbol_bindings),
+        module_bindings=_freeze_relationship_bindings(module_bindings),
+        module_shadowed_names=frozenset(sorted(shadowed_names)),
+    )
+
+
+def _function_parameter_names(node: _qualnames.FunctionNode) -> set[str]:
+    positional = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+    names = {arg.arg for arg in positional}
+    if node.args.vararg is not None:
+        names.add(node.args.vararg.arg)
+    if node.args.kwarg is not None:
+        names.add(node.args.kwarg.arg)
+    return names
+
+
+def _caller_local_bindings(node: _qualnames.FunctionNode) -> frozenset[str]:
+    bound_names = _function_parameter_names(node)
+    global_names: set[str] = set()
+    nonlocal_names: set[str] = set()
+    for scope_node in _iter_relationship_scope_nodes(node.body):
+        if isinstance(scope_node, ast.Name) and isinstance(
+            scope_node.ctx, ast.Store | ast.Del
+        ):
+            bound_names.add(scope_node.id)
+        elif isinstance(scope_node, ast.Import):
+            bound_names.update(
+                alias.asname or alias.name.split(".", 1)[0]
+                for alias in scope_node.names
+            )
+        elif isinstance(scope_node, ast.ImportFrom):
+            bound_names.update(
+                alias.asname or alias.name
+                for alias in scope_node.names
+                if alias.name != "*"
+            )
+        elif isinstance(scope_node, ast.Global):
+            global_names.update(scope_node.names)
+        elif isinstance(scope_node, ast.Nonlocal):
+            nonlocal_names.update(scope_node.names)
+        else:
+            declaration_name = _scope_declaration_binding_name(scope_node)
+            if declaration_name is not None:
+                bound_names.add(declaration_name)
+    bound_names.difference_update(global_names)
+    bound_names.difference_update(nonlocal_names)
+    return frozenset(sorted(bound_names))
+
+
+def _first_parameter_name(node: _qualnames.FunctionNode) -> str | None:
+    positional = [*node.args.posonlyargs, *node.args.args]
+    return positional[0].arg if positional else None
+
+
+def _relationship_expression(node: ast.AST) -> str | None:
+    try:
+        expression = ast.unparse(node)
+    except (TypeError, ValueError):
+        return None
+    return expression or None
+
+
+def _single_relationship_target(
+    targets: frozenset[str] | None,
+    *,
+    resolved_rule: str,
+) -> tuple[str | None, str]:
+    if not targets:
+        return None, "unresolved_name"
+    if len(targets) != 1:
+        return None, "ambiguous_import"
+    return next(iter(targets)), resolved_rule
+
+
+def _resolve_relationship_expression(
+    node: ast.expr,
+    *,
+    imports: _RelationshipImportIndex,
+    caller_bindings: frozenset[str],
+    top_level_function_names: frozenset[str],
+    top_level_class_names: frozenset[str],
+    first_parameter_name: str | None,
+) -> tuple[str | None, str]:
+    if isinstance(node, ast.Name):
+        import_targets = imports.symbol_bindings.get(node.id)
+        if import_targets and (
+            node.id in caller_bindings or node.id in imports.module_shadowed_names
+        ):
+            return None, "local_shadowing"
+        if import_targets:
+            return _single_relationship_target(
+                import_targets,
+                resolved_rule="imported_symbol",
+            )
+        if node.id in top_level_function_names:
+            return None, "same_module_deferred"
+        return None, "unresolved_name"
+
+    if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+        base_name = node.value.id
+        import_targets = imports.module_bindings.get(base_name)
+        if import_targets and (
+            base_name in caller_bindings or base_name in imports.module_shadowed_names
+        ):
+            return None, "local_shadowing"
+        if import_targets:
+            target_module, rule = _single_relationship_target(
+                import_targets,
+                resolved_rule="imported_module_attribute",
+            )
+            if target_module is not None:
+                return f"{target_module}:{node.attr}", rule
+            return None, rule
+        if base_name in top_level_class_names:
+            return None, "same_module_deferred"
+        if first_parameter_name is not None and base_name == first_parameter_name:
+            return None, "self_or_cls_deferred"
+    return None, "unresolved_dynamic"
+
+
+def _relationship_record(
+    *,
+    relation_kind: Literal["call", "reference"],
+    origin_lane: RelationshipOriginLane,
+    source_qualname: str,
+    target_qualname: str | None,
+    filepath: str,
+    node: ast.expr,
+    resolution_rule: str,
+) -> RelationshipRecord:
+    return RelationshipRecord(
+        relation_kind=relation_kind,
+        resolution_status="resolved" if target_qualname is not None else "unresolved",
+        origin_lane=origin_lane,
+        source_qualname=source_qualname,
+        target_qualname=target_qualname,
+        path=filepath,
+        line=max(1, int(getattr(node, "lineno", 1))),
+        expression=_relationship_expression(node),
+        resolution_rule=resolution_rule,
+    )
+
+
+def _relationship_record_sort_key(
+    record: RelationshipRecord,
+) -> tuple[str, str, str, str, int, str, str]:
+    return (
+        record.relation_kind,
+        record.origin_lane,
+        record.target_qualname or "",
+        record.path,
+        record.line,
+        record.resolution_rule or "",
+        record.expression or "",
+    )
+
+
+def _is_relationship_reference_node(
+    node: ast.AST,
+    *,
+    call_function_node_ids: set[int],
+) -> TypeGuard[ast.Name | ast.Attribute]:
+    return (
+        id(node) not in call_function_node_ids
+        and isinstance(node, ast.Name | ast.Attribute)
+        and isinstance(node.ctx, ast.Load)
+    )
+
+
+def _collect_function_relationship_facts(
+    *,
+    tree: ast.AST,
+    module_name: str,
+    filepath: str,
+    collector: _qualnames.QualnameCollector,
+    origin_lane: RelationshipOriginLane,
+) -> tuple[FunctionRelationshipFacts, ...]:
+    imports = _collect_relationship_import_index(
+        tree=tree,
+        module_name=module_name,
+    )
+    top_level_function_names = frozenset(
+        local_name for local_name, _node in collector.units if "." not in local_name
+    )
+    top_level_class_names = frozenset(
+        class_qualname
+        for class_qualname, _node in collector.class_nodes
+        if "." not in class_qualname
+    )
+    facts: list[FunctionRelationshipFacts] = []
+    for local_name, function_node in collector.units:
+        source_qualname = f"{module_name}:{local_name}"
+        caller_bindings = _caller_local_bindings(function_node)
+        first_parameter_name = _first_parameter_name(function_node)
+        scope_nodes = tuple(_iter_relationship_scope_nodes(function_node.body))
+        calls = tuple(node for node in scope_nodes if isinstance(node, ast.Call))
+        call_function_node_ids = {
+            id(descendant) for call in calls for descendant in ast.walk(call.func)
+        }
+        records: list[RelationshipRecord] = []
+        for call in calls:
+            target_qualname, resolution_rule = _resolve_relationship_expression(
+                call.func,
+                imports=imports,
+                caller_bindings=caller_bindings,
+                top_level_function_names=top_level_function_names,
+                top_level_class_names=top_level_class_names,
+                first_parameter_name=first_parameter_name,
+            )
+            records.append(
+                _relationship_record(
+                    relation_kind="call",
+                    origin_lane=origin_lane,
+                    source_qualname=source_qualname,
+                    target_qualname=target_qualname,
+                    filepath=filepath,
+                    node=call.func,
+                    resolution_rule=resolution_rule,
+                )
+            )
+        for node in scope_nodes:
+            if not _is_relationship_reference_node(
+                node,
+                call_function_node_ids=call_function_node_ids,
+            ):
+                continue
+            target_qualname, resolution_rule = _resolve_relationship_expression(
+                node,
+                imports=imports,
+                caller_bindings=caller_bindings,
+                top_level_function_names=top_level_function_names,
+                top_level_class_names=top_level_class_names,
+                first_parameter_name=first_parameter_name,
+            )
+            if target_qualname is not None:
+                records.append(
+                    _relationship_record(
+                        relation_kind="reference",
+                        origin_lane=origin_lane,
+                        source_qualname=source_qualname,
+                        target_qualname=target_qualname,
+                        filepath=filepath,
+                        node=node,
+                        resolution_rule=resolution_rule,
+                    )
+                )
+        if records:
+            facts.append(
+                FunctionRelationshipFacts(
+                    source_qualname=source_qualname,
+                    relationships=tuple(
+                        sorted(records, key=_relationship_record_sort_key)
+                    ),
+                )
+            )
+    return tuple(sorted(facts, key=lambda item: item.source_qualname))
 
 
 def _is_protocol_class(

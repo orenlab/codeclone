@@ -31,6 +31,9 @@ Added
   safety-first global budget reports all ordinary and safety omissions.
   Cache schema 2.9 adds a separate, rebuildable per-function relationship-fact
   projection without changing Unit serialization or canonical report identity.
+  Cross-module calls and resolved non-call references are now attributed to
+  their caller with production/test lanes; conservative caller-scope shadow
+  guards keep ambiguous imported names as unresolved call observations.
   Context evidence never authorizes edits; edit_allowed remains authoritative.
 * Change-intent lifecycle and multi-agent coordination.
   manage_change_intent supports declare, check, clear, queue, promote, and
