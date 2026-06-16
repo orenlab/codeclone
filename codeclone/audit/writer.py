@@ -10,6 +10,7 @@ import hashlib
 import json
 import threading
 from collections.abc import Mapping
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -101,6 +102,14 @@ class SqliteAuditWriter:
         try:
             return self._emit_impl(event)
         except Exception:
+            # Audit writes are non-fatal by contract: a failure must never
+            # break the controller. Count the drop as observability telemetry
+            # (no-op when observability is disabled) so silent audit gaps stay
+            # countable. Telemetry is itself best-effort and never re-raises.
+            with suppress(Exception):
+                from ..observability import record_counter
+
+                record_counter("audit.emit_dropped")
             return None
 
     def close(self) -> None:

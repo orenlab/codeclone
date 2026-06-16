@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 
 from ...report.meta import current_report_timestamp_utc
 from ..governance import record_candidate
@@ -39,6 +40,13 @@ def _try_append_text_candidate(
             max_statement_chars=max_statement_chars,
         )
     except Exception:
+        # Best-effort draft proposal: a single failed candidate must not break
+        # the finish flow. Count the drop as observability telemetry (no-op when
+        # disabled) so silently skipped candidates stay visible. Never re-raises.
+        with suppress(Exception):
+            from ...observability import record_counter
+
+            record_counter("memory.propose_candidate_dropped")
         return None
     return {
         "id": record.id,

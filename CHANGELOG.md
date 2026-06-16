@@ -154,6 +154,12 @@ Fixed
   subjects mid-batch; it now defers the commit so a later failure in the same
   batch rolls back the whole ingestion instead of leaving half-written records
   behind. Standalone store writes keep their previous commit-on-write behavior.
+* Observable best-effort failures. The non-fatal audit-event writer and the
+  best-effort finish-payload memory proposer no longer swallow exceptions with
+  zero signal; each now increments an observability counter (audit.emit_dropped,
+  memory.propose_candidate_dropped) on its fallback path, so silent drops stay
+  countable in the cockpit. Both remain non-fatal and the telemetry never
+  re-raises.
 * Memory lifecycle correctness. Draft records are no longer marked stale
   before human promotion. Trajectory rebuilds now deduplicate superseded
   projections, repoint evidence, remove stale workflow rows, and preserve

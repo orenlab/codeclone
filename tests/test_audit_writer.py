@@ -546,6 +546,34 @@ def test_token_estimation_failure_does_not_break_audit(tmp_path: Path) -> None:
     assert summary.total_events <= 1
 
 
+def test_emit_failure_is_counted_as_observability_telemetry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A swallowed audit-emit failure stays non-fatal but is no longer silent:
+    it increments the audit.emit_dropped observability counter. The lazy import
+    inside emit() resolves record_counter from the patched module attribute."""
+    counters: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "codeclone.observability.record_counter",
+        lambda key, value=1: counters.append((key, value)),
+    )
+
+    db_path = tmp_path / "audit.sqlite3"
+    writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
+
+    def _raise(_event: AuditEvent) -> int | None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(writer, "_emit_impl", _raise)
+    try:
+        assert writer.emit(_event(tmp_path)) is None  # non-fatal fallback
+    finally:
+        writer.close()
+
+    assert ("audit.emit_dropped", 1) in counters
+
+
 def test_audit_schema_migration_adds_token_columns(tmp_path: Path) -> None:
     """Existing v1 DB without token columns gets them after ensure_schema."""
     from codeclone.audit.schema import ensure_schema

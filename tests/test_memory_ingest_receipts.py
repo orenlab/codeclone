@@ -101,6 +101,41 @@ def test_try_append_text_candidate_returns_none_on_record_failure(
     assert result is None
 
 
+def test_try_append_text_candidate_counts_dropped_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A swallowed best-effort proposal stays non-fatal (returns None) but is no
+    longer silent: it increments the memory.propose_candidate_dropped counter.
+    The lazy import resolves record_counter from the patched module attribute."""
+    from codeclone.memory.ingest import receipts as receipts_mod
+
+    counters: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        "codeclone.observability.record_counter",
+        lambda key, value=1: counters.append((key, value)),
+    )
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+
+        def _boom(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("draft limit")
+
+        monkeypatch.setattr(receipts_mod, "record_candidate", _boom)
+        result = receipts_mod._try_append_text_candidate(
+            store,
+            project=project,
+            record_type="change_rationale",
+            text="Claims after patch.",
+            subject_path="pkg/mod.py",
+            created_by="finish_hook",
+            max_candidates=5,
+            max_statement_chars=1000,
+        )
+
+    assert result is None
+    assert ("memory.propose_candidate_dropped", 1) in counters
+
+
 def test_propose_memory_module_role_from_py_scope(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (_root, project, store, _db_path):
         record = record_candidate(
