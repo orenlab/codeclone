@@ -245,7 +245,7 @@ def run_memory_init(
         with store.exclusive_init_lock():
             store.initialize(project)
             with store.transaction():
-                stats = store.persist_batch(batch)
+                stats = store.persist_batch(batch, commit=False)
                 store.prune_duplicate_subjects(commit=False)
                 if options.refresh:
                     stale_report = apply_refresh_staleness(

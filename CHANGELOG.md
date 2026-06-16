@@ -150,6 +150,10 @@ Fixed
   synchronous=FULL, preserving committed drafts across unclean MCP process
   exits. Intent and audit stores retain recovery-oriented
   synchronous=NORMAL.
+* Atomic memory ingestion. persist_batch no longer commits records and
+  subjects mid-batch; it now defers the commit so a later failure in the same
+  batch rolls back the whole ingestion instead of leaving half-written records
+  behind. Standalone store writes keep their previous commit-on-write behavior.
 * Memory lifecycle correctness. Draft records are no longer marked stale
   before human promotion. Trajectory rebuilds now deduplicate superseded
   projections, repoint evidence, remove stale workflow rows, and preserve

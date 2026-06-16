@@ -18,6 +18,7 @@ from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import (
+    MemoryLink,
     MemoryRecord,
     MemorySubject,
     RecordBatch,
@@ -367,6 +368,61 @@ def test_record_candidate_omits_commit_without_subject_fingerprint(
         assert record.created_at_commit is None
         assert record.created_on_branch is None
         assert record.code_fingerprint is None
+
+
+def test_persist_batch_rolls_back_atomically_on_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A mid-batch failure must leave the store empty, not half-written.
+
+    persist_batch participates in the caller's transaction (commit=False), so a
+    failure after records and subjects are inserted must roll the whole batch
+    back. Before the atomic-batch fix, upsert_record / write_subject committed
+    mid-batch, so the surrounding transaction rollback could not undo them.
+    """
+    from tests.memory_fixtures import make_module_record
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        record = make_module_record(project.id, "pkg.atomic")
+        now = current_report_timestamp_utc()
+        batch = RecordBatch(
+            records=[record],
+            subjects=[
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=record.id,
+                    subject_kind="module",
+                    subject_key="pkg.atomic",
+                    relation="about",
+                )
+            ],
+            links=[
+                MemoryLink(
+                    id=generate_memory_id(prefix="link"),
+                    project_id=project.id,
+                    from_memory_id=record.id,
+                    to_memory_id=record.id,
+                    relation="related_to",
+                    created_by="test",
+                    created_at_utc=now,
+                )
+            ],
+        )
+
+        def _boom(_link: MemoryLink) -> None:
+            raise sqlite3.Error("injected mid-batch failure")
+
+        monkeypatch.setattr(store, "write_link", _boom)
+
+        with (
+            pytest.raises(sqlite3.Error, match="injected mid-batch failure"),
+            store.transaction(),
+        ):
+            store.persist_batch(batch, commit=False)
+
+        # Records inserted earlier in the batch must not survive the failure.
+        assert store.count_records() == 0
 
 
 def test_audit_reader_missing_db_and_connect_errors(

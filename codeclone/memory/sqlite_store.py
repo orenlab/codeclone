@@ -281,8 +281,10 @@ class SqliteEngineeringMemoryStore:
         record_id: str,
         sync_fts: bool,
         revision_written: bool = False,
+        commit: bool = True,
     ) -> UpsertResult:
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
         if sync_fts:
             self.sync_fts_record(record_id)
         return UpsertResult(
@@ -291,7 +293,9 @@ class SqliteEngineeringMemoryStore:
             revision_written=revision_written,
         )
 
-    def upsert_record(self, record: MemoryRecord) -> UpsertResult:
+    def upsert_record(
+        self, record: MemoryRecord, *, commit: bool = True
+    ) -> UpsertResult:
         existing = self.find_by_identity_key(record.project_id, record.identity_key)
         now = current_report_timestamp_utc()
         if existing is not None and (
@@ -312,7 +316,8 @@ class SqliteEngineeringMemoryStore:
                     existing.id,
                 ),
             )
-            self._conn.commit()
+            if commit:
+                self._conn.commit()
             return UpsertResult(action="skipped", record_id=existing.id)
 
         revision_written = False
@@ -396,6 +401,7 @@ class SqliteEngineeringMemoryStore:
             record_id=target_id,
             sync_fts=True,
             revision_written=revision_written,
+            commit=commit,
         )
 
     def find_record(self, record_id: str) -> MemoryRecord | None:
@@ -737,7 +743,7 @@ class SqliteEngineeringMemoryStore:
         ).fetchall()
         return [_record_from_row(row) for row in rows]
 
-    def write_subject(self, subject: MemorySubject) -> None:
+    def write_subject(self, subject: MemorySubject, *, commit: bool = True) -> None:
         existing = self._conn.execute(
             """
             SELECT id FROM memory_subjects
@@ -767,7 +773,8 @@ class SqliteEngineeringMemoryStore:
                 subject.relation,
             ),
         )
-        self._conn.commit()  # standalone writes must survive store.close()
+        if commit:
+            self._conn.commit()  # standalone writes must survive store.close()
 
     def prune_duplicate_subjects(self, *, commit: bool = True) -> int:
         before = self._conn.execute("SELECT COUNT(*) FROM memory_subjects").fetchone()
@@ -1047,11 +1054,13 @@ class SqliteEngineeringMemoryStore:
     def next_revision_number(self, memory_id: str) -> int:
         return self._next_revision_number(memory_id)
 
-    def persist_batch(self, batch: RecordBatch) -> dict[str, int]:
+    def persist_batch(
+        self, batch: RecordBatch, *, commit: bool = True
+    ) -> dict[str, int]:
         stats = {"created": 0, "updated": 0, "unchanged": 0, "skipped": 0}
         record_id_map: dict[str, str] = {}
         for record in batch.records:
-            result = self.upsert_record(record)
+            result = self.upsert_record(record, commit=False)
             record_id_map[record.id] = result.record_id
             stats[result.action] = stats.get(result.action, 0) + 1
         for subject in batch.subjects:
@@ -1063,7 +1072,8 @@ class SqliteEngineeringMemoryStore:
                     subject_kind=subject.subject_kind,
                     subject_key=subject.subject_key,
                     relation=subject.relation,
-                )
+                ),
+                commit=False,
             )
         for evidence in batch.evidence:
             mapped_id = record_id_map.get(evidence.memory_id, evidence.memory_id)
@@ -1084,7 +1094,8 @@ class SqliteEngineeringMemoryStore:
         touched_ids = set(record_id_map.values())
         for memory_id in touched_ids:
             self.sync_fts_record(memory_id)
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
         return stats
 
     def close(self) -> None:
