@@ -97,6 +97,7 @@ from ...models import (
     CoverageJoinResult,
     FunctionRelationshipFacts,
     MetricsDiff,
+    ModuleDep,
     ProjectMetrics,
     Suggestion,
 )
@@ -651,6 +652,7 @@ class MCPRunRecord:
     dirty_snapshot: DirtySnapshot | None = None
     unit_inventory: tuple[MCPUnitLocation, ...] = ()
     relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
+    module_imports: tuple[ModuleDep, ...] = ()
 
 
 class CodeCloneMCPRunStore:

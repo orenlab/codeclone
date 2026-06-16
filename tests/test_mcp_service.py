@@ -1247,6 +1247,30 @@ def test_mcp_service_run_record_aggregates_relationship_facts(
     assert sources == sorted(sources)
 
 
+def test_mcp_service_run_record_exposes_module_imports(
+    tmp_path: Path,
+) -> None:
+    # Track 2 Step 1: raw imports — including external/stdlib — are surfaced
+    # off-report on the run record, even though the report dependencies family
+    # filters edges down to internal modules only.
+    service, summary = _analyze_context_run(
+        tmp_path,
+        relative_path="pkg/uses_logging.py",
+        source=(
+            "import logging\n"
+            "\n"
+            "\n"
+            "def make_logger() -> object:\n"
+            "    return logging.getLogger(__name__)\n"
+        ),
+    )
+    record = service._runs.get(str(summary["run_id"]))
+
+    targets = {dep.target for dep in record.module_imports}
+    assert "logging" in targets  # external import retained off-report
+    assert all(dep.source and dep.import_type for dep in record.module_imports)
+
+
 def test_mcp_service_get_implementation_context_projects_call_context(
     tmp_path: Path,
 ) -> None:
