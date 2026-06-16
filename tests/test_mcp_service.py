@@ -1271,6 +1271,51 @@ def test_mcp_service_run_record_exposes_module_imports(
     assert all(dep.source and dep.import_type for dep in record.module_imports)
 
 
+def test_mcp_service_get_implementation_context_query_search(
+    tmp_path: Path,
+) -> None:
+    # Track 2 Step 2: the query path searches names across definitions, call
+    # targets, and imports — including external/stdlib that the report filters
+    # out of the dependency family.
+    service, summary = _analyze_context_run(
+        tmp_path,
+        relative_path="pkg/logwrap.py",
+        source=(
+            "import logging\n"
+            "\n"
+            "\n"
+            "def make_logger() -> object:\n"
+            "    return logging.getLogger(__name__)\n"
+        ),
+    )
+    run_id = str(summary["run_id"])
+
+    def _search(query: str) -> dict[str, object]:
+        return service.get_implementation_context(
+            root=str(tmp_path), run_id=run_id, query=query
+        )
+
+    def _assert_found(query: str, lane: str, expected: str) -> None:
+        result = _search(query)
+        assert result["status"] == "ok"
+        results = cast("dict[str, list[dict[str, object]]]", result["results"])
+        assert expected in {str(row["name"]) for row in results.get(lane, [])}
+
+    # Each lane is searchable, including external names the report filters out.
+    _assert_found("logging", "imports", "logging")
+    _assert_found("getLogger", "calls", "logging:getLogger")
+    _assert_found("make_logger", "definitions", "pkg.logwrap:make_logger")
+
+    miss = _search("zzz_no_such_name")
+    assert miss["status"] == "no_matches"
+    assert isinstance(miss["next_steps"], list) and miss["next_steps"]
+
+    with pytest.raises(MCPServiceContractError, match="mutually exclusive"):
+        service.get_implementation_context(
+            root=str(tmp_path), run_id=run_id, query="logging", symbols=["pkg:x"]
+        )
+
+
 def test_mcp_service_get_implementation_context_projects_call_context(
     tmp_path: Path,
 ) -> None:

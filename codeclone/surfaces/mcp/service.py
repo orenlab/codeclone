@@ -368,6 +368,7 @@ def _apply_public_method_signatures() -> None:
             _kwonly("detail_level", "str", "compact"),
             _kwonly("budget", "int", 50),
             _kwonly("run_id", "str | None", None),
+            _kwonly("query", "str | None", None),
         ),
         "check_patch_contract": (
             _kwonly("mode", "str"),

@@ -66,6 +66,7 @@ from .messages.params import (
     ContextDetailLevelParam,
     ContextModeParam,
     ContextPathsParam,
+    ContextQueryParam,
     ContextSymbolsParam,
     CoverageMinParam,
     CoverageXmlParam,
@@ -576,6 +577,7 @@ def build_mcp_server(
         detail_level: ContextDetailLevelParam = "compact",
         budget: ContextBudgetParam = 50,
         run_id: RunIdParam = None,
+        query: ContextQueryParam = None,
     ) -> dict[str, object]:
         return service.get_implementation_context(
             root=root,
@@ -589,6 +591,7 @@ def build_mcp_server(
             detail_level=detail_level,
             budget=budget,
             run_id=run_id,
+            query=query,
         )
 
     @tool(

@@ -1701,6 +1701,19 @@
           "default": null,
           "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name search query across analyzed definitions, call targets, and imports; mutually exclusive with paths, symbols, and changed_scope.",
+          "title": "Query"
         }
       },
       "required": [

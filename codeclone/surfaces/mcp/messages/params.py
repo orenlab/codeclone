@@ -70,6 +70,15 @@ ChangedScopeParam = Annotated[
     bool,
     Field(description="Use the current git-dirty scope as the context subject."),
 ]
+ContextQueryParam = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Name search query across analyzed definitions, call targets, and "
+            "imports; mutually exclusive with paths, symbols, and changed_scope."
+        )
+    ),
+]
 ContextModeParam = Annotated[
     Literal["implementation", "impact", "contract"],
     Field(description="implementation, impact, or contract context mode."),

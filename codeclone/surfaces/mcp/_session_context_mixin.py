@@ -16,6 +16,7 @@ from typing import Protocol, cast
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
+from ._graph_search import search_graph
 from ._implementation_context import (
     DEFAULT_CONTRACT_FACETS,
     DEFAULT_IMPACT_FACETS,
@@ -90,6 +91,7 @@ class _MCPSessionContextMixin:
         detail_level: str = "compact",
         budget: int = 50,
         run_id: str | None = None,
+        query: str | None = None,
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
         intent = self._context_intent(intent_id)
@@ -108,6 +110,18 @@ class _MCPSessionContextMixin:
                 ),
                 "next_tool": "analyze_repository",
             }
+        if query is not None:
+            if paths or symbols or changed_scope:
+                raise MCPServiceContractError(
+                    "query is mutually exclusive with paths, symbols, and "
+                    "changed_scope."
+                )
+            return search_graph(
+                record=record,
+                root=root_path,
+                query=query,
+                budget=budget,
+            )
         self._validate_context_request(
             paths=paths,
             symbols=symbols,
