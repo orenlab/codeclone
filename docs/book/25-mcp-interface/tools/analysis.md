@@ -104,6 +104,11 @@ units and public API rows. Pass `module:symbol` qualnames with a colon separator
 `call_context` edges are limited to the resolved symbols, not every function in
 the same file. `subject.resolved_symbols` reports exact file and line locations;
 `subject.unresolved_symbols` reports unknown qualnames without guessing. A
-symbol-only query that resolves nothing returns `status="subject_not_found"`.
+symbol-only query that resolves nothing returns a compact
+`status="subject_not_found"` response: the unresolved `subject`, a slim
+`analysis` provenance block (run id, digests, freshness), the
+`context_projection_digest`, and an actionable `next_steps` list. The empty
+facet scaffolding (`structural_context`, `budget_summary`, `dataflow`,
+`call_context`, `uncertainties`) is omitted so a miss does not burn context.
 This index contributes to `context_artifact_digest` but never changes the
 canonical report digest.

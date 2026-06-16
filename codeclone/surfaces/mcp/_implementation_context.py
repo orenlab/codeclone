@@ -487,6 +487,37 @@ def build_implementation_context(
         budget=entry_budget,
     )
     dependency_rows = _dependency_rows(record)
+    context_artifact_digest = _context_artifact_digest(
+        record=record,
+        dependency_rows=dependency_rows,
+    )
+    request_projection = _context_request_projection(
+        subject_resolved_from=subject_resolved_from,
+        paths=normalized_paths,
+        symbols=normalized_symbols,
+        mode=mode,
+        include=include,
+        depth=depth,
+        detail_level=detail_level,
+        budget=budget,
+        change_control=change_control,
+        freshness_status=drift.status,
+    )
+    if (
+        not safety_overflow
+        and normalized_symbols
+        and not normalized_resolved_symbols
+        and not normalized_paths
+    ):
+        return _subject_not_found_payload(
+            record=record,
+            mode=mode,
+            subject=subject,
+            freshness=freshness,
+            context_artifact_digest=context_artifact_digest,
+            projected_change_control=projected_change_control,
+            request=request_projection,
+        )
     module_paths = _module_path_index(record)
     selected_modules = frozenset(_path_to_module(path) for path in normalized_paths)
     structural_context: dict[str, object] = {}
@@ -598,13 +629,10 @@ def build_implementation_context(
         budget=entry_budget,
     )
 
-    analysis = {
+    analysis: dict[str, object] = {
         "run_id": record.run_id,
         "report_digest": record.run_id,
-        "context_artifact_digest": _context_artifact_digest(
-            record=record,
-            dependency_rows=dependency_rows,
-        ),
+        "context_artifact_digest": context_artifact_digest,
         "context_contract_version": CONTEXT_CONTRACT_VERSION,
         "call_resolution_version": CALL_RESOLUTION_VERSION,
         "freshness": freshness,
@@ -662,11 +690,34 @@ def build_implementation_context(
     if isinstance(budget_summary, dict):
         budget_summary["emitted"] = entry_budget.used
         budget_summary["remaining"] = entry_budget.remaining
-    request_projection: dict[str, object] = {
+    _attach_projection_digest(
+        payload,
+        analysis,
+        context_artifact_digest=context_artifact_digest,
+        request=request_projection,
+    )
+    return payload
+
+
+def _context_request_projection(
+    *,
+    subject_resolved_from: str,
+    paths: Sequence[str],
+    symbols: Sequence[str],
+    mode: str,
+    include: Sequence[Facet],
+    depth: int,
+    detail_level: str,
+    budget: int,
+    change_control: Mapping[str, object] | None,
+    freshness_status: str,
+) -> dict[str, object]:
+    """Deterministic request fingerprint bound into the projection digest."""
+    return {
         "subject": {
             "resolved_from": subject_resolved_from,
-            "paths": list(normalized_paths),
-            "symbols": list(normalized_symbols),
+            "paths": list(paths),
+            "symbols": list(symbols),
         },
         "mode": mode,
         "include": sorted(include),
@@ -676,14 +727,74 @@ def build_implementation_context(
         "intent_id": (
             str(change_control.get("intent_id")) if change_control is not None else None
         ),
-        "freshness_status": drift.status,
+        "freshness_status": freshness_status,
     }
+
+
+def _attach_projection_digest(
+    payload: Mapping[str, object],
+    analysis: dict[str, object],
+    *,
+    context_artifact_digest: str,
+    request: Mapping[str, object],
+) -> None:
+    """Bind the request and bounded response into analysis.context_projection_digest."""
     analysis["context_projection_digest"] = _digest(
         _projection_digest_payload(
             payload,
-            context_artifact_digest=str(analysis["context_artifact_digest"]),
-            request=request_projection,
+            context_artifact_digest=context_artifact_digest,
+            request=request,
         )
+    )
+
+
+def _subject_not_found_payload(
+    *,
+    record: MCPRunRecord,
+    mode: str,
+    subject: Mapping[str, object],
+    freshness: Mapping[str, object],
+    context_artifact_digest: str,
+    projected_change_control: Mapping[str, object] | None,
+    request: Mapping[str, object],
+) -> dict[str, object]:
+    """Compact response when an explicit symbol query resolves nothing.
+
+    Emitting the full empty facet scaffolding (structural_context, budget,
+    dataflow, uncertainties, call_context) on a miss burns LLM context for zero
+    signal. Return only the status, the unresolved subject, a slim provenance
+    block, the projection digest for determinism, and actionable next steps.
+    """
+    analysis: dict[str, object] = {
+        "run_id": record.run_id,
+        "report_digest": record.run_id,
+        "context_artifact_digest": context_artifact_digest,
+        "context_contract_version": CONTEXT_CONTRACT_VERSION,
+        "call_resolution_version": CALL_RESOLUTION_VERSION,
+        "freshness": freshness,
+    }
+    payload: dict[str, object] = {
+        "status": "subject_not_found",
+        "mode": mode,
+        "subject": subject,
+        "analysis": analysis,
+        "next_steps": [
+            "Pass an exact qualname as module:symbol with a colon separator "
+            "(for example pkg.mod:func); dot notation does not resolve.",
+            "Only analyzed definitions resolve — functions, methods, classes, "
+            "and public API rows. External or stdlib names are not indexed.",
+            "Inspect subject.unresolved_symbols for the exact tokens that "
+            "failed to resolve.",
+            "Run analyze_repository again if analysis.freshness.status is drifted.",
+        ],
+    }
+    if projected_change_control is not None:
+        payload["change_control"] = projected_change_control
+    _attach_projection_digest(
+        payload,
+        analysis,
+        context_artifact_digest=context_artifact_digest,
+        request=request,
     )
     return payload
 

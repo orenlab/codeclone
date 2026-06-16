@@ -160,6 +160,12 @@ Fixed
   memory.propose_candidate_dropped) on its fallback path, so silent drops stay
   countable in the cockpit. Both remain non-fatal and the telemetry never
   re-raises.
+* Compact implementation-context misses. get_implementation_context no longer
+  emits the full empty facet scaffolding (structural_context, budget_summary,
+  dataflow, call_context, uncertainties) when an explicit symbol query resolves
+  nothing. The subject_not_found response now returns only the unresolved
+  subject, a slim provenance block, the projection digest, and an actionable
+  next_steps list, so a miss does not burn agent context.
 * Memory lifecycle correctness. Draft records are no longer marked stale
   before human promotion. Trajectory rebuilds now deduplicate superseded
   projections, repoint evidence, remove stale workflow rows, and preserve

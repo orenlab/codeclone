@@ -1189,6 +1189,21 @@ def test_mcp_service_get_implementation_context_resolves_symbols(
     missing_subject = cast("dict[str, object]", missing["subject"])
     assert missing_subject["resolved_symbols"] == []
     assert missing_subject["unresolved_symbols"] == ["pkg.internal:missing"]
+    # Compact miss: no empty facet scaffolding is serialized, only the subject,
+    # a slim provenance block, and actionable next steps.
+    for empty_facet in (
+        "structural_context",
+        "budget_summary",
+        "dataflow",
+        "call_context",
+        "uncertainties",
+    ):
+        assert empty_facet not in missing
+    next_steps = missing["next_steps"]
+    assert isinstance(next_steps, list) and next_steps
+    missing_analysis = cast("dict[str, object]", missing["analysis"])
+    assert "context_projection_digest" in missing_analysis
+    assert "call_graph_status" not in missing_analysis
 
 
 def test_mcp_service_run_record_aggregates_relationship_facts(
