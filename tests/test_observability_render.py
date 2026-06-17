@@ -542,3 +542,32 @@ def test_html_format_helpers_and_semantic_cost_rows() -> None:
 
     productive = replace(noop, no_op=False, reason_kind=None)
     assert "productive" in _semantic_row(productive)
+
+
+def test_rss_text_includes_end_peak_and_peak_delta() -> None:
+    from codeclone.observability.render_html import _rss_text
+
+    rendered = _rss_text(
+        1.0,
+        end=0.5,
+        peak=2.0,
+        peak_delta=0.75,
+    )
+    assert "end" in rendered
+    assert "peak" in rendered
+    assert "peakΔ" in rendered
+
+
+def test_render_highlights_process_peak_rss_without_span_consumer() -> None:
+    from codeclone.observability.render_html import render_trace_html
+    from codeclone.observability.views import AggregatesView, TraceView
+
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="t0",
+        window_ended_at_utc="t1",
+        aggregates=AggregatesView(operation_count=1, max_peak_rss_mb=512.0),
+    )
+    html = render_trace_html(trace)
+    assert "Process peak RSS" in html
+    assert "high-water resident set" in html

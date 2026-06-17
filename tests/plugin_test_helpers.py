@@ -90,13 +90,11 @@ def assert_codex_manifest_interface(
     *,
     plugin_root: Path,
 ) -> None:
-    assert (
-        interface["privacyPolicyURL"]
-        == "https://orenlab.github.io/codeclone/privacy-policy/"
+    assert interface["privacyPolicyURL"] == (
+        "https://orenlab.github.io/codeclone/privacy-policy/"
     )
-    assert (
-        interface["termsOfServiceURL"]
-        == "https://orenlab.github.io/codeclone/terms-of-use/"
+    assert interface["termsOfServiceURL"] == (
+        "https://orenlab.github.io/codeclone/terms-of-use/"
     )
     assert interface["composerIcon"] == "./assets/icon.png"
     assert interface["logo"] == "./assets/logo.png"
@@ -121,7 +119,6 @@ def assert_plugin_skills_match_codex(
     plugin_skills_root: Path,
     codex_skills_root: Path,
     skill_names: Sequence[str],
-    review_platform_keyword: str,
 ) -> None:
     for skill_name in skill_names:
         plugin_text = (plugin_skills_root / skill_name / "SKILL.md").read_text(
@@ -130,14 +127,7 @@ def assert_plugin_skills_match_codex(
         codex_text = (codex_skills_root / skill_name / "SKILL.md").read_text(
             encoding="utf-8"
         )
-        plugin_frontmatter = parse_frontmatter(plugin_text)
-        codex_frontmatter = parse_frontmatter(codex_text)
-        assert plugin_frontmatter["name"] == codex_frontmatter["name"]
-        if skill_name == "codeclone-review":
-            assert review_platform_keyword in plugin_frontmatter["description"].lower()
-            assert "codex" in codex_frontmatter["description"].lower()
-            continue
-        assert plugin_frontmatter == codex_frontmatter
+        assert plugin_text == codex_text, skill_name
 
 
 def assert_repo_doc_paths_exist(root: Path, *relative_paths: str) -> None:

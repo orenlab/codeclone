@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -36,6 +37,7 @@ from codeclone.analytics.integrity import PartitionValidityAssessment
 from codeclone.analytics.report import html as html_report
 from codeclone.analytics.report import interpret as interpret_report
 from codeclone.analytics.report.messages.profiles import profile_banner_message
+from codeclone.analytics.store.protocols import CorpusStore
 from codeclone.analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from codeclone.analytics.store.vectors_lancedb import vector_row_key
 from codeclone.contracts import CORPUS_EMBEDDING_CONTRACT_VERSION
@@ -901,3 +903,318 @@ def test_html_projection_helper_empty_and_malformed_rows() -> None:
     assert html_report._available(None) == "unavailable"
     assert html_report._number(None) == "unavailable"
     assert html_report._ratio(None) == "unavailable"
+
+
+def test_enrich_run_for_export_rejects_foreign_snapshot() -> None:
+    store = _ReportStore()
+    with pytest.raises(AnalyticsWorkflowError, match="does not belong"):
+        interpret_report.enrich_run_for_export(
+            store=_as_sqlite_store(store),
+            snapshot=_snapshot(),
+            run=replace(_run(), snapshot_id="other"),
+        )
+
+
+def test_profile_summary_and_comparison_batch_errors() -> None:
+    class _MissingManifestStore(_ProfileReportStore):
+        def get_profile_manifest_snapshot(
+            self,
+            _profile_manifest_digest: str,
+        ) -> ProfileManifestSnapshotRecord | None:
+            return None
+
+    missing_manifest = _MissingManifestStore()
+    with pytest.raises(
+        AnalyticsWorkflowError, match="profile manifest snapshot missing"
+    ):
+        interpret_report.build_profile_summary(
+            store=_as_sqlite_store(missing_manifest),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_batch_id=missing_manifest.profile_batch.profile_batch_id,
+        )
+
+    store = _ProfileReportStore()
+    summary = interpret_report.build_profile_summary(
+        store=_as_sqlite_store(store),
+        snapshot=_snapshot(),
+        embedding_generation_id="embedding",
+        profile_batch_id=store.profile_batch.profile_batch_id,
+    )
+    assert summary is not None
+    assert summary["profile_id"] == store.profile_batch.profile_id
+
+    with pytest.raises(AnalyticsWorkflowError, match="unknown profile batch"):
+        interpret_report._resolve_comparison_batch(
+            store=_as_sqlite_store(store),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id=None,
+            profile_batch_id="missing",
+        )
+
+    mismatched = replace(
+        store.profile_batch,
+        snapshot_id="other",
+    )
+    store.profile_batch = mismatched
+    with pytest.raises(AnalyticsWorkflowError, match="does not belong"):
+        interpret_report._resolve_comparison_batch(
+            store=_as_sqlite_store(store),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id=None,
+            profile_batch_id=mismatched.profile_batch_id,
+        )
+
+
+def test_profile_suitable_helper_handles_missing_context() -> None:
+    assert interpret_report._profile_suitable({}) is None
+    assert (
+        interpret_report._profile_suitable({"profile_context": {"suitability": {}}})
+        is None
+    )
+    assert (
+        interpret_report._profile_suitable(
+            {
+                "profile_context": {
+                    "suitability": {"suitable_for_profile": True},
+                }
+            }
+        )
+        is True
+    )
+
+
+def test_interpret_json_helper_malformed_inputs() -> None:
+    assert interpret_report._json_string_list("not-json") == []
+    assert interpret_report._json_string_list('{"not": "list"}') == []
+    assert interpret_report._json_string_list('["ok", 1]') == ["ok"]
+    assert interpret_report._mapping_list("not-list") == []
+    assert interpret_report._mapping_cells("not-mapping") == []
+    assert interpret_report._json_mapping_or_none("not-json") is None
+    assert interpret_report._json_mapping_or_none('["list"]') is None
+
+
+def test_profile_summary_rejects_multiple_heuristic_recommendations() -> None:
+    store = _ProfileReportStore()
+    store.runs = (
+        replace(_run("run"), recommended_by_heuristic=True),
+        replace(_run("run-b"), recommended_by_heuristic=True),
+    )
+    with pytest.raises(
+        AnalyticsWorkflowError,
+        match="multiple valid heuristic recommendations",
+    ):
+        interpret_report.build_profile_summary(
+            store=_as_sqlite_store(store),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_batch_id=store.profile_batch.profile_batch_id,
+        )
+
+
+def test_resolve_comparison_batch_rejects_profile_id_mismatch() -> None:
+    store = _ProfileReportStore()
+    with pytest.raises(AnalyticsWorkflowError, match="does not match profile"):
+        interpret_report._resolve_comparison_batch(
+            store=_as_sqlite_store(store),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id="other-profile",
+            profile_batch_id=store.profile_batch.profile_batch_id,
+        )
+
+
+def test_interpret_noise_and_distribution_helpers() -> None:
+    noise = interpret_report._noise_item_previews(
+        diagnostics={
+            "noise_items": [
+                {"snapshot_item_id": "missing", "flags": {}},
+                {"snapshot_item_id": "item-1", "flags": {"flag": True}},
+            ]
+        },
+        items_by_id={},
+        assignment_by_id={},
+    )
+    assert noise == []
+
+    assert interpret_report._categorical_correlations(
+        {"metadata_distributions": "bad"}
+    ) == ({})
+    correlations = interpret_report._categorical_correlations(
+        {
+            "metadata_distributions": {
+                "description_length": {"1": {"numerator": 1}},
+                "agent_family": {"codex": {"numerator": 1, "denominator": 2}},
+            }
+        }
+    )
+    assert "agent_family" in correlations
+    assert "description_length" not in correlations
+
+
+def test_interpret_resolve_comparison_batch_profile_id_branch() -> None:
+    class _BatchStore:
+        def get_latest_profile_batch(
+            self,
+            *,
+            snapshot_id: str,
+            embedding_generation_id: str,
+            profile_id: str,
+        ) -> SimpleNamespace | None:
+            assert profile_id == "intent-small-balanced-v1"
+            return SimpleNamespace(
+                profile_batch_id="pbatch-1",
+                snapshot_id=snapshot_id,
+                embedding_generation_id=embedding_generation_id,
+                profile_id=profile_id,
+            )
+
+    batch = interpret_report._resolve_comparison_batch(
+        store=cast(CorpusStore, _BatchStore()),
+        snapshot=_snapshot(),
+        embedding_generation_id="embedding",
+        profile_id="intent-small-balanced-v1",
+        profile_batch_id=None,
+    )
+    assert batch is not None
+    assert batch.profile_batch_id == "pbatch-1"
+
+
+def test_interpret_profile_suitable_handles_non_mapping_and_non_bool() -> None:
+    assert interpret_report._profile_suitable({"profile_context": "bad"}) is None
+    assert (
+        interpret_report._profile_suitable({"profile_context": {"suitability": "bad"}})
+        is None
+    )
+    assert (
+        interpret_report._profile_suitable(
+            {"profile_context": {"suitability": {"suitable_for_profile": "yes"}}}
+        )
+        is None
+    )
+
+
+def test_interpret_resolve_comparison_batch_store_method_guards() -> None:
+    class _BatchOnlyStore:
+        def get_profile_batch(self, profile_batch_id: str) -> SimpleNamespace | None:
+            if profile_batch_id == "missing":
+                return None
+            return SimpleNamespace(
+                profile_batch_id=profile_batch_id,
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                profile_id="intent-small-balanced-v1",
+            )
+
+    class _ProfileOnlyStore:
+        def get_latest_profile_batch(
+            self,
+            *,
+            snapshot_id: str,
+            embedding_generation_id: str,
+            profile_id: str,
+        ) -> None:
+            return None
+
+    class _NoSelectionStore:
+        pass
+
+    assert (
+        interpret_report._resolve_comparison_batch(
+            store=cast(CorpusStore, _NoSelectionStore()),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id=None,
+            profile_batch_id="pbatch-1",
+        )
+        is None
+    )
+    assert (
+        interpret_report._resolve_comparison_batch(
+            store=cast(CorpusStore, _NoSelectionStore()),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id="intent-small-balanced-v1",
+            profile_batch_id=None,
+        )
+        is None
+    )
+    with pytest.raises(AnalyticsWorkflowError, match="unknown profile batch"):
+        interpret_report._resolve_comparison_batch(
+            store=cast(CorpusStore, _BatchOnlyStore()),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id=None,
+            profile_batch_id="missing",
+        )
+    assert (
+        interpret_report._resolve_comparison_batch(
+            store=cast(CorpusStore, _ProfileOnlyStore()),
+            snapshot=_snapshot(),
+            embedding_generation_id="embedding",
+            profile_id="intent-small-balanced-v1",
+            profile_batch_id=None,
+        )
+        is None
+    )
+    assert (
+        interpret_report._active_selection(
+            store=cast(CorpusStore, _NoSelectionStore()),
+            snapshot_id="snapshot",
+            embedding_generation_id="embedding",
+            profile_batch_id=None,
+        )
+        is None
+    )
+
+
+def test_cluster_projection_adds_small_cluster_provenance() -> None:
+    from codeclone.analytics.contracts import ClusterSummaryRecord
+
+    item = _item("item-1", "short intent")
+    summary = ClusterSummaryRecord(
+        clustering_run_id="run",
+        cluster_label=0,
+        display_cluster_id=0,
+        membership_digest="digest",
+        size=5,
+        diagnostics_json=json.dumps(
+            {"representatives": ["item-1"], "boundary_items": []},
+            sort_keys=True,
+        ),
+    )
+    payload = interpret_report._cluster_projection(
+        summary=summary,
+        member_items=[item],
+        items_by_id={"item-1": item},
+        assignment_by_id={},
+    )
+    interpretation = payload["interpretation"]
+    assert isinstance(interpretation, dict)
+    assert "provenance_completeness" in interpretation
+
+
+def test_render_profile_summary_includes_presentation_banner() -> None:
+    html = html_report._render_profile_summary(
+        {
+            "label": "Discovery lens",
+            "description": "Narrow profile",
+            "profile_id": "intent-small-discovery-v1",
+            "profile_batch_id": "pbatch-1",
+            "profile_suitable_count": 0,
+            "presentation": {
+                "banner_kind": "no_profile_suitable_candidate",
+                "banner_message": "No profile-suitable candidate",
+                "technically_valid": False,
+                "failed_invariants": (),
+                "recommended_by_heuristic": False,
+                "selected_by_maintainer": False,
+                "is_candidate_only": False,
+                "projection_mode": "full_interpretation",
+            },
+        }
+    )
+    assert "Profile lens" in html
+    assert "No profile-suitable candidate" in html

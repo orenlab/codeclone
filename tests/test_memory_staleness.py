@@ -658,3 +658,94 @@ def test_refresh_stale_primary_reason_skips_stale_records(tmp_path: Path) -> Non
             )
             is None
         )
+
+
+def test_experience_distiller_path_and_signal_helpers() -> None:
+    from codeclone.memory.experience.distiller import (
+        _agent_family,
+        _path_family,
+        _signals,
+        pattern_keys,
+    )
+    from codeclone.memory.trajectory.models import Trajectory, TrajectorySubject
+
+    assert _agent_family("cursor/cli") == "cursor"
+    assert _path_family("not-valid-repo-path!") is None
+    assert _path_family("mod.py") is None
+
+    trajectory = Trajectory(
+        id="traj-1",
+        project_id="project",
+        repo_root_digest="digest",
+        workflow_id="workflow",
+        intent_id="intent-1",
+        primary_run_id=None,
+        first_run_id=None,
+        last_run_id=None,
+        report_digest=None,
+        outcome="partial",
+        quality_tier="incident",
+        quality_score=10,
+        labels=("scope_expanded",),
+        summary="summary",
+        trajectory_digest="traj-digest",
+        source_event_stream_digest="stream",
+        projection_version="trajectory-v3",
+        event_count=1,
+        step_count=1,
+        incident_count=2,
+        started_at_utc="2026-01-01T00:00:00Z",
+        finished_at_utc="2026-01-01T00:00:01Z",
+        projected_at_utc="2026-01-01T00:00:02Z",
+        updated_at_utc="2026-01-01T00:00:02Z",
+        steps=(),
+        subjects=(
+            TrajectorySubject("agent", "codex/cli", "actor"),
+            TrajectorySubject("path", "codeclone/memory/store.py", "about"),
+        ),
+        evidence=(),
+    )
+    signals = _signals(trajectory)
+    assert "incident_present" in signals
+    keys = pattern_keys(trajectory)
+    assert keys
+
+
+def test_read_intent_declared_records_wraps_open_failure(tmp_path: Path) -> None:
+    from codeclone.audit.reader import read_intent_declared_records
+    from codeclone.audit.validation import AuditReadError
+
+    audit_db = tmp_path / "audit.sqlite3"
+    audit_db.write_text("not-a-database", encoding="utf-8")
+    with pytest.raises(AuditReadError, match="cannot open audit database"):
+        read_intent_declared_records(db_path=audit_db, repo_root_digest="digest")
+
+
+def test_read_intent_declared_records_wraps_read_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sqlite3
+
+    from codeclone.audit.reader import read_intent_declared_records
+    from codeclone.audit.validation import AuditReadError
+
+    audit_db = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(audit_db)
+    conn.execute("CREATE TABLE controller_events (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+
+    class _BrokenConn:
+        def execute(self, *_args: object, **_kwargs: object) -> None:
+            raise sqlite3.Error("read failed")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        lambda _path: _BrokenConn(),
+    )
+    with pytest.raises(AuditReadError, match="cannot read audit database"):
+        read_intent_declared_records(db_path=audit_db, repo_root_digest="digest")

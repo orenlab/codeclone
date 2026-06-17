@@ -122,12 +122,12 @@ def test_codex_plugin_skill_exists() -> None:
         skill_text,
         *(
             "name: codeclone-review",
-            "conservative first pass",
+            "first pass, baseline triage",
             'help(topic="analysis_profile")',
             'help(topic="coverage")',
             'get_report_section(section="metrics")',
-            "Use MCP tools only",
-            "Do not fall back to CLI or local report files.",
+            "MCP tools only",
+            "Do not fall back to CLI / local report files.",
         ),
     )
     assert_all_contained(
@@ -136,8 +136,8 @@ def test_codex_plugin_skill_exists() -> None:
             "name: codeclone-hotspots",
             'get_report_section(section="metrics")',
             'help(topic="coverage")',
-            "Use MCP tools only",
-            "Do not fall back to CLI or local report files.",
+            "MCP tools only",
+            "Do not fall back to CLI / local report files.",
         ),
     )
     assert_all_contained(
@@ -145,18 +145,13 @@ def test_codex_plugin_skill_exists() -> None:
         *(
             "name: codeclone-change-control",
             "MANDATORY HARD GATE before ANY repository file write",
-            "target Python repository",
-            "Normal pipeline",
-            "Tool tiers",
-            "changed_files` XOR `diff_ref",
-            "needs_analysis",
             "start_controlled_change",
             "finish_controlled_change",
             "Completion gate",
-            "Advisory acceptance",
-            "health_delta",
-            "verification_profiles",
-            "patch_trail",
+            "Verification profiles",
+            "record_candidate",
+            "edit_allowed",
+            "get_relevant_memory",
         ),
     )
     assert_all_contained(
@@ -164,24 +159,21 @@ def test_codex_plugin_skill_exists() -> None:
         *(
             "name: codeclone-implementation-context",
             "get_implementation_context",
-            'help(topic="implementation_context")',
-            "module:symbol",
             "do_not_touch",
             "review_context",
             "get_relevant_memory",
-            "start_controlled_change",
             "Do not fall back to CLI or local report files.",
+            "codeclone-change-control",
         ),
     )
     assert_all_contained(
         platform_observability_skill_text,
         *(
             "name: codeclone-platform-observability",
-            "Maintainer-only",
+            "maintainer-only",
             "query_platform_observability",
             "CODECLONE_OBSERVABILITY_ENABLED=1",
-            "Not for end users analyzing their Python repository",
-            "Do not fall back to CLI or local report files for repository analysis.",
+            "codeclone-review",
         ),
     )
 

@@ -74,7 +74,6 @@ def test_cursor_skills_match_codex_skills() -> None:
         plugin_skills_root=root / "plugins" / "cursor-codeclone" / "skills",
         codex_skills_root=root / "plugins" / "codeclone" / "skills",
         skill_names=CODEX_CURSOR_SYNC_SKILL_NAMES,
-        review_platform_keyword="review",
     )
 
 

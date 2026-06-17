@@ -7,8 +7,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -580,3 +581,301 @@ def test_passage_chunk_boundaries_are_deterministic(
     provider, _created = _boundary_fastembed_provider(monkeypatch)
     text = "deterministic " * 400
     assert provider.chunk_text(text) == provider.chunk_text(text)
+
+
+def test_known_model_max_tokens_defaults_to_512() -> None:
+    from codeclone.memory.embedding.fastembed_provider import known_model_max_tokens
+
+    assert known_model_max_tokens("BAAI/bge-small-en-v1.5") == 512
+    assert known_model_max_tokens("unknown-model") == 512
+
+
+def test_fastembed_max_sequence_tokens_uses_loaded_tokenizer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    class _Tokenizer:
+        truncation = SimpleNamespace(max_length=256)
+
+    class _Inner:
+        tokenizer = _Tokenizer()
+
+    provider, created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=_Inner(),
+    )
+    provider.embed_documents(["warmup"])
+    assert provider.max_sequence_tokens() == 256
+    assert created
+
+
+def test_fastembed_probe_passage_token_counts_without_encode_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Tokenizer:
+        truncation = SimpleNamespace(max_length=512)
+
+        def encode(self, text: str, *, add_special_tokens: bool) -> _FakeEncoding:
+            return _FakeEncoding(len(text))
+
+    class _Inner:
+        def __init__(self) -> None:
+            self.tokenizer = _Tokenizer()
+
+        def tokenize(self, documents: list[str]) -> list[_FakeEncoding]:
+            return [
+                self.tokenizer.encode(doc, add_special_tokens=True) for doc in documents
+            ]
+
+    provider, _created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=_Inner(),
+    )
+    provider.embed_documents(["warmup"])
+    (counts,) = provider.probe_passage_token_counts(["hello"])
+    assert counts.raw == counts.effective
+
+
+def test_fastembed_chunk_text_without_tokenizer_returns_original() -> None:
+    from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
+
+    provider = FastEmbedEmbeddingProvider(
+        model_name="BAAI/bge-small-en-v1.5",
+        dimension=384,
+        cache_dir=Path("/tmp/fastembed-cache"),
+        allow_model_download=False,
+    )
+    provider._model = SimpleNamespace(model=SimpleNamespace(tokenizer=None))
+    assert provider.chunk_text("short text") == ("short text",)
+
+
+def test_fastembed_estimate_token_counts_uses_tokenize_when_model_loaded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Inner:
+        def tokenize(self, documents: list[str]) -> list[_FakeEncoding]:
+            return [_FakeEncoding(len(document)) for document in documents]
+
+    provider, _created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=_Inner(),
+    )
+    provider.embed_documents(["warmup"])
+    assert provider.estimate_token_counts(["ab", "abcd"]) == (11, 13)
+
+
+def test_fastembed_chunk_text_without_encode_ops_returns_original(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.embedding import fastembed_provider as provider_mod
+    from codeclone.memory.embedding.fastembed_provider import FastEmbedEmbeddingProvider
+
+    class _Tokenizer:
+        truncation = SimpleNamespace(max_length=512)
+
+    provider = FastEmbedEmbeddingProvider(
+        model_name="BAAI/bge-small-en-v1.5",
+        dimension=384,
+        cache_dir=Path("/tmp/fastembed-cache"),
+        allow_model_download=False,
+    )
+    provider._model = SimpleNamespace(model=SimpleNamespace(tokenizer=_Tokenizer()))
+    monkeypatch.setattr(provider_mod, "_tokenizer_encode_ops", lambda _tokenizer: None)
+    assert provider.chunk_text("hello world") == ("hello world",)
+
+
+def test_embed_documents_records_observability_counter(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.memory.embedding import embed_documents, embed_query
+    from codeclone.observability import bootstrap, shutdown
+
+    provider = DeterministicHashEmbeddingProvider(dimension=8)
+    bootstrap(ObservabilityConfig(enabled=True, profile=False), root=tmp_path)
+    try:
+        vectors = embed_documents(provider, ["one", "two"])
+        query = embed_query(provider, "query")
+    finally:
+        shutdown()
+    assert len(vectors) == 2
+    assert len(query) == 8
+
+
+def test_embed_batching_validation_and_empty_inputs() -> None:
+    from codeclone.memory.embedding.batching import (
+        EmbedBatchLimits,
+        LengthScoredItem,
+        pack_adaptive_batches,
+        score_lengths,
+    )
+
+    with pytest.raises(ValueError, match="length score inputs must align"):
+        score_lengths(
+            ["a"],
+            char_counts=[1],
+            token_counts=[1, 2],
+            source_kinds=["kind"],
+            source_ids=["id"],
+        )
+    with pytest.raises(ValueError, match="embed batch limits must be positive"):
+        pack_adaptive_batches(
+            [], limits=EmbedBatchLimits(max_documents=0, max_padded_tokens=8)
+        )
+    assert (
+        pack_adaptive_batches(
+            [], limits=EmbedBatchLimits(max_documents=4, max_padded_tokens=32)
+        )
+        == []
+    )
+    (batch,) = pack_adaptive_batches(
+        (
+            LengthScoredItem(
+                item="doc",
+                char_count=3,
+                token_count=2,
+                source_kind="memory",
+                source_id="id",
+            ),
+        ),
+        limits=EmbedBatchLimits(max_documents=4, max_padded_tokens=32),
+    )
+    assert batch.items[0].item == "doc"
+
+
+def test_deterministic_embedding_max_sequence_tokens_is_none() -> None:
+    provider = DeterministicHashEmbeddingProvider(dimension=16)
+    assert provider.max_sequence_tokens() is None
+
+
+def test_fastembed_embed_records_infer_counters_when_observability_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.observability import bootstrap, shutdown
+
+    provider, _created = _resolve_fastembed_provider(monkeypatch)
+    bootstrap(ObservabilityConfig(enabled=True, profile=False), root=tmp_path)
+    try:
+        vectors = provider.embed_documents(
+            ["one", "two"],
+            infer_counters={"lane_memory": 2},
+        )
+    finally:
+        shutdown()
+    assert len(vectors) == 2
+
+
+def test_fastembed_tokenizer_helper_edge_paths() -> None:
+    from codeclone.memory.embedding import fastembed_provider as provider_mod
+
+    class _Truncation:
+        max_length = 128
+
+    class _TokenizerWithTruncation:
+        truncation = _Truncation()
+
+    assert provider_mod._tokenizer_max_length(_TokenizerWithTruncation()) == 128
+    assert provider_mod._tokenizer_max_length(object()) is None
+
+    class _Encoding:
+        ids: ClassVar[list[int]] = [1, 2, 3]
+
+    assert provider_mod._encoding_length(_Encoding()) == 3
+    assert provider_mod._encoding_length(object()) == 0
+
+
+def test_fastembed_tokenizer_max_length_rejects_non_positive() -> None:
+    from codeclone.memory.embedding import fastembed_provider as provider_mod
+
+    class _Truncation:
+        max_length = 0
+
+    class _Tokenizer:
+        truncation = _Truncation()
+
+    assert provider_mod._tokenizer_max_length(_Tokenizer()) is None
+
+
+def test_fastembed_verify_chunk_passage_input_raises_on_overflow(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.embedding import fastembed_provider as provider_mod
+    from codeclone.memory.exceptions import SemanticChunkingInvariantError
+
+    def _encode(_text: str, *, add_special_tokens: bool = True) -> object:
+        class _Encoding:
+            ids: ClassVar[list[int]] = list(range(600))
+
+        return _Encoding()
+
+    with pytest.raises(
+        SemanticChunkingInvariantError, match="exceeds model token window"
+    ):
+        provider_mod._verify_chunk_passage_input(
+            _encode,
+            "too-long",
+            model_max_tokens=128,
+        )
+
+
+def test_fastembed_probe_without_tokenizer_uses_char_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, _created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=SimpleNamespace(tokenizer=None, tokenize=lambda _docs: []),
+        vector_value=0.0,
+    )
+    counts = provider.probe_passage_token_counts(["hello"])
+    assert counts[0].raw == counts[0].effective
+    assert counts[0].raw > 0
+
+
+def test_fastembed_chunk_text_raises_when_chunk_cannot_fit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.exceptions import SemanticChunkingInvariantError
+
+    class _Encoding:
+        def __init__(self, ids: list[int]) -> None:
+            self.ids = ids
+
+    class _Tokenizer:
+        truncation = type("T", (), {"max_length": 8})()
+
+        def encode(self, text: str, *, add_special_tokens: bool = False) -> _Encoding:
+            return _Encoding([1] * 32)
+
+        def decode(self, ids: list[int]) -> str:
+            return "x" * len(ids)
+
+        def no_truncation(self) -> None:
+            return None
+
+        def enable_truncation(self, *, max_length: int) -> None:
+            return None
+
+    provider, _created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=SimpleNamespace(tokenizer=_Tokenizer()),
+    )
+    with pytest.raises(
+        SemanticChunkingInvariantError, match="unable to fit passage chunk"
+    ):
+        provider.chunk_text("overflow")
+
+
+def test_fastembed_estimate_token_counts_without_tokenize(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider, _created = _resolve_fastembed_provider(
+        monkeypatch,
+        inner_model=SimpleNamespace(tokenizer=object()),
+        vector_value=0.0,
+    )
+    provider._get_model()
+    counts = provider.estimate_token_counts(["hello"])
+    assert counts == (4,)

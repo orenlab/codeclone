@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -370,3 +371,58 @@ def test_read_git_provenance_unavailable_without_branch_or_head(
     )
     git = read_git_provenance(root)
     assert git.available is False
+
+
+def test_run_memory_init_dry_run_yields_null_db_path(tmp_path: Path) -> None:
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/a.py": "x = 1\n"},
+        registry_items=["pkg/a.py"],
+    )
+    result = run_memory_init(
+        root_path=root,
+        report_document=report_document,
+        options=InitOptions(dry_run=True, include_docs=False, include_tests=False),
+    )
+    assert result.dry_run is True
+    assert result.db_path is None
+    assert result.planned_counts
+
+
+def test_run_memory_init_refresh_records_vacuum_deletions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import dataclass
+
+    root, _report_path, report_document = git_repo_with_cached_report(
+        tmp_path,
+        py_sources={"pkg/c.py": "z = 3\n"},
+        registry_items=["pkg/c.py"],
+    )
+    run_memory_init(
+        root_path=root,
+        report_document=report_document,
+        options=InitOptions(include_docs=False, include_tests=False),
+    )
+
+    @dataclass(frozen=True, slots=True)
+    class _VacuumReport:
+        total_deleted: int = 4
+
+    monkeypatch.setattr(
+        "codeclone.memory.ingest.runner.run_memory_vacuum",
+        lambda *_args, **_kwargs: _VacuumReport(),
+    )
+    monkeypatch.setattr(
+        "codeclone.memory.ingest.runner.apply_refresh_staleness",
+        lambda *_args, **_kwargs: SimpleNamespace(records_marked_stale=2),
+    )
+    result = run_memory_init(
+        root_path=root,
+        report_document=report_document,
+        options=InitOptions(refresh=True, include_docs=False, include_tests=False),
+    )
+    assert result.ingestion_mode == "refresh"
+    assert result.records_marked_stale == 2
+    assert result.vacuum_deleted == 4

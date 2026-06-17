@@ -10,6 +10,7 @@ import importlib
 import math
 import sqlite3
 from collections.abc import Sequence
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import cast
@@ -17,15 +18,27 @@ from typing import cast
 import pytest
 
 from codeclone.analytics.contracts import (
+    ClusteringRunRecord,
     CorpusItemRecord,
+    CorpusSnapshotRecord,
     EmbeddingGenerationRecord,
     EmbeddingItemRecord,
+    ProfileAssessmentRecord,
+    ProfileBatchRecord,
+    ProfileBatchRunRecord,
+    ProfileManifestSnapshotRecord,
+    RunSelectionRecord,
 )
 from codeclone.analytics.embedding import generation
 from codeclone.analytics.exceptions import (
     AnalyticsCapabilityError,
     AnalyticsStoreError,
     AnalyticsWorkflowError,
+)
+from codeclone.analytics.profiles.loader import (
+    canonical_manifest_json,
+    load_bundled_profiles,
+    profile_manifest_digest,
 )
 from codeclone.analytics.schema import ensure_analytics_schema
 from codeclone.analytics.store.protocols import CorpusStore
@@ -38,6 +51,7 @@ from codeclone.analytics.store.vectors_lancedb import (
     vector_digest,
 )
 from codeclone.config.analytics import resolve_analytics_config
+from tests.fixtures.analytics.helpers import open_analytics_store_and_close
 
 
 def _item(item_id: str = "item") -> CorpusItemRecord:
@@ -433,8 +447,7 @@ def test_store_migration_reaches_1_2_and_is_idempotent(
 
 def test_store_migration_backfills_one_legacy_selection(tmp_path: Path) -> None:
     path = tmp_path / "analytics.sqlite3"
-    store = SqliteCorpusAnalyticsStore.open(path)
-    store.close()
+    open_analytics_store_and_close(path)
     _seed_legacy_selection(path)
     _remove_control_plane(path, legacy_version="1.1")
 
@@ -453,6 +466,165 @@ def test_store_migration_backfills_one_legacy_selection(tmp_path: Path) -> None:
     assert active.record.selection_id.startswith("sel-legacy-")
     assert active.record.selected_run_id == "run"
     assert active.record.selected_by == "legacy-migration"
+
+
+def test_sqlite_store_profile_queries_and_list_snapshots(tmp_path: Path) -> None:
+    store = SqliteCorpusAnalyticsStore.open(tmp_path / "analytics.sqlite3")
+    try:
+        store.insert_snapshot(
+            CorpusSnapshotRecord(
+                snapshot_id="snapshot",
+                lane="intent",
+                representation_kind="intent.description.v1",
+                representation_version="3",
+                source_stores_json="{}",
+                source_schema_versions_json="{}",
+                record_count=0,
+                source_digest="digest",
+                created_at_utc="2026-01-01T00:00:00Z",
+            ),
+            (),
+        )
+        store.insert_embedding_generation(
+            EmbeddingGenerationRecord(
+                embedding_generation_id="embedding",
+                provider_id="fastembed",
+                provider_package_version="1",
+                model_id="model",
+                model_revision=None,
+                model_artifact_fingerprint=None,
+                exact_model_artifact_reproducibility=False,
+                dimensions=2,
+                embedding_contract_version="2",
+                embedding_similarity_metric="cosine",
+                vector_preprocessing="l2_normalize",
+                created_at_utc="2026-01-01T00:00:00Z",
+            )
+        )
+        store.insert_clustering_run(
+            ClusteringRunRecord(
+                clustering_run_id="run-a",
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                requested_parameters_json="{}",
+                effective_parameters_json="{}",
+                random_seed=42,
+                run_digest="digest-run-a",
+                recommended_by_heuristic=False,
+                selected_by_maintainer=False,
+                status="completed",
+                created_at_utc="2026-01-01T00:00:00Z",
+                finished_at_utc="2026-01-01T00:00:01Z",
+                error_message=None,
+            )
+        )
+        profile = load_bundled_profiles()["intent-small-balanced-v1"]
+        digest = profile_manifest_digest(profile)
+        manifest = ProfileManifestSnapshotRecord(
+            profile_manifest_digest=digest,
+            profile_id=profile.profile_id,
+            profile_version=profile.profile_version,
+            manifest_schema_version=profile.manifest_schema_version,
+            canonical_manifest_json=canonical_manifest_json(profile),
+            label=profile.label,
+            description=profile.description,
+            created_at_utc="2026-01-01T00:00:00Z",
+        )
+        store.insert_profile_manifest_snapshot(manifest)
+        batch = ProfileBatchRecord(
+            profile_batch_id="batch",
+            snapshot_id="snapshot",
+            embedding_generation_id="embedding",
+            profile_id=profile.profile_id,
+            profile_manifest_digest=digest,
+            candidate_space_digest="space",
+            started_at_utc="2026-01-01T00:00:00Z",
+            finished_at_utc=None,
+            status="running",
+            candidate_count_planned=1,
+            candidate_count_succeeded=0,
+            candidate_count_failed=0,
+            recommended_clustering_run_id=None,
+            recommendation_rationale_json=None,
+            batch_max_cluster_count=None,
+            created_at_utc="2026-01-01T00:00:00Z",
+        )
+        store.insert_profile_batch(batch)
+        store.insert_profile_batch_run(
+            ProfileBatchRunRecord("batch", "run-a", 0, "8|5|1|eom")
+        )
+        store.insert_profile_assessment(
+            ProfileAssessmentRecord(
+                profile_batch_id="batch",
+                clustering_run_id="run-a",
+                profile_id=profile.profile_id,
+                profile_version=profile.profile_version,
+                profile_manifest_digest=digest,
+                suitable_for_profile=False,
+                rejection_reasons_json="[]",
+                observed_metrics_json=None,
+                assessed_digest="assessed",
+            )
+        )
+        store.commit()
+
+        (listed_snapshot,) = store.list_snapshots()
+        assert listed_snapshot.snapshot_id == "snapshot"
+        assert (
+            store.get_latest_profile_batch(
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                profile_id="intent-small-balanced-v1",
+            )
+            == batch
+        )
+        (batch_run,) = store.list_profile_batch_run_records(profile_batch_id="batch")
+        assert batch_run.clustering_run_id == "run-a"
+        (batch_cluster_run,) = store.list_clustering_runs_for_batch(
+            profile_batch_id="batch"
+        )
+        assert batch_cluster_run.clustering_run_id == "run-a"
+        assert store.list_profile_batch_ids_for_run(clustering_run_id="run-a") == (
+            "batch",
+        )
+        (assessment,) = store.list_profile_assessments(profile_batch_id="batch")
+        assert assessment.clustering_run_id == "run-a"
+
+        with pytest.raises(AnalyticsStoreError, match="profile manifest digest"):
+            store.insert_profile_manifest_snapshot(
+                replace(manifest, label="Different label")
+            )
+
+        with pytest.raises(AnalyticsStoreError, match="unknown profile batch"):
+            store.finalize_profile_batch(replace(batch, profile_batch_id="missing"))
+
+        atomic_store = SqliteCorpusAnalyticsStore.open(tmp_path / "atomic.sqlite3")
+        try:
+            atomic_store._conn.execute("BEGIN")
+            with pytest.raises(
+                AnalyticsStoreError,
+                match="atomic selection recording requires a clean transaction",
+            ):
+                atomic_store.record_run_selection_atomic(
+                    RunSelectionRecord(
+                        selection_id="sel-test",
+                        snapshot_id="snapshot",
+                        embedding_generation_id="embedding",
+                        profile_batch_id=None,
+                        profile_id=None,
+                        profile_manifest_digest=None,
+                        selected_run_id="run-a",
+                        selected_at_utc="2026-01-01T00:00:00Z",
+                        selected_by="maintainer",
+                        rationale=None,
+                        supersedes_selection_id=None,
+                    )
+                )
+            atomic_store.rollback()
+        finally:
+            atomic_store.close()
+    finally:
+        store.close()
 
 
 def _seed_legacy_selection(path: Path) -> None:
@@ -526,5 +698,95 @@ def _remove_control_plane(path: Path, *, legacy_version: str) -> None:
             (legacy_version,),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def test_store_migration_rejects_orphan_references(tmp_path: Path) -> None:
+    path = tmp_path / "orphan.sqlite3"
+    store = SqliteCorpusAnalyticsStore.open(path)
+    store.close()
+    _remove_control_plane(path, legacy_version="1.0")
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO corpus_items (
+                snapshot_id, representation_key, snapshot_item_id,
+                source_record_key, project_id, intent_id, normalized_text,
+                normalized_digest, normalizer_version, representation_digest,
+                metadata_json, registry_overlay_json
+            ) VALUES (
+                'missing-snapshot', 'key', 'item', 'source', 'project',
+                'intent', 'text', 'norm', '1', 'rep', '{}', NULL
+            )
+            """
+        )
+        conn.commit()
+        with pytest.raises(AnalyticsStoreError, match="invalid reference"):
+            ensure_analytics_schema(conn)
+    finally:
+        conn.close()
+
+
+def test_store_migration_records_ambiguous_legacy_selection(tmp_path: Path) -> None:
+    path = tmp_path / "ambiguous.sqlite3"
+    open_analytics_store_and_close(path)
+    _seed_legacy_selection(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            INSERT INTO clustering_runs (
+                clustering_run_id, snapshot_id, embedding_generation_id,
+                requested_parameters_json, effective_parameters_json,
+                random_seed, run_digest, recommended_by_heuristic,
+                selected_by_maintainer, status, created_at_utc,
+                finished_at_utc, error_message
+            ) VALUES ('run-b', 'snapshot', 'embedding', '{}', '{}', 42,
+                      'run-digest-b', 0, 1, 'completed',
+                      '2026-01-01T00:00:00Z',
+                      '2026-01-01T00:00:01Z', NULL)
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    _remove_control_plane(path, legacy_version="1.1")
+    migrated = SqliteCorpusAnalyticsStore.open(path)
+    try:
+        active = migrated.get_active_run_selection(
+            snapshot_id="snapshot",
+            embedding_generation_id="embedding",
+            profile_batch_id=None,
+        )
+        diagnostic = migrated._conn.execute(
+            "SELECT value FROM analytics_meta "
+            "WHERE key LIKE 'diagnostic.LEGACY_SELECTION_AMBIGUOUS.%'"
+        ).fetchone()
+    finally:
+        migrated.close()
+
+    assert active.record is None
+    assert diagnostic is not None
+    assert "LEGACY_SELECTION_AMBIGUOUS" in str(diagnostic[0])
+
+
+def test_ensure_analytics_schema_rejects_unsupported_version(tmp_path: Path) -> None:
+    path = tmp_path / "unsupported.sqlite3"
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            "CREATE TABLE analytics_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+        )
+        conn.execute(
+            "INSERT INTO analytics_meta(key, value) VALUES ('schema_version', '9.9')"
+        )
+        conn.commit()
+        with pytest.raises(AnalyticsStoreError, match="unsupported analytics schema"):
+            ensure_analytics_schema(conn)
     finally:
         conn.close()

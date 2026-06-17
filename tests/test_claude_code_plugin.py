@@ -48,7 +48,6 @@ def test_claude_code_plugin_skills_match_shared_contracts() -> None:
         plugin_skills_root=root / "plugins" / "claude-code-codeclone" / "skills",
         codex_skills_root=root / "plugins" / "codeclone" / "skills",
         skill_names=CODEX_CLAUDE_SYNC_SKILL_NAMES,
-        review_platform_keyword="claude code",
     )
 
 

@@ -10,6 +10,7 @@ import json
 from argparse import Namespace
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -42,7 +43,10 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.surfaces.cli import analytics as analytics_cli
-from tests.fixtures.analytics.helpers import write_intent_declared_event
+from tests.fixtures.analytics.helpers import (
+    patch_cli_resolve_analytics_config,
+    write_intent_declared_event,
+)
 
 
 def _snapshot() -> CorpusSnapshotRecord:
@@ -482,7 +486,7 @@ def test_clusters_command_rejects_unknown_snapshot_and_lists_runs(
 ) -> None:
     monkeypatch.setattr(analytics_cli, "_require_capability", lambda _value: None)
     config = SimpleNamespace(db_path=tmp_path / "analytics.sqlite3")
-    monkeypatch.setattr(analytics_cli, "resolve_analytics_config", lambda _root: config)
+    patch_cli_resolve_analytics_config(monkeypatch, analytics_cli, config)
     store = _ReadStore()
     monkeypatch.setattr(
         SqliteCorpusAnalyticsStore,
@@ -610,7 +614,7 @@ def test_build_export_routing_and_missing_artifacts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = SimpleNamespace(db_path=tmp_path / "analytics.sqlite3")
-    monkeypatch.setattr(analytics_cli, "resolve_analytics_config", lambda _root: config)
+    patch_cli_resolve_analytics_config(monkeypatch, analytics_cli, config)
     store = _ReadStore()
     monkeypatch.setattr(
         SqliteCorpusAnalyticsStore,
@@ -706,3 +710,364 @@ def _clustering_args(**overrides: object) -> Namespace:
     }
     values.update(overrides)
     return Namespace(**values)
+
+
+def test_cluster_command_profile_payload_and_selection_scope(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(analytics_cli, "_require_capability", lambda _value: None)
+    monkeypatch.setattr(
+        analytics_cli,
+        "run_clustering",
+        lambda **_kwargs: ("run-a",),
+    )
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone.analytics]
+default_profile_id = "intent-small-balanced-v1"
+""".strip(),
+        encoding="utf-8",
+    )
+    config = resolve_analytics_config(tmp_path)
+    patch_cli_resolve_analytics_config(monkeypatch, analytics_cli, config)
+
+    class _ClusterStore(_ReadStore):
+        def get_latest_profile_batch(
+            self,
+            *,
+            snapshot_id: str,
+            embedding_generation_id: str,
+            profile_id: str,
+        ) -> SimpleNamespace:
+            assert snapshot_id == "snapshot"
+            assert embedding_generation_id == "embedding"
+            assert profile_id == "intent-small-balanced-v1"
+            return SimpleNamespace(
+                profile_batch_id="pbatch-test",
+                profile_id=profile_id,
+                recommended_clustering_run_id="run-a",
+                status="completed",
+            )
+
+    monkeypatch.setattr(
+        SqliteCorpusAnalyticsStore,
+        "open_readonly",
+        lambda _path: _ClusterStore(),
+    )
+    config.db_path.parent.mkdir(parents=True, exist_ok=True)
+    config.db_path.write_text("", encoding="utf-8")
+
+    assert (
+        analytics_cli._run_cluster_command(
+            Namespace(
+                select_run=None,
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                sweep=False,
+                profile="auto",
+                selected_by=None,
+                selection_profile="none",
+                selection_rationale=None,
+                pca_dimensions=None,
+                min_cluster_size=None,
+                min_samples=None,
+                cluster_selection_method=None,
+                sweep_pca=None,
+                sweep_min_cluster_size=None,
+                sweep_min_samples=None,
+                sweep_selection_method=None,
+            ),
+            tmp_path,
+        )
+        == ExitCode.SUCCESS
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["profile_batch_id"] == "pbatch-test"
+    assert payload["recommended_for_profile_run_id"] == "run-a"
+
+    selected: dict[str, object] = {}
+
+    def fake_select(**kwargs: object) -> SimpleNamespace:
+        selected.update(kwargs)
+        return SimpleNamespace(selection_id="selection")
+
+    monkeypatch.setattr(analytics_cli, "select_cluster_run", fake_select)
+    assert (
+        analytics_cli._run_cluster_command(
+            Namespace(
+                select_run="run-a",
+                snapshot_id=None,
+                embedding_generation_id=None,
+                sweep=False,
+                profile=None,
+                selected_by="maintainer",
+                selection_profile="pbatch-scope",
+                selection_rationale="picked",
+                pca_dimensions=None,
+                min_cluster_size=None,
+                min_samples=None,
+                cluster_selection_method=None,
+                sweep_pca=None,
+                sweep_min_cluster_size=None,
+                sweep_min_samples=None,
+                sweep_selection_method=None,
+            ),
+            tmp_path,
+        )
+        == ExitCode.SUCCESS
+    )
+    assert selected["profile_batch_id"] == "pbatch-scope"
+    assert selected["selection_profile_id"] is None
+
+
+def test_comma_parsers_reject_invalid_values() -> None:
+    with pytest.raises(AnalyticsWorkflowError, match="positive integers"):
+        analytics_cli._comma_ints("a,b", flag="--sweep-pca")
+    with pytest.raises(AnalyticsWorkflowError, match="positive integers"):
+        analytics_cli._comma_ints("0", flag="--sweep-pca")
+    assert analytics_cli._comma_ints("2,1", flag="--sweep-pca") == (1, 2)
+    with pytest.raises(AnalyticsWorkflowError, match="eom and/or leaf"):
+        analytics_cli._comma_methods("invalid")
+    assert analytics_cli._comma_methods("leaf,eom") == ("eom", "leaf")
+
+
+def test_resolved_profile_id_auto_requires_default(tmp_path: Path) -> None:
+    config = resolve_analytics_config(tmp_path)
+    with pytest.raises(
+        AnalyticsWorkflowError, match="default_profile_id not configured"
+    ):
+        analytics_cli._resolved_profile_id(config, "auto")
+
+
+def test_cluster_select_run_conflicts_with_execution_args(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(analytics_cli, "_require_capability", lambda _value: None)
+    with pytest.raises(
+        AnalyticsWorkflowError,
+        match="cannot be combined with clustering execution arguments",
+    ):
+        analytics_cli._run_cluster_command(
+            _clustering_args(select_run="run-a", snapshot_id="snapshot"),
+            tmp_path,
+        )
+
+
+def test_cluster_selection_flags_require_select_run(tmp_path: Path) -> None:
+    with pytest.raises(AnalyticsWorkflowError, match="require --select-run"):
+        analytics_cli._run_cluster_command(
+            _clustering_args(selection_rationale="because"),
+            tmp_path,
+        )
+
+
+def test_clustering_mode_rejects_sweep_with_explicit_parameters() -> None:
+    args = _clustering_args(sweep=True, pca_dimensions=32)
+    with pytest.raises(AnalyticsWorkflowError, match="sweep mode conflicts"):
+        analytics_cli._validate_clustering_mode_args(args)
+
+
+def test_clustering_parameters_from_args_uses_config_defaults(tmp_path: Path) -> None:
+    config = resolve_analytics_config(tmp_path)
+    params = analytics_cli._clustering_parameters_from_args(
+        _clustering_args(min_cluster_size=12),
+        config=config,
+    )
+    assert params is not None
+    assert params.min_cluster_size == 12
+    assert params.pca_dimensions == config.default_pca_dimensions
+
+
+def test_selection_scope_and_resolved_profile_id_helpers(tmp_path: Path) -> None:
+    assert analytics_cli._selection_scope("none") == (None, None)
+    assert analytics_cli._selection_scope("pbatch-scope") == ("pbatch-scope", None)
+    assert analytics_cli._selection_scope("intent-small-balanced-v1") == (
+        None,
+        "intent-small-balanced-v1",
+    )
+    config = resolve_analytics_config(tmp_path)
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone.analytics]
+default_profile_id = "intent-small-balanced-v1"
+""".strip(),
+        encoding="utf-8",
+    )
+    config = resolve_analytics_config(tmp_path)
+    assert (
+        analytics_cli._resolved_profile_id(config, "auto") == "intent-small-balanced-v1"
+    )
+    assert analytics_cli._resolved_profile_id(config, "intent-small-discovery-v1") == (
+        "intent-small-discovery-v1"
+    )
+
+
+def test_cluster_command_recommended_and_profile_batch_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(analytics_cli, "_require_capability", lambda _value: None)
+    config = resolve_analytics_config(tmp_path)
+    patch_cli_resolve_analytics_config(monkeypatch, analytics_cli, config)
+    config.db_path.parent.mkdir(parents=True, exist_ok=True)
+    config.db_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(analytics_cli, "run_clustering", lambda **_kwargs: ("run-a",))
+
+    class _RecommendedStore(_ReadStore):
+        def list_clustering_runs(
+            self,
+            *,
+            snapshot_id: str,
+            embedding_generation_id: str | None = None,
+        ) -> tuple[ClusteringRunRecord, ...]:
+            return (
+                replace(_run("run-b"), recommended_by_heuristic=False),
+                _run("run-a"),
+            )
+
+    monkeypatch.setattr(
+        SqliteCorpusAnalyticsStore,
+        "open_readonly",
+        lambda _path: _RecommendedStore(),
+    )
+    assert (
+        analytics_cli._run_cluster_command(
+            _clustering_args(
+                snapshot_id="snapshot", embedding_generation_id="embedding"
+            ),
+            tmp_path,
+        )
+        == ExitCode.SUCCESS
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["recommended_run_id"] == "run-a"
+
+
+def _cli_store_config(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(db_path=tmp_path / "analytics.sqlite3")
+
+
+def _patch_export_sweep_read_store(
+    monkeypatch: pytest.MonkeyPatch,
+    store: _ReadStore,
+) -> None:
+    store.runs = (_run("run-a"),)
+    monkeypatch.setattr(
+        SqliteCorpusAnalyticsStore,
+        "open_readonly",
+        lambda _path: store,
+    )
+    monkeypatch.setattr(
+        analytics_cli,
+        "export_sweep_comparison_json",
+        lambda **_kwargs: '{"kind":"sweep"}\n',
+    )
+
+
+def _build_export_sweep_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> _ReadStore:
+    config = _cli_store_config(tmp_path)
+    patch_cli_resolve_analytics_config(monkeypatch, analytics_cli, config)
+    store = _ReadStore()
+    _patch_export_sweep_read_store(monkeypatch, store)
+    return store
+
+
+def test_write_build_exports_picks_first_run_for_comparison_html(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _build_export_sweep_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        analytics_cli,
+        "render_analytics_html",
+        lambda **kwargs: f"<html>{kwargs['comparison_only']}</html>",
+    )
+    args = Namespace(
+        json_out=None,
+        html_out=tmp_path / "sweep.html",
+        sweep=True,
+        use_recommended=False,
+    )
+    analytics_cli._write_build_exports(
+        args=args,
+        root=tmp_path,
+        build_result=BuildResult(
+            "snapshot",
+            "embedding",
+            ("run-a",),
+            None,
+            profile_id="intent-small-balanced-v1",
+            recommended_for_profile_run_id=None,
+        ),
+    )
+    assert args.html_out.read_text(encoding="utf-8") == "<html>True</html>"
+
+
+def test_profiles_validate_entire_registry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(analytics_cli, "_require_capability", lambda _value: None)
+    analytics_cli._run_profiles_command(
+        Namespace(profile_command="validate", path=None, profile_id=None),
+        tmp_path,
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["valid"] is True
+    assert len(payload["profiles"]) == 4
+
+
+def test_write_build_exports_json_comparison_and_missing_run_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _build_export_sweep_setup(tmp_path, monkeypatch)
+    json_out = tmp_path / "sweep.json"
+    analytics_cli._write_build_exports(
+        args=Namespace(
+            json_out=json_out,
+            html_out=None,
+            sweep=True,
+            use_recommended=False,
+        ),
+        root=tmp_path,
+        build_result=BuildResult(
+            "snapshot",
+            "embedding",
+            (),
+            None,
+            profile_id="intent-small-balanced-v1",
+            recommended_for_profile_run_id=None,
+        ),
+    )
+    assert json_out.read_text(encoding="utf-8") == '{"kind":"sweep"}\n'
+
+    store.runs = ()
+    with pytest.raises(
+        AnalyticsWorkflowError, match="clustering run missing after build"
+    ):
+        analytics_cli._write_build_exports(
+            args=Namespace(
+                json_out=None,
+                html_out=tmp_path / "missing.html",
+                sweep=True,
+                use_recommended=False,
+            ),
+            root=tmp_path,
+            build_result=BuildResult(
+                "snapshot",
+                "embedding",
+                (),
+                None,
+                profile_id="intent-small-balanced-v1",
+                recommended_for_profile_run_id=None,
+            ),
+        )

@@ -10,6 +10,7 @@ import copy
 import importlib
 import json
 import os
+import sqlite3
 import subprocess
 from collections import OrderedDict
 from collections.abc import Mapping
@@ -24,6 +25,7 @@ import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._claim_guard as mcp_claim_guard_mod
+import codeclone.surfaces.mcp._graph_search as mcp_graph_search_mod
 import codeclone.surfaces.mcp._implementation_context as mcp_context_projection_mod
 import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
@@ -37,6 +39,7 @@ import codeclone.surfaces.mcp._session_runtime as mcp_runtime_mod
 import codeclone.surfaces.mcp._session_shared as mcp_shared_mod
 import codeclone.surfaces.mcp._session_state_mixin as mcp_state_mod
 import codeclone.surfaces.mcp._session_workflow_mixin as workflow_mod
+import codeclone.surfaces.mcp._workspace_drift as mcp_workspace_drift_mod
 import codeclone.surfaces.mcp._workspace_hygiene as mcp_workspace_hygiene_mod
 import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.server as mcp_server_mod
@@ -46,7 +49,8 @@ from codeclone.audit.events import AuditEvent
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
 from codeclone.baseline import Baseline, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
-from codeclone.cache.store import Cache
+from codeclone.cache.entries import FileStat
+from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import BASELINE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.contracts.errors import BaselineValidationError
@@ -1754,6 +1758,431 @@ def test_implementation_context_safety_overflow_is_explicit(tmp_path: Path) -> N
         "truncated": True,
         "omitted": 1,
     }
+
+
+def test_implementation_context_repo_relative_normalizes_absolute_paths(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "pkg" / "mod.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    assert mcp_context_projection_mod._repo_relative("pkg/mod.py", tmp_path) == (
+        "pkg/mod.py"
+    )
+    assert mcp_context_projection_mod._repo_relative(str(target), tmp_path) == (
+        "pkg/mod.py"
+    )
+    assert (
+        mcp_context_projection_mod._repo_relative("/outside/mod.py", tmp_path)
+        == "/outside/mod.py"
+    )
+
+
+def test_implementation_context_relationship_row_includes_unresolved_fields(
+    tmp_path: Path,
+) -> None:
+    from codeclone.models import RelationshipRecord
+
+    relation = RelationshipRecord(
+        relation_kind="call",
+        resolution_status="unresolved",
+        origin_lane="production",
+        source_qualname="pkg.mod:consume",
+        target_qualname=None,
+        path=str(tmp_path / "pkg" / "mod.py"),
+        line=12,
+        expression="dynamic()",
+        resolution_rule="attribute",
+    )
+    row = mcp_context_projection_mod._relationship_row(
+        relation,
+        keyed_on_source=False,
+        root=tmp_path,
+    )
+    assert row["target_qualname"] is None
+    assert row["expression"] == "dynamic()"
+    assert row["resolution_rule"] == "attribute"
+    assert row["path"] == "pkg/mod.py"
+
+
+def test_implementation_context_helper_contracts_and_uncertainties() -> None:
+    partial_notes = mcp_context_projection_mod._context_uncertainties("partial")
+    assert any("not complete" in note for note in partial_notes)
+    complete_notes = mcp_context_projection_mod._context_uncertainties("complete")
+    assert len(complete_notes) == 1
+
+    records = (
+        {"type": "module_role", "payload": {"role_kind": "contract_surface"}},
+        {"type": "module_role", "payload": {"role_kind": "inventory_module"}},
+    )
+    assert mcp_context_projection_mod._contract_path_role(records) == "contract_surface"
+    assert mcp_context_projection_mod._contract_path_role(()) is None
+
+
+def test_workspace_drift_unknown_without_manifest(tmp_path: Path) -> None:
+    record = _dummy_run_record(tmp_path, "drift-unknown")
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+    assert drift.status == "unknown"
+    assert drift.drifted_files == ()
+    assert drift.strength == "mtime_size"
+
+
+def test_workspace_drift_build_run_manifest_skips_outside_repo(
+    tmp_path: Path,
+) -> None:
+    outside = tmp_path.parent / "outside.py"
+    outside.write_text("VALUE = 1\n", encoding="utf-8")
+    manifest = mcp_workspace_drift_mod.build_run_manifest(
+        root=tmp_path,
+        filepaths=[str(outside)],
+    )
+    assert manifest == {}
+
+
+def _workspace_drift_pkg(
+    tmp_path: Path,
+    files: tuple[tuple[str, str], ...],
+) -> tuple[Path, dict[str, FileStat]]:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    manifest: dict[str, FileStat] = {}
+    for name, content in files:
+        path = pkg / name
+        path.write_text(content, encoding="utf-8")
+        manifest[f"pkg/{name}"] = file_stat_signature(str(path))
+    return pkg, manifest
+
+
+def test_workspace_drift_detects_added_deleted_and_mtime_changes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pkg, manifest = _workspace_drift_pkg(
+        tmp_path,
+        (("kept.py", "A = 1\n"), ("removed.py", "B = 2\n")),
+    )
+    kept = pkg / "kept.py"
+    removed = pkg / "removed.py"
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(),
+    )
+    record = replace(
+        _dummy_run_record(tmp_path, "drift-topology"),
+        manifest=manifest,
+        dirty_snapshot=snapshot,
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "collect_dirty_snapshot",
+        lambda _root: snapshot,
+    )
+    removed.unlink()
+    kept.write_text("A = 9\n", encoding="utf-8")
+    (pkg / "added.py").write_text("C = 3\n", encoding="utf-8")
+
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+
+    assert drift.status == "drifted"
+    assert drift.deleted_files == ("pkg/removed.py",)
+    assert "pkg/kept.py" in drift.drifted_files
+    assert drift.added_files == ("pkg/added.py",)
+    assert drift.topology_drift is True
+    assert drift.strength == "mtime_size_plus_git"
+
+
+def test_workspace_drift_path_selection_limits_comparison(tmp_path: Path) -> None:
+    pkg, manifest = _workspace_drift_pkg(
+        tmp_path,
+        (("first.py", "A = 1\n"), ("second.py", "B = 2\n")),
+    )
+    second = pkg / "second.py"
+    record = replace(
+        _dummy_run_record(tmp_path, "drift-filter"),
+        manifest=manifest,
+    )
+    second.write_text("B = 9\n", encoding="utf-8")
+
+    drift = mcp_workspace_drift_mod.compute_drift(record, paths=["pkg/first"])
+
+    assert drift.drifted_files == ()
+    assert drift.status == "fresh"
+
+
+def test_workspace_drift_build_run_manifest_tolerates_stat_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    missing = tmp_path / "pkg" / "missing.py"
+
+    def _raise(_path: str) -> object:
+        raise OSError("stat failed")
+
+    monkeypatch.setattr(mcp_workspace_drift_mod, "file_stat_signature", _raise)
+    manifest = mcp_workspace_drift_mod.build_run_manifest(
+        root=tmp_path,
+        filepaths=[str(missing)],
+    )
+    assert manifest == {}
+
+
+def test_workspace_drift_marks_missing_files_when_topology_unknown(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.cache.entries import FileStat
+
+    record = replace(
+        _dummy_run_record(tmp_path, "drift-oserror"),
+        manifest={"pkg/missing.py": FileStat(mtime_ns=1, size=2)},
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "_current_source_paths",
+        lambda _root: None,
+    )
+
+    def _raise(_path: str) -> object:
+        raise OSError("stat failed")
+
+    monkeypatch.setattr(mcp_workspace_drift_mod, "file_stat_signature", _raise)
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+    assert drift.status == "drifted"
+    assert drift.drifted_files == ("pkg/missing.py",)
+
+
+def test_workspace_drift_helpers_cover_discovery_and_relative_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "iter_py_files",
+        lambda _root: (_ for _ in ()).throw(OSError("discovery failed")),
+    )
+    assert mcp_workspace_drift_mod._current_source_paths(tmp_path) is None
+
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    module = pkg / "mod.py"
+    module.write_text("x = 1\n", encoding="utf-8")
+    assert (
+        mcp_workspace_drift_mod._repo_relative_path(tmp_path, str(module))
+        == "pkg/mod.py"
+    )
+    assert (
+        mcp_workspace_drift_mod._repo_relative_path(tmp_path, "pkg/mod.py")
+        == "pkg/mod.py"
+    )
+
+
+def test_workspace_drift_reports_fresh_when_manifest_matches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pkg, _manifest = _workspace_drift_pkg(tmp_path, (("mod.py", "x = 1\n"),))
+    module = pkg / "mod.py"
+    manifest = mcp_workspace_drift_mod.build_run_manifest(
+        root=tmp_path,
+        filepaths=[str(module)],
+    )
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(),
+    )
+    record = replace(
+        _dummy_run_record(tmp_path, "drift-fresh"),
+        manifest=manifest,
+        dirty_snapshot=snapshot,
+    )
+    monkeypatch.setattr(
+        mcp_workspace_drift_mod,
+        "collect_dirty_snapshot",
+        lambda _root: snapshot,
+    )
+    drift = mcp_workspace_drift_mod.compute_drift(record)
+    assert drift.status == "fresh"
+    assert drift.drifted_files == ()
+    assert file_stat_signature(str(module)) == manifest["pkg/mod.py"]
+
+
+def test_graph_search_match_tier_prefix_and_substring() -> None:
+    assert mcp_graph_search_mod._match_tier("modulesearch", "module") == "prefix"
+    assert mcp_graph_search_mod._match_tier("modulesearch", "search") == "substring"
+    assert mcp_graph_search_mod._match_tier("foo_bar", "bar") == "token"
+    assert mcp_graph_search_mod._match_tier("exact_name", "exact_name") == "exact"
+    assert mcp_graph_search_mod._match_tier("abc", "xyz") is None
+
+
+def test_workspace_intent_valid_path_list_required_guard() -> None:
+    assert mcp_workspace_intents_mod._valid_path_list([], required=True) is None
+    assert mcp_workspace_intents_mod._valid_path_list(["pkg/a.py"], required=True) == [
+        "pkg/a.py"
+    ]
+    assert (
+        mcp_workspace_intents_mod._valid_path_list(["../escape.py"], required=False)
+        is None
+    )
+
+
+def test_workspace_intent_is_orphaned_when_pid_dead(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_intent_contract import (
+        WorkspaceIntentRecord,
+        compute_scope_digest,
+    )
+    from codeclone.surfaces.mcp._workspace_intent_lifecycle import PidLiveness
+
+    scope: dict[str, object] = {
+        "allowed_files": ["pkg/a.py"],
+        "allowed_related": [],
+        "forbidden": [],
+    }
+    record = WorkspaceIntentRecord(
+        intent_id="intent-orphan",
+        agent_pid=999999,
+        agent_start_epoch=1,
+        agent_label="test-agent",
+        run_id="run-orphan",
+        declared_at_utc="2026-01-01T00:00:00Z",
+        expires_at_utc="2099-01-01T00:00:00Z",
+        ttl_seconds=3600,
+        status="active",
+        intent="orphan intent",
+        scope=scope,
+        scope_digest=compute_scope_digest(scope),
+        blast_radius_summary={},
+        lease_renewed_at_utc="2026-01-01T00:00:00Z",
+        lease_seconds=3600,
+        report_digest="digest",
+    )
+    monkeypatch.setattr(
+        mcp_workspace_intents_mod,
+        "_pid_liveness",
+        lambda _pid: PidLiveness.DEAD,
+    )
+    assert mcp_workspace_intents_mod.is_orphaned(record) is True
+
+
+def test_mcp_service_implementation_context_intent_guardrails(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/dup.py"], "forbidden": []},
+        intent="guard context",
+    )
+    intent_id = str(started["intent_id"])
+    with pytest.raises(MCPServiceContractError, match="does not match"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            intent_id=intent_id,
+            run_id="deadbeef",
+        )
+    other_root = tmp_path / "other"
+    other_root.mkdir()
+    with pytest.raises(MCPServiceContractError, match="does not belong"):
+        service.get_implementation_context(
+            root=str(other_root.resolve()),
+            intent_id=intent_id,
+        )
+    from codeclone.surfaces.mcp._intent import IntentStatus
+
+    queued = replace(
+        service._active_intents[intent_id],
+        status=IntentStatus.QUEUED,
+    )
+    service._active_intents[intent_id] = queued
+    with pytest.raises(MCPServiceContractError, match="active intent"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            intent_id=intent_id,
+            paths=["pkg/dup.py"],
+            run_id=str(summary["run_id"]),
+        )
+    with pytest.raises(MCPServiceContractError, match="Invalid context mode"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["pkg/dup.py"],
+            mode="bogus",
+            run_id=str(summary["run_id"]),
+        )
+    with pytest.raises(MCPServiceContractError, match="Context depth"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["pkg/dup.py"],
+            depth=99,
+            run_id=str(summary["run_id"]),
+        )
+    with pytest.raises(MCPServiceContractError, match="Context budget"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["pkg/dup.py"],
+            budget=0,
+            run_id=str(summary["run_id"]),
+        )
+    with pytest.raises(MCPServiceContractError, match="non-empty strings"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=[""],
+            run_id=str(summary["run_id"]),
+        )
+    with pytest.raises(
+        MCPServiceContractError, match="not a valid implementation-context path"
+    ):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            paths=["."],
+            run_id=str(summary["run_id"]),
+        )
+
+
+def test_mcp_service_implementation_context_rejects_stale_intent_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["pkg/dup.py"], "forbidden": []},
+        intent="stale run",
+    )
+    intent_id = str(started["intent_id"])
+    intent = service._active_intents[intent_id]
+    original_get = service._runs.get
+
+    def _missing_intent_run(run_id: str) -> MCPRunRecord:
+        if run_id == intent.run_id:
+            raise MCPRunNotFoundError(run_id)
+        return original_get(run_id)
+
+    monkeypatch.setattr(service._runs, "get", _missing_intent_run)
+    with pytest.raises(MCPServiceContractError, match="no longer available"):
+        service.get_implementation_context(
+            root=str(tmp_path),
+            intent_id=intent_id,
+            paths=["pkg/dup.py"],
+        )
 
 
 def test_mcp_session_emits_audit_events_for_controller_flow(tmp_path: Path) -> None:
@@ -10818,3 +11247,313 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
     assert stale.run_id not in service._spread_max_cache
     assert service._blast_radius_cache == {}
     assert intent_id not in service._active_intents
+
+
+def test_implementation_context_coercion_and_location_helpers(
+    tmp_path: Path,
+) -> None:
+    mod = mcp_context_projection_mod
+    assert mod._as_int(True) == 1
+    assert mod._as_int(9) == 9
+    assert mod._as_int("bad") == 0
+    assert mod._repo_relative_location(tmp_path, "") is None
+    assert mod._repo_relative_location(tmp_path, "pkg/mod.py") == "pkg/mod.py"
+    outside = tmp_path.parent / "outside.py"
+    assert mod._repo_relative_location(tmp_path, str(outside)) is None
+
+    locations = mod.build_unit_location_inventory(
+        root=tmp_path,
+        units=(
+            {"qualname": "", "filepath": "pkg/a.py", "start_line": 1},
+            {"qualname": "pkg.a", "filepath": "pkg/a.py", "start_line": 0},
+            {
+                "qualname": "pkg.a",
+                "filepath": str(tmp_path / "pkg/a.py"),
+                "start_line": 1,
+                "end_line": 5,
+            },
+        ),
+    )
+    assert len(locations) == 1
+    assert locations[0].qualname == "pkg.a"
+
+
+def test_implementation_context_related_modules_and_append_edges() -> None:
+    mod = mcp_context_projection_mod
+    rows: dict[tuple[str, str], dict[str, object]] = {}
+    mod._append_related_relation(
+        rows,
+        path="pkg/target.py",
+        module="pkg.target",
+        source_kind="production",
+        relation={"kind": "imports", "import_type": "absolute", "line": 1},
+    )
+    broken_key = ("pkg/target.py", "pkg.target")
+    rows[broken_key]["relations"] = "not-a-list"
+    mod._append_related_relation(
+        rows,
+        path="pkg/target.py",
+        module="pkg.target",
+        source_kind="production",
+        relation={"kind": "imports", "import_type": "absolute", "line": 2},
+    )
+
+    related = mod._collapsed_related_modules(
+        imports=(
+            {
+                "target_path": "pkg/target.py",
+                "target_module": "pkg.target",
+                "import_type": "absolute",
+                "line": 1,
+            },
+        ),
+        importers=(
+            {
+                "source_path": "tests/test_target.py",
+                "source_module": "tests.test_target",
+                "source_kind": "tests",
+                "import_type": "absolute",
+                "line": 2,
+            },
+            {
+                "source_path": "pkg/other.py",
+                "source_module": "pkg.other",
+                "source_kind": "production",
+                "import_type": "absolute",
+                "line": 3,
+            },
+        ),
+        include_production_importers=False,
+        include_test_importers=True,
+    )
+    assert any(
+        relation["kind"] == "tested_by"
+        for row in related
+        for relation in cast("list[dict[str, object]]", row["relations"])
+    )
+
+
+def test_implementation_context_build_payload_reports_unavailable_and_review(
+    tmp_path: Path,
+) -> None:
+    mod = mcp_context_projection_mod
+    record = _dummy_run_record(tmp_path, "ctx-review")
+    payload = mod.build_implementation_context(
+        record=record,
+        paths=("pkg/mod.py",),
+        symbols=(),
+        subject_resolved_from="explicit",
+        subject_source_summary={"total": 1, "shown": 1, "truncated": False},
+        resolved_symbols=(),
+        unresolved_symbols=(),
+        mode="impact",
+        include=("review_context", "dataflow"),
+        depth=1,
+        detail_level="compact",
+        budget=20,
+        blast_radius={"review_context": [{"path": "pkg/mod.py", "category": "risk"}]},
+        memory_result=None,
+        change_control=None,
+    )
+    assert payload["status"] == "ok"
+    assert payload["unavailable_facets"] == ["dataflow"]
+    structural = cast("dict[str, object]", payload["structural_context"])
+    assert cast("list[object]", structural["review_context"])
+
+
+def test_implementation_context_subject_not_found_includes_change_control(
+    tmp_path: Path,
+) -> None:
+    mod = mcp_context_projection_mod
+    record = _dummy_run_record(tmp_path, "ctx-miss")
+    request = mod._context_request_projection(
+        subject_resolved_from="explicit",
+        paths=(),
+        symbols=("missing:Symbol",),
+        mode="implementation",
+        include=("module_role",),
+        depth=1,
+        detail_level="compact",
+        budget=20,
+        change_control={"intent_id": "intent-miss"},
+        freshness_status="current",
+    )
+    payload = mod._subject_not_found_payload(
+        record=record,
+        mode="implementation",
+        subject={
+            "symbols": ["missing:Symbol"],
+            "unresolved_symbols": ["missing:Symbol"],
+        },
+        freshness={"status": "current"},
+        context_artifact_digest="digest",
+        projected_change_control={"intent_id": "intent-miss", "edit_allowed": True},
+        request=request,
+    )
+    assert payload["status"] == "subject_not_found"
+    assert cast("dict[str, object]", payload["change_control"])["intent_id"] == (
+        "intent-miss"
+    )
+
+
+def test_implementation_context_baseline_sensitive_and_contract_role(
+    tmp_path: Path,
+) -> None:
+    from codeclone.models import FunctionRelationshipFacts, RelationshipRecord
+
+    mod = mcp_context_projection_mod
+    relation = RelationshipRecord(
+        relation_kind="call",
+        resolution_status="resolved",
+        origin_lane="production",
+        source_qualname="pkg.consumer:run",
+        target_qualname="pkg.target:save",
+        path=str(tmp_path / "pkg/consumer.py"),
+        line=4,
+        expression=None,
+        resolution_rule="direct",
+    )
+    record = replace(
+        _dummy_run_record(tmp_path, "ctx-findings"),
+        report_document={
+            "findings": {
+                "groups": {
+                    "clone": {
+                        "function": [
+                            {
+                                "id": "clone-1",
+                                "kind": "function",
+                                "severity": "medium",
+                                "novelty": "new",
+                                "items": [{"relative_path": "pkg/mod.py"}],
+                            }
+                        ]
+                    }
+                }
+            },
+            "metrics": {
+                "families": {
+                    "api_surface": {
+                        "items": [
+                            {
+                                "qualname": "",
+                                "relative_path": "pkg/mod.py",
+                                "start_line": 0,
+                            }
+                        ]
+                    }
+                }
+            },
+        },
+        relationship_facts=(
+            FunctionRelationshipFacts(
+                source_qualname="pkg.consumer:run",
+                relationships=(relation,),
+            ),
+        ),
+    )
+    findings = mod._baseline_sensitive_findings(
+        record,
+        relevant_paths=frozenset({"pkg/mod.py"}),
+    )
+    assert findings[0]["novelty"] == "new"
+
+    budget = mod._EntryBudget(limit=20, remaining=20)
+    contracts = mod._project_contracts(
+        record=record,
+        subject_paths=("pkg/mod.py",),
+        subject_qualnames=frozenset({"pkg.target:save"}),
+        memory_result={
+            "records": [
+                {
+                    "type": "module_role",
+                    "payload": {"role_kind": "persistence"},
+                }
+            ]
+        },
+        include_set=frozenset({"persistence_path_callers"}),
+        budget=budget,
+    )
+    assert "persistence_path_callers" in contracts
+
+    surface = mod._unit_location_index(record)
+    assert surface == ()
+
+
+def test_workspace_intent_store_error_paths_and_unsupported_type(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.mcp._workspace_intent_store import (
+        SqliteWorkspaceIntentStore,
+        _close_eligible_records_unlocked,
+        lazy_close_eligible_records_unlocked,
+    )
+
+    db_path = tmp_path / "intents.sqlite3"
+    store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=30)
+    assert store.remove(pid=1, start_epoch=1, intent_id="../bad") is False
+
+    class _BrokenConn:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise sqlite3.Error("boom")
+
+        def commit(self) -> None:
+            raise AssertionError("commit should not run")
+
+    broken = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=30)
+    broken._conn = _BrokenConn()  # type: ignore[assignment]
+    assert (
+        broken.delete_row_unlocked(pid=1, start_epoch=1, intent_id="intent-a") is False
+    )
+    assert (
+        broken._fetch_record_unlocked(pid=1, start_epoch=1, intent_id="intent-a")
+        is None
+    )
+
+    class _FakeStore:
+        pass
+
+    with pytest.raises(TypeError, match="Unsupported workspace intent store"):
+        _close_eligible_records_unlocked(_FakeStore(), for_lazy_close=False)  # type: ignore[arg-type]
+    with pytest.raises(TypeError, match="Unsupported workspace intent store"):
+        lazy_close_eligible_records_unlocked(_FakeStore())  # type: ignore[arg-type]
+
+
+def test_implementation_context_public_surface_full_detail(
+    tmp_path: Path,
+) -> None:
+    mod = mcp_context_projection_mod
+    record = replace(
+        _dummy_run_record(tmp_path, "ctx-surface-full"),
+        report_document={
+            "metrics": {
+                "families": {
+                    "api_surface": {
+                        "items": [
+                            {
+                                "qualname": "pkg.mod.fn",
+                                "relative_path": "pkg/mod.py",
+                                "start_line": 1,
+                                "end_line": 5,
+                                "symbol_kind": "function",
+                                "params": [{"name": "value"}],
+                                "returns_annotated": True,
+                                "exported_via": "__all__",
+                                "record_kind": "symbol",
+                                "module": "pkg.mod",
+                            }
+                        ]
+                    }
+                }
+            }
+        },
+    )
+    rows = mod._public_surface_rows(
+        record,
+        paths=frozenset({"pkg/mod.py"}),
+        detail_level="full",
+    )
+    assert rows[0]["record_kind"] == "symbol"
+    assert rows[0]["module"] == "pkg.mod"
+    assert rows[0]["params"] == [{"name": "value"}]

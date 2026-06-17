@@ -1083,3 +1083,210 @@ def test_enqueue_defers_and_guards_second_spawn(
         assert second["spawned"] is False
         assert second["spawn_skipped_reason"] == "flush_already_scheduled"
         assert second["coalesced"] is True
+
+
+def test_projection_job_store_rolls_back_on_sqlite_errors(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.schema import ensure_schema as ensure_memory_schema
+
+    conn = sqlite3.connect(":memory:")
+    ensure_memory_schema(conn)
+
+    class _BrokenConn:
+        def __init__(self, inner: sqlite3.Connection) -> None:
+            self._inner = inner
+            self._fail_begin = True
+
+        def execute(
+            self, query: str, params: tuple[object, ...] = ()
+        ) -> sqlite3.Cursor:
+            if self._fail_begin and query.strip().upper().startswith("BEGIN"):
+                self._fail_begin = False
+                raise sqlite3.Error("begin failed")
+            return self._inner.execute(query, params)
+
+        def commit(self) -> None:
+            self._inner.commit()
+
+        def rollback(self) -> None:
+            self._inner.rollback()
+
+        def close(self) -> None:
+            self._inner.close()
+
+    broken = _BrokenConn(conn)
+    with pytest.raises(sqlite3.Error, match="begin failed"):
+        try_claim_flush_slot(broken, project_id="project", claimant="1@h")  # type: ignore[arg-type]
+
+    broken2 = _BrokenConn(conn)
+    with pytest.raises(sqlite3.Error, match="begin failed"):
+        claim_next_projection_job(
+            broken2,  # type: ignore[arg-type]
+            project_id="project",
+            claimed_by="1@h",
+            running_timeout_seconds=60,
+        )
+
+
+def test_claim_next_projection_job_rolls_back_on_update_failure(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+        config = resolve_memory_config(root)
+        db_path = resolve_memory_db_path(root, config)
+        conn = open_memory_db(db_path)
+        try:
+            stimulus = compute_projection_stimulus(
+                conn=conn,
+                project=project,
+                root_path=root,
+                config=config,
+            )
+            enqueue_projection_job(
+                conn,
+                project=project,
+                trigger="cli",
+                stimulus=stimulus,
+            )
+
+            class _BrokenConn:
+                def __init__(self, inner: sqlite3.Connection) -> None:
+                    self._inner = inner
+                    self._fail_update = True
+
+                def execute(
+                    self, query: str, params: tuple[object, ...] = ()
+                ) -> sqlite3.Cursor:
+                    if self._fail_update and query.strip().upper().startswith("UPDATE"):
+                        self._fail_update = False
+                        raise sqlite3.Error("update failed")
+                    return self._inner.execute(query, params)
+
+                def commit(self) -> None:
+                    self._inner.commit()
+
+                def rollback(self) -> None:
+                    self._inner.rollback()
+
+                def close(self) -> None:
+                    self._inner.close()
+
+            broken = _BrokenConn(conn)
+            with pytest.raises(sqlite3.Error, match="update failed"):
+                claim_next_projection_job(
+                    broken,  # type: ignore[arg-type]
+                    project_id=project.id,
+                    claimed_by="1@h",
+                    running_timeout_seconds=60,
+                )
+        finally:
+            conn.close()
+
+
+def test_try_claim_flush_slot_rolls_back_on_update_failure(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, _store):
+        config = resolve_memory_config(root)
+        db_path = resolve_memory_db_path(root, config)
+        conn = open_memory_db(db_path)
+        try:
+            stimulus = compute_projection_stimulus(
+                conn=conn,
+                project=project,
+                root_path=root,
+                config=config,
+            )
+            enqueue_projection_job(
+                conn,
+                project=project,
+                trigger="cli",
+                stimulus=stimulus,
+            )
+            job_id = try_claim_flush_slot(conn, project_id=project.id, claimant="1@h")
+            assert job_id is not None
+            set_flush_claimed_by(conn, job_id=job_id, claimant=None)
+
+            class _BrokenConn:
+                def __init__(self, inner: sqlite3.Connection) -> None:
+                    self._inner = inner
+                    self._fail_update = True
+
+                def execute(
+                    self,
+                    query: str,
+                    params: tuple[object, ...] | dict[str, object] = (),
+                ) -> sqlite3.Cursor:
+                    if self._fail_update and "UPDATE memory_projection_jobs" in query:
+                        self._fail_update = False
+                        raise sqlite3.Error("flush update failed")
+                    return self._inner.execute(query, params)
+
+                def commit(self) -> None:
+                    self._inner.commit()
+
+                def rollback(self) -> None:
+                    self._inner.rollback()
+
+                def close(self) -> None:
+                    self._inner.close()
+
+            broken = _BrokenConn(conn)
+            with pytest.raises(sqlite3.Error, match="flush update failed"):
+                try_claim_flush_slot(
+                    broken,  # type: ignore[arg-type]
+                    project_id=project.id,
+                    claimant="2@h",
+                )
+        finally:
+            conn.close()
+
+
+def test_run_flush_spawn_releases_slot_when_spawn_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.jobs.spawn import SpawnWorkerResult
+    from codeclone.memory.jobs.workflow import _FlushDecision, _run_flush_spawn
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        config = resolve_memory_config(root)
+        conn = store.connection
+        stimulus = compute_projection_stimulus(
+            conn=conn,
+            project=project,
+            root_path=root,
+            config=config,
+        )
+        enqueue_projection_job(
+            conn,
+            project=project,
+            trigger="cli",
+            stimulus=stimulus,
+        )
+        monkeypatch.setattr(
+            "codeclone.memory.jobs.workflow.spawn_projection_jobs_worker",
+            lambda **_kwargs: SpawnWorkerResult(
+                spawned=False,
+                reason="spawn denied",
+                pid=None,
+            ),
+        )
+        spawned, pid, reason = _run_flush_spawn(
+            conn,
+            project=project,
+            root_path=root,
+            decision=_FlushDecision(
+                immediate=False,
+                deadline_utc="2099-01-01T00:00:00+00:00",
+            ),
+        )
+        assert spawned is False
+        assert pid is None
+        assert reason == "spawn denied"
+        row = conn.execute(
+            "SELECT flush_claimed_by FROM memory_projection_jobs LIMIT 1"
+        ).fetchone()
+        assert row is not None
+        assert row[0] is None

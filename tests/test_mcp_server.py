@@ -995,3 +995,68 @@ def test_tool_param_docs_reexport() -> None:
 
     field = get_args(RootParam)[1]
     assert "Absolute repository root" in field.description
+
+
+def test_mcp_server_ide_governance_and_observability_tools(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    server = build_mcp_server(history_limit=4, ide_governance_channel=True)
+    abs_root = str(tmp_path.resolve())
+
+    session_stats = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_workspace_session_stats",
+                {"root": abs_root},
+            )
+        )
+    )
+    assert session_stats["status"] in {"ok", "empty", "disabled"}
+
+    audit_trail = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_controller_audit_trail",
+                {"root": abs_root, "limit": 5},
+            )
+        )
+    )
+    assert audit_trail["status"] in {"ok", "empty", "disabled"}
+
+    observability = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "query_platform_observability",
+                {"root": abs_root, "section": "summary"},
+            )
+        )
+    )
+    assert observability["status"] in {"ok", "empty", "disabled"}
+
+
+def test_mcp_server_lifespan_runs_shutdown_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    cleanup_calls: list[bool] = []
+    shutdown_calls: list[bool] = []
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.server.shutdown",
+        lambda: shutdown_calls.append(True),
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.service.CodeCloneMCPService.shutdown_cleanup",
+        lambda _self: cleanup_calls.append(True),
+    )
+    server = build_mcp_server(history_limit=4)
+    lifespan = server.settings.lifespan
+    assert lifespan is not None
+
+    async def _run_lifespan() -> None:
+        async with lifespan(server):
+            return None
+
+    asyncio.run(_run_lifespan())
+    assert cleanup_calls == [True]
+    assert shutdown_calls == [True]

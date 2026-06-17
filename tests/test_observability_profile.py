@@ -27,6 +27,18 @@ from codeclone.observability.store.schema import (
 )
 
 
+def _patch_psutil_process(
+    monkeypatch: pytest.MonkeyPatch,
+    process: object,
+) -> None:
+    import sys
+    from unittest.mock import MagicMock
+
+    mock_psutil = MagicMock()
+    mock_psutil.Process.return_value = process
+    monkeypatch.setitem(sys.modules, "psutil", mock_psutil)
+
+
 @pytest.fixture(autouse=True)
 def _reset_runtime() -> Iterator[None]:
     yield
@@ -133,7 +145,6 @@ def test_profile_helpers_return_none_without_psutil(
 def test_profile_open_fds_degrades_gracefully(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import sys
     from unittest.mock import MagicMock
 
     from codeclone.observability.profile import build_profile_sample
@@ -143,10 +154,70 @@ def test_profile_open_fds_degrades_gracefully(
     process.cpu_times.return_value = MagicMock(user=0.1, system=0.2)
     process.num_fds.side_effect = OSError("unsupported")
     process.num_threads.return_value = 3
-    mock_psutil = MagicMock()
-    mock_psutil.Process.return_value = process
-    monkeypatch.setitem(sys.modules, "psutil", mock_psutil)
+    _patch_psutil_process(monkeypatch, process)
 
     sample = build_profile_sample((512 * 1024, 0.0, 0.0, 256 * 1024))
     assert sample is not None
     assert sample.open_fds is None
+
+
+def test_capture_process_peak_rss_scales_on_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+    from unittest.mock import MagicMock
+
+    from codeclone.observability.profile import capture_process_peak_rss
+
+    usage = MagicMock(ru_maxrss=2048)
+    resource = MagicMock()
+    resource.RUSAGE_SELF = 0
+    resource.getrusage.return_value = usage
+    monkeypatch.setitem(sys.modules, "resource", resource)
+    monkeypatch.setattr(sys, "platform", "linux")
+
+    assert capture_process_peak_rss() == 2048 * 1024
+
+
+def test_capture_profile_baseline_returns_none_without_psutil(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    from collections.abc import Mapping, Sequence
+
+    from codeclone.observability.profile import capture_profile_baseline
+
+    real_import = builtins.__import__
+
+    def _import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "psutil":
+            raise ImportError("psutil unavailable in test")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+    assert capture_profile_baseline() is None
+
+
+def test_build_profile_sample_without_peak_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from unittest.mock import MagicMock
+
+    from codeclone.observability.profile import build_profile_sample
+
+    process = MagicMock()
+    process.memory_info.return_value = MagicMock(rss=2 * 1024 * 1024)
+    process.cpu_times.return_value = MagicMock(user=0.2, system=0.1)
+    process.num_fds.return_value = 4
+    process.num_threads.return_value = 2
+    _patch_psutil_process(monkeypatch, process)
+
+    sample = build_profile_sample((1024 * 1024, 0.0, 0.0, None))
+    assert sample is not None
+    assert sample.peak_rss_delta_mb is None

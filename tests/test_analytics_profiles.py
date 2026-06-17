@@ -10,15 +10,21 @@ import json
 import sqlite3
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 import pytest
 
-from codeclone.analytics.clustering.models import EffectiveClusteringParameters
+from codeclone.analytics.clustering.models import (
+    ClusteringParameters,
+    EffectiveClusteringParameters,
+)
 from codeclone.analytics.clustering.sweep import (
+    SweepCandidate,
     candidate_space_digest,
     iter_profile_candidates,
 )
 from codeclone.analytics.contracts import (
+    ClusterAssignmentRecord,
     ClusteringRunRecord,
     CorpusSnapshotRecord,
     EmbeddingGenerationRecord,
@@ -26,7 +32,7 @@ from codeclone.analytics.contracts import (
     ProfileBatchRunRecord,
     ProfileManifestSnapshotRecord,
 )
-from codeclone.analytics.exceptions import AnalyticsWorkflowError
+from codeclone.analytics.exceptions import AnalyticsStoreError, AnalyticsWorkflowError
 from codeclone.analytics.integrity import PartitionValidityAssessment
 from codeclone.analytics.metrics.partition_metrics import RunPartitionMetrics
 from codeclone.analytics.profiles.loader import (
@@ -47,7 +53,11 @@ from codeclone.analytics.profiles.suitability import (
 )
 from codeclone.analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from codeclone.analytics.workflow import (
+    _effective_parameters_from_run,
+    _resolve_profile,
+    _score_completed_run,
     _validate_profile_applicability,
+    assess_and_persist_profile_batch,
     new_profile_batch_id,
     record_run_selection,
 )
@@ -58,6 +68,7 @@ from codeclone.contracts import (
     CORPUS_EXPORT_SCHEMA_VERSION,
     CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION,
 )
+from tests.fixtures.analytics.helpers import write_bundled_profile_pyproject
 
 
 def test_bundled_profile_contract_and_digest_are_stable() -> None:
@@ -232,11 +243,10 @@ def test_profile_applicability_rejects_incompatible_corpus() -> None:
 def test_analytics_config_resolves_profiles_and_sweep_grid(
     tmp_path: Path,
 ) -> None:
-    profile = load_bundled_profiles()["intent-small-balanced-v1"]
-    profile_path = tmp_path / "custom-profile.json"
-    profile_path.write_text(canonical_manifest_json(profile), encoding="utf-8")
-    (tmp_path / "pyproject.toml").write_text(
-        """
+    profile_path = write_bundled_profile_pyproject(
+        tmp_path,
+        profile_filename="custom-profile.json",
+        analytics_toml_body="""
 [tool.codeclone.analytics]
 default_profile_id = "intent-small-balanced-v1"
 profile_paths = ["custom-profile.json"]
@@ -244,8 +254,7 @@ sweep_pca_dimensions = [16, 32]
 sweep_min_cluster_sizes = [5]
 sweep_min_samples = [1, 3]
 sweep_selection_methods = ["leaf"]
-""".strip(),
-        encoding="utf-8",
+""",
     )
     config = resolve_analytics_config(tmp_path)
     assert config.default_profile_id == "intent-small-balanced-v1"
@@ -467,3 +476,397 @@ def _batch(digest: str) -> ProfileBatchRecord:
         batch_max_cluster_count=None,
         created_at_utc="2026-01-01T00:00:00Z",
     )
+
+
+def test_resolve_profile_auto_uses_default(tmp_path: Path) -> None:
+    write_bundled_profile_pyproject(
+        tmp_path,
+        profile_filename="profile.json",
+        analytics_toml_body="""
+[tool.codeclone.analytics]
+default_profile_id = "intent-small-balanced-v1"
+profile_paths = ["profile.json"]
+""",
+    )
+    config = resolve_analytics_config(tmp_path)
+    resolved = _resolve_profile(config=config, profile_id="auto")
+    assert resolved.profile_id == "intent-small-balanced-v1"
+
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    bare_config = resolve_analytics_config(bare)
+    with pytest.raises(
+        AnalyticsWorkflowError, match="default_profile_id not configured"
+    ):
+        _resolve_profile(config=bare_config, profile_id="auto")
+
+
+def test_profile_applicability_rejects_max_record_count() -> None:
+    profile = load_bundled_profiles()["intent-small-balanced-v1"]
+    with pytest.raises(AnalyticsWorkflowError, match="record count above maximum"):
+        _validate_profile_applicability(
+            profile=replace(
+                profile,
+                applicability=replace(
+                    profile.applicability,
+                    max_record_count=10,
+                ),
+            ),
+            representation_kind="intent.description.v1",
+            record_count=100,
+            embedding_contract_version="2",
+        )
+
+
+def test_effective_parameters_from_run_validates_shape() -> None:
+    valid = _run("run-valid")
+    valid = replace(
+        valid,
+        effective_parameters_json=json.dumps(
+            {
+                "pca_dimensions": 8,
+                "min_cluster_size": 5,
+                "min_samples": 1,
+                "cluster_selection_method": "eom",
+                "n_samples": 100,
+                "n_features": 384,
+            },
+            sort_keys=True,
+        ),
+    )
+    effective = _effective_parameters_from_run(valid)
+    assert effective.pca_dimensions == 8
+    assert effective.n_features == 384
+
+    incomplete = replace(valid, effective_parameters_json="{}")
+    with pytest.raises(AnalyticsWorkflowError, match="incomplete"):
+        _effective_parameters_from_run(incomplete)
+
+    invalid = replace(
+        valid,
+        effective_parameters_json=json.dumps(
+            {
+                "pca_dimensions": True,
+                "min_cluster_size": 5,
+                "min_samples": 1,
+                "cluster_selection_method": "eom",
+                "n_samples": 100,
+                "n_features": 384,
+            },
+            sort_keys=True,
+        ),
+    )
+    with pytest.raises(AnalyticsWorkflowError, match="invalid"):
+        _effective_parameters_from_run(invalid)
+
+
+def test_score_completed_run_uses_assignments(tmp_path: Path) -> None:
+    store = SqliteCorpusAnalyticsStore.open(tmp_path / "analytics.sqlite3")
+    try:
+        _seed_store(store)
+        store._conn.execute(
+            """
+            INSERT INTO corpus_items (
+                snapshot_id, representation_key, snapshot_item_id,
+                source_record_key, project_id, intent_id, normalized_text,
+                normalized_digest, normalizer_version, representation_digest,
+                metadata_json, registry_overlay_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "snapshot",
+                "representation-item",
+                "item",
+                "source-item",
+                "project",
+                "intent-item",
+                "embed this text",
+                "normalized",
+                "1",
+                "representation",
+                "{}",
+                None,
+            ),
+        )
+        store.insert_cluster_assignments(
+            (
+                ClusterAssignmentRecord(
+                    "run-a",
+                    "item",
+                    0,
+                    0.9,
+                    "digest",
+                ),
+            )
+        )
+        store.commit()
+        candidate = SweepCandidate(
+            requested=ClusteringParameters(
+                pca_dimensions=8,
+                min_cluster_size=5,
+                min_samples=1,
+                cluster_selection_method="eom",
+            ),
+            effective=EffectiveClusteringParameters(
+                pca_dimensions=8,
+                min_cluster_size=5,
+                min_samples=1,
+                cluster_selection_method="eom",
+                n_samples=1,
+                n_features=384,
+            ),
+            dedupe_key="8|5|1|eom",
+        )
+        scored = _score_completed_run(
+            store=store,
+            clustering_run_id="run-a",
+            candidate=candidate,
+        )
+        assert scored.cluster_count == 1
+        assert scored.noise_fraction == 0.0
+    finally:
+        store.close()
+
+
+def test_record_run_selection_rejects_empty_actor_and_unknown_batch(
+    tmp_path: Path,
+) -> None:
+    store = SqliteCorpusAnalyticsStore.open(tmp_path / "analytics.sqlite3")
+    try:
+        _seed_store(store)
+        with pytest.raises(
+            AnalyticsWorkflowError, match="selected_by must not be empty"
+        ):
+            record_run_selection(
+                store=store,
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                selected_run_id="run-a",
+                profile_batch_id=None,
+                selected_by="   ",
+                rationale=None,
+            )
+        with pytest.raises(AnalyticsWorkflowError, match="unknown profile batch"):
+            record_run_selection(
+                store=store,
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                selected_run_id="run-a",
+                profile_batch_id="missing-batch",
+                selected_by="maintainer",
+                rationale=None,
+            )
+
+        digest = profile_manifest_digest(
+            load_bundled_profiles()["intent-small-balanced-v1"]
+        )
+        batch_record = _batch(digest)
+
+        class _FailingStore:
+            def get_profile_batch(self, _batch_id: str) -> ProfileBatchRecord:
+                return batch_record
+
+            def record_run_selection_atomic(
+                self,
+                _record: object,
+            ) -> object:
+                raise AnalyticsStoreError("atomic failure")
+
+        with pytest.raises(AnalyticsWorkflowError, match="atomic failure"):
+            record_run_selection(
+                store=_FailingStore(),  # type: ignore[arg-type]
+                snapshot_id="snapshot",
+                embedding_generation_id="embedding",
+                selected_run_id="run-a",
+                profile_batch_id="batch",
+                selected_by="maintainer",
+                rationale="  trimmed  ",
+            )
+    finally:
+        store.close()
+
+
+def test_assess_and_persist_profile_batch_finalizes_status(tmp_path: Path) -> None:
+    store = SqliteCorpusAnalyticsStore.open(tmp_path / "analytics.sqlite3")
+    try:
+        _seed_store(store)
+        profile = load_bundled_profiles()["intent-small-balanced-v1"]
+        digest = profile_manifest_digest(profile)
+        store.insert_profile_manifest_snapshot(
+            ProfileManifestSnapshotRecord(
+                profile_manifest_digest=digest,
+                profile_id=profile.profile_id,
+                profile_version=profile.profile_version,
+                manifest_schema_version=profile.manifest_schema_version,
+                canonical_manifest_json=canonical_manifest_json(profile),
+                label=profile.label,
+                description=profile.description,
+                created_at_utc="2026-01-01T00:00:00Z",
+            )
+        )
+        batch = _batch(digest)
+        store.insert_profile_batch(batch)
+        store.insert_profile_batch_run(
+            ProfileBatchRunRecord("batch", "run-a", 0, "8|5|1|eom")
+        )
+        store.commit()
+        with pytest.raises(AnalyticsWorkflowError, match="unknown profile batch"):
+            assess_and_persist_profile_batch(
+                store=store,
+                profile_batch_id="missing",
+                profile=profile,
+                profile_manifest_digest=digest,
+                clustering_run_ids=("run-a",),
+            )
+        result = assess_and_persist_profile_batch(
+            store=store,
+            profile_batch_id=batch.profile_batch_id,
+            profile=profile,
+            profile_manifest_digest=digest,
+            clustering_run_ids=("run-a",),
+        )
+        assert result.profile_batch_id == batch.profile_batch_id
+        assert result.batch_status in {"completed", "completed_partial", "failed"}
+        finalized = store.get_profile_batch(batch.profile_batch_id)
+        assert finalized is not None
+        assert finalized.finished_at_utc is not None
+    finally:
+        store.close()
+
+
+def test_resolve_profile_registry_custom_bundled_dir(tmp_path: Path) -> None:
+    balanced = load_bundled_profiles()["intent-small-balanced-v1"]
+    manifest_path = tmp_path / "intent-small-balanced-v1.json"
+    manifest_path.write_text(canonical_manifest_json(balanced), encoding="utf-8")
+    registry = resolve_profile_registry(bundled_dir=tmp_path)
+    assert (
+        registry.profiles["intent-small-balanced-v1"].profile_id == balanced.profile_id
+    )
+    assert (
+        registry.sources["intent-small-balanced-v1"]
+        == "bundled:intent-small-balanced-v1.json"
+    )
+
+
+def test_resolve_profile_registry_rejects_duplicate_bundled_manifests(
+    tmp_path: Path,
+) -> None:
+    balanced = load_bundled_profiles()["intent-small-balanced-v1"]
+    text = canonical_manifest_json(balanced)
+    (tmp_path / "first.json").write_text(text, encoding="utf-8")
+    (tmp_path / "second.json").write_text(text, encoding="utf-8")
+    with pytest.raises(AnalyticsWorkflowError, match="conflicting profile manifest"):
+        resolve_profile_registry(bundled_dir=tmp_path)
+
+
+def test_resolve_profile_registry_rejects_unknown_default_profile() -> None:
+    with pytest.raises(AnalyticsWorkflowError, match="unknown analytics profile"):
+        resolve_profile_registry(default_profile_id="missing-profile-id")
+
+
+def test_get_profile_unknown_raises() -> None:
+    from codeclone.analytics.profiles.registry import get_profile
+
+    registry = resolve_profile_registry()
+    with pytest.raises(AnalyticsWorkflowError, match="unknown analytics profile"):
+        get_profile(registry, "missing-profile-id")
+
+
+def test_profile_manifest_validation_rejects_invalid_payloads() -> None:
+    import copy
+    from typing import Any
+
+    def payload() -> dict[str, object]:
+        return copy.deepcopy(
+            manifest_value(load_bundled_profiles()["intent-small-balanced-v1"])
+        )
+
+    base = payload()
+    applicability = cast(dict[str, Any], base["applicability"])
+    primary_space = cast(dict[str, Any], base["primary_space"])
+    ranking = cast(dict[str, Any], base["ranking"])
+    suitability = cast(dict[str, Any], base["suitability"])
+
+    cases: list[tuple[str, dict[str, object]]] = [
+        (
+            "empty embedding contract versions",
+            {
+                **base,
+                "applicability": {
+                    **applicability,
+                    "embedding_contract_versions": [],
+                },
+            },
+        ),
+        (
+            "min_record_count above max_record_count",
+            {
+                **base,
+                "applicability": {
+                    **applicability,
+                    "min_record_count": 100,
+                    "max_record_count": 1,
+                },
+            },
+        ),
+        (
+            "empty pca_dimensions axis",
+            {
+                **base,
+                "primary_space": {**primary_space, "pca_dimensions": []},
+            },
+        ),
+        (
+            "empty cluster_selection_method axis",
+            {
+                **base,
+                "primary_space": {
+                    **primary_space,
+                    "cluster_selection_method": [],
+                },
+            },
+        ),
+        (
+            "negative ranking weight",
+            {
+                **base,
+                "ranking": {**ranking, "base_score_weight": -1.0},
+            },
+        ),
+        (
+            "unsupported manifest schema version",
+            {**base, "manifest_schema_version": "99"},
+        ),
+        (
+            "invalid profile_id",
+            {**base, "profile_id": ""},
+        ),
+        (
+            "invalid profile_version",
+            {**base, "profile_version": "not-semver"},
+        ),
+        (
+            "empty label",
+            {**base, "label": "   "},
+        ),
+        (
+            "empty representation_kinds",
+            {**base, "representation_kinds": []},
+        ),
+    ]
+    for _label, invalid in cases:
+        with pytest.raises(AnalyticsWorkflowError, match="invalid analytics profile"):
+            load_manifest_value(invalid)
+
+    for invalid_ratio in (
+        {**base, "suitability": {**suitability, "max_noise_ratio": 1.5}},
+        {
+            **payload(),
+            "suitability": {
+                **cast(dict[str, float], payload()["suitability"]),
+                "max_noise_ratio": 1.5,
+            },
+        },
+    ):
+        with pytest.raises(AnalyticsWorkflowError, match="invalid analytics profile"):
+            load_manifest_value(invalid_ratio)

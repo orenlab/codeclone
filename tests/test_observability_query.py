@@ -417,3 +417,50 @@ def test_projection_helpers_and_diagnostic_edges(
     assert query_mod._top_diagnostics(aggregate)
     assert query_mod._recommended_next_sections("db_cost", aggregate) == []
     assert len(query_mod._recommended_next_sections("summary", aggregate)) == 3
+
+
+def test_chain_peak_rss_absolute_uses_child_peak() -> None:
+    from codeclone.observability.views import OperationView
+
+    child = OperationView(
+        operation_id="child",
+        correlation_id="corr",
+        surface="memory",
+        name="memory.child",
+        started_at_utc="2026-01-01T00:00:00Z",
+        duration_ms=5.0,
+        status="ok",
+        peak_rss_mb=900.0,
+    )
+    root = OperationView(
+        operation_id="root",
+        correlation_id="corr",
+        surface="memory",
+        name="memory.root",
+        started_at_utc="2026-01-01T00:00:00Z",
+        duration_ms=10.0,
+        status="ok",
+        children=(child,),
+    )
+    assert query_mod._chain_peak_rss_absolute(root) == 900.0
+
+
+def test_memory_diagnostic_reports_peak_only_heavy_usage() -> None:
+    from codeclone.observability.views import AggregatesView, SpanCostView
+
+    semantic = SpanCostView(
+        span_id="semantic",
+        name="memory.semantic.rebuild",
+        surface="memory",
+        operation_id="root",
+        operation_name="memory.job",
+        duration_ms=10.0,
+        peak_rss_mb=600.0,
+        produced=10,
+    )
+    diagnostic = query_mod._memory_diagnostic(
+        AggregatesView(1, peak_memory_span=semantic)
+    )
+    assert diagnostic is not None
+    assert diagnostic["kind"] == "memory"
+    assert "peak 600 MB" in str(diagnostic["message"])

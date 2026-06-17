@@ -175,3 +175,78 @@ def test_observability_span_error_and_sql_classification(tmp_path: Path) -> None
     assert span_row is not None
     assert str(span_row[0]) == "error"
     assert elapsed_row is not None
+
+
+def test_observability_schema_migrates_legacy_span_columns(tmp_path: Path) -> None:
+    import sqlite3
+
+    from codeclone.observability.store.schema import create_observability_schema
+
+    db_path = tmp_path / "legacy.sqlite3"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            CREATE TABLE platform_spans (
+                span_id TEXT PRIMARY KEY,
+                operation_id TEXT NOT NULL,
+                parent_span_id TEXT,
+                name TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                duration_ms REAL NOT NULL,
+                status TEXT NOT NULL,
+                reason_kind TEXT,
+                reason TEXT,
+                dedupe_key TEXT,
+                counters_json TEXT,
+                rss_mb REAL,
+                rss_delta_mb REAL,
+                cpu_user_ms REAL,
+                cpu_system_ms REAL,
+                open_fds INTEGER,
+                thread_count INTEGER
+            );
+            CREATE TABLE platform_operations (
+                operation_id TEXT PRIMARY KEY,
+                parent_operation_id TEXT,
+                correlation_id TEXT NOT NULL,
+                surface TEXT NOT NULL,
+                name TEXT NOT NULL,
+                started_at_utc TEXT NOT NULL,
+                duration_ms REAL NOT NULL,
+                status TEXT NOT NULL,
+                error_kind TEXT,
+                session_id TEXT,
+                repo_root_digest TEXT,
+                request_bytes INTEGER,
+                response_bytes INTEGER,
+                request_tokens INTEGER,
+                response_tokens INTEGER,
+                rss_mb REAL,
+                rss_delta_mb REAL,
+                cpu_user_ms REAL,
+                cpu_system_ms REAL,
+                open_fds INTEGER,
+                thread_count INTEGER
+            );
+            """
+        )
+        conn.commit()
+        create_observability_schema(conn)
+        span_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(platform_spans)")
+        }
+        operation_columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(platform_operations)")
+        }
+        assert "db_fingerprints" in span_columns
+        assert "peak_rss_mb" in span_columns
+        assert "peak_rss_delta_mb" in span_columns
+        assert "peak_rss_mb" in operation_columns
+        assert "peak_rss_delta_mb" in operation_columns
+    finally:
+        conn.close()

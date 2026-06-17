@@ -409,3 +409,129 @@ def test_render_semantic_text_reports_no_matches(
     out = capsys.readouterr().out
     assert code == 0
     assert "(no matches)" in out
+
+
+def test_semantic_probe_skipped_when_disabled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
+    out = capsys.readouterr().out.lower()
+    assert code != 0
+    assert "disabled" in out
+
+
+def test_semantic_probe_json_emits_payload(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "action": "probe_semantic_projections",
+        "status": "ok",
+        "estimator": "chars_approx",
+        "model_max_tokens": 512,
+        "lanes": {
+            "memory": {
+                "documents": 1,
+                "chars": {"p50": 10, "p95": 20, "max": 30},
+                "tokens": {
+                    "raw": {"p50": 3, "p95": 6, "max": 9},
+                    "effective": {"p50": 3, "p95": 6, "max": 9},
+                },
+                "truncation": {"documents": 0, "max_dropped_tokens": 0},
+                "token_overflow": {
+                    "over_model_limit": 0,
+                    "max_overflow_tokens": 0,
+                },
+            }
+        },
+    }
+    monkeypatch.setattr(
+        cli_memory,
+        "execute_semantic_projection_probe",
+        lambda **_kwargs: payload,
+    )
+    code = memory_main(["semantic", "probe", "--root", str(tmp_path), "--json"])
+    assert code == 0
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["action"] == "probe_semantic_projections"
+    assert emitted["lanes"]["memory"]["documents"] == 1
+
+
+def test_semantic_probe_text_renders_lane_percentiles(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload = {
+        "action": "probe_semantic_projections",
+        "estimator": "fastembed_tokenizer",
+        "model_max_tokens": 512,
+        "lanes": {
+            "memory": {
+                "documents": 2,
+                "chars": {"p50": 10, "p95": 20, "max": 30},
+                "tokens": {
+                    "raw": {"p50": 3, "p95": 6, "max": 9},
+                    "effective": {"p50": 2, "p95": 5, "max": 8},
+                },
+                "truncation": {"documents": 1, "max_dropped_tokens": 4},
+                "token_overflow": {
+                    "over_model_limit": 0,
+                    "max_overflow_tokens": 0,
+                },
+            },
+            "audit": {},
+            "trajectory": {},
+        },
+    }
+    monkeypatch.setattr(
+        cli_memory,
+        "execute_semantic_projection_probe",
+        lambda **_kwargs: payload,
+    )
+    code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "Semantic projection probe:" in out
+    assert "fastembed_tokenizer" in out
+    assert "memory: 2 documents" in out
+    assert "raw tokens p50/p95/max: 3/6/9" in out
+    assert "effective tokens p50/p95/max: 2/5/8" in out
+    assert "truncated: 1 (max_dropped=4)" in out
+
+
+def test_semantic_probe_contract_error_suggests_memory_init(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.exceptions import MemoryContractError
+
+    def _raise_contract(**_kwargs: object) -> object:
+        raise MemoryContractError("Engineering memory database not found")
+
+    monkeypatch.setattr(
+        cli_memory, "execute_semantic_projection_probe", _raise_contract
+    )
+    code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+    assert code != 0
+    assert "database not found" in out
+    assert "codeclone memory init" in out
+
+
+def test_semantic_probe_invalid_payload_reports_unavailable(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        cli_memory,
+        "execute_semantic_projection_probe",
+        lambda **_kwargs: {"action": "probe_semantic_projections", "lanes": "bad"},
+    )
+    code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
+    out = capsys.readouterr().out.lower()
+    assert code != 0
+    assert "invalid payload" in out

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from argparse import Namespace
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ import pytest
 from codeclone.audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from codeclone.contracts import ExitCode
 from codeclone.memory.exceptions import MemoryContractError
+from codeclone.surfaces.cli import memory as memory_cli
 from codeclone.surfaces.cli.memory import memory_main
 
 from .memory_fixtures import cli_memory_repo
@@ -315,3 +317,26 @@ def test_dashboard_json_payload_is_valid(
     output = capsys.readouterr().out
     assert '"trajectory_count"' in output
     assert '"agents"' in output
+
+
+def test_memory_operation_name_includes_subcommand_actions() -> None:
+    assert (
+        memory_cli._memory_operation_name(
+            Namespace(command="semantic", semantic_action="rebuild")
+        )
+        == "cli.memory.semantic.rebuild"
+    )
+    assert (
+        memory_cli._memory_operation_name(
+            Namespace(command="trajectory", trajectory_action="show")
+        )
+        == "cli.memory.trajectory.show"
+    )
+    assert (
+        memory_cli._memory_operation_name(Namespace(command="jobs", jobs_action="list"))
+        == "cli.memory.jobs.list"
+    )
+    assert (
+        memory_cli._memory_operation_name(Namespace(command="search"))
+        == "cli.memory.search"
+    )
