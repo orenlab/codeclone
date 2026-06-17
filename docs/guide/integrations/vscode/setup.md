@@ -20,7 +20,7 @@ It does not create a second truth model and it does not mutate the repository.
 Install from the VS Code Marketplace: **`orenlab.codeclone`** (publisher
 **orenlab**), or sideload a `.vsix` built from `extensions/vscode-codeclone`.
 
-The extension needs a local `codeclone-mcp` launcher and VS Code `1.100.0` or newer
+The extension needs a local `codeclone-mcp` launcher and VS Code `1.120.0` or newer
 (`engines.vscode` in `package.json`).
 
 Minimum supported CodeClone version: **`2.0.0`** (core analysis and change control).

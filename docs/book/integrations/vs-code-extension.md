@@ -16,7 +16,7 @@ That is intentional: CodeClone reads repository contents, local git state, and
 the local MCP launcher.
 
 !!! warning "Workspace trust still matters"
-    The extension runs as a workspace extension and requires VS Code `1.100.0`
+    The extension runs as a workspace extension and requires VS Code `1.120.0`
     or newer, local filesystem access, local git access for changed-files review,
     and a local `codeclone-mcp` launcher or an explicitly configured one.
     CodeClone **`2.0.0` or newer** is required for core analysis, triage, and

@@ -38,7 +38,7 @@ artifacts.
 
 ## Requirements
 
-- VS Code `1.100.0+` (`engines.vscode` in `package.json`)
+- VS Code `1.120.0+` (`engines.vscode` in `package.json`)
 - Python workspace (trusted)
 - `codeclone-mcp` launcher (`codeclone >= 2.0.0`)
 - The **Memory** view (Engineering Memory) requires `codeclone >= 2.1.0a1`;
