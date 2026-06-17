@@ -65,7 +65,7 @@ Documentation = "https://orenlab.github.io/codeclone/"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.27.2,<2",
+    "mcp>=1.28.0,<2",
     "httpx>=0.27.1,<1",
 ]
 token-bench = [
@@ -95,7 +95,7 @@ perf = [
     "psutil>=7,<8",
 ]
 dev = [
-    "pytest>=9.0.3",
+    "pytest>=9.1.0",
     "pytest-cov>=7.1.0",
     "build>=1.4.3",
     "twine>=6.2.0",
