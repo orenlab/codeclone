@@ -105,6 +105,10 @@
       "description": "Return a single canonical finding group by short or full id."
     },
     {
+      "name": "get_implementation_context",
+      "description": "Return deterministic, bounded implementation context from one existing analysis run. Resolves explicit repo-relative paths and module:symbol qualnames, then projects module, dependency, API-surface, call/reference, blast-radius, cache-origin, and workspace-freshness facts without re-analysis or edit authorization."
+    },
+    {
       "name": "get_remediation",
       "description": "Return actionable remediation guidance for a single finding."
     },
