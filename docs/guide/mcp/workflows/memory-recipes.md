@@ -5,7 +5,8 @@
 Ranked scope context and governed drafts — **not** a second analyzer. Normative
 tool shapes: [Engineering Memory MCP surface](../../../book/13-engineering-memory/mcp-surface.md).
 
-Session-local review markers live in [Session & coverage](session-and-coverage.md).
+Session-local review markers live in
+[Coverage join & session markers](session-and-coverage.md).
 
 ## 1. Bootstrap before first scoped retrieval
 

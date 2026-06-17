@@ -23,7 +23,7 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 | Register a client    | [Client setup](client-setup.md)               |
 | Launcher & transport | [Server & transport](server-and-transport.md) |
 | Layer diagram        | [Architecture](architecture.md)               |
-| Common failures      | [Troubleshooting](troubleshooting.md)         |
+| Troubleshooting & issues | [MCP troubleshooting](troubleshooting.md)   |
 
 ## Workflows (recommended order)
 
@@ -34,7 +34,7 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 | 3. Live code context     | [Analyze & triage](workflows/analyze-and-triage.md#implementation-context) |
 | 4. Governed edits        | [Change control](workflows/change-control.md)                              |
 | 5. Durable scope context | [Memory recipes](workflows/memory-recipes.md)                              |
-| 6. Coverage & session    | [Session & coverage](workflows/session-and-coverage.md)                    |
+| 6. Optional: coverage & session markers | [Coverage join & session markers](workflows/session-and-coverage.md) |
 
 **Maintainers only** (developing CodeClone itself — not user repo review):
 

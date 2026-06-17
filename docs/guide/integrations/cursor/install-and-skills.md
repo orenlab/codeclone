@@ -1,3 +1,5 @@
+# Cursor plugin
+
 ## What ships in the plugin
 
 | Component                          | Path                            | Purpose                                                                                      |
@@ -16,15 +18,15 @@
 Chat commands use the `name:` field in each `SKILL.md` (not always the folder
 name on disk):
 
-| Folder on disk                      | Chat command (`name`)               | Primary MCP flow                                              |
-|-------------------------------------|-------------------------------------|---------------------------------------------------------------|
-| `production-triage/`                | `/codeclone-production-triage`      | `analyze_repository` → `get_production_triage`                |
-| `codeclone-hotspots/`               | `/codeclone-hotspots`               | `analyze_repository` → hotspots / `check_*`                   |
-| `blast-radius/`                     | `/codeclone-blast-radius`           | `analyze_repository` → `get_blast_radius` (read-only)         |
-| `codeclone-review/`                 | `/codeclone-review`                 | Full review loop (conservative first)                         |
-| `codeclone-change-control/`         | `/codeclone-change-control`         | `start_controlled_change` → edit → `finish_controlled_change` |
-| `codeclone-engineering-memory/`     | `/codeclone-engineering-memory`     | `get_relevant_memory`, `query_engineering_memory`, drafts     |
-| `codeclone-implementation-context/` | `/codeclone-implementation-context` | `get_implementation_context` after `start`                    |
+| Folder on disk                      | Chat command (`name`)               | Primary MCP flow                                                           |
+|-------------------------------------|-------------------------------------|----------------------------------------------------------------------------|
+| `production-triage/`                | `/codeclone-production-triage`      | `analyze_repository` → `get_production_triage`                             |
+| `codeclone-hotspots/`               | `/codeclone-hotspots`               | `analyze_repository` → hotspots / `check_*`                                |
+| `blast-radius/`                     | `/codeclone-blast-radius`           | `analyze_repository` → `get_blast_radius` (read-only)                      |
+| `codeclone-review/`                 | `/codeclone-review`                 | Full review loop (conservative first)                                      |
+| `codeclone-change-control/`         | `/codeclone-change-control`         | `start_controlled_change` → edit → `finish_controlled_change`              |
+| `codeclone-engineering-memory/`     | `/codeclone-engineering-memory`     | `get_relevant_memory`, `query_engineering_memory`, drafts                  |
+| `codeclone-implementation-context/` | `/codeclone-implementation-context` | `get_implementation_context` after `start`                                 |
 | `codeclone-platform-observability/` | `/codeclone-platform-observability` | Maintainer-only: `query_platform_observability` (observer enable required) |
 
 Codex and Claude Code plugins ship six shared skills (includes

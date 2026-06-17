@@ -18,7 +18,8 @@ extra_css = ["assets/stylesheets/extra.css"]
 nav = [
     { "Home" = "index.md" },
     { "Get started" = [
-        { "Getting Started" = "getting-started.md" },
+        { "1. Install & first run" = "getting-started.md" },
+        { "2. Your first governed edit" = "start/first-governed-edit.md" },
         { "Example report" = "examples/report.md" },
     ] },
     { "Guide" = [
@@ -36,11 +37,6 @@ nav = [
             { "Overview" = "guide/memory/overview.md" },
             { "Trajectories & Experiences" = "guide/memory/trajectories-and-experiences.md" },
         ] },
-        { "Diagnostics" = [
-            { "Maintainer workflow" = "guide/observability/maintainer-workflow.md" },
-            { "Quick diagnostics" = "guide/observability/diagnostics.md" },
-            { "Corpus Analytics" = "guide/analytics/overview.md" },
-        ] },
         { "MCP" = [
             { "Overview" = "guide/mcp/README.md" },
             { "Client setup" = "guide/mcp/client-setup.md" },
@@ -51,7 +47,7 @@ nav = [
                 { "Drill down & checks" = "guide/mcp/workflows/drill-down-and-checks.md" },
                 { "Change control" = "guide/mcp/workflows/change-control.md" },
                 { "Memory recipes" = "guide/mcp/workflows/memory-recipes.md" },
-                { "Session & coverage" = "guide/mcp/workflows/session-and-coverage.md" },
+                { "Coverage join & session markers" = "guide/mcp/workflows/session-and-coverage.md" },
                 { "Observability (maintainer)" = "guide/mcp/workflows/observability-recipes.md" },
             ] },
             { "Prompt patterns" = "guide/mcp/prompts.md" },
@@ -175,8 +171,15 @@ nav = [
         { "Plans and Retention" = "plans-and-retention.md" },
     ] },
     { "Maintainers" = [
-        { "Publishing the docs site" = "publishing.md" },
-        { "Releasing & storefront sync" = "releasing.md" },
+        { "Diagnostics" = [
+            { "Maintainer workflow" = "guide/observability/maintainer-workflow.md" },
+            { "Quick diagnostics" = "guide/observability/diagnostics.md" },
+            { "Corpus Analytics" = "guide/analytics/overview.md" },
+        ] },
+        { "Docs site" = [
+            { "Publishing the docs site" = "publishing.md" },
+            { "Releasing & storefront sync" = "releasing.md" },
+        ] },
     ] },
 ]
 

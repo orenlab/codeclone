@@ -1,3 +1,5 @@
+# VS Code setup
+
 ## What it is for
 
 The extension helps you:

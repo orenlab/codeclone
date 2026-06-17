@@ -266,6 +266,7 @@ See [Config and defaults](book/10-config-and-defaults.md).
 
 ## Next Steps
 
+- [Your first governed edit](start/first-governed-edit.md) — the full declare → edit → verify cycle
 - [Architecture narrative](guide/explanation/how-it-works.md) — how the pipeline works
 - [Baseline contract](book/07-baseline.md) — trust model and schema
 - [MCP interface contract](book/25-mcp-interface/index.md) — tool surface and guarantees

@@ -17,6 +17,12 @@ The v2.1 change controller starts before the first edit: an agent declares what
 it intends to change, CodeClone maps the structural blast radius, verifies the
 patch against the declared boundary, and generates an auditable review receipt.
 
+## New here? Follow the path
+
+1. [**Install & first run**](getting-started.md) — install, analyze a repo, read the report.
+2. [**Connect your agent**](getting-started.md#mcp-setup) — wire CodeClone into your IDE or agent.
+3. [**Your first governed edit**](start/first-governed-edit.md) — declare → edit → verify, end to end.
+
 !!! tip "Two tabs — pick one mental model"
     **Guide** — install, run, MCP workflows, IDE setup, recipes.
     Start at the [Guide hub](guide/README.md).
@@ -51,12 +57,11 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Goal                                | Start here                                                                    |
 |-------------------------------------|-------------------------------------------------------------------------------|
 | MCP usage (workflows, setup)        | [MCP guide](guide/mcp/README.md)                                              |
+| First governed edit (tutorial)      | [Your first governed edit](start/first-governed-edit.md)                      |
 | Change controller workflow          | [Structural Change Controller](book/12-structural-change-controller/index.md) |
 | Engineering Memory (scope context)  | [Engineering Memory](book/13-engineering-memory/index.md)                     |
 | Trajectories and recurring patterns | [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md)  |
 | MCP interface contract              | [MCP interface](book/25-mcp-interface/index.md)                               |
-| Diagnose CodeClone runtime          | [Platform Observability](guide/observability/diagnostics.md)                  |
-| Cluster historical intents        | [Corpus Analytics](guide/analytics/overview.md)                               |
 
 ## IDE and Agent Clients
 
@@ -76,3 +81,8 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Report model and schema | [Report contract](book/05-report.md)  |
 | HTML rendering          | [HTML render](book/06-html-render.md) |
 | Live sample             | [Sample report](examples/report.md)   |
+
+## Maintainers & internals
+
+Operating or building CodeClone itself? See [Platform Observability](guide/observability/diagnostics.md)
+and [Corpus Analytics](guide/analytics/overview.md) under the **Maintainers** tab.

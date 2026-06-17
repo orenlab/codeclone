@@ -20,8 +20,8 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 | Govern agent edits                      | [Change control overview](change-control/overview.md)                  |
 | Scope context before edits              | [Engineering Memory overview](memory/overview.md)                      |
 | Inspect trajectory history and patterns | [Trajectories and Experiences](memory/trajectories-and-experiences.md) |
-| Diagnose CodeClone runtime cost         | [Platform Observability](observability/diagnostics.md)                 |
-| Cluster historical agent intents        | [Corpus Analytics](analytics/overview.md)                              |
+| Diagnose CodeClone's own runtime *(maintainer)* | [Platform Observability](observability/diagnostics.md)                 |
+| Cluster historical agent intents *(maintainer)* | [Corpus Analytics](analytics/overview.md)                              |
 
 ## MCP workflows
 
@@ -31,7 +31,7 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 | Hotspots and checks        | [Drill down & checks](mcp/workflows/drill-down-and-checks.md) |
 | Declare → edit → finish    | [Change control](mcp/workflows/change-control.md)             |
 | Memory before/after edits  | [Memory recipes](mcp/workflows/memory-recipes.md)             |
-| Session stats and coverage | [Session & coverage](mcp/workflows/session-and-coverage.md)   |
+| Cobertura join & session markers | [Coverage join & session markers](mcp/workflows/session-and-coverage.md) |
 
 ## Integrations
 

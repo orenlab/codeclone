@@ -1,3 +1,5 @@
+# SARIF export
+
 ## Purpose
 
 Explain how CodeClone projects canonical findings into SARIF and what IDEs or

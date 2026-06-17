@@ -118,8 +118,10 @@ boundaries, and guards beside lane-separated memory evidence. Use
 baseline-sensitive findings. The context tool mirrors authorization evidence;
 it does not grant or widen authorization.
 
-    | Tier | Tools | When to use |
-    |------|-------|-------------|
-    | Normal workflow | `analyze_repository`, `start_controlled_change`, `finish_controlled_change` | Every edit cycle |
-    | Queue/recovery | `manage_change_intent` (promote, recover, reset, renew) | Multi-agent coordination, crash recovery |
-    | Advanced/diagnostic | `get_blast_radius`, `check_patch_contract`, `validate_review_claims`, `create_review_receipt` | Deep inspection, step-by-step debugging |
+### Change control tool tiers
+
+| Tier | Tools | When to use |
+|------|-------|-------------|
+| Normal workflow | `analyze_repository`, `start_controlled_change`, `finish_controlled_change` | Every edit cycle |
+| Queue/recovery | `manage_change_intent` (promote, recover, reset, renew) | Multi-agent coordination, crash recovery |
+| Advanced/diagnostic | `get_blast_radius`, `check_patch_contract`, `validate_review_claims`, `create_review_receipt` | Deep inspection, step-by-step debugging |

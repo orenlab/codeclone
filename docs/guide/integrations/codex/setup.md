@@ -1,3 +1,5 @@
+# Codex setup
+
 ## Install
 
 Install the plugin from the Codex marketplace:
