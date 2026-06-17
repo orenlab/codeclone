@@ -1795,21 +1795,18 @@ def test_resolve_fastembed_provider_when_dependency_present(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import importlib as importlib_module
-
-    from codeclone.analytics.embedding.generation import _resolve_fastembed_provider
+    pytest.importorskip("fastembed")
+    import codeclone.analytics.embedding.generation as generation_mod
 
     sentinel = object()
     monkeypatch.setattr(
-        importlib_module,
-        "import_module",
-        lambda _name: SimpleNamespace(__version__="1.0.0"),
-    )
-    monkeypatch.setattr(
-        "codeclone.analytics.embedding.generation.FastEmbedEmbeddingProvider",
+        generation_mod,
+        "FastEmbedEmbeddingProvider",
         lambda **_kwargs: sentinel,
     )
-    provider = _resolve_fastembed_provider(resolve_analytics_config(tmp_path))
+    provider = generation_mod._resolve_fastembed_provider(
+        resolve_analytics_config(tmp_path)
+    )
     assert provider is sentinel
 
 

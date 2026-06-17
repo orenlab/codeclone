@@ -35,7 +35,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --extra dev --extra mcp --extra token-bench
+        run: uv sync --all-extras
 
       - name: Run tests
         # Smoke CLI tests intentionally disable subprocess coverage collection
