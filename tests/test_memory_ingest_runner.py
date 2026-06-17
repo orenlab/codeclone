@@ -162,7 +162,10 @@ def test_build_init_batch_on_codeclone_repository() -> None:
     project = resolve_project_identity(REPO_ROOT)
     git = read_git_provenance(REPO_ROOT)
     report_document = load_memory_init_report_document(
-        registry_items=["codeclone/memory/ingest/runner.py"],
+        registry_items=[
+            "codeclone/contracts/__init__.py",
+            "codeclone/memory/ingest/runner.py",
+        ],
         fallback_root=REPO_ROOT,
     )
     batch = build_init_batch(
