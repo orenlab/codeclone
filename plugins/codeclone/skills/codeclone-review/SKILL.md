@@ -1,82 +1,53 @@
 ---
 name: codeclone-review
-description: Use when Codex should review a Python repository through CodeClone MCP — conservative first pass, baseline-aware triage, changed-files review, or deeper exploratory follow-up.
+description: Review a Python repository via CodeClone MCP — first pass, baseline triage, changed-files review, and the findings that trip the gates.
 ---
 
 # CodeClone Review
 
-Use this skill for structural review, clone triage, changed-scope review, or
-health-oriented refactor planning in a Python repository.
+Structural / clone / changed-scope / gate review. Read-only; never mutates state.
 
 ## Rules
 
-- Use MCP tools only when invoked through the CodeClone plugin.
-- If no latest MCP run exists, call `analyze_repository` or `analyze_changed_paths` yourself before reading `latest/*` resources.
-- Start with the default or `pyproject`-resolved CodeClone profile.
-- Do not lower thresholds on the first pass.
-- Lower-threshold runs are explicit exploratory follow-ups, not silent replacements.
-- Prefer production-first and changed-files-first review over broad listing.
-- CodeClone is the source of truth — do not reinterpret findings independently.
-- Do not fall back to CLI or local report files.
-- Never auto-suppress findings or mutate repository state.
+- MCP tools only (CodeClone plugin). Absolute `root`. CodeClone is the source of truth — never reinterpret, suppress, or
+  mutate.
+- No latest run → `analyze_repository` / `analyze_changed_paths` first.
+- Default / pyproject thresholds on the first pass. Lower thresholds = explicit exploratory follow-up, never silent.
+- Production- and changed-files-first over broad listing. `detail_level` for lists: summary | normal | full.
 
 ## Workflows
 
-### Full repository
+- Full: `analyze_repository → get_production_triage → list_hotspots → get_finding → get_remediation`
+- PR:
+  `analyze_changed_paths → get_report_section(section="changed") → list_findings(changed_paths=…, sort_by="priority") → generate_pr_summary`
+- Metrics / coverage: `get_report_section(section="metrics")` (coverage join → `help(topic="coverage")`)
+- Deeper: `help(topic="analysis_profile")` → re-analyze with lower thresholds → `compare_runs`
 
-```
-analyze_repository → get_production_triage
-→ list_hotspots → get_finding → get_remediation
-```
+## Gates → the findings that trip them
 
-### Changed files (PR / patch)
+- `evaluate_gates(run_id, fail_on_new=, fail_complexity=, fail_coupling=, fail_dead_code=, fail_health=, …)` → gate
+  decision.
+- See the findings behind a `reasons[]` token:
+  `list_findings(novelty="new", family="clones"|"complexity"|…, source_kind="production")`.
+- Per-family, new vs known: `check_clones | check_complexity | check_coupling | check_cohesion | check_dead_code`.
+- Drill one: `get_finding(finding_id)` → `get_remediation(finding_id)`.
+- Review loop: `mark_finding_reviewed(finding_id) → list_reviewed_findings`; `exclude_reviewed=true` in long sessions.
 
-```
-analyze_changed_paths → get_report_section(section="changed")
-→ list_findings(changed_paths=..., sort_by="priority") → generate_pr_summary
-```
+## Reading the response
 
-### Gate preview
+> Key / easily-misread fields; the real response carries more.
 
-```
-analyze_repository → evaluate_gates
-→ explain reasons, do not change files
-```
-
-### Current-run metrics and coverage surfaces
-
-```
-analyze_repository → get_report_section(section="metrics")
-```
-
-If the question is about external Cobertura join semantics:
-
-1. Call `help(topic="coverage")`.
-2. Explain `coverage_hotspots` vs `scope_gap_hotspots` from canonical metrics.
-3. Do not turn scope gaps into "untested" claims.
-
-### Deeper follow-up
-
-If the default pass looks clean:
-
-1. Call `help(topic="analysis_profile")` for threshold semantics.
-2. Run a second analysis with lower thresholds.
-3. Explain this is a higher-sensitivity pass with more noise.
-4. Use `compare_runs` to show the delta.
-
-## Tool preferences
-
-- Prefer `list_hotspots` or `check_*` before broad `list_findings`.
-- For finding/list/check tools, use `detail_level="summary"`, `"normal"`, or
-  `"full"` only. `compact` is valid only for `help(detail="compact")`.
-- Use `get_finding` / `get_remediation` for one finding — not `detail_level=full` on lists.
-- Use `source_kind="production"` (or `tests`, `fixtures`, `mixed`, `other`) to cut test noise.
-- Use `get_report_section(section="metrics")` for adoption, API-surface, or Coverage Join facts.
-- Use `mark_finding_reviewed` + `exclude_reviewed=true` in long sessions.
-- Pass absolute `root` — MCP rejects relative roots.
+| Field                                     | Meaning                                                                       |
+|-------------------------------------------|-------------------------------------------------------------------------------|
+| `health.score`/`grade`                    | 0–100 / A–F; `dimensions` = per-family scores                                 |
+| `findings.new`/`known`                    | baseline-relative novelty — NOT patch-local proof (use change-control verify) |
+| `new_by_source_kind`                      | new split prod / tests / fixtures (the gate counts production)                |
+| `evaluate_gates.would_fail` + `reasons[]` | gate verdict + cause tokens (`clone:new`, `health`, …)                        |
+| finding `severity` vs `priority`          | severity = impact class; priority = ranked action order                       |
+| finding `source_kind`                     | production / tests / fixtures — filter test noise                             |
+| `novelty="known"`                         | in baseline, NOT "safe" — a patch may reintroduce it                          |
 
 ## Non-goals
 
-- Do not auto-suppress findings.
-- Do not treat report-only `overloaded_modules` as findings or gate data.
-- Do not present a clean default pass as proof that no finer-grained issues exist.
+- No auto-suppress, no mutate. `overloaded_modules` = report-only context, not a finding/gate.
+- A clean default pass ≠ proof no finer-grained issues exist. Do not fall back to CLI / local report files.

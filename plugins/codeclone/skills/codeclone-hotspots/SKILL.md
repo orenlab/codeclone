@@ -1,61 +1,49 @@
 ---
 name: codeclone-hotspots
-description: Use for quick CodeClone hotspot discovery — health check, top risks, or a single-question quality snapshot without a full review loop.
+description: Fast CodeClone quality snapshot — health, top risks, or one metric, without a full review loop.
 ---
 
 # CodeClone Hotspots
 
-Use this skill when the user wants a fast quality snapshot — not a full review
-session but a quick answer about health, top risks, or a specific metric.
+Fast quality answer (health, worst hotspots, one metric) — not a full review session.
 
 ## When to use
 
-- "How healthy is this repo?"
-- "What are the worst hotspots?"
-- "Any new baseline-relative regressions?"
-- "Show me the complexity hotspots."
-- Quick pre-merge sanity checks.
+- "How healthy is this repo?" / "Worst hotspots?" / "Complexity hotspots?" / pre-merge sanity.
+- Baseline-relative `new`/`known` is NOT patch-local proof — for "did my patch cause this?" use the change-control
+  before→after verify path.
 
-Baseline-relative `new`/`known` is not patch-local proof. For "did my patch
-introduce this?", use the change-control before-run to after-run verify path.
-
-## Workflow
+## Loop
 
 ```
-analyze_repository → get_production_triage
+analyze_repository(root=<abs>) → get_production_triage
 ```
 
-That's the cheapest useful path. Stop there unless the user asks for more.
+Cheapest useful path. Stop there unless asked for more.
 
-### If the user asks about a specific metric
+- Specific metric:
+  `analyze_repository → check_complexity | check_coupling | check_cohesion | check_dead_code | check_clones`
+- Adoption / API surface / coverage join: `get_report_section(section="metrics")` (coverage unclear →
+  `help(topic="coverage")`)
+- Gate preview → its findings: `evaluate_gates(run_id, fail_on_new=, fail_complexity=, …)` → for the actual findings,
+  `list_findings(novelty="new", family=…, source_kind="production")`.
 
-```
-analyze_repository → check_complexity | check_coupling | check_cohesion | check_dead_code | check_clones
-```
+## Reading the response
 
-For adoption, API-surface, or current-run coverage join questions:
+> Key / easily-misread fields; the real response carries more.
 
-```
-analyze_repository → get_report_section(section="metrics")
-```
-
-If external coverage semantics are unclear, call `help(topic="coverage")`
-before interpreting `coverage_hotspots` or `scope_gap_hotspots`.
-
-### If the user wants a gate preview
-
-```
-analyze_repository → evaluate_gates
-```
+| Field                                         | Meaning                                                        |
+|-----------------------------------------------|----------------------------------------------------------------|
+| `health.score`/`grade`                        | 0–100 / A–F; `dimensions` = per-family                         |
+| `findings.new`/`known`                        | baseline-relative — NOT patch-local proof                      |
+| `new_by_source_kind`                          | new split prod / tests / fixtures (the gate counts production) |
+| `evaluate_gates.would_fail` + `reasons[]`     | gate verdict + cause tokens                                    |
+| check item `novelty` / `clone_type` / `scope` | new vs known / Type-1..4 / production vs tests                 |
 
 ## Rules
 
-- Use MCP tools only when invoked through the CodeClone plugin.
-- If no latest MCP run exists, call `analyze_repository` yourself before reading `latest/*` resources.
-- Use default thresholds — this is a quick check, not an exploratory deep-dive.
-- For `check_*` tools, use `detail_level="summary"`, `"normal"`, or
-  `"full"` only. `compact` is valid only for `help(detail="compact")`.
-- One tool call is better than three when answering a simple question.
-- Summarize concisely — the user wants a snapshot, not a report.
-- Do not fall back to CLI or local report files.
-- If the result looks concerning, suggest using `codeclone-review` for a proper session.
+- MCP tools only (CodeClone plugin). Absolute `root`. No latest run → `analyze_repository` first.
+- Default thresholds — this is a quick check. `detail_level` for lists: summary | normal | full.
+- One precise call beats three. Summarize concisely — a snapshot, not a report.
+- Do not fall back to CLI / local report files. CodeClone is the source of truth.
+- If results look concerning, suggest `codeclone-review` for a real session.

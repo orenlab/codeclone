@@ -1,153 +1,53 @@
 ---
 name: codeclone-engineering-memory
-description: Use CodeClone Engineering Memory via MCP — scope context before edits, FTS search, draft writes, finish proposals, and human approve boundaries.
+description: CodeClone Engineering Memory via MCP — scope evidence before edits, search, draft writes, finish proposals, and the human-only approve boundary.
 ---
 
 # CodeClone Engineering Memory
 
-Local SQLite store of evidence-linked repository facts. Complements change
-control — does **not** replace analysis, blast radius, or patch verify.
+Local SQLite store of evidence-linked repository facts. Chat is ephemeral — anything
+the next agent must remember goes here via MCP, never "I noted it in the summary".
 
-Full contract: `docs/book/13-engineering-memory/index.md`. MCP help:
-`help(topic="engineering_memory")`.
+## In the edit cycle (mandatory step 3)
 
-## Prerequisites
+After `start_controlled_change` returns `edit_allowed:true`:
 
-Default `mcp_sync_policy=bootstrap_if_missing` auto-creates the store from the
-latest MCP analysis run on first `get_relevant_memory` after `analyze_repository`.
+1. `get_relevant_memory(root=<abs>, intent_id=... or scope=...)` — `root` is REQUIRED; `intent_id` alone fails MCP
+   validation.
+2. Read contract warnings, stale decisions, `contradiction_note` alerts. Surface contradictions to the user before
+   editing.
+3. Drill down: `query_engineering_memory(mode=for_path | search | get)`.
 
-| Need | Tool |
-|------|------|
-| Auto bootstrap (default) | `analyze_repository(root=abs)` → `get_relevant_memory(root=abs, …)` |
-| Explicit refresh | `manage_engineering_memory(action=refresh_from_run, run_id?)` |
-| CI / offline bootstrap | `codeclone memory init [--refresh]` |
+## Writing (agents draft only)
 
-If policy is `off` or no MCP run exists and the DB is missing, call
-`refresh_from_run` after `analyze_repository` or ask the user to run CLI init.
-Do not invent memory from local files or report dumps.
+- During a cycle, on a stable observation or any incident / complexity / decision:
+  `manage_engineering_memory(action=record_candidate, record_type=risk_note|change_rationale, statement="<what happened / learned / do next>", subject_path="<repo-relative file>")`.
+- After an accepted patch: `finish_controlled_change(..., propose_memory=true)` → `memory_candidates`.
+- Before `finish`: if the cycle had an incident / complexity / decision, you MUST `record_candidate` first. Chat
+  summaries do not count.
 
-## When to read
+## Hard boundaries
 
-| Moment                           | Tool                       | Parameters                                                  |
-|----------------------------------|----------------------------|-------------------------------------------------------------|
-| After `start`, before first edit | `get_relevant_memory`      | **`root` required**; `scope`, `intent_id`, or `symbols` |
-| One file deep-dive               | `query_engineering_memory` | `mode=for_path`, `path`                                     |
-| Symbol context                   | `query_engineering_memory` | `mode=for_symbol`, `symbol`                                 |
-| Keyword discovery                | `query_engineering_memory` | `mode=search`, `query`, `filters={match_mode:"any"\|"all"}`; optional `semantic=true` when index built |
-| Store health                     | `query_engineering_memory` | `mode=status`                                               |
-| Stale inventory                  | `query_engineering_memory` | `mode=stale`                                                |
-| Trajectory forensics             | `query_engineering_memory` | `mode=trajectory_get\|trajectory_search\|trajectory_status` |
-| Trajectory analytics             | `query_engineering_memory` | `mode=trajectory_anomalies\|trajectory_agents\|trajectory_dashboard` |
+- Agents CANNOT `approve` / `reject` / `archive`. Only a human, via the VS Code Memory view (not MCP, not
+  `codeclone memory approve`).
+- Memory NEVER authorizes edits, expands scope, or overrides findings.
+- Do NOT treat `draft` / `inferred` / stale records as established fact. Do not ignore stale warnings.
+- Never use the repo root as memory scope. Compress each statement to one durable fact (target ≤300 chars).
 
-Defaults exclude **stale**. Keyword `search` excludes drafts unless
-`include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
-`for_symbol` include draft agent notes automatically so handoffs are visible.
-Draft records remain non-authoritative.
+## Reading the response
 
-### Optional semantic search
+> Key / easily-misread fields; the real response carries more.
 
-Repository default: `memory.semantic.enabled=false`. To use semantic blend:
+| Field                                      | Meaning                                                                         |
+|--------------------------------------------|---------------------------------------------------------------------------------|
+| `records` / `trajectories` / `experiences` | separate evidence lanes: asserted facts / episodic workflow / advisory patterns |
+| `relevance_score`                          | lane-LOCAL — never compare across lanes; `for_path` / plain search are unranked |
+| record `status`                            | draft (unverified) / active / stale / historical / rejected                     |
+| record `approved`                          | human-approved? draft + inferred are non-authoritative                          |
+| `contradiction_note`                       | conflicting records for your scope — surface before editing                     |
+| `coverage`                                 | visibility metadata, NOT correctness or approval                                |
+| `subjects_truncated`                       | more subjects exist — use `mode=get` / `detail_level=full`                      |
 
-1. Enable `[tool.codeclone.memory.semantic]` in `pyproject.toml`
-2. `pip install 'codeclone[semantic-lancedb]'`
-3. `manage_engineering_memory(action=rebuild_semantic_index)` (MCP) or
-   `codeclone memory semantic rebuild` (CLI/CI)
-4. `query_engineering_memory(mode=search, semantic=true, …)`
+## Non-goals
 
-Without a built index, search stays FTS-only (`semantic.used: false` in the
-response). Default provider `diagnostic` is **deterministic hash vectors**, not
-semantic-quality embeddings — do not present hits as LLM recall.
-
-### Read checklist
-
-1. Scan ranked records for `contract_note`, `document_link`, `risk_note`
-2. Check response warnings for stale linked paths
-3. If `contradiction_note` matches scope → **stop and tell the user**
-4. Do not treat `draft` / `inferred` as policy
-
-## When to write (draft only)
-
-| Situation                       | Tool                                                                                        | Notes                        |
-|---------------------------------|---------------------------------------------------------------------------------------------|------------------------------|
-| Durable observation during edit | `manage_engineering_memory(action=record_candidate, record_type, statement, subject_path)` | Creates **draft** — **subject_path required** |
-| Validate claims before finish   | `manage_engineering_memory(action=validate_claims, text=…)`                                 | Memory-layer guard           |
-| Post-edit batch proposal        | `finish_controlled_change(..., propose_memory=true)`                                        | On **accept** only           |
-| Refresh system facts from run   | `manage_engineering_memory(action=refresh_from_run, run_id?)`                               | Force ingest                 |
-| Rebuild semantic LanceDB sidecar | `manage_engineering_memory(action=rebuild_semantic_index)`                                 | After semantic enabled + extras |
-| Rebuild trajectories             | `manage_engineering_memory(action=rebuild_trajectories)`                                   | After audit-enabled workflows   |
-| Promote an Experience            | `manage_engineering_memory(action=promote_experience, experience_id=…)`                    | Creates a human-reviewable draft |
-| Projection jobs                  | `manage_engineering_memory(action=enqueue_projection_rebuild)` / `action=projection_rebuild_status` / `action=run_projection_jobs_once` | When policy enabled |
-| Atomic fallback                 | `manage_engineering_memory(action=propose_from_receipt, text=…, intent_id?)`                | When finish hook unavailable |
-
-### Write rules
-
-- **Session chat is ephemeral** — durable notes require `record_candidate` or
-  `finish(..., propose_memory=true)`; never rely on the assistant message alone.
-- Before `finish_controlled_change`, if the cycle had an **incident**, **complexity**,
-  or a **decision** worth remembering, write at least one `record_candidate` (see
-  `change-control-gate` and `codeclone-change-control` §Incident memory).
-- Agents **never** approve, reject, or archive via MCP
-- Ask the user to approve drafts in the CodeClone VS Code **Memory** view (agents
-  cannot approve through MCP)
-- Ask user to run `codeclone memory init --refresh` when policy is `off` and facts drift
-- Or call `refresh_from_run` when an MCP run is available
-- Memory writes do **not** satisfy change-control scope or verify requirements
-- **Never** use project root as memory scope (`"."`, `""`, unscoped retrieval)
-- Compress observations before `record_candidate`: one durable fact, target
-  ≤300 chars; rewrite if >500; hard reject >1000
-- Read compact lanes separately: `records[]` are durable assertions,
-  `experiences[]` are advisory patterns, `trajectories[]` are bounded examples,
-  and `coverage` describes evidence availability
-- Compact is default: subject lists are bounded with
-  `subject_count`/`subjects_truncated`; experience diversity uses
-  `multi_agent`/`dominant_agent_facet`; trajectory contracts, steps, evidence
-  ids, payloads, and the duplicated root Patch Trail are omitted
-- Use `mode=get`, `trajectory_get`, or `detail_level=full` for complete
-  statements, subjects, agent facets, contracts, evidence, and payloads
-
-## When NOT to use memory
-
-- Justifying `do_not_touch` path edits
-- Expanding scope beyond declared intent
-- Overriding CodeClone findings
-- Substituting for `analyze_repository` or `get_blast_radius`
-- Treating draft/stale as verified project policy
-- Treating `trajectories[]` or `patch_trail_summary` as edit authorization
-
-## Integration with change control
-
-Normal edit cycle (memory steps in **bold**):
-
-```
-analyze_repository
-→ start_controlled_change
-→ get_relevant_memory          # after edit_allowed=true
-→ get_implementation_context   # after memory; see codeclone-implementation-context skill
-→ edit in scope
-→ analyze_repository           # when after_run required
-→ record_candidate             # before finish if incident/complexity/decision
-→ finish_controlled_change     # optional propose_memory=true
-```
-
-Memory context is **advisory**. Implementation context is **orientation evidence**
-— it does not replace memory governance or grant edit permission. Blast radius
-`do_not_touch` remains a hard boundary.
-
-## Record types (common)
-
-| Type                 | Typical source              | Agent trust               |
-|----------------------|-----------------------------|---------------------------|
-| `contract_note`      | init ingest                 | high when active+verified |
-| `document_link`      | docs ingest                 | high when active          |
-| `risk_note`          | metrics ingest              | informational             |
-| `module_role`        | inventory / finish proposal | context                   |
-| `change_rationale`   | finish proposal             | draft until approved      |
-| `contradiction_note` | ingest conflict             | **escalate to user**      |
-
-## Escalate to user
-
-- `contradiction_note` in scope
-- Stale warnings on previously approved records you rely on
-- Missing memory DB with no MCP run (init or analyze first)
-- Draft candidate should become team policy (approve needed)
-- System facts outdated after large refactor (refresh needed)
+- Do not approve / reject via MCP. Do not treat chat as memory. Do not let memory override a finding or grant an edit.

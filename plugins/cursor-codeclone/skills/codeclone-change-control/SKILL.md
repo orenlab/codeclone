@@ -1,264 +1,79 @@
 ---
 name: codeclone-change-control
-description: MANDATORY HARD GATE before ANY repository file write when CodeClone MCP is connected — read on every implement/fix/refactor task; start_controlled_change before first edit; finish_controlled_change before claiming done; see always-on rule change-control-gate.
+description: MANDATORY HARD GATE before ANY repository file write when CodeClone MCP is connected — start_controlled_change before the first edit, finish_controlled_change (accepted) before claiming done.
 ---
 
-# CodeClone Change Control
+# CodeClone Change Control — MANDATORY GATE
 
-Edit pipeline for the **target Python repository** (source, `tests/`, docs, config).
-CodeClone MCP available → follow this pipeline. Coverage/CI/docs labels do **not**
-skip intent. Use `dirty_scope_policy="continue_own_wip"` only to resume known
-uncommitted WIP in declared scope when start would otherwise block on dirty scope
-alone — finish still proves scope via `changed_files` or `diff_ref`.
+Not advisory. Applies before ANY write to a tracked repository file (code, tests,
+docs, config) whenever CodeClone MCP is connected. No exceptions, no rationalizing
+a skipped step.
 
-**Skip pipeline** only when: no files will change; analysis-only; MCP unavailable
-(edits → BLOCKED). Not for read-only review (`codeclone-review`), bounded context
-only (`codeclone-implementation-context`), or snapshots (`codeclone-hotspots`).
+## The loop (do not skip, reorder, or approximate)
 
-Findings are source of truth — do not reinterpret. No CLI/local-report fallback.
-Never mutate baseline, cache, canonical reports, or generated state; never
-auto-suppress. Pass absolute `root` to analysis tools.
+1. `analyze_repository(root=<abs>)` — skip only if a valid recent run for the same absolute root exists.
+2. `start_controlled_change(root=<abs>, scope={allowed_files:[...]}, intent="...")` — returns blast radius, budget,
+   `edit_allowed`, `intent_id`.
+3. `get_relevant_memory(root=<abs>, intent_id=...)` — REQUIRED after `edit_allowed:true`. `root` is mandatory. Read
+   contract / stale / contradiction alerts.
+4. Edit — inside declared scope ONLY.
+5. `analyze_repository(root=<abs>)` — after-run; required for any `.py` or governance-config change.
+6. Engineering Memory `record_candidate` — if the cycle had any incident / complexity / decision (see
+   `codeclone-engineering-memory`). Chat is NOT memory.
+7. `finish_controlled_change(intent_id=..., changed_files=[...], after_run_id=...)`.
 
-## Tool tiers
+## Hard rules — MUST / MUST NOT
 
-| Tier               | Tools                                                                                                                                 | Role                             |
-|--------------------|---------------------------------------------------------------------------------------------------------------------------------------|----------------------------------|
-| **Normal**         | `analyze_repository`, `start_controlled_change`, `get_relevant_memory`, `get_implementation_context`, `finish_controlled_change`       | Every edit cycle — use these     |
-| **Memory writes**  | `manage_engineering_memory` (`record_candidate`, `validate_claims`, `propose_memory` via finish)                                      | Draft notes before finish        |
-| **Queue/recovery** | `manage_change_intent` (promote, recover, renew, clear, list_workspace, gc_workspace, reset_workspace)                                | Multi-agent wait, crash recovery |
-| **Advanced**       | `get_blast_radius`, `check_patch_contract`, `validate_review_claims`, `create_review_receipt`             | Debugging or legacy servers only |
+- MUST NOT edit before `start` returned `status:"active"` AND `edit_allowed:true`.
+- MUST NOT touch a file outside `scope.allowed_files`. Need one → `start` again with a wider scope FIRST. Never widen
+  silently or "just this once".
+- MUST NOT touch `do_not_touch` paths (baseline, `.codeclone/**`, cache, generated). `review_context` is context, not a
+  ban.
+- `status:"queued"` → DO NOT edit; `manage_change_intent(action="promote")` first, edit only after it returns `active`.
+- `finish` `status:"unverified"`/`"violated"` → intent stays active; follow the exact `next_step`. Do not invent a
+  recovery; do not switch to atomic verify.
+- Live foreign intent overlap → STOP. Never kill a PID without explicit user confirmation it is abandoned.
+- Findings are the source of truth. Do not reinterpret, soften, or engineer around the gate.
 
-Workflow tools orchestrate the same steps as atomic tools. They **never run
-analysis**. Do not call atomic verify/receipt/clear in the same cycle when
-start/finish are available.
+## Completion gate — do not say "done / verified / ready" unless ALL hold
 
-## Normal pipeline
+- `finish` returned `accepted` (or `accepted_with_external_changes`).
+- `scope_check.status` = `clean` or `expanded`.
+- `intent_cleared: true`.
+- If `claims.valid: false` → report the warnings, do not suppress.
 
-One edit cycle:
+Otherwise report `BLOCKED` / `UNVERIFIED` with the `intent_id` and the exact missing
+step. A leftover active or recoverable own intent is a blocked task, not a finished
+one. `accepted_with_external_changes` → report the external-change advisory; do not
+present the patch as fully clean.
 
-```
-1. analyze_repository(root=abs)           # before-run; skip if valid recent run
-2. start_controlled_change(...)           # see decision table — before first edit
-3. get_relevant_memory(root=abs, scope=... or intent_id=... or symbols=...)  # root required
-4. get_implementation_context(root=abs, paths=..., intent_id=...)  # see codeclone-implementation-context skill
-5. edit inside declared scope only
-6. analyze_repository(root=abs)           # after-run ONLY if finish will require it
-7. record engineering memory (MCP)        # REQUIRED before finish if §Incident memory
-8. finish_controlled_change(...)          # see decision table — same intent_id
-   # optional: propose_memory=true on accept for draft memory candidates
-```
+## Reading the response
 
-Keep `intent_id` and the before-run from step 1 through the cycle. With
-`intent_id`, the before-run is pinned automatically — `run_id` is optional and
-must match the intent-bound run if supplied.
+> Key / easily-misread fields; the real response carries more.
 
-### Engineering Memory (step 3)
+| Field                                  | Meaning                                                                                 |
+|----------------------------------------|-----------------------------------------------------------------------------------------|
+| `edit_allowed`                         | true only when intent active AND hygiene clear — authorization lives HERE, nowhere else |
+| `scope.allowed_files` / `do_not_touch` | your hard edit boundary / paths needing separate approval                               |
+| `blast_radius.radius_level`            | low / medium / high — context, NOT permission to widen scope                            |
+| `finish.scope_check.status`            | clean / expanded / violated (out-of-scope file touched)                                 |
+| `finish.verification.status`           | accepted / unverified (missing evidence) / violated (regression)                        |
+| `finish_block_reason`                  | missing_evidence / foreign_dirty_overlap / own_unscoped_dirty (strict only)             |
+| `intent_cleared`                       | false = intent still open = NOT done                                                    |
 
-After `edit_allowed=true`, call `get_relevant_memory` before the first edit.
-**Always pass absolute `root`** (same as `analyze_repository`); `intent_id` or
-`scope` alone fails MCP validation. Default `mcp_sync_policy=bootstrap_if_missing`
-auto-bootstraps when the store is missing and a session run exists; explicit
-`refresh_from_run` when you need a forced ingest. No MCP run → auto sync skipped.
+## Verification profiles (controller derives — you do not choose)
 
-| Need                                          | Tool                                                                                                                |
-|-----------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| Ranked scope context                          | `get_relevant_memory(root=abs, scope=… \| intent_id=… \| symbols=…)`                                                |
-| Bounded structural + call + contract evidence | `get_implementation_context(root=abs, paths=…, intent_id=…)` — `codeclone-implementation-context` skill |
-| One path                                      | `query_engineering_memory(mode=for_path, path=…)`                                                                   |
-| Keyword search                                | `query_engineering_memory(mode=search, query=…, filters={match_mode:…})`; optional `semantic=true` when index built |
-| Draft observation                             | `manage_engineering_memory(action=record_candidate, …)`                                                             |
-| Post-edit proposals                           | `finish(..., propose_memory=true)`                                                                                  |
+`python_structural` (any `.py` touched) → needs an after-run + `after_run_id`.
+`governance_config` → after-run, no structural checks. `documentation_only` /
+`non_python_patch` → verify from `changed_files`, no after-run. `state_artifact_change`
+(baseline / cache / generated) → violated.
 
-Full playbook: `codeclone-engineering-memory` skill and
-`docs/book/13-engineering-memory/index.md`. Human approval via VS Code Memory view (not
-MCP) required to promote drafts — agents cannot activate records via MCP.
+## Atomic fallback
 
-Do not use memory to expand scope, override findings, or justify `do_not_touch`
-edits. Surface `contradiction_note` and stale warnings to the user.
+Only when `start`/`finish` are unavailable: `get_blast_radius` → edit →
+`check_patch_contract(mode="verify")` → `create_review_receipt`. Never mix atomic and
+workflow verification in one cycle. Queue / promote / recover always go through
+`manage_change_intent`.
 
-### Incident memory (before step 7)
-
-**Chat does not persist.** If the cycle had an incident, non-trivial complexity, or
-a decision the next agent should not rediscover, call
-`manage_engineering_memory(action=record_candidate, …)` **before**
-`finish_controlled_change` — or use `propose_memory=true` on finish for a batch.
-
-| Write when | Examples                                                               |
-|------------|------------------------------------------------------------------------|
-| Incident   | verify/hygiene surprise, recovery, workaround, blocked then unblocked  |
-| Complexity | non-obvious root cause, multi-file debug, acted on stale/contradiction |
-| Decision   | tradeoff, “do not repeat X”, integration quirk                         |
-
-Skip for trivial one-liner fixes only. See `change-control-gate` rule and
-`codeclone-engineering-memory` skill.
-
-Before `record_candidate`, compress to one durable fact with `subject_path` set;
-target ≤300 chars (hard reject above `max_statement_chars`, default 1000).
-
-### After `start` (`edit_allowed` gate)
-
-| Response         | Action                                                                                                                                                                                                                    |
-|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `needs_analysis` | Run step 1 for same `root`, then `start` again                                                                                                                                                                            |
-| `queued`         | **No edits.** Wait → `manage_change_intent(promote)`. If `before_run_evicted`: step 1 → `start` again                                                                                                                     |
-| `blocked`        | **No edits.** Intent exists — clear via `manage_change_intent(clear)` if abandoning; follow `next_step`. If dirty scope is known WIP with no foreign overlap, retry `start` with `dirty_scope_policy="continue_own_wip"`. |
-| `active`         | Read `blast_radius` + `budget`. Edit only if `edit_allowed=true`. Budget `gate_preview.would_fail` is advisory — edit may proceed, but verify may reject.                                                                 |
-
-**Edit permission:** `status == "active"` alone is not enough — require
-`edit_allowed == true`. Treat unknown start statuses as no permission.
-
-Three independent contours (do not collapse):
-
-```text
-status     = persisted registry lifecycle
-ownership  = runtime view (PID / TTL / lease)
-hygiene    = git working tree ∩ declared scope
-permission = edit_allowed (with status gate)
-```
-
-Before edit: call `get_implementation_context` with `intent_id` and explicit
-`paths` for files you will edit — it bundles blast zone, `call_context`,
-`change_control` (`do_not_touch` hard vs `review_context` advisory), and optional
-memory lanes. Use `get_blast_radius(transitive)` only for blast-only deep
-inspection when the bundled context is insufficient.
-
-### Shared worktree / freshness
-
-If `get_implementation_context` reports `analysis.freshness.status=drifted`, treat
-that as a **coordination signal** (another agent or parallel WIP may have changed
-the tree) — **not** a trigger to re-analyze in a loop. Verify conclusions that
-matter against the **source files** in your scope; continue when `edit_allowed`
-is true. Re-analyze once at verification boundaries (after-run before `finish`, or
-a deliberate new cycle). Full policy: `codeclone-implementation-context` skill.
-
-Declare in `start`: `allowed_files`, `allowed_related`, `forbidden`, `intent`,
-`expected_effects`. Outside scope → stop → user OK (unless already allowed) →
-new `start` with wider scope. Silent expansion = failed patch. Foreign overlap →
-`on_conflict=queue` unless immediate edit required.
-
-**Scope declaration rules:**
-
-| Path kind                         | Declare in        | Notes                                                                         |
-|-----------------------------------|-------------------|-------------------------------------------------------------------------------|
-| Files you create or edit          | `allowed_files`   | **New modules go here**, not only `allowed_related`                           |
-| Tests/docs/helpers you will touch | `allowed_related` | Finish-allowed; may show `scope: expanded`                                    |
-| Paths you will not touch          | omit              | Foreign **active/stale** dirty paths outside your scope are ignored at finish |
-
-### After edit → `finish`
-
-Evidence: **`changed_files` XOR `diff_ref`** — exactly one; both or neither is
-an error. `before_run_id` is resolved from the intent — do not pass a new declare.
-
-**Git reconciliation (automatic):** finish cross-checks agent evidence against
-the **full git working tree** and the dirty snapshot captured at `start` — not
-honor-system. List every path you touched in `changed_files` when possible; the
-controller also reads git and blocks under-reporting or silent out-of-scope
-edits. You **must** declare scope wide enough at `start`.
-
-| `finish_block_reason`   | Blocks?                               | Action                                                  |
-|-------------------------|---------------------------------------|---------------------------------------------------------|
-| `missing_evidence`      | yes                                   | Add in-scope dirty paths to evidence or revert          |
-| `foreign_dirty_overlap` | yes                                   | Coordinate foreign intent on overlapping in-scope paths |
-| `own_unscoped_dirty`    | only if `CODECLONE_STRICT_FINISH` env | Reconcile out-of-scope dirt or widen scope              |
-
-Out-of-scope unattributed dirt (`new_` / `modified_` / `unknown_unattributed_*`) and
-`preexisting_unscoped_dirty` are **advisory** — report them; they may elevate status to
-`accepted_with_external_changes` without blocking.
-
-```
-finish_controlled_change(
-  intent_id=...,
-  changed_files=[...] | diff_ref=...,     # XOR
-  after_run_id=...,                       # when verification.after_run_required
-  detail_level=summary|full,              # hygiene attribution
-  patch_trail_detail=summary|full,        # patch_trail forensics
-  claims_text=...,                        # optional
-  propose_memory=...,                     # optional draft batch on accept
-)
-```
-
-Pipeline (do not replicate manually): hygiene → check → verify → patch_trail →
-claims → receipt → clear. `patch_trail` does not authorize edits.
-
-### After `finish`
-
-| Status                                        | Action                                                                                                                            |
-|-----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| `accepted` / `accepted_with_external_changes` | Cycle complete only if `intent_cleared=true` **and** §Completion gate + §Advisory acceptance satisfied                            |
-| `unverified`                                  | Intent stays active. Follow `next_step` (usually after-run), then **retry same `intent_id`**                                      |
-| `violated` (scope)                            | Fix files or expand scope via new `start`; retry same `intent_id`                                                                 |
-| `expired`                                     | Before-run digest stale. Re-analyze → new `start`                                                                                 |
-| `reason=workspace_hygiene`                    | **No atomic verify bypass.** Reconcile dirty scope/evidence → retry same `intent_id`. Queued foreign intents do not block finish. |
-| `user_action_required=true`                   | Stop; follow `next_step` or escalate                                                                                              |
-
-Do not start a new intent unless scope changed or intent expired.
-
-## Completion gate
-
-No "done" / "verified" / "implemented" / "ready" unless all hold:
-
-- `finish.status` is `accepted` or `accepted_with_external_changes`
-- `intent_cleared=true`
-- claim warnings reported when `claims.valid` is false
-- §Advisory acceptance signals reported when present
-
-`accepted` = patch contract passed for declared scope — **not** "no regressions" or
-unchanged health.
-
-`novelty="known"` is baseline-relative, not patch-relative. It means the finding
-fingerprint is accepted by the trusted baseline; it does **not** prove the patch
-did not introduce or reintroduce it. Patch-local regression claims require clean
-before-run to after-run evidence from compare/verify.
-
-## Advisory acceptance (do not hide)
-
-Read **before** the user summary, even when `intent_cleared=true`:
-
-| Field                                        | Report when                                                    |
-|----------------------------------------------|----------------------------------------------------------------|
-| `verification.structural_delta.health_delta` | `< 0` — health dropped; cite delta even when verify `accepted` |
-| `health_regression_advisory`                 | present on accepted finish when delta negative                 |
-| `verification.reason: after_run_not_new`     | after-run equals before-run — re-analyze with new run_id       |
-| `verification.structural_delta.verdict`      | `regressed` or `mixed`                                         |
-| `external_regressions`, `gate_worsened`      | non-empty / true                                               |
-| `accepted_with_external_changes`             | name external workspace signal                                 |
-| `contract_violations`                        | non-empty (`relaxed` may still accept)                         |
-| `receipt.verdict`, `human_decision_points`   | `needs_attention` or non-empty                                 |
-
-**Anti-pattern:** `status: accepted` → skip reporting health drop or structural
-regressions. Contract acceptance clears the intent; structural delta is
-user-facing advisory.
-
-**Example:** docs-only patch → `accepted`, `intent_cleared=true`, but
-`health_delta: -2`, `verdict: regressed` → tell the user health fell; do not stop
-at "patch accepted".
-
-## Verify profiles
-
-Controller derives profile from changed files — read
-`verification.verification_profile` and `after_run_required` from finish.
-Do not guess. Details: `help(topic="verification_profiles")`.
-
-## Atomic fallback (legacy / debug only)
-
-When start/finish unavailable:
-
-```
-list_workspace → analyze → declare → budget → edit → analyze → check → verify
-→ validate_review_claims(text=..., patch_health_delta=verify.structural_delta.health_delta)
-→ create_review_receipt → clear
-```
-
-Say explicitly which tools were skipped. Never mix with normal pipeline in one cycle.
-
-## Escalate to user
-
-Scope expansion; touch `do_not_touch`; foreign active without queue; blocked
-`next_step`; baseline/cache/report mutation; recover foreign intent. Routine
-analyze/queue/promote runs automatically.
-
-## Claims (do not)
-
-Report-only ≠ CI fail; Security Surfaces ≠ vulns; baselined debt ≠ new relative
-to baseline; patch-local regression needs before/after evidence; dead code vs
-runtime reachability; structural verify without profile evidence.
+Skip the whole gate only for read-only / analysis tasks, or when CodeClone MCP is
+unavailable AND the task is read-only (then stop and report blockers for any edit).
