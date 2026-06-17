@@ -50,9 +50,11 @@ Security-relevant input classes:
 - Five session/coordination tools are marked `destructiveHint` in MCP metadata
   (`manage_change_intent`, `start_controlled_change`,
   `finish_controlled_change`, `mark_finding_reviewed`, `clear_session_runs`).
-- `--allow-remote` is required for non-local transports. It is an explicit
-  operator opt-in, not authentication. A remote MCP endpoint remains an
-  unauthenticated local-trust surface unless wrapped by external access control.
+- `--allow-remote` is required for non-loopback HTTP bind. It is an explicit
+  operator opt-in, not a substitute for authentication. For `streamable-http`,
+  `CODECLONE_MCP_AUTH_TOKEN` is mandatory at server start (see
+  [Remote MCP transport](#remote-mcp-transport)). stdio transport remains a
+  local-trust surface on the host.
 - MCP accepts cache policies `reuse` and `off`; `refresh` is rejected at
   runtime with a contract error.
 - `git_diff_ref` is validated as a safe single revision expression before any `git diff` subprocess call.
@@ -131,11 +133,13 @@ Refs:
 Loopback binding is the default. `--allow-remote` removes the loopback-only
 transport guard so HTTP MCP can bind on non-local interfaces.
 
-For `streamable-http`, configure Bearer auth via `CODECLONE_MCP_AUTH_TOKEN`
-(minimum 32 characters). The server validates `Authorization: Bearer …` with
-`hmac.compare_digest` (stdlib only). Without a token, HTTP MCP is an
-unauthenticated local-trust surface. CodeClone does not ship TLS or multi-tenant
-session management — use a reverse proxy when exposing beyond loopback.
+For **every** `streamable-http` start (loopback or remote), set
+`CODECLONE_MCP_AUTH_TOKEN` to a secret of at least 32 characters. The launcher
+refuses to bind HTTP transport when the variable is missing or too short; there
+is no unauthenticated HTTP fallback. Clients must send
+`Authorization: Bearer …`; the server validates with `hmac.compare_digest`
+(stdlib only). CodeClone does not ship TLS or multi-tenant session management —
+use a reverse proxy when exposing beyond loopback.
 
 Variable semantics and precedence:
 [10-config Environment variable overrides](10-config-and-defaults.md#mcp-http-authentication).

@@ -68,7 +68,7 @@ canonical reports. It may write ephemeral coordination state under
 `.codeclone/intents/` (file backend) or `.codeclone/db/intents.sqlite3`
 (SQLite backend), optional audit records when enabled, and Engineering
 Memory **draft** rows through agent tools. Human approve/reject stays in VS Code
-Memory or `codeclone memory approve`.
+Memory or `codeclone memory approve --i-know-what-im-doing` (optional `--by NAME`).
 
 ## First workflow
 

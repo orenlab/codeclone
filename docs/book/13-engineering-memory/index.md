@@ -44,7 +44,7 @@ Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.7`**).
 
 Semantic index format (separate contract): `SEMANTIC_INDEX_FORMAT_VERSION`
-(currently **`1`**) in the same module. The vector sidecar is independent of
+(currently **`2`**) in the same module. The vector sidecar is independent of
 the SQLite memory schema version.
 
 ---

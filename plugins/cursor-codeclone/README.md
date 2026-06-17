@@ -60,6 +60,7 @@ codeclone-mcp --help
 | **Review**                 | `/codeclone-review`                 | Full structural review session with baseline-aware triage                          |
 | **Change Control**         | `/codeclone-change-control`         | Intent-first edit workflow: declare, context, edit, verify, clear                  |
 | **Engineering Memory**     | `/codeclone-engineering-memory`     | Scope memory before edits, search, draft `record_candidate`, finish proposals      |
+| **Platform Observability** | `/codeclone-platform-observability` | **Maintainer-only** — CodeClone runtime diagnostics (requires observer enable)     |
 
 ### Typical flow
 

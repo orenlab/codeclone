@@ -36,13 +36,21 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 | 5. Durable scope context | [Memory recipes](workflows/memory-recipes.md)                              |
 | 6. Coverage & session    | [Session & coverage](workflows/session-and-coverage.md)                    |
 
+**Maintainers only** (developing CodeClone itself — not user repo review):
+
+| Phase                         | Recipe                                                                      |
+|-------------------------------|-----------------------------------------------------------------------------|
+| M. Observer setup & MCP drill | [Platform Observability recipes](workflows/observability-recipes.md)        |
+| M. Maintainer playbook        | [Developing CodeClone with observer](../observability/maintainer-workflow.md) |
+
 ## Reference shortcuts
 
-| Need                            | Page                                                                                   |
-|---------------------------------|----------------------------------------------------------------------------------------|
-| Prompt patterns                 | [Prompt patterns](prompts.md)                                                          |
-| Payload field cheat sheet       | [Payload cheatsheet](payload-cheatsheet.md)                                            |
-| Change control contract         | [Structural Change Controller](../../book/12-structural-change-controller/index.md)    |
-| Implementation-context contract | [Analysis tools](../../book/25-mcp-interface/tools/analysis.md#implementation-context) |
-| Engineering Memory contract     | [Engineering Memory](../../book/13-engineering-memory/index.md)                        |
-| Runtime diagnostics             | [Platform Observability](../observability/diagnostics.md)                              |
+| Need                            | Page                                                                                  |
+|---------------------------------|---------------------------------------------------------------------------------------|
+| Prompt patterns                 | [Prompt patterns](prompts.md)                                                         |
+| Payload field cheat sheet       | [Payload cheatsheet](payload-cheatsheet.md)                                           |
+| Change control contract         | [Structural Change Controller](../../book/12-structural-change-controller/index.md)   |
+| Implementation-context contract | [Implementation context](../../book/25-mcp-interface/tools/implementation-context.md) |
+| `help()` topics                 | [Help topics](../../book/25-mcp-interface/tools/help-and-topics.md)                   |
+| Engineering Memory contract     | [Engineering Memory](../../book/13-engineering-memory/index.md)                       |
+| Runtime diagnostics (maintainer-only) | [Platform Observability](../observability/maintainer-workflow.md)                     |

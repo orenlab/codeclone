@@ -14,6 +14,8 @@ sequenceDiagram
     MCP -->> Agent: intent_id, blast_radius, budget, edit_allowed
     Agent ->> MCP: get_relevant_memory(root, scope|intent_id)
     MCP -->> Agent: ranked memory context
+    Agent ->> MCP: get_implementation_context(root, paths, intent_id?)
+    MCP -->> Agent: bounded structural context
     Note over Agent: edit files
     opt Python structural / governance config
         Agent ->> MCP: analyze_repository

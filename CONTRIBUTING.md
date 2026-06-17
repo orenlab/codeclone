@@ -201,15 +201,16 @@ See the [security model](docs/book/21-security-model.md).
 Current values must always be verified in `codeclone/contracts/__init__.py`.
 At the time this document was updated, the main contracts were:
 
-| Contract | Version | Primary owner |
-|---|---:|---|
-| Baseline schema | `2.1` | `codeclone/baseline/` |
-| Baseline fingerprint | `1` | `codeclone/contracts/__init__.py` |
-| Analysis cache | `2.8` | `codeclone/cache/` |
-| Canonical report | `2.11` | `codeclone/report/document/` |
-| Metrics baseline | `1.2` | `codeclone/baseline/` |
-| Engineering Memory | `1.6` | `codeclone/memory/` |
-| Semantic index format | `1` | `codeclone/memory/semantic/` |
+| Contract               | Version | Primary owner                     |
+|------------------------|--------:|-----------------------------------|
+| Baseline schema        |   `2.1` | `codeclone/baseline/`             |
+| Baseline fingerprint   |     `1` | `codeclone/contracts/__init__.py` |
+| Analysis cache         |  `2.10` | `codeclone/cache/`                |
+| Canonical report       |  `2.11` | `codeclone/report/document/`      |
+| Metrics baseline       |   `1.2` | `codeclone/baseline/`             |
+| Engineering Memory     |   `1.7` | `codeclone/memory/`               |
+| Semantic index format  |     `2` | `codeclone/memory/semantic/`      |
+| Platform Observability |   `1.1` | `codeclone/observability/`        |
 
 Any schema shape or semantic change requires version review, tests, and
 documentation. Compatibility details live in
@@ -360,14 +361,14 @@ release utilities. It is not a miscellaneous home for product behavior:
 runtime logic belongs in the owning `codeclone/` module and scripts should stay
 thin, explicit, and tested.
 
-| Path | Purpose | Important boundary |
-|---|---|---|
+| Path                                   | Purpose                                                                                          | Important boundary                                                                                                          |
+|----------------------------------------|--------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
 | `scripts/build_docs_example_report.py` | Analyze the repository and stage the live docs example as HTML, JSON, SARIF, and `manifest.json` | Writes generated output, by default under `site/examples/report/live`; use it only for docs example/report publication work |
-| `scripts/lint_admonitions.py` | Validate MkDocs admonition/details indentation | `--fix` rewrites Markdown; review the resulting diff |
-| `scripts/launch_mcp` | Monorepo adapter that delegates to the shared Codex plugin MCP launcher | Not an independent launcher implementation; keep launcher resolution in `plugins/codeclone/scripts/launch_mcp.py` |
-| `scripts/sync_integrations.py` | Synchronize Codex, Claude Code, Cursor, VS Code, and Claude Desktop distribution repositories | Maintainer/release tool that deletes and recopies managed target paths; always dry-run first |
-| `scripts/integration_dist/*` | Distribution-only README, `.gitignore`, and marketplace overlays used by storefront sync | Source-controlled release inputs, not generated scratch files |
-| `scripts/__init__.py` | Package marker for importing script helpers in tests | Not a command-line entrypoint |
+| `scripts/lint_admonitions.py`          | Validate MkDocs admonition/details indentation                                                   | `--fix` rewrites Markdown; review the resulting diff                                                                        |
+| `scripts/launch_mcp`                   | Monorepo adapter that delegates to the shared Codex plugin MCP launcher                          | Not an independent launcher implementation; keep launcher resolution in `plugins/codeclone/scripts/launch_mcp.py`           |
+| `scripts/sync_integrations.py`         | Synchronize Codex, Claude Code, Cursor, VS Code, and Claude Desktop distribution repositories    | Maintainer/release tool that deletes and recopies managed target paths; always dry-run first                                |
+| `scripts/integration_dist/*`           | Distribution-only README, `.gitignore`, and marketplace overlays used by storefront sync         | Source-controlled release inputs, not generated scratch files                                                               |
+| `scripts/__init__.py`                  | Package marker for importing script helpers in tests                                             | Not a command-line entrypoint                                                                                               |
 
 ### Docs utilities
 

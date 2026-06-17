@@ -92,7 +92,10 @@ agent family. The dashboard combines projection status, agent aggregates,
 anomalies, and recent trajectories.
 
 Routine `run:*` workflows and trajectories with quality tier `routine` are
-excluded by default. Callers can opt in with `include_routine=true`.
+excluded by default. Opt in via CLI `--include-routine` or MCP
+`filters.include_routine=true` on `query_engineering_memory` trajectory modes
+(`trajectory_search`, `trajectory_dashboard`, etc.) — not a top-level
+`get_relevant_memory` MCP parameter.
 
 Available CLI commands:
 

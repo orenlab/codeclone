@@ -93,9 +93,9 @@ Refs:
       renders the same blast-radius projection used by MCP.
     - `--patch-verify` compares the current run against the trusted clone
       baseline for baseline-relative regressions, previews gate status, and
-      exits `3` for blocking violations in `ci` or `strict` mode. Patch-local
-      before-run to after-run regression claims require MCP change-control
-      verify.
+      exits `3` for blocking violations in `ci` or `strict` mode. Cannot combine
+      with changed-scope flags; patch-local before-run to after-run regression
+      claims require MCP change-control verify.
 - Session query mode is terminal-only:
     - `--session-stats` shows workspace session status: active agents, intents,
       and lease health. Read-only, does not run analysis.
@@ -103,14 +103,18 @@ Refs:
     - `--audit` shows the local Controller audit trail from the configured audit
       database. Read-only, does not run analysis. Requires `audit_enabled=true`
       in effective configuration (`[tool.codeclone]` or resolved defaults).
-    - `--audit-json` outputs audit payload footprint as JSON. Implies `--audit`.
-      Useful for cross-repository comparison.
+    - `--audit-json` outputs audit payload footprint as JSON. Uses the same audit
+      collector as `--audit` but does not set the `--audit` flag for combination
+      validation. Requires `audit_enabled=true` in effective configuration.
 - Engineering Memory commands (`codeclone memory`) are terminal-only and
   read-only with respect to source files, baselines, and analysis cache:
-    - `init [--refresh] [--dry-run]` — create or refresh the local SQLite
-      memory store from canonical report + git + docs + tests.
+    - `init [--refresh] [--dry-run] [--from-report PATH] [--no-docs] [--no-tests]`
+      — create or refresh the local SQLite memory store from canonical report +
+      git + docs + tests (omit docs/tests with the `--no-*` flags; seed from an
+      existing report with `--from-report`).
     - `status`, `for-path`, `search`, `stale`, `vacuum`, `coverage` — query
-      modes mirroring MCP `query_engineering_memory`.
+      modes mirroring MCP `query_engineering_memory` (`vacuum` purges per
+      retention config; no `--dry-run`).
     - `semantic status|rebuild|search` — optional LanceDB sidecar (requires
       `[tool.codeclone.memory.semantic] enabled = true`, extra
       `codeclone[semantic-lancedb]`, and a successful rebuild — MCP agents use
@@ -119,7 +123,10 @@ Refs:
       and configure `embedding_provider = "fastembed"`; `semantic-lancedb`
       alone can still run the deterministic diagnostic provider.
     - `review-candidates`, `approve`, `reject`, `archive` — human governance
-      for draft records (CLI and VS Code Memory; not MCP agent tools).
+      for draft records (CLI and VS Code Memory; not MCP agent tools). Direct CLI
+      `approve` / `reject` / `archive` require `--i-know-what-im-doing` unless
+      routed through the IDE governance channel. Use `--by NAME` (default
+      `human`) to record the approver; there is no `--verified-by` flag.
     - `trajectory status|rebuild|list|search|show|agents|anomalies|dashboard|export`
       — audit-derived narratives, quality passports, analytics, and local
       Patch Trail export (requires audit + rebuild).
@@ -174,9 +181,12 @@ Refs:
     - `--session-stats` and `--audit` collect payloads from
       `codeclone/controller_insights/` (same facts as IDE-only MCP tools when
       the server runs with `--ide-governance-channel`).
-    - `--session-stats` cannot combine with `--audit`, `--blast-radius`, or
-      `--patch-verify`.
-    - `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
+    - `--session-stats` cannot combine with explicit `--audit`, `--blast-radius`,
+      or `--patch-verify`. `--audit-json` is not treated as `--audit` for this
+      check (run one pre-analysis query per invocation).
+    - explicit `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
+    - controller and workspace query modes cannot combine with changed-scope
+      flags (`--changed-only`, `--diff-against`, `--paths-from-git-diff`).
     - controller and workspace query modes do not write reports, baselines, or
       analysis cache data.
 - Contract errors use `CONTRACT ERROR:`.
@@ -198,13 +208,15 @@ Refs:
 - `--timestamped-report-paths` requires at least one requested report output.
 - `--changed-only` requires a diff source.
 - `--blast-radius` and `--patch-verify` are mutually exclusive.
-- `--session-stats` cannot combine with `--audit`, `--blast-radius`, or
+- `--session-stats` cannot combine with explicit `--audit`, `--blast-radius`, or
   `--patch-verify`.
-- `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
+- explicit `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
+- Controller and workspace query modes are incompatible with changed-scope flags
+  (`--changed-only`, `--diff-against`, `--paths-from-git-diff`).
 - Controller and workspace query modes are incompatible with report output flags,
   baseline update flags, and changed-scope flags.
 - `--patch-verify` requires a trusted clone baseline.
-- `--audit` requires `audit_enabled=true` in effective configuration.
+- `--audit` and `--audit-json` require `audit_enabled=true` in effective configuration.
 - Browser-open failure after successful HTML write is warning-only.
 - In gating mode, unreadable source files are contract errors with higher priority than clone/metric gate failures.
 
@@ -234,6 +246,7 @@ Refs:
     | Unreadable source in CI/gating                                    | contract             | `2`  |
     | New clones with `--fail-on-new`                                   | gating               | `3`  |
     | Blocking `--patch-verify` contract violation                      | gating               | `3`  |
+    | Untested coverage hotspots with `--fail-on-untested-hotspots`     | gating               | `3`  |
     | Threshold or metrics gate exceeded                                | gating               | `3`  |
     | Unexpected exception                                              | internal             | `5`  |
 

@@ -55,6 +55,9 @@ Refs:
   `--fail-on-typing-regression`, `--fail-on-docstring-regression`,
   `--fail-on-api-break`, `--min-typing-coverage`, or `--min-docstring-coverage`
   is active (`codeclone/surfaces/cli/runtime.py:gating_mode_enabled`).
+- **`--fail-on-untested-hotspots`** is a Coverage Join policy gate (exit `3` when
+  breached). It requires `--coverage` / `coverage_xml` and is evaluated after
+  metrics analysis, not via `gating_mode_enabled` unreadable-source precedence.
 - In gating mode, unreadable source files produce `CONTRACT ERROR:` and exit `2`
   **before** clone/metric gate evaluation (`GATING FAILURE:` is suppressed when
   both would apply).
@@ -66,18 +69,19 @@ Refs:
 
 ## Failure modes
 
-| Condition                                  | Marker           | Exit |
-|--------------------------------------------|------------------|------|
-| Invalid output extension/path              | `CONTRACT ERROR` | `2`  |
-| Invalid CLI flag combination               | `CONTRACT ERROR` | `2`  |
-| Invalid controller query combination       | `CONTRACT ERROR` | `2`  |
-| `--patch-verify` without trusted baseline  | `CONTRACT ERROR` | `2`  |
-| Untrusted baseline in CI/gating            | `CONTRACT ERROR` | `2`  |
-| Unreadable source in CI/gating             | `CONTRACT ERROR` | `2`  |
-| New clones with `--fail-on-new`            | `GATING FAILURE` | `3`  |
-| Blocking `--patch-verify` violation        | `GATING FAILURE` | `3`  |
-| Threshold or metrics gate breach           | `GATING FAILURE` | `3`  |
-| Unexpected exception in top-level CLI path | `INTERNAL ERROR` | `5`  |
+| Condition                                                     | Marker           | Exit |
+|---------------------------------------------------------------|------------------|------|
+| Invalid output extension/path                                 | `CONTRACT ERROR` | `2`  |
+| Invalid CLI flag combination                                  | `CONTRACT ERROR` | `2`  |
+| Invalid controller query combination                          | `CONTRACT ERROR` | `2`  |
+| `--patch-verify` without trusted baseline                     | `CONTRACT ERROR` | `2`  |
+| Untrusted baseline in CI/gating                               | `CONTRACT ERROR` | `2`  |
+| Unreadable source in CI/gating                                | `CONTRACT ERROR` | `2`  |
+| New clones with `--fail-on-new`                               | `GATING FAILURE` | `3`  |
+| Blocking `--patch-verify` violation                           | `GATING FAILURE` | `3`  |
+| Threshold or metrics gate breach                              | `GATING FAILURE` | `3`  |
+| Untested coverage hotspots with `--fail-on-untested-hotspots` | `GATING FAILURE` | `3`  |
+| Unexpected exception in top-level CLI path                    | `INTERNAL ERROR` | `5`  |
 
 ## Determinism / canonicalization
 

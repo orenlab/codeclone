@@ -55,7 +55,9 @@ Current server characteristics:
 
 - **Optional dependency** — base `codeclone` install does not require MCP
   runtime packages.
-- **Transports** — `stdio` (default), `streamable-http`.
+- **Transports** — `stdio` (default), `streamable-http` (Bearer auth required).
+- **HTTP flags** — `--json-response` (default on), `--stateless-http` (default
+  on), `--debug`, `--log-level` (`DEBUG`–`CRITICAL`, default `INFO`).
 - **Run storage** — in-memory only, bounded by `--history-limit` (default 4,
   max 10). Latest-run pointer is process-local.
 - **Roots** — analysis tools require an absolute repository root. Relative
@@ -69,10 +71,11 @@ Current server characteristics:
   default 7 days, max 14 in open source). See
   [Plans and Retention](../../plans-and-retention.md).
 
-!!! warning "Absolute roots and remote exposure"
-    Analysis tools require an absolute repository root. HTTP exposure beyond
-    loopback requires explicit `--allow-remote`. For authenticated
-    `streamable-http`, set `CODECLONE_MCP_AUTH_TOKEN` — see
+!!! warning "Absolute roots and HTTP transport"
+    Analysis tools require an absolute repository root. Every
+    `streamable-http` start requires `CODECLONE_MCP_AUTH_TOKEN` (≥32 characters);
+    the server exits without it. Non-loopback binding additionally requires
+    `--allow-remote`. See
     [Environment variable overrides](../10-config-and-defaults.md#mcp-http-authentication)
     and [Security Model](../21-security-model.md).
 
@@ -135,5 +138,7 @@ The surface is intentionally triage-first: analyze → summarize/triage →
 drill into one finding or one hotspot family.
 
 Tool families and exact parameters are split under
-[Tools](tools/analysis.md), including the
+[Tools](tools/analysis.md), including
+[Implementation context](tools/implementation-context.md),
+[Help topics](tools/help-and-topics.md), and the
 [Platform Observability slicer](tools/platform-observability.md).

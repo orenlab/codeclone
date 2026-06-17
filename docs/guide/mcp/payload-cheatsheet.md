@@ -27,6 +27,12 @@ projection.
 `threshold_context` showing whether the run is genuinely quiet or simply
 below the active threshold.
 
+**Engineering Memory** — `get_relevant_memory` omits routine `run:*` trajectories
+from `trajectories[]` by default. Use `query_engineering_memory` trajectory
+modes with `filters.include_routine=true` to include them. Scoped retrieval
+defaults to `detail_level=compact`; use `full` or
+`query_engineering_memory(mode=get)` for complete payloads.
+
 …
 
 [Full reference →](../../book/25-mcp-interface/payload-conventions.md)

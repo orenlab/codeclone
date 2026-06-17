@@ -47,7 +47,7 @@ codeclone . --ci               # CI mode
 - **Baseline governance** — separates legacy debt from new regressions; CI fails only on what changed
 - **Change controller** — intent declaration, blast radius, patch contract, review receipt for AI agents
 - **Engineering Memory** — governed records, trajectory passports, and advisory Experiences
-- **MCP server** — 32-tool default interface for IDE and agent clients
+- **MCP server** — 33-tool default interface for IDE and agent clients (35 with `--ide-governance-channel`)
 - **Platform Observability** — opt-in local diagnostics for CodeClone's own runtime
 - **Corpus Analytics** — optional offline intent clustering (`codeclone[analytics]`)
 - **Reports** — HTML, JSON, Markdown, SARIF, text from one canonical payload

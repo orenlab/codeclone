@@ -103,10 +103,16 @@ def test_codex_plugin_skill_exists() -> None:
     implementation_context_skill_path = (
         plugin_root / "skills" / "codeclone-implementation-context" / "SKILL.md"
     )
+    platform_observability_skill_path = (
+        plugin_root / "skills" / "codeclone-platform-observability" / "SKILL.md"
+    )
     skill_text = skill_path.read_text(encoding="utf-8")
     hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
     change_control_skill_text = change_control_skill_path.read_text(encoding="utf-8")
     implementation_context_skill_text = implementation_context_skill_path.read_text(
+        encoding="utf-8"
+    )
+    platform_observability_skill_text = platform_observability_skill_path.read_text(
         encoding="utf-8"
     )
     manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
@@ -165,6 +171,17 @@ def test_codex_plugin_skill_exists() -> None:
             "get_relevant_memory",
             "start_controlled_change",
             "Do not fall back to CLI or local report files.",
+        ),
+    )
+    assert_all_contained(
+        platform_observability_skill_text,
+        *(
+            "name: codeclone-platform-observability",
+            "Maintainer-only",
+            "query_platform_observability",
+            "CODECLONE_OBSERVABILITY_ENABLED=1",
+            "Not for end users analyzing their Python repository",
+            "Do not fall back to CLI or local report files for repository analysis.",
         ),
     )
 

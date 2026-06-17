@@ -254,21 +254,38 @@ Cross-surface schema/version constants live in
 their owning modules. **Always read values from code, never copy from another
 doc.** Current central values (verified at write time):
 
-| Constant                                | Current value   |
-|-----------------------------------------|-----------------|
-| `BASELINE_SCHEMA_VERSION`               | `2.1`           |
-| `BASELINE_FINGERPRINT_VERSION`          | `1`             |
-| `CACHE_VERSION`                         | `2.8`           |
-| `REPORT_SCHEMA_VERSION`                 | `2.11`          |
-| `METRICS_BASELINE_SCHEMA_VERSION`       | `1.2`           |
-| `ENGINEERING_MEMORY_SCHEMA_VERSION`     | `1.6`           |
-| `SEMANTIC_INDEX_FORMAT_VERSION`         | `2`             |
-| `PATCH_TRAIL_SCHEMA_VERSION`            | `1`             |
-| `PLATFORM_OBSERVABILITY_SCHEMA_VERSION` | `1.0`           |
-| `TRAJECTORY_PROJECTION_VERSION`         | `trajectory-v3` |
-| `TRAJECTORY_QUALITY_SCORE_VERSION`      | `2`             |
-| `EXPERIENCE_DISTILLATION_VERSION`       | `experience-v1` |
-| `IDE_GOVERNANCE_PROTOCOL_VERSION`       | `2`             |
+| Constant                                 | Current value   |
+|------------------------------------------|-----------------|
+| `BASELINE_SCHEMA_VERSION`                | `2.1`           |
+| `BASELINE_FINGERPRINT_VERSION`           | `1`             |
+| `CACHE_VERSION`                          | `2.10`          |
+| `REPORT_SCHEMA_VERSION`                  | `2.11`          |
+| `METRICS_BASELINE_SCHEMA_VERSION`        | `1.2`           |
+| `ENGINEERING_MEMORY_SCHEMA_VERSION`      | `1.7`           |
+| `SEMANTIC_INDEX_FORMAT_VERSION`          | `2`             |
+| `PATCH_TRAIL_SCHEMA_VERSION`             | `1`             |
+| `PLATFORM_OBSERVABILITY_SCHEMA_VERSION`  | `1.1`           |
+| `TRAJECTORY_PROJECTION_VERSION`          | `trajectory-v3` |
+| `TRAJECTORY_QUALITY_SCORE_VERSION`       | `2`             |
+| `EXPERIENCE_DISTILLATION_VERSION`        | `experience-v1` |
+| `IDE_GOVERNANCE_PROTOCOL_VERSION`        | `2`             |
+| `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION`  | `1.2`           |
+| `CORPUS_EXPORT_SCHEMA_VERSION`           | `1.3`           |
+| `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `1`             |
+| `CORPUS_CONTROL_PLANE_CONTRACT_VERSION`  | `1.0`           |
+| `CORPUS_REPRESENTATION_CONTRACT_VERSION` | `3`             |
+| `CORPUS_NORMALIZER_VERSION`              | `1`             |
+| `CORPUS_EMBEDDING_CONTRACT_VERSION`      | `2`             |
+| `CORPUS_AGENT_LABEL_CONTRACT_VERSION`    | `1`             |
+| `CORPUS_PARTITION_MAP_VERSION`           | `1`             |
+
+Subsystem-local wire versions (not in `contracts/__init__.py`):
+
+| Constant                   | Value | Owner                                               |
+|----------------------------|-------|-----------------------------------------------------|
+| `AUDIT_EVENT_CORE_VERSION` | `2`   | `codeclone/audit/events.py`                         |
+| `CONTEXT_CONTRACT_VERSION` | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `CALL_RESOLUTION_VERSION`  | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
 
 When updating any doc that mentions a version, re-read `codeclone/contracts/__init__.py` first. Do not derive
 versions from another document.
@@ -815,7 +832,7 @@ If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 | Controller audit and insights (`codeclone/audit/*`, `codeclone/controller_insights/*`, CLI/MCP session/audit surfaces)                                                                                        | Controller, CLI/config, retention, MCP, and integration docs; `CHANGELOG.md` when public                                                                                                     | `tests/test_audit_*.py`, `tests/test_controller_insights.py`, CLI/MCP projection tests                                                                                                                                                                                                                                               | audit event core/schema, retention, token/payload footprint, or shared collector semantics change                               | audit schema/event core, `--audit`/`--session-stats`, IDE-only insight payloads change                                |
 | VS Code extension surface (`extensions/vscode-codeclone/*`)                                                                                                                                                   | `README.md`, `docs/guide/integrations/vscode/setup.md`, `docs/book/integrations/vs-code-extension.md`, `docs/book/02-architecture-map.md`, `docs/index.md`, `CHANGELOG.md`                   | `node --check extensions/vscode-codeclone/src/support.js`, `node --check extensions/vscode-codeclone/src/mcpClient.js`, `node --check extensions/vscode-codeclone/src/extension.js`, `node --test extensions/vscode-codeclone/test/*.test.js`, plus local extension-host smoke and package smoke when surface/manifest/assets change | command/view UX, trust/runtime model, source-first review flow, or packaging metadata change                                    | documented commands/views/setup/trust behavior, packaged assets, or publish metadata change                           |
 | Claude Desktop bundle surface (`extensions/claude-desktop-codeclone/*`)                                                                                                                                       | `docs/guide/integrations/claude-desktop/setup.md`, `docs/book/integrations/claude-desktop-bundle.md`, `docs/guide/mcp/`, `docs/book/02-architecture-map.md`, `docs/index.md`, `CHANGELOG.md` | `node --check extensions/claude-desktop-codeclone/server/index.js`, `node --check extensions/claude-desktop-codeclone/src/launcher.js`, `node --check extensions/claude-desktop-codeclone/scripts/build-mcpb.mjs`, `node --test extensions/claude-desktop-codeclone/test/*.test.js`, plus `.mcpb` build smoke                        | bundle install/runtime model, launcher UX, local-stdio constraints, or bundle metadata change                                   | documented Claude Desktop install/setup/runtime behavior or packaged bundle semantics change                          |
-| Claude Code plugin surface (`plugins/claude-code-codeclone/*`, `scripts/integration_dist/marketplace.claude-code.json`)                                                                                       | `docs/guide/integrations/claude-code/setup.md`, `docs/book/integrations/claude-code-plugin.md`, `docs/guide/mcp/`, `docs/book/02-architecture-map.md`, `docs/index.md`, `CHANGELOG.md`       | `python3 -m json.tool plugins/claude-code-codeclone/.claude-plugin/plugin.json`, `python3 -m json.tool plugins/claude-code-codeclone/.mcp.json`, `python3 -m json.tool scripts/integration_dist/marketplace.claude-code.json`, `claude plugin validate plugins/claude-code-codeclone`, `tests/test_claude_code_plugin.py`             | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, launcher behavior, or marketplace metadata change   | documented Claude Code install/discovery/runtime behavior or plugin manifest/marketplace semantics change            |
+| Claude Code plugin surface (`plugins/claude-code-codeclone/*`, `scripts/integration_dist/marketplace.claude-code.json`)                                                                                       | `docs/guide/integrations/claude-code/setup.md`, `docs/book/integrations/claude-code-plugin.md`, `docs/guide/mcp/`, `docs/book/02-architecture-map.md`, `docs/index.md`, `CHANGELOG.md`       | `python3 -m json.tool plugins/claude-code-codeclone/.claude-plugin/plugin.json`, `python3 -m json.tool plugins/claude-code-codeclone/.mcp.json`, `python3 -m json.tool scripts/integration_dist/marketplace.claude-code.json`, `claude plugin validate plugins/claude-code-codeclone`, `tests/test_claude_code_plugin.py`            | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, launcher behavior, or marketplace metadata change   | documented Claude Code install/discovery/runtime behavior or plugin manifest/marketplace semantics change             |
 | Codex plugin surface (`plugins/codeclone/*`, `.agents/plugins/marketplace.json`)                                                                                                                              | `docs/guide/integrations/codex/setup.md`, `docs/book/integrations/codex-plugin.md`, `docs/guide/mcp/`, `docs/book/02-architecture-map.md`, `docs/index.md`, `CHANGELOG.md`                   | `python3 -m json.tool plugins/codeclone/.codex-plugin/plugin.json`, `python3 -m json.tool plugins/codeclone/.mcp.json`, `python3 -m json.tool .agents/plugins/marketplace.json`, `tests/test_codex_plugin.py`                                                                                                                        | plugin discovery/runtime model, bundled MCP config, bundled skill behavior, or plugin metadata change                           | documented Codex plugin install/discovery/runtime behavior or plugin manifest/marketplace semantics change            |
 | Cursor plugin surface (`plugins/cursor-codeclone/*`)                                                                                                                                                          | `docs/guide/integrations/cursor/install-and-skills.md`, `docs/book/integrations/cursor-plugin.md`, `docs/guide/mcp/`, `docs/book/02-architecture-map.md`, `docs/index.md`, `CHANGELOG.md`    | `tests/test_cursor_plugin.py`, `tests/test_cursor_plugin_hooks.py`                                                                                                                                                                                                                                                                   | plugin discovery/runtime model, bundled MCP config, bundled skill/rule/hook behavior, or plugin metadata change                 | documented Cursor plugin install/discovery/runtime behavior or plugin manifest semantics change                       |
 | GitHub Action surface (`.github/actions/codeclone/*`)                                                                                                                                                         | Action README, main README/getting-started/CI docs, `CHANGELOG.md` when user-visible                                                                                                         | `tests/test_github_action_helpers.py`, shell/action smoke for changed workflow behavior                                                                                                                                                                                                                                              | input interpolation, command construction, timeout, output, or exit behavior changes                                            | public action inputs/outputs/runtime behavior changes                                                                 |

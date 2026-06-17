@@ -4,13 +4,13 @@
 
 ## Troubleshooting
 
-| Problem                                                   | Fix                                                     |
-|-----------------------------------------------------------|---------------------------------------------------------|
-| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"`                      |
-| Client cannot find `codeclone-mcp`                        | `uv tool install "codeclone[mcp]"` or use absolute path |
-| Client only accepts remote MCP                            | Use `streamable-http` transport                         |
-| Agent reads stale results                                 | Call `analyze_repository` again                         |
-| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths               |
-| Relative root rejected                                    | Use absolute path, not `.`                              |
+| Problem                                                   | Fix                                                                                                                     |
+|-----------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------|
+| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"`                                                                                      |
+| Client cannot find `codeclone-mcp`                        | `uv tool install "codeclone[mcp]"` or use absolute path                                                                 |
+| Client only accepts remote MCP                            | Use `streamable-http` transport; set `CODECLONE_MCP_AUTH_TOKEN` (≥32 chars) before start — no unauthenticated HTTP mode |
+| Agent reads stale results                                 | Call `analyze_repository` again                                                                                         |
+| `changed_paths` rejected                                  | Pass a `list[str]` of repo-relative paths                                                                               |
+| Relative root rejected                                    | Use absolute path, not `.`                                                                                              |
 
 ---

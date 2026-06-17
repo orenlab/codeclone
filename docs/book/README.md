@@ -37,7 +37,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [05-report.md](05-report.md) — report contract (schema v2.11)
 - [06-html-render.md](06-html-render.md) — HTML rendering contract
 - [07-baseline.md](07-baseline.md) — baseline contract (schema v2.1)
-- [08-cache.md](08-cache.md) — cache contract (schema v2.8)
+- [08-cache.md](08-cache.md) — cache contract (schema v2.10)
 
 ### Contracts and config
 

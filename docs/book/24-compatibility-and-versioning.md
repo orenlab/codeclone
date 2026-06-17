@@ -13,7 +13,9 @@ compatibility is enforced.
 
 ## Public surface
 
-- Version constants: `codeclone/contracts/__init__.py`
+- Version constants: `codeclone/contracts/__init__.py` (central);
+  subsystem-local versions in owning modules (audit event core,
+  implementation-context payload/resolver)
 - Clone baseline compatibility:
   `codeclone/baseline/clone_baseline.py:Baseline.verify_compatibility`
 - Metrics baseline compatibility:
@@ -30,7 +32,7 @@ Current contract versions:
 
 - `BASELINE_SCHEMA_VERSION = "2.1"`
 - `BASELINE_FINGERPRINT_VERSION = "1"`
-- `CACHE_VERSION = "2.9"`
+- `CACHE_VERSION = "2.10"`
 - `REPORT_SCHEMA_VERSION = "2.11"`
 - `METRICS_BASELINE_SCHEMA_VERSION = "1.2"`
 - `ENGINEERING_MEMORY_SCHEMA_VERSION = "1.7"`
@@ -46,13 +48,20 @@ Current contract versions:
 - `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION = "1"` (profile manifests)
 - `CORPUS_CONTROL_PLANE_CONTRACT_VERSION = "1.0"` (profile/selection export)
 - `CORPUS_REPRESENTATION_CONTRACT_VERSION = "3"` (intent representation payloads)
+- `CORPUS_NORMALIZER_VERSION = "1"` (corpus normalization pipeline)
 - `CORPUS_EMBEDDING_CONTRACT_VERSION = "2"` (analytics embedding sidecar)
-- `CONTEXT_CONTRACT_VERSION = "1"` (implementation-context payload; subsystem-local)
-- `CALL_RESOLUTION_VERSION = "1"` (implementation-context relationship resolver; subsystem-local)
+- `CORPUS_AGENT_LABEL_CONTRACT_VERSION = "1"` (agent label payloads)
+- `CORPUS_PARTITION_MAP_VERSION = "1"` (partition map artifacts)
+- `IDE_GOVERNANCE_PROTOCOL_VERSION = 2` (VS Code Memory HMAC attestation)
+- `AUDIT_EVENT_CORE_VERSION = "2"` (`codeclone/audit/events.py`; frozen audit step core)
+- `CONTEXT_CONTRACT_VERSION = "1"` (`codeclone/surfaces/mcp/_implementation_context.py`)
+- `CALL_RESOLUTION_VERSION = "1"` (`codeclone/surfaces/mcp/_implementation_context.py`)
 
 Refs:
 
 - `codeclone/contracts/__init__.py`
+- `codeclone/audit/events.py`
+- `codeclone/surfaces/mcp/_implementation_context.py`
 
 ## Contracts
 
@@ -61,8 +70,10 @@ Version bump rules:
 - bump **baseline schema** only for clone-baseline JSON layout/type changes
 - bump **fingerprint version** when clone identity semantics change
 - bump **cache schema** for cache wire-format or compatibility-semantics changes
-  — `2.9` adds rebuildable, off-report per-function call/reference facts as a
-  sibling projection without changing serialized `Unit` rows
+  — `2.9` adds rebuildable, off-report per-function call/reference facts (`fr`
+  wire section) as a sibling projection without changing serialized `Unit` rows;
+  `2.10` aggregates those facts across files onto the analysis result and MCP
+  run record (still off the canonical report)
 - bump **report schema** for canonical report document shape/meaning changes
 - bump **metrics-baseline schema** only for standalone metrics-baseline payload changes
 - bump **engineering memory schema** for SQLite DDL / governed record-shape changes
@@ -110,7 +121,7 @@ Operational compatibility rules:
 - runtime writes standalone metrics-baseline schema `1.2`
 - runtime accepts standalone metrics-baseline `1.x` where the baseline minor
   version is less than or equal to the runtime minor (currently through `1.2`)
-- runtime writes cache schema `2.8`
+- runtime writes cache schema `2.10`
 - MCP does not define a separate schema constant; tool/resource semantics are
   package-versioned public surface
 - adding or changing an MCP tool is a package-versioned interface change and

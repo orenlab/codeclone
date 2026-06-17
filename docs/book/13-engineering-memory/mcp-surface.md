@@ -16,6 +16,11 @@ Ranked, scope-aware context for the **declared edit scope**.
 | `include_stale`, `include_drafts` | `include_stale` defaults false; drafts are automatic for scoped retrieval / path / symbol and opt-in for search |
 | `detail_level`                    | `compact` (default) or `full` — compact returns statement previews without payload                              |
 
+`trajectories[]` excludes routine `run:*` workflows by default (same semantics
+as `include_routine=false` in retrieval). There is **no** `include_routine`
+parameter on this tool; use `query_engineering_memory` trajectory modes with
+`filters.include_routine` to include routine analysis-only trajectories.
+
 Unscoped `get_relevant_memory` is **rejected**. Pass `scope`, `intent_id`, or
 `symbols`. For project-wide orientation use
 `query_engineering_memory(mode=status|search)` — not root scope (`"."`, `""`).
@@ -107,7 +112,8 @@ IDE channel only (VS Code launches MCP with `--ide-governance-channel`):
 | `commit_governance`       | Human confirm with HMAC proof → approve/reject/archive  |
 
 Agent calls to `approve`, `reject`, or `archive` return `governance_mode_unavailable`
-with `next_step` pointing to the VS Code Memory view (never CLI instructions).
+with `next_step` pointing to the VS Code Memory view. Humans may also use
+`codeclone memory approve|reject|archive --i-know-what-im-doing` (CLI break-glass).
 
 #### `finish_controlled_change(propose_memory=true)`
 

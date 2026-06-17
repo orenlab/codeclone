@@ -49,6 +49,8 @@ Claude Code namespaces plugin skills with the plugin name:
 | Hotspot snapshot | `/codeclone:codeclone-hotspots` |
 | Controlled repository edit | `/codeclone:codeclone-change-control` |
 | Engineering Memory | `/codeclone:codeclone-engineering-memory` |
+| Implementation context | `/codeclone:codeclone-implementation-context` |
+| Platform Observability (maintainer-only) | `/codeclone:codeclone-platform-observability` |
 
 The MCP server remains read-only with respect to source, baselines, cache, and
 canonical reports. Change control, audit, and Engineering Memory write only

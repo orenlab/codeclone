@@ -44,7 +44,8 @@ manage_engineering_memory(
 ```
 
 Agents **cannot** `approve` / `reject` / `archive` via MCP. Humans promote drafts
-in the VS Code Memory view or with `codeclone memory approve`.
+in the VS Code Memory view or with
+`codeclone memory approve --i-know-what-im-doing` (optional `--by NAME`).
 
 ## 4. Finish proposals
 

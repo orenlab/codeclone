@@ -7,10 +7,21 @@ It explains the cost and shape of CodeClone's own execution. It does **not**
 describe repository quality and must never affect analysis truth, gates,
 baselines, cache compatibility, findings, or edit authorization.
 
-For practical commands, see the
-[observability diagnostics guide](../guide/observability/diagnostics.md). For
-the bounded MCP projection, see
-[query_platform_observability](25-mcp-interface/tools/platform-observability.md).
+!!! warning "Not for CodeClone end users"
+    If you use CodeClone to analyze **your** Python project, observer tooling
+    will not help with clones, health score, CI gates, or MCP review. Use the
+    normal CLI/MCP workflow instead. Platform Observability is **only** for
+    people developing **CodeClone itself**.
+
+    Instrumentation is **disabled by default** and requires explicit environment
+    configuration before any telemetry is collected. See
+    [Maintainer workflow](../guide/observability/maintainer-workflow.md).
+
+    For practical commands, see the
+    [observability diagnostics guide](../guide/observability/diagnostics.md). Maintainer
+    playbook: [Developing CodeClone with Platform Observability](../guide/observability/maintainer-workflow.md).
+    For the bounded MCP projection, see
+    [query_platform_observability](25-mcp-interface/tools/platform-observability.md).
 
 ## Trust boundary
 

@@ -2,12 +2,25 @@
 
 <!-- doc-scope: guide -->
 
-Platform Observability is for diagnosing CodeClone itself: slow MCP calls,
-projection work, database query cost, redundant work, and correlated
-CLI/MCP/worker activity. It is not a repository quality report.
+!!! warning "Maintainer-only — not for end users"
+    Platform Observability diagnoses **CodeClone's own runtime** while you
+    **develop CodeClone**. It does **not** help users analyze their Python
+    repositories (clones, health, gates, MCP review). For that, use the
+    [MCP guide](../mcp/README.md).
 
-The normative contract is
-[Platform Observability](../../book/26-platform-observability.md).
+    Observation is **disabled by default** and requires explicit environment
+    setup before any data exists. See
+    [Maintainer workflow](maintainer-workflow.md).
+
+    Platform Observability is for diagnosing CodeClone itself: slow MCP calls,
+    projection work, database query cost, redundant work, and correlated
+    CLI/MCP/worker activity. It is not a repository quality report.
+
+    The normative contract is
+    [Platform Observability](../../book/26-platform-observability.md).
+
+    Full maintainer playbook:
+    [Developing CodeClone with Platform Observability](maintainer-workflow.md).
 
 ## Enable it locally
 

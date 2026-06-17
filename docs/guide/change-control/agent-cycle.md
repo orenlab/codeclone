@@ -20,5 +20,9 @@ return `after_run_not_new`.
 `finish(..., propose_memory=true)` for draft candidates (human approve in VS Code
 Memory view).
 
+**Implementation context:** after memory, call `get_implementation_context` with
+scoped paths when editing Python — bounded structural, call-graph, and contract
+evidence from one stored run.
+
 Contract tables: [Verification profiles](../../book/12-structural-change-controller/verification-profiles.md),
 [finish_controlled_change](../../book/12-structural-change-controller/finish-controlled-change.md).

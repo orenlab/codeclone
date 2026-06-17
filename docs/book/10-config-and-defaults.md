@@ -176,30 +176,51 @@ Keys under `[tool.codeclone.memory]` and `[tool.codeclone.memory.semantic]` are
 
 Trajectory / projection keys (defaults from `codeclone/config/memory_defaults.py`):
 
-| Key                                        | Default    | Meaning                                                 |
-|--------------------------------------------|------------|---------------------------------------------------------|
-| trajectories_enabled                       | `true`     | Gate trajectory rebuild and retrieval                   |
-| trajectory_retention_days                  | `365`      | Retention hint for vacuum                               |
-| projection_rebuild_policy                  | `off`      | `enqueue_when_stale` enqueues worker on accepted finish |
-| projection_rebuild_running_timeout_seconds | `1800`     | Stale running job timeout                               |
-| projection_rebuild_spawn_worker            | `true`     | Spawn worker on enqueue                                 |
-| trajectory_export_enabled                  | `false`    | Gate CLI JSONL export                                   |
-| trajectory_export_include_payloads         | `false`    | Include step payloads in export rows                    |
-| trajectory_export_max_record_bytes         | `65536`    | Per export row cap                                      |
-| trajectory_export_max_file_bytes           | `10485760` | Output file cap                                         |
+| Key                                          | Default                                        | Meaning                                                             |
+|----------------------------------------------|------------------------------------------------|---------------------------------------------------------------------|
+| `backend`                                    | `sqlite`                                       | Memory store backend (`sqlite` or `postgres`)                       |
+| `db_path`                                    | `.codeclone/memory/engineering_memory.sqlite3` | SQLite path under repo root                                         |
+| `mcp_sync_policy`                            | `bootstrap_if_missing`                         | MCP auto-bootstrap when store missing (`off`, `refresh_when_stale`) |
+| `active_retention_days`                      | `-1`                                           | Active record retention (`-1` = no expiry)                          |
+| `stale_retention_days`                       | `180`                                          | Stale record retention before vacuum                                |
+| `draft_retention_days`                       | `14`                                           | Draft candidate retention                                           |
+| `rejected_retention_days`                    | `30`                                           | Rejected draft retention                                            |
+| `archived_retention_days`                    | `365`                                          | Archived record retention                                           |
+| `receipt_retention_days`                     | `90`                                           | Patch Trail receipt retention                                       |
+| `max_records`                                | `10000`                                        | Hard cap on active memory rows                                      |
+| `max_candidates`                             | `1000`                                         | Draft candidate cap                                                 |
+| `max_evidence_per_record`                    | `20`                                           | Evidence links per record                                           |
+| `max_statement_chars`                        | `1000`                                         | Hard statement length cap                                           |
+| `max_blast_radius_cache_entries`             | `500`                                          | Blast-radius cache size                                             |
+| `git_hotspot_period_days`                    | `90`                                           | Git hotspot lookback window                                         |
+| `git_hotspot_min_changes`                    | `5`                                            | Minimum commits to qualify as hotspot                               |
+| `trajectories_enabled`                       | `true`                                         | Gate trajectory rebuild and retrieval                               |
+| `trajectory_retention_days`                  | `365`                                          | Retention hint for vacuum                                           |
+| `projection_rebuild_policy`                  | `off`                                          | `enqueue_when_stale` enqueues worker on accepted finish             |
+| `projection_rebuild_running_timeout_seconds` | `1800`                                         | Stale running job timeout                                           |
+| `projection_rebuild_spawn_worker`            | `true`                                         | Spawn worker on enqueue                                             |
+| `projection_rebuild_coalesce_window_seconds` | `60`                                           | Batch sub-threshold rebuilds within window (`0` = immediate spawn)  |
+| `projection_rebuild_coalesce_min_delta`      | `25`                                           | Active-record delta that bypasses coalesce window                   |
+| `trajectory_export_enabled`                  | `false`                                        | Gate CLI JSONL export                                               |
+| `trajectory_export_include_payloads`         | `false`                                        | Include step payloads in export rows                                |
+| `trajectory_export_max_record_bytes`         | `65536`                                        | Per export row cap                                                  |
+| `trajectory_export_max_file_bytes`           | `10485760`                                     | Output file cap                                                     |
 
-| Semantic field       | Default                                           | Meaning                                                                                                                |
-|----------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
-| enabled              | `false`                                           | Turn on LanceDB sidecar indexing and search blend                                                                      |
-| backend              | `lancedb`                                         | Vector backend (only `lancedb` today)                                                                                  |
-| index_path           | `.codeclone/memory/semantic_index.lance`          | Sidecar directory                                                                                                      |
-| embedding_provider   | `diagnostic`                                      | `diagnostic` (hash vectors, not semantic quality), `fastembed` (local semantic-quality provider), `local_model`, `api` |
-| embedding_model      | `null` (`BAAI/bge-small-en-v1.5` for `fastembed`) | Optional provider model name                                                                                           |
-| embedding_cache_dir  | `.codeclone/memory/fastembed`                     | Local model cache used by `fastembed`                                                                                  |
-| allow_model_download | `false`                                           | Permit `fastembed` to download a missing model instead of requiring a pre-populated cache                              |
-| dimension            | `256` (`384` for `fastembed`)                     | Vector size; must match the provider model                                                                             |
-| max_results          | `20`                                              | Cap for vector `k` and merged search ranking                                                                           |
-| index_audit          | `true`                                            | Index bounded audit `summary` rows when audit DB exists                                                                |
+| Semantic field                      | Default                                           | Meaning                                                                                                                |
+|-------------------------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `enabled`                           | `false`                                           | Turn on LanceDB sidecar indexing and search blend                                                                      |
+| `backend`                           | `lancedb`                                         | Vector backend (only `lancedb` today)                                                                                  |
+| `index_path`                        | `.codeclone/memory/semantic_index.lance`          | Sidecar directory                                                                                                      |
+| `embedding_provider`                | `diagnostic`                                      | `diagnostic` (hash vectors, not semantic quality), `fastembed` (local semantic-quality provider), `local_model`, `api` |
+| `embedding_model`                   | `null` (`BAAI/bge-small-en-v1.5` for `fastembed`) | Optional provider model name                                                                                           |
+| `embedding_cache_dir`               | `.codeclone/memory/fastembed`                     | Local model cache used by `fastembed`                                                                                  |
+| `allow_model_download`              | `false`                                           | Permit `fastembed` to download a missing model instead of requiring a pre-populated cache                              |
+| `dimension`                         | `256` (`384` for `fastembed`)                     | Vector size; must match the provider model                                                                             |
+| `max_results`                       | `20`                                              | Cap for vector `k` and merged search ranking                                                                           |
+| `index_audit`                       | `true`                                            | Index bounded audit `summary` rows when audit DB exists                                                                |
+| `embed_max_documents_per_batch`     | `64`                                              | Max documents per embedding batch                                                                                      |
+| `embed_max_padded_tokens_per_batch` | `8192`                                            | Max padded tokens per embedding batch                                                                                  |
+| `projection_token_estimator`        | `chars_approx`                                    | Token estimate for semantic projection (`chars_approx` or `tiktoken`)                                                  |
 
 Semantic-quality local search requires both the LanceDB sidecar and FastEmbed:
 install `codeclone[semantic-local]` (or combine `semantic-lancedb` +
@@ -232,7 +253,7 @@ keys are contract errors.
     | `--strictness LEVEL`             | Analysis      | `ci`, `strict`, or `relaxed`; valid only with `--patch-verify` (default: `ci`)     |
     | `--session-stats`                | Analysis      | Show workspace session status; read-only                                           |
     | `--audit`                        | Analysis      | Show local Controller audit trail; requires `audit_enabled=true`                   |
-    | `--audit-json`                   | Analysis      | JSON audit footprint; implies `--audit`                                            |
+    | `--audit-json`                   | Analysis      | JSON audit footprint; uses audit collector; requires `audit_enabled=true`          |
     | `--cache-dir [FILE]`             | Analysis      | Legacy alias for `--cache-path`                                                    |
     | `--timestamped-report-paths`     | Reporting     | Append UTC timestamp to default report filenames                                   |
     | `--open-html-report`             | Output and UI | Open generated HTML in browser; requires `--html`                                  |
@@ -241,6 +262,31 @@ keys are contract errors.
 
     Canonical help text, defaults, and exit-code epilog are locked by
     `tests/test_cli_help_snapshot.py` and `tests/test_cli_unit.py::test_cli_help_text_consistency`.
+
+    #### Controller and workspace query combinations
+
+    Enforced by `codeclone/surfaces/cli/workflow.py:_validate_controller_query_flags`:
+
+    | Combination | Result |
+    |-------------|--------|
+    | `--blast-radius` + `--patch-verify` | contract error |
+    | `--session-stats` + explicit `--audit` | contract error |
+    | `--session-stats` + `--blast-radius` or `--patch-verify` | contract error |
+    | explicit `--audit` + `--blast-radius` or `--patch-verify` | contract error |
+    | any controller query + `--changed-only`, `--diff-against`, or `--paths-from-git-diff` | contract error |
+    | any controller query + report output flags | contract error |
+    | any controller query + `--update-baseline` / `--update-metrics-baseline` | contract error |
+    | `--strictness` without `--patch-verify` (when `--strictness` is explicit on argv) | contract error |
+
+    Notes:
+
+    - `--patch-verify` cannot scope via `--diff-against`; use changed-scope flags for
+      git-selected review, or `--patch-verify` alone for baseline-relative terminal check.
+    - `--audit-json` selects JSON audit output but does **not** set the `--audit` flag
+      for combination validation. `--session-stats` blocks only explicit `--audit`.
+    - Pre-analysis queries (`--session-stats`, `--audit`, `--audit-json`) exit before
+      analysis; only the first matching mode runs per invocation.
+    - `--audit` and `--audit-json` both require `audit_enabled=true` in effective config.
 
 !!! warning "Metrics-mode conflicts are enforced"
     Metrics update/gating flags are runtime contracts, not hints. Combinations
@@ -334,9 +380,9 @@ name is flat and listed below.
 
 ### Diagnostics
 
-| Variable          | Values      | Effect                                                                                                                               |
-|-------------------|-------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `CODECLONE_DEBUG` | `1` enables | Turns on CLI debug diagnostics (`codeclone/surfaces/cli/console.py`). Independent of analysis, gating, and `[tool.codeclone] debug`. |
+| Variable          | Values              | Effect                                                                                                                                                                                            |
+|-------------------|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_DEBUG` | exactly `1` enables | Turns on CLI debug diagnostics (`codeclone/surfaces/cli/console.py`). Other truthy strings such as `true` do **not** enable debug. Independent of analysis, gating, and `[tool.codeclone] debug`. |
 
 ### Platform Observability
 
@@ -399,8 +445,9 @@ listed field only. Paths resolve under the repository root like pyproject paths.
 | `CODECLONE_MEMORY_SEMANTIC_ALLOW_MODEL_DOWNLOAD` | `true` / `false`                                | `memory.semantic.allow_model_download` | When `false`, FastEmbed requires a pre-populated cache                                    |
 | `CODECLONE_MEMORY_SEMANTIC_INDEX_PATH`           | path                                            | `memory.semantic.index_path`           | LanceDB semantic sidecar directory                                                        |
 
-Memory keys without a documented env override (for example
-`projection_rebuild_spawn_worker`) are pyproject-only.
+Memory keys without a documented env override (for example retention caps,
+`projection_rebuild_spawn_worker`, and projection coalesce settings) are
+pyproject-only.
 
 Refs: `codeclone/config/memory.py`, `codeclone/config/memory_defaults.py`.
 
@@ -433,11 +480,12 @@ Refs: `codeclone/surfaces/mcp/_workspace_intents.py`,
 
 ### MCP HTTP authentication
 
-| Variable                   | Values                        | Effect                                                                                                                                                                                      |
-|----------------------------|-------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `CODECLONE_MCP_AUTH_TOKEN` | string, minimum 32 characters | Bearer token for `streamable-http` transport. Required for authenticated remote HTTP; validated with constant-time compare. Without it, HTTP MCP is an unauthenticated local-trust surface. |
+| Variable                   | Values                        | Effect                                                                                                                                                                                                                                                                                                                                                       |
+|----------------------------|-------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `CODECLONE_MCP_AUTH_TOKEN` | string, minimum 32 characters | **Required** for every `streamable-http` start (loopback or remote). The launcher exits with code `2` when the variable is missing or shorter than 32 characters — there is no unauthenticated HTTP mode. Clients send `Authorization: Bearer …`; the server validates with `hmac.compare_digest`. Non-loopback bind additionally requires `--allow-remote`. |
 
-Refs: `codeclone/surfaces/mcp/auth.py`, [21-security-model.md](21-security-model.md).
+Refs: `codeclone/surfaces/mcp/auth.py`, `codeclone/surfaces/mcp/server.py`,
+[21-security-model.md](21-security-model.md#remote-mcp-transport).
 
 ### Workspace edit gate (hooks)
 

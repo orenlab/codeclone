@@ -10,13 +10,13 @@ dedicated `orenlab/codeclone-claude-code` storefront.
 
 The distribution repository contains:
 
-| Path                                           | Role                                          |
-|------------------------------------------------|-----------------------------------------------|
-| `.claude-plugin/marketplace.json`              | Marketplace catalog named `orenlab-codeclone` |
-| `plugins/codeclone/.claude-plugin/plugin.json` | Plugin identity and metadata                  |
-| `plugins/codeclone/.mcp.json`                  | Local stdio MCP definition                    |
-| `plugins/codeclone/skills/`                    | Review, hotspots, change control, and memory  |
-| `plugins/codeclone/scripts/launch_mcp.py`      | Standalone workspace-first launcher           |
+| Path                                           | Role                                                             |
+|------------------------------------------------|------------------------------------------------------------------|
+| `.claude-plugin/marketplace.json`              | Marketplace catalog named `orenlab-codeclone`                    |
+| `plugins/codeclone/.claude-plugin/plugin.json` | Plugin identity and metadata                                     |
+| `plugins/codeclone/.mcp.json`                  | Local stdio MCP definition                                       |
+| `plugins/codeclone/skills/`                    | Review, hotspots, change control, memory, implementation context, platform observability (maintainer-only) |
+| `plugins/codeclone/scripts/launch_mcp.py`      | Standalone workspace-first launcher                              |
 
 ## Installation contract
 
@@ -42,7 +42,7 @@ flowchart TD
     F --> G["Canonical analysis and change control"]
 ```
 
-The plugin is additive. It provides four skills and the standard agent MCP
+The plugin is additive. It provides six skills and the standard agent MCP
 surface from the locally resolved `codeclone-mcp` version. It does not install
 the Python package, filter tools, or create a second analysis model.
 

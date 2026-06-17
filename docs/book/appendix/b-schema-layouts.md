@@ -114,11 +114,11 @@ Notes:
 }
 ```
 
-## Cache schema (`2.8`)
+## Cache schema (`2.10`)
 
 ```json
 {
-  "v": "2.8",
+  "v": "2.10",
   "payload": {
     "py": "cp314",
     "fp": "1",
@@ -301,6 +301,11 @@ Notes:
   canonicalization must not rewrite callable signature order.
 - `u` row decoder accepts both legacy 11-column rows and canonical 17-column rows
   (legacy rows map new structural fields to neutral defaults).
+- `fr` (schema **`2.9`+**) stores per-function relationship facts: caller
+  qualname plus relationship rows (`relation_kind`, `resolution_status`,
+  `origin_lane`, `target_qualname`, line, expression, `resolution_rule`).
+  Facts are rebuildable and off the canonical report; schema **`2.10`** adds
+  cross-file aggregation onto the analysis result and MCP run record.
 
 ## Report schema (`2.11`)
 
@@ -889,7 +894,7 @@ Retrieval collapses chunk hits to one score per parent trajectory.
 - Row/projection semantics: [Engineering Memory](../13-engineering-memory/index.md);
   bump rules: [24-compatibility-and-versioning.md](../24-compatibility-and-versioning.md).
 
-## Platform Observability schema (`1.0`)
+## Platform Observability schema (`1.1`)
 
 Optional local SQLite database at
 `.codeclone/db/platform_observability.sqlite3`. It is disposable development
@@ -1062,6 +1067,32 @@ for batch and selection semantics, and
 [Report Interpretability](../27-corpus-analytics.md#report-interpretability-slice-11)
 for validity and privacy rules.
 
+## Subsystem-local version constants
+
+Not defined in `codeclone/contracts/__init__.py`; bump in the owning module.
+
+| Constant | Value | Owner |
+|---|---|---|
+| `AUDIT_EVENT_CORE_VERSION` | `2` | `codeclone/audit/events.py` |
+| `CONTEXT_CONTRACT_VERSION` | `1` | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `CALL_RESOLUTION_VERSION` | `1` | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `TRAJECTORY_EXPORT_SCHEMA_VERSION` | `2` | `codeclone/memory/trajectory/profiles.py` |
+
+Central corpus and governance constants (also in `codeclone/contracts/__init__.py`):
+
+| Constant | Value |
+|---|---|
+| `IDE_GOVERNANCE_PROTOCOL_VERSION` | `2` |
+| `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` | `1.2` |
+| `CORPUS_EXPORT_SCHEMA_VERSION` | `1.3` |
+| `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `1` |
+| `CORPUS_CONTROL_PLANE_CONTRACT_VERSION` | `1.0` |
+| `CORPUS_REPRESENTATION_CONTRACT_VERSION` | `3` |
+| `CORPUS_NORMALIZER_VERSION` | `1` |
+| `CORPUS_EMBEDDING_CONTRACT_VERSION` | `2` |
+| `CORPUS_AGENT_LABEL_CONTRACT_VERSION` | `1` |
+| `CORPUS_PARTITION_MAP_VERSION` | `1` |
+
 ## Refs
 
 - `codeclone/baseline/clone_baseline.py`
@@ -1071,7 +1102,9 @@ for validity and privacy rules.
 - `codeclone/memory/schema_migrate.py`
 - `codeclone/memory/semantic/models.py`
 - `codeclone/observability/store/schema.py`
-- `codeclone/contracts/__init__.py` (`SEMANTIC_INDEX_FORMAT_VERSION`)
+- `codeclone/contracts/__init__.py`
+- `codeclone/audit/events.py`
+- `codeclone/surfaces/mcp/_implementation_context.py`
 - `codeclone/report/document/builder.py`
 - `codeclone/report/renderers/text.py`
 - `codeclone/report/renderers/markdown.py`

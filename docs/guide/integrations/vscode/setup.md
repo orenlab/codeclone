@@ -23,7 +23,10 @@ Install from the VS Code Marketplace: **`orenlab.codeclone`** (publisher
 The extension needs a local `codeclone-mcp` launcher and VS Code `1.100.0` or newer
 (`engines.vscode` in `package.json`).
 
-Minimum supported CodeClone version: `2.0.0`.
+Minimum supported CodeClone version: **`2.0.0`** (core analysis and change control).
+
+Engineering Memory features (Memory tree, search, governance, trajectory views)
+require **`2.1.0a1` or newer** on the resolved `codeclone-mcp` launcher.
 
 In `auto` mode, it checks the current workspace virtualenv before falling back
 to `PATH`. Runtime and version-mismatch messages identify that resolved launcher source.

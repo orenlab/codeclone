@@ -19,7 +19,14 @@ the local MCP launcher.
     The extension runs as a workspace extension and requires VS Code `1.100.0`
     or newer, local filesystem access, local git access for changed-files review,
     and a local `codeclone-mcp` launcher or an explicitly configured one.
-    CodeClone `2.0.0` or newer is required.
+    CodeClone **`2.0.0` or newer** is required for core analysis, triage, and
+    change-control MCP tools.
+
+    **Engineering Memory** (Memory tree view, search, IDE governance approve/reject,
+    trajectory dashboard) requires CodeClone **`2.1.0a1` or newer** with
+    `query_engineering_memory` and governance tools on the resolved launcher.
+    Older servers that pass the `2.0.0` gate still load the extension but show
+    Memory features as unavailable until upgraded.
 
     In `auto` mode, launcher resolution prefers the current workspace virtualenv
     before `PATH`. Launcher override settings (`codeclone.mcp.command`,

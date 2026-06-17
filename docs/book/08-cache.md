@@ -1,4 +1,4 @@
-<!-- doc-scope: CACHE CONTRACT (schema v2.8).
+<!-- doc-scope: CACHE CONTRACT (schema v2.10).
      owns: cache schema, profile compatibility, fail-open behavior, size guards.
      does-not-own: baseline (→ 07), pipeline (→ 03). -->
 
@@ -6,7 +6,7 @@
 
 ## Purpose
 
-Define cache schema `2.8`, integrity verification, stale-entry pruning, and
+Define cache schema `2.10`, integrity verification, stale-entry pruning, and
 fail-open behavior.
 
 ## Public surface
@@ -21,7 +21,7 @@ fail-open behavior.
 
 ## Data model
 
-On-disk schema (`v == "2.8"`):
+On-disk schema (`v == "2.10"`):
 
 - top-level: `v`, `payload`, `sig`
 - `payload` keys: `py`, `fp`, `ap`, `files`, optional `sr`
@@ -31,14 +31,38 @@ On-disk schema (`v == "2.8"`):
 - `files` stores compact per-file entries with stat signature, extracted units,
   optional metrics sections (including runtime reachability evidence and
   report-only `security_surfaces`),
-  referenced names/qualnames, and cached source stats
+  referenced names/qualnames, cached source stats, and optional
+  **`function_relationship_facts`**
 - `sr` stores optional segment-report projection payload
+
+### `function_relationship_facts` (per-file cache section)
+
+Cached under the canonical key `function_relationship_facts` in the typed entry;
+wire compact key **`fr`**. Each file may store zero or more fact rows keyed by
+`source_qualname`, each with a sorted list of relationship records:
+
+| Field               | Meaning                                                |
+|---------------------|--------------------------------------------------------|
+| `relation_kind`     | Deterministic relationship classifier from module walk |
+| `resolution_status` | Resolved vs deferred boundary for the target           |
+| `origin_lane`       | Which analysis lane produced the edge                  |
+| `target_qualname`   | Callee / related symbol qualname                       |
+| `line`              | Source line of the relationship site                   |
+| `expression`        | Normalized expression text (bounded)                   |
+| `resolution_rule`   | Rule id explaining how the target was resolved         |
+
+Facts are derived during unit extraction (`codeclone/analysis/units.py`) and
+persisted on cache save when present. On cache hit, discovery rehydrates them
+into the processing pipeline (`codeclone/core/discovery.py`) so warm runs preserve
+the same function-relationship evidence as cold runs without recomputing AST
+facts. Empty sections are omitted from wire entries.
 
 Refs:
 
 - `codeclone/cache/store.py:Cache.load`
-- `codeclone/cache/_wire_encode.py:_encode_wire_file_entry`
-- `codeclone/cache/_wire_decode.py:_decode_wire_file_entry`
+- `codeclone/cache/_wire_encode.py:_encode_function_relationship_facts`
+- `codeclone/cache/_wire_decode.py:_decode_optional_wire_function_relationship_facts`
+- `codeclone/cache/entries.py:_function_relationship_facts_dict_from_model`
 
 ## Contracts
 
@@ -70,6 +94,8 @@ Refs:
 - Cached public-API symbol payloads preserve declared parameter order.
 - Cached runtime reachability facts are required for cold/warm dead-code
   equivalence across supported framework registration patterns.
+- Cached `function_relationship_facts` round-trip deterministically through wire
+  encode/decode and preserve relationship ordering within each source qualname.
 - Legacy `.cache_secret` is warning-only and never used for trust.
 
 Refs:
@@ -120,6 +146,7 @@ Refs:
 - `tests/test_cache.py::test_cache_signature_validation_ignores_json_whitespace`
 - `tests/test_cache.py::test_cache_signature_mismatch_warns`
 - `tests/test_cache.py::test_cache_too_large_warns`
+- `tests/test_cache.py::test_cache_roundtrip_preserves_function_relationship_facts`
 - `tests/test_cli_inprocess.py::test_cli_reports_cache_too_large_respects_max_size_flag`
 - `tests/test_cli_inprocess.py::test_cli_cache_analysis_profile_compatibility`
 - `tests/test_core_branch_coverage.py::test_discover_prunes_deleted_cache_entries`

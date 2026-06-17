@@ -154,14 +154,15 @@ See [Exit codes](book/09-exit-codes.md).
 
 ## MCP Setup
 
-The MCP server exposes **32 tools** for agent clients over the same canonical
-pipeline (34 when VS Code starts the server with `--ide-governance-channel` for
+The MCP server exposes **33 tools** for agent clients over the same canonical
+pipeline (35 when VS Code starts the server with `--ide-governance-channel` for
 session stats and audit insights).
 
 ### Start the server
 
 ```bash
 codeclone-mcp --transport stdio            # local clients (IDE, agents)
+# HTTP: set CODECLONE_MCP_AUTH_TOKEN (≥32 chars) before start — required for streamable-http
 codeclone-mcp --transport streamable-http   # remote / HTTP clients
 ```
 

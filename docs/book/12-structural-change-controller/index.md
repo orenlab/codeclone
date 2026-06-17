@@ -42,8 +42,9 @@ queries:
 - Tools derive responses from existing run/report facts rather than LLM
   inference.
 - Report-only context is review context, not an edit prohibition.
-  !!! note "Claim Guard"
-  Full pattern catalog: [Claim Guard](../14-claim-guard.md).
+
+!!! note "Claim Guard"
+    Full pattern catalog: [Claim Guard](../14-claim-guard.md).
 
 ## Chapters
 

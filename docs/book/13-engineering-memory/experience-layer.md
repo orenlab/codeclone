@@ -93,7 +93,11 @@ memory candidate with the Experience statement, subject family, and trajectory
 evidence. It obeys the project's draft capacity and does not silently approve
 the result.
 
-Only the IDE governance channel can approve, reject, or archive memory records.
+Promotion creates drafts only. To approve, reject, or archive records, use the
+**VS Code Memory** view (IDE governance channel) or the CLI break-glass path
+(`codeclone memory approve|reject|archive --i-know-what-im-doing`). MCP agents
+cannot perform governance actions.
+
 See [Trust and lifecycle](trust-and-lifecycle.md),
 [MCP surface](mcp-surface.md), and the
 [trajectories and Experiences guide](../../guide/memory/trajectories-and-experiences.md).

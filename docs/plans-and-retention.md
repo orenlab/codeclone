@@ -94,7 +94,9 @@ that prefer hosted embedding quality or need on-prem model compliance.
 
 The controller audit trail records passive events (intent lifecycle, lease
 transitions, workspace coordination) in a local SQLite database when
-`--audit-enabled` is set.
+`audit_enabled=true` in effective config (pyproject or env). CLI **display**
+uses `--audit` / `--audit-json` when audit is enabled — there is no
+`--audit-enabled` flag.
 
 | Setting                | Open Source  | Team            | Enterprise           |
 |------------------------|--------------|-----------------|----------------------|

@@ -37,7 +37,8 @@ nav = [
             { "Trajectories & Experiences" = "guide/memory/trajectories-and-experiences.md" },
         ] },
         { "Diagnostics" = [
-            { "Platform Observability" = "guide/observability/diagnostics.md" },
+            { "Maintainer workflow" = "guide/observability/maintainer-workflow.md" },
+            { "Quick diagnostics" = "guide/observability/diagnostics.md" },
             { "Corpus Analytics" = "guide/analytics/overview.md" },
         ] },
         { "MCP" = [
@@ -51,8 +52,10 @@ nav = [
                 { "Change control" = "guide/mcp/workflows/change-control.md" },
                 { "Memory recipes" = "guide/mcp/workflows/memory-recipes.md" },
                 { "Session & coverage" = "guide/mcp/workflows/session-and-coverage.md" },
+                { "Observability (maintainer)" = "guide/mcp/workflows/observability-recipes.md" },
             ] },
             { "Prompt patterns" = "guide/mcp/prompts.md" },
+            { "Payload cheat sheet" = "guide/mcp/payload-cheatsheet.md" },
             { "Troubleshooting" = "guide/mcp/troubleshooting.md" },
         ] },
         { "Integrations" = [
@@ -62,6 +65,7 @@ nav = [
             { "Codex" = "guide/integrations/codex/setup.md" },
             { "Claude Desktop" = "guide/integrations/claude-desktop/setup.md" },
             { "SARIF export" = "guide/integrations/sarif/export.md" },
+            { "GitHub Action" = "book/integrations/github-action.md" },
         ] },
     ] },
     { "Contracts" = [
@@ -136,6 +140,8 @@ nav = [
             { "Overview" = "book/25-mcp-interface/index.md" },
             { "Tools" = [
                 { "Analysis" = "book/25-mcp-interface/tools/analysis.md" },
+                { "Implementation context" = "book/25-mcp-interface/tools/implementation-context.md" },
+                { "Help topics" = "book/25-mcp-interface/tools/help-and-topics.md" },
                 { "Report & findings" = "book/25-mcp-interface/tools/report-and-findings.md" },
                 { "Checks" = "book/25-mcp-interface/tools/checks.md" },
                 { "Workflow" = "book/25-mcp-interface/tools/workflow.md" },
@@ -154,6 +160,7 @@ nav = [
             { "Claude Code plugin" = "book/integrations/claude-code-plugin.md" },
             { "Codex plugin" = "book/integrations/codex-plugin.md" },
             { "Claude Desktop" = "book/integrations/claude-desktop-bundle.md" },
+            { "GitHub Action" = "book/integrations/github-action.md" },
             { "SARIF" = "book/integrations/sarif.md" },
         ] },
         { "Appendix" = [

@@ -31,13 +31,13 @@ style G fill: #fef9c3
 
 ### When to write memory
 
-| Situation                        | Action                                                            | Notes                                 |
-|----------------------------------|-------------------------------------------------------------------|---------------------------------------|
-| Stable observation during edit   | `record_candidate`                                                | Draft only; cite scope in statement   |
-| Patch accepted, workflow finish  | `propose_memory=true`                                             | Preferred batch proposal              |
-| Atomic fallback (no finish hook) | `propose_from_receipt`                                            | Same receipt shape as finish          |
-| System facts changed in repo     | `refresh_from_run` or ask human for `memory init --refresh`       | Explicit MCP refresh always available |
-| Promote draft to trusted fact    | **Not agent** — VS Code Memory view or `codeclone memory approve` | Required for active/verified          |
+| Situation                        | Action                                                                                   | Notes                                 |
+|----------------------------------|------------------------------------------------------------------------------------------|---------------------------------------|
+| Stable observation during edit   | `record_candidate`                                                                       | Draft only; cite scope in statement   |
+| Patch accepted, workflow finish  | `propose_memory=true`                                                                    | Preferred batch proposal              |
+| Atomic fallback (no finish hook) | `propose_from_receipt`                                                                   | Same receipt shape as finish          |
+| System facts changed in repo     | `refresh_from_run` or ask human for `memory init --refresh`                              | Explicit MCP refresh always available |
+| Promote draft to trusted fact    | **Not agent** — VS Code Memory view or `codeclone memory approve --i-know-what-im-doing` | Required for active/verified          |
 
 ### When **not** to use memory
 

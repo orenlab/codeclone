@@ -11,7 +11,7 @@ flowchart LR
 
     subgraph HumanCI["Human / CI"]
         I[memory init / refresh CLI]
-        A[approve / reject / archive]
+        A[approve / reject / archive<br/>VS Code or CLI --i-know-what-im-doing]
     end
 
     subgraph McpSync["MCP sync (policy-gated)"]
@@ -39,9 +39,9 @@ Never -.->|blocked|Store
 | `refresh_from_run`                      | Agent MCP (explicit)                  | Force ingest from selected MCP run         |
 | `record_candidate`                      | Agent MCP                             | `draft`                                    |
 | `finish(propose_memory=true)` on accept | Agent MCP                             | `draft` proposals + staleness side effects |
-| `approve`                               | Human CLI                             | `active` + `verified`/`supported`          |
-| `reject`                                | Human CLI                             | `rejected`                                 |
-| `archive`                               | Human CLI                             | `archived`                                 |
+| `approve`                               | Human CLI (`--i-know-what-im-doing`) or VS Code IDE channel | `active` + `verified`/`supported`          |
+| `reject`                                | Human CLI (`--i-know-what-im-doing`) or VS Code IDE channel | `rejected`                                 |
+| `archive`                               | Human CLI (`--i-know-what-im-doing`) or VS Code IDE channel | `archived`                                 |
 | Refresh detects drift                   | System on `init --refresh`            | `stale`                                    |
 | Patch touches linked path               | System on accepted finish             | `stale`                                    |
 

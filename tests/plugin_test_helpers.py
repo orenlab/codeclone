@@ -25,6 +25,7 @@ CODEX_CLAUDE_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = (
     "codeclone-change-control",
     "codeclone-engineering-memory",
     "codeclone-implementation-context",
+    "codeclone-platform-observability",
 )
 
 

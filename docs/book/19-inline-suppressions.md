@@ -40,12 +40,15 @@ Refs:
         - same-line single-line declaration
         - first line of a multiline declaration header
         - closing header line containing `:`
-- Supported rule ids: `dead-code`, `clone-cohort-drift`, `clone-guard-exit-divergence`.
+- Parsed rule ids: `dead-code`, `clone-cohort-drift`, `clone-guard-exit-divergence`.
+  Only `dead-code` has a runtime effect today. Clone rule ids are reserved:
+  they parse and bind like other rule ids but do not suppress clone findings.
 - Rule list supports comma-separated values and deduplicates deterministically.
 - Suppression applies only to declaration targets (`def`, `async def`, `class`).
 - Suppression is target-scoped:
   class-level suppression does not implicitly suppress unrelated methods.
-- Dead-code suppression is applied in final liveness filtering by rule id.
+- Dead-code suppression is applied in final liveness filtering by rule id
+  (`codeclone/metrics/dead_code.py:find_unused`).
 - Suppressed dead-code candidates are reported separately (not as active
   findings) with deterministic suppression metadata in report metrics.
 
@@ -58,13 +61,14 @@ Refs:
 
 ## Failure modes
 
-| Condition                                         | Behavior                            |
-|---------------------------------------------------|-------------------------------------|
-| malformed `# codeclone: ignore[...]` payload      | ignored silently                    |
-| unknown `codeclone[...]` rule id                  | ignored silently                    |
-| suppression on non-declaration line               | ignored silently                    |
-| duplicate rule ids in one directive               | deduplicated deterministically      |
-| suppression rule mismatch (`dead-code` vs others) | does not suppress dead-code finding |
+| Condition                                         | Behavior                             |
+|---------------------------------------------------|--------------------------------------|
+| malformed `# codeclone: ignore[...]` payload      | ignored silently                     |
+| unknown `codeclone[...]` rule id                  | ignored silently                     |
+| suppression on non-declaration line               | ignored silently                     |
+| duplicate rule ids in one directive               | deduplicated deterministically       |
+| non-`dead-code` rule id on a declaration          | parsed/bound only; no finding effect |
+| suppression rule mismatch (`dead-code` vs others) | does not suppress dead-code finding  |
 
 ## Determinism / canonicalization
 

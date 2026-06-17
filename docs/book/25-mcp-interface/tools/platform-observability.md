@@ -3,11 +3,18 @@
 <!-- doc-scope: contract -->
 
 `query_platform_observability` projects bounded diagnostics from CodeClone's
-local observer store. It is intended for CodeClone maintainers and development
-agents, not for evaluating the analyzed repository.
+local observer store. It is intended **only** for CodeClone maintainers
+developing the product — **not** for users evaluating their analyzed
+repository.
 
-See [Platform Observability](../../26-platform-observability.md) for storage,
-privacy, configuration, and trust boundaries.
+!!! warning "Prerequisites"
+    Observation is **off by default**. Set `CODECLONE_OBSERVABILITY_ENABLED=1`
+    on the CLI/MCP/worker process **before** reproduction. Without enablement
+    the tool returns `status=disabled` or `status=no_store` and provides no
+    repository-quality signal.
+
+    See [Platform Observability](../../26-platform-observability.md) for storage,
+    privacy, configuration, and trust boundaries.
 
 ## Parameters
 

@@ -34,7 +34,8 @@ The wrapper prefers a workspace-local `.venv`, then a Poetry environment, then
 user-local install paths, then `PATH`.
 
 The bundle does **not** pass `--ide-governance-channel`. Agents see the standard
-**32** default MCP tools. VS Code session stats, audit trail webviews, and IDE Memory
+**33** default MCP tools (35 with `--ide-governance-channel`). VS Code session stats, audit trail webviews, and IDE
+Memory
 governance (`prepare_governance` / `commit_governance`) require the VS Code
 extension launcher.
 

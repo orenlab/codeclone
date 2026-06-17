@@ -120,7 +120,11 @@ def test_option_specs_have_pyproject_loading_coverage(
 
 def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
     text = Path("docs/book/10-config-and-defaults.md").read_text(encoding="utf-8")
-    documented = set(re.findall(r"^\| `([a-z0-9_]+)`\s+\|", text, re.MULTILINE))
+    # Scope to the core [tool.codeclone] table; the "Engineering Memory (nested
+    # tables)" section below documents the separate [tool.codeclone.memory*]
+    # namespace, which the doc itself marks as not part of the root key set.
+    core_section = text.split("### Engineering Memory (nested tables)", 1)[0]
+    documented = set(re.findall(r"^\| `([a-z0-9_]+)`\s+\|", core_section, re.MULTILINE))
     declared = {
         option.pyproject_key
         for option in PYPROJECT_OPTIONS

@@ -44,7 +44,8 @@ or project-wide dumps.
   create **draft** records only (`record_candidate`, finish `propose_memory`, atomic `propose_from_receipt`). System
   actions include `refresh_from_run`, semantic/trajectory/projection rebuild jobs, and finish-side staleness updates.
   Human approve/reject/archive: VS Code Memory view **or**
-  `codeclone memory approve|reject|archive` (not MCP agent tools).
+  `codeclone memory approve|reject|archive --i-know-what-im-doing` (optional
+  `--by NAME`; not MCP agent tools).
 - Subject rows deduplicated in retrieval payloads (one row per logical subject key).
 - FTS rebuilt after init/refresh ingest completes.
 - Schema migration is forward-only through `schema_migrate.py`.

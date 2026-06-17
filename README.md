@@ -248,12 +248,18 @@ codeclone . --changed-only --diff-against main
 codeclone . --paths-from-git-diff HEAD~1
 ```
 
-Inspect structural blast radius and verify a patch:
+Inspect structural blast radius or run a baseline-relative patch check:
 
 ```bash
 codeclone . --blast-radius codeclone/analysis/parser.py
-codeclone . --patch-verify --diff-against HEAD~1
+codeclone . --patch-verify
 ```
+
+`--patch-verify` is a terminal-only controller query: it cannot combine with
+`--changed-only`, `--diff-against`, or `--paths-from-git-diff`. Use changed-scope
+flags for git-selected review; use `--patch-verify` alone for a trusted-baseline
+budget check on the working tree. Patch-local before/after verification with
+explicit changed-file evidence belongs in MCP change control (`check_patch_contract`).
 
 Use CodeClone in GitHub Actions:
 
