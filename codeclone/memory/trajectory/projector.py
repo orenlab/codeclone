@@ -1,0 +1,596 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+import hashlib
+from collections.abc import Iterable, Mapping, Sequence
+
+import orjson
+
+from ...audit.events import (
+    EVENT_ANALYSIS_COMPLETED,
+    EVENT_BASELINE_ABUSE,
+    EVENT_CLAIM_COMPLETED,
+    EVENT_CLAIM_VIOLATED,
+    EVENT_INTENT_CHECKED,
+    EVENT_INTENT_DECLARED,
+    EVENT_INTENT_EXPANDED,
+    EVENT_INTENT_EXPIRED,
+    EVENT_INTENT_PROMOTED,
+    EVENT_INTENT_QUEUE_BLOCKED,
+    EVENT_INTENT_QUEUED,
+    EVENT_INTENT_VIOLATED,
+    EVENT_PATCH_EXPIRED,
+    EVENT_PATCH_TRAIL_COMPUTED,
+    EVENT_PATCH_VERIFIED,
+    EVENT_PATCH_VIOLATED,
+    EVENT_RECEIPT_CREATED,
+    EVENT_WORKSPACE_CONFLICT,
+    projection_supplement_facts_from_payload,
+)
+from ...audit.reader import AuditRecord
+from ...report.meta import current_report_timestamp_utc
+from ...utils.json_io import json_text
+from .models import (
+    TRAJECTORY_PROJECTION_VERSION,
+    Trajectory,
+    TrajectoryEvidence,
+    TrajectoryLabel,
+    TrajectoryOutcome,
+    TrajectoryQualityTier,
+    TrajectoryStep,
+    TrajectorySubject,
+)
+
+
+class TrajectoryProjectionError(ValueError):
+    """Raised when audit event core cannot be projected deterministically."""
+
+
+def project_trajectory(
+    *,
+    project_id: str,
+    repo_root_digest: str,
+    workflow_id: str,
+    records: Sequence[AuditRecord],
+    projection_version: str = TRAJECTORY_PROJECTION_VERSION,
+    projected_at_utc: str | None = None,
+    patch_trail_digest: str | None = None,
+) -> Trajectory:
+    if not records:
+        raise TrajectoryProjectionError("trajectory projection requires events")
+    ordered = tuple(sorted(records, key=_record_order_key))
+    _validate_single_workflow(workflow_id, ordered)
+    cores = tuple(_validated_event_core(record) for record in ordered)
+    steps = tuple(
+        _step_from_record(index, record) for index, record in enumerate(ordered)
+    )
+    outcome = _outcome(ordered, cores)
+    labels = _labels(ordered, cores, outcome=outcome)
+    quality_tier = _quality_tier(outcome=outcome, records=ordered, labels=labels)
+    run_ids = tuple(
+        value for value in (_clean_text(record.run_id) for record in ordered) if value
+    )
+    report_digests = tuple(
+        value
+        for value in (
+            _canonical_report_digest(record.report_digest) for record in ordered
+        )
+        if value
+    )
+    intent_id = _first_text(record.intent_id for record in ordered)
+    now = projected_at_utc or current_report_timestamp_utc()
+    event_count = len(ordered)
+    incident_count = sum(
+        1 for record in ordered if record.severity in {"warn", "error"}
+    )
+    first_run_id = run_ids[0] if run_ids else None
+    last_run_id = run_ids[-1] if run_ids else None
+    primary_run_id = last_run_id or first_run_id
+    report_digest = report_digests[-1] if report_digests else None
+    source_stream_digest = _source_event_stream_digest(ordered)
+    summary = _summary(
+        workflow_id=workflow_id,
+        outcome=outcome,
+        quality_tier=quality_tier,
+        event_count=event_count,
+        incident_count=incident_count,
+        labels=labels,
+        first_summary=_first_text(record.summary for record in ordered),
+    )
+    trajectory_id = _trajectory_id(
+        projection_version=projection_version,
+        repo_root_digest=repo_root_digest,
+        workflow_id=workflow_id,
+    )
+    subjects = _subjects(
+        workflow_id=workflow_id,
+        intent_id=intent_id,
+        run_ids=run_ids,
+        report_digests=report_digests,
+        cores=_cores_with_payload_supplements(cores, ordered),
+        agent_label=_primary_agent_label(ordered),
+    )
+    evidence = (
+        TrajectoryEvidence(
+            evidence_kind="audit_event_stream",
+            ref=workflow_id,
+            locator=str(ordered[0].audit_sequence),
+            digest=source_stream_digest,
+            created_at_utc=now,
+        ),
+    )
+    trajectory_digest = _trajectory_digest(
+        projection_version=projection_version,
+        repo_root_digest=repo_root_digest,
+        workflow_id=workflow_id,
+        outcome=outcome,
+        quality_tier=quality_tier,
+        quality_score=0,
+        labels=labels,
+        summary=summary,
+        source_event_stream_digest=source_stream_digest,
+        steps=steps,
+        patch_trail_digest=patch_trail_digest,
+    )
+    return Trajectory(
+        id=trajectory_id,
+        project_id=project_id,
+        repo_root_digest=repo_root_digest,
+        workflow_id=workflow_id,
+        intent_id=intent_id,
+        primary_run_id=primary_run_id,
+        first_run_id=first_run_id,
+        last_run_id=last_run_id,
+        report_digest=report_digest,
+        outcome=outcome,
+        quality_tier=quality_tier,
+        quality_score=0,
+        labels=labels,
+        summary=summary,
+        trajectory_digest=trajectory_digest,
+        source_event_stream_digest=source_stream_digest,
+        projection_version=projection_version,
+        event_count=event_count,
+        step_count=len(steps),
+        incident_count=incident_count,
+        started_at_utc=ordered[0].created_at_utc,
+        finished_at_utc=ordered[-1].created_at_utc,
+        projected_at_utc=now,
+        updated_at_utc=now,
+        steps=steps,
+        subjects=subjects,
+        evidence=evidence,
+    )
+
+
+def _record_order_key(record: AuditRecord) -> tuple[int, str]:
+    sequence = record.audit_sequence
+    if sequence is None:
+        raise TrajectoryProjectionError("audit event is missing audit_sequence")
+    return (sequence, record.event_id)
+
+
+def _validate_single_workflow(
+    workflow_id: str,
+    records: Sequence[AuditRecord],
+) -> None:
+    for record in records:
+        if record.workflow_id != workflow_id:
+            raise TrajectoryProjectionError("mixed workflow ids in trajectory")
+
+
+def _validated_event_core(record: AuditRecord) -> Mapping[str, object]:
+    if not record.event_core_json or not record.event_core_sha256:
+        raise TrajectoryProjectionError("audit event is missing event core")
+    actual = hashlib.sha256(record.event_core_json.encode("utf-8")).hexdigest()
+    if actual != record.event_core_sha256:
+        raise TrajectoryProjectionError("event core digest mismatch")
+    loaded = orjson.loads(record.event_core_json)
+    if not isinstance(loaded, dict):
+        raise TrajectoryProjectionError("event core must be a JSON object")
+    return loaded
+
+
+def _step_from_record(index: int, record: AuditRecord) -> TrajectoryStep:
+    if record.audit_sequence is None:
+        raise TrajectoryProjectionError("audit event is missing audit_sequence")
+    if not record.event_core_json or not record.event_core_sha256:
+        raise TrajectoryProjectionError("audit event is missing event core")
+    return TrajectoryStep(
+        step_index=index,
+        audit_sequence=record.audit_sequence,
+        event_id=record.event_id,
+        event_type=record.event_type,
+        status=record.status,
+        run_id=record.run_id,
+        report_digest=_canonical_report_digest(record.report_digest),
+        event_core_sha256=record.event_core_sha256,
+        event_core_json=record.event_core_json,
+        summary=record.summary,
+        created_at_utc=record.created_at_utc,
+    )
+
+
+def _outcome(
+    records: Sequence[AuditRecord],
+    cores: Sequence[Mapping[str, object]],
+) -> TrajectoryOutcome:
+    event_types = {record.event_type for record in records}
+    statuses = {
+        status
+        for status in (_clean_text(record.status) for record in records)
+        if status is not None
+    }
+    core_statuses = {
+        status
+        for status in (_clean_text(core.get("status")) for core in cores)
+        if status is not None
+    }
+    all_statuses = statuses | core_statuses
+    if event_types & {
+        EVENT_BASELINE_ABUSE,
+        EVENT_CLAIM_VIOLATED,
+        EVENT_PATCH_VIOLATED,
+        EVENT_INTENT_VIOLATED,
+    }:
+        return "violated"
+    if any(_core_fact_bool(core, "baseline_abuse") for core in cores):
+        return "violated"
+    if EVENT_PATCH_VERIFIED in event_types:
+        if "accepted_with_external_changes" in all_statuses:
+            return "accepted_with_external_changes"
+        if "accepted" in all_statuses:
+            return "accepted"
+    if event_types & {EVENT_PATCH_EXPIRED, EVENT_INTENT_EXPIRED}:
+        return "abandoned"
+    if event_types & {EVENT_INTENT_QUEUE_BLOCKED, EVENT_WORKSPACE_CONFLICT}:
+        return "blocked"
+    return "partial"
+
+
+_CHANGE_CONTROL_EVENT_TYPES = frozenset(
+    {
+        EVENT_INTENT_DECLARED,
+        EVENT_INTENT_CHECKED,
+        EVENT_INTENT_EXPANDED,
+        EVENT_INTENT_QUEUED,
+        EVENT_INTENT_PROMOTED,
+        EVENT_INTENT_QUEUE_BLOCKED,
+        EVENT_INTENT_VIOLATED,
+        EVENT_INTENT_EXPIRED,
+        EVENT_PATCH_VERIFIED,
+        EVENT_PATCH_VIOLATED,
+        EVENT_PATCH_EXPIRED,
+        EVENT_PATCH_TRAIL_COMPUTED,
+        EVENT_CLAIM_COMPLETED,
+        EVENT_CLAIM_VIOLATED,
+        EVENT_RECEIPT_CREATED,
+    }
+)
+
+
+def _labels(
+    records: Sequence[AuditRecord],
+    cores: Sequence[Mapping[str, object]],
+    *,
+    outcome: TrajectoryOutcome,
+) -> tuple[TrajectoryLabel, ...]:
+    labels: set[TrajectoryLabel] = set()
+    event_types = {record.event_type for record in records}
+    if event_types & _CHANGE_CONTROL_EVENT_TYPES:
+        labels.add("change_control_workflow")
+    elif EVENT_ANALYSIS_COMPLETED in event_types:
+        labels.add("analysis_observed")
+    if outcome in {"accepted", "accepted_with_external_changes"} and (
+        EVENT_PATCH_VERIFIED in event_types
+    ):
+        labels.add("verified_finish")
+    if any(
+        record.event_type == EVENT_INTENT_CHECKED
+        and _clean_text(record.status) in {"clean", "expanded"}
+        for record in records
+    ):
+        labels.add("scope_clean")
+    if EVENT_INTENT_EXPANDED in event_types:
+        labels.add("scope_expanded")
+    if EVENT_INTENT_QUEUED in event_types:
+        labels.add("queue_used")
+    if EVENT_PATCH_TRAIL_COMPUTED in event_types:
+        labels.add("patch_trail_recorded")
+    if EVENT_RECEIPT_CREATED in event_types:
+        labels.add("receipt_issued")
+    if EVENT_CLAIM_COMPLETED in event_types:
+        labels.add("claim_validated")
+    if EVENT_BASELINE_ABUSE in event_types or any(
+        _core_fact_bool(core, "baseline_abuse") for core in cores
+    ):
+        labels.add("baseline_abuse_detected")
+    if EVENT_CLAIM_VIOLATED in event_types:
+        labels.add("claim_guard_failed")
+    if EVENT_WORKSPACE_CONFLICT in event_types:
+        labels.add("foreign_conflict_seen")
+    if EVENT_INTENT_PROMOTED in event_types:
+        labels.add("recovered")
+    if any(
+        record.surface == "hook" and record.severity in {"warn", "error"}
+        for record in records
+    ):
+        labels.add("hook_blocked")
+    if any(
+        (record.tool_name or "").startswith("manage_engineering_memory")
+        for record in records
+    ):
+        labels.add("memory_used")
+    if any(record.status == "accepted_with_external_changes" for record in records):
+        labels.add("external_changes_accepted")
+    return tuple(sorted(labels))
+
+
+def _quality_tier(
+    *,
+    outcome: TrajectoryOutcome,
+    records: Sequence[AuditRecord],
+    labels: Sequence[TrajectoryLabel],
+) -> TrajectoryQualityTier:
+    if outcome == "violated" or any(
+        label in {"baseline_abuse_detected", "claim_guard_failed", "hook_blocked"}
+        for label in labels
+    ):
+        return "incident"
+    if outcome == "partial":
+        return "partial"
+    if outcome in {"accepted", "accepted_with_external_changes"}:
+        if any(
+            record.event_type in {EVENT_PATCH_VIOLATED, EVENT_INTENT_VIOLATED}
+            for record in records
+        ):
+            return "corrected"
+        return "verified"
+    return "routine"
+
+
+def _cores_with_payload_supplements(
+    cores: Sequence[Mapping[str, object]],
+    records: Sequence[AuditRecord],
+) -> tuple[Mapping[str, object], ...]:
+    if not any(record.payload_json for record in records):
+        return tuple(cores)
+    supplemented: list[Mapping[str, object]] = list(cores)
+    for record in records:
+        facts = projection_supplement_facts_from_payload(
+            record.event_type,
+            record.payload_json,
+        )
+        if facts:
+            supplemented.append({"facts": facts})
+    return tuple(supplemented)
+
+
+def _primary_agent_label(records: Sequence[AuditRecord]) -> str | None:
+    for record in records:
+        if record.event_type == EVENT_INTENT_DECLARED:
+            label = _clean_text(record.agent_label)
+            if label:
+                return label
+    for record in records:
+        label = _clean_text(record.agent_label)
+        if label:
+            return label
+    return None
+
+
+def _subjects(
+    *,
+    workflow_id: str,
+    intent_id: str | None,
+    run_ids: Sequence[str],
+    report_digests: Sequence[str],
+    cores: Sequence[Mapping[str, object]],
+    agent_label: str | None = None,
+) -> tuple[TrajectorySubject, ...]:
+    path_about, path_touched, path_untouched = _path_subjects_from_cores(cores)
+    subjects = {
+        ("workflow", workflow_id, "about"),
+        *{("run", run_id, "observed") for run_id in run_ids},
+        *{("report_digest", digest, "evidence") for digest in report_digests},
+        *{("path", path, "about") for path in path_about},
+        *{("path", path, "touched") for path in path_touched},
+        *{("path", path, "untouched") for path in path_untouched},
+    }
+    if intent_id:
+        subjects.add(("intent", intent_id, "about"))
+    if agent_label:
+        subjects.add(("agent", agent_label, "actor"))
+    return tuple(
+        TrajectorySubject(subject_kind=kind, subject_key=key, relation=relation)
+        for kind, key, relation in sorted(subjects)
+    )
+
+
+def _path_subjects_from_cores(
+    cores: Sequence[Mapping[str, object]],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    about: set[str] = set()
+    touched: set[str] = set()
+    untouched: set[str] = set()
+    for core in cores:
+        facts = core.get("facts")
+        if not isinstance(facts, Mapping):
+            continue
+        about.update(_facts_path_list(facts, "scope_paths"))
+        about.update(_facts_path_list(facts, "declared_scope_paths"))
+        touched.update(_facts_path_list(facts, "changed_files"))
+        untouched.update(_facts_path_list(facts, "untouched_in_declared"))
+    return (
+        tuple(sorted(about)),
+        tuple(sorted(touched)),
+        tuple(sorted(untouched)),
+    )
+
+
+def _facts_path_list(facts: Mapping[str, object], key: str) -> tuple[str, ...]:
+    raw_paths = facts.get(key)
+    if not isinstance(raw_paths, list):
+        return ()
+    paths = [
+        text.strip()
+        for item in raw_paths
+        if isinstance(item, str) and (text := item.strip())
+    ]
+    return tuple(sorted(set(paths)))
+
+
+def _summary(
+    *,
+    workflow_id: str,
+    outcome: TrajectoryOutcome,
+    quality_tier: TrajectoryQualityTier,
+    event_count: int,
+    incident_count: int,
+    labels: Sequence[TrajectoryLabel],
+    first_summary: str | None,
+) -> str:
+    label_text = ",".join(labels) if labels else "none"
+    prefix = (
+        f"{workflow_id}: outcome={outcome}; tier={quality_tier}; "
+        f"events={event_count}; incidents={incident_count}; labels={label_text}"
+    )
+    if first_summary:
+        return f"{prefix}; first_summary={first_summary[:160]}"
+    return prefix
+
+
+def _trajectory_id(
+    *,
+    projection_version: str,
+    repo_root_digest: str,
+    workflow_id: str,
+) -> str:
+    payload = _canonical_json(
+        {
+            "projection_version": projection_version,
+            "repo_root_digest": repo_root_digest,
+            "workflow_id": workflow_id,
+        }
+    )
+    return f"traj-{_sha256(payload)[:32]}"
+
+
+def _source_event_stream_digest(records: Sequence[AuditRecord]) -> str:
+    items = [
+        {
+            "audit_sequence": record.audit_sequence,
+            "event_core_sha256": record.event_core_sha256,
+        }
+        for record in records
+    ]
+    return _sha256(_canonical_json({"events": items}))
+
+
+def trajectory_digest_for(
+    trajectory: Trajectory,
+    *,
+    quality_score: int,
+    patch_trail_digest: str | None = None,
+) -> str:
+    return _trajectory_digest(
+        projection_version=trajectory.projection_version,
+        repo_root_digest=trajectory.repo_root_digest,
+        workflow_id=trajectory.workflow_id,
+        outcome=trajectory.outcome,
+        quality_tier=trajectory.quality_tier,
+        quality_score=quality_score,
+        labels=trajectory.labels,
+        summary=trajectory.summary,
+        source_event_stream_digest=trajectory.source_event_stream_digest,
+        steps=trajectory.steps,
+        patch_trail_digest=patch_trail_digest,
+    )
+
+
+def _trajectory_digest(
+    *,
+    projection_version: str,
+    repo_root_digest: str,
+    workflow_id: str,
+    outcome: TrajectoryOutcome,
+    quality_tier: TrajectoryQualityTier,
+    quality_score: int,
+    labels: Sequence[TrajectoryLabel],
+    summary: str,
+    source_event_stream_digest: str,
+    steps: Sequence[TrajectoryStep],
+    patch_trail_digest: str | None = None,
+) -> str:
+    payload: dict[str, object] = {
+        "projection_version": projection_version,
+        "repo_root_digest": repo_root_digest,
+        "workflow_id": workflow_id,
+        "outcome": outcome,
+        "quality_tier": quality_tier,
+        "quality_score": quality_score,
+        "labels": list(labels),
+        "summary": summary,
+        "source_event_stream_digest": source_event_stream_digest,
+        "steps": [
+            {
+                "event_type": step.event_type,
+                "status": step.status,
+                "run_id": step.run_id,
+                "report_digest": step.report_digest,
+                "event_core_sha256": step.event_core_sha256,
+                "summary": step.summary,
+            }
+            for step in steps
+        ],
+    }
+    if patch_trail_digest:
+        payload["patch_trail_digest"] = patch_trail_digest
+    return _sha256(_canonical_json(payload))
+
+
+def _core_fact_bool(core: Mapping[str, object], key: str) -> bool:
+    facts = core.get("facts")
+    return bool(facts.get(key)) if isinstance(facts, Mapping) else False
+
+
+def _first_text(values: Iterable[object]) -> str | None:
+    for value in values:
+        text = _clean_text(value)
+        if text:
+            return text
+    return None
+
+
+def _clean_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _canonical_report_digest(value: str | None) -> str | None:
+    text = _clean_text(value)
+    if text is None:
+        return None
+    lowered = text.lower()
+    digest = lowered[7:] if lowered.startswith("sha256:") else lowered
+    if len(digest) == 64 and all(char in "0123456789abcdef" for char in digest):
+        return f"sha256:{digest}"
+    return text
+
+
+def _canonical_json(payload: Mapping[str, object]) -> str:
+    return json_text(payload, sort_keys=True)
+
+
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+__all__ = ["TrajectoryProjectionError", "project_trajectory"]

@@ -6,6 +6,37 @@ function arrayItems(value) {
     return Array.isArray(value) ? value : [];
 }
 
+function shouldUseCachedTriage(
+    {
+        now,
+        currentRunId,
+        lastTriageFetchAt,
+        lastTriageFetchRunId,
+        stale,
+        cooldownMs,
+    },
+    hasCachedTriage
+) {
+    if (!hasCachedTriage) {
+        return false;
+    }
+    if (stale) {
+        return false;
+    }
+    if (lastTriageFetchRunId !== currentRunId) {
+        return false;
+    }
+    return now - Number(lastTriageFetchAt || 0) < cooldownMs;
+}
+
+async function fetchProductionTriage(client, runId) {
+    return client.callTool("get_production_triage", {
+        run_id: runId,
+        max_hotspots: 5,
+        max_suggestions: 5,
+    });
+}
+
 async function loadRunArtifacts(
     client,
     folder,
@@ -16,11 +47,7 @@ async function loadRunArtifacts(
         client.callTool("get_run_summary", {
             run_id: runId,
         }),
-        client.callTool("get_production_triage", {
-            run_id: runId,
-            max_hotspots: 5,
-            max_suggestions: 5,
-        }),
+        fetchProductionTriage(client, runId),
         client.callTool("get_report_section", {
             run_id: runId,
             section: "metrics",
@@ -49,5 +76,7 @@ async function loadRunArtifacts(
 }
 
 module.exports = {
+    fetchProductionTriage,
     loadRunArtifacts,
+    shouldUseCachedTriage,
 };

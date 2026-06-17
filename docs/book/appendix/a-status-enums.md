@@ -1,3 +1,7 @@
+<!-- doc-scope: APPENDIX — status enums and typed contracts.
+     owns: enum value tables for intent, registry, verify, and profile statuses.
+     does-not-own: main chapter content — reference back-links only. -->
+
 # Appendix A. Status Enums
 
 ## Purpose
@@ -9,6 +13,12 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Baseline statuses: `codeclone/baseline/trust.py:BaselineStatus`
 - Cache statuses: `codeclone/cache/versioning.py:CacheStatus`
 - Exit categories: `codeclone/contracts/__init__.py:ExitCode`
+- Intent status: `codeclone/surfaces/mcp/_intent.py:IntentStatus`
+- Intent ownership: `codeclone/surfaces/mcp/_workspace_intents.py:IntentOwnership`
+- Workspace intent status: `codeclone/surfaces/mcp/_workspace_intents.py:WorkspaceIntentStatus`
+- Patch contract: `codeclone/surfaces/mcp/_patch_contract.py:PatchContractStatus`
+- Verification profile: `codeclone/surfaces/mcp/_verification_profile.py:VerificationProfile`
+- Engineering Memory status: `codeclone/memory/enums.py:MemoryStatus`
 
 ## Data model
 
@@ -51,6 +61,81 @@ Defined by `BASELINE_UNTRUSTED_STATUSES`.
 - `2` contract error
 - `3` gating failure
 - `5` internal error
+
+### WorkspaceIntentStatus
+
+- `active`
+- `queued`
+- `clean`
+- `expanded`
+- `violated`
+- `expired`
+- `orphaned`
+
+Persisted workspace registry records use these lifecycle values. Terminal GC
+statuses are `clean`, `expired`, and `orphaned`. Semantics:
+[Intent registry & queue](../12-structural-change-controller/intent-registry-and-queue.md).
+
+### IntentStatus (scope check / session lifecycle)
+
+- `active`
+- `queued`
+- `clean`
+- `expanded`
+- `violated`
+- `unverified`
+- `expired`
+
+Used by `manage_change_intent(check)` and session intent records. Finish
+top-level `status: "unverified"` is a **response string**, not this enum value.
+
+### IntentOwnership
+
+- `own_active`
+- `own_stale`
+- `foreign_active`
+- `foreign_stale`
+- `recoverable`
+- `expired`
+
+Semantics:
+[Intent registry & queue](../12-structural-change-controller/intent-registry-and-queue.md).
+
+### PatchContractStatus
+
+- `accepted`
+- `accepted_with_external_changes`
+- `violated`
+- `unverified`
+- `expired`
+
+Semantics:
+[Patch contract verification](../12-structural-change-controller/patch-contract-verify.md).
+
+### VerificationProfile
+
+- `state_artifact_change`
+- `python_structural`
+- `governance_config`
+- `documentation_only`
+- `non_python_patch`
+
+Priority-ordered. A single file from a higher-priority category overrides
+the entire patch. Semantics are defined in
+[Structural Change Controller § Verification Profiles](../12-structural-change-controller/verification-profiles.md).
+
+### MemoryStatus
+
+Defined by `codeclone/memory/enums.py:MemoryStatus`. Semantics are defined in
+[Engineering Memory § Staleness and anchor durability](../13-engineering-memory/staleness-and-anchors.md).
+
+- `draft` — unapproved agent candidate
+- `active` — trusted or system fact; default retrieval includes
+- `historical` — anchor subject absent at `HEAD`; preserved, default retrieval includes
+- `stale` — drift or ingest contradiction; excluded from default retrieval
+- `superseded` — replaced by a newer record
+- `rejected` — human rejected draft
+- `archived` — explicitly archived
 
 ## Contracts
 

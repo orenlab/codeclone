@@ -28,6 +28,8 @@ from codeclone.metrics.complexity import (
 from codeclone.metrics.coupling import compute_cbo, coupling_risk
 from codeclone.metrics.dead_code import find_suppressed_unused, find_unused
 from codeclone.metrics.dependencies import (
+    _internal_roots,
+    _is_internal_target,
     build_dep_graph,
     build_import_graph,
     depth_profile,
@@ -52,6 +54,15 @@ def _parse_named_node(
         ):
             return node
     raise AssertionError(f"top-level node {name!r} not found")
+
+
+def test_dependency_internal_roots_and_target_guards() -> None:
+    dep = ModuleDep(source="pkg.a", target="ext.b", import_type="import", line=1)
+    roots = _internal_roots(["pkg.mod"], [dep])
+    assert roots == frozenset(["pkg"])
+    assert _is_internal_target("", internal_roots=roots) is False
+    assert _is_internal_target("pkg.sub", internal_roots=roots) is True
+    assert _is_internal_target("ext.b", internal_roots=roots) is False
 
 
 def test_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:
@@ -330,6 +341,37 @@ class UnknownCall:
     )
     assert isinstance(class_node, ast.ClassDef)
     assert compute_lcom4(class_node) == (2, 2, 1)
+
+
+def test_compute_lcom4_honors_ignored_methods() -> None:
+    class_node = _parse_named_node(
+        """
+class Mixed:
+    def connected_left(self) -> None:
+        self.shared = 1
+        self.connected_right()
+
+    def connected_right(self) -> None:
+        self.shared = 2
+
+    def isolated(self) -> int:
+        return 1
+""".strip(),
+        "Mixed",
+    )
+    assert isinstance(class_node, ast.ClassDef)
+    assert compute_lcom4(class_node) == (2, 3, 2)
+    assert compute_lcom4(class_node, ignored_methods=frozenset({"isolated"})) == (
+        1,
+        3,
+        2,
+    )
+    assert compute_lcom4(
+        class_node,
+        ignored_methods=frozenset(
+            {"connected_left", "connected_right", "isolated"},
+        ),
+    ) == (1, 3, 0)
 
 
 def test_cohesion_risk_boundaries() -> None:
@@ -649,6 +691,12 @@ def test_depth_profile_uses_nearest_rank_p95() -> None:
     avg_depth, p95_depth = depth_profile(graph)
     assert avg_depth == pytest.approx((3 + 2 + 1 + 2 + 1 + 1) / 6)
     assert p95_depth == 3
+
+
+def test_depth_profile_empty_graph_returns_zeros() -> None:
+    avg_depth, p95_depth = depth_profile({})
+    assert avg_depth == 0.0
+    assert p95_depth == 0
 
 
 def test_health_dependency_tail_pressure_is_adaptive() -> None:

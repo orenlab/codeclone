@@ -1,3 +1,8 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
 import os
@@ -12,6 +17,30 @@ POETRY_TIMEOUT_SECONDS = 5
 PLUGIN_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = PLUGIN_ROOT.parents[1]
 TRANSPORT_ARGS = ("--transport", "stdio")
+MAX_STDIN_BYTES = 65536
+_SPAWN_ENV_EXACT_KEYS = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "SystemRoot",
+        "WINDIR",
+        "TEMP",
+        "TMP",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "TZ",
+        "TERM",
+        "PWD",
+        "OS",
+        "COMSPEC",
+        "PATHEXT",
+    }
+)
+_SPAWN_ENV_PREFIXES = ("CODECLONE_", "PYTHON", "UV_", "VIRTUAL_ENV", "POETRY_")
 
 
 @dataclass(frozen=True)
@@ -64,14 +93,40 @@ def workspace_local_launcher_candidates(root: Path) -> tuple[Path, ...]:
     )
 
 
+def launcher_within_workspace(candidate: Path, root: Path) -> bool:
+    if not candidate.is_file():
+        return False
+    try:
+        candidate.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def minimal_child_env(
+    env: Mapping[str, str],
+    workspace_root: Path | None,
+) -> dict[str, str]:
+    child_env = {
+        key: value
+        for key, value in env.items()
+        if key in _SPAWN_ENV_EXACT_KEYS or key.startswith(_SPAWN_ENV_PREFIXES)
+    }
+    if workspace_root is not None and not _normalized_env_value(
+        child_env.get("CODECLONE_WORKSPACE_ROOT")
+    ):
+        child_env["CODECLONE_WORKSPACE_ROOT"] = str(workspace_root)
+    return child_env
+
+
 def resolve_workspace_local_launcher(
     roots: tuple[Path, ...],
 ) -> LaunchTarget | None:
     for root in roots:
         for candidate in workspace_local_launcher_candidates(root):
-            if candidate.is_file():
+            if launcher_within_workspace(candidate, root):
                 return LaunchTarget(
-                    command=str(candidate),
+                    command=str(candidate.resolve()),
                     source="workspaceLocal",
                     workspace_root=root,
                 )
@@ -96,7 +151,7 @@ def resolve_poetry_launcher(
         candidate = candidate / script_dir / executable
         if candidate.is_file():
             return LaunchTarget(
-                command=str(candidate),
+                command=str(candidate.resolve()),
                 source="poetryEnv",
                 workspace_root=root,
             )
@@ -111,11 +166,12 @@ def resolve_poetry_env_root(
 ) -> Path | None:
     if not (root / "pyproject.toml").is_file():
         return None
+    probe_env = minimal_child_env(env, root)
     try:
         completed = run_cmd(
             ["poetry", "env", "info", "-p"],
             cwd=str(root),
-            env=dict(env),
+            env=probe_env,
             capture_output=True,
             text=True,
             check=False,
@@ -168,13 +224,12 @@ def build_setup_message() -> str:
 
 
 def exec_launch_target(target: LaunchTarget, env: Mapping[str, str]) -> None:
-    child_env = dict(env)
-    if target.workspace_root is not None and not _normalized_env_value(
-        child_env.get("CODECLONE_WORKSPACE_ROOT")
-    ):
-        child_env["CODECLONE_WORKSPACE_ROOT"] = str(target.workspace_root)
-    argv = [target.command, *TRANSPORT_ARGS]
-    os.execvpe(target.command, argv, child_env)
+    command = target.command
+    if os.path.isabs(command):
+        command = str(Path(command).resolve())
+    child_env = minimal_child_env(env, target.workspace_root)
+    argv = [command, *TRANSPORT_ARGS]
+    os.execvpe(command, argv, child_env)
 
 
 def main() -> int:

@@ -35,6 +35,7 @@ CATEGORY_COHESION: Final = "cohesion"
 CATEGORY_DEAD_CODE: Final = "dead_code"
 CATEGORY_DEPENDENCY: Final = "dependency"
 CATEGORY_COVERAGE: Final = "coverage"
+CATEGORY_DESIGN: Final = "design"
 
 FINDING_KIND_CLONE_GROUP: Final = "clone_group"
 FINDING_KIND_UNUSED_SYMBOL: Final = "unused_symbol"
@@ -44,6 +45,19 @@ FINDING_KIND_CYCLE: Final = "cycle"
 FINDING_KIND_UNTESTED_HOTSPOT: Final = "untested_hotspot"
 FINDING_KIND_COVERAGE_HOTSPOT: Final = "coverage_hotspot"
 FINDING_KIND_COVERAGE_SCOPE_GAP: Final = "coverage_scope_gap"
+
+DESIGN_KIND_INSTANCE_INDEPENDENT_METHOD: Final = "instance_independent_method"
+
+# Classifications for instance-independent method occurrences (Phase 21).
+# Only ``candidate`` is a default-surfaced signal; the rest are context or
+# suppressed so default payloads avoid noisy contract methods.
+IIM_CLASSIFICATION_CANDIDATE: Final = "candidate"
+IIM_CLASSIFICATION_DECORATED_CONTEXT: Final = "decorated_context"
+IIM_CLASSIFICATION_INTERFACE_CONTRACT: Final = "interface_contract"
+IIM_CLASSIFICATION_OVERRIDE_CONTEXT: Final = "override_context"
+IIM_CLASSIFICATION_PROPERTY_LIKE: Final = "property_like"
+IIM_CLASSIFICATION_DUNDER_PROTOCOL: Final = "dunder_protocol"
+IIM_CLASSIFICATION_NOOP_STUB: Final = "noop_stub"
 
 STRUCTURAL_KIND_DUPLICATED_BRANCHES: Final = "duplicated_branches"
 STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE: Final = "clone_guard_exit_divergence"
@@ -57,12 +71,14 @@ __all__ = [
     "CATEGORY_COVERAGE",
     "CATEGORY_DEAD_CODE",
     "CATEGORY_DEPENDENCY",
+    "CATEGORY_DESIGN",
     "CATEGORY_STRUCTURAL",
     "CLONE_KIND_BLOCK",
     "CLONE_KIND_FUNCTION",
     "CLONE_KIND_SEGMENT",
     "CLONE_NOVELTY_KNOWN",
     "CLONE_NOVELTY_NEW",
+    "DESIGN_KIND_INSTANCE_INDEPENDENT_METHOD",
     "FAMILY_CLONE",
     "FAMILY_CLONES",
     "FAMILY_DEAD_CODE",
@@ -77,6 +93,13 @@ __all__ = [
     "FINDING_KIND_FUNCTION_HOTSPOT",
     "FINDING_KIND_UNTESTED_HOTSPOT",
     "FINDING_KIND_UNUSED_SYMBOL",
+    "IIM_CLASSIFICATION_CANDIDATE",
+    "IIM_CLASSIFICATION_DECORATED_CONTEXT",
+    "IIM_CLASSIFICATION_DUNDER_PROTOCOL",
+    "IIM_CLASSIFICATION_INTERFACE_CONTRACT",
+    "IIM_CLASSIFICATION_NOOP_STUB",
+    "IIM_CLASSIFICATION_OVERRIDE_CONTEXT",
+    "IIM_CLASSIFICATION_PROPERTY_LIKE",
     "STRUCTURAL_KIND_CLONE_COHORT_DRIFT",
     "STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE",
     "STRUCTURAL_KIND_DUPLICATED_BRANCHES",

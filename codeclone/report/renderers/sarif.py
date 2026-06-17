@@ -52,6 +52,7 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ..messages import sarif as sarif_msgs
 
 if TYPE_CHECKING:
     from ...models import StructuralFindingGroup, Suggestion
@@ -93,43 +94,9 @@ def _rule_name(spec: _RuleSpec) -> str:
 
 
 def _rule_remediation(spec: _RuleSpec) -> str:
-    rule_id = spec.rule_id
-    if rule_id.startswith("CCLONE"):
-        return (
-            "Review the representative occurrence and related occurrences, "
-            "then extract shared behavior or keep accepted debt in the baseline."
-        )
-    if rule_id == "CSTRUCT001":
-        return (
-            "Collapse repeated branch shapes into a shared helper, validator, "
-            "or control-flow abstraction where the behavior is intentionally shared."
-        )
-    if rule_id == "CSTRUCT002":
-        return (
-            "Review the clone cohort and reconcile guard or early-exit behavior "
-            "if those members are expected to stay aligned."
-        )
-    if rule_id == "CSTRUCT003":
-        return (
-            "Review the clone cohort and reconcile terminal, guard, or try/finally "
-            "profiles if the drift is not intentional."
-        )
-    if rule_id.startswith("CDEAD"):
-        return (
-            "Remove the unused symbol or keep it explicitly documented/suppressed "
-            "when runtime dynamics call it intentionally."
-        )
-    if rule_id == "CDESIGN001":
-        return (
-            "Split the class or regroup behavior so responsibilities become cohesive."
-        )
-    if rule_id == "CDESIGN002":
-        return "Split the function or simplify control flow to reduce complexity."
-    if rule_id == "CDESIGN003":
-        return "Reduce dependencies or split responsibilities to lower coupling."
-    return (
-        "Break the cycle or invert dependencies so modules no longer depend "
-        "on each other circularly."
+    return sarif_msgs.REMEDIATION_BY_RULE_ID.get(
+        spec.rule_id,
+        sarif_msgs.REMEDIATION_DEPENDENCY_CYCLE,
     )
 
 
@@ -140,7 +107,7 @@ def _rule_help(spec: _RuleSpec) -> dict[str, str]:
         "markdown": (
             f"{spec.full_description}\n\n"
             f"{remediation}\n\n"
-            f"See [CodeClone docs]({DOCS_URL})."
+            f"{sarif_msgs.SARIF_HELP_DOCS_SUFFIX.format(docs_url=DOCS_URL)}"
         ),
     }
 
@@ -209,8 +176,8 @@ def _clone_rule_spec(category: str) -> _RuleSpec:
     if category == CLONE_KIND_FUNCTION:
         return _RuleSpec(
             "CCLONE001",
-            "Function clone group",
-            "Multiple functions share the same normalized function body.",
+            sarif_msgs.RULE_FUNCTION_CLONE_SHORT,
+            sarif_msgs.RULE_FUNCTION_CLONE_FULL,
             SEVERITY_WARNING,
             FAMILY_CLONE,
             FINDING_KIND_CLONE_GROUP,
@@ -219,8 +186,8 @@ def _clone_rule_spec(category: str) -> _RuleSpec:
     if category == CLONE_KIND_BLOCK:
         return _RuleSpec(
             "CCLONE002",
-            "Block clone group",
-            "Repeated normalized statement blocks were detected across occurrences.",
+            sarif_msgs.RULE_BLOCK_CLONE_SHORT,
+            sarif_msgs.RULE_BLOCK_CLONE_FULL,
             SEVERITY_WARNING,
             FAMILY_CLONE,
             FINDING_KIND_CLONE_GROUP,
@@ -228,8 +195,8 @@ def _clone_rule_spec(category: str) -> _RuleSpec:
         )
     return _RuleSpec(
         "CCLONE003",
-        "Segment clone group",
-        "Repeated normalized statement segments were detected across occurrences.",
+        sarif_msgs.RULE_SEGMENT_CLONE_SHORT,
+        sarif_msgs.RULE_SEGMENT_CLONE_FULL,
         "note",
         FAMILY_CLONE,
         FINDING_KIND_CLONE_GROUP,
@@ -241,11 +208,8 @@ def _structural_rule_spec(kind: str) -> _RuleSpec:
     if kind == STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE:
         return _RuleSpec(
             "CSTRUCT002",
-            "Clone guard/exit divergence",
-            (
-                "Members of the same function-clone cohort diverged in "
-                "entry guards or early-exit behavior."
-            ),
+            sarif_msgs.RULE_GUARD_DIVERGENCE_SHORT,
+            sarif_msgs.RULE_GUARD_DIVERGENCE_FULL,
             SEVERITY_WARNING,
             FAMILY_STRUCTURAL,
             STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
@@ -254,11 +218,8 @@ def _structural_rule_spec(kind: str) -> _RuleSpec:
     if kind == STRUCTURAL_KIND_CLONE_COHORT_DRIFT:
         return _RuleSpec(
             "CSTRUCT003",
-            "Clone cohort drift",
-            (
-                "Members of the same function-clone cohort drifted from "
-                "the majority terminal/guard/try profile."
-            ),
+            sarif_msgs.RULE_COHORT_DRIFT_SHORT,
+            sarif_msgs.RULE_COHORT_DRIFT_FULL,
             SEVERITY_WARNING,
             FAMILY_STRUCTURAL,
             STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
@@ -266,8 +227,8 @@ def _structural_rule_spec(kind: str) -> _RuleSpec:
         )
     return _RuleSpec(
         "CSTRUCT001",
-        "Duplicated branches",
-        "Repeated branch families with matching structural signatures were detected.",
+        sarif_msgs.RULE_DUPLICATED_BRANCHES_SHORT,
+        sarif_msgs.RULE_DUPLICATED_BRANCHES_FULL,
         SEVERITY_WARNING,
         FAMILY_STRUCTURAL,
         kind or STRUCTURAL_KIND_DUPLICATED_BRANCHES,
@@ -279,8 +240,8 @@ def _dead_code_rule_spec(category: str) -> _RuleSpec:
     if category == SYMBOL_KIND_FUNCTION:
         return _RuleSpec(
             "CDEAD001",
-            "Unused function",
-            "Function appears to be unused with high confidence.",
+            sarif_msgs.RULE_UNUSED_FUNCTION_SHORT,
+            sarif_msgs.RULE_UNUSED_FUNCTION_FULL,
             SEVERITY_WARNING,
             FAMILY_DEAD_CODE,
             FINDING_KIND_UNUSED_SYMBOL,
@@ -289,8 +250,8 @@ def _dead_code_rule_spec(category: str) -> _RuleSpec:
     if category == SYMBOL_KIND_CLASS:
         return _RuleSpec(
             "CDEAD002",
-            "Unused class",
-            "Class appears to be unused with high confidence.",
+            sarif_msgs.RULE_UNUSED_CLASS_SHORT,
+            sarif_msgs.RULE_UNUSED_CLASS_FULL,
             SEVERITY_WARNING,
             FAMILY_DEAD_CODE,
             FINDING_KIND_UNUSED_SYMBOL,
@@ -299,8 +260,8 @@ def _dead_code_rule_spec(category: str) -> _RuleSpec:
     if category == SYMBOL_KIND_METHOD:
         return _RuleSpec(
             "CDEAD003",
-            "Unused method",
-            "Method appears to be unused with high confidence.",
+            sarif_msgs.RULE_UNUSED_METHOD_SHORT,
+            sarif_msgs.RULE_UNUSED_METHOD_FULL,
             SEVERITY_WARNING,
             FAMILY_DEAD_CODE,
             FINDING_KIND_UNUSED_SYMBOL,
@@ -308,8 +269,8 @@ def _dead_code_rule_spec(category: str) -> _RuleSpec:
         )
     return _RuleSpec(
         "CDEAD004",
-        "Unused symbol",
-        "Symbol appears to be unused with reported confidence.",
+        sarif_msgs.RULE_UNUSED_SYMBOL_SHORT,
+        sarif_msgs.RULE_UNUSED_SYMBOL_FULL,
         SEVERITY_WARNING,
         FAMILY_DEAD_CODE,
         FINDING_KIND_UNUSED_SYMBOL,
@@ -321,8 +282,8 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
     if category == CATEGORY_COHESION:
         return _RuleSpec(
             "CDESIGN001",
-            "Low cohesion class",
-            "Class cohesion is low according to LCOM4 hotspot thresholds.",
+            sarif_msgs.RULE_LOW_COHESION_SHORT,
+            sarif_msgs.RULE_LOW_COHESION_FULL,
             SEVERITY_WARNING,
             FAMILY_DESIGN,
             kind or FINDING_KIND_CLASS_HOTSPOT,
@@ -331,8 +292,8 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
     if category == CATEGORY_COMPLEXITY:
         return _RuleSpec(
             "CDESIGN002",
-            "Complexity hotspot",
-            "Function exceeds the project complexity hotspot threshold.",
+            sarif_msgs.RULE_COMPLEXITY_SHORT,
+            sarif_msgs.RULE_COMPLEXITY_FULL,
             SEVERITY_WARNING,
             FAMILY_DESIGN,
             kind or FINDING_KIND_FUNCTION_HOTSPOT,
@@ -341,8 +302,8 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
     if category == CATEGORY_COUPLING:
         return _RuleSpec(
             "CDESIGN003",
-            "Coupling hotspot",
-            "Class exceeds the project coupling hotspot threshold.",
+            sarif_msgs.RULE_COUPLING_SHORT,
+            sarif_msgs.RULE_COUPLING_FULL,
             SEVERITY_WARNING,
             FAMILY_DESIGN,
             kind or FINDING_KIND_CLASS_HOTSPOT,
@@ -352,9 +313,8 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
         if kind == FINDING_KIND_COVERAGE_SCOPE_GAP:
             return _RuleSpec(
                 "CDESIGN006",
-                "Coverage scope gap",
-                "A medium/high-risk function is outside the supplied joined "
-                "coverage scope.",
+                sarif_msgs.RULE_COVERAGE_SCOPE_GAP_SHORT,
+                sarif_msgs.RULE_COVERAGE_SCOPE_GAP_FULL,
                 SEVERITY_WARNING,
                 FAMILY_DESIGN,
                 kind,
@@ -362,9 +322,8 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
             )
         return _RuleSpec(
             "CDESIGN005",
-            "Coverage hotspot",
-            "A medium/high-risk function falls below the configured joined "
-            "coverage threshold.",
+            sarif_msgs.RULE_COVERAGE_HOTSPOT_SHORT,
+            sarif_msgs.RULE_COVERAGE_HOTSPOT_FULL,
             SEVERITY_WARNING,
             FAMILY_DESIGN,
             kind or FINDING_KIND_COVERAGE_HOTSPOT,
@@ -372,8 +331,8 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
         )
     return _RuleSpec(
         "CDESIGN004",
-        "Dependency cycle",
-        "A dependency cycle was detected between project modules.",
+        sarif_msgs.RULE_DEPENDENCY_CYCLE_SHORT,
+        sarif_msgs.RULE_DEPENDENCY_CYCLE_FULL,
         "error",
         FAMILY_DESIGN,
         kind or FINDING_KIND_CYCLE,

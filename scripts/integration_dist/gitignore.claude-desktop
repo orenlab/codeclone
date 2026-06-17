@@ -1,0 +1,20 @@
+# Distribution repo — synced from orenlab/codeclone (scripts/sync_integrations.py)
+
+# IDE / OS
+.idea/
+.DS_Store
+
+# Node (bundle build and tests)
+node_modules/
+dist/
+build/
+
+# MCP bundle smoke output
+*.mcpb
+
+# Local secrets
+.env
+.env.*
+
+# Logs
+*.log

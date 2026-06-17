@@ -1,0 +1,39 @@
+{
+  "manifest_schema_version": "1",
+  "profile_id": "intent-small-stable-v1",
+  "profile_version": "1.0.0",
+  "lane": "intent",
+  "representation_kinds": [
+    "intent.description.v1",
+    "intent.description_with_frame.v1"
+  ],
+  "label": "Small intent corpus — stable families",
+  "description": "Prefer a small number of broad, stable families. High dominant-cluster share and moderate noise are acceptable.",
+  "applicability": {
+    "corpus_size_class": "small_intent",
+    "min_record_count": 50,
+    "max_record_count": 500,
+    "embedding_contract_versions": ["2"]
+  },
+  "primary_space": {
+    "pca_dimensions": [64, 128],
+    "min_cluster_size": [12, 15, 20],
+    "min_samples": [3, 5],
+    "cluster_selection_method": ["eom", "leaf"]
+  },
+  "suitability": {
+    "min_non_noise_cluster_count": 2,
+    "max_non_noise_cluster_count": 8,
+    "max_dominant_cluster_ratio": 0.85,
+    "min_noise_ratio": 0.05,
+    "max_noise_ratio": 0.55,
+    "min_non_noise_count": 40
+  },
+  "ranking": {
+    "base_score_weight": 0.6,
+    "cluster_count_weight": 0.2,
+    "cluster_count_direction": "prefer_lower",
+    "noise_weight": 0.2,
+    "noise_direction": "prefer_lower"
+  }
+}

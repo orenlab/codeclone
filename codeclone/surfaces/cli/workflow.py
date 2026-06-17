@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
+from typing import Protocol
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -17,6 +18,7 @@ from ...cache.projection import build_segment_report_projection
 from ...cache.store import Cache
 from ...config import resolver as config_resolver
 from ...config.argparse_builder import build_parser
+from ...config.observability import resolve_observability_config
 from ...config.pyproject_loader import load_pyproject_config
 from ...contracts import (
     ISSUES_URL,
@@ -30,6 +32,8 @@ from ...core.parallelism import process
 from ...core.pipeline import analyze
 from ...core.reporting import gate, report
 from ...models import MetricsDiff
+from ...observability import bootstrap as start_observability
+from ...observability import operation
 from ...report.html import build_html_report
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
@@ -43,7 +47,16 @@ from . import startup as cli_startup
 from . import state as cli_state
 from . import summary as cli_summary
 from . import tips as cli_tips
+from .attrs import bool_attr
+from .patch_verify import VALID_STRICTNESS_PROFILES
 from .types import CLIArgsLike, StatusConsole, require_status_console
+
+_CLI_SESSION_START_EPOCH = int(time.time())
+
+
+class _AuditEnabledArgs(Protocol):
+    audit_enabled: bool
+
 
 __all__ = [
     "LEGACY_CACHE_PATH",
@@ -68,6 +81,7 @@ __all__ = [
     "_resolve_metrics_baseline_state",
     "_rich_progress_symbols",
     "_run_analysis_stages",
+    "_validate_controller_query_flags",
     "_validate_report_ui_flags",
     "_write_report_outputs",
     "analyze",
@@ -79,6 +93,7 @@ __all__ = [
     "discover",
     "gate",
     "main",
+    "maybe_print_gitignore_codeclone_cache_tip",
     "maybe_print_vscode_extension_tip",
     "print_banner",
     "process",
@@ -116,6 +131,12 @@ warn_new_clones_without_fail = cli_post_run.warn_new_clones_without_fail
 maybe_print_vscode_extension_tip = cli_tips.maybe_print_vscode_extension_tip
 maybe_print_dead_code_reachability_migration_note = (
     cli_tips.maybe_print_dead_code_reachability_migration_note
+)
+maybe_print_cohesion_lcom4_migration_note = (
+    cli_tips.maybe_print_cohesion_lcom4_migration_note
+)
+maybe_print_gitignore_codeclone_cache_tip = (
+    cli_tips.maybe_print_gitignore_codeclone_cache_tip
 )
 
 _report_path_origins = cli_reports_output._report_path_origins
@@ -163,6 +184,142 @@ def _make_console(*, no_color: bool) -> object:
 console: object = _make_plain_console()
 _set_console(console)
 LEGACY_CACHE_PATH = cli_state.LEGACY_CACHE_PATH
+
+
+def _controller_query_mode(args: object) -> bool:
+    return (
+        bool_attr(args, "blast_radius")
+        or bool_attr(args, "patch_verify")
+        or bool_attr(args, "session_stats")
+        or bool_attr(args, "audit")
+        or bool_attr(args, "audit_json")
+    )
+
+
+def _validate_controller_query_flags(
+    *,
+    args: object,
+    report_outputs_requested: bool = False,
+    strictness_explicit: bool = False,
+) -> None:
+    printer = _console()
+    blast_radius = bool_attr(args, "blast_radius")
+    patch_verify = bool_attr(args, "patch_verify")
+    strictness = str(getattr(args, "strictness", "ci") or "ci")
+    if strictness not in VALID_STRICTNESS_PROFILES:
+        expected = ", ".join(sorted(VALID_STRICTNESS_PROFILES))
+        printer.print(
+            ui.fmt_contract_error(
+                f"Invalid --strictness value: {strictness!r}. Expected {expected}."
+            )
+        )
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if strictness_explicit and not patch_verify:
+        printer.print(ui.fmt_contract_error(ui.ERR_STRICTNESS_PATCH_VERIFY_ONLY))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    session_stats = bool_attr(args, "session_stats")
+    audit = bool_attr(args, "audit")
+    if session_stats and (blast_radius or patch_verify or audit):
+        printer.print(ui.fmt_contract_error(ui.ERR_SESSION_STATS_COMBINED))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if audit and (blast_radius or patch_verify):
+        printer.print(ui.fmt_contract_error(ui.ERR_AUDIT_COMBINED))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if blast_radius and patch_verify:
+        printer.print(ui.fmt_contract_error(ui.ERR_BLAST_PATCH_BOTH))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if not (blast_radius or patch_verify or session_stats or audit):
+        return
+    if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
+        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_NO_BASELINE_UPDATE))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if (
+        bool_attr(args, "changed_only")
+        or getattr(args, "diff_against", None)
+        or getattr(args, "paths_from_git_diff", None)
+    ):
+        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_NO_CHANGED_SCOPE))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+    if report_outputs_requested:
+        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_TERMINAL_ONLY))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+
+
+def _run_controller_query(
+    *,
+    args: CLIArgsLike,
+    report_document: dict[str, object] | None,
+    root_path: Path,
+    analysis_result: AnalysisResult,
+    diff_context: cli_post_run.DiffContext,
+    baseline_state: cli_baseline_state.CloneBaselineState,
+) -> int | None:
+    if bool_attr(args, "blast_radius"):
+        from .blast_radius import render_blast_radius
+
+        return render_blast_radius(
+            console=_console(),
+            report_document=report_document,
+            files=tuple(getattr(args, "blast_radius", ()) or ()),
+            root_path=root_path,
+            quiet=args.quiet,
+        )
+    if not bool_attr(args, "patch_verify"):
+        return None
+    from .patch_verify import render_patch_verify
+
+    return render_patch_verify(
+        console=_console(),
+        args=args,
+        strictness=str(getattr(args, "strictness", "ci") or "ci"),
+        analysis=analysis_result,
+        diff_context=diff_context,
+        baseline_state=baseline_state,
+        quiet=args.quiet,
+    )
+
+
+def _controller_query_console(args: CLIArgsLike) -> StatusConsole:
+    """Shared console for pre-analysis controller query screens."""
+    return require_status_console(
+        cli_console.make_query_console(no_color=args.no_color)
+    )
+
+
+def _dispatch_session_stats(args: CLIArgsLike, root_path: Path) -> int:
+    from .session_stats import render_session_stats
+
+    return render_session_stats(
+        console=_controller_query_console(args),
+        root_path=root_path,
+        quiet=args.quiet,
+    )
+
+
+def _dispatch_audit(args: CLIArgsLike, root_path: Path) -> int:
+    from .audit import render_audit
+
+    audit_json = bool_attr(args, "audit_json")
+    return render_audit(
+        console=_controller_query_console(args),
+        root_path=root_path,
+        audit_enabled=bool(getattr(args, "audit_enabled", False)),
+        audit_path=str(getattr(args, "audit_path", "")),
+        quiet=args.quiet,
+        json_summary=audit_json,
+    )
+
+
+def _run_pre_analysis_controller_query(
+    *,
+    args: CLIArgsLike,
+    root_path: Path,
+) -> int | None:
+    if bool_attr(args, "session_stats"):
+        return _dispatch_session_stats(args, root_path)
+    if bool_attr(args, "audit") or bool_attr(args, "audit_json"):
+        return _dispatch_audit(args, root_path)
+    return None
 
 
 def print_banner(*, root: Path | None = None) -> None:
@@ -273,6 +430,9 @@ def _main_impl() -> None:
     explicit_cli_dests = collect_explicit_cli_dests(ap, argv=raw_argv)
     report_path_origins = _report_path_origins(raw_argv)
     report_generated_at_utc = cli_meta_mod._current_report_timestamp_utc()
+    strictness_explicit = any(
+        arg == "--strictness" or arg.startswith("--strictness=") for arg in raw_argv
+    )
     cache_path_from_args = any(
         arg in {"--cache-dir", "--cache-path"}
         or arg.startswith(("--cache-dir=", "--cache-path="))
@@ -298,14 +458,24 @@ def _main_impl() -> None:
         config_values=pyproject_config,
         explicit_cli_dests=explicit_cli_dests,
     )
+    _validate_controller_query_flags(
+        args=args,
+        strictness_explicit=strictness_explicit,
+    )
+    _configure_runtime_flags(args)
+    _configure_runtime_console(args)
+    pre_analysis_query_exit = _run_pre_analysis_controller_query(
+        args=args,
+        root_path=root_path,
+    )
+    if pre_analysis_query_exit is not None:
+        sys.exit(pre_analysis_query_exit)
     git_diff_ref = _validate_changed_scope_args(args=args)
     changed_paths = (
         _git_diff_changed_paths(root_path=root_path, git_diff_ref=git_diff_ref)
         if git_diff_ref is not None
         else ()
     )
-    _configure_runtime_flags(args)
-    _configure_runtime_console(args)
     _validate_numeric_args_or_exit(
         args=args,
         validate_numeric_args_fn=_validate_numeric_args,
@@ -337,6 +507,19 @@ def _main_impl() -> None:
         report_generated_at_utc=report_generated_at_utc,
     )
     _validate_report_ui_flags(args=args, output_paths=output_paths)
+    _validate_controller_query_flags(
+        args=args,
+        report_outputs_requested=bool(
+            output_paths.html
+            or output_paths.json
+            or output_paths.md
+            or output_paths.sarif
+            or output_paths.text
+            or bool_attr(args, "open_html_report")
+            or bool_attr(args, "timestamped_report_paths")
+        ),
+        strictness_explicit=strictness_explicit,
+    )
     cache_path = _resolve_cache_path(
         root_path=root_path,
         args=args,
@@ -365,11 +548,15 @@ def _main_impl() -> None:
         output_paths=output_paths,
         cache_path=cache_path,
     )
-    discovery_result, processing_result, analysis_result = _run_analysis_stages(
-        args=args,
-        boot=boot,
-        cache=cache,
-    )
+    # Freeze the env-resolved observability decision for this CLI process
+    # (default OFF) so the core pipeline stage spans attach to a cli.analyze op.
+    start_observability(resolve_observability_config(), root=root_path)
+    with operation(name="cli.analyze", surface="cli"):
+        discovery_result, processing_result, analysis_result = _run_analysis_stages(
+            args=args,
+            boot=boot,
+            cache=cache,
+        )
 
     source_read_contract_failure = (
         bool(processing_result.source_read_failures)
@@ -427,35 +614,36 @@ def _main_impl() -> None:
         discovery_result=discovery_result,
         processing_result=processing_result,
     )
-    _print_summary(
-        console=_console(),
-        quiet=args.quiet,
-        files_found=discovery_result.files_found,
-        files_analyzed=processing_result.files_analyzed,
-        cache_hits=discovery_result.cache_hits,
-        files_skipped=processing_result.files_skipped,
-        analyzed_lines=summary_counts["analyzed_lines"],
-        analyzed_functions=summary_counts["analyzed_functions"],
-        analyzed_methods=summary_counts["analyzed_methods"],
-        analyzed_classes=summary_counts["analyzed_classes"],
-        func_clones_count=analysis_result.func_clones_count,
-        block_clones_count=analysis_result.block_clones_count,
-        segment_clones_count=analysis_result.segment_clones_count,
-        suppressed_golden_fixture_groups=len(
-            getattr(analysis_result, "suppressed_clone_groups", ())
-        ),
-        suppressed_segment_groups=analysis_result.suppressed_segment_groups,
-        new_clones_count=diff_context.new_clones_count,
-    )
-    print_metrics_if_available(
-        args=args,
-        analysis=analysis_result,
-        metrics_diff=diff_context.metrics_diff,
-        api_surface_diff_available=diff_context.api_surface_diff_available,
-        console=_console(),
-        build_metrics_snapshot_fn=build_metrics_snapshot,
-        print_metrics_fn=_print_metrics,
-    )
+    if not _controller_query_mode(args):
+        _print_summary(
+            console=_console(),
+            quiet=args.quiet,
+            files_found=discovery_result.files_found,
+            files_analyzed=processing_result.files_analyzed,
+            cache_hits=discovery_result.cache_hits,
+            files_skipped=processing_result.files_skipped,
+            analyzed_lines=summary_counts["analyzed_lines"],
+            analyzed_functions=summary_counts["analyzed_functions"],
+            analyzed_methods=summary_counts["analyzed_methods"],
+            analyzed_classes=summary_counts["analyzed_classes"],
+            func_clones_count=analysis_result.func_clones_count,
+            block_clones_count=analysis_result.block_clones_count,
+            segment_clones_count=analysis_result.segment_clones_count,
+            suppressed_golden_fixture_groups=len(
+                getattr(analysis_result, "suppressed_clone_groups", ())
+            ),
+            suppressed_segment_groups=analysis_result.suppressed_segment_groups,
+            new_clones_count=diff_context.new_clones_count,
+        )
+        print_metrics_if_available(
+            args=args,
+            analysis=analysis_result,
+            metrics_diff=diff_context.metrics_diff,
+            api_surface_diff_available=diff_context.api_surface_diff_available,
+            console=_console(),
+            build_metrics_snapshot_fn=build_metrics_snapshot,
+            print_metrics_fn=_print_metrics,
+        )
 
     report_artifacts = report(
         boot=boot,
@@ -469,8 +657,25 @@ def _main_impl() -> None:
         metrics_diff=diff_context.metrics_diff,
         coverage_adoption_diff_available=diff_context.coverage_adoption_diff_available,
         api_surface_diff_available=diff_context.api_surface_diff_available,
-        include_report_document=bool(changed_paths),
+        include_report_document=bool(changed_paths) or _controller_query_mode(args),
     )
+    _emit_cli_analysis_completed_if_enabled(
+        args=args,
+        root_path=root_path,
+        report_document=report_artifacts.report_document,
+        new_func_count=len(diff_context.new_func),
+        new_block_count=len(diff_context.new_block),
+    )
+    controller_exit_code = _run_controller_query(
+        args=args,
+        report_document=report_artifacts.report_document,
+        root_path=root_path,
+        analysis_result=analysis_result,
+        diff_context=diff_context,
+        baseline_state=baseline_state,
+    )
+    if controller_exit_code is not None:
+        sys.exit(controller_exit_code)
     changed_clone_gate = resolve_changed_clone_gate(
         args=args,
         report_document=report_artifacts.report_document,
@@ -533,16 +738,86 @@ def _main_impl() -> None:
         baseline_generator_version=baseline_state.baseline.generator_version,
         baseline_trusted_for_diff=baseline_state.trusted_for_diff,
     )
+    maybe_print_cohesion_lcom4_migration_note(
+        args=args,
+        console=_console(),
+        codeclone_version=__version__,
+        cache_path=cache_path,
+        baseline_generator_version=baseline_state.baseline.generator_version,
+        baseline_trusted_for_diff=baseline_state.trusted_for_diff,
+    )
     maybe_print_vscode_extension_tip(
         args=args,
         console=_console(),
         codeclone_version=__version__,
         cache_path=cache_path,
     )
+    maybe_print_gitignore_codeclone_cache_tip(
+        args=args,
+        console=_console(),
+        root_path=root_path,
+    )
     print_pipeline_done_if_needed(args=args, run_started_at=run_started_at)
 
 
+def _emit_cli_analysis_completed_if_enabled(
+    *,
+    args: _AuditEnabledArgs,
+    root_path: Path,
+    report_document: object,
+    new_func_count: int,
+    new_block_count: int,
+) -> None:
+    if not bool(getattr(args, "audit_enabled", False)):
+        return
+    if not isinstance(report_document, dict):
+        return
+    digest = _report_digest_from_document(report_document)
+    if not digest:
+        return
+    try:
+        from ...audit.analysis_completed import (
+            ANALYSIS_SOURCE_CLI,
+            emit_analysis_completed_from_report,
+        )
+
+        emit_analysis_completed_from_report(
+            root_path=root_path,
+            report_document=report_document,
+            report_digest=digest,
+            run_id=digest,
+            source=ANALYSIS_SOURCE_CLI,
+            new_func_count=new_func_count,
+            new_block_count=new_block_count,
+            agent_start_epoch=_CLI_SESSION_START_EPOCH,
+        )
+    except Exception:
+        return None
+
+
+def _report_digest_from_document(report_document: dict[str, object]) -> str:
+    integrity = report_document.get("integrity")
+    if not isinstance(integrity, dict):
+        return ""
+    digest = integrity.get("digest")
+    if not isinstance(digest, dict):
+        return ""
+    return str(digest.get("value", "")).strip()
+
+
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "analytics":
+        from .analytics import analytics_main
+
+        raise SystemExit(analytics_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "memory":
+        from .memory import memory_main
+
+        raise SystemExit(memory_main(sys.argv[2:]))
+    if len(sys.argv) > 1 and sys.argv[1] == "observability":
+        from .observability import observability_main
+
+        raise SystemExit(observability_main(sys.argv[2:]))
     try:
         _main_impl()
     except SystemExit:

@@ -18,7 +18,7 @@ inputs:
   package-version:
     description: "CodeClone version from PyPI for remote installs (ignored when the action runs from the checked-out CodeClone repo)"
     required: false
-    default: "2.0.2"
+    default: "2.1.0a1"
 
   path:
     description: "Project root"
@@ -28,7 +28,7 @@ inputs:
   json-path:
     description: "Canonical JSON report output path"
     required: false
-    default: ".cache/codeclone/report.json"
+    default: ".codeclone/report.json"
 
   sarif:
     description: "Generate SARIF and upload to Code Scanning"
@@ -38,7 +38,7 @@ inputs:
   sarif-path:
     description: "SARIF output path"
     required: false
-    default: ".cache/codeclone/report.sarif"
+    default: ".codeclone/report.sarif"
 
   pr-comment:
     description: "Post or update a PR summary comment"

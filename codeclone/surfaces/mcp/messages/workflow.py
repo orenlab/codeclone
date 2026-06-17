@@ -1,0 +1,163 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+"""Controlled-change workflow user messages."""
+
+from __future__ import annotations
+
+from typing import Final
+
+START_NEEDS_ANALYSIS: Final = (
+    "No analysis run available for this root. Call analyze_repository first."
+)
+
+START_QUEUED: Final = (
+    "Intent queued behind active workspace intent. Do not edit until promoted."
+)
+
+FINISH_PROMOTE_BEFORE_VERIFY: Final = (
+    "Promote the queued intent before editing or verification."
+)
+
+FINISH_QUEUED_NOT_ACTIVE: Final = "Queued intent must be promoted before verification."
+
+FINISH_DIGEST_MISMATCH: Final = "Intent expired: report digest mismatch."
+
+FINISH_DIGEST_MISMATCH_NEXT: Final = (
+    "Intent was declared against a different report. "
+    "Do not redeclare on the after-run — use the "
+    "original intent_id with the original before_run_id."
+)
+
+FINISH_SCOPE_VIOLATION: Final = "Patch touched files outside declared scope."
+
+FINISH_SCOPE_VIOLATION_NEXT: Final = (
+    "Redeclare intent with expanded scope, or remove the out-of-scope changes."
+)
+
+START_INTENT_ACTIVE: Final = "Intent active."
+START_HIGH_BLAST_RADIUS: Final = "Blast radius is high — review transitive summary."
+START_BUDGET_OUTSIDE_CI: Final = "Budget is already outside CI thresholds."
+START_BUDGET_WITHIN_CI: Final = "Budget is within CI thresholds."
+START_BUDGET_PREVIEW_ADVISORY: Final = (
+    "Budget preview already fails; edit is allowed, but final verification "
+    "may not be accepted."
+)
+
+START_CONTINUE_OWN_WIP: Final = (
+    "Continuing own uncommitted work in declared scope. Finish must cover all "
+    "dirty paths via changed_files or diff_ref."
+)
+
+FINISH_RECEIPT_FAILED: Final = (
+    "Change verified but receipt creation failed. Intent not cleared for retry."
+)
+
+FINISH_DONE: Final = "Done. Intent cleared."
+
+FINISH_EVIDENCE_XOR: Final = (
+    "finish_controlled_change requires exactly one of "
+    "changed_files or diff_ref, not both."
+)
+FINISH_EVIDENCE_REQUIRED: Final = (
+    "finish_controlled_change requires changed_files or diff_ref."
+)
+
+START_FOREIGN_ACTIVE_OVERLAP: Final = (
+    "Foreign active intent overlaps your scope. Ask the user, narrow scope, "
+    'or restart with on_conflict="queue".'
+)
+
+START_FOREIGN_STALE_OVERLAP: Final = (
+    "Foreign stale intent overlaps your scope. Coordinate with the user or "
+    "recover the foreign intent before editing."
+)
+
+START_DIRTY_SCOPE: Final = (
+    "Uncommitted changes overlap your declared scope. Ask the user before "
+    "editing; inspect diff, then commit, stash, revert, or narrow scope."
+)
+
+START_FOREIGN_DIRTY_OVERLAP: Final = (
+    "Uncommitted changes overlap your declared scope and a foreign intent "
+    "previously declared overlapping paths. Ask the user before editing."
+)
+
+START_COMBINED_BLOCK: Final = (
+    "Foreign active intent overlaps your scope and dirty files exist in "
+    "declared scope. Ask the user before editing; queue or narrow scope, "
+    "or reconcile the working tree."
+)
+
+FINISH_HYGIENE_BLOCKED: Final = "Finish blocked by workspace hygiene."
+
+FINISH_HYGIENE_NEXT: Final = (
+    "Finish evidence does not match dirty paths in declared scope, or new/modified "
+    "unattributed dirty paths appeared outside declared scope after intent start. "
+    "List every touched path in changed_files, redeclare scope, or reconcile the tree."
+)
+
+FINISH_HYGIENE_MISSING_EVIDENCE: Final = (
+    "Git shows dirty paths inside declared scope that are missing from finish evidence."
+)
+
+FINISH_HYGIENE_OWN_UNSCOPED: Final = (
+    "Git shows unattributed uncommitted changes outside declared scope. "
+    "Redeclare scope to include them or revert those edits."
+)
+
+FINISH_HYGIENE_NEW_UNATTRIBUTED: Final = (
+    "Git shows new unattributed dirty paths outside declared scope since intent start. "
+    "Redeclare scope to include them or revert those edits."
+)
+
+FINISH_HYGIENE_MODIFIED_UNATTRIBUTED: Final = (
+    "Git shows preexisting dirty paths outside declared scope changed since intent "
+    "start. Redeclare scope to include them or reconcile those edits."
+)
+
+FINISH_HYGIENE_UNKNOWN_UNATTRIBUTED: Final = (
+    "Git shows unattributed dirty paths outside declared scope, but their start-time "
+    "snapshot is unavailable. Reconcile the tree or redeclare scope."
+)
+
+FINISH_HYGIENE_UNACKNOWLEDGED_DIRTY: Final = (
+    "Finish evidence does not cover all dirty paths in declared scope."
+)
+
+FINISH_HYGIENE_FOREIGN_DIRTY: Final = "Foreign dirty overlap remains in declared scope."
+
+
+def start_controlled_change_message(
+    *,
+    radius_level: str,
+    budget_would_fail: bool,
+    continuing_own_wip: bool = False,
+) -> str:
+    parts: list[str] = [START_INTENT_ACTIVE]
+    if continuing_own_wip:
+        parts.append(START_CONTINUE_OWN_WIP)
+    if radius_level == "high":
+        parts.append(START_HIGH_BLAST_RADIUS)
+    if budget_would_fail:
+        parts.append(START_BUDGET_OUTSIDE_CI)
+        parts.append(START_BUDGET_PREVIEW_ADVISORY)
+    else:
+        parts.append(START_BUDGET_WITHIN_CI)
+    return " ".join(parts)
+
+
+def finish_controlled_change_message(
+    *,
+    verify_status: str,
+    intent_cleared: bool,
+    receipt_error: str | None,
+) -> str:
+    if receipt_error is not None:
+        return FINISH_RECEIPT_FAILED
+    if intent_cleared:
+        return FINISH_DONE
+    return f"Verified ({verify_status}). Intent still active."

@@ -5,12 +5,13 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 
 import os
-import runpy
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+from tests._runpy_guard import assert_runpy_module_help_exits_zero
 
 
 def test_main_module_guard_runs() -> None:
@@ -27,8 +28,9 @@ def test_main_module_guard_runs() -> None:
 
 
 def test_main_module_guard_runpy(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delitem(sys.modules, "codeclone.main", raising=False)
-    monkeypatch.setattr(sys, "argv", ["codeclone", "--help"])
-    with pytest.raises(SystemExit) as exc:
-        runpy.run_module("codeclone.main", run_name="__main__")
-    assert exc.value.code == 0
+    assert_runpy_module_help_exits_zero(
+        monkeypatch,
+        module="codeclone.main",
+        module_cache_key="codeclone.main",
+        argv=["codeclone", "--help"],
+    )

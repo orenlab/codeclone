@@ -126,7 +126,16 @@
    Tables
    --------------------------------------------------------- */
 
+/* Uniform width: the wrapper is block-level and the table fills it, so every
+   content table shares one width instead of sizing to its own content. */
+.md-typeset__table {
+    display: block;
+    width: 100%;
+}
+
 .md-typeset table:not([class]) {
+    display: table;
+    width: 100%;
     border-radius: 14px;
     overflow: hidden;
     border: 1px solid var(--cc-border-dark);
@@ -343,4 +352,24 @@
 .md-typeset details {
     box-shadow: none !important;
     border-width: 1px;
+}
+
+/* ---------------------------------------------------------
+   Home / hub goal tables
+   --------------------------------------------------------- */
+
+.md-typeset table:not([class]) thead th {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--md-default-fg-color--light);
+}
+
+[data-md-color-scheme="slate"] .md-typeset table:not([class]) tbody tr:hover {
+    background: rgba(129, 140, 248, 0.06);
+}
+
+[data-md-color-scheme="default"] .md-typeset table:not([class]) tbody tr:hover {
+    background: rgba(79, 70, 229, 0.04);
 }

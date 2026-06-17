@@ -1,75 +1,11 @@
 [
   {
+    "name": "analyze_changed_paths",
     "input_schema": {
       "properties": {
-        "analysis_mode": {
-          "default": "full",
-          "title": "Analysis Mode",
-          "type": "string"
-        },
-        "api_surface": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Api Surface"
-        },
-        "baseline_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Baseline Path"
-        },
-        "block_min_loc": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Block Min Loc"
-        },
-        "block_min_stmt": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Block Min Stmt"
-        },
-        "cache_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cache Path"
-        },
-        "cache_policy": {
-          "default": "reuse",
-          "title": "Cache Policy",
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
           "type": "string"
         },
         "changed_paths": {
@@ -85,67 +21,8 @@
             }
           ],
           "default": null,
+          "description": "Repo-relative paths; mutually exclusive with git_diff_ref.",
           "title": "Changed Paths"
-        },
-        "cohesion_threshold": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cohesion Threshold"
-        },
-        "complexity_threshold": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Complexity Threshold"
-        },
-        "coupling_threshold": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Coupling Threshold"
-        },
-        "coverage_min": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Coverage Min"
-        },
-        "coverage_xml": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Coverage Xml"
         },
         "git_diff_ref": {
           "anyOf": [
@@ -157,9 +34,22 @@
             }
           ],
           "default": null,
+          "description": "Safe git revision for changed files; not with changed_paths.",
           "title": "Git Diff Ref"
         },
-        "max_baseline_size_mb": {
+        "analysis_mode": {
+          "default": "full",
+          "description": "full: clones+metrics. clones_only: clones without metrics.",
+          "title": "Analysis Mode",
+          "type": "string"
+        },
+        "respect_pyproject": {
+          "default": true,
+          "description": "Load [tool.codeclone] thresholds from pyproject when true.",
+          "title": "Respect Pyproject",
+          "type": "boolean"
+        },
+        "processes": {
           "anyOf": [
             {
               "type": "integer"
@@ -169,31 +59,8 @@
             }
           ],
           "default": null,
-          "title": "Max Baseline Size Mb"
-        },
-        "max_cache_size_mb": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Cache Size Mb"
-        },
-        "metrics_baseline_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Metrics Baseline Path"
+          "description": "Parallel workers override; capped by host and 64.",
+          "title": "Processes"
         },
         "min_loc": {
           "anyOf": [
@@ -205,6 +72,7 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Min Loc"
         },
         "min_stmt": {
@@ -217,9 +85,10 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Min Stmt"
         },
-        "processes": {
+        "block_min_loc": {
           "anyOf": [
             {
               "type": "integer"
@@ -229,16 +98,21 @@
             }
           ],
           "default": null,
-          "title": "Processes"
+          "description": "Optional analysis threshold override.",
+          "title": "Block Min Loc"
         },
-        "respect_pyproject": {
-          "default": true,
-          "title": "Respect Pyproject",
-          "type": "boolean"
-        },
-        "root": {
-          "title": "Root",
-          "type": "string"
+        "block_min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Block Min Stmt"
         },
         "segment_min_loc": {
           "anyOf": [
@@ -250,6 +124,7 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Segment Min Loc"
         },
         "segment_min_stmt": {
@@ -262,7 +137,163 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Segment Min Stmt"
+        },
+        "api_surface": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Enable API surface metrics when true.",
+          "title": "Api Surface"
+        },
+        "coverage_xml": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Cobertura XML path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Coverage Xml"
+        },
+        "coverage_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Coverage gate minimum percent (0-100).",
+          "title": "Coverage Min"
+        },
+        "complexity_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Complexity Threshold"
+        },
+        "coupling_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Coupling Threshold"
+        },
+        "cohesion_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Cohesion Threshold"
+        },
+        "baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Baseline Path"
+        },
+        "metrics_baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Metrics Baseline Path"
+        },
+        "max_baseline_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max artifact size in megabytes.",
+          "title": "Max Baseline Size Mb"
+        },
+        "cache_policy": {
+          "default": "reuse",
+          "description": "reuse: read cache. off: skip cache. MCP read-only.",
+          "title": "Cache Policy",
+          "type": "string"
+        },
+        "cache_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Cache Path"
+        },
+        "max_cache_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max artifact size in megabytes.",
+          "title": "Max Cache Size Mb"
+        },
+        "allow_external_artifacts": {
+          "default": false,
+          "description": "Allow optional artifact paths (baseline_path, metrics_baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
+          "title": "Allow External Artifacts",
+          "type": "boolean"
         }
       },
       "required": [
@@ -270,81 +301,28 @@
       ],
       "title": "analyze_changed_pathsArguments",
       "type": "object"
-    },
-    "name": "analyze_changed_paths"
+    }
   },
   {
+    "name": "analyze_repository",
     "input_schema": {
       "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
         "analysis_mode": {
           "default": "full",
+          "description": "full: clones+metrics. clones_only: clones without metrics.",
           "title": "Analysis Mode",
           "type": "string"
         },
-        "api_surface": {
-          "anyOf": [
-            {
-              "type": "boolean"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Api Surface"
-        },
-        "baseline_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Baseline Path"
-        },
-        "block_min_loc": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Block Min Loc"
-        },
-        "block_min_stmt": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Block Min Stmt"
-        },
-        "cache_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cache Path"
-        },
-        "cache_policy": {
-          "default": "reuse",
-          "title": "Cache Policy",
-          "type": "string"
+        "respect_pyproject": {
+          "default": true,
+          "description": "Load [tool.codeclone] thresholds from pyproject when true.",
+          "title": "Respect Pyproject",
+          "type": "boolean"
         },
         "changed_paths": {
           "anyOf": [
@@ -359,67 +337,8 @@
             }
           ],
           "default": null,
+          "description": "Repo-relative paths; mutually exclusive with git_diff_ref.",
           "title": "Changed Paths"
-        },
-        "cohesion_threshold": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Cohesion Threshold"
-        },
-        "complexity_threshold": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Complexity Threshold"
-        },
-        "coupling_threshold": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Coupling Threshold"
-        },
-        "coverage_min": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Coverage Min"
-        },
-        "coverage_xml": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Coverage Xml"
         },
         "git_diff_ref": {
           "anyOf": [
@@ -431,9 +350,10 @@
             }
           ],
           "default": null,
+          "description": "Safe git revision for changed files; not with changed_paths.",
           "title": "Git Diff Ref"
         },
-        "max_baseline_size_mb": {
+        "processes": {
           "anyOf": [
             {
               "type": "integer"
@@ -443,31 +363,8 @@
             }
           ],
           "default": null,
-          "title": "Max Baseline Size Mb"
-        },
-        "max_cache_size_mb": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Cache Size Mb"
-        },
-        "metrics_baseline_path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Metrics Baseline Path"
+          "description": "Parallel workers override; capped by host and 64.",
+          "title": "Processes"
         },
         "min_loc": {
           "anyOf": [
@@ -479,6 +376,7 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Min Loc"
         },
         "min_stmt": {
@@ -491,9 +389,10 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Min Stmt"
         },
-        "processes": {
+        "block_min_loc": {
           "anyOf": [
             {
               "type": "integer"
@@ -503,16 +402,21 @@
             }
           ],
           "default": null,
-          "title": "Processes"
+          "description": "Optional analysis threshold override.",
+          "title": "Block Min Loc"
         },
-        "respect_pyproject": {
-          "default": true,
-          "title": "Respect Pyproject",
-          "type": "boolean"
-        },
-        "root": {
-          "title": "Root",
-          "type": "string"
+        "block_min_stmt": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Block Min Stmt"
         },
         "segment_min_loc": {
           "anyOf": [
@@ -524,6 +428,7 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Segment Min Loc"
         },
         "segment_min_stmt": {
@@ -536,21 +441,23 @@
             }
           ],
           "default": null,
+          "description": "Optional analysis threshold override.",
           "title": "Segment Min Stmt"
-        }
-      },
-      "required": [
-        "root"
-      ],
-      "title": "analyze_repositoryArguments",
-      "type": "object"
-    },
-    "name": "analyze_repository"
-  },
-  {
-    "input_schema": {
-      "properties": {
-        "clone_type": {
+        },
+        "api_surface": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Enable API surface metrics when true.",
+          "title": "Api Surface"
+        },
+        "coverage_xml": {
           "anyOf": [
             {
               "type": "string"
@@ -560,17 +467,175 @@
             }
           ],
           "default": null,
-          "title": "Clone Type"
+          "description": "Cobertura XML path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Coverage Xml"
         },
-        "detail_level": {
-          "default": "summary",
-          "title": "Detail Level",
+        "coverage_min": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Coverage gate minimum percent (0-100).",
+          "title": "Coverage Min"
+        },
+        "complexity_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Complexity Threshold"
+        },
+        "coupling_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Coupling Threshold"
+        },
+        "cohesion_threshold": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional analysis threshold override.",
+          "title": "Cohesion Threshold"
+        },
+        "baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Baseline Path"
+        },
+        "metrics_baseline_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Metrics Baseline Path"
+        },
+        "max_baseline_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max artifact size in megabytes.",
+          "title": "Max Baseline Size Mb"
+        },
+        "cache_policy": {
+          "default": "reuse",
+          "description": "reuse: read cache. off: skip cache. MCP read-only.",
+          "title": "Cache Policy",
           "type": "string"
         },
-        "max_results": {
-          "default": 10,
-          "title": "Max Results",
-          "type": "integer"
+        "cache_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative artifact path. Absolute/out-of-repo paths require allow_external_artifacts=true.",
+          "title": "Cache Path"
+        },
+        "max_cache_size_mb": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max artifact size in megabytes.",
+          "title": "Max Cache Size Mb"
+        },
+        "allow_external_artifacts": {
+          "default": false,
+          "description": "Allow optional artifact paths (baseline_path, metrics_baseline_path, cache_path, coverage_xml) to be absolute or outside the repository.",
+          "title": "Allow External Artifacts",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "analyze_repositoryArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "check_clones",
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
         },
         "path": {
           "anyOf": [
@@ -582,9 +647,10 @@
             }
           ],
           "default": null,
+          "description": "Repo-relative module or file path filter.",
           "title": "Path"
         },
-        "root": {
+        "clone_type": {
           "anyOf": [
             {
               "type": "string"
@@ -594,19 +660,8 @@
             }
           ],
           "default": null,
-          "title": "Root"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
+          "description": "function, block, or segment.",
+          "title": "Clone Type"
         },
         "source_kind": {
           "anyOf": [
@@ -618,28 +673,31 @@
             }
           ],
           "default": null,
+          "description": "production, tests, fixtures, mixed, or other.",
           "title": "Source Kind"
+        },
+        "max_results": {
+          "default": 10,
+          "description": "Pagination limit.",
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
         }
       },
       "title": "check_clonesArguments",
       "type": "object"
-    },
-    "name": "check_clones"
+    }
   },
   {
+    "name": "check_cohesion",
     "input_schema": {
       "properties": {
-        "detail_level": {
-          "default": "summary",
-          "title": "Detail Level",
-          "type": "string"
-        },
-        "max_results": {
-          "default": 10,
-          "title": "Max Results",
-          "type": "integer"
-        },
-        "path": {
+        "run_id": {
           "anyOf": [
             {
               "type": "string"
@@ -649,7 +707,8 @@
             }
           ],
           "default": null,
-          "title": "Path"
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
         },
         "root": {
           "anyOf": [
@@ -661,8 +720,43 @@
             }
           ],
           "default": null,
+          "description": "Absolute repository root when resolving run by root.",
           "title": "Root"
         },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative module or file path filter.",
+          "title": "Path"
+        },
+        "max_results": {
+          "default": 10,
+          "description": "Pagination limit.",
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        }
+      },
+      "title": "check_cohesionArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "check_complexity",
+    "input_schema": {
+      "properties": {
         "run_id": {
           "anyOf": [
             {
@@ -673,26 +767,34 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
-        }
-      },
-      "title": "check_cohesionArguments",
-      "type": "object"
-    },
-    "name": "check_cohesion"
-  },
-  {
-    "input_schema": {
-      "properties": {
-        "detail_level": {
-          "default": "summary",
-          "title": "Detail Level",
-          "type": "string"
         },
-        "max_results": {
-          "default": 10,
-          "title": "Max Results",
-          "type": "integer"
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative module or file path filter.",
+          "title": "Path"
         },
         "min_complexity": {
           "anyOf": [
@@ -704,64 +806,31 @@
             }
           ],
           "default": null,
+          "description": "Minimum cyclomatic complexity filter.",
           "title": "Min Complexity"
         },
-        "path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Path"
+        "max_results": {
+          "default": 10,
+          "description": "Pagination limit.",
+          "title": "Max Results",
+          "type": "integer"
         },
-        "root": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Root"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
         }
       },
       "title": "check_complexityArguments",
       "type": "object"
-    },
-    "name": "check_complexity"
+    }
   },
   {
+    "name": "check_coupling",
     "input_schema": {
       "properties": {
-        "detail_level": {
-          "default": "summary",
-          "title": "Detail Level",
-          "type": "string"
-        },
-        "max_results": {
-          "default": 10,
-          "title": "Max Results",
-          "type": "integer"
-        },
-        "path": {
+        "run_id": {
           "anyOf": [
             {
               "type": "string"
@@ -771,7 +840,8 @@
             }
           ],
           "default": null,
-          "title": "Path"
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
         },
         "root": {
           "anyOf": [
@@ -783,8 +853,43 @@
             }
           ],
           "default": null,
+          "description": "Absolute repository root when resolving run by root.",
           "title": "Root"
         },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative module or file path filter.",
+          "title": "Path"
+        },
+        "max_results": {
+          "default": 10,
+          "description": "Pagination limit.",
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        }
+      },
+      "title": "check_couplingArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "check_dead_code",
+    "input_schema": {
+      "properties": {
         "run_id": {
           "anyOf": [
             {
@@ -795,26 +900,34 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
-        }
-      },
-      "title": "check_couplingArguments",
-      "type": "object"
-    },
-    "name": "check_coupling"
-  },
-  {
-    "input_schema": {
-      "properties": {
-        "detail_level": {
-          "default": "normal",
-          "title": "Detail Level",
-          "type": "string"
         },
-        "max_results": {
-          "default": 10,
-          "title": "Max Results",
-          "type": "integer"
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative module or file path filter.",
+          "title": "Path"
         },
         "min_severity": {
           "anyOf": [
@@ -826,31 +939,34 @@
             }
           ],
           "default": null,
+          "description": "Minimum dead-code severity filter.",
           "title": "Min Severity"
         },
-        "path": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Path"
+        "max_results": {
+          "default": 10,
+          "description": "Pagination limit.",
+          "title": "Max Results",
+          "type": "integer"
         },
-        "root": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Root"
+        "detail_level": {
+          "default": "normal",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        }
+      },
+      "title": "check_dead_codeArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "check_patch_contract",
+    "input_schema": {
+      "properties": {
+        "mode": {
+          "description": "budget: pre-edit gate preview. verify: post-edit check.",
+          "title": "Mode",
+          "type": "string"
         },
         "run_id": {
           "anyOf": [
@@ -862,28 +978,106 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "before_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Pre-edit analyze run id or intent-resolved before run.",
+          "title": "Before Run Id"
+        },
+        "after_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Post-edit analyze run id for structural verify.",
+          "title": "After Run Id"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "strictness": {
+          "default": "ci",
+          "description": "ci, relaxed, or strict patch-contract profile.",
+          "title": "Strictness",
+          "type": "string"
+        },
+        "diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git revision for scope or verify evidence.",
+          "title": "Diff Ref"
+        },
+        "changed_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative changed files for scope or verify.",
+          "title": "Changed Files"
         }
       },
-      "title": "check_dead_codeArguments",
+      "required": [
+        "mode"
+      ],
+      "title": "check_patch_contractArguments",
       "type": "object"
-    },
-    "name": "check_dead_code"
+    }
   },
   {
+    "name": "clear_session_runs",
     "input_schema": {
       "properties": {},
       "title": "clear_session_runsArguments",
       "type": "object"
-    },
-    "name": "clear_session_runs"
+    }
   },
   {
+    "name": "compare_runs",
     "input_schema": {
       "properties": {
-        "focus": {
-          "default": "all",
-          "title": "Focus",
+        "run_id_before": {
+          "description": "8-char or full run id from analyze response.",
+          "title": "Run Id Before",
           "type": "string"
         },
         "run_id_after": {
@@ -896,10 +1090,13 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id After"
         },
-        "run_id_before": {
-          "title": "Run Id Before",
+        "focus": {
+          "default": "all",
+          "description": "all, clones, structural, or metrics comparison focus.",
+          "title": "Focus",
           "type": "string"
         }
       },
@@ -908,92 +1105,12 @@
       ],
       "title": "compare_runsArguments",
       "type": "object"
-    },
-    "name": "compare_runs"
+    }
   },
   {
+    "name": "create_review_receipt",
     "input_schema": {
       "properties": {
-        "coverage_min": {
-          "default": 50,
-          "title": "Coverage Min",
-          "type": "integer"
-        },
-        "fail_cohesion": {
-          "default": -1,
-          "title": "Fail Cohesion",
-          "type": "integer"
-        },
-        "fail_complexity": {
-          "default": -1,
-          "title": "Fail Complexity",
-          "type": "integer"
-        },
-        "fail_coupling": {
-          "default": -1,
-          "title": "Fail Coupling",
-          "type": "integer"
-        },
-        "fail_cycles": {
-          "default": false,
-          "title": "Fail Cycles",
-          "type": "boolean"
-        },
-        "fail_dead_code": {
-          "default": false,
-          "title": "Fail Dead Code",
-          "type": "boolean"
-        },
-        "fail_health": {
-          "default": -1,
-          "title": "Fail Health",
-          "type": "integer"
-        },
-        "fail_on_api_break": {
-          "default": false,
-          "title": "Fail On Api Break",
-          "type": "boolean"
-        },
-        "fail_on_docstring_regression": {
-          "default": false,
-          "title": "Fail On Docstring Regression",
-          "type": "boolean"
-        },
-        "fail_on_new": {
-          "default": false,
-          "title": "Fail On New",
-          "type": "boolean"
-        },
-        "fail_on_new_metrics": {
-          "default": false,
-          "title": "Fail On New Metrics",
-          "type": "boolean"
-        },
-        "fail_on_typing_regression": {
-          "default": false,
-          "title": "Fail On Typing Regression",
-          "type": "boolean"
-        },
-        "fail_on_untested_hotspots": {
-          "default": false,
-          "title": "Fail On Untested Hotspots",
-          "type": "boolean"
-        },
-        "fail_threshold": {
-          "default": -1,
-          "title": "Fail Threshold",
-          "type": "integer"
-        },
-        "min_docstring_coverage": {
-          "default": -1,
-          "title": "Min Docstring Coverage",
-          "type": "integer"
-        },
-        "min_typing_coverage": {
-          "default": -1,
-          "title": "Min Typing Coverage",
-          "type": "integer"
-        },
         "run_id": {
           "anyOf": [
             {
@@ -1004,17 +1121,301 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "format": {
+          "default": "markdown",
+          "description": "markdown or json receipt output.",
+          "title": "Format",
+          "type": "string"
+        },
+        "include_blast_radius": {
+          "default": true,
+          "description": "Include blast radius section in receipt.",
+          "title": "Include Blast Radius",
+          "type": "boolean"
+        },
+        "include_patch_contract": {
+          "default": true,
+          "description": "Include patch contract section in receipt.",
+          "title": "Include Patch Contract",
+          "type": "boolean"
+        }
+      },
+      "title": "create_review_receiptArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "evaluate_gates",
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "fail_on_new": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail On New",
+          "type": "boolean"
+        },
+        "fail_threshold": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Fail Threshold",
+          "type": "integer"
+        },
+        "fail_complexity": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Fail Complexity",
+          "type": "integer"
+        },
+        "fail_coupling": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Fail Coupling",
+          "type": "integer"
+        },
+        "fail_cohesion": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Fail Cohesion",
+          "type": "integer"
+        },
+        "fail_cycles": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail Cycles",
+          "type": "boolean"
+        },
+        "fail_dead_code": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail Dead Code",
+          "type": "boolean"
+        },
+        "fail_health": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Fail Health",
+          "type": "integer"
+        },
+        "fail_on_new_metrics": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail On New Metrics",
+          "type": "boolean"
+        },
+        "fail_on_typing_regression": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail On Typing Regression",
+          "type": "boolean"
+        },
+        "fail_on_docstring_regression": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail On Docstring Regression",
+          "type": "boolean"
+        },
+        "fail_on_api_break": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail On Api Break",
+          "type": "boolean"
+        },
+        "fail_on_untested_hotspots": {
+          "default": false,
+          "description": "Enable this gate when true.",
+          "title": "Fail On Untested Hotspots",
+          "type": "boolean"
+        },
+        "min_typing_coverage": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Min Typing Coverage",
+          "type": "integer"
+        },
+        "min_docstring_coverage": {
+          "default": -1,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Min Docstring Coverage",
+          "type": "integer"
+        },
+        "coverage_min": {
+          "default": 50,
+          "description": "Gate threshold; -1 disables that gate.",
+          "title": "Coverage Min",
+          "type": "integer"
         }
       },
       "title": "evaluate_gatesArguments",
       "type": "object"
-    },
-    "name": "evaluate_gates"
+    }
   },
   {
+    "name": "finish_controlled_change",
     "input_schema": {
       "properties": {
+        "intent_id": {
+          "description": "Intent id from start or declare.",
+          "title": "Intent Id",
+          "type": "string"
+        },
+        "changed_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative changed files for scope or verify.",
+          "title": "Changed Files"
+        },
+        "diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git revision for scope or verify evidence.",
+          "title": "Diff Ref"
+        },
+        "after_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Post-edit analyze run id for structural verify.",
+          "title": "After Run Id"
+        },
+        "review_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional human review note for finish output; not claim-validated. Use claims_text for text that should be checked.",
+          "title": "Review Text"
+        },
+        "claims_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional claims text to validate against the run.",
+          "title": "Claims Text"
+        },
+        "create_receipt": {
+          "default": true,
+          "description": "Generate review receipt on accepted finish.",
+          "title": "Create Receipt",
+          "type": "boolean"
+        },
+        "auto_clear": {
+          "default": true,
+          "description": "Clear intent after accepted finish when true.",
+          "title": "Auto Clear",
+          "type": "boolean"
+        },
+        "strictness": {
+          "default": "ci",
+          "description": "ci, relaxed, or strict patch-contract profile.",
+          "title": "Strictness",
+          "type": "string"
+        },
+        "propose_memory": {
+          "default": false,
+          "description": "When true on accepted finish, propose draft memory candidates and mark scope-linked records stale.",
+          "title": "Propose Memory",
+          "type": "boolean"
+        },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "patch_trail_detail": {
+          "default": "summary",
+          "description": "summary or full patch_trail payload on finish.",
+          "title": "Patch Trail Detail",
+          "type": "string"
+        }
+      },
+      "required": [
+        "intent_id"
+      ],
+      "title": "finish_controlled_changeArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "generate_pr_summary",
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
         "changed_paths": {
           "anyOf": [
             {
@@ -1028,12 +1429,8 @@
             }
           ],
           "default": null,
+          "description": "Repo-relative paths; mutually exclusive with git_diff_ref.",
           "title": "Changed Paths"
-        },
-        "format": {
-          "default": "markdown",
-          "title": "Format",
-          "type": "string"
         },
         "git_diff_ref": {
           "anyOf": [
@@ -1045,7 +1442,31 @@
             }
           ],
           "default": null,
+          "description": "Safe git revision for changed files; not with changed_paths.",
           "title": "Git Diff Ref"
+        },
+        "format": {
+          "default": "markdown",
+          "description": "markdown (preferred) or json PR summary.",
+          "title": "Format",
+          "type": "string"
+        }
+      },
+      "title": "generate_pr_summaryArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_blast_radius",
+    "input_schema": {
+      "properties": {
+        "files": {
+          "description": "Repo-relative files to inspect for blast radius.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Files",
+          "type": "array"
         },
         "run_id": {
           "anyOf": [
@@ -1057,23 +1478,45 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
-        }
-      },
-      "title": "generate_pr_summaryArguments",
-      "type": "object"
-    },
-    "name": "generate_pr_summary"
-  },
-  {
-    "input_schema": {
-      "properties": {
-        "detail_level": {
-          "default": "normal",
-          "title": "Detail Level",
+        },
+        "depth": {
+          "default": "direct",
+          "description": "direct, transitive, or auto blast-radius depth.",
+          "title": "Depth",
           "type": "string"
         },
+        "include": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional blast-radius include filters.",
+          "title": "Include"
+        }
+      },
+      "required": [
+        "files"
+      ],
+      "title": "get_blast_radiusArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_finding",
+    "input_schema": {
+      "properties": {
         "finding_id": {
+          "description": "Short or full canonical finding id.",
           "title": "Finding Id",
           "type": "string"
         },
@@ -1087,7 +1530,14 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "detail_level": {
+          "default": "normal",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
         }
       },
       "required": [
@@ -1095,20 +1545,148 @@
       ],
       "title": "get_findingArguments",
       "type": "object"
-    },
-    "name": "get_finding"
+    }
   },
   {
+    "name": "get_implementation_context",
     "input_schema": {
       "properties": {
-        "max_hotspots": {
-          "default": 3,
-          "title": "Max Hotspots",
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative implementation-context subject paths.",
+          "title": "Paths"
+        },
+        "symbols": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "module:symbol qualnames to resolve as context subjects (colon separator, for example pkg.mod:func).",
+          "title": "Symbols"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "changed_scope": {
+          "default": false,
+          "description": "Use the current git-dirty scope as the context subject.",
+          "title": "Changed Scope",
+          "type": "boolean"
+        },
+        "mode": {
+          "default": "implementation",
+          "description": "implementation, impact, or contract context mode.",
+          "enum": [
+            "implementation",
+            "impact",
+            "contract"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "include": {
+          "anyOf": [
+            {
+              "items": {
+                "enum": [
+                  "module_role",
+                  "imports",
+                  "importers",
+                  "callers",
+                  "callees",
+                  "references",
+                  "public_surface",
+                  "blast_radius",
+                  "tests",
+                  "contract_tests",
+                  "test_callers",
+                  "docs",
+                  "memory",
+                  "trajectories",
+                  "experiences",
+                  "memory_conflicts",
+                  "definition_sites",
+                  "persistence_path_callers",
+                  "serialization_path_callers",
+                  "deserialization_path_callers",
+                  "store_api_consumers",
+                  "scope",
+                  "review_context",
+                  "baseline_sensitive_findings",
+                  "version_constants",
+                  "dataflow"
+                ],
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional closed set of implementation-context facets.",
+          "title": "Include"
+        },
+        "depth": {
+          "default": 1,
+          "description": "Bounded structural traversal depth from 0 through 3.",
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Depth",
           "type": "integer"
         },
-        "max_suggestions": {
-          "default": 3,
-          "title": "Max Suggestions",
+        "detail_level": {
+          "default": "compact",
+          "description": "compact, normal, or full context detail level.",
+          "enum": [
+            "compact",
+            "normal",
+            "full"
+          ],
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "budget": {
+          "default": 50,
+          "description": "Global maximum emitted context entries (1-200).",
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Budget",
           "type": "integer"
         },
         "run_id": {
@@ -1121,23 +1699,156 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name search query across analyzed definitions, call targets, and imports; mutually exclusive with paths, symbols, and changed_scope.",
+          "title": "Query"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "get_implementation_contextArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_production_triage",
+    "input_schema": {
+      "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "max_hotspots": {
+          "default": 3,
+          "description": "Max production hotspots returned.",
+          "title": "Max Hotspots",
+          "type": "integer"
+        },
+        "max_suggestions": {
+          "default": 3,
+          "description": "Max production suggestions returned.",
+          "title": "Max Suggestions",
+          "type": "integer"
         }
       },
       "title": "get_production_triageArguments",
       "type": "object"
-    },
-    "name": "get_production_triage"
+    }
   },
   {
+    "name": "get_relevant_memory",
     "input_schema": {
       "properties": {
-        "detail_level": {
-          "default": "normal",
-          "title": "Detail Level",
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
           "type": "string"
         },
+        "scope": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative scope paths for engineering memory retrieval.",
+          "title": "Scope"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "symbols": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional symbol keys for engineering memory retrieval.",
+          "title": "Symbols"
+        },
+        "max_records": {
+          "default": 20,
+          "description": "Maximum engineering memory records to return.",
+          "title": "Max Records",
+          "type": "integer"
+        },
+        "include_stale": {
+          "default": false,
+          "description": "Include stale engineering memory records.",
+          "title": "Include Stale",
+          "type": "boolean"
+        },
+        "include_drafts": {
+          "default": false,
+          "description": "Include draft engineering memory records. Defaults false for search; get_relevant_memory with scope or intent_id includes drafts automatically; query_engineering_memory for_path/for_symbol includes drafts without setting this flag.",
+          "title": "Include Drafts",
+          "type": "boolean"
+        },
+        "detail_level": {
+          "default": "compact",
+          "description": "compact (default) returns statement previews without payload; full returns complete statement and payload. mode=get always returns full.",
+          "title": "Detail Level",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "get_relevant_memoryArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "get_remediation",
+    "input_schema": {
+      "properties": {
         "finding_id": {
+          "description": "Short or full canonical finding id.",
           "title": "Finding Id",
           "type": "string"
         },
@@ -1151,7 +1862,14 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "detail_level": {
+          "default": "normal",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
         }
       },
       "required": [
@@ -1159,12 +1877,31 @@
       ],
       "title": "get_remediationArguments",
       "type": "object"
-    },
-    "name": "get_remediation"
+    }
   },
   {
+    "name": "get_report_section",
     "input_schema": {
       "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "section": {
+          "default": "all",
+          "description": "meta, inventory, findings, metrics, metrics_detail, changed, derived, integrity, or all.",
+          "title": "Section",
+          "type": "string"
+        },
         "family": {
           "anyOf": [
             {
@@ -1175,17 +1912,8 @@
             }
           ],
           "default": null,
+          "description": "Metrics or finding family filter.",
           "title": "Family"
-        },
-        "limit": {
-          "default": 50,
-          "title": "Limit",
-          "type": "integer"
-        },
-        "offset": {
-          "default": 0,
-          "title": "Offset",
-          "type": "integer"
         },
         "path": {
           "anyOf": [
@@ -1197,32 +1925,28 @@
             }
           ],
           "default": null,
+          "description": "Repo-relative module or file path filter.",
           "title": "Path"
         },
-        "run_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
+        "offset": {
+          "default": 0,
+          "description": "Pagination offset.",
+          "title": "Offset",
+          "type": "integer"
         },
-        "section": {
-          "default": "all",
-          "title": "Section",
-          "type": "string"
+        "limit": {
+          "default": 50,
+          "description": "Pagination limit.",
+          "title": "Limit",
+          "type": "integer"
         }
       },
       "title": "get_report_sectionArguments",
       "type": "object"
-    },
-    "name": "get_report_section"
+    }
   },
   {
+    "name": "get_run_summary",
     "input_schema": {
       "properties": {
         "run_id": {
@@ -1235,24 +1959,27 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
         }
       },
       "title": "get_run_summaryArguments",
       "type": "object"
-    },
-    "name": "get_run_summary"
+    }
   },
   {
+    "name": "help",
     "input_schema": {
       "properties": {
-        "detail": {
-          "default": "compact",
-          "title": "Detail",
+        "topic": {
+          "description": "workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, implementation_context, verification_profiles, observability",
+          "title": "Topic",
           "type": "string"
         },
-        "topic": {
-          "title": "Topic",
+        "detail": {
+          "default": "compact",
+          "description": "compact includes anti_patterns; normal adds warnings.",
+          "title": "Detail",
           "type": "string"
         }
       },
@@ -1261,12 +1988,31 @@
       ],
       "title": "helpArguments",
       "type": "object"
-    },
-    "name": "help"
+    }
   },
   {
+    "name": "list_findings",
     "input_schema": {
       "properties": {
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "family": {
+          "default": "all",
+          "description": "all, clone, structural, dead_code, or design.",
+          "title": "Family",
+          "type": "string"
+        },
         "category": {
           "anyOf": [
             {
@@ -1277,88 +2023,8 @@
             }
           ],
           "default": null,
+          "description": "Finding category filter.",
           "title": "Category"
-        },
-        "changed_paths": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Changed Paths"
-        },
-        "detail_level": {
-          "default": "summary",
-          "title": "Detail Level",
-          "type": "string"
-        },
-        "exclude_reviewed": {
-          "default": false,
-          "title": "Exclude Reviewed",
-          "type": "boolean"
-        },
-        "family": {
-          "default": "all",
-          "title": "Family",
-          "type": "string"
-        },
-        "git_diff_ref": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Git Diff Ref"
-        },
-        "limit": {
-          "default": 50,
-          "title": "Limit",
-          "type": "integer"
-        },
-        "max_results": {
-          "anyOf": [
-            {
-              "type": "integer"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Max Results"
-        },
-        "novelty": {
-          "default": "all",
-          "title": "Novelty",
-          "type": "string"
-        },
-        "offset": {
-          "default": 0,
-          "title": "Offset",
-          "type": "integer"
-        },
-        "run_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Run Id"
         },
         "severity": {
           "anyOf": [
@@ -1370,12 +2036,8 @@
             }
           ],
           "default": null,
+          "description": "critical, warning, or info.",
           "title": "Severity"
-        },
-        "sort_by": {
-          "default": "default",
-          "title": "Sort By",
-          "type": "string"
         },
         "source_kind": {
           "anyOf": [
@@ -1387,17 +2049,27 @@
             }
           ],
           "default": null,
+          "description": "production, tests, fixtures, mixed, or other.",
           "title": "Source Kind"
-        }
-      },
-      "title": "list_findingsArguments",
-      "type": "object"
-    },
-    "name": "list_findings"
-  },
-  {
-    "input_schema": {
-      "properties": {
+        },
+        "novelty": {
+          "default": "all",
+          "description": "all, new, or known vs baseline.",
+          "title": "Novelty",
+          "type": "string"
+        },
+        "sort_by": {
+          "default": "default",
+          "description": "default, priority, severity, or spread.",
+          "title": "Sort By",
+          "type": "string"
+        },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        },
         "changed_paths": {
           "anyOf": [
             {
@@ -1411,17 +2083,8 @@
             }
           ],
           "default": null,
+          "description": "Repo-relative paths; mutually exclusive with git_diff_ref.",
           "title": "Changed Paths"
-        },
-        "detail_level": {
-          "default": "summary",
-          "title": "Detail Level",
-          "type": "string"
-        },
-        "exclude_reviewed": {
-          "default": false,
-          "title": "Exclude Reviewed",
-          "type": "boolean"
         },
         "git_diff_ref": {
           "anyOf": [
@@ -1433,14 +2096,24 @@
             }
           ],
           "default": null,
+          "description": "Safe git revision for changed files; not with changed_paths.",
           "title": "Git Diff Ref"
         },
-        "kind": {
-          "title": "Kind",
-          "type": "string"
+        "exclude_reviewed": {
+          "default": false,
+          "description": "Omit session-marked reviewed findings when true.",
+          "title": "Exclude Reviewed",
+          "type": "boolean"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Pagination offset.",
+          "title": "Offset",
+          "type": "integer"
         },
         "limit": {
-          "default": 10,
+          "default": 50,
+          "description": "Pagination limit.",
           "title": "Limit",
           "type": "integer"
         },
@@ -1454,7 +2127,22 @@
             }
           ],
           "default": null,
+          "description": "Optional hard cap on returned items.",
           "title": "Max Results"
+        }
+      },
+      "title": "list_findingsArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "list_hotspots",
+    "input_schema": {
+      "properties": {
+        "kind": {
+          "description": "most_actionable, highest_spread, highest_priority, production_hotspots, or test_fixture_hotspots.",
+          "title": "Kind",
+          "type": "string"
         },
         "run_id": {
           "anyOf": [
@@ -1466,7 +2154,68 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "detail_level": {
+          "default": "summary",
+          "description": "summary, normal, or full detail level.",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "changed_paths": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative paths; mutually exclusive with git_diff_ref.",
+          "title": "Changed Paths"
+        },
+        "git_diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Safe git revision for changed files; not with changed_paths.",
+          "title": "Git Diff Ref"
+        },
+        "exclude_reviewed": {
+          "default": false,
+          "description": "Omit session-marked reviewed findings when true.",
+          "title": "Exclude Reviewed",
+          "type": "boolean"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Pagination limit.",
+          "title": "Limit",
+          "type": "integer"
+        },
+        "max_results": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional hard cap on returned items.",
+          "title": "Max Results"
         }
       },
       "required": [
@@ -1474,10 +2223,10 @@
       ],
       "title": "list_hotspotsArguments",
       "type": "object"
-    },
-    "name": "list_hotspots"
+    }
   },
   {
+    "name": "list_reviewed_findings",
     "input_schema": {
       "properties": {
         "run_id": {
@@ -1490,20 +2239,446 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
         }
       },
       "title": "list_reviewed_findingsArguments",
       "type": "object"
-    },
-    "name": "list_reviewed_findings"
+    }
   },
   {
+    "name": "manage_change_intent",
+    "input_schema": {
+      "properties": {
+        "action": {
+          "description": "list_workspace, declare, get, check, clear, renew, promote, recover, gc_workspace, reset_workspace.",
+          "title": "Action",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Scope for declare: allowed_files, allowed_related, forbidden.",
+          "title": "Scope"
+        },
+        "intent": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Intent description for declare action.",
+          "title": "Intent"
+        },
+        "expected_effects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional expected patch effects for review.",
+          "title": "Expected Effects"
+        },
+        "diff_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Git revision for scope or verify evidence.",
+          "title": "Diff Ref"
+        },
+        "changed_files": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative changed files for scope or verify.",
+          "title": "Changed Files"
+        },
+        "root": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Absolute repository root when resolving run by root.",
+          "title": "Root"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Intent TTL seconds; default 3600.",
+          "title": "Ttl Seconds"
+        },
+        "lease_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Lease renewal seconds for renew action.",
+          "title": "Lease Seconds"
+        },
+        "on_conflict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "queue to wait on overlapping workspace intents.",
+          "title": "On Conflict"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "title": "manage_change_intentArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "manage_engineering_memory",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "action": {
+          "description": "Agent: record_candidate, promote_experience, validate_claims, propose_from_receipt, refresh_from_run, rebuild_semantic_index, rebuild_trajectories, enqueue_projection_rebuild, projection_rebuild_status, run_projection_jobs_once. IDE channel only (VS Code): register_ide_governance, prepare_governance, commit_governance. approve/reject/archive are not available through MCP.",
+          "title": "Action",
+          "type": "string"
+        },
+        "record_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Memory record type for record_candidate.",
+          "title": "Record Type"
+        },
+        "statement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Candidate statement for record_candidate.",
+          "title": "Statement"
+        },
+        "subject_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative subject path for manage_engineering_memory action=record_candidate (required for record_candidate).",
+          "title": "Subject Path"
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Claims text for validate_claims.",
+          "title": "Text"
+        },
+        "intent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Active or queued intent id when required by action.",
+          "title": "Intent Id"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Record id for mode=get or IDE governance actions; trajectory id for mode=trajectory_get.",
+          "title": "Record Id"
+        },
+        "experience_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Experience id for manage_engineering_memory action=promote_experience (required for that action).",
+          "title": "Experience Id"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE governance decision: approve, reject, or archive.",
+          "title": "Decision"
+        },
+        "ide_governance_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Session-bound IDE governance key (hex, >=32 bytes). VS Code only.",
+          "title": "Ide Governance Key"
+        },
+        "client_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE client name for register_ide_governance.",
+          "title": "Client Name"
+        },
+        "client_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE client version for register_ide_governance.",
+          "title": "Client Version"
+        },
+        "governance_ticket": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Single-use governance ticket from prepare_governance.",
+          "title": "Governance Ticket"
+        },
+        "confirmation_nonce": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Nonce from prepare_governance; required for commit.",
+          "title": "Confirmation Nonce"
+        },
+        "proof": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "HMAC proof for commit_governance (protocol v2).",
+          "title": "Proof"
+        },
+        "actor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Human actor label stored on the memory revision.",
+          "title": "Actor"
+        },
+        "protocol": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "IDE attestation protocol version (currently 2).",
+          "title": "Protocol"
+        }
+      },
+      "required": [
+        "root",
+        "action"
+      ],
+      "title": "manage_engineering_memoryArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "mark_finding_reviewed",
     "input_schema": {
       "properties": {
         "finding_id": {
+          "description": "Short or full canonical finding id.",
           "title": "Finding Id",
           "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
         },
         "note": {
           "anyOf": [
@@ -1515,7 +2690,317 @@
             }
           ],
           "default": null,
+          "description": "Optional session-local review note.",
           "title": "Note"
+        }
+      },
+      "required": [
+        "finding_id"
+      ],
+      "title": "mark_finding_reviewedArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "query_engineering_memory",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "mode": {
+          "description": "search, get, for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, trajectory_search, trajectory_get, trajectory_anomalies, trajectory_agents, or trajectory_dashboard.",
+          "title": "Mode",
+          "type": "string"
+        },
+        "record_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Record id for mode=get or IDE governance actions; trajectory id for mode=trajectory_get.",
+          "title": "Record Id"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative subject path for manage_engineering_memory action=record_candidate (required for record_candidate).",
+          "title": "Path"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Symbol qualname for mode=for_symbol.",
+          "title": "Symbol"
+        },
+        "query": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Keyword query for mode=search or mode=trajectory_search.",
+          "title": "Query"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Repo-relative scope paths for engineering memory retrieval.",
+          "title": "Scope"
+        },
+        "filters": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional filters: types, statuses, confidences, match_mode (any|all, search mode only), include_routine (trajectory_search, trajectory_anomalies, trajectory_agents, trajectory_dashboard; default false excludes run:* routine workflows).",
+          "title": "Filters"
+        },
+        "max_results": {
+          "default": 20,
+          "description": "Maximum engineering memory records to return.",
+          "title": "Max Results",
+          "type": "integer"
+        },
+        "include_stale": {
+          "default": false,
+          "description": "Include stale engineering memory records.",
+          "title": "Include Stale",
+          "type": "boolean"
+        },
+        "include_drafts": {
+          "default": false,
+          "description": "Include draft engineering memory records. Defaults false for search; get_relevant_memory with scope or intent_id includes drafts automatically; query_engineering_memory for_path/for_symbol includes drafts without setting this flag.",
+          "title": "Include Drafts",
+          "type": "boolean"
+        },
+        "detail_level": {
+          "default": "compact",
+          "description": "compact (default) returns statement previews without payload; full returns complete statement and payload. mode=get always returns full.",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "semantic": {
+          "default": false,
+          "description": "Blend semantic recall into mode=search (FTS plus semantic, re-ranked); audit incidents and trajectory precedents are returned typed-separate. Requires the optional index; falls back to FTS-only when unavailable.",
+          "title": "Semantic",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "root",
+        "mode"
+      ],
+      "title": "query_engineering_memoryArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "query_platform_observability",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "section": {
+          "description": "Telemetry section to project: summary | slow_operations | memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | correlated_chains | costly_noops | pipeline.",
+          "title": "Section",
+          "type": "string"
+        },
+        "detail_level": {
+          "default": "compact",
+          "description": "compact (bounded top rows) or normal (rows up to limit); full downgrades to normal for aggregate sections.",
+          "title": "Detail Level",
+          "type": "string"
+        },
+        "limit": {
+          "default": 10,
+          "description": "Row cap per section; clamped to [1, 50], else 10.",
+          "title": "Limit",
+          "type": "integer"
+        },
+        "window": {
+          "default": "latest",
+          "description": "'latest' for the recent window, or a correlation_id.",
+          "title": "Window",
+          "type": "string"
+        },
+        "operation_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "title": "Operation Id"
+        },
+        "span_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "title": "Span Id"
+        }
+      },
+      "required": [
+        "root",
+        "section"
+      ],
+      "title": "query_platform_observabilityArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "start_controlled_change",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "scope": {
+          "additionalProperties": true,
+          "description": "Scope object with allowed_files, optional allowed_related, forbidden.",
+          "title": "Scope",
+          "type": "object"
+        },
+        "intent": {
+          "description": "Short description of planned edit.",
+          "title": "Intent",
+          "type": "string"
+        },
+        "expected_effects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional expected patch effects for review.",
+          "title": "Expected Effects"
+        },
+        "on_conflict": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "queue to wait on overlapping workspace intents.",
+          "title": "On Conflict"
+        },
+        "strictness": {
+          "default": "ci",
+          "description": "ci, relaxed, or strict patch-contract profile.",
+          "title": "Strictness",
+          "type": "string"
+        },
+        "ttl_seconds": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Intent TTL seconds; default 3600.",
+          "title": "Ttl Seconds"
+        },
+        "blast_radius_depth": {
+          "default": "auto",
+          "description": "auto, direct, or transitive pre-edit blast radius.",
+          "title": "Blast Radius Depth",
+          "type": "string"
+        },
+        "dirty_scope_policy": {
+          "default": "block",
+          "description": "block (default) or continue_own_wip when uncommitted changes already overlap declared scope.",
+          "title": "Dirty Scope Policy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root",
+        "scope",
+        "intent"
+      ],
+      "title": "start_controlled_changeArguments",
+      "type": "object"
+    }
+  },
+  {
+    "name": "validate_review_claims",
+    "input_schema": {
+      "properties": {
+        "text": {
+          "description": "Review claims text to validate against the run.",
+          "title": "Text",
+          "type": "string"
         },
         "run_id": {
           "anyOf": [
@@ -1527,15 +3012,34 @@
             }
           ],
           "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "require_citations": {
+          "default": true,
+          "description": "Require finding ids or metric citations in text.",
+          "title": "Require Citations",
+          "type": "boolean"
+        },
+        "patch_health_delta": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional health delta from check_patch_contract verify (after minus before). Enables health-regression overclaim checks.",
+          "title": "Patch Health Delta"
         }
       },
       "required": [
-        "finding_id"
+        "text"
       ],
-      "title": "mark_finding_reviewedArguments",
+      "title": "validate_review_claimsArguments",
       "type": "object"
-    },
-    "name": "mark_finding_reviewed"
+    }
   }
 ]

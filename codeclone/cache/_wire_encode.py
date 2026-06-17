@@ -263,6 +263,32 @@ def _encode_runtime_reachability(entry: CacheEntry, wire: dict[str, object]) -> 
         ]
 
 
+def _encode_function_relationship_facts(
+    entry: CacheEntry,
+    wire: dict[str, object],
+) -> None:
+    facts_rows = entry.get("function_relationship_facts", [])
+    if facts_rows:
+        wire["fr"] = [
+            [
+                facts["source_qualname"],
+                [
+                    [
+                        record["relation_kind"],
+                        record["resolution_status"],
+                        record["origin_lane"],
+                        record["target_qualname"],
+                        record["line"],
+                        record["expression"],
+                        record["resolution_rule"],
+                    ]
+                    for record in facts["relationships"]
+                ],
+            ]
+            for facts in facts_rows
+        ]
+
+
 def _encode_optional_metrics_sections(
     entry: CacheEntry, wire: dict[str, object]
 ) -> None:
@@ -342,6 +368,7 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
     _encode_dead_candidates(entry, wire)
     _encode_name_lists(entry, wire)
     _encode_runtime_reachability(entry, wire)
+    _encode_function_relationship_facts(entry, wire)
     _encode_security_surfaces(entry, wire)
     _encode_optional_metrics_sections(entry, wire)
     _encode_structural_findings(entry, wire)

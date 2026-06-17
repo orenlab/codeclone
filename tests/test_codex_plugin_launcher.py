@@ -1,3 +1,8 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
 import importlib.util
@@ -55,10 +60,55 @@ def test_resolve_launch_target_prefers_workspace_local_launcher(tmp_path: Path) 
     )
 
     assert target == launcher_mod.LaunchTarget(
-        command=str(launcher_path),
+        command=str(launcher_path.resolve()),
         source="workspaceLocal",
         workspace_root=workspace_root,
     )
+
+
+def test_resolve_launch_target_skips_workspace_local_launcher_outside_root(
+    tmp_path: Path,
+) -> None:
+    workspace_root = tmp_path / "workspace"
+    outside_root = tmp_path / "outside"
+    workspace_root.mkdir(parents=True)
+    outside_root.mkdir(parents=True)
+    real_launcher = outside_root / "codeclone-mcp"
+    real_launcher.write_text("", encoding="utf-8")
+    symlink_path = launcher_mod.workspace_local_launcher_candidates(workspace_root)[0]
+    symlink_path.parent.mkdir(parents=True, exist_ok=True)
+    symlink_path.symlink_to(real_launcher)
+
+    target = launcher_mod.resolve_launch_target(
+        env={"PWD": str(workspace_root)},
+        cwd=str(workspace_root),
+        repo_root=workspace_root,
+        which=lambda _name: "/usr/local/bin/codeclone-mcp",
+    )
+
+    assert target == launcher_mod.LaunchTarget(
+        command="/usr/local/bin/codeclone-mcp",
+        source="path",
+        workspace_root=workspace_root,
+    )
+
+
+def test_minimal_child_env_filters_unrelated_secrets() -> None:
+    child_env = launcher_mod.minimal_child_env(
+        {
+            "PATH": "/bin",
+            "HOME": "/home/user",
+            "SECRET_TOKEN": "hidden",
+            "CODECLONE_WORKSPACE_ROOT": "",
+            "PYTHONPATH": "/tmp",
+        },
+        workspace_root=Path("/workspace/repo"),
+    )
+    assert child_env["PATH"] == "/bin"
+    assert child_env["HOME"] == "/home/user"
+    assert child_env["PYTHONPATH"] == "/tmp"
+    assert child_env["CODECLONE_WORKSPACE_ROOT"] == "/workspace/repo"
+    assert "SECRET_TOKEN" not in child_env
 
 
 def test_resolve_launch_target_prefers_poetry_before_path(tmp_path: Path) -> None:
@@ -74,6 +124,9 @@ def test_resolve_launch_target_prefers_poetry_before_path(tmp_path: Path) -> Non
 
     def fake_run(*_args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
         assert kwargs["cwd"] == str(workspace_root)
+        probe_env = kwargs["env"]
+        assert isinstance(probe_env, dict)
+        assert "SECRET_TOKEN" not in probe_env
         return subprocess.CompletedProcess(
             args=["poetry", "env", "info", "-p"],
             returncode=0,
@@ -82,7 +135,7 @@ def test_resolve_launch_target_prefers_poetry_before_path(tmp_path: Path) -> Non
         )
 
     target = launcher_mod.resolve_launch_target(
-        env={"PWD": str(workspace_root)},
+        env={"PWD": str(workspace_root), "SECRET_TOKEN": "hidden"},
         cwd=str(workspace_root),
         repo_root=workspace_root,
         run_cmd=fake_run,
@@ -94,7 +147,7 @@ def test_resolve_launch_target_prefers_poetry_before_path(tmp_path: Path) -> Non
     )
 
     assert target == launcher_mod.LaunchTarget(
-        command=str(poetry_launcher),
+        command=str(poetry_launcher.resolve()),
         source="poetryEnv",
         workspace_root=workspace_root,
     )

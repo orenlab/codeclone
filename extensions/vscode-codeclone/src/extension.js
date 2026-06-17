@@ -1,5 +1,6 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
 /** @type {any} */
@@ -16,6 +17,7 @@ const {
     REVIEW_DECORATION_THEMES,
     WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
     WORKSPACE_STATE_LAST_HELP_TOPIC,
+    TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
 } = require("./constants");
 const {
     capitalize,
@@ -67,6 +69,8 @@ const {
 const {CodeCloneMcpClient, MCPClientError} = require("./mcpClient");
 const {
     markdownBulletList,
+    renderBlastRadiusMarkdown,
+    renderBlastRadiusSvgHtml,
     renderCoverageJoinMarkdown,
     renderFindingMarkdown,
     renderOverloadedModuleMarkdown,
@@ -77,9 +81,40 @@ const {
     renderSetupMarkdown,
     renderTriageMarkdown,
 } = require("./renderers");
-const {loadRunArtifacts} = require("./runArtifacts");
+const {
+    renderAuditTrailHtml,
+    renderAuditTrailMarkdown,
+    renderSessionStatsHtml,
+    renderSessionStatsMarkdown,
+} = require("./workspaceInsightsRenderer");
+const {
+    renderTrajectoryDashboardHtml,
+    renderTrajectoryDetailHtml,
+    renderTrajectoryDashboardMarkdown,
+    formatTrajectoryPickDescription,
+} = require("./trajectoryViewerRenderer");
+const {fetchProductionTriage, loadRunArtifacts, shouldUseCachedTriage} = require("./runArtifacts");
+const {MemoryController, recordStatement} = require("./memoryController");
+const {
+    buildBulkConfirmDetail,
+    dedupeGovernanceNodes,
+    distinctRecordTypes,
+    formatBulkResultSummary,
+    recordIdFromTreeItemId,
+    resolveGovernanceTargets,
+} = require("./memoryBulkSelection");
+const {
+    MemorySearchController,
+    activeEditorMemoryPath,
+    isValidMemoryRecordId,
+} = require("./memorySearch");
+const {
+    ensureIdeGovernanceRegistered,
+    withIdeGovernanceChannel,
+} = require("./memoryGovernance");
 const {
     HotspotsTreeProvider,
+    MemoryTreeProvider,
     OverviewTreeProvider,
     ReviewCodeLensProvider,
     ReviewFileDecorationProvider,
@@ -102,6 +137,7 @@ const {
     STALE_REASON_EDITOR,
     STALE_REASON_WORKSPACE,
     isMinimumSupportedCodeCloneVersion,
+    isLauncherWithinWorkspace,
     launchSpecOrigin,
     resolveAnalysisSettings,
     sameAnalysisSettings,
@@ -125,6 +161,8 @@ class CodeCloneController {
             log: true,
         });
         this.client = new CodeCloneMcpClient(this.outputChannel);
+        this.memoryController = new MemoryController(this);
+        this.memorySearchController = new MemorySearchController(this);
         this.states = new Map();
         this.hotspotFocusMode = this.loadHotspotFocusMode();
         const storedHelpTopic = this.context.workspaceState.get(
@@ -162,6 +200,7 @@ class CodeCloneController {
         this.overviewProvider = new OverviewTreeProvider(this);
         this.hotspotsProvider = new HotspotsTreeProvider(this);
         this.sessionProvider = new SessionTreeProvider(this);
+        this.memoryProvider = new MemoryTreeProvider(this);
         this.reviewCodeLensProvider = new ReviewCodeLensProvider(this);
         this.reviewFileDecorationProvider = new ReviewFileDecorationProvider(this);
         this.overviewView = vscode.window.createTreeView("codeclone.overview", {
@@ -175,6 +214,30 @@ class CodeCloneController {
         this.sessionView = vscode.window.createTreeView("codeclone.session", {
             treeDataProvider: this.sessionProvider,
             showCollapseAll: false,
+        });
+        this.memoryView = vscode.window.createTreeView("codeclone.memory", {
+            treeDataProvider: this.memoryProvider,
+            showCollapseAll: true,
+            canSelectMany: true,
+        });
+        this.memoryView.onDidChangeCheckboxState((event) => {
+            const folder = this.getMemoryWorkspaceFolder();
+            if (!folder) {
+                return;
+            }
+            for (const [treeItem, state] of event.items) {
+                const recordId = recordIdFromTreeItemId(treeItem.id);
+                if (!recordId) {
+                    continue;
+                }
+                this.memoryController.setDraftChecked(
+                    folder,
+                    recordId,
+                    state === vscode.TreeItemCheckboxState.Checked
+                );
+            }
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
         });
         this.onClientState = (state) => {
             if (this.disposed) {
@@ -211,6 +274,8 @@ class CodeCloneController {
             this.overviewProvider,
             this.hotspotsProvider,
             this.sessionProvider,
+            this.memoryProvider,
+            this.memoryView,
             this.reviewCodeLensProvider,
             this.reviewFileDecorationProvider,
             this.overviewView,
@@ -377,6 +442,94 @@ class CodeCloneController {
             vscode.commands.registerCommand("codeclone.reviewSecuritySurface", (node) =>
                 this.reviewSecuritySurface(node)
             ),
+            vscode.commands.registerCommand("codeclone.showBlastRadius", () =>
+                this.showBlastRadius()
+            ),
+            vscode.commands.registerCommand("codeclone.copyBlastRadiusBrief", () =>
+                this.copyBlastRadiusBrief()
+            ),
+            vscode.commands.registerCommand("codeclone.showWorkspaceSessionStats", () =>
+                this.showWorkspaceSessionStats()
+            ),
+            vscode.commands.registerCommand("codeclone.showControllerAuditTrail", () =>
+                this.showControllerAuditTrail()
+            ),
+            vscode.commands.registerCommand("codeclone.copyWorkspaceSessionStatsBrief", () =>
+                this.copyWorkspaceSessionStatsBrief()
+            ),
+            vscode.commands.registerCommand("codeclone.copyControllerAuditTrailBrief", () =>
+                this.copyControllerAuditTrailBrief()
+            ),
+            vscode.commands.registerCommand("codeclone.showTrajectoryDashboard", () =>
+                this.showTrajectoryDashboard()
+            ),
+            vscode.commands.registerCommand("codeclone.showTrajectoryDetail", () =>
+                this.showTrajectoryDetail()
+            ),
+            vscode.commands.registerCommand("codeclone.copyTrajectoryDashboardBrief", () =>
+                this.copyTrajectoryDashboardBrief()
+            ),
+            vscode.commands.registerCommand("codeclone.refreshMemory", () =>
+                this.refreshMemoryView()
+            ),
+            vscode.commands.registerCommand("codeclone.syncMemoryFromRun", () =>
+                this.syncMemoryFromRun()
+            ),
+            vscode.commands.registerCommand(
+                "codeclone.approveMemoryRecord",
+                (node, selectedItems) =>
+                    this.governMemoryRecordSelection(node, selectedItems, "approve")
+            ),
+            vscode.commands.registerCommand(
+                "codeclone.rejectMemoryRecord",
+                (node, selectedItems) =>
+                    this.governMemoryRecordSelection(node, selectedItems, "reject")
+            ),
+            vscode.commands.registerCommand("codeclone.approveCheckedMemoryDrafts", () =>
+                this.governCheckedMemoryDrafts("approve")
+            ),
+            vscode.commands.registerCommand("codeclone.rejectCheckedMemoryDrafts", () =>
+                this.governCheckedMemoryDrafts("reject")
+            ),
+            vscode.commands.registerCommand("codeclone.selectAllMemoryDrafts", () =>
+                this.selectAllMemoryDrafts()
+            ),
+            vscode.commands.registerCommand("codeclone.selectMemoryDraftsByType", () =>
+                this.selectMemoryDraftsByType()
+            ),
+            vscode.commands.registerCommand("codeclone.clearMemoryDraftSelection", () =>
+                this.clearMemoryDraftSelection()
+            ),
+            vscode.commands.registerCommand("codeclone.selectAllMemoryStale", () =>
+                this.selectAllMemoryStale()
+            ),
+            vscode.commands.registerCommand("codeclone.selectMemoryStaleByType", () =>
+                this.selectMemoryStaleByType()
+            ),
+            vscode.commands.registerCommand("codeclone.openMemoryRecord", (node) =>
+                this.openMemoryRecord(node)
+            ),
+            vscode.commands.registerCommand("codeclone.openMemoryRecordById", (recordId) =>
+                this.openMemoryRecordById(recordId)
+            ),
+            vscode.commands.registerCommand("codeclone.searchEngineeringMemory", () =>
+                this.searchEngineeringMemory()
+            ),
+            vscode.commands.registerCommand("codeclone.memoryForActiveFile", () =>
+                this.memoryForActiveFile()
+            ),
+            vscode.commands.registerCommand("codeclone.openMemorySearchPanel", () =>
+                this.openMemorySearchPanel()
+            ),
+            vscode.commands.registerCommand("codeclone.refreshMemorySearch", () =>
+                this.refreshMemorySearchPanel()
+            ),
+            vscode.commands.registerCommand("codeclone.configureMemorySearch", () =>
+                this.configureMemorySearch()
+            ),
+            vscode.commands.registerCommand("codeclone.openMemoryView", () =>
+                vscode.commands.executeCommand("codeclone.memory.focus")
+            ),
         ];
         this.context.subscriptions.push(...subscriptions);
     }
@@ -387,6 +540,15 @@ class CodeCloneController {
             this.states.set(key, new WorkspaceState(folder));
         }
         return this.states.get(key);
+    }
+
+    getMemoryWorkspaceFolder() {
+        const state = this.getPrimaryState();
+        if (state?.folder) {
+            return state.folder;
+        }
+        const folders = vscode.workspace.workspaceFolders;
+        return folders && folders.length > 0 ? folders[0] : undefined;
     }
 
     getPrimaryState() {
@@ -640,10 +802,13 @@ class CodeCloneController {
         const config = vscode.workspace.getConfiguration("codeclone", folder.uri);
         const configuredCommand = config.get("mcp.command", "auto");
         const configuredArgs = config.get("mcp.args", []);
+        const governanceArgs = withIdeGovernanceChannel(
+            Array.isArray(configuredArgs) ? configuredArgs : []
+        );
         if (configuredCommand && configuredCommand !== "auto") {
             return normalizedLaunchSpec({
                 command: configuredCommand,
-                args: Array.isArray(configuredArgs) ? configuredArgs : [],
+                args: governanceArgs,
                 cwd: folder.uri.fsPath,
                 source: "configured",
             });
@@ -656,17 +821,20 @@ class CodeCloneController {
             }))
         );
         const localLauncher = candidateChecks.find((entry) => entry.exists)?.candidate;
-        if (localLauncher) {
+        if (
+            localLauncher &&
+            isLauncherWithinWorkspace(localLauncher, folder.uri.fsPath)
+        ) {
             return normalizedLaunchSpec({
                 command: localLauncher,
-                args: Array.isArray(configuredArgs) ? configuredArgs : [],
+                args: governanceArgs,
                 cwd: folder.uri.fsPath,
                 source: "workspaceLocal",
             });
         }
         const primary = /** @type {any} */ (normalizedLaunchSpec({
             command: "codeclone-mcp",
-            args: Array.isArray(configuredArgs) ? configuredArgs : [],
+            args: governanceArgs,
             cwd: folder.uri.fsPath,
             source: "path",
         }));
@@ -682,6 +850,11 @@ class CodeCloneController {
     }
 
     async ensureConnected(folder) {
+        if (!(await this.ensureWorkspaceTrust())) {
+            throw new MCPClientError(
+                "CodeClone requires a trusted workspace before starting the local MCP server."
+            );
+        }
         const launchSpec = await this.resolveLaunchSpec(folder);
         if (this.client.isConnected() && this.connectionInfo.launchSpec) {
             const activeLaunchSpec = this.connectionInfo.launchSpec;
@@ -735,8 +908,29 @@ class CodeCloneController {
                 )
             );
         }
+        try {
+            const registration = await ensureIdeGovernanceRegistered(
+                this.client,
+                this.context,
+                effectiveLaunchSpec.cwd
+            );
+            if (registration.status !== "ok") {
+                logChannelMessage(
+                    this.outputChannel,
+                    "warn",
+                    `[codeclone] IDE governance registration returned ${registration.status}.`
+                );
+            }
+        } catch (error) {
+            logChannelMessage(
+                this.outputChannel,
+                "warn",
+                `[codeclone] IDE governance registration failed: ${error.message}`
+            );
+        }
         this.updateContextKeys();
         this.updateStatusBar();
+        this.memoryProvider.refresh();
         return connection;
     }
 
@@ -1141,6 +1335,8 @@ class CodeCloneController {
                     state.currentRunId = runId;
                     state.latestSummary = artifacts.summary;
                     state.latestTriage = artifacts.triage;
+                    state.lastTriageFetchAt = Date.now();
+                    state.lastTriageFetchRunId = runId;
                     state.metricsSummary = artifacts.metricsSummary;
                     state.changedSummary = changedMode ? analysisPayload : null;
                     state.analysisSettings = analysisSettings;
@@ -1191,13 +1387,73 @@ class CodeCloneController {
 
     async openProductionTriage() {
         const state = this.getPrimaryState();
-        if (!state || !state.latestTriage) {
+        if (!state || !state.currentRunId) {
             await vscode.window.showInformationMessage(
                 "Start with Analyze Workspace or Review Changes before opening triage."
             );
             return;
         }
-        await this.showMarkdownDocument(renderTriageMarkdown(state));
+        try {
+            await this.ensureConnected(state.folder);
+            const triage = await this.resolveLiveTriage(state);
+            if (!triage) {
+                await vscode.window.showWarningMessage(
+                    "Could not load production triage for the current run."
+                );
+                return;
+            }
+            await this.showMarkdownDocument(renderTriageMarkdown(state));
+        } catch (error) {
+            this.handleError(error, "Could not open production triage.");
+        }
+    }
+
+    async resolveLiveTriage(state) {
+        const runId = state.currentRunId;
+        if (!runId) {
+            return null;
+        }
+        if (state.triageFetchPromise) {
+            return state.triageFetchPromise;
+        }
+        const now = Date.now();
+        if (
+            shouldUseCachedTriage(
+                {
+                    now,
+                    currentRunId: runId,
+                    lastTriageFetchAt: state.lastTriageFetchAt,
+                    lastTriageFetchRunId: state.lastTriageFetchRunId,
+                    stale: state.stale,
+                    cooldownMs: TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
+                },
+                Boolean(state.latestTriage)
+            )
+        ) {
+            return state.latestTriage;
+        }
+        const fetchPromise = vscode.window
+            .withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Refreshing production triage",
+                    cancellable: false,
+                },
+                async () => fetchProductionTriage(this.client, runId)
+            )
+            .then((triage) => {
+                state.latestTriage = triage;
+                state.lastTriageFetchAt = Date.now();
+                state.lastTriageFetchRunId = runId;
+                return triage;
+            })
+            .finally(() => {
+                if (state.triageFetchPromise === fetchPromise) {
+                    state.triageFetchPromise = null;
+                }
+            });
+        state.triageFetchPromise = fetchPromise;
+        return fetchPromise;
     }
 
     setActiveReviewTarget(target) {
@@ -2786,6 +3042,383 @@ class CodeCloneController {
         );
     }
 
+    async showBlastRadius() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        const state = this.getWorkspaceState(folder);
+        if (!state.currentRunId) {
+            const choice = await vscode.window.showInformationMessage(
+                "No CodeClone run is available. Analyze the workspace first.",
+                "Analyze Workspace"
+            );
+            if (choice === "Analyze Workspace") {
+                await this.analyzeWorkspace();
+            }
+            return;
+        }
+        const files = this.resolveBlastRadiusFiles(folder);
+        if (files.length === 0) {
+            const input = await vscode.window.showInputBox({
+                title: "Blast Radius",
+                prompt: "Enter a workspace-relative file path",
+                placeHolder: "src/module.py",
+            });
+            if (!input || !input.trim()) {
+                return;
+            }
+            files.push(this.normalizeBlastRadiusFileInput(folder, input));
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_blast_radius", {
+                files,
+                run_id: state.currentRunId,
+                depth: "transitive",
+            });
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.blastRadius",
+                `Blast Radius: ${files.map((f) => path.basename(f)).join(", ")}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("target");
+            panel.webview.html = renderBlastRadiusSvgHtml(
+                payload,
+                folder.name,
+                nonce
+            );
+        } catch (error) {
+            this.handleError(error, "Could not compute blast radius.");
+        }
+    }
+
+    async copyBlastRadiusBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        const state = this.getWorkspaceState(folder);
+        if (!state.currentRunId) {
+            await vscode.window.showInformationMessage(
+                "No CodeClone run is available. Analyze the workspace first."
+            );
+            return;
+        }
+        const files = this.resolveBlastRadiusFiles(folder);
+        if (files.length === 0) {
+            const input = await vscode.window.showInputBox({
+                title: "Blast Radius Brief",
+                prompt: "Enter a workspace-relative file path",
+                placeHolder: "src/module.py",
+            });
+            if (!input || !input.trim()) {
+                return;
+            }
+            files.push(this.normalizeBlastRadiusFileInput(folder, input));
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_blast_radius", {
+                files,
+                run_id: state.currentRunId,
+                depth: "transitive",
+            });
+            const brief = renderBlastRadiusMarkdown(payload, folder.name);
+            await vscode.env.clipboard.writeText(brief);
+            await vscode.window.showInformationMessage(
+                `Copied blast radius brief for ${files.join(", ")}.`
+            );
+        } catch (error) {
+            this.handleError(error, "Could not compute blast radius for brief.");
+        }
+    }
+
+    async showWorkspaceSessionStats() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_workspace_session_stats", {
+                root: folder.uri.fsPath,
+            });
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.sessionStats",
+                `Session Stats: ${folder.name}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("debug-console");
+            panel.webview.html = renderSessionStatsHtml(payload, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load workspace session stats.");
+        }
+    }
+
+    async showControllerAuditTrail() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_controller_audit_trail", {
+                root: folder.uri.fsPath,
+                limit: 50,
+            });
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.controllerAudit",
+                `Controller Audit: ${folder.name}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("history");
+            panel.webview.html = renderAuditTrailHtml(payload, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load controller audit trail.");
+        }
+    }
+
+    async showTrajectoryDashboard() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const result = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_dashboard",
+                max_results: 25,
+            });
+            const payload =
+                result && typeof result.payload === "object" && result.payload
+                    ? result.payload
+                    : result;
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.trajectoryDashboard",
+                `Trajectories: ${folder.name}`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                    retainContextWhenHidden: true,
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("history");
+            panel.webview.html = renderTrajectoryDashboardHtml(payload, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load trajectory dashboard.");
+        }
+    }
+
+    async showTrajectoryDetail() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const listResult = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_dashboard",
+                max_results: 25,
+            });
+            const listPayload =
+                listResult && typeof listResult.payload === "object" && listResult.payload
+                    ? listResult.payload
+                    : listResult;
+            const recent = Array.isArray(listPayload?.recent_trajectories)
+                ? listPayload.recent_trajectories
+                : [];
+            if (recent.length === 0) {
+                await vscode.window.showInformationMessage(
+                    "No stored trajectories. Run `codeclone memory trajectory rebuild` first."
+                );
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(
+                recent.map((item) => ({
+                    label: String(item.trajectory_id || "?"),
+                    description: `${item.outcome}/${item.quality_tier} · ${item.workflow_id || ""}`,
+                    detail: formatTrajectoryPickDescription(item),
+                    trajectoryId: String(item.trajectory_id || ""),
+                })),
+                {
+                    title: "Open trajectory detail",
+                    placeHolder: "Select a stored trajectory",
+                }
+            );
+            if (!picked?.trajectoryId) {
+                return;
+            }
+            const detailResult = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_get",
+                record_id: picked.trajectoryId,
+            });
+            const detailPayload =
+                detailResult && typeof detailResult.payload === "object" && detailResult.payload
+                    ? detailResult.payload
+                    : detailResult;
+            const trajectory =
+                detailPayload && typeof detailPayload.trajectory === "object"
+                    ? detailPayload.trajectory
+                    : null;
+            if (!trajectory) {
+                await vscode.window.showWarningMessage("Trajectory detail not found.");
+                return;
+            }
+            const nonce = crypto.randomBytes(16).toString("hex");
+            const panel = vscode.window.createWebviewPanel(
+                "codeclone.trajectoryDetail",
+                `Trajectory: ${picked.trajectoryId.slice(0, 18)}…`,
+                vscode.ViewColumn.Beside,
+                {
+                    enableScripts: false,
+                    localResourceRoots: [],
+                    retainContextWhenHidden: true,
+                }
+            );
+            panel.iconPath = new vscode.ThemeIcon("list-tree");
+            panel.webview.html = renderTrajectoryDetailHtml(trajectory, folder.name, nonce);
+        } catch (error) {
+            this.handleError(error, "Could not load trajectory detail.");
+        }
+    }
+
+    async copyTrajectoryDashboardBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const result = await this.client.callTool("query_engineering_memory", {
+                root: folder.uri.fsPath,
+                mode: "trajectory_dashboard",
+                max_results: 25,
+            });
+            const payload =
+                result && typeof result.payload === "object" && result.payload
+                    ? result.payload
+                    : result;
+            const brief = renderTrajectoryDashboardMarkdown(payload);
+            await vscode.env.clipboard.writeText(brief);
+            await vscode.window.showInformationMessage("Copied trajectory dashboard brief.");
+        } catch (error) {
+            this.handleError(error, "Could not copy trajectory dashboard brief.");
+        }
+    }
+
+    async copyWorkspaceSessionStatsBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_workspace_session_stats", {
+                root: folder.uri.fsPath,
+            });
+            await vscode.env.clipboard.writeText(renderSessionStatsMarkdown(payload));
+            await vscode.window.showInformationMessage(
+                "Copied workspace session stats brief."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not copy session stats brief.");
+        }
+    }
+
+    async copyControllerAuditTrailBrief() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        if (!(await this.ensureWorkspaceTrust())) {
+            return;
+        }
+        try {
+            await this.ensureConnected(folder);
+            const payload = await this.client.callTool("get_controller_audit_trail", {
+                root: folder.uri.fsPath,
+                limit: 50,
+            });
+            await vscode.env.clipboard.writeText(renderAuditTrailMarkdown(payload));
+            await vscode.window.showInformationMessage(
+                "Copied controller audit trail brief."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not copy controller audit brief.");
+        }
+    }
+
+    /**
+     * @param {any} folder
+     * @returns {string[]}
+     */
+    resolveBlastRadiusFiles(folder) {
+        const editor = vscode.window.activeTextEditor;
+        if (!editor) {
+            return [];
+        }
+        const relativePath = workspaceRelativePath(folder, editor.document.uri.fsPath);
+        if (relativePath && !relativePath.startsWith("..")) {
+            return [relativePath];
+        }
+        return [];
+    }
+
+    normalizeBlastRadiusFileInput(folder, input) {
+        const resolved = resolveWorkspacePath(folder.uri.fsPath, input);
+        if (!resolved) {
+            throw new MCPClientError(
+                "Blast radius path must be a workspace-relative file inside the open folder."
+            );
+        }
+        return path.relative(folder.uri.fsPath, resolved).split(path.sep).join("/");
+    }
+
     async clearSessionState() {
         const folder = this.getPreferredFolder();
         if (!folder) {
@@ -2799,6 +3432,9 @@ class CodeCloneController {
                 state.latestSummary = null;
                 state.metricsSummary = null;
                 state.latestTriage = null;
+                state.lastTriageFetchAt = 0;
+                state.lastTriageFetchRunId = null;
+                state.triageFetchPromise = null;
                 state.changedSummary = null;
                 state.analysisSettings = null;
                 state.reviewed = [];
@@ -3477,6 +4113,525 @@ class CodeCloneController {
         return [];
     }
 
+    async getMemoryChildren(node) {
+        const folder = this.getMemoryWorkspaceFolder();
+        try {
+            return await this.memoryController.getChildren(folder, node);
+        } catch (error) {
+            return [
+                {
+                    nodeType: "message",
+                    label: `Error: ${error.message}`,
+                    icon: new vscode.ThemeIcon("error"),
+                },
+            ];
+        }
+    }
+
+    async refreshMemoryView() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        this.memoryController.invalidate(folder);
+        this.memoryProvider.refresh();
+        this.updateViewChrome();
+        this.updateContextKeys();
+    }
+
+    async syncMemoryFromRun() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Syncing engineering memory from analysis run",
+                },
+                async () => {
+                    await this.ensureConnected(folder);
+                    await this.client.callTool("manage_engineering_memory", {
+                        root: folder.uri.fsPath,
+                        action: "refresh_from_run",
+                    });
+                }
+            );
+            this.memoryController.invalidate(folder);
+            this.memoryProvider.refresh();
+            this.updateViewChrome();
+            await vscode.window.showInformationMessage(
+                "Engineering memory synced from the latest analysis run."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not sync engineering memory.");
+        }
+    }
+
+    async governMemoryRecordSelection(node, selectedItems, decision) {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        const resolved = resolveGovernanceTargets(node, selectedItems);
+        if (!resolved.length) {
+            await vscode.window.showWarningMessage(
+                "No memory records selected for governance."
+            );
+            return;
+        }
+        await this.governMemoryRecords(folder, resolved, decision);
+    }
+
+    async governCheckedMemoryDrafts(decision) {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        const checked = this.memoryController.getCheckedGovernanceNodes(folder);
+        if (!checked.length) {
+            await vscode.window.showWarningMessage(
+                "No memory records are checked. Use inbox or stale checkboxes, or Select all."
+            );
+            return;
+        }
+        await this.governMemoryRecords(folder, checked, decision);
+    }
+
+    async selectAllMemoryDrafts() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const recordIds = snapshot.drafts
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select memory drafts.");
+        }
+    }
+
+    async selectMemoryDraftsByType() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const types = distinctRecordTypes(snapshot.drafts);
+            if (!types.length) {
+                await vscode.window.showInformationMessage(
+                    "No draft memory records in the inbox."
+                );
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(types, {
+                placeHolder: "Select record type to check in the inbox",
+                canPickMany: true,
+            });
+            if (!picked?.length) {
+                return;
+            }
+            const typeSet = new Set(picked);
+            const recordIds = snapshot.drafts
+                .filter((record) => typeSet.has(String(record.type || "")))
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select memory drafts by type.");
+        }
+    }
+
+    async clearMemoryDraftSelection() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        this.memoryController.clearCheckedDrafts(folder);
+        this.memoryProvider.refresh();
+        this.updateContextKeys();
+    }
+
+    async selectAllMemoryStale() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const recordIds = snapshot.stale
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select stale memory records.");
+        }
+    }
+
+    async selectMemoryStaleByType() {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const snapshot = await this.memoryController.ensureSnapshot(folder);
+            const types = distinctRecordTypes(snapshot.stale);
+            if (!types.length) {
+                await vscode.window.showInformationMessage(
+                    "No stale memory records."
+                );
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(types, {
+                placeHolder: "Select record type to check in stale",
+                canPickMany: true,
+            });
+            if (!picked?.length) {
+                return;
+            }
+            const typeSet = new Set(picked);
+            const recordIds = snapshot.stale
+                .filter((record) => typeSet.has(String(record.type || "")))
+                .map((record) => String(record.id || ""))
+                .filter((recordId) => recordId.length > 0);
+            this.memoryController.setDraftsChecked(folder, recordIds, true);
+            this.memoryProvider.refresh();
+            this.updateContextKeys();
+        } catch (error) {
+            this.handleError(error, "Could not select stale memory records by type.");
+        }
+    }
+
+    /**
+     * @param {import("vscode").WorkspaceFolder} folder
+     * @param {object[]} nodes
+     * @param {"approve"|"reject"|"archive"} decision
+     */
+    async governMemoryRecords(folder, nodes, decision) {
+        await this.memoryController.ensureSnapshot(folder);
+        const hydrated = this.memoryController.hydrateGovernanceNodes(
+            folder,
+            dedupeGovernanceNodes(nodes)
+        );
+        if (!hydrated.length) {
+            await vscode.window.showWarningMessage(
+                "No memory records selected for governance."
+            );
+            return;
+        }
+        let workingTargets = hydrated;
+        if (decision === "reject") {
+            const draftTargets = hydrated.filter(
+                (node) => String(node.record?.status || "draft") === "draft"
+            );
+            if (!draftTargets.length) {
+                await vscode.window.showWarningMessage(
+                    "Only draft records can be rejected. Stale records can be approved or opened."
+                );
+                return;
+            }
+            workingTargets = draftTargets;
+        }
+        const labels = {
+            approve: {verb: "Approve", gerund: "Approving", past: "approved"},
+            reject: {verb: "Reject", gerund: "Rejecting", past: "rejected"},
+            archive: {verb: "Archive", gerund: "Archiving", past: "archived"},
+        };
+        const label = labels[decision] || labels.approve;
+        const validTargets = [];
+        const skipped = [];
+        for (const node of workingTargets) {
+            const record = safeObject(node.record);
+            try {
+                this.memoryController.assertGovernanceAllowed(
+                    String(record.status || "draft"),
+                    decision
+                );
+                validTargets.push(node);
+            } catch (error) {
+                skipped.push({
+                    recordId: String(record.id || ""),
+                    message:
+                        error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+        if (!validTargets.length) {
+            const first = skipped[0];
+            await vscode.window.showWarningMessage(
+                first?.message || "Selected memory records cannot be updated."
+            );
+            return;
+        }
+        const confirmLabel =
+            validTargets.length === 1
+                ? label.verb
+                : `${label.verb} ${validTargets.length}`;
+        const confirmPrompt =
+            validTargets.length === 1
+                ? `${label.verb} this memory record?`
+                : `${label.verb} ${validTargets.length} memory records?`;
+        const detail = buildBulkConfirmDetail(validTargets, decision);
+        const confirm = await vscode.window.showWarningMessage(
+            confirmPrompt,
+            {modal: true, detail},
+            confirmLabel
+        );
+        if (confirm !== confirmLabel) {
+            return;
+        }
+        /** @type {{succeeded: string[], failed: {recordId: string, message: string}[]}} */
+        const results = {succeeded: [], failed: [...skipped]};
+        try {
+            await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title:
+                        validTargets.length === 1
+                            ? `${label.gerund} memory record`
+                            : `${label.gerund} ${validTargets.length} memory records`,
+                    cancellable: true,
+                },
+                async (progress, token) => {
+                    await this.ensureConnected(folder);
+                    for (let index = 0; index < validTargets.length; index += 1) {
+                        if (token.isCancellationRequested) {
+                            break;
+                        }
+                        const node = validTargets[index];
+                        const recordId = String(node.record?.id || "");
+                        progress.report({
+                            message: `${index + 1}/${validTargets.length} — ${recordId}`,
+                        });
+                        try {
+                            await this.memoryController.runGovernance(
+                                folder,
+                                node,
+                                decision,
+                                {
+                                    progress,
+                                    token,
+                                    deferInvalidate: true,
+                                }
+                            );
+                            results.succeeded.push(recordId);
+                            this.memoryController.setDraftChecked(
+                                folder,
+                                recordId,
+                                false
+                            );
+                        } catch (error) {
+                            if (
+                                error instanceof Error &&
+                                error.message === "Canceled"
+                            ) {
+                                throw error;
+                            }
+                            results.failed.push({
+                                recordId,
+                                message:
+                                    error instanceof Error
+                                        ? error.message
+                                        : String(error),
+                            });
+                        }
+                    }
+                }
+            );
+        } catch (error) {
+            if (error instanceof Error && error.message === "Canceled") {
+                return;
+            }
+            this.handleError(error, "Could not update the memory records.");
+            return;
+        }
+        this.memoryController.invalidate(folder);
+        this.memoryProvider.refresh();
+        this.updateViewChrome();
+        this.updateContextKeys();
+        const summary = formatBulkResultSummary(results, decision);
+        if (results.succeeded.length) {
+            await vscode.window.showInformationMessage(summary);
+        } else if (results.failed.length) {
+            await vscode.window.showWarningMessage(summary);
+        }
+    }
+
+    async openMemoryRecord(node) {
+        const folder = this.getMemoryWorkspaceFolder();
+        if (!folder || !node) {
+            return;
+        }
+        try {
+            await this.memoryController.openRecordDetail(folder, node);
+        } catch (error) {
+            this.handleError(error, "Could not open the memory record.");
+        }
+    }
+
+    async openMemoryRecordById(recordId) {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        if (!isValidMemoryRecordId(recordId)) {
+            this.handleError(
+                new Error("Invalid memory record id."),
+                "Could not open the memory record."
+            );
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            await this.memorySearchController.openRecordById(folder, recordId);
+        } catch (error) {
+            this.handleError(error, "Could not open the memory record.");
+        }
+    }
+
+    async searchEngineeringMemory() {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            const query = await this.memorySearchController.promptSearchQuery(folder);
+            if (!query) {
+                return;
+            }
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Searching engineering memory",
+                },
+                async () => this.memorySearchController.querySearch(folder, query)
+            );
+            const records = this.memorySearchController.extractRecords(result);
+            const picked = await this.memorySearchController.pickRecord(
+                records,
+                "Engineering Memory Search"
+            );
+            if (picked) {
+                await this.memorySearchController.openRecord(folder, picked);
+            }
+        } catch (error) {
+            this.handleError(error, "Could not search engineering memory.");
+        }
+    }
+
+    async memoryForActiveFile() {
+        const folder = this.getPreferredFolder();
+        if (!folder) {
+            return;
+        }
+        const relPath = activeEditorMemoryPath(folder);
+        if (!relPath) {
+            await vscode.window.showInformationMessage(
+                "Open a workspace file in the editor to load memory for that path."
+            );
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: `Memory for ${relPath}`,
+                },
+                async () => this.memorySearchController.queryForPath(folder, relPath)
+            );
+            const records = this.memorySearchController.extractRecords(result);
+            const picked = await this.memorySearchController.pickRecord(
+                records,
+                `Memory: ${relPath}`
+            );
+            if (picked) {
+                await this.memorySearchController.openRecord(folder, picked);
+            }
+        } catch (error) {
+            this.handleError(error, "Could not load memory for the active file.");
+        }
+    }
+
+    async openMemorySearchPanel() {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const ready = await this.memorySearchController.ensureMemoryReady(folder);
+            if (!ready.ok) {
+                return;
+            }
+            const query = await this.memorySearchController.promptSearchQuery(folder);
+            if (!query) {
+                return;
+            }
+            const result = await vscode.window.withProgress(
+                {
+                    location: vscode.ProgressLocation.Notification,
+                    title: "Searching engineering memory",
+                },
+                async () => this.memorySearchController.querySearch(folder, query)
+            );
+            this.memorySearchController.showSearchPanel(folder, query, result);
+        } catch (error) {
+            this.handleError(error, "Could not open memory search.");
+        }
+    }
+
+    async refreshMemorySearchPanel() {
+        try {
+            await this.memorySearchController.refreshActivePanel();
+        } catch (error) {
+            this.handleError(error, "Could not refresh memory search.");
+        }
+    }
+
+    async configureMemorySearch() {
+        const folder = this.getPreferredFolder() || this.getMemoryWorkspaceFolder();
+        if (!folder) {
+            return;
+        }
+        try {
+            const updated = await this.memorySearchController.configureSearchFilters(
+                folder
+            );
+            if (!updated) {
+                return;
+            }
+            if (this.memorySearchController.activePanel) {
+                await this.memorySearchController.refreshActivePanel();
+            }
+            await vscode.window.showInformationMessage(
+                "Engineering memory search filters updated for this workspace."
+            );
+        } catch (error) {
+            this.handleError(error, "Could not update memory search settings.");
+        }
+    }
+
     async getHotspotGroupChildren(state, groupId) {
         if (state.groupCache.has(groupId)) {
             return state.groupCache.get(groupId);
@@ -3770,6 +4925,7 @@ class CodeCloneController {
                 item.id = node.id;
                 item.description = node.description;
                 item.iconPath = node.icon;
+                item.contextValue = node.contextValue;
                 item.command = node.command;
                 break;
             }
@@ -3846,6 +5002,47 @@ class CodeCloneController {
                 };
                 break;
             }
+            case "memoryDraft": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.Collapsed
+                );
+                item.id = node.id;
+                item.description = node.description;
+                item.tooltip = node.tooltip;
+                item.iconPath = node.icon;
+                item.contextValue = node.contextValue || "codeclone.memoryDraft";
+                item.command = node.command;
+                if (node.checkboxState !== undefined) {
+                    item.checkboxState = node.checkboxState;
+                }
+                break;
+            }
+            case "memoryStale": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.Collapsed
+                );
+                item.id = node.id;
+                item.description = node.description;
+                item.tooltip = node.tooltip;
+                item.iconPath = node.icon;
+                item.contextValue = node.contextValue || "codeclone.memoryStale";
+                item.command = node.command;
+                if (node.checkboxState !== undefined) {
+                    item.checkboxState = node.checkboxState;
+                }
+                break;
+            }
+            case "action": {
+                item = new vscode.TreeItem(
+                    node.label,
+                    vscode.TreeItemCollapsibleState.None
+                );
+                item.iconPath = node.icon;
+                item.command = node.command;
+                break;
+            }
             case "detail": {
                 item = new vscode.TreeItem(
                     node.label,
@@ -3878,6 +5075,7 @@ class CodeCloneController {
         this.overviewProvider.refresh();
         this.hotspotsProvider.refresh();
         this.sessionProvider.refresh();
+        this.memoryProvider.refresh();
         this.reviewCodeLensProvider.refresh();
         this.updateViewChrome();
     }
@@ -3987,6 +5185,19 @@ class CodeCloneController {
             this.sessionView.description =
                 state && state.reviewed.length > 0 ? `${state.reviewed.length} reviewed` : undefined;
         }
+        if (this.memoryView) {
+            const folder = this.getMemoryWorkspaceFolder();
+            const draftCount = folder ? this.memoryController.draftCount(folder) : 0;
+            this.memoryView.badge =
+                draftCount > 0
+                    ? {
+                        value: draftCount,
+                        tooltip: `${draftCount} draft memory record(s) awaiting review`,
+                    }
+                    : undefined;
+            this.memoryView.description =
+                draftCount > 0 ? `${draftCount} draft` : undefined;
+        }
     }
 
     updateContextKeys() {
@@ -4055,6 +5266,31 @@ class CodeCloneController {
             "setContext",
             "codeclone.hotspotFocusMode",
             this.hotspotFocusMode
+        );
+        const memoryFolder = this.getMemoryWorkspaceFolder();
+        const draftCount = memoryFolder
+            ? this.memoryController.draftCount(memoryFolder)
+            : 0;
+        const staleCount = memoryFolder
+            ? this.memoryController.staleCount(memoryFolder)
+            : 0;
+        const checkedDraftCount = memoryFolder
+            ? this.memoryController.checkedDraftCount(memoryFolder)
+            : 0;
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.memoryHasDrafts",
+            draftCount > 0
+        );
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.memoryHasStale",
+            staleCount > 0
+        );
+        void vscode.commands.executeCommand(
+            "setContext",
+            "codeclone.memoryHasCheckedDrafts",
+            checkedDraftCount > 0
         );
     }
 

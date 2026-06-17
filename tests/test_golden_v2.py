@@ -32,7 +32,10 @@ from codeclone.findings.structural.detectors import (
 )
 from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
 from codeclone.scanner import iter_py_files, module_name_from_path
-from tests._assertions import snapshot_python_tag
+from tests._assertions import (
+    assert_snapshot_matches_or_smoke_on_python_tag_mismatch,
+    snapshot_python_tag,
+)
 
 _GOLDEN_V2_ROOT = Path("tests/fixtures/golden_v2").resolve()
 
@@ -243,15 +246,14 @@ def test_golden_v2_analysis_contracts(fixture_name: str) -> None:
     expected_python_tag = expected_meta.get("python_tag")
     assert isinstance(expected_python_tag, str)
 
-    runtime_tag = current_python_tag()
-    if runtime_tag != expected_python_tag:
-        pytest.skip(
-            "Golden detector fixture is canonicalized for "
-            f"{expected_python_tag}; runtime is {runtime_tag}."
-        )
-
     snapshot = _collect_analysis_snapshot(fixture_root)
-    assert snapshot == expected
+    assert_snapshot_matches_or_smoke_on_python_tag_mismatch(
+        snapshot=snapshot,
+        expected=expected,
+        runtime_tag=current_python_tag(),
+        expected_python_tag=expected_python_tag,
+        smoke_keys=("meta", "metrics"),
+    )
 
 
 def _run_cli(args: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
@@ -282,7 +284,7 @@ def _collect_cli_snapshot(
     shutil.copytree(fixture_root, project_root)
     report_path = project_root / "report.json"
     baseline_path = project_root / "codeclone.baseline.json"
-    cache_path = project_root / ".cache" / "codeclone" / "cache.json"
+    cache_path = project_root / ".codeclone" / "cache.json"
 
     exit_code = _run_cli(
         [
@@ -333,16 +335,15 @@ def test_golden_v2_cli_pyproject_contract(
     expected = json.loads(expected_path.read_text("utf-8"))
     expected_python_tag = snapshot_python_tag(expected)
 
-    runtime_tag = current_python_tag()
-    if runtime_tag != expected_python_tag:
-        pytest.skip(
-            "Golden detector fixture is canonicalized for "
-            f"{expected_python_tag}; runtime is {runtime_tag}."
-        )
-
     snapshot = _collect_cli_snapshot(
         fixture_root=fixture_root,
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
     )
-    assert snapshot == expected
+    assert_snapshot_matches_or_smoke_on_python_tag_mismatch(
+        snapshot=snapshot,
+        expected=expected,
+        runtime_tag=current_python_tag(),
+        expected_python_tag=expected_python_tag,
+        smoke_keys=("report_schema_version",),
+    )

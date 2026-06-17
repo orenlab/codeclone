@@ -1,0 +1,42 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+"""Blast-radius boundary reasons and guardrails."""
+
+from __future__ import annotations
+
+from typing import Final
+
+from codeclone.analysis.blast_radius import (
+    BOUNDARY_REASON_AFFECTED_NOT_ALLOWED,
+    BOUNDARY_REASON_BASELINE_OR_STATE,
+    BOUNDARY_REASON_EXPLICIT_FORBIDDEN,
+    GUARDRAIL_CLONE_COHORT_CONTEXT,
+    GUARDRAIL_DO_NOT_TOUCH_APPROVAL,
+    GUARDRAIL_HIGH_RADIUS_APPROVAL,
+    GUARDRAIL_REVIEW_DEPENDENTS,
+    REVIEW_REASON_GOLDEN_FIXTURE_SURFACE,
+    REVIEW_REASON_KNOWN_BASELINE_DEBT,
+    REVIEW_REASON_REPORT_ONLY_DESIGN,
+    REVIEW_REASON_SECURITY_BOUNDARY,
+)
+
+BLAST_SUMMARY_UNKNOWN: Final = "unknown"
+
+__all__ = [
+    "BLAST_SUMMARY_UNKNOWN",
+    "BOUNDARY_REASON_AFFECTED_NOT_ALLOWED",
+    "BOUNDARY_REASON_BASELINE_OR_STATE",
+    "BOUNDARY_REASON_EXPLICIT_FORBIDDEN",
+    "GUARDRAIL_CLONE_COHORT_CONTEXT",
+    "GUARDRAIL_DO_NOT_TOUCH_APPROVAL",
+    "GUARDRAIL_HIGH_RADIUS_APPROVAL",
+    "GUARDRAIL_REVIEW_DEPENDENTS",
+    "REVIEW_REASON_GOLDEN_FIXTURE_SURFACE",
+    "REVIEW_REASON_KNOWN_BASELINE_DEBT",
+    "REVIEW_REASON_REPORT_ONLY_DESIGN",
+    "REVIEW_REASON_SECURITY_BOUNDARY",
+]

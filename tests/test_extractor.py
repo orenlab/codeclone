@@ -27,6 +27,7 @@ from codeclone.models import (
     BlockUnit,
     ClassMetrics,
     FileMetrics,
+    FunctionRelationshipFacts,
     ModuleDep,
     RuntimeReachabilityFact,
     SegmentUnit,
@@ -1210,6 +1211,156 @@ class Service:
     )
 
 
+def test_extract_protocol_class_excludes_stub_methods_from_lcom4() -> None:
+    src = """
+from typing import Protocol
+
+class Reader(Protocol):
+    def read(self) -> str: ...
+
+    def write(self, data: str) -> None: ...
+
+    def close(self) -> None: ...
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=src,
+        filepath="pkg/reader.py",
+        module_name="pkg.reader",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert file_metrics.class_metrics == (
+        ClassMetrics(
+            qualname="pkg.reader:Reader",
+            filepath="pkg/reader.py",
+            start_line=4,
+            end_line=9,
+            cbo=0,
+            lcom4=1,
+            method_count=3,
+            instance_var_count=0,
+            risk_coupling="low",
+            risk_cohesion="low",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "filepath", "module_name", "lcom4", "method_count", "risk"),
+    (
+        pytest.param(
+            """
+from pydantic import BaseModel, field_validator
+
+class Config(BaseModel):
+    name: str
+    value: int
+
+    @field_validator("name")
+    @classmethod
+    def validate_name(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value: int) -> int:
+        return value
+
+    def describe(self) -> str:
+        return self.name
+""".strip(),
+            "pkg/config.py",
+            "pkg.config",
+            1,
+            3,
+            "low",
+            id="field_validators_ignored",
+        ),
+        pytest.param(
+            """
+from pydantic import BaseModel, computed_field
+
+class Item(BaseModel):
+    first: str
+    second: str
+
+    @computed_field
+    @property
+    def left(self) -> str:
+        return self.first
+
+    @computed_field
+    @property
+    def right(self) -> str:
+        return self.second
+
+    def unrelated(self) -> int:
+        return 1
+""".strip(),
+            "pkg/item.py",
+            "pkg.item",
+            3,
+            3,
+            "medium",
+            id="computed_field_in_graph",
+        ),
+    ),
+)
+def test_extract_pydantic_cohesion_exclusions(
+    source: str,
+    filepath: str,
+    module_name: str,
+    lcom4: int,
+    method_count: int,
+    risk: str,
+) -> None:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert len(file_metrics.class_metrics) == 1
+    metric = file_metrics.class_metrics[0]
+    assert metric.lcom4 == lcom4
+    assert metric.method_count == method_count
+    assert metric.risk_cohesion == risk
+
+
+def test_extract_ignores_dynamic_pydantic_decorator_for_cohesion() -> None:
+    source = """
+import pydantic
+from pydantic import BaseModel
+
+class Item(BaseModel):
+    value: int
+
+    @getattr(pydantic, "field_validator")("value")
+    @classmethod
+    def validate_value(cls, value: int) -> int:
+        return value
+
+    def used(self) -> int:
+        return self.value
+""".strip()
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/item.py",
+        module_name="pkg.item",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert len(file_metrics.class_metrics) == 1
+    assert file_metrics.class_metrics[0].method_count == 2
+    # Dynamic decorator names are not resolved; validator stays in the cohesion graph.
+    assert file_metrics.class_metrics[0].lcom4 == 2
+
+
 def test_dead_code_marks_symbol_dead_when_referenced_only_by_tests() -> None:
     src_prod = """
 def orphan():
@@ -1425,6 +1576,17 @@ target = loader()[name]
     assert reachability_mod._is_type_checking_guard(typing_guarded_if.test) is True
     assert reachability_mod._dotted_name(subscript_value) == "loader"
     assert reachability_mod._resolve_symbol(ast.Constant(value=1), {}) is None
+
+
+def test_runtime_binding_collect_first_arg_object_requires_args() -> None:
+    visitor = reachability_mod._RuntimeBindingVisitor(aliases={})
+    visitor.objects["app"] = "aiohttp_app"
+    stmt = ast.parse("app.add_routes()").body[0]
+    assert isinstance(stmt, ast.Expr)
+    call = stmt.value
+    assert isinstance(call, ast.Call)
+    visitor._collect_runtime_registration(call)
+    assert visitor.included_routers == set()
 
 
 def test_runtime_reachability_internal_guards_stay_safe() -> None:
@@ -2110,6 +2272,466 @@ def wrapper():
     )
     assert "pkg.runtime:run" in file_metrics.referenced_qualnames
     assert "pkg.helpers:decorate" in file_metrics.referenced_qualnames
+
+
+def test_extract_collects_cross_module_relationships_by_caller() -> None:
+    source = """
+from pkg.runtime import run as imported_run
+from pkg.handlers import handler
+import pkg.helpers as helpers
+
+def source(value):
+    callback = handler
+    imported_run()
+    helpers.decorate(value)
+    factory()()
+    return callback
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert len(file_metrics.function_relationship_facts) == 1
+    facts = file_metrics.function_relationship_facts[0]
+    assert facts.source_qualname == "pkg.module:source"
+    resolved = {
+        (record.relation_kind, record.target_qualname, record.resolution_rule)
+        for record in facts.relationships
+        if record.resolution_status == "resolved"
+    }
+    assert (
+        "call",
+        "pkg.runtime:run",
+        "imported_symbol",
+    ) in resolved
+    assert (
+        "call",
+        "pkg.helpers:decorate",
+        "imported_module_attribute",
+    ) in resolved
+    assert (
+        "reference",
+        "pkg.handlers:handler",
+        "imported_symbol",
+    ) in resolved
+    unresolved_calls = [
+        record
+        for record in facts.relationships
+        if record.resolution_status == "unresolved"
+    ]
+    assert unresolved_calls
+    assert all(record.relation_kind == "call" for record in unresolved_calls)
+    assert all(record.origin_lane == "production" for record in facts.relationships)
+
+
+def test_relationship_resolution_guards_caller_local_shadowing() -> None:
+    source = """
+from pkg.runtime import run
+
+def by_parameter(run):
+    return run()
+
+def by_assignment():
+    run = lambda: 1
+    return run()
+
+def by_nested_definition():
+    def run():
+        return 1
+    return run()
+
+def by_local_import():
+    from pkg.other import run
+    return run()
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    records = [
+        record
+        for facts in file_metrics.function_relationship_facts
+        for record in facts.relationships
+        if record.expression == "run"
+    ]
+    assert len(records) == 4
+    assert all(record.relation_kind == "call" for record in records)
+    assert all(record.resolution_status == "unresolved" for record in records)
+    assert all(record.target_qualname is None for record in records)
+    assert all(record.resolution_rule == "local_shadowing" for record in records)
+
+
+def test_relationship_import_index_is_module_scoped_and_conservative() -> None:
+    tree = ast.parse(
+        """
+import pkg.alpha as alpha
+import pkg.one as duplicate
+import pkg.two as duplicate
+from pkg.handlers import handler
+from pkg.other import handler
+from pkg.runtime import *
+from .... import hidden
+
+shadowed = 1
+
+def declared():
+    import pkg.local as leaked
+    return leaked.run()
+
+try:
+    value = 1
+except Exception as captured:
+    value = 2
+
+match value:
+    case {"name": matched}:
+        pass
+"""
+    )
+
+    index = module_walk_mod._collect_relationship_import_index(
+        tree=tree,
+        module_name="pkg.module",
+    )
+
+    assert index.module_bindings["alpha"] == frozenset({"pkg.alpha"})
+    assert index.module_bindings["duplicate"] == frozenset({"pkg.one", "pkg.two"})
+    assert index.symbol_bindings["handler"] == frozenset(
+        {"pkg.handlers:handler", "pkg.other:handler"}
+    )
+    assert "leaked" not in index.module_bindings
+    assert {"shadowed", "declared", "captured", "matched"} <= set(
+        index.module_shadowed_names
+    )
+    assert module_walk_mod._collect_relationship_import_index(
+        tree=ast.Constant(value=1),
+        module_name="pkg.module",
+    ) == module_walk_mod._RelationshipImportIndex({}, {}, frozenset())
+
+
+def test_relationship_caller_bindings_cover_python_scope_forms() -> None:
+    outer = ast.parse(
+        """
+def outer():
+    inherited = 1
+
+    def inner(posonly, /, regular, *args, kwonly, **kwargs):
+        global global_name
+        nonlocal inherited
+        global_name = 1
+        inherited = 2
+        local = 3
+        for item in ():
+            pass
+        with resource() as opened:
+            pass
+        try:
+            pass
+        except Exception as captured:
+            pass
+        match regular:
+            case {"name": matched}:
+                pass
+        import pkg.local as local_module
+        from pkg.runtime import handler
+        def nested():
+            return None
+        class Inner:
+            pass
+        return local
+"""
+    ).body[0]
+    assert isinstance(outer, ast.FunctionDef)
+    inner = outer.body[1]
+    assert isinstance(inner, ast.FunctionDef)
+
+    bindings = module_walk_mod._caller_local_bindings(inner)
+
+    assert {
+        "posonly",
+        "regular",
+        "args",
+        "kwonly",
+        "kwargs",
+        "local",
+        "item",
+        "opened",
+        "captured",
+        "matched",
+        "local_module",
+        "handler",
+        "nested",
+        "Inner",
+    } <= set(bindings)
+    assert "global_name" not in bindings
+    assert "inherited" not in bindings
+    assert module_walk_mod._first_parameter_name(inner) == "posonly"
+    no_args = ast.parse("def empty():\n    return None\n").body[0]
+    assert isinstance(no_args, ast.FunctionDef)
+    assert module_walk_mod._first_parameter_name(no_args) is None
+
+
+def test_relationship_expression_resolution_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    imports = module_walk_mod._RelationshipImportIndex(
+        symbol_bindings={
+            "handler": frozenset({"pkg.handlers:handler"}),
+            "ambiguous": frozenset({"pkg.one:run", "pkg.two:run"}),
+            "shadowed": frozenset({"pkg.runtime:shadowed"}),
+        },
+        module_bindings={
+            "helpers": frozenset({"pkg.helpers"}),
+            "modules": frozenset({"pkg.one", "pkg.two"}),
+        },
+        module_shadowed_names=frozenset({"shadowed"}),
+    )
+
+    def resolve(
+        expression: str,
+        *,
+        caller_bindings: frozenset[str] = frozenset(),
+        local_method_qualnames: frozenset[str] = frozenset({"pkg.module:Service.hook"}),
+        enclosing_class_local: str | None = None,
+        receiver_name: str | None = None,
+    ) -> tuple[str | None, str]:
+        node = ast.parse(expression, mode="eval").body
+        assert isinstance(node, ast.expr)
+        return module_walk_mod._resolve_relationship_expression(
+            node,
+            module_name="pkg.module",
+            imports=imports,
+            caller_bindings=caller_bindings,
+            top_level_function_names=frozenset({"local_function"}),
+            top_level_class_names=frozenset({"Service"}),
+            local_method_qualnames=local_method_qualnames,
+            enclosing_class_local=enclosing_class_local,
+            receiver_name=receiver_name,
+        )
+
+    assert resolve("handler") == ("pkg.handlers:handler", "imported_symbol")
+    assert resolve("handler", caller_bindings=frozenset({"handler"})) == (
+        None,
+        "local_shadowing",
+    )
+    assert resolve("shadowed") == (None, "local_shadowing")
+    assert resolve("ambiguous") == (None, "ambiguous_import")
+    # same-module function (6c): resolved unless caller-shadowed.
+    assert resolve("local_function") == (
+        "pkg.module:local_function",
+        "same_module_function",
+    )
+    assert resolve(
+        "local_function",
+        caller_bindings=frozenset({"local_function"}),
+    ) == (None, "unresolved_name")
+    assert resolve("unknown") == (None, "unresolved_name")
+    assert resolve("helpers.decorate") == (
+        "pkg.helpers:decorate",
+        "imported_module_attribute",
+    )
+    assert resolve(
+        "helpers.decorate",
+        caller_bindings=frozenset({"helpers"}),
+    ) == (None, "local_shadowing")
+    assert resolve("modules.run") == (None, "ambiguous_import")
+    # same-module class method (6c): resolved only when the method exists and the
+    # class name is not locally shadowed.
+    assert resolve("Service.hook") == (
+        "pkg.module:Service.hook",
+        "same_module_class_method",
+    )
+    assert resolve("Service.missing") == (None, "unresolved_dynamic")
+    assert resolve(
+        "Service.hook",
+        caller_bindings=frozenset({"Service"}),
+    ) == (None, "unresolved_dynamic")
+    # self/cls receiver method (6c): resolved against the enclosing class, keyed
+    # on the actual first-parameter name, only when the method exists.
+    assert resolve(
+        "receiver.hook",
+        enclosing_class_local="Service",
+        receiver_name="receiver",
+    ) == ("pkg.module:Service.hook", "self_or_cls_method")
+    assert resolve(
+        "receiver.missing",
+        enclosing_class_local="Service",
+        receiver_name="receiver",
+    ) == (None, "unresolved_dynamic")
+    assert resolve("factory().hook") == (None, "unresolved_dynamic")
+    assert module_walk_mod._single_relationship_target(
+        None,
+        resolved_rule="unused",
+    ) == (None, "unresolved_name")
+
+    expression = ast.Name(id="handler", ctx=ast.Load())
+    monkeypatch.setattr(
+        ast,
+        "unparse",
+        lambda _node: (_ for _ in ()).throw(ValueError("broken")),
+    )
+    assert module_walk_mod._relationship_expression(expression) is None
+    record = module_walk_mod._relationship_record(
+        relation_kind="call",
+        origin_lane="production",
+        source_qualname="pkg.module:source",
+        target_qualname=None,
+        filepath="pkg/module.py",
+        node=expression,
+        resolution_rule="unresolved_name",
+    )
+    assert record.line == 1
+    assert record.resolution_status == "unresolved"
+
+
+def _function_relationship_facts_for(
+    source: str, source_qualname: str
+) -> FunctionRelationshipFacts:
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    return next(
+        facts
+        for facts in file_metrics.function_relationship_facts
+        if facts.source_qualname == source_qualname
+    )
+
+
+def test_relationship_collection_resolves_intra_module_and_self() -> None:
+    source = """
+def local_function():
+    return 1
+
+class Service:
+    def hook(self):
+        return 1
+
+    def caller(receiver):
+        local_function()
+        Service.hook()
+        receiver.hook()
+        factory().hook()
+"""
+    caller = _function_relationship_facts_for(source, "pkg.module:Service.caller")
+    resolved = {
+        record.resolution_rule: record.target_qualname
+        for record in caller.relationships
+        if record.relation_kind == "call" and record.resolution_status == "resolved"
+    }
+    # receiver.hook() resolves on the actual first-parameter name (not a hardcoded
+    # "self"); Service.hook() and receiver.hook() reach the same method via
+    # different rules.
+    assert resolved == {
+        "same_module_function": "pkg.module:local_function",
+        "same_module_class_method": "pkg.module:Service.hook",
+        "self_or_cls_method": "pkg.module:Service.hook",
+    }
+    assert any(
+        record.resolution_rule == "unresolved_dynamic"
+        and record.resolution_status == "unresolved"
+        for record in caller.relationships
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "source_qualname"),
+    [
+        pytest.param(
+            """
+class Service:
+    def hook(self):
+        return 1
+
+    @staticmethod
+    def build(item):
+        return item.hook()
+""",
+            "pkg.module:Service.build",
+            id="staticmethod_first_param",
+        ),
+        pytest.param(
+            """
+class Service:
+    def hook(self):
+        return 1
+
+def helper(self):
+    return self.hook()
+""",
+            "pkg.module:helper",
+            id="top_level_self_param",
+        ),
+    ],
+)
+def test_relationship_non_receiver_first_parameter_stays_unresolved(
+    source: str, source_qualname: str
+) -> None:
+    # A staticmethod's first parameter and a top-level function's parameter named
+    # self are ordinary values, not receivers — self/cls resolution must not fire
+    # even though a Service.hook method exists.
+    facts = _function_relationship_facts_for(source, source_qualname)
+    assert all(
+        record.resolution_status == "unresolved" for record in facts.relationships
+    )
+
+
+def test_relationship_classmethod_receiver_resolves_to_same_class() -> None:
+    source = """
+class Service:
+    def hook(self):
+        return 1
+
+    @classmethod
+    def make(cls):
+        return cls.hook()
+"""
+    make = _function_relationship_facts_for(source, "pkg.module:Service.make")
+    assert any(
+        record.target_qualname == "pkg.module:Service.hook"
+        and record.resolution_rule == "self_or_cls_method"
+        for record in make.relationships
+    )
+
+
+def test_test_relationship_lane_does_not_feed_flat_reachability() -> None:
+    source = """
+from prod import only_used_by_test
+
+def test_it():
+    assert only_used_by_test() == 1
+"""
+    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath="tests/test_prod.py",
+        module_name="tests.test_prod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+
+    assert file_metrics.referenced_qualnames == frozenset()
+    records = file_metrics.function_relationship_facts[0].relationships
+    assert any(
+        record.target_qualname == "prod:only_used_by_test"
+        and record.origin_lane == "test"
+        and record.resolution_status == "resolved"
+        for record in records
+    )
 
 
 def test_extract_collects_referenced_qualnames_for_module_all_exports() -> None:

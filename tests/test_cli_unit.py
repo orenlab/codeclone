@@ -232,7 +232,7 @@ def test_cli_vscode_extension_tip_uses_versioned_cache(
     printer = _RecordingPrinter()
     args = SimpleNamespace(quiet=False, ci=False)
     env = {"TERM_PROGRAM": "vscode"}
-    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+    cache_path = tmp_path / ".codeclone" / "cache.json"
 
     cli_tips.maybe_print_vscode_extension_tip(
         args=args,
@@ -290,7 +290,7 @@ def test_cli_vscode_extension_tip_tolerates_state_write_failure(
         args=args,
         console=printer,
         codeclone_version=__version__,
-        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        cache_path=tmp_path / ".codeclone" / "cache.json",
         environ={"TERM_PROGRAM": "vscode"},
         stream=_TTYStream(is_tty=True),
     )
@@ -330,13 +330,43 @@ def test_cli_vscode_extension_tip_respects_context_gates(
         args=args,
         console=printer,
         codeclone_version=__version__,
-        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        cache_path=tmp_path / ".codeclone" / "cache.json",
         environ=effective_env,
         stream=_TTYStream(is_tty=isatty),
     )
 
     assert shown is False
     assert printer.lines == []
+
+
+def test_cli_gitignore_codeclone_cache_tip(tmp_path: Path) -> None:
+    printer = _RecordingPrinter()
+    shown = cli_tips.maybe_print_gitignore_codeclone_cache_tip(
+        args=SimpleNamespace(quiet=False, ci=False),
+        console=printer,
+        root_path=tmp_path,
+        environ={},
+        stream=_TTYStream(is_tty=True),
+    )
+    assert shown is True
+    assert len(printer.lines) == 1
+    assert ".codeclone/" in printer.lines[0]
+
+    covered_root = tmp_path / "covered"
+    covered_root.mkdir()
+    (covered_root / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+    silent_printer = _RecordingPrinter()
+    assert (
+        cli_tips.maybe_print_gitignore_codeclone_cache_tip(
+            args=SimpleNamespace(quiet=False, ci=False),
+            console=silent_printer,
+            root_path=covered_root,
+            environ={},
+            stream=_TTYStream(is_tty=True),
+        )
+        is False
+    )
+    assert silent_printer.lines == []
 
 
 @pytest.mark.parametrize(
@@ -378,6 +408,7 @@ def test_cli_dead_code_reachability_migration_note_version_gate(
         "expected_message",
         "expected_tip_key",
         "preexisting_tip_keys",
+        "print_note",
     ),
     [
         (
@@ -386,6 +417,7 @@ def test_cli_dead_code_reachability_migration_note_version_gate(
             "Dead-code reachability was refined in 2.0.1",
             "dead_code_reachability_2_0_1_migration_shown",
             (),
+            cli_tips.maybe_print_dead_code_reachability_migration_note,
         ),
         (
             "2.0.1",
@@ -393,20 +425,30 @@ def test_cli_dead_code_reachability_migration_note_version_gate(
             "Dead-code reachability was refined again in 2.0.2",
             "dead_code_reachability_2_0_2_migration_shown",
             ("dead_code_reachability_2_0_1_migration_shown",),
+            cli_tips.maybe_print_dead_code_reachability_migration_note,
+        ),
+        (
+            "2.0.2",
+            "2.1.0a1",
+            "Class cohesion (LCOM4) applicability was refined in 2.1.0",
+            "cohesion_lcom4_2_1_migration_shown",
+            (),
+            cli_tips.maybe_print_cohesion_lcom4_migration_note,
         ),
     ],
 )
-def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
+def test_cli_migration_notes_use_one_shot_cache(
     tmp_path: Path,
     baseline_version: str,
     current_version: str,
     expected_message: str,
     expected_tip_key: str,
     preexisting_tip_keys: tuple[str, ...],
+    print_note: Callable[..., bool],
 ) -> None:
     printer = _RecordingPrinter()
     args = SimpleNamespace(quiet=False, ci=False)
-    cache_path = tmp_path / ".cache" / "codeclone" / "cache.json"
+    cache_path = tmp_path / ".codeclone" / "cache.json"
     tips_path = cache_path.parent / "tips.json"
     if preexisting_tip_keys:
         tips_path.parent.mkdir(parents=True)
@@ -420,7 +462,7 @@ def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
             "utf-8",
         )
 
-    shown = cli_tips.maybe_print_dead_code_reachability_migration_note(
+    shown = print_note(
         args=args,
         console=printer,
         codeclone_version=current_version,
@@ -440,7 +482,7 @@ def test_cli_dead_code_reachability_migration_note_uses_one_shot_cache(
     for tip_key in (*preexisting_tip_keys, expected_tip_key):
         assert state["tips"][tip_key]["shown"] is True
 
-    shown_again = cli_tips.maybe_print_dead_code_reachability_migration_note(
+    shown_again = print_note(
         args=args,
         console=printer,
         codeclone_version=current_version,
@@ -489,7 +531,7 @@ def test_cli_dead_code_reachability_migration_note_respects_gates(
         args=args,
         console=printer,
         codeclone_version=current_version,
-        cache_path=tmp_path / ".cache" / "codeclone" / "cache.json",
+        cache_path=tmp_path / ".codeclone" / "cache.json",
         baseline_generator_version=baseline_version,
         baseline_trusted_for_diff=trusted,
         environ=env,
@@ -498,6 +540,65 @@ def test_cli_dead_code_reachability_migration_note_respects_gates(
 
     assert shown is False
     assert printer.lines == []
+
+
+@pytest.mark.parametrize(
+    ("baseline_version", "current_version", "expected"),
+    [
+        ("2.0.2", "2.1.0a1", True),
+        ("2.0.2", "2.1.0", True),
+        ("2.0.2", "2.0.2", False),
+        ("2.0.1", "2.1.0a1", False),
+        ("2.0.1", "2.1.0", False),
+        ("2.0.0", "2.1.0", False),
+        (None, "2.1.0a1", False),
+    ],
+)
+def test_cli_cohesion_lcom4_migration_note_version_gate(
+    baseline_version: str | None,
+    current_version: str,
+    expected: bool,
+) -> None:
+    assert (
+        cli_tips._cohesion_lcom4_migration(
+            baseline_generator_version=baseline_version,
+            codeclone_version=current_version,
+        )
+        is not None
+    ) is expected
+
+
+def test_tip_was_shown_returns_false_for_malformed_state() -> None:
+    assert cli_tips._tip_was_shown({"tips": "not-a-mapping"}, tip_key="x") is False
+
+
+def test_migration_note_still_reports_when_tip_cache_write_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    printer = _RecordingPrinter()
+    args = SimpleNamespace(quiet=False, ci=False)
+    cache_path = tmp_path / ".codeclone" / "cache.json"
+
+    def _fail_remember(**_kwargs: object) -> None:
+        raise OSError("read-only tips cache")
+
+    monkeypatch.setattr(cli_tips, "_remember_tip_shown", _fail_remember)
+
+    shown = cli_tips.maybe_print_cohesion_lcom4_migration_note(
+        args=args,
+        console=printer,
+        codeclone_version="2.1.0a1",
+        cache_path=cache_path,
+        baseline_generator_version="2.0.2",
+        baseline_trusted_for_diff=True,
+        environ={},
+        stream=_TTYStream(is_tty=True),
+    )
+
+    assert shown is True
+    assert len(printer.lines) == 1
+    assert "Class cohesion (LCOM4) applicability was refined" in printer.lines[0]
 
 
 def test_cli_module_main_guard(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -544,6 +645,9 @@ def test_cli_help_text_consistency(
         "--changed-only",
         "--diff-against GIT_REF",
         "--paths-from-git-diff GIT_REF",
+        "--blast-radius FILE [FILE ...]",
+        "--patch-verify",
+        "--strictness LEVEL",
         "Baselines and CI:",
         "Quality gates:",
         "Analysis stages:",
@@ -558,7 +662,7 @@ def test_cli_help_text_consistency(
         "If enabled without a value, uses 10.",
         "If enabled without a value, uses 4.",
         "If enabled without a value, uses 60.",
-        "<root>/.cache/codeclone/cache.json",
+        "<root>/.codeclone/cache.json",
         "Legacy alias for --cache-path",
         "--max-baseline-size-mb MB",
         "--max-cache-size-mb MB",
@@ -648,6 +752,26 @@ def test_cli_plain_console_status_context() -> None:
     plain = cli._make_plain_console()
     with plain.status("noop"):
         pass
+
+
+def test_main_dispatches_memory_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[list[str]] = []
+
+    def _memory_main(argv: list[str]) -> int:
+        calls.append(argv)
+        return 0
+
+    monkeypatch.setattr(sys, "argv", ["codeclone", "memory", "status", "--root", "."])
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.memory_main",
+        _memory_main,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 0
+    assert calls == [["status", "--root", "."]]
 
 
 def test_cli_internal_error_marker(
@@ -1444,8 +1568,10 @@ def test_compact_summary_labels_use_machine_scannable_keys() -> None:
 
 
 def test_ui_summary_formatters_cover_optional_branches() -> None:
-    assert ui._vn(0) == "[dim]0[/dim]"
-    assert ui._vn(1200) == "1,200"
+    from codeclone.ui_messages.styling import _vn
+
+    assert _vn(0) == "[dim]0[/dim]"
+    assert _vn(1200) == "1,200"
 
     parsed = ui.fmt_summary_parsed(lines=1200, functions=3, methods=2, classes=1)
     assert parsed is not None
@@ -2215,6 +2341,44 @@ def _assert_main_impl_exit_code(
     with pytest.raises(SystemExit) as exc:
         cli._main_impl()
     assert exc.value.code == expected_code
+
+
+def test_main_impl_exits_on_pre_analysis_session_stats(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["codeclone", str(tmp_path), "--quiet", "--session-stats"],
+    )
+    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.session_stats.render_session_stats",
+        lambda **_kwargs: 0,
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli._main_impl()
+    assert exc.value.code == 0
+
+
+def test_main_impl_exits_on_post_analysis_controller_query(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import codeclone.surfaces.cli.workflow as wf
+
+    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["codeclone", str(tmp_path), "--quiet", "--patch-verify"],
+    )
+    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
+    _patch_main_pipeline_stubs(monkeypatch)
+    monkeypatch.setattr(wf, "_run_controller_query", lambda **_kwargs: 3)
+    with pytest.raises(SystemExit) as exc:
+        cli._main_impl()
+    assert exc.value.code == 3
 
 
 def _prepare_fail_on_new_metrics_case(

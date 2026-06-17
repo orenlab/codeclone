@@ -15,6 +15,7 @@ from ...metrics.registry import METRIC_FAMILIES
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ..messages import gates as gate_msgs
 
 if TYPE_CHECKING:
     from ...models import CoverageJoinResult, ProjectMetrics
@@ -271,9 +272,9 @@ def _complexity_threshold_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         0 <= config.fail_complexity < state.complexity_max,
-        "Complexity threshold exceeded: "
-        f"max CC={state.complexity_max}, "
-        f"threshold={config.fail_complexity}.",
+        gate_msgs.GATE_REASON_COMPLEXITY_THRESHOLD
+        + f"max CC={state.complexity_max}, "
+        + f"threshold={config.fail_complexity}.",
     )
 
 
@@ -284,9 +285,9 @@ def _coupling_threshold_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         0 <= config.fail_coupling < state.coupling_max,
-        "Coupling threshold exceeded: "
-        f"max CBO={state.coupling_max}, "
-        f"threshold={config.fail_coupling}.",
+        gate_msgs.GATE_REASON_COUPLING_THRESHOLD
+        + f"max CBO={state.coupling_max}, "
+        + f"threshold={config.fail_coupling}.",
     )
 
 
@@ -297,9 +298,9 @@ def _cohesion_threshold_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         0 <= config.fail_cohesion < state.cohesion_max,
-        "Cohesion threshold exceeded: "
-        f"max LCOM4={state.cohesion_max}, "
-        f"threshold={config.fail_cohesion}.",
+        gate_msgs.GATE_REASON_COHESION_THRESHOLD
+        + f"max LCOM4={state.cohesion_max}, "
+        + f"threshold={config.fail_cohesion}.",
     )
 
 
@@ -310,8 +311,8 @@ def _health_threshold_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_health >= 0 and state.health_score < config.fail_health,
-        "Health score below threshold: "
-        f"score={state.health_score}, threshold={config.fail_health}.",
+        gate_msgs.GATE_REASON_HEALTH_THRESHOLD
+        + f"score={state.health_score}, threshold={config.fail_health}.",
     )
 
 
@@ -322,7 +323,7 @@ def _dependency_cycles_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_cycles and state.dependency_cycles > 0,
-        f"Dependency cycles detected: {state.dependency_cycles} cycle(s).",
+        f"{gate_msgs.GATE_REASON_CYCLES_DETECTED}{state.dependency_cycles}{gate_msgs.GATE_SUFFIX_CYCLES}.",
     )
 
 
@@ -333,7 +334,7 @@ def _dead_code_high_confidence_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_dead_code and state.dead_high_confidence > 0,
-        f"Dead code detected (high confidence): {state.dead_high_confidence} item(s).",
+        f"{gate_msgs.GATE_REASON_DEAD_CODE_DETECTED}{state.dead_high_confidence}{gate_msgs.GATE_SUFFIX_ITEMS}.",
     )
 
 
@@ -344,8 +345,7 @@ def _new_high_risk_functions_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_new_metrics and state.diff_new_high_risk_functions > 0,
-        "New high-risk functions vs metrics baseline: "
-        f"{state.diff_new_high_risk_functions}.",
+        f"{gate_msgs.GATE_REASON_NEW_HIGH_RISK_FUNCTIONS}{state.diff_new_high_risk_functions}.",
     )
 
 
@@ -356,8 +356,7 @@ def _new_high_coupling_classes_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_new_metrics and state.diff_new_high_coupling_classes > 0,
-        "New high-coupling classes vs metrics baseline: "
-        f"{state.diff_new_high_coupling_classes}.",
+        f"{gate_msgs.GATE_REASON_NEW_HIGH_COUPLING}{state.diff_new_high_coupling_classes}.",
     )
 
 
@@ -368,7 +367,7 @@ def _new_dependency_cycles_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_new_metrics and state.diff_new_cycles > 0,
-        f"New dependency cycles vs metrics baseline: {state.diff_new_cycles}.",
+        f"{gate_msgs.GATE_REASON_NEW_CYCLES}{state.diff_new_cycles}.",
     )
 
 
@@ -379,7 +378,7 @@ def _new_dead_code_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_new_metrics and state.diff_new_dead_code > 0,
-        f"New dead code items vs metrics baseline: {state.diff_new_dead_code}.",
+        f"{gate_msgs.GATE_REASON_NEW_DEAD_CODE}{state.diff_new_dead_code}.",
     )
 
 
@@ -390,7 +389,7 @@ def _health_regression_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_new_metrics and state.diff_health_delta < 0,
-        f"Health score regressed vs metrics baseline: delta={state.diff_health_delta}.",
+        f"{gate_msgs.GATE_REASON_HEALTH_REGRESSION}{state.diff_health_delta}.",
     )
 
 
@@ -403,8 +402,8 @@ def _typing_coverage_threshold_reason(
     return _reason_if(
         config.min_typing_coverage >= 0
         and typing_percent < float(config.min_typing_coverage),
-        "Typing coverage below threshold: "
-        f"coverage={typing_percent:.1f}%, threshold={config.min_typing_coverage}%.",
+        gate_msgs.GATE_REASON_TYPING_THRESHOLD
+        + f"coverage={typing_percent:.1f}%, threshold={config.min_typing_coverage}%.",
     )
 
 
@@ -417,9 +416,9 @@ def _docstring_coverage_threshold_reason(
     return _reason_if(
         config.min_docstring_coverage >= 0
         and docstring_percent < float(config.min_docstring_coverage),
-        "Docstring coverage below threshold: "
-        f"coverage={docstring_percent:.1f}%, "
-        f"threshold={config.min_docstring_coverage}%.",
+        gate_msgs.GATE_REASON_DOCSTRING_THRESHOLD
+        + f"coverage={docstring_percent:.1f}%, "
+        + f"threshold={config.min_docstring_coverage}%.",
     )
 
 
@@ -434,9 +433,9 @@ def _typing_regression_reason(
             state.diff_typing_param_permille_delta < 0
             or state.diff_typing_return_permille_delta < 0
         ),
-        "Typing coverage regressed vs metrics baseline: "
-        f"params_delta={state.diff_typing_param_permille_delta}, "
-        f"returns_delta={state.diff_typing_return_permille_delta}.",
+        gate_msgs.GATE_REASON_TYPING_REGRESSION
+        + f"params_delta={state.diff_typing_param_permille_delta}, "
+        + f"returns_delta={state.diff_typing_return_permille_delta}.",
     )
 
 
@@ -447,8 +446,7 @@ def _docstring_regression_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_docstring_regression and state.diff_docstring_permille_delta < 0,
-        "Docstring coverage regressed vs metrics baseline: "
-        f"delta={state.diff_docstring_permille_delta}.",
+        f"{gate_msgs.GATE_REASON_DOCSTRING_REGRESSION}{state.diff_docstring_permille_delta}.",
     )
 
 
@@ -459,8 +457,7 @@ def _api_breaking_changes_reason(
 ) -> tuple[str, ...]:
     return _reason_if(
         config.fail_on_api_break and state.api_breaking_changes > 0,
-        "Public API breaking changes vs metrics baseline: "
-        f"{state.api_breaking_changes}.",
+        f"{gate_msgs.GATE_REASON_API_BREAKING}{state.api_breaking_changes}.",
     )
 
 
@@ -473,9 +470,9 @@ def _coverage_hotspots_reason(
         config.fail_on_untested_hotspots
         and state.coverage_join_status == "ok"
         and state.coverage_hotspots > 0,
-        "Coverage hotspots detected: "
-        f"hotspots={state.coverage_hotspots}, "
-        f"threshold={config.coverage_min}%.",
+        gate_msgs.GATE_REASON_COVERAGE_HOTSPOTS
+        + f"hotspots={state.coverage_hotspots}, "
+        + f"threshold={config.coverage_min}%.",
     )
 
 

@@ -6,16 +6,11 @@
 
 from __future__ import annotations
 
+import os
+
 from ...cache.store import Cache
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...domain.findings import (
-    CATEGORY_CLONE,
-    CATEGORY_COHESION,
-    CATEGORY_COMPLEXITY,
-    CATEGORY_COUPLING,
-    CATEGORY_DEAD_CODE,
-    CATEGORY_DEPENDENCY,
-    CATEGORY_STRUCTURAL,
     FAMILY_CLONE,
     FAMILY_DEAD_CODE,
 )
@@ -32,6 +27,12 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
+from ...utils.repo_paths import (
+    PathOutsideRepoError,
+    RepoPathError,
+    RepoPathPolicy,
+    resolve_under_repo_root,
+)
 from ._session_runtime import resolve_cache_path
 from ._session_shared import (
     _COMPACT_ITEM_EMPTY_VALUES,
@@ -71,7 +72,19 @@ from ._session_shared import (
     _suggestion_finding_id_payload,
     _summarize_metrics_diff,
 )
+from .messages import remediation as remediation_msgs
+from .messages.facts import SECURITY_SURFACES_SUMMARY_NOTE
 from .payloads import short_id
+
+_MCP_MAX_PROCESS_COUNT = 64
+
+
+def _cap_mcp_process_count(processes: int | None) -> int | None:
+    """Clamp MCP worker pool size without changing analysis semantics."""
+    if processes is None:
+        return None
+    host_limit = os.cpu_count() or 4
+    return min(processes, host_limit, _MCP_MAX_PROCESS_COUNT)
 
 
 def _summary_health_payload(summary: Mapping[str, object]) -> dict[str, object]:
@@ -111,10 +124,9 @@ def _validate_choice(
     allowed: Sequence[str] | frozenset[str],
 ) -> ChoiceT:
     if value not in allowed:
-        allowed_list = ", ".join(sorted(allowed))
-        raise MCPServiceContractError(
-            f"Invalid value for {name}: {value!r}. Expected one of: {allowed_list}."
-        )
+        from .messages import errors as err_msgs
+
+        raise MCPServiceContractError(err_msgs.invalid_choice(name, value, allowed))
     return value
 
 
@@ -192,10 +204,30 @@ def _normalize_relative_path(path: str) -> str:
         return ""
     if cleaned.startswith("./"):
         cleaned = cleaned[2:]
+    if Path(cleaned).is_absolute():
+        _raise_path_traversal(path)
     cleaned = cleaned.rstrip("/")
     if ".." in Path(cleaned).parts:
-        raise MCPServiceContractError(f"path traversal not allowed: {path}")
+        _raise_path_traversal(path)
     return cleaned
+
+
+def _validate_resource_suffix(suffix: str) -> str:
+    cleaned = suffix.strip()
+    if (
+        not cleaned
+        or cleaned.startswith("/")
+        or Path(cleaned).is_absolute()
+        or ".." in Path(cleaned).parts
+    ):
+        _raise_path_traversal(suffix)
+    return cleaned
+
+
+def _raise_path_traversal(path: str) -> None:
+    from .messages import errors as err_msgs
+
+    raise MCPServiceContractError(err_msgs.PATH_TRAVERSAL.format(path=path))
 
 
 def _path_matches(relative_path: str, changed_paths: Sequence[str]) -> bool:
@@ -217,38 +249,51 @@ def _record_supports_analysis_mode(
 
 
 def _resolve_root(root: str | None) -> Path:
+    from .messages import errors as err_msgs
+
     if not isinstance(root, str) or not root.strip():
-        raise MCPServiceContractError(
-            "CodeClone MCP analyze_repository requires an absolute repository root."
-        )
+        raise MCPServiceContractError(err_msgs.ROOT_REQUIRED_ABSOLUTE)
     root_path = Path(root).expanduser()
     if not root_path.is_absolute():
-        raise MCPServiceContractError(
-            "CodeClone MCP analyze_repository requires an absolute repository root."
-        )
+        raise MCPServiceContractError(err_msgs.ROOT_REQUIRED_ABSOLUTE)
     try:
         resolved = root_path.resolve()
     except OSError as exc:
         raise MCPServiceContractError(
-            f"Unable to resolve repository root '{root}': {exc}"
+            err_msgs.ROOT_RESOLVE_FAILED.format(root=root, error=exc)
         ) from exc
     if not resolved.exists():
-        raise MCPServiceContractError(f"Repository root '{resolved}' does not exist.")
+        raise MCPServiceContractError(err_msgs.ROOT_NOT_EXISTS.format(root=resolved))
     if not resolved.is_dir():
-        raise MCPServiceContractError(
-            f"Repository root '{resolved}' is not a directory."
-        )
+        raise MCPServiceContractError(err_msgs.ROOT_NOT_DIRECTORY.format(root=resolved))
     return resolved
 
 
-def _resolve_optional_path(value: str, root_path: Path) -> Path:
-    candidate = Path(value).expanduser()
-    resolved = candidate if candidate.is_absolute() else root_path / candidate
+def _resolve_optional_path(
+    value: str,
+    root_path: Path,
+    *,
+    allow_external_artifacts: bool = False,
+    allow_repo_absolute: bool = False,
+) -> Path:
+    from .messages import errors as err_msgs
+
     try:
-        return resolved.resolve()
-    except OSError as exc:
+        return resolve_under_repo_root(
+            root_path,
+            value,
+            policy=RepoPathPolicy(
+                allow_absolute=allow_external_artifacts or allow_repo_absolute,
+                allow_external=allow_external_artifacts,
+            ),
+        )
+    except (PathOutsideRepoError, RepoPathError) as exc:
         raise MCPServiceContractError(
-            f"Invalid path '{value}' relative to '{root_path}': {exc}"
+            err_msgs.INVALID_RELATIVE_PATH.format(
+                value=value,
+                root=root_path,
+                error=exc,
+            )
         ) from exc
 
 
@@ -342,28 +387,11 @@ def _project_remediation(
 
 
 def _safe_refactor_shape(suggestion: object) -> str:
-    category = str(getattr(suggestion, "category", "")).strip()
-    clone_type = str(getattr(suggestion, "clone_type", "")).strip()
-    title = str(getattr(suggestion, "title", "")).strip()
-    if category == CATEGORY_CLONE and clone_type == "Type-1":
-        return "Keep one canonical implementation and route callers through it."
-    if category == CATEGORY_CLONE and clone_type == "Type-2":
-        return "Extract shared implementation with explicit parameters."
-    if category == CATEGORY_CLONE and "Block" in title:
-        return "Extract the repeated statement sequence into a helper."
-    if category == CATEGORY_STRUCTURAL:
-        return "Extract the repeated branch family into a named helper."
-    if category == CATEGORY_COMPLEXITY:
-        return "Split the function into smaller named steps."
-    if category == CATEGORY_COUPLING:
-        return "Isolate responsibilities and invert unnecessary dependencies."
-    if category == CATEGORY_COHESION:
-        return "Split the class by responsibility boundary."
-    if category == CATEGORY_DEAD_CODE:
-        return "Delete the unused symbol or document intentional reachability."
-    if category == CATEGORY_DEPENDENCY:
-        return "Break the cycle by moving shared abstractions to a lower layer."
-    return "Extract the repeated logic into a shared, named abstraction."
+    return remediation_msgs.safe_refactor_shape(
+        category=str(getattr(suggestion, "category", "")).strip(),
+        clone_type=str(getattr(suggestion, "clone_type", "")).strip(),
+        title=str(getattr(suggestion, "title", "")).strip(),
+    )
 
 
 def _risk_level_for_effort(effort: str) -> str:
@@ -564,7 +592,19 @@ def _comparison_summary_text(
 
 
 def _resolve_cache_path(*, root_path: Path, args: Namespace) -> Path:
-    return resolve_cache_path(root_path=root_path, args=args)
+    from .messages import errors as err_msgs
+
+    raw_value = getattr(args, "cache_path", None)
+    try:
+        return resolve_cache_path(root_path=root_path, args=args)
+    except (PathOutsideRepoError, RepoPathError) as exc:
+        raise MCPServiceContractError(
+            err_msgs.INVALID_RELATIVE_PATH.format(
+                value=raw_value,
+                root=root_path,
+                error=str(exc),
+            )
+        ) from exc
 
 
 def _build_cache(
@@ -786,6 +826,7 @@ def _summary_security_surfaces_payload(record: MCPRunRecord) -> dict[str, object
         "production": _as_int(summary.get("production", 0), 0),
         "tests": _as_int(summary.get("tests", 0), 0),
         "report_only": bool(summary.get("report_only", True)),
+        "note": SECURITY_SURFACES_SUMMARY_NOTE,
     }
 
 
@@ -917,3 +958,37 @@ def _render_pr_summary_markdown(payload: Mapping[str, object]) -> str:
     else:
         lines.extend([f"- `{reason}`" for reason in blocking_gates])
     return "\n".join(lines)
+
+
+def workspace_hygiene_tips(root: Path) -> list[dict[str, object]]:
+    from ...paths.gitignore import repo_gitignore_covers_codeclone_cache
+    from .messages.tips import gitignore_codeclone_cache_tip
+
+    if repo_gitignore_covers_codeclone_cache(root):
+        return []
+    return [gitignore_codeclone_cache_tip()]
+
+
+def attach_workspace_hygiene_tips(
+    payload: dict[str, object],
+    *,
+    root: Path,
+) -> dict[str, object]:
+    tips = workspace_hygiene_tips(root)
+    if tips:
+        payload["tips"] = tips
+    return payload
+
+
+def workspace_dirty_summary_payload(*, root: Path) -> dict[str, object]:
+    from ._workspace_hygiene import workspace_dirty_summary
+
+    return workspace_dirty_summary(root=root)
+
+
+def coerce_repo_path_tuple(paths: Iterable[object]) -> tuple[str, ...]:
+    return tuple(str(path) for path in paths)
+
+
+def coerce_object_dict(payload: Mapping[object, object]) -> dict[str, object]:
+    return {str(key): value for key, value in payload.items()}

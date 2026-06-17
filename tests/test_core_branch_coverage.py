@@ -1417,3 +1417,15 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
 
     cli._run_analysis_stages(args=args, boot=boot, cache=cast(Cache, _BadCache()))
     cli.print_banner(root=None)
+
+
+def test_worker_signature_cache_handles_uninspectable_callable() -> None:
+    from codeclone.core import worker as core_worker
+
+    core_worker._supported_process_file_kwarg_names.cache_clear()
+
+    def _broken(*_args: object, **_kwargs: object) -> object:
+        return None
+
+    assert core_worker._supported_process_file_kwarg_names(_broken) is None
+    core_worker._supported_process_file_kwarg_names.cache_clear()

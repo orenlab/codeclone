@@ -1,8 +1,8 @@
 {
   "name": "codeclone",
   "displayName": "CodeClone",
-  "description": "Baseline-aware, triage-first structural review for Python, powered by CodeClone MCP.",
-  "version": "0.2.7",
+  "description": "Structural Change Controller for AI-assisted Python development — baseline-aware, triage-first structural review in VS Code, powered by codeclone-mcp.",
+  "version": "0.3.0",
   "publisher": "orenlab",
   "license": "MPL-2.0",
   "repository": {
@@ -42,13 +42,13 @@
     }
   },
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.120.0"
   },
   "scripts": {
     "build": "node esbuild.config.mjs",
     "watch": "node esbuild.config.mjs --watch",
     "typecheck": "tsc -p jsconfig.json --noEmit",
-    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/mcpClient.js && node --check src/extension.js",
+    "check": "npm run build && npm run typecheck && node --check src/constants.js && node --check src/formatters.js && node --check src/runtime.js && node --check src/renderers.js && node --check src/providers.js && node --check src/support.js && node --check src/runArtifacts.js && node --check src/memoryGovernance.js && node --check src/memoryBulkSelection.js && node --check src/memoryController.js && node --check src/memorySearch.js && node --check src/memorySearchRenderer.js && node --check src/workspaceInsightsRenderer.js && node --check src/trajectoryViewerRenderer.js && node --check src/mcpClient.js && node --check src/extension.js",
     "test": "node --test test/*.test.js",
     "test:host": "npm run build && node test/runExtensionHost.js",
     "vscode:prepublish": "npm run build"
@@ -62,6 +62,7 @@
     "onView:codeclone.overview",
     "onView:codeclone.hotspots",
     "onView:codeclone.session",
+    "onView:codeclone.memory",
     "onCommand:codeclone.connectMcp",
     "onCommand:codeclone.analyzeWorkspace",
     "onCommand:codeclone.analyzeChangedFiles",
@@ -83,7 +84,32 @@
     "onCommand:codeclone.copyCoverageJoinBrief",
     "onCommand:codeclone.openSecuritySurface",
     "onCommand:codeclone.copySecuritySurfaceBrief",
-    "onCommand:codeclone.manageWorkspaceTrust"
+    "onCommand:codeclone.manageWorkspaceTrust",
+    "onCommand:codeclone.refreshMemory",
+    "onCommand:codeclone.syncMemoryFromRun",
+    "onCommand:codeclone.approveMemoryRecord",
+    "onCommand:codeclone.rejectMemoryRecord",
+    "onCommand:codeclone.approveCheckedMemoryDrafts",
+    "onCommand:codeclone.rejectCheckedMemoryDrafts",
+    "onCommand:codeclone.selectAllMemoryDrafts",
+    "onCommand:codeclone.selectMemoryDraftsByType",
+    "onCommand:codeclone.clearMemoryDraftSelection",
+    "onCommand:codeclone.selectAllMemoryStale",
+    "onCommand:codeclone.selectMemoryStaleByType",
+    "onCommand:codeclone.openMemoryRecord",
+    "onCommand:codeclone.openMemoryRecordById",
+    "onCommand:codeclone.searchEngineeringMemory",
+    "onCommand:codeclone.memoryForActiveFile",
+    "onCommand:codeclone.openMemorySearchPanel",
+    "onCommand:codeclone.refreshMemorySearch",
+    "onCommand:codeclone.configureMemorySearch",
+    "onCommand:codeclone.showWorkspaceSessionStats",
+    "onCommand:codeclone.showControllerAuditTrail",
+    "onCommand:codeclone.showTrajectoryDashboard",
+    "onCommand:codeclone.showTrajectoryDetail",
+    "onCommand:codeclone.copyTrajectoryDashboardBrief",
+    "onCommand:codeclone.copyWorkspaceSessionStatsBrief",
+    "onCommand:codeclone.copyControllerAuditTrailBrief"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -115,6 +141,12 @@
           "name": "Runs & Session",
           "type": "tree",
           "icon": "media/view-session.svg"
+        },
+        {
+          "id": "codeclone.memory",
+          "name": "Memory",
+          "type": "tree",
+          "icon": "media/view-memory.svg"
         }
       ]
     },
@@ -158,6 +190,21 @@
         "view": "codeclone.session",
         "when": "isWorkspaceTrusted && codeclone.connected && !codeclone.hasRun",
         "contents": "The local CodeClone server is ready. Run [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Review Changes](command:codeclone.analyzeChangedFiles) to create the first run."
+      },
+      {
+        "view": "codeclone.memory",
+        "when": "!isWorkspaceTrusted",
+        "contents": "Engineering Memory requires a trusted workspace.\n\nOpen [Manage Workspace Trust](command:codeclone.manageWorkspaceTrust) to review and approve draft memory records."
+      },
+      {
+        "view": "codeclone.memory",
+        "when": "isWorkspaceTrusted && !codeclone.connected",
+        "contents": "Connect CodeClone to load Engineering Memory.\n\nRun [Analyze Workspace](command:codeclone.analyzeWorkspace) or [Verify Local Server](command:codeclone.connectMcp), then [Sync from latest run](command:codeclone.syncMemoryFromRun) to ingest system facts."
+      },
+      {
+        "view": "codeclone.memory",
+        "when": "isWorkspaceTrusted && codeclone.connected",
+        "contents": "Check drafts in **Inbox**, then use the toolbar or context menu to approve or reject in bulk with one confirmation.\n\n[Search memory](command:codeclone.searchEngineeringMemory) · [Memory for active file](command:codeclone.memoryForActiveFile) · [Search panel](command:codeclone.openMemorySearchPanel)\n\n[Refresh memory](command:codeclone.refreshMemory) · [Sync from latest run](command:codeclone.syncMemoryFromRun)"
       }
     ],
     "commands": [
@@ -360,6 +407,173 @@
         "category": "CodeClone"
       },
       {
+        "command": "codeclone.showBlastRadius",
+        "title": "Show Blast Radius",
+        "category": "CodeClone",
+        "icon": "$(target)"
+      },
+      {
+        "command": "codeclone.copyBlastRadiusBrief",
+        "title": "Copy Blast Radius Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.showWorkspaceSessionStats",
+        "title": "Show Session Stats",
+        "category": "CodeClone",
+        "icon": "$(debug-console)"
+      },
+      {
+        "command": "codeclone.showControllerAuditTrail",
+        "title": "Show Controller Audit Trail",
+        "category": "CodeClone",
+        "icon": "$(history)"
+      },
+      {
+        "command": "codeclone.copyWorkspaceSessionStatsBrief",
+        "title": "Copy Session Stats Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.copyControllerAuditTrailBrief",
+        "title": "Copy Controller Audit Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.showTrajectoryDashboard",
+        "title": "Show Trajectory Dashboard",
+        "category": "CodeClone",
+        "icon": "$(history)"
+      },
+      {
+        "command": "codeclone.showTrajectoryDetail",
+        "title": "Show Trajectory Detail",
+        "category": "CodeClone",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "codeclone.copyTrajectoryDashboardBrief",
+        "title": "Copy Trajectory Dashboard Brief",
+        "category": "CodeClone",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "codeclone.refreshMemory",
+        "title": "Refresh Memory",
+        "category": "CodeClone",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeclone.syncMemoryFromRun",
+        "title": "Sync Memory From Run",
+        "category": "CodeClone",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "codeclone.approveMemoryRecord",
+        "title": "Approve Memory Record",
+        "category": "CodeClone",
+        "icon": "$(check)"
+      },
+      {
+        "command": "codeclone.rejectMemoryRecord",
+        "title": "Reject Memory Record",
+        "category": "CodeClone",
+        "icon": "$(close)"
+      },
+      {
+        "command": "codeclone.approveCheckedMemoryDrafts",
+        "title": "Approve Checked Memory Drafts",
+        "category": "CodeClone",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "codeclone.rejectCheckedMemoryDrafts",
+        "title": "Reject Checked Memory Drafts",
+        "category": "CodeClone",
+        "icon": "$(close-all)"
+      },
+      {
+        "command": "codeclone.selectAllMemoryDrafts",
+        "title": "Select All Memory Drafts",
+        "category": "CodeClone",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "codeclone.selectMemoryDraftsByType",
+        "title": "Select Memory Drafts by Type",
+        "category": "CodeClone",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "codeclone.clearMemoryDraftSelection",
+        "title": "Clear Memory Draft Selection",
+        "category": "CodeClone",
+        "icon": "$(clear-all)"
+      },
+      {
+        "command": "codeclone.selectAllMemoryStale",
+        "title": "Select All Stale Memory Records",
+        "category": "CodeClone",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "codeclone.selectMemoryStaleByType",
+        "title": "Select Stale Memory Records by Type",
+        "category": "CodeClone",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "codeclone.openMemoryRecord",
+        "title": "Open Memory Record",
+        "category": "CodeClone",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "codeclone.openMemoryView",
+        "title": "Open Memory View",
+        "category": "CodeClone",
+        "icon": "$(inbox)"
+      },
+      {
+        "command": "codeclone.searchEngineeringMemory",
+        "title": "Search Engineering Memory",
+        "category": "CodeClone",
+        "icon": "$(search)"
+      },
+      {
+        "command": "codeclone.memoryForActiveFile",
+        "title": "Memory for Active File",
+        "category": "CodeClone",
+        "icon": "$(file)"
+      },
+      {
+        "command": "codeclone.openMemorySearchPanel",
+        "title": "Open Memory Search Panel",
+        "category": "CodeClone",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "codeclone.refreshMemorySearch",
+        "title": "Refresh Memory Search",
+        "category": "CodeClone",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "codeclone.configureMemorySearch",
+        "title": "Configure Memory Search",
+        "category": "CodeClone",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "codeclone.openMemoryRecordById",
+        "title": "Open Memory Record By Id",
+        "category": "CodeClone"
+      },
+      {
         "command": "codeclone.clearSessionState",
         "title": "Clear Session",
         "category": "CodeClone",
@@ -445,7 +659,15 @@
           "when": "false"
         },
         {
+          "command": "codeclone.openMemoryRecordById",
+          "when": "false"
+        },
+        {
           "command": "codeclone.reviewSecuritySurface",
+          "when": "false"
+        },
+        {
+          "command": "codeclone.copyBlastRadiusBrief",
           "when": "false"
         }
       ],
@@ -551,6 +773,126 @@
           "group": "secondary@1"
         },
         {
+          "command": "codeclone.showWorkspaceSessionStats",
+          "when": "view == codeclone.session && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.showControllerAuditTrail",
+          "when": "view == codeclone.session && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeclone.copyWorkspaceSessionStatsBrief",
+          "when": "view == codeclone.session && isWorkspaceTrusted && codeclone.connected",
+          "group": "secondary@3"
+        },
+        {
+          "command": "codeclone.copyControllerAuditTrailBrief",
+          "when": "view == codeclone.session && isWorkspaceTrusted && codeclone.connected",
+          "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.searchEngineeringMemory",
+          "when": "view == codeclone.memory && isWorkspaceTrusted",
+          "group": "navigation@2"
+        },
+        {
+          "command": "codeclone.memoryForActiveFile",
+          "when": "view == codeclone.memory && isWorkspaceTrusted",
+          "group": "navigation@3"
+        },
+        {
+          "command": "codeclone.openMemorySearchPanel",
+          "when": "view == codeclone.memory && isWorkspaceTrusted",
+          "group": "navigation@4"
+        },
+        {
+          "command": "codeclone.refreshMemory",
+          "when": "view == codeclone.memory && isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.showTrajectoryDashboard",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.showTrajectoryDetail",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@6"
+        },
+        {
+          "command": "codeclone.copyTrajectoryDashboardBrief",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.syncMemoryFromRun",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.connected",
+          "group": "navigation@5"
+        },
+        {
+          "command": "codeclone.approveCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasCheckedDrafts",
+          "group": "navigation@6"
+        },
+        {
+          "command": "codeclone.rejectCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasCheckedDrafts",
+          "group": "navigation@7"
+        },
+        {
+          "command": "codeclone.selectAllMemoryDrafts",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasDrafts",
+          "group": "secondary@2"
+        },
+        {
+          "command": "codeclone.selectMemoryDraftsByType",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasDrafts",
+          "group": "secondary@3"
+        },
+        {
+          "command": "codeclone.clearMemoryDraftSelection",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasCheckedDrafts",
+          "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.selectAllMemoryStale",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasStale",
+          "group": "secondary@5"
+        },
+        {
+          "command": "codeclone.selectMemoryStaleByType",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && codeclone.memoryHasStale",
+          "group": "secondary@6"
+        },
+        {
+          "command": "codeclone.manageWorkspaceTrust",
+          "when": "view == codeclone.memory && !isWorkspaceTrusted",
+          "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.connectMcp",
+          "when": "view == codeclone.memory && isWorkspaceTrusted && !codeclone.connected",
+          "group": "secondary@1"
+        },
+        {
+          "command": "codeclone.approveMemoryRecord",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
+          "group": "inline@1"
+        },
+        {
+          "command": "codeclone.rejectMemoryRecord",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "group": "inline@2"
+        },
+        {
+          "command": "codeclone.openMemoryRecord",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
+          "group": "1_memory@1"
+        },
+        {
           "command": "codeclone.openSetupHelp",
           "when": "view == codeclone.session && (!isWorkspaceTrusted || !codeclone.connected)",
           "group": "secondary@2"
@@ -641,6 +983,66 @@
           "command": "codeclone.copySecuritySurfaceBrief",
           "when": "viewItem == codeclone.securitySurface",
           "group": "navigation@1"
+        },
+        {
+          "command": "codeclone.approveMemoryRecord",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "codeclone.rejectMemoryRecord",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryDraft",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "codeclone.openMemoryRecord",
+          "when": "view == codeclone.memory && (viewItem == codeclone.memoryDraft || viewItem == codeclone.memoryStale)",
+          "group": "1_memory@3"
+        },
+        {
+          "command": "codeclone.selectAllMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "codeclone.selectMemoryDraftsByType",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "codeclone.approveCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@3"
+        },
+        {
+          "command": "codeclone.rejectCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@4"
+        },
+        {
+          "command": "codeclone.clearMemoryDraftSelection",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryInbox && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@5"
+        },
+        {
+          "command": "codeclone.selectAllMemoryStale",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection",
+          "group": "1_memory@1"
+        },
+        {
+          "command": "codeclone.selectMemoryStaleByType",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection",
+          "group": "1_memory@2"
+        },
+        {
+          "command": "codeclone.approveCheckedMemoryDrafts",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@3"
+        },
+        {
+          "command": "codeclone.clearMemoryDraftSelection",
+          "when": "view == codeclone.memory && viewItem == codeclone.memoryStaleSection && codeclone.memoryHasCheckedDrafts",
+          "group": "1_memory@4"
         }
       ],
       "editor/title": [
@@ -683,6 +1085,21 @@
           "command": "codeclone.copySecuritySurfaceBrief",
           "when": "editorTextFocus && codeclone.activeReviewTargetVisibleInEditor && codeclone.activeReviewTargetIsSecuritySurface",
           "group": "secondary@4"
+        },
+        {
+          "command": "codeclone.showBlastRadius",
+          "when": "editorTextFocus && codeclone.hasRun && isWorkspaceTrusted",
+          "group": "secondary@6"
+        },
+        {
+          "command": "codeclone.copyBlastRadiusBrief",
+          "when": "editorTextFocus && codeclone.hasRun && isWorkspaceTrusted",
+          "group": "secondary@7"
+        },
+        {
+          "command": "codeclone.memoryForActiveFile",
+          "when": "editorTextFocus && isWorkspaceTrusted && codeclone.connected",
+          "group": "secondary@8"
         }
       ]
     },
@@ -827,15 +1244,51 @@
           "scope": "window",
           "default": true,
           "description": "Show a single workspace-level CodeClone status bar item."
+        },
+        "codeclone.memory.searchSemantic": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": true,
+          "description": "Blend semantic recall into Engineering Memory keyword search (FTS fallback when the index is unavailable)."
+        },
+        "codeclone.memory.searchIncludeDrafts": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Include draft records in memory search and the search panel."
+        },
+        "codeclone.memory.searchIncludeStale": {
+          "type": "boolean",
+          "scope": "resource",
+          "default": false,
+          "description": "Include stale records in memory search and the search panel."
+        },
+        "codeclone.memory.searchMaxResults": {
+          "type": "integer",
+          "scope": "resource",
+          "default": 20,
+          "minimum": 5,
+          "maximum": 50,
+          "description": "Maximum Engineering Memory records returned per search."
+        },
+        "codeclone.memory.searchDetailLevel": {
+          "type": "string",
+          "enum": [
+            "compact",
+            "full"
+          ],
+          "scope": "resource",
+          "default": "compact",
+          "description": "Statement detail level for search/list modes (get always returns full records)."
         }
       }
     }
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
-    "@types/vscode": "1.100.0",
-    "@vscode/vsce": "2.25.0",
+    "@types/node": "^25.9.1",
+    "@types/vscode": "1.120.0",
+    "@vscode/vsce": "3.9.1",
     "esbuild": "^0.28.0",
-    "typescript": "^6.0.2"
+    "typescript": "^6.0.3"
   }
 }

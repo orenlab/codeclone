@@ -39,6 +39,26 @@ def test_load_pyproject_config_missing_file_returns_empty(tmp_path: Path) -> Non
     assert loader_mod.load_pyproject_config(tmp_path) == {}
 
 
+def test_load_pyproject_config_rejects_symlinked_pyproject(tmp_path: Path) -> None:
+    real_config = tmp_path / "actual.toml"
+    _write_pyproject(real_config, "[tool]\n")
+    config_link = tmp_path / "pyproject.toml"
+    try:
+        config_link.symlink_to(real_config)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlink unavailable: {exc}")
+
+    with pytest.raises(ConfigValidationError, match="must not be a symlink"):
+        loader_mod.load_pyproject_config(tmp_path)
+
+
+def test_open_repo_config_reads_pyproject_bytes(tmp_path: Path) -> None:
+    _write_pyproject(tmp_path / "pyproject.toml", "[tool]\n")
+
+    with loader_mod.open_repo_config(tmp_path) as handle:
+        assert handle.read() == b"[tool]\n"
+
+
 def test_load_pyproject_config_raises_on_loader_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -124,7 +144,7 @@ def test_load_pyproject_config_normalizes_relative_and_absolute_paths(
         """
 [tool.codeclone]
 min_loc = 5
-cache_path = ".cache/codeclone/cache.json"
+cache_path = ".codeclone/cache.json"
 json_out = "/tmp/report.json"
 md_out = "reports/report.md"
 sarif_out = "reports/report.sarif"
@@ -132,7 +152,7 @@ sarif_out = "reports/report.sarif"
     )
     loaded = loader_mod.load_pyproject_config(tmp_path)
     assert loaded["min_loc"] == 5
-    assert loaded["cache_path"] == str(tmp_path / ".cache/codeclone/cache.json")
+    assert loaded["cache_path"] == str(tmp_path / ".codeclone/cache.json")
     assert loaded["json_out"] == "/tmp/report.json"
     assert loaded["md_out"] == str(tmp_path / "reports/report.md")
     assert loaded["sarif_out"] == str(tmp_path / "reports/report.sarif")
@@ -156,6 +176,7 @@ def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
         ("min_loc", 10, 10),
         ("baseline", "codeclone.baseline.json", "codeclone.baseline.json"),
         ("cache_path", None, None),
+        ("audit_token_estimator", "tiktoken", "tiktoken"),
         (
             "golden_fixture_paths",
             ["tests/fixtures/golden_*", "tests/fixtures/golden_*"],
@@ -318,3 +339,33 @@ def test_load_toml_py310_uses_tomli_load(
         SimpleNamespace(import_module=lambda _name: _FakeTomli),
     )
     assert loader_mod._load_toml(toml_path) == {"tool": {}}
+
+
+def test_pyproject_loader_rejects_symlinks_and_invalid_ingest_table(
+    tmp_path: Path,
+) -> None:
+    from codeclone.config.pyproject_loader import (
+        ConfigValidationError,
+        _validate_nested_ingest_table,
+        load_pyproject_config,
+        open_repo_config,
+    )
+
+    broken = tmp_path / "pyproject.toml"
+    broken.symlink_to(tmp_path / "missing.toml")
+    with pytest.raises(ConfigValidationError, match="must not be a symlink"):
+        load_pyproject_config(tmp_path)
+
+    real = tmp_path / "real.toml"
+    real.write_text("[tool.codeclone]\n", encoding="utf-8")
+    broken.unlink()
+    link = tmp_path / "pyproject.toml"
+    link.symlink_to(real)
+    with pytest.raises(ConfigValidationError, match="must not be a symlink"):
+        open_repo_config(tmp_path)
+
+    with pytest.raises(ConfigValidationError, match="must be object"):
+        _validate_nested_ingest_table(
+            ingest_obj="not-a-table",
+            config_path=tmp_path / "pyproject.toml",
+        )

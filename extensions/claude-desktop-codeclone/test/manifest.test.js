@@ -12,6 +12,15 @@ const manifest = JSON.parse(
 const packageJson = JSON.parse(
     fs.readFileSync(path.join(rootDir, "package.json"), "utf8"),
 );
+const contractSnapshot = JSON.parse(
+    fs.readFileSync(
+        path.join(
+            rootDir,
+            "../../tests/fixtures/contract_snapshots/mcp_tool_schemas.json",
+        ),
+        "utf8",
+    ),
+);
 
 test("manifest and package metadata stay aligned", () => {
     assert.equal(manifest.version, packageJson.version);
@@ -30,8 +39,17 @@ test("manifest keeps the setup surface bounded and local", () => {
     assert.deepEqual(manifest.privacy_policies, [
         "https://orenlab.github.io/codeclone/privacy-policy/",
     ]);
-    assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/claude-desktop-bundle/");
+    assert.equal(manifest.documentation, "https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/");
     assert.equal(manifest.tools_generated, true);
-    assert.equal(manifest.tools.length, 11);
+    // Derive the expected count from the canonical MCP contract snapshot so the
+    // bundle stays in lockstep with the server surface instead of drifting
+    // against a hardcoded number.
+    assert.equal(manifest.tools.length, contractSnapshot.length);
     assert.equal("instructions" in manifest, false);
+});
+
+test("manifest tools match MCP contract snapshot", () => {
+    const expected = contractSnapshot.map((entry) => entry.name).sort();
+    const actual = manifest.tools.map((entry) => entry.name).sort();
+    assert.deepEqual(actual, expected);
 });

@@ -9,7 +9,7 @@ from __future__ import annotations
 import inspect
 import os
 from collections.abc import Callable
-from pathlib import Path
+from functools import lru_cache
 
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.units import extract_units_and_stats_from_source
@@ -20,7 +20,7 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
 )
-from ..scanner import module_name_from_path
+from ..scanner import module_name_from_path, resolved_path_under_root
 from ._types import MAX_FILE_SIZE, FileProcessResult
 
 
@@ -39,8 +39,16 @@ def process_file(
     segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
 ) -> FileProcessResult:
     try:
+        resolved = resolved_path_under_root(filepath, root)
+        if resolved is None:
+            return FileProcessResult(
+                filepath=filepath,
+                success=False,
+                error="Source path resolves outside repository root.",
+                error_kind="source_read_error",
+            )
         try:
-            stat_result = os.stat(filepath)
+            stat_result = os.stat(resolved)
             if stat_result.st_size > MAX_FILE_SIZE:
                 return FileProcessResult(
                     filepath=filepath,
@@ -63,7 +71,7 @@ def process_file(
             "size": stat_result.st_size,
         }
         try:
-            source = Path(filepath).read_text("utf-8")
+            source = resolved.read_text("utf-8")
         except UnicodeDecodeError as exc:
             return FileProcessResult(
                 filepath=filepath,
@@ -143,24 +151,16 @@ def _invoke_process_file(
         "segment_min_loc": segment_min_loc,
         "segment_min_stmt": segment_min_stmt,
     }
-    try:
-        signature = inspect.signature(process_file)
-    except (TypeError, ValueError):
+    process_callable: Callable[..., FileProcessResult] = process_file
+    supported_names = _supported_process_file_kwarg_names(process_callable)
+    if supported_names is None:
         supported_kwargs = optional_kwargs
     else:
-        parameters = tuple(signature.parameters.values())
-        if any(
-            parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters
-        ):
-            supported_kwargs = optional_kwargs
-        else:
-            supported_names = {parameter.name for parameter in parameters}
-            supported_kwargs = {
-                key: value
-                for key, value in optional_kwargs.items()
-                if key in supported_names
-            }
-    process_callable: Callable[..., FileProcessResult] = process_file
+        supported_kwargs = {
+            key: value
+            for key, value in optional_kwargs.items()
+            if key in supported_names
+        }
     return process_callable(
         filepath,
         root,
@@ -169,3 +169,17 @@ def _invoke_process_file(
         min_stmt,
         **supported_kwargs,
     )
+
+
+@lru_cache(maxsize=32)
+def _supported_process_file_kwarg_names(
+    process_callable: Callable[..., FileProcessResult],
+) -> frozenset[str] | None:
+    try:
+        signature = inspect.signature(process_callable)
+    except (TypeError, ValueError):
+        return None
+    parameters = tuple(signature.parameters.values())
+    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return None
+    return frozenset(parameter.name for parameter in parameters)

@@ -78,6 +78,16 @@ class CLIArgsLike(Protocol):
     changed_only: bool
     diff_against: str | None
     paths_from_git_diff: str | None
+    blast_radius: tuple[str, ...] | list[str] | None
+    patch_verify: bool
+    strictness: str
+    session_stats: bool
+    audit: bool
+    audit_enabled: bool
+    audit_path: str
+    audit_payloads: str
+    audit_retention_days: int
+    audit_token_estimator: str
     skip_metrics: bool
     skip_dead_code: bool
     skip_dependencies: bool

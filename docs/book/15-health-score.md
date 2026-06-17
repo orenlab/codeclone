@@ -1,4 +1,8 @@
-# Health Score
+<!-- doc-scope: HEALTH SCORE MODEL and evolution policy.
+     owns: score formula, grade thresholds, dimension weights, evolution rules.
+     does-not-own: gate flags (→ 16), report schema (→ 05). -->
+
+# 15. Health Score
 
 ## Purpose
 
@@ -13,7 +17,7 @@ policy for future scoring-model expansion.
 - Canonical report surface:
   `codeclone/report/document/builder.py:build_report_document`
 - Health snapshot projections:
-  `codeclone/report/derived.py:_health_snapshot`,
+  `codeclone/report/document/derived.py:_health_snapshot`,
   `codeclone/report/overview.py:_health_snapshot`
 - CLI / HTML / MCP consumers:
   `codeclone/surfaces/cli/summary.py`,
@@ -92,6 +96,6 @@ If that happens:
 
 ## See also
 
-- [08-report.md](08-report.md)
-- [14-compatibility-and-versioning.md](14-compatibility-and-versioning.md)
-- [15-metrics-and-quality-gates.md](15-metrics-and-quality-gates.md)
+- [05-report.md](05-report.md)
+- [24-compatibility-and-versioning.md](24-compatibility-and-versioning.md)
+- [16-metrics-and-quality-gates.md](16-metrics-and-quality-gates.md)

@@ -19,6 +19,7 @@ from codeclone.cache._canonicalize import (
     _as_module_api_surface_dict,
     _as_module_docstring_coverage_dict,
     _as_module_typing_coverage_dict,
+    _attach_optional_cache_sections,
     _canonicalize_cache_entry,
     _has_cache_entry_container_shape,
 )
@@ -26,14 +27,17 @@ from codeclone.cache._validators import (
     _is_api_param_spec_dict,
     _is_class_metrics_dict,
     _is_dead_candidate_dict,
+    _is_function_relationship_facts_dict,
     _is_module_api_surface_dict,
     _is_module_dep_dict,
     _is_public_symbol_dict,
+    _is_relationship_record_dict,
     _is_runtime_reachability_fact_dict,
     _is_security_surface_dict,
 )
 from codeclone.cache._wire_decode import (
     _decode_optional_wire_api_surface,
+    _decode_optional_wire_function_relationship_facts,
     _decode_optional_wire_module_ints,
     _decode_optional_wire_source_stats,
     _decode_wire_api_param_spec,
@@ -45,6 +49,7 @@ from codeclone.cache._wire_decode import (
     _decode_wire_file_sections,
     _decode_wire_module_dep,
     _decode_wire_name_sections,
+    _decode_wire_relationship_record,
     _decode_wire_runtime_reachability,
     _decode_wire_security_surface,
     _decode_wire_segment,
@@ -58,6 +63,11 @@ from codeclone.cache._wire_helpers import (
 )
 from codeclone.cache.entries import (
     CacheEntry,
+    ModuleApiSurfaceDict,
+    SourceStatsDict,
+    _as_relationship_kind,
+    _as_relationship_origin_lane,
+    _as_relationship_resolution_status,
     _as_runtime_reachability_confidence,
     _as_runtime_reachability_edge_kind,
     _as_runtime_reachability_framework,
@@ -79,17 +89,22 @@ from codeclone.cache.projection import (
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
 from codeclone.contracts.errors import CacheError
+from codeclone.core._types import _unit_to_group_item
+from codeclone.core.discovery import _decode_cached_function_relationship_facts
 from codeclone.models import (
     ApiParamSpec,
     BlockUnit,
     FileMetrics,
+    FunctionRelationshipFacts,
     ModuleApiSurface,
     PublicSymbol,
+    RelationshipRecord,
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentUnit,
     Unit,
 )
+from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
 
 
 def _make_unit(filepath: str) -> Unit:
@@ -180,6 +195,313 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     assert entry["units"][0]["qualname"] == "mod:func"
     assert loaded.load_status == CacheStatus.OK
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_roundtrip_preserves_function_relationship_facts(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path.resolve()
+    filepath = str((root / "pkg" / "module.py").resolve())
+    cache_path = root / "cache.json"
+    cache = Cache(cache_path, root=root)
+    facts = FunctionRelationshipFacts(
+        source_qualname="pkg.module:source",
+        relationships=(
+            RelationshipRecord(
+                relation_kind="reference",
+                resolution_status="resolved",
+                origin_lane="production",
+                source_qualname="pkg.module:source",
+                target_qualname="pkg.target:handler",
+                path=filepath,
+                line=7,
+                expression="handler",
+                resolution_rule="cross_module_import",
+            ),
+            RelationshipRecord(
+                relation_kind="call",
+                resolution_status="unresolved",
+                origin_lane="test",
+                source_qualname="pkg.module:source",
+                target_qualname=None,
+                path=filepath,
+                line=11,
+                expression="factory()",
+                resolution_rule="dynamic_call",
+            ),
+        ),
+    )
+    cache.put_file_entry(
+        filepath,
+        {"mtime_ns": 1, "size": 10},
+        [_make_unit(filepath)],
+        [],
+        [],
+        function_relationship_facts=(facts,),
+    )
+    cache.save()
+
+    loaded = Cache(cache_path, root=root)
+    loaded.load()
+    entry = loaded.get_file_entry(filepath)
+
+    assert entry is not None
+    assert entry["function_relationship_facts"] == [
+        {
+            "source_qualname": "pkg.module:source",
+            "relationships": [
+                {
+                    "relation_kind": "call",
+                    "resolution_status": "unresolved",
+                    "origin_lane": "test",
+                    "source_qualname": "pkg.module:source",
+                    "target_qualname": None,
+                    "path": filepath,
+                    "line": 11,
+                    "expression": "factory()",
+                    "resolution_rule": "dynamic_call",
+                },
+                {
+                    "relation_kind": "reference",
+                    "resolution_status": "resolved",
+                    "origin_lane": "production",
+                    "source_qualname": "pkg.module:source",
+                    "target_qualname": "pkg.target:handler",
+                    "path": filepath,
+                    "line": 7,
+                    "expression": "handler",
+                    "resolution_rule": "cross_module_import",
+                },
+            ],
+        }
+    ]
+
+    # Step 7a: discovery rehydrates the stored dicts back into typed models for
+    # cross-file aggregation. Round-trip must be faithful (storage sort order).
+    decoded = _decode_cached_function_relationship_facts(
+        entry["function_relationship_facts"]
+    )
+    assert len(decoded) == 1
+    assert decoded[0].source_qualname == "pkg.module:source"
+    assert tuple(
+        (record.relation_kind, record.target_qualname, record.resolution_rule)
+        for record in decoded[0].relationships
+    ) == (
+        ("call", None, "dynamic_call"),
+        ("reference", "pkg.target:handler", "cross_module_import"),
+    )
+    assert decoded[0].relationships[0].origin_lane == "test"
+
+
+def test_cache_derives_function_relationship_facts_from_file_metrics(
+    tmp_path: Path,
+) -> None:
+    filepath = str((tmp_path / "pkg" / "module.py").resolve())
+    facts = FunctionRelationshipFacts(
+        source_qualname="pkg.module:source",
+        relationships=(
+            RelationshipRecord(
+                relation_kind="call",
+                resolution_status="resolved",
+                origin_lane="production",
+                source_qualname="pkg.module:source",
+                target_qualname="pkg.target:handler",
+                path=filepath,
+                line=7,
+            ),
+        ),
+    )
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.put_file_entry(
+        filepath,
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        file_metrics=FileMetrics(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset(),
+            function_relationship_facts=(facts,),
+        ),
+    )
+
+    entry = cache.get_file_entry(filepath)
+
+    assert entry is not None
+    assert (
+        entry["function_relationship_facts"][0]["relationships"][0]["target_qualname"]
+        == "pkg.target:handler"
+    )
+
+
+def test_cache_rejects_malformed_function_relationship_wire() -> None:
+    entry = _decode_wire_file_entry(
+        {
+            "st": [1, 10],
+            "fr": [
+                [
+                    "pkg.module:source",
+                    [["call", "unresolved", "production", "not-null", 7, "f()", None]],
+                ]
+            ],
+        },
+        "pkg/module.py",
+    )
+
+    assert entry is None
+
+
+def test_relationship_cache_helpers_enforce_two_axis_contract() -> None:
+    resolved = {
+        "relation_kind": "call",
+        "resolution_status": "resolved",
+        "origin_lane": "production",
+        "source_qualname": "pkg.module:source",
+        "target_qualname": "pkg.target:handler",
+        "path": "pkg/module.py",
+        "line": 7,
+        "expression": "handler()",
+        "resolution_rule": "cross_module_import",
+    }
+    unresolved = {
+        **resolved,
+        "resolution_status": "unresolved",
+        "target_qualname": None,
+    }
+
+    assert _as_relationship_kind("call") == "call"
+    assert _as_relationship_kind("reference") == "reference"
+    assert _as_relationship_kind("other") is None
+    assert _as_relationship_resolution_status("resolved") == "resolved"
+    assert _as_relationship_resolution_status("unresolved") == "unresolved"
+    assert _as_relationship_resolution_status("other") is None
+    assert _as_relationship_origin_lane("production") == "production"
+    assert _as_relationship_origin_lane("test") == "test"
+    assert _as_relationship_origin_lane("other") is None
+    assert _is_relationship_record_dict(resolved)
+    assert _is_relationship_record_dict(unresolved)
+    assert not _is_relationship_record_dict(object())
+    assert not _is_relationship_record_dict({**resolved, "line": 0})
+    assert not _is_relationship_record_dict({**resolved, "target_qualname": None})
+    assert not _is_relationship_record_dict(
+        {**unresolved, "target_qualname": "pkg.target:handler"}
+    )
+    assert not _is_relationship_record_dict({**resolved, "expression": 1})
+    assert not _is_relationship_record_dict({**resolved, "resolution_rule": 1})
+    assert _is_function_relationship_facts_dict(
+        {
+            "source_qualname": "pkg.module:source",
+            "relationships": [resolved, unresolved],
+        }
+    )
+    assert not _is_function_relationship_facts_dict(object())
+    assert not _is_function_relationship_facts_dict(
+        {
+            "source_qualname": "pkg.module:other",
+            "relationships": [resolved],
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "row",
+    [
+        object(),
+        ["call", "resolved", "production", None, 7, None, None],
+        ["call", "unresolved", "production", "pkg.target:f", 7, None, None],
+        ["other", "resolved", "production", "pkg.target:f", 7, None, None],
+        ["call", "resolved", "other", "pkg.target:f", 7, None, None],
+        ["call", "resolved", "production", "pkg.target:f", 0, None, None],
+        ["call", "resolved", "production", "pkg.target:f", 7, 1, None],
+        ["call", "resolved", "production", "pkg.target:f", 7, None, 1],
+    ],
+)
+def test_decode_wire_relationship_record_rejects_invalid_rows(row: object) -> None:
+    assert (
+        _decode_wire_relationship_record(
+            row,
+            source_qualname="pkg.module:source",
+            filepath="pkg/module.py",
+        )
+        is None
+    )
+
+
+def test_decode_optional_wire_relationship_facts_rejects_invalid_container() -> None:
+    assert (
+        _decode_optional_wire_function_relationship_facts(
+            obj={"fr": "invalid"},
+            filepath="pkg/module.py",
+        )
+        is None
+    )
+    assert (
+        _decode_optional_wire_function_relationship_facts(
+            obj={"fr": [["pkg.module:source", "invalid"]]},
+            filepath="pkg/module.py",
+        )
+        is None
+    )
+
+
+def test_cache_rejects_relationship_source_mismatch(tmp_path: Path) -> None:
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    facts = FunctionRelationshipFacts(
+        source_qualname="pkg.module:source",
+        relationships=(
+            RelationshipRecord(
+                relation_kind="call",
+                resolution_status="resolved",
+                origin_lane="production",
+                source_qualname="pkg.module:other",
+                target_qualname="pkg.target:handler",
+                path="pkg/module.py",
+                line=7,
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="source_qualname must match its facts container",
+    ):
+        cache.put_file_entry(
+            "pkg/module.py",
+            {"mtime_ns": 1, "size": 10},
+            [],
+            [],
+            [],
+            function_relationship_facts=(facts,),
+        )
+
+
+def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
+    unit = _make_unit("pkg/module.py")
+
+    assert _unit_to_group_item(unit) == {
+        "qualname": "mod:func",
+        "filepath": "pkg/module.py",
+        "start_line": 1,
+        "end_line": 2,
+        "loc": 2,
+        "stmt_count": 1,
+        "fingerprint": "abc",
+        "loc_bucket": "0-19",
+        "cyclomatic_complexity": 1,
+        "nesting_depth": 0,
+        "risk": "low",
+        "raw_hash": "",
+        "entry_guard_count": 0,
+        "entry_guard_terminal_profile": "none",
+        "entry_guard_has_side_effect_before": False,
+        "terminal_kind": "fallthrough",
+        "try_finally_profile": "none",
+        "side_effect_order_profile": "none",
+    }
 
 
 def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
@@ -331,6 +653,87 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
     ]
 
 
+def test_attach_optional_cache_sections_sets_all_optional_blocks() -> None:
+    base = cast(
+        CacheEntry,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": [],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "referenced_qualnames": [],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    attached = _attach_optional_cache_sections(
+        base,
+        typing_coverage={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "callable_count": 1,
+            "params_total": 1,
+            "params_annotated": 1,
+            "returns_total": 1,
+            "returns_annotated": 1,
+            "any_annotation_count": 0,
+        },
+        docstring_coverage={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "public_symbol_total": 1,
+            "public_symbol_documented": 1,
+        },
+        api_surface={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "all_declared": [],
+            "symbols": [],
+        },
+        runtime_reachability=[
+            {
+                "target_qualname": "pkg.mod:fn",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 2,
+                "target_kind": "function",
+                "framework": "fastapi",
+                "edge_kind": "registers_handler",
+                "confidence": "high",
+                "evidence": "route",
+                "evidence_symbol": "get",
+                "source_qualname": "pkg.mod:router",
+            }
+        ],
+        security_surfaces=[
+            {
+                "category": "process_boundary",
+                "capability": "subprocess_run",
+                "module": "pkg.mod",
+                "filepath": "pkg/mod.py",
+                "qualname": "pkg.mod:run",
+                "start_line": 1,
+                "end_line": 1,
+                "location_scope": "callable",
+                "classification_mode": "exact_call",
+                "evidence_kind": "call",
+                "evidence_symbol": "subprocess.run",
+            }
+        ],
+        source_stats=SourceStatsDict(lines=10, functions=1, methods=0, classes=0),
+        structural_findings=[],
+    )
+    assert attached["typing_coverage"]["module"] == "pkg.mod"
+    assert attached["runtime_reachability"][0]["framework"] == "fastapi"
+    assert attached["security_surfaces"][0]["category"] == "process_boundary"
+    assert attached["source_stats"]["lines"] == 10
+    assert attached["structural_findings"] == []
+
+
 def test_cache_roundtrip_preserves_runtime_reachability(tmp_path: Path) -> None:
     entry = _roundtrip_cache_entry_with_metrics(
         tmp_path,
@@ -396,6 +799,36 @@ def test_security_surface_cache_helpers_reject_invalid_values() -> None:
         is False
     )
     assert _is_security_surface_dict(object()) is False
+    assert _is_security_surface_dict(
+        {
+            "category": "process_boundary",
+            "capability": "subprocess_run",
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:run",
+            "start_line": 1,
+            "end_line": 1,
+            "location_scope": "callable",
+            "classification_mode": "exact_call",
+            "evidence_kind": "call",
+            "evidence_symbol": "subprocess.run",
+        }
+    )
+    assert _is_runtime_reachability_fact_dict(
+        {
+            "target_qualname": "pkg.mod:fn",
+            "filepath": "pkg/mod.py",
+            "start_line": 1,
+            "end_line": 2,
+            "target_kind": "function",
+            "framework": "fastapi",
+            "edge_kind": "registers_handler",
+            "confidence": "high",
+            "evidence": "route",
+            "evidence_symbol": "get",
+            "source_qualname": "pkg.mod:router",
+        }
+    )
 
 
 def test_runtime_reachability_cache_helpers_reject_invalid_values() -> None:
@@ -705,10 +1138,50 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
     assert cache._dirty is True
 
 
+def test_cache_helper_type_guards_accept_valid_optional_metric_dicts() -> None:
+    typing = {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "callable_count": 1,
+        "params_total": 2,
+        "params_annotated": 1,
+        "returns_total": 1,
+        "returns_annotated": 1,
+        "any_annotation_count": 0,
+    }
+    docstrings = {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "public_symbol_total": 2,
+        "public_symbol_documented": 1,
+    }
+    api_surface: ModuleApiSurfaceDict = {
+        "module": "pkg.mod",
+        "filepath": "pkg/mod.py",
+        "all_declared": [],
+        "symbols": [],
+    }
+    assert _as_module_typing_coverage_dict(typing) == typing
+    assert _as_module_docstring_coverage_dict(docstrings) == docstrings
+    assert _as_module_api_surface_dict(api_surface) == api_surface
+
+
 def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -> None:
     assert _as_module_typing_coverage_dict({"module": "pkg"}) is None
     assert _as_module_docstring_coverage_dict({"module": "pkg"}) is None
     assert _as_module_api_surface_dict({"module": "pkg"}) is None
+    assert (
+        _has_cache_entry_container_shape(
+            {
+                "stat": {"mtime_ns": 1, "size": 1},
+                "units": [],
+                "blocks": [],
+                "segments": [],
+                "class_metrics": "not-a-list",
+            }
+        )
+        is False
+    )
     assert (
         _has_cache_entry_container_shape(
             {
@@ -764,13 +1237,51 @@ def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -
     assert _decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
     assert (
         _decode_wire_api_surface_symbol(
+            ["pkg.mod:run", "function", 1, 2, "name", "", "bad-params"]
+        )
+        is None
+    )
+    assert _decode_wire_api_param_spec(["name", "pos_or_kw", "not-int", ""]) is None
+    assert (
+        _decode_wire_api_surface_symbol(
             ["pkg.mod:run", "function", 1, 2, "name", "", [None]]
         )
         is None
     )
     assert _decode_wire_api_param_spec(["value"]) is None
     assert _is_api_param_spec_dict([]) is False
+    assert _is_api_param_spec_dict(
+        {
+            "name": "value",
+            "kind": "pos_or_kw",
+            "has_default": False,
+            "annotation_hash": "",
+        }
+    )
     assert _is_public_symbol_dict([]) is False
+    assert (
+        _is_public_symbol_dict(
+            {
+                "qualname": "pkg.mod:run",
+                "kind": "function",
+                "exported_via": "name",
+                "start_line": "bad",
+                "end_line": 2,
+            }
+        )
+        is False
+    )
+    assert _is_public_symbol_dict(
+        {
+            "qualname": "pkg.mod:run",
+            "kind": "function",
+            "exported_via": "name",
+            "start_line": 1,
+            "end_line": 2,
+            "returns_hash": "",
+            "params": [],
+        }
+    )
     assert (
         _is_public_symbol_dict(
             {
@@ -799,7 +1310,7 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("def f():\n    return 1\n", "utf-8")
 
-    cache_path = project_root / ".cache" / "codeclone" / "cache.json"
+    cache_path = project_root / ".codeclone" / "cache.json"
     cache = Cache(cache_path, root=project_root)
     cache.put_file_entry(
         str(target),
@@ -1215,6 +1726,23 @@ def test_cache_load_corrupted_json(tmp_path: Path) -> None:
     assert cache.cache_schema_version is None
 
 
+def test_cache_load_exists_oserror_graceful_ignore(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    original_exists = Path.exists
+
+    def _raise_exists(self: Path) -> bool:
+        if self == cache_path:
+            raise OSError("no exists")
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", _raise_exists)
+    cache = Cache(cache_path)
+    cache.load()
+    _assert_unreadable_cache_contract(cache)
+
+
 def test_cache_load_unreadable_stat_graceful_ignore(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1238,18 +1766,14 @@ def test_cache_load_unreadable_read_graceful_ignore(
 ) -> None:
     cache_path = tmp_path / "cache.json"
     cache_path.write_text('{"version":"1.0","files":{}}', "utf-8")
-    original_read_text = Path.read_text
+    original_open = Path.open
 
-    def _raise_read_text(
-        self: Path,
-        encoding: str | None = None,
-        errors: str | None = None,
-    ) -> str:
+    def _raise_open(self: Path, *args: Any, **kwargs: Any) -> object:
         if self == cache_path:
             raise OSError("no read")
-        return original_read_text(self, encoding=encoding, errors=errors)
+        return original_open(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", _raise_read_text)
+    monkeypatch.setattr(Path, "open", _raise_open)
     cache = Cache(cache_path)
     cache.load()
     _assert_unreadable_cache_contract(cache)
@@ -1639,7 +2163,42 @@ def test_runtime_filepath_from_wire_resolve_oserror(
         return original_resolve(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _resolve_with_error)
-    assert runtime_filepath_from_wire("pkg/module.py", root=cache.root) == str(combined)
+    with pytest.raises(RepoPathError, match="cannot resolve path"):
+        runtime_filepath_from_wire("pkg/module.py", root=cache.root)
+
+
+@pytest.mark.parametrize("wire_path", ["../outside.py", "pkg/../../outside.py"])
+def test_runtime_filepath_from_wire_rejects_traversal_escape(
+    tmp_path: Path,
+    wire_path: str,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+
+    with pytest.raises(PathOutsideRepoError, match="escapes repository root"):
+        runtime_filepath_from_wire(wire_path, root=root)
+
+
+def test_runtime_filepath_from_wire_rejects_external_absolute_path(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+
+    with pytest.raises(PathOutsideRepoError, match="escapes repository root"):
+        runtime_filepath_from_wire(str(tmp_path / "outside.py"), root=root)
+
+
+def test_runtime_filepath_from_wire_accepts_absolute_under_root(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "project"
+    root.mkdir()
+    absolute_under_root = root / "pkg" / "module.py"
+
+    assert runtime_filepath_from_wire(str(absolute_under_root), root=root) == str(
+        absolute_under_root
+    )
 
 
 def test_as_str_dict_rejects_non_string_keys() -> None:
@@ -1759,6 +2318,27 @@ def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> No
         _decode_wire_file_entry(
             {"st": [1, 2], "cc": [["Q", ["A", 1]]]},
             "x.py",
+        )
+        is None
+    )
+
+
+def test_decode_wire_file_entry_returns_none_when_optional_sections_invalid() -> None:
+    assert (
+        _decode_wire_file_entry(
+            {
+                "st": [1, 2],
+                "cc": [],
+                "rr": "not-a-list",
+            },
+            "x.py",
+        )
+        is None
+    )
+    assert (
+        _decode_optional_wire_api_surface(
+            obj={"as": [None, [], []]},
+            filepath="pkg/mod.py",
         )
         is None
     )
@@ -2164,6 +2744,16 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
         )
         is False
     )
+    assert _is_dead_candidate_dict(
+        {
+            "qualname": "pkg.mod:unused",
+            "local_name": "unused",
+            "filepath": "pkg/mod.py",
+            "start_line": 1,
+            "end_line": 2,
+            "kind": "function",
+        }
+    )
     assert (
         _is_dead_candidate_dict(
             {
@@ -2285,3 +2875,11 @@ def test_decode_wire_segment_rejects_missing_segment_signature() -> None:
 
 def test_decode_wire_dead_candidate_rejects_invalid_rows() -> None:
     assert _decode_wire_dead_candidate(object(), "pkg/mod.py") is None
+
+
+def test_integrity_read_json_document_forwards_max_bytes(tmp_path: Path) -> None:
+    from codeclone.cache.integrity import read_json_document
+
+    path = tmp_path / "doc.json"
+    path.write_text('{"ok": true}', encoding="utf-8")
+    assert read_json_document(path, max_bytes=64) == {"ok": True}

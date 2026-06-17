@@ -1,9 +1,20 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Final, Literal
 
 from .. import ui_messages as ui
+from ..audit.validation import (
+    DEFAULT_AUDIT_PATH,
+    DEFAULT_AUDIT_PAYLOADS,
+    DEFAULT_AUDIT_RETENTION_DAYS,
+    DEFAULT_AUDIT_TOKEN_ESTIMATOR,
+)
 from ..contracts import (
     DEFAULT_BASELINE_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -26,6 +37,11 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
     DEFAULT_TEXT_REPORT_PATH,
+)
+from .intent_registry_defaults import (
+    DEFAULT_INTENT_REGISTRY_BACKEND,
+    DEFAULT_INTENT_REGISTRY_DB_PATH,
+    DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
 )
 
 CliKind = Literal[
@@ -230,6 +246,105 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         default=None,
         metavar="GIT_REF",
         help_text=ui.HELP_PATHS_FROM_GIT_DIFF,
+    ),
+    _option(
+        dest="blast_radius",
+        group="Analysis",
+        cli_kind="value",
+        flags=("--blast-radius",),
+        default=None,
+        nargs="+",
+        metavar="FILE",
+        help_text=ui.HELP_BLAST_RADIUS,
+    ),
+    _option(
+        dest="patch_verify",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--patch-verify",),
+        default=False,
+        help_text=ui.HELP_PATCH_VERIFY,
+    ),
+    _option(
+        dest="strictness",
+        group="Analysis",
+        cli_kind="value",
+        flags=("--strictness",),
+        default="ci",
+        metavar="LEVEL",
+        help_text=ui.HELP_STRICTNESS,
+    ),
+    _option(
+        dest="session_stats",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--session-stats",),
+        default=False,
+        help_text=ui.HELP_SESSION_STATS,
+    ),
+    _option(
+        dest="audit",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--audit",),
+        default=False,
+        help_text=ui.HELP_AUDIT,
+    ),
+    _option(
+        dest="audit_json",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--audit-json",),
+        default=False,
+        help_text=ui.HELP_AUDIT_JSON,
+    ),
+    _option(
+        dest="audit_enabled",
+        group=None,
+        default=False,
+        pyproject_type=bool,
+    ),
+    _option(
+        dest="audit_path",
+        group=None,
+        default=DEFAULT_AUDIT_PATH,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="audit_payloads",
+        group=None,
+        default=DEFAULT_AUDIT_PAYLOADS,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="audit_retention_days",
+        group=None,
+        default=DEFAULT_AUDIT_RETENTION_DAYS,
+        pyproject_type=int,
+    ),
+    _option(
+        dest="audit_token_estimator",
+        group=None,
+        default=DEFAULT_AUDIT_TOKEN_ESTIMATOR,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="intent_registry_backend",
+        group=None,
+        default=DEFAULT_INTENT_REGISTRY_BACKEND,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="intent_registry_path",
+        group=None,
+        default=DEFAULT_INTENT_REGISTRY_DB_PATH,
+        pyproject_type=str,
+    ),
+    _option(
+        dest="intent_registry_retention_days",
+        group=None,
+        default=DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
+        pyproject_type=int,
     ),
     _option(
         dest="cache_path",

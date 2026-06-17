@@ -29,6 +29,7 @@ def _class_metrics_for_node(
     filepath: str,
     module_import_names: set[str],
     module_class_names: set[str],
+    cohesion_ignored_methods: frozenset[str] = frozenset(),
 ) -> ClassMetrics | None:
     span = _node_line_span(class_node)
     if span is None:
@@ -39,7 +40,10 @@ def _class_metrics_for_node(
         module_import_names=module_import_names,
         module_class_names=module_class_names,
     )
-    lcom4, method_count, instance_var_count = compute_lcom4(class_node)
+    lcom4, method_count, instance_var_count = compute_lcom4(
+        class_node,
+        ignored_methods=cohesion_ignored_methods,
+    )
     return ClassMetrics(
         qualname=f"{module_name}:{class_qualname}",
         filepath=filepath,

@@ -54,8 +54,10 @@ def verify_cache_payload_signature(
     return hmac.compare_digest(signature, sign_cache_payload(payload))
 
 
-def read_json_document(path: Path) -> object:
-    return _read_json_document(path)
+def read_json_document(path: Path, *, max_bytes: int | None = None) -> object:
+    if max_bytes is None:
+        return _read_json_document(path)
+    return _read_json_document(path, max_bytes=max_bytes)
 
 
 def write_json_document_atomically(path: Path, document: object) -> None:

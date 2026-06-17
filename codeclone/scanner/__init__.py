@@ -57,6 +57,18 @@ def _is_under_root(path: Path, root: Path) -> bool:
         return False
 
 
+def resolved_path_under_root(filepath: str, root: str) -> Path | None:
+    """Return the resolved source path when it stays under ``root``."""
+    try:
+        root_path = Path(root).resolve()
+        resolved = Path(filepath).resolve()
+    except OSError:
+        return None
+    if _is_under_root(resolved, root_path):
+        return resolved
+    return None
+
+
 def _ensure_not_sensitive_root(*, rootp: Path, root_arg: str) -> None:
     root_str = str(rootp)
     temp_root = _get_tempdir()

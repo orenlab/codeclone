@@ -4,16 +4,20 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+import importlib
 from pathlib import Path
+from types import ModuleType
 from xml.etree import ElementTree
 
 import pytest
 
+import codeclone.metrics.coverage_join as coverage_join_mod
 from codeclone.metrics.coverage_join import (
     CoverageJoinParseError,
     _iter_cobertura_class_elements,
     _iter_cobertura_line_hits,
     _local_tag_name,
+    _parse_xml_bytes,
     _resolve_report_filename,
     _resolved_coverage_sources,
     build_coverage_join,
@@ -148,6 +152,76 @@ def test_build_coverage_join_rejects_invalid_cobertura_xml(tmp_path: Path) -> No
             hotspot_threshold_percent=50,
             units=(),
         )
+
+
+def test_build_coverage_join_rejects_oversized_cobertura_xml(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    coverage_xml = tmp_path / "coverage.xml"
+    coverage_xml.write_text("<coverage>too large</coverage>", encoding="utf-8")
+    monkeypatch.setattr(coverage_join_mod, "MAX_COVERAGE_XML_BYTES", 8)
+
+    with pytest.raises(CoverageJoinParseError, match="File too large"):
+        build_coverage_join(
+            coverage_xml=coverage_xml,
+            root_path=tmp_path,
+            hotspot_threshold_percent=50,
+            units=(),
+        )
+
+
+def test_coverage_join_defusedxml_import_path_when_available() -> None:
+    pytest.importorskip("defusedxml.ElementTree")
+
+    root_element = _parse_xml_bytes(b"<coverage><packages/></coverage>")
+
+    assert _local_tag_name(root_element.tag) == "coverage"
+
+
+def test_parse_xml_bytes_uses_mocked_defusedxml(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_module = ModuleType("defusedxml.ElementTree")
+
+    def _fromstring(payload: bytes) -> ElementTree.Element:
+        return ElementTree.fromstring(payload)
+
+    fake_module.fromstring = _fromstring  # type: ignore[attr-defined]
+
+    def _import(name: str, package: str | None = None) -> ModuleType:
+        if name == "defusedxml.ElementTree":
+            return fake_module
+        return importlib.import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import)
+    root_element = _parse_xml_bytes(b"<coverage><packages/></coverage>")
+    assert _local_tag_name(root_element.tag) == "coverage"
+
+
+def test_parse_xml_bytes_maps_defusedxml_errors_to_parse_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _DefusedError(Exception):
+        pass
+
+    _DefusedError.__module__ = "defusedxml.common"
+
+    fake_module = ModuleType("defusedxml.ElementTree")
+
+    def _fromstring(_payload: bytes) -> ElementTree.Element:
+        raise _DefusedError("unsafe xml")
+
+    fake_module.fromstring = _fromstring  # type: ignore[attr-defined]
+
+    def _import(name: str, package: str | None = None) -> ModuleType:
+        if name == "defusedxml.ElementTree":
+            return fake_module
+        return importlib.import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import)
+    with pytest.raises(ElementTree.ParseError, match="unsafe xml"):
+        _parse_xml_bytes(b"<coverage/>")
 
 
 def test_coverage_join_resolves_sources_and_filenames(tmp_path: Path) -> None:

@@ -381,8 +381,348 @@ function renderSecuritySurfaceMarkdown(item) {
     ].join("\n");
 }
 
+function escapeHtml(text) {
+    return String(text)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
+function blastRadiusFileListSection(title, items, open) {
+    if (items.length === 0) {
+        return "";
+    }
+    const openAttr = open ? " open" : "";
+    const listItems = items
+        .map((f) => `<li>${escapeHtml(f)}</li>`)
+        .join("");
+    return `<details${openAttr}><summary>${escapeHtml(title)} (${items.length})</summary><ul class="file-list">${listItems}</ul></details>`;
+}
+
+function renderBlastRadiusMarkdown(payload, workspaceName) {
+    const origin = safeArray(payload.origin);
+    const direct = safeArray(payload.direct_dependents);
+    const transitive = safeArray(payload.transitive_dependents);
+    const cloneCohort = safeArray(payload.clone_cohort_members);
+    const inCycle = safeArray(payload.in_dependency_cycle);
+    const risk = safeObject(payload.structural_risk);
+    const doNotTouch = safeArray(payload.do_not_touch);
+    const reviewContext = safeArray(payload.review_context);
+    const guardrails = safeArray(payload.guardrails);
+    const radiusLevel = capitalize(String(payload.radius_level || "unknown"));
+
+    const lines = [
+        "# Blast Radius",
+        "",
+        `- Run: \`${payload.run_id || "unknown"}\``,
+        `- Workspace: \`${workspaceName || "unknown"}\``,
+        `- Depth: ${payload.depth || "direct"}`,
+        `- Radius level: **${radiusLevel}**`,
+        `- Origin: ${origin.length} files`,
+        `- Direct dependents: ${direct.length}`,
+        `- Transitive dependents: ${transitive.length}`,
+        `- Clone cohort: ${cloneCohort.length}`,
+    ];
+    if (origin.length > 0) {
+        lines.push(
+            "",
+            "## Origin files",
+            markdownBulletList(origin.map((f) => `\`${f}\``))
+        );
+    }
+    if (direct.length > 0) {
+        lines.push(
+            "",
+            "## Direct dependents",
+            markdownBulletList(direct.map((f) => `\`${f}\``))
+        );
+    }
+    if (transitive.length > 0) {
+        lines.push(
+            "",
+            "## Transitive dependents",
+            markdownBulletList(transitive.map((f) => `\`${f}\``))
+        );
+    }
+    if (cloneCohort.length > 0) {
+        lines.push(
+            "",
+            "## Clone cohort members",
+            markdownBulletList(cloneCohort.map((f) => `\`${f}\``))
+        );
+    }
+    if (inCycle.length > 0) {
+        lines.push(
+            "",
+            "## In dependency cycle",
+            markdownBulletList(inCycle.map((f) => `\`${f}\``))
+        );
+    }
+    const riskEntries = Object.entries(risk).filter(
+        ([, paths]) => safeArray(paths).length > 0
+    );
+    if (riskEntries.length > 0) {
+        lines.push("", "## Structural risk");
+        for (const [key, paths] of riskEntries) {
+            lines.push(
+                "",
+                `### ${humanizeIdentifier(key)}`,
+                markdownBulletList(safeArray(paths).map((f) => `\`${f}\``))
+            );
+        }
+    }
+    if (doNotTouch.length > 0) {
+        lines.push(
+            "",
+            "## Do not touch",
+            markdownBulletList(
+                doNotTouch.map(
+                    (e) =>
+                        `\`${safeObject(e).path}\` — ${safeObject(e).reason}`
+                )
+            )
+        );
+    }
+    if (reviewContext.length > 0) {
+        lines.push(
+            "",
+            "## Review context",
+            markdownBulletList(
+                reviewContext.map(
+                    (e) =>
+                        `\`${safeObject(e).path}\` — ${safeObject(e).reason}`
+                )
+            )
+        );
+    }
+    if (guardrails.length > 0) {
+        lines.push("", "## Guardrails", markdownBulletList(guardrails));
+    }
+    return lines.join("\n");
+}
+
+function renderBlastRadiusSvgHtml(payload, workspaceName, nonce) {
+    const origin = safeArray(payload.origin);
+    const direct = safeArray(payload.direct_dependents);
+    const transitive = safeArray(payload.transitive_dependents);
+    const cloneCohort = safeArray(payload.clone_cohort_members);
+    const inCycle = safeArray(payload.in_dependency_cycle);
+    const risk = safeObject(payload.structural_risk);
+    const doNotTouch = safeArray(payload.do_not_touch);
+    const reviewContext = safeArray(payload.review_context);
+    const guardrails = safeArray(payload.guardrails);
+    const radiusLevel = String(payload.radius_level || "unknown").toLowerCase();
+    const depth = String(payload.depth || "direct");
+    const runId = String(payload.run_id || "unknown");
+
+    const hasDirect = direct.length > 0;
+    const hasTransitive = transitive.length > 0;
+    const hasClones = cloneCohort.length > 0;
+
+    const cx = hasClones ? 260 : 300;
+    const cy = 170;
+    const originR = 50;
+    const directR = hasDirect ? 105 : 0;
+    const transitiveR = hasTransitive ? 155 : 0;
+    const outerR = transitiveR || directR || originR;
+    const svgWidth = hasClones ? 600 : 520;
+
+    let svgContent = "";
+
+    if (hasTransitive) {
+        svgContent += `<circle cx="${cx}" cy="${cy}" r="${transitiveR}" class="ring ring-transitive"/>`;
+        svgContent += `<text x="${cx}" y="${cy - transitiveR + 18}" class="ring-label">Transitive (${transitive.length})</text>`;
+    }
+    if (hasDirect) {
+        svgContent += `<circle cx="${cx}" cy="${cy}" r="${directR}" class="ring ring-direct"/>`;
+        svgContent += `<text x="${cx}" y="${cy - directR + 18}" class="ring-label">Direct (${direct.length})</text>`;
+    }
+    svgContent += `<circle cx="${cx}" cy="${cy}" r="${originR}" class="ring ring-origin"/>`;
+    svgContent += `<text x="${cx}" y="${cy - 6}" class="ring-label origin-label">Origin</text>`;
+    svgContent += `<text x="${cx}" y="${cy + 14}" class="ring-label">${origin.length} file${origin.length !== 1 ? "s" : ""}</text>`;
+
+    if (hasClones) {
+        const boxX = cx + outerR + 30;
+        const boxW = Math.max(svgWidth - boxX - 10, 80);
+        svgContent += `<rect x="${boxX}" y="${cy - 35}" width="${boxW}" height="70" rx="8" class="clone-box"/>`;
+        svgContent += `<text x="${boxX + boxW / 2}" y="${cy - 8}" class="ring-label">Clone cohort</text>`;
+        svgContent += `<text x="${boxX + boxW / 2}" y="${cy + 16}" class="ring-label clone-count">${cloneCohort.length}</text>`;
+        svgContent += `<line x1="${cx + outerR}" y1="${cy}" x2="${boxX}" y2="${cy}" class="clone-line"/>`;
+    }
+
+    if (inCycle.length > 0) {
+        svgContent += `<circle cx="${cx + 20}" cy="${cy + originR - 12}" r="6" class="cycle-marker"/>`;
+        svgContent += `<text x="${cx + 32}" y="${cy + originR - 8}" class="legend-text" style="font-size:11px">${inCycle.length} in cycle</text>`;
+    }
+
+    const legendY = cy + outerR + 25;
+    let legendX = 20;
+    const legendItems = [{cssClass: "ring-origin", label: "Origin"}];
+    if (hasDirect) {
+        legendItems.push({cssClass: "ring-direct", label: "Direct"});
+    }
+    if (hasTransitive) {
+        legendItems.push({cssClass: "ring-transitive", label: "Transitive"});
+    }
+    if (hasClones) {
+        legendItems.push({cssClass: "clone-box", label: "Clones"});
+    }
+
+    for (const item of legendItems) {
+        svgContent += `<rect x="${legendX}" y="${legendY}" width="12" height="12" rx="2" class="${item.cssClass}" style="stroke-width:1"/>`;
+        svgContent += `<text x="${legendX + 18}" y="${legendY + 10}" class="legend-text">${escapeHtml(item.label)}</text>`;
+        legendX += 18 + item.label.length * 7 + 16;
+    }
+
+    const svgHeight = legendY + 30;
+
+    const svg = [
+        `<svg viewBox="0 0 ${svgWidth} ${svgHeight}" xmlns="http://www.w3.org/2000/svg"`,
+        ` role="img" aria-label="Blast radius: ${origin.length} origin, ${direct.length} direct, ${transitive.length} transitive, ${cloneCohort.length} clones">`,
+        svgContent,
+        "</svg>",
+    ].join("");
+
+    const detailSections = [];
+    detailSections.push(blastRadiusFileListSection("Origin files", origin, true));
+    if (hasDirect) {
+        detailSections.push(blastRadiusFileListSection("Direct dependents", direct, false));
+    }
+    if (hasTransitive) {
+        detailSections.push(blastRadiusFileListSection("Transitive dependents", transitive, false));
+    }
+    if (hasClones) {
+        detailSections.push(blastRadiusFileListSection("Clone cohort members", cloneCohort, false));
+    }
+    if (inCycle.length > 0) {
+        detailSections.push(blastRadiusFileListSection("In dependency cycle", inCycle, false));
+    }
+
+    const riskEntries = Object.entries(risk).filter(
+        ([, paths]) => safeArray(paths).length > 0
+    );
+    if (riskEntries.length > 0) {
+        let riskHtml = "<h2>Structural risk</h2>";
+        for (const [key, paths] of riskEntries) {
+            const riskClass = key.includes("complexity")
+                ? "risk-high"
+                : key.includes("coverage")
+                    ? "risk-coverage"
+                    : key.includes("overloaded")
+                        ? "risk-overloaded"
+                        : "risk-high";
+            riskHtml += `<h3>${escapeHtml(humanizeIdentifier(key))}</h3><div class="risk-section">`;
+            for (const p of safeArray(paths)) {
+                riskHtml += `<div class="risk-item"><span class="risk-indicator ${riskClass}"></span><code>${escapeHtml(p)}</code></div>`;
+            }
+            riskHtml += "</div>";
+        }
+        detailSections.push(riskHtml);
+    }
+
+    if (doNotTouch.length > 0) {
+        let html = `<h2>Do not touch (${doNotTouch.length})</h2>`;
+        for (const entry of doNotTouch) {
+            const e = safeObject(entry);
+            html += `<div class="boundary-entry"><code class="boundary-path">${escapeHtml(e.path)}</code>`;
+            html += `<span class="boundary-reason"> — ${escapeHtml(e.reason)}</span></div>`;
+        }
+        detailSections.push(html);
+    }
+
+    if (reviewContext.length > 0) {
+        let html = `<h2>Review context (${reviewContext.length})</h2>`;
+        for (const entry of reviewContext) {
+            const e = safeObject(entry);
+            html += `<div class="boundary-entry"><code class="boundary-path">${escapeHtml(e.path)}</code>`;
+            html += `<span class="boundary-reason"> — ${escapeHtml(e.reason)}</span></div>`;
+        }
+        detailSections.push(html);
+    }
+
+    let guardrailsHtml = "";
+    if (guardrails.length > 0) {
+        const items = guardrails.map((g) => `<li>${escapeHtml(g)}</li>`).join("");
+        guardrailsHtml = `<div class="guardrails"><h3>Guardrails</h3><ul>${items}</ul></div>`;
+    }
+
+    return [
+        "<!DOCTYPE html>",
+        '<html lang="en">',
+        "<head>",
+        '<meta charset="UTF-8">',
+        '<meta name="viewport" content="width=device-width,initial-scale=1.0">',
+        `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}';">`,
+        `<style nonce="${nonce}">`,
+        "body{font-family:var(--vscode-font-family);color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);padding:16px 24px;line-height:1.5;margin:0}",
+        ".header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}",
+        "h1{font-size:1.6em;margin:0}",
+        "h2{font-size:1.15em;margin:20px 0 8px;border-bottom:1px solid var(--vscode-widget-border,#444);padding-bottom:4px}",
+        "h3{font-size:1em;margin:12px 0 4px}",
+        ".badge{display:inline-block;padding:2px 10px;border-radius:10px;font-size:.85em;font-weight:600;text-transform:uppercase;letter-spacing:.03em}",
+        ".badge-low{background:var(--vscode-charts-green,#388a34);color:#fff}",
+        ".badge-medium{background:var(--vscode-charts-orange,#d18616);color:#fff}",
+        ".badge-high{background:var(--vscode-charts-red,#e51400);color:#fff}",
+        ".badge-unknown{background:var(--vscode-badge-background,#616161);color:var(--vscode-badge-foreground,#fff)}",
+        ".meta{color:var(--vscode-descriptionForeground);font-size:.9em;margin-bottom:8px}",
+        ".meta-item{margin-left:12px}",
+        ".diagram{margin:16px 0;text-align:center}",
+        ".diagram svg{max-width:600px;width:100%;height:auto}",
+        ".ring{stroke-width:2}",
+        ".ring-origin{fill:rgba(255,165,0,.12);stroke:var(--vscode-charts-orange,#d18616)}",
+        ".ring-direct{fill:rgba(255,215,0,.08);stroke:var(--vscode-charts-yellow,#bf8803)}",
+        ".ring-transitive{fill:rgba(70,130,220,.06);stroke:var(--vscode-charts-blue,#1e90ff)}",
+        ".ring-label{fill:var(--vscode-editor-foreground);font-family:var(--vscode-font-family);font-size:13px;text-anchor:middle;dominant-baseline:middle}",
+        ".origin-label{font-weight:600}",
+        ".clone-box{fill:rgba(160,90,220,.10);stroke:var(--vscode-charts-purple,#652d90);stroke-width:2}",
+        ".clone-line{stroke:var(--vscode-charts-purple,#652d90);stroke-width:1;stroke-dasharray:4 3;opacity:.5}",
+        ".clone-count{font-weight:600;font-size:16px}",
+        ".cycle-marker{fill:var(--vscode-charts-red,#e51400);opacity:.7}",
+        ".legend-text{fill:var(--vscode-descriptionForeground);font-family:var(--vscode-font-family);font-size:11px;dominant-baseline:middle}",
+        "details{margin:4px 0}",
+        "summary{cursor:pointer;padding:4px 0;font-weight:500;user-select:none}",
+        "summary:hover{color:var(--vscode-textLink-foreground)}",
+        ".file-list{list-style:none;padding:0 0 0 16px;margin:4px 0}",
+        ".file-list li{padding:2px 0;font-family:var(--vscode-editor-fontFamily,monospace);font-size:.9em}",
+        '.file-list li::before{content:"\\2192  ";color:var(--vscode-descriptionForeground)}',
+        ".boundary-entry{padding:2px 0 2px 16px;font-size:.9em}",
+        ".boundary-path{font-family:var(--vscode-editor-fontFamily,monospace)}",
+        ".boundary-reason{color:var(--vscode-descriptionForeground);margin-left:8px}",
+        ".guardrails{margin:16px 0;padding:12px;border-left:3px solid var(--vscode-charts-orange,#d18616);background:var(--vscode-textBlockQuote-background,transparent)}",
+        ".guardrails h3{margin:0 0 8px}",
+        ".guardrails ul{margin:0;padding-left:20px}",
+        ".guardrails li{padding:2px 0;font-size:.9em}",
+        ".risk-section{margin:4px 0}",
+        ".risk-item{display:flex;align-items:center;gap:8px;padding:2px 0 2px 16px}",
+        ".risk-indicator{display:inline-block;width:8px;height:8px;border-radius:50%}",
+        ".risk-high{background:var(--vscode-charts-red,#e51400)}",
+        ".risk-coverage{background:var(--vscode-charts-orange,#d18616)}",
+        ".risk-overloaded{background:var(--vscode-charts-purple,#652d90)}",
+        "</style>",
+        "</head>",
+        "<body>",
+        '<div class="header">',
+        "<h1>Blast Radius</h1>",
+        `<span class="badge badge-${radiusLevel}">${escapeHtml(capitalize(radiusLevel))}</span>`,
+        "</div>",
+        '<div class="meta">',
+        `<span class="meta-item">Run: ${escapeHtml(runId)}</span>`,
+        `<span class="meta-item">Depth: ${escapeHtml(depth)}</span>`,
+        `<span class="meta-item">Workspace: ${escapeHtml(workspaceName)}</span>`,
+        "</div>",
+        `<div class="diagram">${svg}</div>`,
+        detailSections.filter(Boolean).join("\n"),
+        guardrailsHtml,
+        "</body>",
+        "</html>",
+    ].join("\n");
+}
+
 module.exports = {
     markdownBulletList,
+    renderBlastRadiusMarkdown,
+    renderBlastRadiusSvgHtml,
     renderFindingMarkdown,
     renderCoverageJoinMarkdown,
     renderOverloadedModuleMarkdown,

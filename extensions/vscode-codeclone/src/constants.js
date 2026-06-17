@@ -113,6 +113,9 @@ const REVIEW_DECORATION_THEMES = {
 const WORKSPACE_STATE_HOTSPOT_FOCUS_MODE = "codeclone.hotspotFocusMode";
 const WORKSPACE_STATE_LAST_HELP_TOPIC = "codeclone.lastHelpTopic";
 
+/** Minimum interval between live get_production_triage calls for Open Triage. */
+const TRIAGE_LIVE_REFRESH_COOLDOWN_MS = 5000;
+
 module.exports = {
     HELP_TOPICS,
     KNOWN_HELP_TOPICS,
@@ -124,4 +127,5 @@ module.exports = {
     REVIEW_DECORATION_THEMES,
     WORKSPACE_STATE_HOTSPOT_FOCUS_MODE,
     WORKSPACE_STATE_LAST_HELP_TOPIC,
+    TRIAGE_LIVE_REFRESH_COOLDOWN_MS,
 };

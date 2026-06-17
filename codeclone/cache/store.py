@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from json import JSONDecodeError
 from pathlib import Path
 from typing import Protocol
@@ -24,7 +24,14 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_STMT,
 )
 from ..contracts.errors import CacheError
-from ..models import BlockUnit, FileMetrics, SegmentUnit, StructuralFindingGroup, Unit
+from ..models import (
+    BlockUnit,
+    FileMetrics,
+    FunctionRelationshipFacts,
+    SegmentUnit,
+    StructuralFindingGroup,
+    Unit,
+)
 from ._canonicalize import (
     _as_file_stat_dict,
     _as_typed_block_list,
@@ -46,6 +53,7 @@ from .entries import (
     _class_metrics_dict_from_model,
     _dead_candidate_dict_from_model,
     _docstring_coverage_dict_from_model,
+    _function_relationship_facts_dict_from_model,
     _module_dep_dict_from_model,
     _new_optional_metrics_payload,
     _normalize_cached_structural_groups,
@@ -283,7 +291,7 @@ class Cache:
                 )
                 return
 
-            raw_obj = read_json_document(self.path)
+            raw_obj = read_json_document(self.path, max_bytes=self.max_size_bytes)
             parsed = self._load_and_validate(raw_obj)
             if parsed is None:
                 return
@@ -505,6 +513,7 @@ class Cache:
             class_names_raw,
             runtime_reachability_raw,
             security_surfaces_raw,
+            function_relationship_facts_raw,
             typing_coverage_raw,
             docstring_coverage_raw,
             api_surface_raw,
@@ -533,6 +542,7 @@ class Cache:
             api_surface=api_surface_raw,
             runtime_reachability=runtime_reachability_raw,
             security_surfaces=security_surfaces_raw,
+            function_relationship_facts=function_relationship_facts_raw,
             source_stats=source_stats,
             structural_findings=structural_findings,
         )
@@ -553,6 +563,7 @@ class Cache:
         source_stats: SourceStatsDict | None = None,
         file_metrics: FileMetrics | None = None,
         structural_findings: list[StructuralFindingGroup] | None = None,
+        function_relationship_facts: Sequence[FunctionRelationshipFacts] | None = None,
     ) -> None:
         runtime_path = runtime_filepath_from_wire(
             wire_filepath_from_runtime(filepath, root=self.root),
@@ -563,6 +574,20 @@ class Cache:
         block_rows = [_block_dict_from_model(block, runtime_path) for block in blocks]
         segment_rows = [
             _segment_dict_from_model(segment, runtime_path) for segment in segments
+        ]
+        effective_relationship_facts = function_relationship_facts
+        if effective_relationship_facts is None:
+            effective_relationship_facts = (
+                file_metrics.function_relationship_facts
+                if file_metrics is not None
+                else ()
+            )
+        function_relationship_fact_rows = [
+            _function_relationship_facts_dict_from_model(
+                facts,
+                filepath=runtime_path,
+            )
+            for facts in effective_relationship_facts
         ]
 
         (
@@ -637,6 +662,7 @@ class Cache:
             class_names=class_names,
             runtime_reachability=runtime_reachability,
             security_surfaces=security_surfaces,
+            function_relationship_facts=function_relationship_fact_rows,
         )
         if typing_coverage is not None:
             entry_dict["typing_coverage"] = typing_coverage

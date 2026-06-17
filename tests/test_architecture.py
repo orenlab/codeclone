@@ -194,3 +194,52 @@ def test_architecture_layer_violations() -> None:
             )
 
     assert violations == []
+
+
+def test_non_mcp_surfaces_do_not_import_mcp_blast_radius_module() -> None:
+    root = Path(__file__).resolve().parents[1]
+    forbidden = "codeclone.surfaces.mcp._blast_radius"
+    violations: list[str] = []
+    for module_name, path in _iter_codeclone_modules(root):
+        if module_name.startswith("codeclone.surfaces.mcp"):
+            continue
+        imports = _iter_local_imports(module_name, path.read_text("utf-8"))
+        violations.extend(
+            f"{module_name} -> {import_name}"
+            for import_name in imports
+            if import_name == forbidden or import_name.startswith(forbidden + ".")
+        )
+    assert violations == []
+
+
+_FORBIDDEN_SURFACE_PREFIXES = (
+    "codeclone.surfaces.",
+    "codeclone.ui_messages",
+    "codeclone.report.html",
+)
+
+
+def _assert_no_forbidden_surface_imports(package_prefix: str) -> None:
+    root = Path(__file__).resolve().parents[1]
+    violations: list[str] = []
+    for module_name, path in _iter_codeclone_modules(root):
+        if not module_name.startswith(package_prefix):
+            continue
+        imports = _iter_local_imports(module_name, path.read_text("utf-8"))
+        violations.extend(
+            f"{module_name} -> {import_name}"
+            for import_name in imports
+            if any(
+                import_name == prefix.rstrip(".") or import_name.startswith(prefix)
+                for prefix in _FORBIDDEN_SURFACE_PREFIXES
+            )
+        )
+    assert violations == []
+
+
+def test_analytics_package_does_not_import_forbidden_surfaces() -> None:
+    _assert_no_forbidden_surface_imports("codeclone.analytics")
+
+
+def test_memory_package_does_not_import_forbidden_surfaces() -> None:
+    _assert_no_forbidden_surface_imports("codeclone.memory")

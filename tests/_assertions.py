@@ -33,6 +33,23 @@ def assert_missing_keys(mapping: Mapping[str, object], /, *keys: str) -> None:
         assert key not in mapping
 
 
+def assert_snapshot_matches_or_smoke_on_python_tag_mismatch(
+    *,
+    snapshot: Mapping[str, object],
+    expected: Mapping[str, object],
+    runtime_tag: str,
+    expected_python_tag: str,
+    smoke_keys: tuple[str, ...],
+) -> None:
+    """Compare golden JSON on the canonical tag; otherwise exercise pipeline only."""
+    if runtime_tag != expected_python_tag:
+        assert isinstance(snapshot, dict)
+        for key in smoke_keys:
+            assert key in snapshot
+        return
+    assert snapshot == expected
+
+
 def snapshot_python_tag(snapshot: Mapping[str, object]) -> str:
     meta = snapshot.get("meta", {})
     assert isinstance(meta, dict)

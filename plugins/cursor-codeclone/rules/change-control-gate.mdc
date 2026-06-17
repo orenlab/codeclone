@@ -1,0 +1,112 @@
+---
+description: "HARD GATE: CodeClone MCP connected — start before any file write, finish before done"
+alwaysApply: true
+---
+
+# CodeClone change-control gate
+
+This rule applies in **any workspace** where the CodeClone MCP server is
+connected. It is not tied to a particular repository layout or language.
+
+## When this gate is active
+
+The gate is **ON** when CodeClone MCP tools are available in the session (for
+example `start_controlled_change` / `finish_controlled_change` appear in the
+tool list).
+
+The gate is **OFF** only when:
+
+- the task is **read-only** (analysis, review, research, answering questions), or
+- the user explicitly says **no repository edits**, **analysis-only**, or
+  **skip change control** for this task.
+
+“Implement”, “fix”, “refactor”, and “add feature” **do not** disable this gate.
+
+## Hard prohibitions (gate ON)
+
+1. **No first edit** until `start_controlled_change` returns `status: "active"`
+   with `edit_allowed: true` for the workspace `root` (absolute path).
+2. **No scope expansion** — if you need another file, stop and call `start` again
+   with expanded `scope` before touching it.
+3. **No edits** while `status: "queued"` — promote or wait; do not patch.
+4. **No edits** while `status: "blocked"` — follow `next_step` or report BLOCKED.
+5. **No completion claims** (`done`, `implemented`, `verified`, `ready`, etc.)
+   until `finish_controlled_change` returns `status: "accepted"` or
+   `"accepted_with_external_changes"`, `intent_cleared: true`, and scope check is
+   `clean` or `expanded`.
+6. **No MCP/CLI workaround** for human-only actions (for example memory
+   approve/reject) — direct the user to the documented IDE path.
+7. **No `finish` after a non-trivial cycle without a durable memory note** — see
+   [Before finish: incident / complexity memory](#before-finish-incident--complexity-memory).
+
+If the gate is ON and a required MCP call fails: respond **`BLOCKED`**, state the
+missing step and `intent_id` if any — **do not** edit “anyway”.
+
+`finish_controlled_change` is allowed to inspect the full git tree. It blocks
+finish on `missing_evidence`, `foreign_dirty_overlap`, or `own_unscoped_dirty`
+only when `CODECLONE_STRICT_FINISH` is truthy. New/modified/unknown
+unattributed out-of-scope dirt and unchanged preexisting unscoped dirty are
+advisory — report them; finish may return `accepted_with_external_changes`.
+Live foreign in-scope overlap still blocks.
+
+## Before finish: incident / complexity memory
+
+Session **chat is ephemeral** — it is not Engineering Memory. If the edit cycle
+involved anything worth remembering next time, **write it through MCP before**
+`finish_controlled_change` (not only in the final chat message).
+
+**Record when any of these applied:**
+
+- **Incident** — surprise error, failed verify/hygiene, recovery path, workaround,
+  blocked step then unblocked, foreign intent / scope friction.
+- **Complexity** — non-obvious root cause, multi-step debug, coupling across files,
+  near `do_not_touch`, contradiction or stale memory warnings you acted on.
+- **Decision** — non-default tradeoff the next agent should not rediscover.
+
+**Skip only** for truly trivial edits (typo, one-line obvious fix, no learning).
+
+**How to write (pick one):**
+
+```text
+manage_engineering_memory(
+  action=record_candidate,
+  record_type=risk_note | change_rationale,
+  statement="<what happened, what we learned, what to do next time>",
+  subject_path="<main repo-relative path you touched>"
+)
+```
+
+Or batch via `finish_controlled_change(..., propose_memory=true)` when several
+notes belong together. Human **approve** stays in VS Code Memory view — agents do
+not approve via MCP.
+
+## Required sequence (every edit cycle)
+
+```
+analyze_repository(root=<abs>)     # skip if valid recent run exists
+start_controlled_change(...)       # before the first file write
+get_relevant_memory(root=abs, ...) # root required; after edit_allowed=true
+get_implementation_context(...)    # after memory; intent_id pins before-run
+<edit only inside declared scope>
+analyze_repository(...)            # after-run when finish profile requires it
+record_candidate / propose_memory  # REQUIRED before finish if incident/complexity
+finish_controlled_change(...)      # same intent_id; pass changed_files / after_run_id
+```
+
+If `get_implementation_context` reports `freshness.status=drifted`, treat it as a
+shared-worktree coordination signal — verify important facts against source files;
+do not re-analyze in a loop. Re-analyze once before `finish` when after-run is
+required. See `codeclone-implementation-context` skill.
+
+Use the **`codeclone-change-control`** skill for scope shapes, queue/promote,
+verification profiles, and atomic fallback when workflow tools are missing.
+
+## MCP unavailable
+
+If repository files must change but CodeClone MCP cannot be called: **`BLOCKED`**
+— do not substitute CLI reports, local HTML/JSON, or silent edits.
+
+## Priority
+
+If this gate conflicts with speed, brevity, or an implied “just patch it” request,
+**this gate wins** unless the user explicitly exempts this task (see above).

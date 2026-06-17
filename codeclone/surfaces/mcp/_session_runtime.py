@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ...utils.repo_paths import RepoPathPolicy, resolve_under_repo_root
+
 
 def validate_numeric_args(args: object) -> bool:
     return bool(
@@ -32,8 +34,20 @@ def validate_numeric_args(args: object) -> bool:
 def resolve_cache_path(*, root_path: Path, args: object) -> Path:
     raw_value = getattr(args, "cache_path", None)
     if isinstance(raw_value, str) and raw_value.strip():
-        return Path(raw_value).expanduser()
-    return root_path / ".cache" / "codeclone" / "cache.json"
+        allow_external_artifacts = bool(
+            getattr(args, "allow_external_artifacts", False)
+        )
+        return resolve_under_repo_root(
+            root_path,
+            raw_value,
+            policy=RepoPathPolicy(
+                allow_absolute=True,
+                allow_external=allow_external_artifacts,
+            ),
+        )
+    from ...paths.workspace import default_cache_path
+
+    return default_cache_path(root_path)
 
 
 def _int_attr(args: object, name: str, default: int = 0) -> int:

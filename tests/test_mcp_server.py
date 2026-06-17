@@ -20,6 +20,7 @@ import pytest
 import codeclone.surfaces.mcp.server as mcp_server
 from codeclone import __version__ as CODECLONE_VERSION
 from codeclone.contracts import REPORT_SCHEMA_VERSION
+from codeclone.surfaces.mcp.auth import MCP_AUTH_TOKEN_ENV
 from codeclone.surfaces.mcp.server import MCPDependencyError, build_mcp_server
 from codeclone.surfaces.mcp.session import MCPServiceContractError
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
@@ -37,6 +38,21 @@ def _structured_tool_result(result: object) -> dict[str, object]:
 
 def _mapping_child(payload: Mapping[str, object], key: str) -> dict[str, object]:
     return cast("dict[str, object]", payload[key])
+
+
+def _install_fake_main_server(
+    monkeypatch: pytest.MonkeyPatch,
+    captured: dict[str, object],
+) -> None:
+    class _FakeServer:
+        def run(self, *, transport: str) -> None:
+            captured["transport"] = transport
+
+    def _fake_build_mcp_server(**kwargs: object) -> _FakeServer:
+        captured["kwargs"] = kwargs
+        return _FakeServer()
+
+    monkeypatch.setattr(mcp_server, "build_mcp_server", _fake_build_mcp_server)
 
 
 def _require_mcp_runtime() -> None:
@@ -97,7 +113,8 @@ def _write_quality_fixture(root: Path) -> None:
 
 def test_mcp_server_validated_cache_policy_accepts_known_values() -> None:
     assert mcp_server._validated_cache_policy("reuse") == "reuse"
-    assert mcp_server._validated_cache_policy("refresh") == "refresh"
+    with pytest.raises(MCPServiceContractError, match="CLI-only"):
+        mcp_server._validated_cache_policy("refresh")
     assert mcp_server._validated_cache_policy("off") == "off"
     with pytest.raises(MCPServiceContractError, match="cache_policy"):
         mcp_server._validated_cache_policy("broken")
@@ -115,6 +132,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     assert "default or pyproject-resolved thresholds for the first pass" in str(
         server.instructions
     )
+    assert "start_controlled_change" in str(server.instructions)
+    assert "finish_controlled_change" in str(server.instructions)
+    assert ".codeclone/intents/" in str(server.instructions)
 
     tools = {tool.name: tool for tool in asyncio.run(server.list_tools())}
     assert set(tools) == {
@@ -122,8 +142,17 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "analyze_changed_paths",
         "clear_session_runs",
         "help",
+        "query_platform_observability",
         "get_run_summary",
         "get_production_triage",
+        "get_blast_radius",
+        "get_implementation_context",
+        "get_relevant_memory",
+        "query_engineering_memory",
+        "manage_engineering_memory",
+        "check_patch_contract",
+        "create_review_receipt",
+        "validate_review_claims",
         "evaluate_gates",
         "get_report_section",
         "list_findings",
@@ -139,6 +168,9 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "generate_pr_summary",
         "mark_finding_reviewed",
         "list_reviewed_findings",
+        "manage_change_intent",
+        "start_controlled_change",
+        "finish_controlled_change",
     }
     for name, tool in tools.items():
         assert tool.annotations is not None
@@ -154,8 +186,16 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "check_dead_code",
                 "get_run_summary",
                 "get_production_triage",
+                "get_blast_radius",
+                "get_implementation_context",
+                "get_relevant_memory",
+                "query_engineering_memory",
+                "check_patch_contract",
+                "create_review_receipt",
+                "validate_review_claims",
                 "evaluate_gates",
                 "help",
+                "query_platform_observability",
                 "get_report_section",
                 "list_findings",
                 "get_finding",
@@ -167,32 +207,52 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
             }
         )
         assert tool.annotations.destructiveHint is (
-            name in {"mark_finding_reviewed", "clear_session_runs"}
+            name
+            in {
+                "mark_finding_reviewed",
+                "manage_change_intent",
+                "manage_engineering_memory",
+                "clear_session_runs",
+                "start_controlled_change",
+                "finish_controlled_change",
+            }
         )
         assert tool.annotations.idempotentHint is True
-    assert "cache_policy='off'" in str(tools["analyze_repository"].description)
-    assert "cache_policy='off'" in str(tools["analyze_changed_paths"].description)
+    assert "reuse or off" in str(tools["analyze_repository"].description)
+    assert "reuse or off" in str(tools["analyze_changed_paths"].description)
     assert "absolute repository root" in str(tools["analyze_repository"].description)
-    assert "absolute repository root" in str(tools["analyze_changed_paths"].description)
-    assert "get_run_summary or get_production_triage" in str(
-        tools["analyze_repository"].description
-    )
-    assert "conservative first pass" in str(tools["analyze_repository"].description)
-    assert "get_report_section(section='changed')" in str(
-        tools["analyze_changed_paths"].description
-    )
-    assert "conservative profile first" in str(
-        tools["analyze_changed_paths"].description
-    )
+    assert "Absolute root required" in str(tools["analyze_changed_paths"].description)
+    assert "get_production_triage" in str(tools["analyze_repository"].description)
+    assert "next_tool hint" in str(tools["analyze_changed_paths"].description)
     assert "Use analyze_repository first" in str(tools["check_complexity"].description)
     assert "Use analyze_repository first" in str(tools["check_clones"].description)
     assert "default first-pass review" in str(
         tools["get_production_triage"].description
     )
-    assert "bounded guidance, not a full manual" in str(tools["help"].description)
-    assert "workflow, analysis_profile, suppressions, baseline" in str(
+    assert "structural risk boundary" in str(tools["get_blast_radius"].description)
+    assert "review-only context" in str(tools["get_blast_radius"].description)
+    assert "bounded implementation context" in str(
+        tools["get_implementation_context"].description
+    )
+    assert "without re-analysis" in str(tools["get_implementation_context"].description)
+    assert "mode='budget'" in str(tools["check_patch_contract"].description)
+    assert "optional claims" in str(tools["finish_controlled_change"].description)
+    assert "auditable review receipt" in str(tools["create_review_receipt"].description)
+    assert "claims-not-made" in str(tools["create_review_receipt"].description)
+    assert "Structural citation matching" in str(
+        tools["validate_review_claims"].description
+    )
+    assert "not NLP" in str(tools["validate_review_claims"].description)
+    assert "list_workspace" in str(tools["manage_change_intent"].description)
+    assert "recover" in str(tools["manage_change_intent"].description)
+    assert ".codeclone/intents/" in str(tools["manage_change_intent"].description)
+    assert "compact adds anti_patterns" in str(tools["help"].description)
+    assert "change_control, trust_boundaries, engineering_memory" in str(
         tools["help"].description
     )
+    obs_description = str(tools["query_platform_observability"].description)
+    assert "slicer, not a trace export API" in obs_description
+    assert "high DB queries != repository" in obs_description
     assert init_options.server_version == CODECLONE_VERSION
     assert "Prefer list_hotspots or focused check_* tools" in str(
         tools["list_findings"].description
@@ -202,9 +262,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["list_hotspots"].description
     )
     assert "Prefer format='markdown'" in str(tools["generate_pr_summary"].description)
-    assert "Prefer specific sections instead of 'all'" in str(
-        tools["get_report_section"].description
-    )
+    assert "over all unless necessary" in str(tools["get_report_section"].description)
     analyze_repository_schema = cast(
         "dict[str, object]",
         tools["analyze_repository"].inputSchema,
@@ -286,6 +344,68 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert "warnings" in help_payload
     assert "recommended_tools" in help_payload
 
+    abs_root = str(tmp_path.resolve())
+    relevant_memory = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_relevant_memory",
+                {"root": abs_root, "scope": ["pkg/dup.py"]},
+            )
+        )
+    )
+    assert isinstance(relevant_memory, dict)
+    query_memory = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "query_engineering_memory",
+                {
+                    "root": abs_root,
+                    "mode": "search",
+                    "query": "dup",
+                },
+            )
+        )
+    )
+    assert isinstance(query_memory, dict)
+    controlled_start = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "start_controlled_change",
+                {
+                    "root": abs_root,
+                    "scope": {"allowed_files": ["pkg/dup.py"]},
+                    "intent": "server coverage roundtrip",
+                },
+            )
+        )
+    )
+    assert controlled_start["status"] == "active"
+    memory_validate = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "manage_engineering_memory",
+                {
+                    "root": abs_root,
+                    "action": "validate_claims",
+                    "text": "No structural regressions.",
+                },
+            )
+        )
+    )
+    assert memory_validate["action"] == "validate_claims"
+    finish_controlled = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "finish_controlled_change",
+                {
+                    "intent_id": str(controlled_start["intent_id"]),
+                    "changed_files": ["pkg/dup.py"],
+                },
+            )
+        )
+    )
+    assert finish_controlled["intent_id"] == controlled_start["intent_id"]
+
     findings_result = _structured_tool_result(
         asyncio.run(
             server.call_tool(
@@ -325,6 +445,82 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     )
     assert production_triage["run_id"] == run_id
     assert _mapping_child(production_triage, "cache")["freshness"]
+
+    blast_radius = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_blast_radius",
+                {"run_id": run_id, "files": ["pkg/dup.py"]},
+            )
+        )
+    )
+    assert blast_radius["origin"] == ["pkg/dup.py"]
+    assert blast_radius["radius_level"] in {"low", "medium", "high"}
+    assert "review_context" in blast_radius
+    assert "do_not_touch_summary" in blast_radius
+
+    implementation_context = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_implementation_context",
+                {
+                    "root": abs_root,
+                    "run_id": run_id,
+                    "paths": ["pkg/dup.py"],
+                    "budget": 20,
+                },
+            )
+        )
+    )
+    assert implementation_context["status"] == "ok"
+    assert implementation_context["mode"] == "implementation"
+    assert "freshness" in cast(
+        "dict[str, object]",
+        implementation_context["analysis"],
+    )
+
+    change_intent = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "manage_change_intent",
+                {
+                    "action": "declare",
+                    "run_id": run_id,
+                    "scope": {"allowed_files": ["pkg/dup.py"]},
+                    "intent": "review duplicate fixture",
+                },
+            )
+        )
+    )
+    intent_id = str(change_intent["intent_id"])
+    intent_check = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "manage_change_intent",
+                {
+                    "action": "check",
+                    "intent_id": intent_id,
+                    "changed_files": ["pkg/dup.py"],
+                },
+            )
+        )
+    )
+    assert change_intent["status"] == "active"
+    assert intent_check["status"] == "clean"
+    patch_budget = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "check_patch_contract",
+                {
+                    "mode": "budget",
+                    "run_id": run_id,
+                    "intent_id": intent_id,
+                },
+            )
+        )
+    )
+    assert patch_budget["mode"] == "budget"
+    assert patch_budget["intent_id"] == intent_id
 
     latest_report_resource = list(
         asyncio.run(server.read_resource("codeclone://latest/report.json"))
@@ -538,6 +734,29 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             )
         )
     )
+    receipt = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "create_review_receipt",
+                {
+                    "run_id": run_id,
+                    "intent_id": intent_id,
+                    "format": "markdown",
+                },
+            )
+        )
+    )
+    claim_guard = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "validate_review_claims",
+                {
+                    "run_id": run_id,
+                    "text": "security_surfaces is boundary inventory.",
+                },
+            )
+        )
+    )
     assert complexity["check"] == "complexity"
     assert cast(int, clones["total"]) >= 1
     assert coupling["check"] == "coupling"
@@ -552,6 +771,20 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert reviewed_finding["priority"] == summary_finding["priority"]
     assert reviewed_finding["locations"] == summary_finding["locations"]
     assert "## CodeClone Summary" in str(pr_summary["content"])
+    assert receipt["format"] == "markdown"
+    assert claim_guard["valid"] is True
+    assert claim_guard["citations_found"] == 1
+    assert "## CodeClone Agent Review Receipt" in str(receipt["content"])
+    receipt_payload = cast("dict[str, object]", receipt["receipt"])
+    assert cast("dict[str, object]", receipt_payload["scope"])["intent_id"] == (
+        intent_id
+    )
+    assert (
+        cast("dict[str, object]", receipt_payload["reviewed_evidence"])[
+            "reviewed_count"
+        ]
+        == 1
+    )
 
     run_summary_resource = list(
         asyncio.run(server.read_resource(f"codeclone://runs/{run_id}/summary"))
@@ -576,6 +809,7 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         asyncio.run(server.call_tool("clear_session_runs", {}))
     )
     assert cast(int, cleared["cleared_runs"]) >= 1
+    assert cast(int, cleared["cleared_intents"]) >= 1
     assert run_id in cast("list[str]", cleared["cleared_run_ids"])
     from mcp.server.fastmcp.exceptions import ResourceError
 
@@ -597,15 +831,8 @@ def test_mcp_server_parser_defaults_and_main_success(
 
     captured: dict[str, object] = {}
 
-    class _FakeServer:
-        def run(self, *, transport: str) -> None:
-            captured["transport"] = transport
-
-    def _fake_build_mcp_server(**kwargs: object) -> _FakeServer:
-        captured["kwargs"] = kwargs
-        return _FakeServer()
-
-    monkeypatch.setattr(mcp_server, "build_mcp_server", _fake_build_mcp_server)
+    monkeypatch.setenv(MCP_AUTH_TOKEN_ENV, "a" * 32)
+    _install_fake_main_server(monkeypatch, captured)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -626,6 +853,7 @@ def test_mcp_server_parser_defaults_and_main_success(
     kwargs = cast("dict[str, object]", captured["kwargs"])
     assert kwargs["port"] == 9000
     assert kwargs["history_limit"] == 8
+    assert kwargs["auth_token"] == "a" * 32
 
 
 def test_mcp_server_parser_rejects_excessive_history_limit() -> None:
@@ -662,11 +890,8 @@ def test_mcp_server_main_allows_non_loopback_host_with_opt_in(
 ) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeServer:
-        def run(self, *, transport: str) -> None:
-            captured["transport"] = transport
-
-    monkeypatch.setattr(mcp_server, "build_mcp_server", lambda **kwargs: _FakeServer())
+    monkeypatch.setenv(MCP_AUTH_TOKEN_ENV, "b" * 32)
+    _install_fake_main_server(monkeypatch, captured)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -683,6 +908,7 @@ def test_mcp_server_main_allows_non_loopback_host_with_opt_in(
     mcp_server.main()
 
     assert captured["transport"] == "streamable-http"
+    assert cast("dict[str, object]", captured["kwargs"])["auth_token"] == "b" * 32
 
 
 def test_mcp_server_main_reports_missing_optional_dependency(
@@ -744,6 +970,7 @@ def test_mcp_server_main_swallows_keyboard_interrupt(
         "build_mcp_server",
         lambda **_kwargs: _FakeServer(),
     )
+    monkeypatch.setenv(MCP_AUTH_TOKEN_ENV, "c" * 32)
     monkeypatch.setattr(
         sys, "argv", ["codeclone-mcp", "--transport", "streamable-http"]
     )
@@ -759,3 +986,77 @@ def test_mcp_server_host_loopback_detection() -> None:
     assert mcp_server._host_is_loopback("[::1]") is True
     assert mcp_server._host_is_loopback("0.0.0.0") is False
     assert mcp_server._host_is_loopback("example.com") is False
+
+
+def test_tool_param_docs_reexport() -> None:
+    from typing import get_args
+
+    from codeclone.surfaces.mcp._tool_param_docs import RootParam
+
+    field = get_args(RootParam)[1]
+    assert "Absolute repository root" in field.description
+
+
+def test_mcp_server_ide_governance_and_observability_tools(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    server = build_mcp_server(history_limit=4, ide_governance_channel=True)
+    abs_root = str(tmp_path.resolve())
+
+    session_stats = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_workspace_session_stats",
+                {"root": abs_root},
+            )
+        )
+    )
+    assert session_stats["status"] in {"ok", "empty", "disabled"}
+
+    audit_trail = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_controller_audit_trail",
+                {"root": abs_root, "limit": 5},
+            )
+        )
+    )
+    assert audit_trail["status"] in {"ok", "empty", "disabled"}
+
+    observability = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "query_platform_observability",
+                {"root": abs_root, "section": "summary"},
+            )
+        )
+    )
+    assert observability["status"] in {"ok", "empty", "disabled"}
+
+
+def test_mcp_server_lifespan_runs_shutdown_hooks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("mcp.server.fastmcp")
+    cleanup_calls: list[bool] = []
+    shutdown_calls: list[bool] = []
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.server.shutdown",
+        lambda: shutdown_calls.append(True),
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp.service.CodeCloneMCPService.shutdown_cleanup",
+        lambda _self: cleanup_calls.append(True),
+    )
+    server = build_mcp_server(history_limit=4)
+    lifespan = server.settings.lifespan
+    assert lifespan is not None
+
+    async def _run_lifespan() -> None:
+        async with lifespan(server):
+            return None
+
+    asyncio.run(_run_lifespan())
+    assert cleanup_calls == [True]
+    assert shutdown_calls == [True]

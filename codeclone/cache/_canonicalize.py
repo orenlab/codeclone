@@ -14,6 +14,7 @@ from ._validators import (
     _is_class_metrics_dict,
     _is_dead_candidate_dict,
     _is_file_stat_dict,
+    _is_function_relationship_facts_dict,
     _is_module_api_surface_dict,
     _is_module_dep_dict,
     _is_module_docstring_coverage_dict,
@@ -32,11 +33,13 @@ from .entries import (
     ClassMetricsDict,
     DeadCandidateDict,
     FileStat,
+    FunctionRelationshipFactsDict,
     ModuleApiSurfaceDict,
     ModuleDepDict,
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
     PublicSymbolDict,
+    RelationshipRecordDict,
     RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
     SegmentDict,
@@ -124,6 +127,12 @@ def _as_typed_runtime_reachability_list(
     return _as_typed_list(value, predicate=_is_runtime_reachability_fact_dict)
 
 
+def _as_typed_function_relationship_facts_list(
+    value: object,
+) -> list[FunctionRelationshipFactsDict] | None:
+    return _as_typed_list(value, predicate=_is_function_relationship_facts_dict)
+
+
 def _as_typed_string_list(value: object) -> list[str] | None:
     return _as_typed_list(value, predicate=_is_str_item)
 
@@ -187,6 +196,7 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
         "runtime_reachability",
         "security_surfaces",
         "structural_findings",
+        "function_relationship_facts",
     )
     if not all(isinstance(entry.get(key, []), list) for key in optional_list_keys):
         return False
@@ -217,6 +227,7 @@ def _decode_optional_cache_sections(
         list[str],
         list[RuntimeReachabilityFactDict],
         list[SecuritySurfaceDict],
+        list[FunctionRelationshipFactsDict],
         ModuleTypingCoverageDict | None,
         ModuleDocstringCoverageDict | None,
         ModuleApiSurfaceDict | None,
@@ -242,6 +253,9 @@ def _decode_optional_cache_sections(
     security_surfaces_raw = _as_typed_security_surfaces_list(
         entry.get("security_surfaces", [])
     )
+    function_relationship_facts_raw = _as_typed_function_relationship_facts_list(
+        entry.get("function_relationship_facts", [])
+    )
     if (
         class_metrics_raw is None
         or module_deps_raw is None
@@ -252,6 +266,7 @@ def _decode_optional_cache_sections(
         or class_names_raw is None
         or runtime_reachability_raw is None
         or security_surfaces_raw is None
+        or function_relationship_facts_raw is None
     ):
         return None
     typing_coverage_raw = _as_module_typing_coverage_dict(entry.get("typing_coverage"))
@@ -274,6 +289,7 @@ def _decode_optional_cache_sections(
         class_names_raw,
         runtime_reachability_raw,
         security_surfaces_raw,
+        function_relationship_facts_raw,
         typing_coverage_raw,
         docstring_coverage_raw,
         api_surface_raw,
@@ -290,6 +306,7 @@ def _attach_optional_cache_sections(
     api_surface: ModuleApiSurfaceDict | None = None,
     runtime_reachability: list[RuntimeReachabilityFactDict] | None = None,
     security_surfaces: list[SecuritySurfaceDict] | None = None,
+    function_relationship_facts: list[FunctionRelationshipFactsDict] | None = None,
     source_stats: SourceStatsDict | None = None,
     structural_findings: list[StructuralFindingGroupDict] | None = None,
 ) -> CacheEntry:
@@ -303,6 +320,8 @@ def _attach_optional_cache_sections(
         entry["runtime_reachability"] = runtime_reachability
     if security_surfaces is not None:
         entry["security_surfaces"] = security_surfaces
+    if function_relationship_facts is not None:
+        entry["function_relationship_facts"] = function_relationship_facts
     if source_stats is not None:
         entry["source_stats"] = source_stats
     if structural_findings is not None:
@@ -361,6 +380,41 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
             tuple(item.get("suppressed_rules", [])),
         ),
     )
+    function_relationship_facts = [
+        FunctionRelationshipFactsDict(
+            source_qualname=facts["source_qualname"],
+            relationships=sorted(
+                (
+                    RelationshipRecordDict(
+                        relation_kind=record["relation_kind"],
+                        resolution_status=record["resolution_status"],
+                        origin_lane=record["origin_lane"],
+                        source_qualname=record["source_qualname"],
+                        target_qualname=record["target_qualname"],
+                        path=record["path"],
+                        line=record["line"],
+                        expression=record["expression"],
+                        resolution_rule=record["resolution_rule"],
+                    )
+                    for record in facts["relationships"]
+                ),
+                key=lambda record: (
+                    record["relation_kind"],
+                    record["origin_lane"],
+                    record["target_qualname"] or "",
+                    record["path"],
+                    record["line"],
+                    record["resolution_status"],
+                    record["resolution_rule"] or "",
+                    record["expression"] or "",
+                ),
+            ),
+        )
+        for facts in sorted(
+            entry.get("function_relationship_facts", []),
+            key=lambda item: item["source_qualname"],
+        )
+    ]
 
     result: CacheEntry = {
         "stat": entry["stat"],
@@ -396,6 +450,7 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
                 item["evidence_symbol"],
             ),
         ),
+        "function_relationship_facts": function_relationship_facts,
     }
     typing_coverage = entry.get("typing_coverage")
     if typing_coverage is not None:
@@ -472,6 +527,7 @@ __all__ = [
     "_as_typed_block_list",
     "_as_typed_class_metrics_list",
     "_as_typed_dead_candidates_list",
+    "_as_typed_function_relationship_facts_list",
     "_as_typed_module_deps_list",
     "_as_typed_runtime_reachability_list",
     "_as_typed_security_surfaces_list",

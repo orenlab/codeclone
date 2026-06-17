@@ -1824,6 +1824,92 @@ def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> Non
     assert "Ranked modules" not in html
 
 
+def test_html_report_overloaded_modules_fallback_module_path_in_overview() -> None:
+    payload = _metrics_payload(
+        health_score=72,
+        health_grade="B",
+        complexity_max=25,
+        complexity_high_risk=1,
+        coupling_high_risk=1,
+        cohesion_low=1,
+        dep_cycles=[],
+        dep_max_depth=4,
+        dead_total=1,
+        dead_critical=1,
+    )
+    overloaded_modules = payload["overloaded_modules"]
+    assert isinstance(overloaded_modules, dict)
+    overloaded_modules["summary"] = {
+        "total": 1,
+        "candidates": 1,
+        "population_status": "ok",
+        "top_score": 0.93,
+        "average_score": 0.93,
+        "candidate_score_cutoff": 0.88,
+    }
+    overloaded_modules["items"] = [
+        {
+            "module": "pkg.hub",
+            "source_kind": "production",
+            "loc": 420,
+            "complexity_total": 31,
+            "fan_in": 4,
+            "fan_out": 7,
+            "score": 0.93,
+            "candidate_status": "candidate",
+            "candidate_reasons": ["size_pressure"],
+        }
+    ]
+
+    html = _render_metrics_html(payload)
+
+    _assert_html_contains(html, "pkg/hub.py", "Overloaded Modules")
+
+
+def test_html_report_overview_helper_branches() -> None:
+    from codeclone.report.html.sections._overview import (
+        _directory_kind_meta_parts,
+        _format_count,
+    )
+
+    assert _directory_kind_meta_parts({"func": 3}, total_groups=10) == []
+    assert _directory_kind_meta_parts({"func": 5, "block": 2}, total_groups=5) == []
+    meta = _directory_kind_meta_parts({"func": 3, "block": 2}, total_groups=10)
+    assert len(meta) == 2
+    assert _format_count(1234.5) == "1,234.50"
+
+
+def test_html_report_overview_shows_partial_baselined_clone_badge(
+    tmp_path: Path,
+) -> None:
+    from codeclone.models import MetricsDiff
+
+    source = tmp_path / "a.py"
+    source.write_text("def f():\n    return 1\n", "utf-8")
+    clone_item = {
+        "qualname": "pkg.mod:fn",
+        "filepath": str(source),
+        "start_line": 1,
+        "end_line": 2,
+    }
+    html = build_html_report(
+        func_groups={"known-func": [clone_item], "new-func": [clone_item]},
+        block_groups={},
+        segment_groups={},
+        new_function_group_keys={"new-func"},
+        metrics_diff=MetricsDiff(
+            new_high_risk_functions=(),
+            new_high_coupling_classes=(),
+            new_cycles=(),
+            new_dead_code=(),
+            health_delta=0,
+        ),
+        report_meta={"baseline_loaded": True, "baseline_status": "ok"},
+    )
+
+    _assert_html_contains(html, "kpi-micro--baselined", "baselined")
+
+
 def test_html_report_renders_overloaded_modules_from_legacy_god_modules_key() -> None:
     payload = _metrics_payload(
         health_score=72,

@@ -6,14 +6,34 @@
 
 from __future__ import annotations
 
+import os
+import time
+from collections.abc import Mapping
+from pathlib import Path
+
+from ...audit import AuditEvent, AuditWriter, repo_root_digest
+from ...audit.runtime import open_audit_writer_for_root
 from ...cache.store import resolve_cache_status
+from ...memory.ide_governance import IdeGovernanceSessionState
+from ...observability import span
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
+from ._blast_radius import BlastRadiusResult
+from ._implementation_context import build_unit_location_inventory
+from ._intent import IntentRecord
 from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
 )
+from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
+from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
+from ._session_context_mixin import _MCPSessionContextMixin
+from ._session_insights_mixin import _MCPSessionInsightsMixin
+from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_memory_mixin import _MCPSessionMemoryMixin
+from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
+from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import (
     _REPORT_DUMMY_PATH,
     DEFAULT_BLOCK_MIN_LOC,
@@ -55,6 +75,9 @@ from ._session_shared import (
     report,
 )
 from ._session_state_mixin import _MCPSessionStateMixin
+from ._session_workflow_mixin import _MCPSessionWorkflowMixin
+from ._workspace_drift import build_run_manifest
+from ._workspace_hygiene import collect_dirty_snapshot
 
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
@@ -75,17 +98,143 @@ __all__ = [
 ]
 
 
-class MCPSession(_MCPSessionStateMixin):
-    def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
+class MCPSession(
+    _MCPSessionWorkflowMixin,
+    _MCPSessionClaimGuardMixin,
+    _MCPSessionReviewReceiptMixin,
+    _MCPSessionPatchContractMixin,
+    _MCPSessionIntentMixin,
+    _MCPSessionMemoryMixin,
+    _MCPSessionContextMixin,
+    _MCPSessionBlastRadiusMixin,
+    _MCPSessionInsightsMixin,
+    _MCPSessionStateMixin,
+):
+    def __init__(
+        self,
+        *,
+        history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
+        audit_writer: AuditWriter | None = None,
+        ide_governance_channel: bool = False,
+    ) -> None:
         self._runs = CodeCloneMCPRunStore(history_limit=history_limit)
+        self._ide_governance = IdeGovernanceSessionState(
+            channel_enabled=ide_governance_channel
+        )
         self._state_lock = RLock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
         self._last_gate_results: dict[str, dict[str, object]] = {}
         self._spread_max_cache: dict[str, int] = {}
+        self._blast_radius_cache: dict[
+            tuple[str, tuple[str, ...], str],
+            BlastRadiusResult,
+        ] = {}
+        self._active_intents: dict[str, IntentRecord] = {}
+        self._intent_sequence = 0
+        self._agent_pid = os.getpid()
+        self._agent_start_epoch = int(time.time())
+        self._agent_label_cache: str | None = None
+        self._fastmcp: object | None = None
+        self._audit_writer_override = audit_writer
+        self._audit_writers: dict[Path, AuditWriter] = {}
+
+    # ------------------------------------------------------------------
+    # Agent label: lazy-resolved from MCP clientInfo on first access
+    # ------------------------------------------------------------------
+
+    @property
+    def _agent_label(self) -> str:
+        if self._agent_label_cache is None:
+            self._agent_label_cache = self._resolve_agent_label()
+        return self._agent_label_cache
+
+    @_agent_label.setter
+    def _agent_label(self, value: str) -> None:
+        self._agent_label_cache = value
+
+    def _resolve_agent_label(self) -> str:
+        """Build a human-readable agent label from MCP client metadata.
+
+        Resolution order:
+        1. MCP ``clientInfo`` from the protocol ``initialize`` handshake
+           (available after the first tool call) → ``"name/version"``.
+        2. Fallback → ``"pid-<pid>"``.
+        """
+        try:
+            get_context = getattr(self._fastmcp, "get_context", None)
+            if not callable(get_context):
+                return f"pid-{self._agent_pid}"
+            ctx = get_context()
+            session = getattr(ctx, "session", None)
+            params = getattr(session, "client_params", None)
+            info = getattr(params, "clientInfo", None)
+            name = getattr(info, "name", None)
+            if not isinstance(name, str) or not name:
+                return f"pid-{self._agent_pid}"
+            version = getattr(info, "version", None)
+            if isinstance(version, str) and version:
+                return f"{name}/{version}"
+            return name
+        except Exception:
+            pass
+        return f"pid-{self._agent_pid}"
+
+    # ------------------------------------------------------------------
+    # Audit trail: best-effort observer, never controller truth
+    # ------------------------------------------------------------------
+
+    def _audit_emit(
+        self,
+        *,
+        root: Path,
+        event_type: str,
+        severity: str,
+        run_id: str | None = None,
+        intent_id: str | None = None,
+        report_digest: str | None = None,
+        status: str | None = None,
+        payload: Mapping[str, object] | None = None,
+    ) -> int | None:
+        try:
+            writer = self._audit_writer_for_root(root)
+            return writer.emit(
+                AuditEvent(
+                    event_type=event_type,
+                    severity="error"
+                    if severity == "error"
+                    else ("warn" if severity == "warn" else "info"),
+                    repo_root_digest=repo_root_digest(root),
+                    agent_pid=self._agent_pid,
+                    agent_start_epoch=self._agent_start_epoch,
+                    agent_label=self._agent_label,
+                    run_id=run_id,
+                    intent_id=intent_id,
+                    report_digest=report_digest,
+                    status=status,
+                    payload=payload,
+                )
+            )
+        except Exception:
+            return None
+
+    def _audit_writer_for_root(self, root: Path) -> AuditWriter:
+        if self._audit_writer_override is not None:
+            return self._audit_writer_override
+        root_path = root.resolve()
+        cached = self._audit_writers.get(root_path)
+        if cached is not None:
+            return cached
+        writer = self._build_audit_writer(root_path)
+        self._audit_writers[root_path] = writer
+        return writer
+
+    def _build_audit_writer(self, root: Path) -> AuditWriter:
+        return open_audit_writer_for_root(root.resolve())
 
     def analyze_repository(self, request: MCPAnalysisRequest) -> dict[str, object]:
         self._validate_analysis_request(request)
         root_path = _helpers._resolve_root(request.root)
+        run_dirty_snapshot = collect_dirty_snapshot(root_path)
         analysis_started_at_utc = _current_report_timestamp_utc()
         changed_paths = self._resolve_request_changed_paths(
             root_path=root_path,
@@ -109,19 +258,37 @@ class MCPSession(_MCPSessionStateMixin):
         )
         console = _BufferConsole()
 
-        boot = bootstrap(
-            args=args,
+        # Stage spans so mcp.analyze_repository carries the same discover/process/
+        # analyze timing as cli.analyze (this path bypasses run_analysis_stages,
+        # spec §6.1). Spans attach to the active operation from the MCP registrar;
+        # inert when observability is disabled or no operation is open.
+        with span(name="pipeline.bootstrap"):
+            boot = bootstrap(
+                args=args,
+                root=root_path,
+                output_paths=OutputPaths(json=_REPORT_DUMMY_PATH),
+                cache_path=cache_path,
+            )
+        with span(name="pipeline.discover"):
+            discovery_result = discover(boot=boot, cache=cache)
+        run_manifest = build_run_manifest(
             root=root_path,
-            output_paths=OutputPaths(json=_REPORT_DUMMY_PATH),
-            cache_path=cache_path,
+            filepaths=discovery_result.all_file_paths,
         )
-        discovery_result = discover(boot=boot, cache=cache)
-        processing_result = process(boot=boot, discovery=discovery_result, cache=cache)
-        analysis_result = analyze(
-            boot=boot,
-            discovery=discovery_result,
-            processing=processing_result,
+        with span(name="pipeline.process"):
+            processing_result = process(
+                boot=boot, discovery=discovery_result, cache=cache
+            )
+        unit_inventory = build_unit_location_inventory(
+            root=root_path,
+            units=processing_result.units,
         )
+        with span(name="pipeline.analyze"):
+            analysis_result = analyze(
+                boot=boot,
+                discovery=discovery_result,
+                processing=processing_result,
+            )
 
         clone_baseline_state = resolve_clone_baseline_state(
             baseline_path=baseline_path,
@@ -298,6 +465,11 @@ class MCPSession(_MCPSessionStateMixin):
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
             metrics_diff=metrics_diff,
+            manifest=run_manifest,
+            dirty_snapshot=run_dirty_snapshot,
+            unit_inventory=unit_inventory,
+            relationship_facts=processing_result.function_relationship_facts,
+            module_imports=processing_result.module_deps,
         )
         changed_projection = self._build_changed_projection(provisional_record)
         summary = self._augment_summary_with_changed(
@@ -327,10 +499,47 @@ class MCPSession(_MCPSessionStateMixin):
             new_func=frozenset(new_func),
             new_block=frozenset(new_block),
             metrics_diff=metrics_diff,
+            manifest=run_manifest,
+            dirty_snapshot=run_dirty_snapshot,
+            unit_inventory=unit_inventory,
+            relationship_facts=processing_result.function_relationship_facts,
+            module_imports=processing_result.module_deps,
         )
         self._runs.register(record)
+        self._emit_analysis_completed_audit(
+            root_path=root_path,
+            record=record,
+            summary=summary,
+        )
         self._prune_session_state()
         return self._summary_payload(record.summary, record=record)
+
+    def _emit_analysis_completed_audit(
+        self,
+        *,
+        root_path: Path,
+        record: MCPRunRecord,
+        summary: Mapping[str, object],
+    ) -> None:
+        try:
+            from ...audit.analysis_completed import (
+                ANALYSIS_SOURCE_MCP,
+                emit_analysis_completed,
+            )
+
+            emit_analysis_completed(
+                root_path=root_path,
+                summary=summary,
+                source=ANALYSIS_SOURCE_MCP,
+                report_digest=self._report_digest_value(record),
+                run_id=record.run_id,
+                agent_pid=self._agent_pid,
+                agent_start_epoch=self._agent_start_epoch,
+                agent_label=self._agent_label,
+                writer=self._audit_writer_for_root(root_path),
+            )
+        except Exception:
+            return None
 
     def analyze_changed_paths(self, request: MCPAnalysisRequest) -> dict[str, object]:
         if not request.changed_paths and request.git_diff_ref is None:

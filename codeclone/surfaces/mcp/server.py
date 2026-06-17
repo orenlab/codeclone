@@ -7,13 +7,166 @@
 from __future__ import annotations
 
 import argparse
+import functools
+import inspect
 import ipaddress
+import os
 import sys
-from collections.abc import Callable
+import time
+from collections.abc import AsyncIterator, Callable, Mapping
+from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal, TypeVar
 
 from ... import __version__
+from ...config.observability import resolve_observability_config
 from ...contracts import DEFAULT_COVERAGE_MIN, DOCS_URL
+from ...observability import (
+    bind_root,
+    bootstrap,
+    is_observability_enabled,
+    operation,
+    payload_capture_enabled,
+    shutdown,
+    span,
+)
+from .auth import (
+    MCP_AUTH_TOKEN_ENV,
+    MCPAuthConfigurationError,
+    StaticBearerTokenVerifier,
+    build_http_auth_settings,
+    validated_mcp_auth_token,
+)
+from .messages import errors as err_msgs
+from .messages import instructions as mcp_instructions
+from .messages import resources as mcp_resources
+from .messages import tools as mcp_tools
+from .messages.params import (
+    AfterRunIdParam,
+    AllowExternalArtifactsParam,
+    AnalysisModeParam,
+    ApiSurfaceParam,
+    AuditPathOverrideParam,
+    AuditTrailLimitParam,
+    AutoClearParam,
+    BeforeRunIdParam,
+    BlastDepthParam,
+    BlastRadiusDepthParam,
+    CachePolicyParam,
+    CategoryParam,
+    ChangedFilesParam,
+    ChangedPathsParam,
+    ChangedScopeParam,
+    ClaimsTextParam,
+    CloneTypeParam,
+    CompareFocusParam,
+    ConfirmationNonceParam,
+    ContextBudgetParam,
+    ContextDepthParam,
+    ContextDetailLevelParam,
+    ContextModeParam,
+    ContextPathsParam,
+    ContextQueryParam,
+    ContextSymbolsParam,
+    CoverageMinParam,
+    CoverageXmlParam,
+    CreateReceiptParam,
+    DetailLevelParam,
+    DiffRefParam,
+    DirtyScopePolicyParam,
+    ExcludeReviewedParam,
+    ExpectedEffectsParam,
+    FacetIncludeParam,
+    FamilyParam,
+    FilesParam,
+    FindingFamilyParam,
+    FindingIdParam,
+    FinishReviewTextParam,
+    GateBoolParam,
+    GateIntParam,
+    GitDiffRefParam,
+    GovernanceActorParam,
+    GovernanceDecisionParam,
+    GovernanceProofParam,
+    GovernanceProtocolParam,
+    GovernanceTicketParam,
+    HelpDetailParam,
+    HelpTopicParam,
+    HotspotKindParam,
+    IdeGovernanceClientNameParam,
+    IdeGovernanceClientVersionParam,
+    IdeGovernanceKeyParam,
+    IncludeBlastRadiusParam,
+    IncludeDraftsParam,
+    IncludeParam,
+    IncludePatchContractParam,
+    IncludeStaleParam,
+    IntentIdParam,
+    IntentTextParam,
+    LeaseSecondsParam,
+    LimitParam,
+    ManageActionParam,
+    ManageMemoryActionParam,
+    ManageMemoryExperienceIdParam,
+    MaxHotspotsParam,
+    MaxResultsParam,
+    MaxSizeMbParam,
+    MaxSuggestionsParam,
+    MemoryClaimsTextParam,
+    MemoryDetailLevelParam,
+    MemoryFiltersParam,
+    MemoryMaxRecordsParam,
+    MemoryPathParam,
+    MemoryQueryModeParam,
+    MemoryRecordIdParam,
+    MemoryRecordTypeParam,
+    MemoryScopeListParam,
+    MemorySearchQueryParam,
+    MemoryStatementParam,
+    MemorySymbolParam,
+    MemorySymbolsParam,
+    MinComplexityParam,
+    MinSeverityParam,
+    NoveltyParam,
+    ObservabilityDetailParam,
+    ObservabilityLimitParam,
+    ObservabilityOperationIdParam,
+    ObservabilitySectionParam,
+    ObservabilitySpanIdParam,
+    ObservabilityWindowParam,
+    OffsetParam,
+    OnConflictParam,
+    OptionalIntentIdParam,
+    OptionalIntentTextParam,
+    OptionalPathParam,
+    OptionalRootParam,
+    OptionalScopeParam,
+    PatchHealthDeltaParam,
+    PatchModeParam,
+    PatchTrailDetailParam,
+    PathFilterParam,
+    PrFormatParam,
+    ProcessesParam,
+    ProposeMemoryParam,
+    ReceiptFormatParam,
+    ReportSectionParam,
+    RequireCitationsParam,
+    RespectPyprojectParam,
+    ReviewNoteParam,
+    ReviewTextParam,
+    RootParam,
+    RunIdParam,
+    RunIdRequiredParam,
+    ScopeParam,
+    SemanticParam,
+    SeverityParam,
+    SortByParam,
+    SourceKindParam,
+    StrictnessParam,
+    ThresholdIntParam,
+    TtlSecondsParam,
+)
+from .payloads import measure_payload
 from .service import CodeCloneMCPService
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -30,27 +183,6 @@ if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
     from mcp.types import ToolAnnotations
 
-_SERVER_INSTRUCTIONS = (
-    "CodeClone MCP is a deterministic, baseline-aware, read-only analysis server "
-    "for Python repositories. Use analyze_repository first for full runs or "
-    "analyze_changed_paths for PR-style review, then prefer get_run_summary or "
-    "get_production_triage for the first pass. Use list_hotspots or focused "
-    "check_* tools before broader list_findings calls, then drill into one "
-    "finding with get_finding or get_remediation. Use "
-    "help(topic=...) when workflow or contract semantics are unclear. Use "
-    "default or pyproject-resolved thresholds for the first pass, and lower "
-    "them only for an explicit higher-sensitivity follow-up when needed. Use "
-    "get_report_section(section='metrics_detail', family=..., limit=...) for "
-    "bounded metrics drill-down, and prefer generate_pr_summary(format='markdown') "
-    "unless machine JSON is required. Coverage join accepts external Cobertura "
-    "XML as a current-run signal and does not become baseline truth. Pass an "
-    "absolute repository root to analysis tools. This server never updates "
-    "baselines and never mutates source files."
-)
-_MCP_INSTALL_HINT = (
-    "CodeClone MCP support requires the optional 'mcp' extra. "
-    "Install it with: pip install 'codeclone[mcp]'"
-)
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8000
 DEFAULT_MCP_JSON_RESPONSE = True
@@ -66,6 +198,55 @@ class MCPDependencyError(RuntimeError):
 MCPCallable = TypeVar("MCPCallable", bound=Callable[..., object])
 
 
+def _observability_session_id() -> str:
+    """Stable per-process id grouping every operation from this MCP server."""
+    return f"mcp:{os.getpid()}:{int(time.time())}"
+
+
+def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
+    """Wrap a registered MCP tool so each call records an observability operation
+    with request/response payload sizes (bytes + tokens).
+
+    Inert direct passthrough when observability is disabled. Signature-preserving
+    (``functools.wraps`` + explicit ``__signature__``) so FastMCP schema
+    introspection — and the tool-schema snapshot — stay unchanged.
+    """
+    tool_name = getattr(func, "__name__", "tool")
+
+    @functools.wraps(func)
+    def wrapper(*args: object, **kwargs: object) -> object:
+        if not is_observability_enabled():
+            return func(*args, **kwargs)
+        root = kwargs.get("root")
+        if isinstance(root, str) and root:
+            bind_root(Path(root))
+        with operation(name=f"mcp.{tool_name}", surface="mcp") as op:
+            if payload_capture_enabled():
+                request_bytes, request_tokens = measure_payload(kwargs)
+                op.set_request(
+                    request_bytes=request_bytes, request_tokens=request_tokens
+                )
+            # Open a root span around the handler: record_db_query attributes
+            # SQL to the active span, not the operation. Without this span every
+            # DB-touching MCP tool (start/finish/get_relevant_memory/manage_*)
+            # records zero db_queries — the operation has no span to hold them.
+            with span(name=f"mcp.{tool_name}"):
+                result = func(*args, **kwargs)
+            if payload_capture_enabled() and isinstance(result, Mapping):
+                response_bytes, response_tokens = measure_payload(result)
+                op.set_response(
+                    response_bytes=response_bytes, response_tokens=response_tokens
+                )
+            return result
+
+    # eval_str resolves the tool's string annotations (PEP 563) into real types
+    # so FastMCP/Pydantic build the same input schema as the unwrapped handler.
+    wrapper.__signature__ = inspect.signature(  # type: ignore[attr-defined]
+        func, eval_str=True
+    )
+    return wrapper
+
+
 def _load_mcp_runtime() -> tuple[
     type[FastMCP],
     ToolAnnotations,
@@ -76,7 +257,7 @@ def _load_mcp_runtime() -> tuple[
         from mcp.server.fastmcp import FastMCP as imported_fastmcp
         from mcp.types import ToolAnnotations as runtime_tool_annotations
     except ImportError as exc:
-        raise MCPDependencyError(_MCP_INSTALL_HINT) from exc
+        raise MCPDependencyError(mcp_instructions.MCP_INSTALL_HINT) from exc
     runtime_fastmcp: type[FastMCP] = imported_fastmcp
     return (
         runtime_fastmcp,
@@ -107,21 +288,23 @@ def _validated_analysis_mode(value: str) -> AnalysisMode:
     if value == "clones_only":
         return "clones_only"
     raise MCPServiceContractError(
-        f"Invalid value for analysis_mode: {value!r}. "
-        "Expected one of: clones_only, full."
+        err_msgs.invalid_choice(
+            "analysis_mode",
+            value,
+            ("clones_only", "full"),
+        )
     )
 
 
 def _validated_cache_policy(value: str) -> CachePolicy:
     if value == "reuse":
         return "reuse"
-    if value == "refresh":
-        return "refresh"
     if value == "off":
         return "off"
+    if value == "refresh":
+        raise MCPServiceContractError(err_msgs.CACHE_POLICY_CLI_ONLY)
     raise MCPServiceContractError(
-        f"Invalid value for cache_policy: {value!r}. "
-        "Expected one of: off, refresh, reuse."
+        err_msgs.invalid_choice("cache_policy", value, ("off", "reuse"))
     )
 
 
@@ -136,14 +319,37 @@ def build_mcp_server(
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = (
         DEFAULT_MCP_LOG_LEVEL
     ),
+    ide_governance_channel: bool = False,
+    auth_token: str | None = None,
 ) -> FastMCP:
     """Build and register the local read-only CodeClone FastMCP server."""
 
     runtime_fastmcp, read_only_tool, analysis_tool, session_tool = _load_mcp_runtime()
-    service = CodeCloneMCPService(history_limit=_validated_history_limit(history_limit))
+    service = CodeCloneMCPService(
+        history_limit=_validated_history_limit(history_limit),
+        ide_governance_channel=ide_governance_channel,
+    )
+    # Freeze the env-resolved observability decision for this server process
+    # (default OFF). Root-less here; the registrar binds the store to the first
+    # tool call that carries a root.
+    bootstrap(resolve_observability_config(), session_id=_observability_session_id())
+
+    @asynccontextmanager
+    async def _lifespan(_app: FastMCP) -> AsyncIterator[dict[str, object]]:
+        yield {}
+        service.shutdown_cleanup()
+        shutdown()
+
+    token_verifier = None
+    auth_settings = None
+    if auth_token is not None:
+        token_verifier = StaticBearerTokenVerifier(auth_token)
+        auth_settings = build_http_auth_settings(host=host, port=port)
+
     mcp = runtime_fastmcp(
         name="CodeClone",
-        instructions=_SERVER_INSTRUCTIONS,
+        instructions=mcp_instructions.SERVER_INSTRUCTIONS,
+        lifespan=_lifespan,
         website_url=DOCS_URL,
         host=host,
         port=port,
@@ -152,15 +358,20 @@ def build_mcp_server(
         debug=debug,
         log_level=log_level,
         dependencies=(f"codeclone=={__version__}",),
+        token_verifier=token_verifier,
+        auth=auth_settings,
     )
     # FastMCP otherwise reports the `mcp` package version in initialize/serverInfo.
     mcp._mcp_server.version = __version__
+    # Inject FastMCP reference so the service can lazily resolve the MCP
+    # clientInfo (name/version) for workspace intent agent_label fields.
+    service._fastmcp = mcp
 
     def tool(*args: object, **kwargs: object) -> Callable[[MCPCallable], MCPCallable]:
         decorator = mcp.tool(*args, **kwargs)  # type: ignore[arg-type]
 
         def register(func: MCPCallable) -> MCPCallable:
-            decorator(func)
+            decorator(_instrument_tool(func))
             return func
 
         return register
@@ -178,43 +389,37 @@ def build_mcp_server(
         return register
 
     @tool(
-        title="Analyze Repository",
-        description=(
-            "Run a deterministic CodeClone analysis and register it as the "
-            "latest MCP run. Pass an absolute repository root; relative roots "
-            "like '.' are rejected in MCP. Start with get_run_summary or "
-            "get_production_triage. Tip: set cache_policy='off' for a fully "
-            "fresh run. Defaults are the conservative first pass; lower "
-            "thresholds only for an explicit deeper review."
-        ),
+        title=mcp_tools.TITLE_ANALYZE_REPOSITORY,
+        description=mcp_tools.ANALYZE_REPOSITORY,
         annotations=analysis_tool,
         structured_output=True,
     )
     def analyze_repository(
-        root: str,
-        analysis_mode: str = "full",
-        respect_pyproject: bool = True,
-        changed_paths: list[str] | None = None,
-        git_diff_ref: str | None = None,
-        processes: int | None = None,
-        min_loc: int | None = None,
-        min_stmt: int | None = None,
-        block_min_loc: int | None = None,
-        block_min_stmt: int | None = None,
-        segment_min_loc: int | None = None,
-        segment_min_stmt: int | None = None,
-        api_surface: bool | None = None,
-        coverage_xml: str | None = None,
-        coverage_min: int | None = None,
-        complexity_threshold: int | None = None,
-        coupling_threshold: int | None = None,
-        cohesion_threshold: int | None = None,
-        baseline_path: str | None = None,
-        metrics_baseline_path: str | None = None,
-        max_baseline_size_mb: int | None = None,
-        cache_policy: str = "reuse",
-        cache_path: str | None = None,
-        max_cache_size_mb: int | None = None,
+        root: RootParam,
+        analysis_mode: AnalysisModeParam = "full",
+        respect_pyproject: RespectPyprojectParam = True,
+        changed_paths: ChangedPathsParam = None,
+        git_diff_ref: GitDiffRefParam = None,
+        processes: ProcessesParam = None,
+        min_loc: ThresholdIntParam = None,
+        min_stmt: ThresholdIntParam = None,
+        block_min_loc: ThresholdIntParam = None,
+        block_min_stmt: ThresholdIntParam = None,
+        segment_min_loc: ThresholdIntParam = None,
+        segment_min_stmt: ThresholdIntParam = None,
+        api_surface: ApiSurfaceParam = None,
+        coverage_xml: CoverageXmlParam = None,
+        coverage_min: CoverageMinParam = None,
+        complexity_threshold: ThresholdIntParam = None,
+        coupling_threshold: ThresholdIntParam = None,
+        cohesion_threshold: ThresholdIntParam = None,
+        baseline_path: OptionalPathParam = None,
+        metrics_baseline_path: OptionalPathParam = None,
+        max_baseline_size_mb: MaxSizeMbParam = None,
+        cache_policy: CachePolicyParam = "reuse",
+        cache_path: OptionalPathParam = None,
+        max_cache_size_mb: MaxSizeMbParam = None,
+        allow_external_artifacts: AllowExternalArtifactsParam = False,
     ) -> dict[str, object]:
         return service.analyze_repository(
             MCPAnalysisRequest(
@@ -242,49 +447,42 @@ def build_mcp_server(
                 cache_policy=_validated_cache_policy(cache_policy),
                 cache_path=cache_path,
                 max_cache_size_mb=max_cache_size_mb,
+                allow_external_artifacts=allow_external_artifacts,
             )
         )
 
     @tool(
-        title="Analyze Changed Paths",
-        description=(
-            "Run a deterministic CodeClone analysis and return a changed-files "
-            "projection from explicit paths or a git diff ref. Pass an absolute "
-            "repository root; relative roots like '.' are rejected in MCP. "
-            "Start with get_report_section(section='changed') or "
-            "get_production_triage before broader finding lists. Tip: set "
-            "cache_policy='off' for a fully fresh run. Start with the "
-            "conservative profile first; lower thresholds only for an "
-            "explicit higher-sensitivity pass."
-        ),
+        title=mcp_tools.TITLE_ANALYZE_CHANGED_PATHS,
+        description=mcp_tools.ANALYZE_CHANGED_PATHS,
         annotations=analysis_tool,
         structured_output=True,
     )
     def analyze_changed_paths(
-        root: str,
-        changed_paths: list[str] | None = None,
-        git_diff_ref: str | None = None,
-        analysis_mode: str = "full",
-        respect_pyproject: bool = True,
-        processes: int | None = None,
-        min_loc: int | None = None,
-        min_stmt: int | None = None,
-        block_min_loc: int | None = None,
-        block_min_stmt: int | None = None,
-        segment_min_loc: int | None = None,
-        segment_min_stmt: int | None = None,
-        api_surface: bool | None = None,
-        coverage_xml: str | None = None,
-        coverage_min: int | None = None,
-        complexity_threshold: int | None = None,
-        coupling_threshold: int | None = None,
-        cohesion_threshold: int | None = None,
-        baseline_path: str | None = None,
-        metrics_baseline_path: str | None = None,
-        max_baseline_size_mb: int | None = None,
-        cache_policy: str = "reuse",
-        cache_path: str | None = None,
-        max_cache_size_mb: int | None = None,
+        root: RootParam,
+        changed_paths: ChangedPathsParam = None,
+        git_diff_ref: GitDiffRefParam = None,
+        analysis_mode: AnalysisModeParam = "full",
+        respect_pyproject: RespectPyprojectParam = True,
+        processes: ProcessesParam = None,
+        min_loc: ThresholdIntParam = None,
+        min_stmt: ThresholdIntParam = None,
+        block_min_loc: ThresholdIntParam = None,
+        block_min_stmt: ThresholdIntParam = None,
+        segment_min_loc: ThresholdIntParam = None,
+        segment_min_stmt: ThresholdIntParam = None,
+        api_surface: ApiSurfaceParam = None,
+        coverage_xml: CoverageXmlParam = None,
+        coverage_min: CoverageMinParam = None,
+        complexity_threshold: ThresholdIntParam = None,
+        coupling_threshold: ThresholdIntParam = None,
+        cohesion_threshold: ThresholdIntParam = None,
+        baseline_path: OptionalPathParam = None,
+        metrics_baseline_path: OptionalPathParam = None,
+        max_baseline_size_mb: MaxSizeMbParam = None,
+        cache_policy: CachePolicyParam = "reuse",
+        cache_path: OptionalPathParam = None,
+        max_cache_size_mb: MaxSizeMbParam = None,
+        allow_external_artifacts: AllowExternalArtifactsParam = False,
     ) -> dict[str, object]:
         return service.analyze_changed_paths(
             MCPAnalysisRequest(
@@ -312,36 +510,29 @@ def build_mcp_server(
                 cache_policy=_validated_cache_policy(cache_policy),
                 cache_path=cache_path,
                 max_cache_size_mb=max_cache_size_mb,
+                allow_external_artifacts=allow_external_artifacts,
             )
         )
 
     @tool(
-        title="Get Run Summary",
-        description=(
-            "Return the stored compact MCP summary for the latest or specified "
-            "run. Start here when you want the cheapest run-level snapshot."
-        ),
+        title=mcp_tools.TITLE_GET_RUN_SUMMARY,
+        description=mcp_tools.GET_RUN_SUMMARY,
         annotations=read_only_tool,
         structured_output=True,
     )
-    def get_run_summary(run_id: str | None = None) -> dict[str, object]:
+    def get_run_summary(run_id: RunIdParam = None) -> dict[str, object]:
         return service.get_run_summary(run_id)
 
     @tool(
-        title="Get Production Triage",
-        description=(
-            "Return a production-first triage view over a stored run: health, "
-            "cache freshness, production hotspots, and production suggestions, "
-            "while keeping global source-kind counters visible. Use this as the "
-            "default first-pass review on noisy repositories."
-        ),
+        title=mcp_tools.TITLE_GET_PRODUCTION_TRIAGE,
+        description=mcp_tools.GET_PRODUCTION_TRIAGE,
         annotations=read_only_tool,
         structured_output=True,
     )
     def get_production_triage(
-        run_id: str | None = None,
-        max_hotspots: int = 3,
-        max_suggestions: int = 3,
+        run_id: RunIdParam = None,
+        max_hotspots: MaxHotspotsParam = 3,
+        max_suggestions: MaxSuggestionsParam = 3,
     ) -> dict[str, object]:
         return service.get_production_triage(
             run_id=run_id,
@@ -350,21 +541,248 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Help",
-        description=(
-            "Explain a supported CodeClone workflow or contract topic and "
-            "suggest the safest next step. Return compact guidance with "
-            "canonical doc links. Use this when workflow or contract meaning "
-            "is unclear. This is bounded guidance, not a full manual. "
-            "Supported topics: workflow, analysis_profile, suppressions, "
-            "baseline, coverage, latest_runs, review_state, changed_scope."
-        ),
+        title=mcp_tools.TITLE_GET_BLAST_RADIUS,
+        description=mcp_tools.GET_BLAST_RADIUS,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_blast_radius(
+        files: FilesParam,
+        run_id: RunIdParam = None,
+        depth: BlastDepthParam = "direct",
+        include: IncludeParam = None,
+    ) -> dict[str, object]:
+        return service.get_blast_radius(
+            files=files,
+            run_id=run_id,
+            depth=depth,
+            include=include,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_IMPLEMENTATION_CONTEXT,
+        description=mcp_tools.GET_IMPLEMENTATION_CONTEXT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_implementation_context(
+        root: RootParam,
+        paths: ContextPathsParam = None,
+        symbols: ContextSymbolsParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        changed_scope: ChangedScopeParam = False,
+        mode: ContextModeParam = "implementation",
+        include: FacetIncludeParam = None,
+        depth: ContextDepthParam = 1,
+        detail_level: ContextDetailLevelParam = "compact",
+        budget: ContextBudgetParam = 50,
+        run_id: RunIdParam = None,
+        query: ContextQueryParam = None,
+    ) -> dict[str, object]:
+        return service.get_implementation_context(
+            root=root,
+            paths=paths,
+            symbols=symbols,
+            intent_id=intent_id,
+            changed_scope=changed_scope,
+            mode=mode,
+            include=include,
+            depth=depth,
+            detail_level=detail_level,
+            budget=budget,
+            run_id=run_id,
+            query=query,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_RELEVANT_MEMORY,
+        description=mcp_tools.GET_RELEVANT_MEMORY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_relevant_memory(
+        root: RootParam,
+        scope: MemoryScopeListParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        symbols: MemorySymbolsParam = None,
+        max_records: MemoryMaxRecordsParam = 20,
+        include_stale: IncludeStaleParam = False,
+        include_drafts: IncludeDraftsParam = False,
+        detail_level: MemoryDetailLevelParam = "compact",
+    ) -> dict[str, object]:
+        return service.get_relevant_memory(
+            root=root,
+            scope=scope,
+            intent_id=intent_id,
+            symbols=symbols,
+            max_records=max_records,
+            include_stale=include_stale,
+            include_drafts=include_drafts,
+            detail_level=detail_level,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_QUERY_ENGINEERING_MEMORY,
+        description=mcp_tools.QUERY_ENGINEERING_MEMORY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def query_engineering_memory(
+        root: RootParam,
+        mode: MemoryQueryModeParam,
+        record_id: MemoryRecordIdParam = None,
+        path: MemoryPathParam = None,
+        symbol: MemorySymbolParam = None,
+        query: MemorySearchQueryParam = None,
+        scope: MemoryScopeListParam = None,
+        filters: MemoryFiltersParam = None,
+        max_results: MemoryMaxRecordsParam = 20,
+        include_stale: IncludeStaleParam = False,
+        include_drafts: IncludeDraftsParam = False,
+        detail_level: MemoryDetailLevelParam = "compact",
+        semantic: SemanticParam = False,
+    ) -> dict[str, object]:
+        return service.query_engineering_memory(
+            root=root,
+            mode=mode,
+            record_id=record_id,
+            path=path,
+            symbol=symbol,
+            query=query,
+            scope=scope,
+            filters=filters,
+            max_results=max_results,
+            include_stale=include_stale,
+            include_drafts=include_drafts,
+            detail_level=detail_level,
+            semantic=semantic,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_MANAGE_ENGINEERING_MEMORY,
+        description=mcp_tools.MANAGE_ENGINEERING_MEMORY,
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def manage_engineering_memory(
+        root: RootParam,
+        action: ManageMemoryActionParam,
+        record_type: MemoryRecordTypeParam = None,
+        statement: MemoryStatementParam = None,
+        subject_path: MemoryPathParam = None,
+        text: MemoryClaimsTextParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        run_id: RunIdParam = None,
+        record_id: MemoryRecordIdParam = None,
+        experience_id: ManageMemoryExperienceIdParam = None,
+        decision: GovernanceDecisionParam = None,
+        ide_governance_key: IdeGovernanceKeyParam = None,
+        client_name: IdeGovernanceClientNameParam = None,
+        client_version: IdeGovernanceClientVersionParam = None,
+        governance_ticket: GovernanceTicketParam = None,
+        confirmation_nonce: ConfirmationNonceParam = None,
+        proof: GovernanceProofParam = None,
+        actor: GovernanceActorParam = None,
+        protocol: GovernanceProtocolParam = None,
+    ) -> dict[str, object]:
+        return service.manage_engineering_memory(
+            root=root,
+            action=action,
+            record_type=record_type,
+            statement=statement,
+            subject_path=subject_path,
+            text=text,
+            intent_id=intent_id,
+            run_id=run_id,
+            record_id=record_id,
+            experience_id=experience_id,
+            decision=decision,
+            ide_governance_key=ide_governance_key,
+            client_name=client_name,
+            client_version=client_version,
+            governance_ticket=governance_ticket,
+            confirmation_nonce=confirmation_nonce,
+            proof=proof,
+            actor=actor,
+            protocol=protocol,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_CHECK_PATCH_CONTRACT,
+        description=mcp_tools.CHECK_PATCH_CONTRACT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def check_patch_contract(
+        mode: PatchModeParam,
+        run_id: RunIdParam = None,
+        before_run_id: BeforeRunIdParam = None,
+        after_run_id: AfterRunIdParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        strictness: StrictnessParam = "ci",
+        diff_ref: DiffRefParam = None,
+        changed_files: ChangedFilesParam = None,
+    ) -> dict[str, object]:
+        return service.check_patch_contract(
+            mode=mode,
+            run_id=run_id,
+            before_run_id=before_run_id,
+            after_run_id=after_run_id,
+            intent_id=intent_id,
+            strictness=strictness,
+            diff_ref=diff_ref,
+            changed_files=changed_files,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_CREATE_REVIEW_RECEIPT,
+        description=mcp_tools.CREATE_REVIEW_RECEIPT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def create_review_receipt(
+        run_id: RunIdParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        format: ReceiptFormatParam = "markdown",
+        include_blast_radius: IncludeBlastRadiusParam = True,
+        include_patch_contract: IncludePatchContractParam = True,
+    ) -> dict[str, object]:
+        return service.create_review_receipt(
+            run_id=run_id,
+            intent_id=intent_id,
+            format=format,
+            include_blast_radius=include_blast_radius,
+            include_patch_contract=include_patch_contract,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_VALIDATE_REVIEW_CLAIMS,
+        description=mcp_tools.VALIDATE_REVIEW_CLAIMS,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def validate_review_claims(
+        text: ReviewTextParam,
+        run_id: RunIdParam = None,
+        require_citations: RequireCitationsParam = True,
+        patch_health_delta: PatchHealthDeltaParam = None,
+    ) -> dict[str, object]:
+        return service.validate_review_claims(
+            text=text,
+            run_id=run_id,
+            require_citations=require_citations,
+            patch_health_delta=patch_health_delta,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_HELP,
+        description=mcp_tools.HELP,
         annotations=read_only_tool,
         structured_output=True,
     )
     def help(
-        topic: str,
-        detail: str = "compact",
+        topic: HelpTopicParam,
+        detail: HelpDetailParam = "compact",
     ) -> dict[str, object]:
         return service.get_help(
             topic=topic,
@@ -372,32 +790,29 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Evaluate Gates",
-        description=(
-            "Evaluate CodeClone gate conditions against an existing MCP run without "
-            "modifying baselines or exiting the process."
-        ),
+        title=mcp_tools.TITLE_EVALUATE_GATES,
+        description=mcp_tools.EVALUATE_GATES,
         annotations=read_only_tool,
         structured_output=True,
     )
     def evaluate_gates(
-        run_id: str | None = None,
-        fail_on_new: bool = False,
-        fail_threshold: int = -1,
-        fail_complexity: int = -1,
-        fail_coupling: int = -1,
-        fail_cohesion: int = -1,
-        fail_cycles: bool = False,
-        fail_dead_code: bool = False,
-        fail_health: int = -1,
-        fail_on_new_metrics: bool = False,
-        fail_on_typing_regression: bool = False,
-        fail_on_docstring_regression: bool = False,
-        fail_on_api_break: bool = False,
-        fail_on_untested_hotspots: bool = False,
-        min_typing_coverage: int = -1,
-        min_docstring_coverage: int = -1,
-        coverage_min: int = DEFAULT_COVERAGE_MIN,
+        run_id: RunIdParam = None,
+        fail_on_new: GateBoolParam = False,
+        fail_threshold: GateIntParam = -1,
+        fail_complexity: GateIntParam = -1,
+        fail_coupling: GateIntParam = -1,
+        fail_cohesion: GateIntParam = -1,
+        fail_cycles: GateBoolParam = False,
+        fail_dead_code: GateBoolParam = False,
+        fail_health: GateIntParam = -1,
+        fail_on_new_metrics: GateBoolParam = False,
+        fail_on_typing_regression: GateBoolParam = False,
+        fail_on_docstring_regression: GateBoolParam = False,
+        fail_on_api_break: GateBoolParam = False,
+        fail_on_untested_hotspots: GateBoolParam = False,
+        min_typing_coverage: GateIntParam = -1,
+        min_docstring_coverage: GateIntParam = -1,
+        coverage_min: GateIntParam = DEFAULT_COVERAGE_MIN,
     ) -> dict[str, object]:
         return service.evaluate_gates(
             MCPGateRequest(
@@ -422,24 +837,18 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Report Section",
-        description=(
-            "Return a canonical CodeClone report section for the latest or "
-            "specified MCP run. Prefer specific sections instead of 'all' unless "
-            "you truly need the full canonical report. The 'metrics' section "
-            "returns only the summary, while 'metrics_detail' returns paginated "
-            "item slices or summary+hint when unfiltered."
-        ),
+        title=mcp_tools.TITLE_GET_REPORT_SECTION,
+        description=mcp_tools.GET_REPORT_SECTION,
         annotations=read_only_tool,
         structured_output=True,
     )
     def get_report_section(
-        run_id: str | None = None,
-        section: str = "all",
-        family: str | None = None,
-        path: str | None = None,
-        offset: int = 0,
-        limit: int = 50,
+        run_id: RunIdParam = None,
+        section: ReportSectionParam = "all",
+        family: FamilyParam = None,
+        path: PathFilterParam = None,
+        offset: OffsetParam = 0,
+        limit: LimitParam = 50,
     ) -> dict[str, object]:
         return service.get_report_section(
             run_id=run_id,
@@ -451,31 +860,51 @@ def build_mcp_server(
         )
 
     @tool(
-        title="List Findings",
-        description=(
-            "List canonical finding groups with deterministic ordering, optional "
-            "filters, pagination, and compact summary cards by default. Prefer "
-            "list_hotspots or focused check_* tools for first-pass triage; use "
-            "this when you need a broader filtered list."
-        ),
+        title=mcp_tools.TITLE_QUERY_PLATFORM_OBSERVABILITY,
+        description=mcp_tools.QUERY_PLATFORM_OBSERVABILITY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def query_platform_observability(
+        root: RootParam,
+        section: ObservabilitySectionParam,
+        detail_level: ObservabilityDetailParam = "compact",
+        limit: ObservabilityLimitParam = 10,
+        window: ObservabilityWindowParam = "latest",
+        operation_id: ObservabilityOperationIdParam = None,
+        span_id: ObservabilitySpanIdParam = None,
+    ) -> dict[str, object]:
+        return service.query_platform_observability(
+            root=root,
+            section=section,
+            detail_level=detail_level,
+            limit=limit,
+            window=window,
+            operation_id=operation_id,
+            span_id=span_id,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_LIST_FINDINGS,
+        description=mcp_tools.LIST_FINDINGS,
         annotations=read_only_tool,
         structured_output=True,
     )
     def list_findings(
-        run_id: str | None = None,
-        family: str = "all",
-        category: str | None = None,
-        severity: str | None = None,
-        source_kind: str | None = None,
-        novelty: str = "all",
-        sort_by: str = "default",
-        detail_level: str = "summary",
-        changed_paths: list[str] | None = None,
-        git_diff_ref: str | None = None,
-        exclude_reviewed: bool = False,
-        offset: int = 0,
-        limit: int = 50,
-        max_results: int | None = None,
+        run_id: RunIdParam = None,
+        family: FindingFamilyParam = "all",
+        category: CategoryParam = None,
+        severity: SeverityParam = None,
+        source_kind: SourceKindParam = None,
+        novelty: NoveltyParam = "all",
+        sort_by: SortByParam = "default",
+        detail_level: DetailLevelParam = "summary",
+        changed_paths: ChangedPathsParam = None,
+        git_diff_ref: GitDiffRefParam = None,
+        exclude_reviewed: ExcludeReviewedParam = False,
+        offset: OffsetParam = 0,
+        limit: LimitParam = 50,
+        max_results: MaxResultsParam = None,
     ) -> dict[str, object]:
         return service.list_findings(
             run_id=run_id,
@@ -495,20 +924,15 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Finding",
-        description=(
-            "Return a single canonical finding group by short or full id. "
-            "Normal detail is the default. Use this after list_hotspots, "
-            "list_findings, or check_* instead of requesting larger lists at "
-            "higher detail."
-        ),
+        title=mcp_tools.TITLE_GET_FINDING,
+        description=mcp_tools.GET_FINDING,
         annotations=read_only_tool,
         structured_output=True,
     )
     def get_finding(
-        finding_id: str,
-        run_id: str | None = None,
-        detail_level: str = "normal",
+        finding_id: FindingIdParam,
+        run_id: RunIdParam = None,
+        detail_level: DetailLevelParam = "normal",
     ) -> dict[str, object]:
         return service.get_finding(
             finding_id=finding_id,
@@ -517,19 +941,15 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Get Remediation",
-        description=(
-            "Return actionable remediation guidance for a single finding. "
-            "Normal detail is the default. Use this when you need the fix packet "
-            "for one finding without pulling larger detail lists."
-        ),
+        title=mcp_tools.TITLE_GET_REMEDIATION,
+        description=mcp_tools.GET_REMEDIATION,
         annotations=read_only_tool,
         structured_output=True,
     )
     def get_remediation(
-        finding_id: str,
-        run_id: str | None = None,
-        detail_level: str = "normal",
+        finding_id: FindingIdParam,
+        run_id: RunIdParam = None,
+        detail_level: DetailLevelParam = "normal",
     ) -> dict[str, object]:
         return service.get_remediation(
             finding_id=finding_id,
@@ -538,24 +958,20 @@ def build_mcp_server(
         )
 
     @tool(
-        title="List Hotspots",
-        description=(
-            "Return one of the derived CodeClone hotlists for the latest or "
-            "specified MCP run, using compact summary cards by default. Prefer "
-            "this for first-pass triage before broader list_findings calls."
-        ),
+        title=mcp_tools.TITLE_LIST_HOTSPOTS,
+        description=mcp_tools.LIST_HOTSPOTS,
         annotations=read_only_tool,
         structured_output=True,
     )
     def list_hotspots(
-        kind: str,
-        run_id: str | None = None,
-        detail_level: str = "summary",
-        changed_paths: list[str] | None = None,
-        git_diff_ref: str | None = None,
-        exclude_reviewed: bool = False,
-        limit: int = 10,
-        max_results: int | None = None,
+        kind: HotspotKindParam,
+        run_id: RunIdParam = None,
+        detail_level: DetailLevelParam = "summary",
+        changed_paths: ChangedPathsParam = None,
+        git_diff_ref: GitDiffRefParam = None,
+        exclude_reviewed: ExcludeReviewedParam = False,
+        limit: LimitParam = 10,
+        max_results: MaxResultsParam = None,
     ) -> dict[str, object]:
         return service.list_hotspots(
             kind=kind,
@@ -569,19 +985,15 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Compare Runs",
-        description=(
-            "Compare two registered CodeClone MCP runs by finding ids and "
-            "run-to-run health. Returns 'incomparable' when roots or effective "
-            "analysis settings differ."
-        ),
+        title=mcp_tools.TITLE_COMPARE_RUNS,
+        description=mcp_tools.COMPARE_RUNS,
         annotations=read_only_tool,
         structured_output=True,
     )
     def compare_runs(
-        run_id_before: str,
-        run_id_after: str | None = None,
-        focus: str = "all",
+        run_id_before: RunIdRequiredParam,
+        run_id_after: RunIdParam = None,
+        focus: CompareFocusParam = "all",
     ) -> dict[str, object]:
         return service.compare_runs(
             run_id_before=run_id_before,
@@ -590,24 +1002,18 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Complexity",
-        description=(
-            "Return complexity hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "complexity hotspots."
-        ),
+        title=mcp_tools.TITLE_CHECK_COMPLEXITY,
+        description=mcp_tools.CHECK_COMPLEXITY,
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_complexity(
-        run_id: str | None = None,
-        root: str | None = None,
-        path: str | None = None,
-        min_complexity: int | None = None,
-        max_results: int = 10,
-        detail_level: str = "summary",
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+        path: PathFilterParam = None,
+        min_complexity: MinComplexityParam = None,
+        max_results: LimitParam = 10,
+        detail_level: DetailLevelParam = "summary",
     ) -> dict[str, object]:
         return service.check_complexity(
             run_id=run_id,
@@ -619,25 +1025,19 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Clones",
-        description=(
-            "Return clone findings from a compatible stored run. "
-            "Use analyze_repository first if no compatible run is available. "
-            "When filtering by root without run_id, pass an absolute root. "
-            "Prefer this narrower tool instead of list_findings when you only "
-            "need clone findings."
-        ),
+        title=mcp_tools.TITLE_CHECK_CLONES,
+        description=mcp_tools.CHECK_CLONES,
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_clones(
-        run_id: str | None = None,
-        root: str | None = None,
-        path: str | None = None,
-        clone_type: str | None = None,
-        source_kind: str | None = None,
-        max_results: int = 10,
-        detail_level: str = "summary",
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+        path: PathFilterParam = None,
+        clone_type: CloneTypeParam = None,
+        source_kind: SourceKindParam = None,
+        max_results: LimitParam = 10,
+        detail_level: DetailLevelParam = "summary",
     ) -> dict[str, object]:
         return service.check_clones(
             run_id=run_id,
@@ -650,23 +1050,17 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Coupling",
-        description=(
-            "Return coupling hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "coupling hotspots."
-        ),
+        title=mcp_tools.TITLE_CHECK_COUPLING,
+        description=mcp_tools.CHECK_COUPLING,
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_coupling(
-        run_id: str | None = None,
-        root: str | None = None,
-        path: str | None = None,
-        max_results: int = 10,
-        detail_level: str = "summary",
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+        path: PathFilterParam = None,
+        max_results: LimitParam = 10,
+        detail_level: DetailLevelParam = "summary",
     ) -> dict[str, object]:
         return service.check_coupling(
             run_id=run_id,
@@ -677,23 +1071,17 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Cohesion",
-        description=(
-            "Return cohesion hotspots from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "cohesion hotspots."
-        ),
+        title=mcp_tools.TITLE_CHECK_COHESION,
+        description=mcp_tools.CHECK_COHESION,
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_cohesion(
-        run_id: str | None = None,
-        root: str | None = None,
-        path: str | None = None,
-        max_results: int = 10,
-        detail_level: str = "summary",
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+        path: PathFilterParam = None,
+        max_results: LimitParam = 10,
+        detail_level: DetailLevelParam = "summary",
     ) -> dict[str, object]:
         return service.check_cohesion(
             run_id=run_id,
@@ -704,24 +1092,18 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Check Dead Code",
-        description=(
-            "Return dead-code findings from a compatible stored run. "
-            "Use analyze_repository first if no full run is available. When "
-            "filtering by root without run_id, pass an absolute root. Prefer "
-            "this narrower tool instead of list_findings when you only need "
-            "dead-code findings."
-        ),
+        title=mcp_tools.TITLE_CHECK_DEAD_CODE,
+        description=mcp_tools.CHECK_DEAD_CODE,
         annotations=read_only_tool,
         structured_output=True,
     )
     def check_dead_code(
-        run_id: str | None = None,
-        root: str | None = None,
-        path: str | None = None,
-        min_severity: str | None = None,
-        max_results: int = 10,
-        detail_level: str = "normal",
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+        path: PathFilterParam = None,
+        min_severity: MinSeverityParam = None,
+        max_results: LimitParam = 10,
+        detail_level: DetailLevelParam = "normal",
     ) -> dict[str, object]:
         return service.check_dead_code(
             run_id=run_id,
@@ -733,20 +1115,16 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Generate PR Summary",
-        description=(
-            "Generate a PR-friendly CodeClone summary for changed files. Prefer "
-            "format='markdown' for compact LLM-facing output; use 'json' only "
-            "for machine post-processing."
-        ),
+        title=mcp_tools.TITLE_GENERATE_PR_SUMMARY,
+        description=mcp_tools.GENERATE_PR_SUMMARY,
         annotations=read_only_tool,
         structured_output=True,
     )
     def generate_pr_summary(
-        run_id: str | None = None,
-        changed_paths: list[str] | None = None,
-        git_diff_ref: str | None = None,
-        format: str = "markdown",
+        run_id: RunIdParam = None,
+        changed_paths: ChangedPathsParam = None,
+        git_diff_ref: GitDiffRefParam = None,
+        format: PrFormatParam = "markdown",
     ) -> dict[str, object]:
         return service.generate_pr_summary(
             run_id=run_id,
@@ -756,15 +1134,15 @@ def build_mcp_server(
         )
 
     @tool(
-        title="Mark Finding Reviewed",
-        description="Mark a finding as reviewed in the current in-memory MCP session.",
+        title=mcp_tools.TITLE_MARK_FINDING_REVIEWED,
+        description=mcp_tools.MARK_FINDING_REVIEWED,
         annotations=session_tool,
         structured_output=True,
     )
     def mark_finding_reviewed(
-        finding_id: str,
-        run_id: str | None = None,
-        note: str | None = None,
+        finding_id: FindingIdParam,
+        run_id: RunIdParam = None,
+        note: ReviewNoteParam = None,
     ) -> dict[str, object]:
         return service.mark_finding_reviewed(
             finding_id=finding_id,
@@ -773,32 +1151,154 @@ def build_mcp_server(
         )
 
     @tool(
-        title="List Reviewed Findings",
-        description=(
-            "List in-memory reviewed findings for the current or specified run."
-        ),
+        title=mcp_tools.TITLE_LIST_REVIEWED_FINDINGS,
+        description=mcp_tools.LIST_REVIEWED_FINDINGS,
         annotations=read_only_tool,
         structured_output=True,
     )
-    def list_reviewed_findings(run_id: str | None = None) -> dict[str, object]:
+    def list_reviewed_findings(run_id: RunIdParam = None) -> dict[str, object]:
         return service.list_reviewed_findings(run_id=run_id)
 
     @tool(
-        title="Clear Session Runs",
-        description=(
-            "Clear all in-memory MCP analysis runs and ephemeral session state "
-            "for this server process."
-        ),
+        title=mcp_tools.TITLE_START_CONTROLLED_CHANGE,
+        description=mcp_tools.START_CONTROLLED_CHANGE,
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def start_controlled_change(
+        root: RootParam,
+        scope: ScopeParam,
+        intent: IntentTextParam,
+        expected_effects: ExpectedEffectsParam = None,
+        on_conflict: OnConflictParam = None,
+        strictness: StrictnessParam = "ci",
+        ttl_seconds: TtlSecondsParam = None,
+        blast_radius_depth: BlastRadiusDepthParam = "auto",
+        dirty_scope_policy: DirtyScopePolicyParam = "block",
+    ) -> dict[str, object]:
+        return service.start_controlled_change(
+            root=root,
+            scope=scope,
+            intent=intent,
+            expected_effects=expected_effects,
+            on_conflict=on_conflict,
+            strictness=strictness,
+            ttl_seconds=ttl_seconds,
+            blast_radius_depth=blast_radius_depth,
+            dirty_scope_policy=dirty_scope_policy,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_FINISH_CONTROLLED_CHANGE,
+        description=mcp_tools.FINISH_CONTROLLED_CHANGE,
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def finish_controlled_change(
+        intent_id: IntentIdParam,
+        changed_files: ChangedFilesParam = None,
+        diff_ref: DiffRefParam = None,
+        after_run_id: AfterRunIdParam = None,
+        review_text: FinishReviewTextParam = None,
+        claims_text: ClaimsTextParam = None,
+        create_receipt: CreateReceiptParam = True,
+        auto_clear: AutoClearParam = True,
+        strictness: StrictnessParam = "ci",
+        propose_memory: ProposeMemoryParam = False,
+        detail_level: DetailLevelParam = "summary",
+        patch_trail_detail: PatchTrailDetailParam = "summary",
+    ) -> dict[str, object]:
+        return service.finish_controlled_change(
+            intent_id=intent_id,
+            changed_files=changed_files,
+            diff_ref=diff_ref,
+            after_run_id=after_run_id,
+            review_text=review_text,
+            claims_text=claims_text,
+            create_receipt=create_receipt,
+            auto_clear=auto_clear,
+            strictness=strictness,
+            propose_memory=propose_memory,
+            detail_level=detail_level,
+            patch_trail_detail=patch_trail_detail,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_MANAGE_CHANGE_INTENT,
+        description=mcp_tools.MANAGE_CHANGE_INTENT,
+        annotations=session_tool,
+        structured_output=True,
+    )
+    def manage_change_intent(
+        action: ManageActionParam,
+        run_id: RunIdParam = None,
+        intent_id: OptionalIntentIdParam = None,
+        scope: OptionalScopeParam = None,
+        intent: OptionalIntentTextParam = None,
+        expected_effects: ExpectedEffectsParam = None,
+        diff_ref: DiffRefParam = None,
+        changed_files: ChangedFilesParam = None,
+        root: OptionalRootParam = None,
+        ttl_seconds: TtlSecondsParam = None,
+        lease_seconds: LeaseSecondsParam = None,
+        on_conflict: OnConflictParam = None,
+    ) -> dict[str, object]:
+        return service.manage_change_intent(
+            action=action,
+            run_id=run_id,
+            intent_id=intent_id,
+            scope=scope,
+            intent=intent,
+            expected_effects=expected_effects,
+            diff_ref=diff_ref,
+            changed_files=changed_files,
+            root=root,
+            ttl_seconds=ttl_seconds,
+            lease_seconds=lease_seconds,
+            on_conflict=on_conflict,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_CLEAR_SESSION_RUNS,
+        description=mcp_tools.CLEAR_SESSION_RUNS,
         annotations=session_tool,
         structured_output=True,
     )
     def clear_session_runs() -> dict[str, object]:
         return service.clear_session_runs()
 
+    if ide_governance_channel:
+
+        @tool(
+            title=mcp_tools.TITLE_GET_WORKSPACE_SESSION_STATS,
+            description=mcp_tools.GET_WORKSPACE_SESSION_STATS,
+            annotations=read_only_tool,
+            structured_output=True,
+        )
+        def get_workspace_session_stats(root: RootParam) -> dict[str, object]:
+            return service.get_workspace_session_stats(root=root)
+
+        @tool(
+            title=mcp_tools.TITLE_GET_CONTROLLER_AUDIT_TRAIL,
+            description=mcp_tools.GET_CONTROLLER_AUDIT_TRAIL,
+            annotations=read_only_tool,
+            structured_output=True,
+        )
+        def get_controller_audit_trail(
+            root: RootParam,
+            limit: AuditTrailLimitParam = 50,
+            audit_path: AuditPathOverrideParam = None,
+        ) -> dict[str, object]:
+            return service.get_controller_audit_trail(
+                root=root,
+                limit=limit,
+                audit_path=audit_path,
+            )
+
     @resource(
         "codeclone://latest/summary",
-        title="Latest Run Summary",
-        description="Canonical JSON summary for the latest CodeClone MCP run.",
+        title=mcp_resources.TITLE_LATEST_SUMMARY,
+        description=mcp_resources.LATEST_SUMMARY,
         mime_type="application/json",
     )
     def latest_summary_resource() -> str:
@@ -806,8 +1306,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/report.json",
-        title="Latest Canonical Report",
-        description="Canonical JSON report for the latest CodeClone MCP run.",
+        title=mcp_resources.TITLE_LATEST_REPORT,
+        description=mcp_resources.LATEST_REPORT,
         mime_type="application/json",
     )
     def latest_report_resource() -> str:
@@ -815,8 +1315,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/health",
-        title="Latest Health Snapshot",
-        description="Health score and dimensions for the latest CodeClone MCP run.",
+        title=mcp_resources.TITLE_LATEST_HEALTH,
+        description=mcp_resources.LATEST_HEALTH,
         mime_type="application/json",
     )
     def latest_health_resource() -> str:
@@ -824,8 +1324,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/gates",
-        title="Latest Gate Evaluation",
-        description="Last gate evaluation result produced by this MCP session.",
+        title=mcp_resources.TITLE_LATEST_GATES,
+        description=mcp_resources.LATEST_GATES,
         mime_type="application/json",
     )
     def latest_gates_resource() -> str:
@@ -833,10 +1333,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/changed",
-        title="Latest Changed Findings",
-        description=(
-            "Changed-files projection for the latest diff-aware CodeClone MCP run."
-        ),
+        title=mcp_resources.TITLE_LATEST_CHANGED,
+        description=mcp_resources.LATEST_CHANGED,
         mime_type="application/json",
     )
     def latest_changed_resource() -> str:
@@ -844,8 +1342,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://latest/triage",
-        title="Latest Production Triage",
-        description=("Production-first triage view for the latest CodeClone MCP run."),
+        title=mcp_resources.TITLE_LATEST_TRIAGE,
+        description=mcp_resources.LATEST_TRIAGE,
         mime_type="application/json",
     )
     def latest_triage_resource() -> str:
@@ -853,8 +1351,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://schema",
-        title="CodeClone Report Schema",
-        description="JSON schema-style descriptor for the canonical CodeClone report.",
+        title=mcp_resources.TITLE_REPORT_SCHEMA,
+        description=mcp_resources.REPORT_SCHEMA,
         mime_type="application/json",
     )
     def schema_resource() -> str:
@@ -862,8 +1360,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://runs/{run_id}/summary",
-        title="Run Summary",
-        description="Canonical JSON summary for a specific CodeClone MCP run.",
+        title=mcp_resources.TITLE_RUN_SUMMARY,
+        description=mcp_resources.RUN_SUMMARY,
         mime_type="application/json",
     )
     def run_summary_resource(run_id: str) -> str:
@@ -871,8 +1369,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://runs/{run_id}/report.json",
-        title="Run Canonical Report",
-        description="Canonical JSON report for a specific CodeClone MCP run.",
+        title=mcp_resources.TITLE_RUN_REPORT,
+        description=mcp_resources.RUN_REPORT,
         mime_type="application/json",
     )
     def run_report_resource(run_id: str) -> str:
@@ -880,8 +1378,8 @@ def build_mcp_server(
 
     @resource(
         "codeclone://runs/{run_id}/findings/{finding_id}",
-        title="Run Finding",
-        description="Canonical JSON finding group for a specific CodeClone MCP run.",
+        title=mcp_resources.TITLE_RUN_FINDING,
+        description=mcp_resources.RUN_FINDING,
         mime_type="application/json",
     )
     def run_finding_resource(run_id: str, finding_id: str) -> str:
@@ -928,7 +1426,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help=(
             "Allow binding streamable-http to a non-loopback host. "
-            "Disabled by default because CodeClone MCP has no built-in authentication."
+            f"HTTP still requires {MCP_AUTH_TOKEN_ENV}."
         ),
     )
     parser.add_argument(
@@ -970,6 +1468,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_MCP_LOG_LEVEL,
         help="FastMCP server log level.",
     )
+    parser.add_argument(
+        "--ide-governance-channel",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Enable the VS Code IDE governance channel for human "
+            "approve/reject/archive via manage_engineering_memory. "
+            "Agent launchers must not pass this flag."
+        ),
+    )
     return parser
 
 
@@ -985,7 +1493,30 @@ def _host_is_loopback(host: str) -> bool:
         return False
 
 
+def _install_sigterm_handler() -> None:
+    """Convert SIGTERM to SystemExit so async teardown runs.
+
+    Python's default SIGTERM handler (SIG_DFL) terminates the process
+    immediately — no ``finally`` blocks, no ``atexit``, no async
+    context manager teardown.  By raising :class:`SystemExit`, the
+    event loop unwinds normally and the FastMCP lifespan teardown
+    (which cleans workspace intent files) gets a chance to execute.
+
+    Only installed on platforms that support SIGTERM (not Windows).
+    """
+    import signal as _signal
+
+    if not hasattr(_signal, "SIGTERM"):
+        return  # pragma: no cover
+
+    def _handler(_signum: int, _frame: object) -> None:
+        raise SystemExit(0)
+
+    _signal.signal(_signal.SIGTERM, _handler)
+
+
 def main() -> None:
+    _install_sigterm_handler()
     args = build_parser().parse_args()
     if (
         args.transport == "streamable-http"
@@ -996,11 +1527,18 @@ def main() -> None:
             (
                 "Refusing to bind CodeClone MCP streamable-http to non-loopback "
                 f"host '{args.host}' without --allow-remote. "
-                "The server has no built-in authentication."
+                f"Set {MCP_AUTH_TOKEN_ENV} and pass --allow-remote explicitly."
             ),
             file=sys.stderr,
         )
         raise SystemExit(2)
+    auth_token = None
+    if args.transport == "streamable-http":
+        try:
+            auth_token = validated_mcp_auth_token(os.environ.get(MCP_AUTH_TOKEN_ENV))
+        except MCPAuthConfigurationError as exc:
+            print(str(exc), file=sys.stderr)
+            raise SystemExit(2) from exc
     try:
         server = build_mcp_server(
             history_limit=args.history_limit,
@@ -1010,6 +1548,8 @@ def main() -> None:
             stateless_http=args.stateless_http,
             debug=args.debug,
             log_level=args.log_level,
+            ide_governance_channel=args.ide_governance_channel,
+            auth_token=auth_token,
         )
     except MCPDependencyError as exc:
         print(str(exc), file=sys.stderr)

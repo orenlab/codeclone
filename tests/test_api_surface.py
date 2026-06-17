@@ -23,6 +23,8 @@ from codeclone.models import (
 )
 from tests._ast_metrics_helpers import tree_collector_and_imports
 
+from .ast_test_helpers import parse_class_first_member
+
 
 def test_collect_module_api_surface_skips_self_and_collects_public_symbols() -> None:
     tree, collector, import_names = tree_collector_and_imports(
@@ -259,6 +261,12 @@ def test_api_surface_helpers_cover_constant_symbols_and_break_variants() -> None
         visibility=visibility,
     )
     assert constant_rows == (("CONST", 1, 1),)
+    assign_tree = ast.parse("Public = 2")
+    assign_rows = api_surface_mod._public_constant_rows(
+        tree=assign_tree,
+        visibility=visibility,
+    )
+    assert assign_rows == (("Public", 1, 1),)
     assert (
         api_surface_mod._build_public_symbol(
             module_name="pkg.mod",
@@ -271,16 +279,14 @@ def test_api_surface_helpers_cover_constant_symbols_and_break_variants() -> None
         )
         is None
     )
-    outer_class = ast.parse(
+    _outer_class, nested_class = parse_class_first_member(
         """
 class Outer:
     class Inner:
         pass
-"""
-    ).body[0]
-    assert isinstance(outer_class, ast.ClassDef)
-    nested_class = outer_class.body[0]
-    assert isinstance(nested_class, ast.ClassDef)
+""",
+        ast.ClassDef,
+    )
     assert (
         api_surface_mod._class_api_symbol(
             module_name="pkg.mod",
@@ -385,3 +391,24 @@ def run(self, a: int, /, b, *args: str, c: int, **kwargs: bytes) -> int:
         )
         == "Changed return annotation."
     )
+    fewer_params = _public_symbol("pkg.mod:run", "function", params=())
+    more_params = _public_symbol(
+        "pkg.mod:run",
+        "function",
+        params=(
+            ApiParamSpec(name="a", kind="pos_or_kw", has_default=False),
+            ApiParamSpec(name="b", kind="pos_or_kw", has_default=False),
+        ),
+    )
+    assert (
+        api_surface_mod._signature_break_detail(
+            baseline_symbol=fewer_params,
+            current_symbol=more_params,
+            strict_types=False,
+        )
+        == "Changed callable parameter count."
+    )
+
+
+def test_symbol_index_none_snapshot_returns_empty() -> None:
+    assert api_surface_mod._symbol_index(None) == {}

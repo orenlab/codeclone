@@ -1,13 +1,30 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
+)
+from .analytics_specs import (
+    ANALYTICS_NESTED_TABLE_KEY,
+    ANALYTICS_PATH_CONFIG_KEYS,
+)
+from .memory_specs import (
+    INGEST_NESTED_TABLE_KEY,
+    MEMORY_CONFIG_KEY_SPECS,
+    MEMORY_NESTED_TABLE_KEY,
+    MEMORY_PATH_CONFIG_KEYS,
+    SEMANTIC_NESTED_TABLE_KEY,
 )
 from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS, ConfigKeySpec
 
@@ -75,6 +92,8 @@ def load_pyproject_config(
 ) -> dict[str, object]:
     config_path = root_path / "pyproject.toml"
     if not config_path.exists():
+        if config_path.is_symlink():
+            raise ConfigValidationError("pyproject.toml must not be a symlink.")
         return {}
 
     load_toml_fn = _load_toml if load_toml is None else load_toml
@@ -82,6 +101,8 @@ def load_pyproject_config(
     payload: object
     try:
         payload = load_toml_fn(config_path)
+    except ConfigValidationError:
+        raise
     except OSError as exc:
         raise ConfigValidationError(
             f"Cannot read pyproject.toml at {config_path}: {exc}"
@@ -111,7 +132,11 @@ def load_pyproject_config(
             f"{config_path}: 'tool.codeclone' must be object"
         )
 
-    unknown = sorted(set(codeclone_obj.keys()) - set(config_key_specs))
+    unknown = sorted(
+        set(codeclone_obj.keys())
+        - set(config_key_specs)
+        - {MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY}
+    )
     if unknown:
         raise ConfigValidationError(
             "Unknown key(s) in tool.codeclone: " + ", ".join(unknown)
@@ -119,6 +144,8 @@ def load_pyproject_config(
 
     validated: dict[str, object] = {}
     for key in sorted(codeclone_obj.keys()):
+        if key in {MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY}:
+            continue
         value = validate_config_value(
             key=key,
             value=codeclone_obj[key],
@@ -130,7 +157,127 @@ def load_pyproject_config(
             root_path=root_path,
             path_config_keys=path_config_keys,
         )
+
+    memory_obj = codeclone_obj.get(MEMORY_NESTED_TABLE_KEY)
+    if memory_obj is not None:
+        validated[MEMORY_NESTED_TABLE_KEY] = _validate_nested_memory_table(
+            memory_obj=memory_obj,
+            root_path=root_path,
+            config_path=config_path,
+        )
+    analytics_obj = codeclone_obj.get(ANALYTICS_NESTED_TABLE_KEY)
+    if analytics_obj is not None:
+        validated[ANALYTICS_NESTED_TABLE_KEY] = _validate_nested_analytics_table(
+            analytics_obj=analytics_obj,
+            root_path=root_path,
+            config_path=config_path,
+        )
     return validated
+
+
+def _validate_nested_analytics_table(
+    *,
+    analytics_obj: object,
+    root_path: Path,
+    config_path: Path,
+) -> dict[str, object]:
+    if not isinstance(analytics_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.analytics' must be object"
+        )
+    normalized: dict[str, object] = {}
+    for key in sorted(analytics_obj.keys()):
+        value = analytics_obj[key]
+        if key in ANALYTICS_PATH_CONFIG_KEYS and isinstance(value, str):
+            normalized[key] = normalize_path_config_value(
+                key=key,
+                value=value,
+                root_path=root_path,
+                path_config_keys=ANALYTICS_PATH_CONFIG_KEYS,
+            )
+        else:
+            normalized[key] = value
+    return normalized
+
+
+def _validate_nested_memory_table(
+    *,
+    memory_obj: object,
+    root_path: Path,
+    config_path: Path,
+) -> dict[str, object]:
+    if not isinstance(memory_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.memory' must be object"
+        )
+    unknown = sorted(
+        set(memory_obj.keys())
+        - set(MEMORY_CONFIG_KEY_SPECS)
+        - {SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY}
+    )
+    if unknown:
+        raise ConfigValidationError(
+            "Unknown key(s) in tool.codeclone.memory: " + ", ".join(unknown)
+        )
+    validated: dict[str, object] = {}
+    for key in sorted(memory_obj.keys()):
+        if key in {SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY}:
+            continue
+        value = validate_config_value(
+            key=key,
+            value=memory_obj[key],
+            config_key_specs=MEMORY_CONFIG_KEY_SPECS,
+        )
+        validated[key] = normalize_path_config_value(
+            key=key,
+            value=value,
+            root_path=root_path,
+            path_config_keys=MEMORY_PATH_CONFIG_KEYS,
+        )
+    semantic_obj = memory_obj.get(SEMANTIC_NESTED_TABLE_KEY)
+    if semantic_obj is not None:
+        validated[SEMANTIC_NESTED_TABLE_KEY] = _validate_nested_semantic_table(
+            semantic_obj=semantic_obj,
+            config_path=config_path,
+        )
+    ingest_obj = memory_obj.get(INGEST_NESTED_TABLE_KEY)
+    if ingest_obj is not None:
+        validated[INGEST_NESTED_TABLE_KEY] = _validate_nested_ingest_table(
+            ingest_obj=ingest_obj,
+            config_path=config_path,
+        )
+    return validated
+
+
+def _validate_nested_ingest_table(
+    *,
+    ingest_obj: object,
+    config_path: Path,
+) -> dict[str, object]:
+    if not isinstance(ingest_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.memory.ingest' must be object"
+        )
+    return dict(ingest_obj)
+
+
+def _validate_nested_semantic_table(
+    *,
+    semantic_obj: object,
+    config_path: Path,
+) -> dict[str, object]:
+    # Structural boundary only: ensure it is a table. Field-level validation
+    # (allowed keys, types, literals, ranges) is owned by the pydantic
+    # SemanticConfig in resolve_memory_config — one validation authority.
+    if not isinstance(semantic_obj, dict):
+        raise ConfigValidationError(
+            "Invalid pyproject payload at "
+            f"{config_path}: 'tool.codeclone.memory.semantic' must be object"
+        )
+    return dict(semantic_obj)
 
 
 def normalize_path_config_value(
@@ -187,7 +334,7 @@ def _load_toml(path: Path) -> object:
     if sys.version_info >= (3, 11):
         import tomllib
 
-        with path.open("rb") as config_file:
+        with _open_toml_file_no_follow(path) as config_file:
             return tomllib.load(config_file)
 
     try:
@@ -201,8 +348,27 @@ def _load_toml(path: Path) -> object:
     if not callable(load_fn):
         raise ConfigValidationError("Invalid 'tomli' module: missing callable 'load'.")
 
-    with path.open("rb") as config_file:
+    with _open_toml_file_no_follow(path) as config_file:
         return load_fn(config_file)
+
+
+def open_repo_config(root_path: Path) -> BinaryIO:
+    """Open repo ``pyproject.toml`` through the security-hardened config path."""
+
+    return _open_toml_file_no_follow(root_path / "pyproject.toml")
+
+
+def _open_toml_file_no_follow(path: Path) -> BinaryIO:
+    if path.is_symlink():
+        raise ConfigValidationError("pyproject.toml must not be a symlink.")
+    if getattr(sys, "platform", "") == "win32":
+        return path.open("rb")
+    flags = os.O_RDONLY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if isinstance(nofollow, int):
+        flags |= nofollow
+    fd = os.open(path, flags)
+    return os.fdopen(fd, "rb")
 
 
 __all__ = [
@@ -212,5 +378,6 @@ __all__ = [
     "_load_toml",
     "load_pyproject_config",
     "normalize_path_config_value",
+    "open_repo_config",
     "validate_config_value",
 ]

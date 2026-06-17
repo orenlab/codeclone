@@ -18,6 +18,7 @@ import codeclone.baseline as baseline_mod
 import codeclone.baseline._metrics_baseline_payload as mb_payload
 import codeclone.baseline._metrics_baseline_validation as mb_validate
 import codeclone.baseline.metrics_baseline as mb_mod
+from codeclone.baseline._metrics_baseline_payload import _local_name_from_qualname
 from codeclone.baseline.metrics_baseline import (
     MetricsBaseline,
     MetricsBaselineStatus,
@@ -400,6 +401,29 @@ def test_metrics_baseline_save_standalone_payload_sets_metadata(tmp_path: Path) 
     assert isinstance(baseline.payload_sha256, str)
 
 
+def test_local_name_from_qualname_without_module_prefix() -> None:
+    assert _local_name_from_qualname(module="pkg.mod", qualname="legacy:name") == (
+        "legacy:name"
+    )
+
+
+def test_metrics_baseline_save_rejects_non_object_payload_meta(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = MetricsBaseline.from_project_metrics(
+        project_metrics=_project_metrics_with_adoption_and_api(),
+        path=tmp_path / "metrics-baseline.json",
+    )
+    monkeypatch.setattr(
+        mb_mod,
+        "_build_payload",
+        lambda **_kwargs: {"meta": "not-an-object", "metrics": {}},
+    )
+    with pytest.raises(BaselineValidationError, match="'meta' must be object"):
+        baseline.save()
+
+
 def test_metrics_baseline_save_writes_compact_api_surface_local_names(
     tmp_path: Path,
 ) -> None:
@@ -544,6 +568,46 @@ def test_metrics_baseline_verify_compatibility_and_integrity_failures(
 
     baseline.payload_sha256 = "a" * 64
     with pytest.raises(BaselineValidationError, match="integrity check failed"):
+        baseline.verify_integrity()
+
+
+def test_metrics_baseline_verify_requires_valid_api_surface_payload_hash(
+    tmp_path: Path,
+) -> None:
+    baseline = MetricsBaseline.from_project_metrics(
+        project_metrics=_project_metrics_with_adoption_and_api(
+            api_surface=_api_surface_snapshot(include_added=True),
+        ),
+        path=tmp_path / "metrics-baseline.json",
+    )
+    snapshot = baseline.snapshot
+    assert snapshot is not None
+    baseline.payload_sha256 = mb_payload._compute_payload_sha256(snapshot)
+    baseline.api_surface_payload_sha256 = "not-a-valid-sha256"
+    with pytest.raises(
+        BaselineValidationError,
+        match="API surface integrity payload hash is missing",
+    ):
+        baseline.verify_integrity()
+
+
+def test_metrics_baseline_verify_detects_api_surface_payload_mismatch(
+    tmp_path: Path,
+) -> None:
+    baseline = MetricsBaseline.from_project_metrics(
+        project_metrics=_project_metrics_with_adoption_and_api(
+            api_surface=_api_surface_snapshot(include_added=True),
+        ),
+        path=tmp_path / "metrics-baseline.json",
+    )
+    snapshot = baseline.snapshot
+    assert snapshot is not None
+    baseline.payload_sha256 = mb_payload._compute_payload_sha256(snapshot)
+    baseline.api_surface_payload_sha256 = "a" * 64
+    with pytest.raises(
+        BaselineValidationError,
+        match="api_surface payload_sha256 mismatch",
+    ):
         baseline.verify_integrity()
 
 
@@ -1254,11 +1318,14 @@ def test_metrics_baseline_load_json_read_oserror_status(
 ) -> None:
     path = tmp_path / "metrics-baseline.json"
     path.write_text("{}", "utf-8")
+    original_open = Path.open
 
-    def _boom_read(_self: Path, _encoding: str) -> str:
-        raise OSError("read failed")
+    def _boom_open(self: Path, *args: Any, **kwargs: Any) -> object:
+        if self == path:
+            raise OSError("read failed")
+        return original_open(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", _boom_read)
+    monkeypatch.setattr(Path, "open", _boom_open)
     with pytest.raises(
         BaselineValidationError, match="Cannot read metrics baseline file"
     ):

@@ -178,3 +178,5 @@ def method(
     assert adoption_mod._is_any_annotation(union_any) is True
     assert adoption_mod._attribute_name(typing_any) == "typing.Any"
     assert adoption_mod._attribute_name(ast.Constant(value=1)) is None
+    broken_chain = ast.Attribute(value=ast.Constant(value=1), attr="Any")
+    assert adoption_mod._attribute_name(broken_chain) is None

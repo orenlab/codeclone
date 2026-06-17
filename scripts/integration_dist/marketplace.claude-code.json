@@ -1,0 +1,27 @@
+{
+  "name": "orenlab-codeclone",
+  "owner": {
+    "name": "OrenLab",
+    "email": "pytelemonbot@mail.ru"
+  },
+  "metadata": {
+    "description": "CodeClone Structural Change Controller plugins for Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "codeclone",
+      "source": "./plugins/codeclone",
+      "description": "Deterministic structural review, Engineering Memory, and intent-first change control over codeclone-mcp.",
+      "homepage": "https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/",
+      "repository": "https://github.com/orenlab/codeclone-claude-code",
+      "license": "MPL-2.0",
+      "category": "developer-tools",
+      "tags": [
+        "python",
+        "mcp",
+        "structural-review",
+        "change-control"
+      ]
+    }
+  ]
+}

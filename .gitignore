@@ -22,12 +22,14 @@ site/
 
 # Tool caches
 .cache/
+.codeclone/
 .codeclone-cache/
 .codeclone-baseline.json.bak
 
 # IDE
 .idea/
 .vscode/
+/.cursor/
 
 # OS
 .DS_Store
@@ -45,3 +47,8 @@ extensions/vscode-codeclone/node_modules
 /scripts/refactor_guard.sh
 /docs/refactoring-spec.md
 /smoke_cli.sh
+/codeclone-v2.1-roadmap.md
+/specs/
+/coverage.json
+/benchmarks/memory_semantic_eval.md
+/scripts/commit_memory_phases.sh

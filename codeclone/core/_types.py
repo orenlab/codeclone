@@ -24,6 +24,7 @@ from ..models import (
     CoverageJoinResult,
     DeadCandidate,
     FileMetrics,
+    FunctionRelationshipFacts,
     GroupItem,
     GroupItemLike,
     ModuleApiSurface,
@@ -89,6 +90,7 @@ class DiscoveryResult:
     cached_docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     cached_api_modules: tuple[ModuleApiSurface, ...] = ()
     cached_structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    cached_function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
     cached_segment_report_projection: SegmentReportProjection | None = None
     cached_lines: int = 0
     cached_functions: int = 0
@@ -139,6 +141,7 @@ class ProcessingResult:
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     api_modules: tuple[ModuleApiSurface, ...] = ()
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
     source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
 
 

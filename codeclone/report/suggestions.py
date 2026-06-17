@@ -61,6 +61,7 @@ from .derived import (
     representative_locations,
     source_kind_breakdown,
 )
+from .messages import suggestions as sugg_msgs
 
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
@@ -131,11 +132,7 @@ def _source_context(
 
 
 def _clone_fact_kind(kind: Literal["function", "block", "segment"]) -> str:
-    return {
-        CLONE_KIND_FUNCTION: "Function clone group",
-        CLONE_KIND_BLOCK: "Block clone group",
-        CLONE_KIND_SEGMENT: "Segment clone group",
-    }[kind]
+    return sugg_msgs.CLONE_FACT_KIND_BY_KIND[kind]
 
 
 def _clone_summary(
@@ -147,22 +144,22 @@ def _clone_summary(
     if kind == CLONE_KIND_FUNCTION:
         match clone_type:
             case "Type-1":
-                return "same exact function body"
+                return sugg_msgs.CLONE_SUMMARY_FUNCTION_TYPE1
             case "Type-2":
-                return "same parameterized function body"
+                return sugg_msgs.CLONE_SUMMARY_FUNCTION_TYPE2
             case "Type-3":
-                return "same structural function body with small identifier changes"
+                return sugg_msgs.CLONE_SUMMARY_FUNCTION_TYPE3
             case _:
-                return "same structural function body"
+                return sugg_msgs.CLONE_SUMMARY_FUNCTION_TYPE4
     if kind == CLONE_KIND_BLOCK:
         hint = str(facts.get("hint", "")).strip()
         pattern = str(facts.get("pattern", "")).strip()
         if hint == BLOCK_HINT_ASSERT_ONLY:
-            return "same assertion template"
+            return sugg_msgs.CLONE_SUMMARY_BLOCK_ASSERT_ONLY
         if pattern == BLOCK_PATTERN_REPEATED_STMT_HASH:
-            return "same repeated setup/assert pattern"
-        return "same structural sequence with small value changes"
-    return "same structural segment sequence"
+            return sugg_msgs.CLONE_SUMMARY_BLOCK_REPEATED_STMT
+        return sugg_msgs.CLONE_SUMMARY_BLOCK_DEFAULT
+    return sugg_msgs.CLONE_SUMMARY_SEGMENT
 
 
 def _clone_steps(
@@ -173,34 +170,19 @@ def _clone_steps(
 ) -> tuple[str, ...]:
     hint = str(facts.get("hint", "")).strip()
     if kind == CLONE_KIND_FUNCTION and clone_type == "Type-1":
-        return (
-            "Keep one canonical implementation and remove the exact duplicates.",
-            "Route the remaining call sites to the shared implementation.",
-        )
+        return (sugg_msgs.CLONE_STEP_TYPE1_1, sugg_msgs.CLONE_STEP_TYPE1_2)
     if kind == CLONE_KIND_FUNCTION and clone_type == "Type-2":
-        return (
-            "Extract a shared implementation with explicit parameters.",
-            "Replace identifier-only variations with arguments.",
-        )
+        return (sugg_msgs.CLONE_STEP_TYPE2_1, sugg_msgs.CLONE_STEP_TYPE2_2)
     if kind == CLONE_KIND_BLOCK and hint == BLOCK_HINT_ASSERT_ONLY:
         return (
-            "Collapse the repeated assertion template into a helper or loop.",
-            "Keep the asserted values as data instead of copy-pasted statements.",
+            sugg_msgs.CLONE_STEP_BLOCK_ASSERT_1,
+            sugg_msgs.CLONE_STEP_BLOCK_ASSERT_2,
         )
     if kind == CLONE_KIND_BLOCK:
-        return (
-            "Extract the repeated statement sequence into a helper.",
-            "Keep setup data close to the call site and move shared logic out.",
-        )
+        return (sugg_msgs.CLONE_STEP_BLOCK_1, sugg_msgs.CLONE_STEP_BLOCK_2)
     if kind == CLONE_KIND_SEGMENT:
-        return (
-            "Review whether the repeated segment should become shared utility code.",
-            "Keep this as a report hint only if the duplication is intentional.",
-        )
-    return (
-        "Extract the repeated logic into a shared abstraction.",
-        "Replace the duplicated bodies with calls to the shared code.",
-    )
+        return (sugg_msgs.CLONE_STEP_SEGMENT_1, sugg_msgs.CLONE_STEP_SEGMENT_2)
+    return (sugg_msgs.CLONE_STEP_DEFAULT_1, sugg_msgs.CLONE_STEP_DEFAULT_2)
 
 
 def _clone_suggestion(
@@ -388,13 +370,13 @@ def _complexity_suggestions(
             _single_location_suggestion(
                 severity=severity,
                 category=CATEGORY_COMPLEXITY,
-                title="Reduce function complexity",
+                title=sugg_msgs.SUGGESTION_TITLE_REDUCE_COMPLEXITY,
                 steps=(
-                    "Split the function into smaller deterministic stages.",
-                    "Extract helper functions for nested branches.",
+                    sugg_msgs.COMPLEXITY_STEP_1,
+                    sugg_msgs.COMPLEXITY_STEP_2,
                 ),
                 effort=EFFORT_MODERATE,
-                fact_kind="Function complexity hotspot",
+                fact_kind=sugg_msgs.FACT_KIND_COMPLEXITY_HOTSPOT,
                 fact_summary=f"cyclomatic_complexity={cc}, nesting_depth={nesting}",
                 filepath=_as_str(unit.get("filepath")),
                 start_line=_as_int(unit.get("start_line")),
@@ -424,13 +406,13 @@ def _coupling_and_cohesion_suggestions(
                 _single_location_suggestion(
                     severity=SEVERITY_WARNING,
                     category=CATEGORY_COUPLING,
-                    title="Reduce class coupling",
+                    title=sugg_msgs.SUGGESTION_TITLE_REDUCE_COUPLING,
                     steps=(
-                        "Reduce external dependencies of this class.",
-                        "Move unrelated responsibilities to collaborator classes.",
+                        sugg_msgs.COUPLING_STEP_1,
+                        sugg_msgs.COUPLING_STEP_2,
                     ),
                     effort=EFFORT_MODERATE,
-                    fact_kind="Class coupling hotspot",
+                    fact_kind=sugg_msgs.FACT_KIND_COUPLING_HOTSPOT,
                     fact_summary=f"cbo={metric.cbo}",
                     filepath=metric.filepath,
                     start_line=metric.start_line,
@@ -447,13 +429,13 @@ def _coupling_and_cohesion_suggestions(
                 _single_location_suggestion(
                     severity=SEVERITY_WARNING,
                     category=CATEGORY_COHESION,
-                    title="Split low-cohesion class",
+                    title=sugg_msgs.SUGGESTION_TITLE_SPLIT_COHESION,
                     steps=(
-                        "Split class by responsibility boundaries.",
-                        "Group methods by shared state and extract subcomponents.",
+                        sugg_msgs.COHESION_STEP_1,
+                        sugg_msgs.COHESION_STEP_2,
                     ),
                     effort=EFFORT_MODERATE,
-                    fact_kind="Low cohesion class",
+                    fact_kind=sugg_msgs.FACT_KIND_LOW_COHESION,
                     fact_summary=f"lcom4={metric.lcom4}",
                     filepath=metric.filepath,
                     start_line=metric.start_line,
@@ -481,13 +463,13 @@ def _dead_code_suggestions(
             _single_location_suggestion(
                 severity=SEVERITY_WARNING,
                 category=CATEGORY_DEAD_CODE,
-                title="Remove or explicitly keep unused code",
+                title=sugg_msgs.SUGGESTION_TITLE_DEAD_CODE,
                 steps=(
-                    "Remove or deprecate the unused symbol.",
-                    "If intentionally reserved, add explicit keep marker and test.",
+                    sugg_msgs.DEAD_CODE_STEP_1,
+                    sugg_msgs.DEAD_CODE_STEP_2,
                 ),
                 effort=EFFORT_EASY,
-                fact_kind="Dead code item",
+                fact_kind=sugg_msgs.FACT_KIND_DEAD_CODE,
                 fact_summary=f"{item.kind} with {item.confidence} confidence",
                 filepath=item.filepath,
                 start_line=item.start_line,
@@ -518,18 +500,18 @@ def _dependency_suggestions(project_metrics: ProjectMetrics) -> list[Suggestion]
             Suggestion(
                 severity=SEVERITY_CRITICAL,
                 category=CATEGORY_DEPENDENCY,
-                title="Break circular dependency",
+                title=sugg_msgs.SUGGESTION_TITLE_BREAK_CYCLE,
                 location=location,
                 steps=(
-                    "Break the cycle by extracting a shared abstraction.",
-                    "Invert one dependency edge through an interface or protocol.",
+                    sugg_msgs.DEPENDENCY_STEP_1,
+                    sugg_msgs.DEPENDENCY_STEP_2,
                 ),
                 effort=EFFORT_HARD,
                 priority=_priority(SEVERITY_CRITICAL, EFFORT_HARD),
                 finding_family=FAMILY_METRICS,
                 finding_kind="cycle",
                 subject_key=location,
-                fact_kind="Dependency cycle",
+                fact_kind=sugg_msgs.FACT_KIND_DEPENDENCY_CYCLE,
                 fact_summary=f"{len(cycle)} modules participate in this cycle",
                 fact_count=len(cycle),
                 spread_files=len(cycle),
@@ -547,13 +529,13 @@ def _structural_summary(group: StructuralFindingGroup) -> tuple[str, str]:
     match group.finding_kind:
         case "clone_guard_exit_divergence":
             return (
-                "Clone guard/exit divergence",
-                "clone cohort members differ in entry guards or early-exit behavior",
+                sugg_msgs.STRUCTURAL_TITLE_GUARD_EXIT_DIVERGENCE,
+                sugg_msgs.STRUCTURAL_SUMMARY_GUARD_EXIT_DIVERGENCE,
             )
         case "clone_cohort_drift":
             return (
-                "Clone cohort drift",
-                "clone cohort members drift from majority terminal/guard/try profile",
+                sugg_msgs.STRUCTURAL_TITLE_COHORT_DRIFT,
+                sugg_msgs.STRUCTURAL_SUMMARY_COHORT_DRIFT,
             )
         case _:
             pass
@@ -565,36 +547,42 @@ def _structural_summary(group: StructuralFindingGroup) -> tuple[str, str]:
     raise_like = terminal == "raise" or raises not in {"", "0"}
     match (raise_like, terminal, has_loop):
         case (True, _, _):
-            return "Repeated branch family", "same repeated guard/validation branch"
+            return (
+                sugg_msgs.STRUCTURAL_TITLE_REPEATED_BRANCH,
+                sugg_msgs.STRUCTURAL_SUMMARY_RAISE_BRANCH,
+            )
         case (False, "return", _):
-            return "Repeated branch family", "same repeated return branch"
+            return (
+                sugg_msgs.STRUCTURAL_TITLE_REPEATED_BRANCH,
+                sugg_msgs.STRUCTURAL_SUMMARY_RETURN_BRANCH,
+            )
         case (False, _, "1"):
-            return "Repeated branch family", "same repeated loop branch"
+            return (
+                sugg_msgs.STRUCTURAL_TITLE_REPEATED_BRANCH,
+                sugg_msgs.STRUCTURAL_SUMMARY_LOOP_BRANCH,
+            )
         case _:
             if stmt_seq:
-                return "Repeated branch family", (
+                return sugg_msgs.STRUCTURAL_TITLE_REPEATED_BRANCH, (
                     f"same repeated branch shape ({stmt_seq})"
                 )
-            return "Repeated branch family", "same repeated branch shape"
+            return (
+                sugg_msgs.STRUCTURAL_TITLE_REPEATED_BRANCH,
+                sugg_msgs.STRUCTURAL_SUMMARY_BRANCH_DEFAULT,
+            )
 
 
 def structural_action_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
     match group.finding_kind:
         case "clone_guard_exit_divergence":
             return (
-                (
-                    "Compare divergent clone members against the majority "
-                    "guard/exit profile."
-                ),
-                "If divergence is accidental, align guard exits across the cohort.",
+                sugg_msgs.STRUCTURAL_STEP_GUARD_EXIT_1,
+                sugg_msgs.STRUCTURAL_STEP_GUARD_EXIT_2,
             )
         case "clone_cohort_drift":
             return (
-                "Review whether cohort drift is intentional for this clone family.",
-                (
-                    "If not intentional, reconcile terminal/guard/try profiles "
-                    "across members."
-                ),
+                sugg_msgs.STRUCTURAL_STEP_COHORT_DRIFT_1,
+                sugg_msgs.STRUCTURAL_STEP_COHORT_DRIFT_2,
             )
         case _:
             pass
@@ -604,36 +592,24 @@ def structural_action_steps(group: StructuralFindingGroup) -> tuple[str, ...]:
     stmt_names = tuple(part.strip() for part in stmt_seq.split(",") if part.strip())
     if "Continue" in stmt_names:
         return (
-            (
-                "Review whether the repeated continue guard can be merged "
-                "into one predicate."
-            ),
-            (
-                "If separate continue checks keep the local control flow clearer, "
-                "keep this as a report-only hint."
-            ),
+            sugg_msgs.STRUCTURAL_STEP_CONTINUE_1,
+            sugg_msgs.STRUCTURAL_STEP_CONTINUE_2,
         )
     match terminal:
         case "raise":
             return (
-                "Factor the repeated validation/guard path into a shared helper.",
-                (
-                    "Keep the branch-specific inputs at the call site and share "
-                    "the exit policy."
-                ),
+                sugg_msgs.STRUCTURAL_STEP_RAISE_1,
+                sugg_msgs.STRUCTURAL_STEP_RAISE_2,
             )
         case "return":
             return (
-                "Consolidate the repeated return-path logic into a shared helper.",
-                "Keep the branch predicate local and share the emitted behavior.",
+                sugg_msgs.STRUCTURAL_STEP_RETURN_1,
+                sugg_msgs.STRUCTURAL_STEP_RETURN_2,
             )
         case _:
             return (
-                "Review whether the repeated local branch can be simplified in place.",
-                (
-                    "If the local duplication keeps control flow clearer, keep "
-                    "this as a report-only hint."
-                ),
+                sugg_msgs.STRUCTURAL_STEP_DEFAULT_1,
+                sugg_msgs.STRUCTURAL_STEP_DEFAULT_2,
             )
 
 
@@ -717,7 +693,7 @@ def _structural_suggestions(
                 finding_family=FAMILY_STRUCTURAL,
                 finding_kind=group.finding_kind,
                 subject_key=group.finding_key,
-                fact_kind="Structural finding",
+                fact_kind=sugg_msgs.FACT_KIND_STRUCTURAL,
                 fact_summary=summary,
                 fact_count=count,
                 spread_files=spread_files,

@@ -52,6 +52,7 @@ from codeclone.report.html.widgets.icons import section_icon_html
 from codeclone.report.html.widgets.snippets import _FileCache
 from codeclone.report.html.widgets.tabs import render_split_tabs
 from tests._assertions import assert_contains_none
+from tests.assertion_helpers import assert_all_contained
 
 
 def test_summary_helpers_cover_empty_and_non_clone_context_branches() -> None:
@@ -654,10 +655,13 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
         )
     )
     assert 'class="prov-badge prov-badge--red prov-badge--inline"' in meta_html
-    assert 'class="prov-badge prov-badge--neutral prov-badge--inline"' in meta_html
-    assert 'class="prov-badge prov-badge--amber prov-badge--inline"' in meta_html
-    assert '<span class="prov-badge-val">FAILED</span>' in meta_html
-    assert '<span class="prov-badge-val">stale</span>' in meta_html
+    assert_all_contained(
+        meta_html,
+        'class="prov-badge prov-badge--neutral prov-badge--inline"',
+        'class="prov-badge prov-badge--amber prov-badge--inline"',
+        '<span class="prov-badge-val">FAILED</span>',
+        '<span class="prov-badge-val">stale</span>',
+    )
     assert f'<span class="prov-badge-val">runtime {runtime_tag}</span>' in meta_html
     assert '<span class="prov-badge-val">verified</span>' in meta_html
     assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html

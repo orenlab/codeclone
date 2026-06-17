@@ -5,11 +5,34 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from math import ceil
 from typing import Generic, TypeVar
 
+from ...budget.estimator import estimate_payload
+
 T = TypeVar("T")
+
+
+def measure_payload(payload: Mapping[str, object]) -> tuple[int, int]:
+    """Return ``(byte_size, token_estimate)`` for a payload's canonical JSON.
+
+    ``byte_size`` is the UTF-8 length of the canonical JSON; tokens reuse the
+    shared budget estimator (chars-approx default — no ``tiktoken`` import). Never
+    raises: payload measurement must never break the tool call it wraps.
+    """
+    try:
+        text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return 0, 0
+    byte_size = len(text.encode("utf-8"))
+    try:
+        tokens = estimate_payload(payload).tokens
+    except (TypeError, ValueError):
+        tokens = ceil(len(text) / 4)
+    return byte_size, tokens
 
 
 @dataclass(frozen=True, slots=True)

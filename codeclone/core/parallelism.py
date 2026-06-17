@@ -14,6 +14,7 @@ from ..cache.store import Cache
 from ..models import (
     ClassMetrics,
     DeadCandidate,
+    FunctionRelationshipFacts,
     GroupItem,
     ModuleApiSurface,
     ModuleDep,
@@ -95,6 +96,7 @@ def process(
             failed_files=(),
             source_read_failures=(),
             structural_findings=discovery.cached_structural_findings,
+            function_relationship_facts=discovery.cached_function_relationship_facts,
             source_stats_by_file=discovery.cached_source_stats_by_file,
         )
 
@@ -135,6 +137,9 @@ def process(
     analyzed_classes = 0
     all_structural_findings: list[StructuralFindingGroup] = list(
         discovery.cached_structural_findings
+    )
+    all_function_relationship_facts: list[FunctionRelationshipFacts] = list(
+        discovery.cached_function_relationship_facts
     )
     source_stats_by_file: dict[str, tuple[int, int, int, int]] = {
         filepath: (lines, functions, methods, classes)
@@ -233,6 +238,9 @@ def process(
                     result.file_metrics.runtime_reachability
                 )
                 all_security_surfaces.extend(result.file_metrics.security_surfaces)
+                all_function_relationship_facts.extend(
+                    result.file_metrics.function_relationship_facts
+                )
                 if result.file_metrics.typing_coverage is not None:
                     all_typing_modules.append(result.file_metrics.typing_coverage)
                 if result.file_metrics.docstring_coverage is not None:
@@ -370,6 +378,12 @@ def process(
         failed_files=tuple(sorted(failed_files)),
         source_read_failures=tuple(sorted(source_read_failures)),
         structural_findings=tuple(all_structural_findings),
+        function_relationship_facts=tuple(
+            sorted(
+                all_function_relationship_facts,
+                key=lambda facts: facts.source_qualname,
+            )
+        ),
         source_stats_by_file=tuple(
             (filepath, *stats)
             for filepath, stats in sorted(source_stats_by_file.items())

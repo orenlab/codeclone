@@ -1,0 +1,244 @@
+# Zensical configuration for CodeClone docs site.
+# Docs: https://zensical.org/docs/
+
+[project]
+site_name = "CodeClone"
+site_description = "Structural review layer for Python"
+site_url = "https://orenlab.github.io/codeclone/"
+repo_url = "https://github.com/orenlab/codeclone"
+repo_name = "orenlab/codeclone"
+
+docs_dir = "docs"
+edit_uri = "blob/main/docs/"
+
+exclude_docs = ["README-pypi.md"]
+
+extra_css = ["assets/stylesheets/extra.css"]
+
+nav = [
+    { "Home" = "index.md" },
+    { "Get started" = [
+        { "1. Install & first run" = "getting-started.md" },
+        { "2. Your first governed edit" = "start/first-governed-edit.md" },
+        { "Example report" = "examples/report.md" },
+    ] },
+    { "Guide" = [
+        { "Overview" = "guide/README.md" },
+        { "Explanation" = [
+            { "How CodeClone works" = "guide/explanation/how-it-works.md" },
+        ] },
+        { "Change control" = [
+            { "Overview" = "guide/change-control/overview.md" },
+            { "Agent edit cycle" = "guide/change-control/agent-cycle.md" },
+            { "Queue & recovery" = "guide/change-control/queue-and-recovery.md" },
+            { "Atomic debug path" = "guide/change-control/atomic-debug.md" },
+        ] },
+        { "Engineering Memory" = [
+            { "Overview" = "guide/memory/overview.md" },
+            { "Trajectories & Experiences" = "guide/memory/trajectories-and-experiences.md" },
+        ] },
+        { "MCP" = [
+            { "Overview" = "guide/mcp/README.md" },
+            { "Client setup" = "guide/mcp/client-setup.md" },
+            { "Server & transport" = "guide/mcp/server-and-transport.md" },
+            { "Architecture" = "guide/mcp/architecture.md" },
+            { "Workflows" = [
+                { "Analyze & triage" = "guide/mcp/workflows/analyze-and-triage.md" },
+                { "Drill down & checks" = "guide/mcp/workflows/drill-down-and-checks.md" },
+                { "Change control" = "guide/mcp/workflows/change-control.md" },
+                { "Memory recipes" = "guide/mcp/workflows/memory-recipes.md" },
+                { "Coverage join & session markers" = "guide/mcp/workflows/session-and-coverage.md" },
+                { "Observability (maintainer)" = "guide/mcp/workflows/observability-recipes.md" },
+            ] },
+            { "Prompt patterns" = "guide/mcp/prompts.md" },
+            { "Payload cheat sheet" = "guide/mcp/payload-cheatsheet.md" },
+            { "Troubleshooting" = "guide/mcp/troubleshooting.md" },
+        ] },
+        { "Integrations" = [
+            { "VS Code" = "guide/integrations/vscode/setup.md" },
+            { "Cursor" = "guide/integrations/cursor/install-and-skills.md" },
+            { "Claude Code" = "guide/integrations/claude-code/setup.md" },
+            { "Codex" = "guide/integrations/codex/setup.md" },
+            { "Claude Desktop" = "guide/integrations/claude-desktop/setup.md" },
+            { "SARIF export" = "guide/integrations/sarif/export.md" },
+            { "GitHub Action" = "book/integrations/github-action.md" },
+        ] },
+    ] },
+    { "Contracts" = [
+        { "Overview" = "book/README.md" },
+        { "Foundations" = [
+            { "Intro" = "book/00-intro.md" },
+            { "Terminology" = "book/01-terminology.md" },
+            { "Architecture Map" = "book/02-architecture-map.md" },
+        ] },
+        { "Pipeline & data" = [
+            { "Core Pipeline" = "book/03-core-pipeline.md" },
+            { "CFG Semantics" = "book/04-cfg-semantics.md" },
+            { "Report" = "book/05-report.md" },
+            { "HTML Render" = "book/06-html-render.md" },
+            { "Baseline" = "book/07-baseline.md" },
+            { "Cache" = "book/08-cache.md" },
+        ] },
+        { "Contracts & config" = [
+            { "Exit Codes" = "book/09-exit-codes.md" },
+            { "Config and Defaults" = "book/10-config-and-defaults.md" },
+            { "CLI" = "book/11-cli.md" },
+        ] },
+        { "Change control" = [
+            { "Overview" = "book/12-structural-change-controller/index.md" },
+            { "CLI queries" = "book/12-structural-change-controller/cli-controller-queries.md" },
+            { "Blast radius & receipt" = "book/12-structural-change-controller/blast-radius-and-receipt.md" },
+            { "Intent registry & queue" = "book/12-structural-change-controller/intent-registry-and-queue.md" },
+            { "Verification profiles" = "book/12-structural-change-controller/verification-profiles.md" },
+            { "Patch contract verify" = "book/12-structural-change-controller/patch-contract-verify.md" },
+            { "Workflow tools" = "book/12-structural-change-controller/workflow-tools.md" },
+            { "Finish controlled change" = "book/12-structural-change-controller/finish-controlled-change.md" },
+            { "Finish hygiene" = "book/12-structural-change-controller/finish-hygiene.md" },
+            { "Patch Trail" = "book/12-structural-change-controller/patch-trail.md" },
+            { "Payload semantics" = "book/12-structural-change-controller/payload-semantics.md" },
+            { "Token budget" = "book/12-structural-change-controller/token-budget.md" },
+            { "Claim Guard" = "book/14-claim-guard.md" },
+        ] },
+        { "Engineering Memory" = [
+            { "Overview" = "book/13-engineering-memory/index.md" },
+            { "Trust & lifecycle" = "book/13-engineering-memory/trust-and-lifecycle.md" },
+            { "Bootstrap & config" = "book/13-engineering-memory/bootstrap-and-config.md" },
+            { "CLI surface" = "book/13-engineering-memory/cli-surface.md" },
+            { "MCP surface" = "book/13-engineering-memory/mcp-surface.md" },
+            { "Agent contracts" = "book/13-engineering-memory/agent-contracts.md" },
+            { "Staleness" = "book/13-engineering-memory/staleness-and-anchors.md" },
+            { "FTS search" = "book/13-engineering-memory/search-fts.md" },
+            { "Semantic search" = "book/13-engineering-memory/search-semantic.md" },
+            { "Trajectory" = "book/13-engineering-memory/trajectory-and-patch-trail.md" },
+            { "Trajectory quality & passport" = "book/13-engineering-memory/trajectory-quality-and-passport.md" },
+            { "Trajectory labels" = "book/13-engineering-memory/trajectory-labels.md" },
+            { "Experience Layer" = "book/13-engineering-memory/experience-layer.md" },
+            { "Projection jobs" = "book/13-engineering-memory/projection-jobs.md" },
+            { "Scope & invariants" = "book/13-engineering-memory/scope-and-invariants.md" },
+        ] },
+        { "Quality signals" = [
+            { "Health Score" = "book/15-health-score.md" },
+            { "Metrics and Gates" = "book/16-metrics-and-quality-gates.md" },
+            { "Dead Code" = "book/17-dead-code-contract.md" },
+            { "Suggestions and Clone Typing" = "book/18-suggestions-and-clone-typing.md" },
+            { "Inline Suppressions" = "book/19-inline-suppressions.md" },
+            { "Benchmarking" = "book/20-benchmarking.md" },
+        ] },
+        { "System properties" = [
+            { "Security Model" = "book/21-security-model.md" },
+            { "Determinism" = "book/22-determinism.md" },
+            { "Testing as Spec" = "book/23-testing-as-spec.md" },
+            { "Compatibility and Versioning" = "book/24-compatibility-and-versioning.md" },
+            { "Platform Observability" = "book/26-platform-observability.md" },
+            { "Corpus Analytics" = "book/27-corpus-analytics.md" },
+        ] },
+        { "MCP interface" = [
+            { "Overview" = "book/25-mcp-interface/index.md" },
+            { "Tools" = [
+                { "Analysis" = "book/25-mcp-interface/tools/analysis.md" },
+                { "Implementation context" = "book/25-mcp-interface/tools/implementation-context.md" },
+                { "Help topics" = "book/25-mcp-interface/tools/help-and-topics.md" },
+                { "Report & findings" = "book/25-mcp-interface/tools/report-and-findings.md" },
+                { "Checks" = "book/25-mcp-interface/tools/checks.md" },
+                { "Workflow" = "book/25-mcp-interface/tools/workflow.md" },
+                { "Atomic change control" = "book/25-mcp-interface/tools/atomic-change-control.md" },
+                { "Session & memory" = "book/25-mcp-interface/tools/session-and-memory.md" },
+                { "Platform observability" = "book/25-mcp-interface/tools/platform-observability.md" },
+                { "IDE governance" = "book/25-mcp-interface/tools/ide-governance.md" },
+            ] },
+            { "Resources" = "book/25-mcp-interface/resources.md" },
+            { "Payload conventions" = "book/25-mcp-interface/payload-conventions.md" },
+            { "Determinism & tests" = "book/25-mcp-interface/determinism-and-tests.md" },
+        ] },
+        { "Integrations" = [
+            { "VS Code" = "book/integrations/vs-code-extension.md" },
+            { "Cursor plugin" = "book/integrations/cursor-plugin.md" },
+            { "Claude Code plugin" = "book/integrations/claude-code-plugin.md" },
+            { "Codex plugin" = "book/integrations/codex-plugin.md" },
+            { "Claude Desktop" = "book/integrations/claude-desktop-bundle.md" },
+            { "GitHub Action" = "book/integrations/github-action.md" },
+            { "SARIF" = "book/integrations/sarif.md" },
+        ] },
+        { "Appendix" = [
+            { "Status Enums" = "book/appendix/a-status-enums.md" },
+            { "Schema Layouts" = "book/appendix/b-schema-layouts.md" },
+            { "Error Catalog" = "book/appendix/c-error-catalog.md" },
+        ] },
+    ] },
+    { "Legal & plans" = [
+        { "Privacy Policy" = "privacy-policy.md" },
+        { "Terms of Use" = "terms-of-use.md" },
+        { "Plans and Retention" = "plans-and-retention.md" },
+    ] },
+    { "Maintainers" = [
+        { "Diagnostics" = [
+            { "Maintainer workflow" = "guide/observability/maintainer-workflow.md" },
+            { "Quick diagnostics" = "guide/observability/diagnostics.md" },
+            { "Corpus Analytics" = "guide/analytics/overview.md" },
+        ] },
+        { "Docs site" = [
+            { "Publishing the docs site" = "publishing.md" },
+            { "Releasing & storefront sync" = "releasing.md" },
+        ] },
+    ] },
+]
+
+[project.theme]
+logo = "assets/codeclone-docs-wordmark.svg"
+favicon = "assets/favicon.svg"
+
+features = [
+    "navigation.tabs",
+    "navigation.sections",
+    "navigation.top",
+    "navigation.instant",
+    "navigation.tracking",
+    "search.highlight",
+    "content.code.copy",
+    "content.tabs.link",
+]
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+
+[project.theme.font]
+text = "Inter"
+code = "JetBrains Mono"
+
+[[project.theme.palette]]
+scheme = "default"
+primary = "white"
+accent = "indigo"
+toggle.icon = "material/weather-night"
+toggle.name = "Switch to dark mode"
+
+[[project.theme.palette]]
+scheme = "slate"
+primary = "black"
+accent = "indigo"
+toggle.icon = "material/weather-sunny"
+toggle.name = "Switch to light mode"
+
+[project.markdown_extensions.admonition]
+[project.markdown_extensions.attr_list]
+[project.markdown_extensions.def_list]
+[project.markdown_extensions.footnotes]
+[project.markdown_extensions.tables]
+
+[project.markdown_extensions.toc]
+permalink = true
+
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.highlight]
+anchor_linenums = true
+
+[project.markdown_extensions.pymdownx.inlinehilite]
+
+[project.markdown_extensions.pymdownx.superfences]
+custom_fences = [
+    { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
+]
+
+[project.markdown_extensions.pymdownx.tabbed]
+alternate_style = true

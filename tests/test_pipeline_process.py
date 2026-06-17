@@ -37,7 +37,8 @@ from codeclone.core.parallelism import (
 )
 from codeclone.core.pipeline import analyze
 from codeclone.core.reporting import report
-from codeclone.models import HealthScore, ProjectMetrics
+from codeclone.metrics.coverage_join import CoverageJoinParseError
+from codeclone.models import DepGraph, HealthScore, ProjectMetrics
 
 
 class _FailExec:
@@ -285,6 +286,39 @@ def test_process_small_batch_skips_parallel_executor(
     assert callbacks == []
     assert result.files_analyzed == 1
     assert result.files_skipped == 0
+
+
+def test_invoke_process_file_caches_signature_lookup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process_file = _stub_process_file(expected_root=str(tmp_path))
+    monkeypatch.setattr(core_worker, "process_file", process_file)
+    core_worker._supported_process_file_kwarg_names.cache_clear()
+
+    for idx in range(2):
+        filepath = tmp_path / f"cached_{idx}.py"
+        filepath.write_text("def cached():\n    return 1\n", encoding="utf-8")
+        result = core_worker._invoke_process_file(
+            str(filepath),
+            str(tmp_path),
+            NormalizationConfig(),
+            1,
+            1,
+            collect_structural_findings=False,
+            collect_api_surface=False,
+            api_include_private_modules=False,
+            block_min_loc=20,
+            block_min_stmt=8,
+            segment_min_loc=20,
+            segment_min_stmt=10,
+        )
+        assert result.success is True
+
+    cache_info = core_worker._supported_process_file_kwarg_names.cache_info()
+    assert cache_info.misses == 1
+    assert cache_info.hits == 1
+    core_worker._supported_process_file_kwarg_names.cache_clear()
 
 
 def test_process_parallel_failure_large_batch_invokes_fallback_callback(
@@ -585,3 +619,59 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
     analysis = analyze(boot=boot, discovery=discovery, processing=processing)
     assert analysis.project_metrics == project_metrics
     assert analysis.suppressed_dead_code_items == 0
+
+
+def test_analyze_coverage_join_parse_error_sets_invalid_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot, discovery, processing, _analysis = _build_report_case(tmp_path)
+    boot.args.skip_metrics = False
+    boot.args.skip_dead_code = True
+    boot.args.skip_dependencies = True
+    boot.args.coverage_xml = "coverage.xml"
+    boot.args.coverage_min = 88
+
+    project_metrics = ProjectMetrics(
+        complexity_avg=0.0,
+        complexity_max=0,
+        high_risk_functions=(),
+        coupling_avg=0.0,
+        coupling_max=0,
+        high_risk_classes=(),
+        cohesion_avg=0.0,
+        cohesion_max=0,
+        low_cohesion_classes=(),
+        dependency_modules=0,
+        dependency_edges=0,
+        dependency_edge_list=(),
+        dependency_cycles=(),
+        dependency_max_depth=0,
+        dependency_longest_chains=(),
+        dead_code=(),
+        health=HealthScore(total=100, grade="A", dimensions={"overall": 100}),
+    )
+    monkeypatch.setattr(
+        core_pipeline,
+        "compute_project_metrics",
+        lambda **kwargs: (
+            project_metrics,
+            DepGraph(frozenset(), (), (), 0, 0.0, 0, ()),
+            (),
+        ),
+    )
+    monkeypatch.setattr(core_pipeline, "compute_suggestions", lambda **kwargs: ())
+    monkeypatch.setattr(
+        core_pipeline,
+        "build_metrics_report_payload",
+        lambda **kwargs: {"health": {"score": 100, "grade": "A", "dimensions": {}}},
+    )
+    monkeypatch.setattr(
+        core_pipeline,
+        "build_coverage_join",
+        lambda **kwargs: (_ for _ in ()).throw(CoverageJoinParseError("bad xml")),
+    )
+
+    result = analyze(boot=boot, discovery=discovery, processing=processing)
+    assert result.coverage_join is not None
+    assert result.coverage_join.status == "invalid"

@@ -833,13 +833,14 @@ def test_baseline_load_json_read_error(
 ) -> None:
     path = tmp_path / "baseline.json"
     path.write_text("{}", "utf-8")
+    original_open = Path.open
 
-    def _boom_read(self: Path, *_args: object, **_kwargs: object) -> str:
+    def _boom_open(self: Path, *args: Any, **kwargs: Any) -> object:
         if self == path:
             raise OSError("blocked")
-        return "{}"
+        return original_open(self, *args, **kwargs)
 
-    monkeypatch.setattr(Path, "read_text", _boom_read)
+    monkeypatch.setattr(Path, "open", _boom_open)
     with pytest.raises(
         BaselineValidationError, match="Cannot read baseline file"
     ) as exc:

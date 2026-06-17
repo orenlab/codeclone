@@ -1,8 +1,8 @@
 {
   "name": "@orenlab/codeclone-claude-desktop",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
-  "description": "Claude Desktop MCP bundle wrapper for the local CodeClone MCP launcher.",
+  "description": "Structural Change Controller for AI-assisted Python development — Claude Desktop MCP bundle.",
   "license": "MPL-2.0",
   "type": "commonjs",
   "engines": {

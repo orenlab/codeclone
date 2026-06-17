@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TypedDict
 
 from ..models import SegmentGroupItem
+from ..utils.repo_paths import RepoPathPolicy, resolve_under_repo_root
 from .integrity import (
     as_int_or_none,
     as_object_list,
@@ -51,14 +52,16 @@ def runtime_filepath_from_wire(
     root: Path | None,
 ) -> str:
     wire_path = Path(wire_filepath)
-    if root is None or wire_path.is_absolute():
+    if root is None:
         return str(wire_path)
 
-    combined = root / wire_path
-    try:
-        return str(combined.resolve(strict=False))
-    except OSError:
-        return str(combined)
+    return str(
+        resolve_under_repo_root(
+            root,
+            wire_path,
+            policy=RepoPathPolicy(allow_absolute=True),
+        )
+    )
 
 
 class SegmentReportProjection(TypedDict):

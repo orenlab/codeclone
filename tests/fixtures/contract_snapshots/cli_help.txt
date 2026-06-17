@@ -1,7 +1,9 @@
 usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--processes PROCESSES] [--changed-only | --no-changed-only]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
-                 [--cache-path [FILE]] [--cache-dir [FILE]]
+                 [--blast-radius FILE [FILE ...]] [--patch-verify]
+                 [--strictness LEVEL] [--session-stats] [--audit]
+                 [--audit-json] [--cache-path [FILE]] [--cache-dir [FILE]]
                  [--max-cache-size-mb MB] [--baseline [FILE]]
                  [--max-baseline-size-mb MB]
                  [--update-baseline | --no-update-baseline]
@@ -56,8 +58,22 @@ Analysis:
   --paths-from-git-diff GIT_REF
                         Shorthand for --changed-only using `git diff --name-only <REF>`.
                         Useful for PR and CI review flows.
+  --blast-radius FILE [FILE ...]
+                        Show structural blast radius for the given files.
+                        Runs analysis first, then projects dependents, clone cohorts,
+                        risk signals, and do-not-touch boundaries.
+  --patch-verify        Verify the current patch against the trusted baseline budget.
+                        Runs analysis, checks baseline-relative regressions and gate status, then exits.
+  --strictness LEVEL    Strictness profile for --patch-verify: ci, strict, or relaxed.
+                        Default: ci.
+  --session-stats       Show workspace session status: active agents, intents, lease health.
+                        Read-only, does not run analysis.
+  --audit               Show local Controller audit trail from the configured audit database.
+                        Read-only, does not run analysis.
+  --audit-json          Output audit payload footprint as JSON.
+                        Implies --audit. Useful for cross-repository comparison.
   --cache-path [FILE]   Path to the cache file.
-                        If FILE is omitted, uses <root>/.cache/codeclone/cache.json.
+                        If FILE is omitted, uses <root>/.codeclone/cache.json.
   --cache-dir [FILE]    Legacy alias for --cache-path.
                         Prefer --cache-path in new configurations.
   --max-cache-size-mb MB
@@ -151,15 +167,15 @@ Analysis stages:
 
 Reporting:
   --html [FILE]         Generate an HTML report.
-                        If FILE is omitted, writes to .cache/codeclone/report.html.
+                        If FILE is omitted, writes to .codeclone/report.html.
   --json [FILE]         Generate the canonical JSON report.
-                        If FILE is omitted, writes to .cache/codeclone/report.json.
+                        If FILE is omitted, writes to .codeclone/report.json.
   --md [FILE]           Generate a Markdown report.
-                        If FILE is omitted, writes to .cache/codeclone/report.md.
+                        If FILE is omitted, writes to .codeclone/report.md.
   --sarif [FILE]        Generate a SARIF 2.1.0 report.
-                        If FILE is omitted, writes to .cache/codeclone/report.sarif.
+                        If FILE is omitted, writes to .codeclone/report.sarif.
   --text [FILE]         Generate a plain-text report.
-                        If FILE is omitted, writes to .cache/codeclone/report.txt.
+                        If FILE is omitted, writes to .codeclone/report.txt.
   --timestamped-report-paths, --no-timestamped-report-paths
                         Append a UTC timestamp to default report filenames.
                         Applies only to report flags passed without FILE.

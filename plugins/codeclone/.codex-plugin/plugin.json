@@ -1,13 +1,13 @@
 {
   "name": "codeclone",
-  "version": "2.0.0",
-  "description": "Baseline-aware structural code quality analysis for Codex through the local CodeClone MCP server.",
+  "version": "2.1.0a1",
+  "description": "Structural Change Controller for AI-assisted Python development — Codex plugin over local codeclone-mcp.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
     "url": "https://github.com/orenlab"
   },
-  "homepage": "https://orenlab.github.io/codeclone/codex-plugin/",
+  "homepage": "https://orenlab.github.io/codeclone/guide/integrations/codex/setup/",
   "repository": "https://github.com/orenlab/codeclone",
   "license": "MPL-2.0",
   "keywords": [
@@ -21,11 +21,11 @@
   ],
   "skills": "./skills/",
   "mcpServers": "./.mcp.json",
-  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis, use analyze_changed_paths for diffs, use get_report_section(section=\"metrics\") for adoption/API/coverage facts, call help(topic=\"coverage\") when external coverage semantics matter, and never fall back to CLI, local report files, or repository mutation.",
+  "instructions": "You have access to CodeClone through the local CodeClone MCP server. Use MCP tools only. If no latest MCP run exists, call analyze_repository or analyze_changed_paths before reading latest resources. Start with the default profile, prefer get_production_triage after analysis. Call help(topic=change_control|engineering_memory|implementation_context|verification_profiles) for edit/memory/context semantics. Before any repository file edit: analyze_repository → start_controlled_change → get_relevant_memory → get_implementation_context(paths=…, intent_id=…) → edit in scope → finish_controlled_change. Accepted finish does not mean unchanged health — report verification.structural_delta and receipt advisories.",
   "interface": {
     "displayName": "CodeClone",
-    "shortDescription": "Structural code quality analysis for Python.",
-    "longDescription": "CodeClone for Codex — clone detection, quality metrics, and baseline-aware governance over the canonical codeclone-mcp server. Ships a review skill and a hotspot discovery skill for conservative-first, triage-first structural review.",
+    "shortDescription": "Structural Change Controller for AI-assisted Python development.",
+    "longDescription": "CodeClone for Codex — structural change controller for AI-assisted Python development. Clone detection, quality metrics, baseline-aware governance, engineering memory, and intent-first change control over the canonical codeclone-mcp server. Repository read-only (source, baselines, cache, reports); full default agent MCP passthrough. Ships review, hotspot, change-control, and engineering-memory skills for conservative-first structural review and scoped repository edits.",
     "developerName": "OrenLab",
     "category": "Developer Tools",
     "capabilities": [
@@ -33,13 +33,14 @@
       "Skills",
       "Read-only"
     ],
-    "websiteURL": "https://orenlab.github.io/codeclone/codex-plugin/",
+    "websiteURL": "https://orenlab.github.io/codeclone/guide/integrations/codex/setup/",
     "privacyPolicyURL": "https://orenlab.github.io/codeclone/privacy-policy/",
     "termsOfServiceURL": "https://orenlab.github.io/codeclone/terms-of-use/",
     "defaultPrompt": [
       "Use CodeClone to analyze this repo and show the top production hotspots.",
       "Run a changed-files CodeClone review for my current diff.",
-      "Check CodeClone health and explain what to fix first."
+      "Check CodeClone health and explain what to fix first.",
+      "Use CodeClone change control for this repository edit."
     ],
     "brandColor": "#6366f1",
     "composerIcon": "./assets/icon.png",

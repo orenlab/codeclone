@@ -4,10 +4,12 @@ const {spawn} = require("node:child_process");
 const {EventEmitter} = require("node:events");
 
 const {version: EXTENSION_VERSION} = require("../package.json");
-const {logChannelMessage, trimTail} = require("./support");
+const {logChannelMessage, spawnEnvForMcp, trimTail} = require("./support");
 
 const MCP_PROTOCOL_VERSION = "2025-03-26";
 const REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+/** Per-step ceiling for memory governance tool calls (separate from RPC timeout). */
+const GOVERNANCE_TOOL_TIMEOUT_MS = 90 * 1000;
 const MAX_STDOUT_BUFFER_CHARS = 4 * 1024 * 1024;
 const MAX_STDERR_BUFFER_CHARS = 256 * 1024;
 const MAX_LOG_LINE_CHARS = 4096;
@@ -32,6 +34,64 @@ class MCPClientError extends Error {
         super(message);
         this.name = "MCPClientError";
     }
+}
+
+/**
+ * @param {unknown} result
+ * @param {string} toolName
+ * @returns {string|null}
+ */
+function extractToolErrorMessage(result, toolName) {
+    if (!result || typeof result !== "object") {
+        return null;
+    }
+    const content = /** @type {{content?: unknown}} */ (result).content;
+    if (!Array.isArray(content)) {
+        return null;
+    }
+    for (const entry of content) {
+        if (
+            entry &&
+            typeof entry === "object" &&
+            /** @type {{type?: string}} */ (entry).type === "text" &&
+            typeof /** @type {{text?: string}} */ (entry).text === "string"
+        ) {
+            const text = /** @type {{text: string}} */ (entry).text.trim();
+            const prefix = `Error executing tool ${toolName}:`;
+            if (text.startsWith(prefix)) {
+                return text.slice(prefix.length).trim();
+            }
+            return text;
+        }
+    }
+    return null;
+}
+
+/**
+ * @param {Promise<unknown>} promise
+ * @param {number} timeoutMs
+ * @param {string} label
+ */
+function withToolTimeout(promise, timeoutMs, label) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(
+                new MCPClientError(
+                    `${label} timed out after ${Math.round(timeoutMs / 1000)}s.`
+                )
+            );
+        }, timeoutMs);
+        Promise.resolve(promise).then(
+            (value) => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            (error) => {
+                clearTimeout(timer);
+                reject(error);
+            }
+        );
+    });
 }
 
 class CodeCloneMcpClient extends EventEmitter {
@@ -141,17 +201,29 @@ class CodeCloneMcpClient extends EventEmitter {
         }
     }
 
-    async callTool(name, args = {}) {
+    async callTool(name, args = {}, options = {}) {
         if (!this.connected) {
             throw new MCPClientError("CodeClone MCP is not connected.");
         }
-        const result = await this.request("tools/call", {
+        const timeoutMs =
+            typeof options.timeoutMs === "number"
+                ? options.timeoutMs
+                : REQUEST_TIMEOUT_MS;
+        const label =
+            typeof options.timeoutLabel === "string"
+                ? options.timeoutLabel
+                : `CodeClone MCP tool ${name}`;
+        const request = this.request("tools/call", {
             name,
             arguments: args,
         });
+        const result = await withToolTimeout(request, timeoutMs, label);
         if (result && result.isError) {
+            const detail = extractToolErrorMessage(result, name);
             throw new MCPClientError(
-                `Tool ${name} returned an error response from CodeClone MCP.`
+                detail
+                    ? `CodeClone MCP (${name}): ${detail}`
+                    : `Tool ${name} returned an error response from CodeClone MCP.`
             );
         }
         if (result && result.structuredContent !== undefined) {
@@ -233,7 +305,7 @@ class CodeCloneMcpClient extends EventEmitter {
         await new Promise((resolve, reject) => {
             const child = spawn(launchSpec.command, launchSpec.args, {
                 cwd: launchSpec.cwd,
-                env: process.env,
+                env: spawnEnvForMcp(launchSpec.cwd),
                 shell: false,
                 stdio: ["pipe", "pipe", "pipe"],
             });
@@ -436,4 +508,7 @@ class CodeCloneMcpClient extends EventEmitter {
 module.exports = {
     CodeCloneMcpClient,
     MCPClientError,
+    GOVERNANCE_TOOL_TIMEOUT_MS,
+    extractToolErrorMessage,
+    withToolTimeout,
 };

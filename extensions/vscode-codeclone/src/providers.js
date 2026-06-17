@@ -29,6 +29,9 @@ class WorkspaceState {
         this.stale = false;
         this.staleReason = null;
         this.lastStaleCheckAt = 0;
+        this.lastTriageFetchAt = 0;
+        this.lastTriageFetchRunId = null;
+        this.triageFetchPromise = null;
     }
 }
 
@@ -81,6 +84,17 @@ class SessionTreeProvider extends BaseTreeProvider {
     }
 }
 
+/** @implements {VSCodeTreeDataProvider} */
+class MemoryTreeProvider extends BaseTreeProvider {
+    async getTreeItem(node) {
+        return this.controller.createTreeItem(node);
+    }
+
+    async getChildren(node) {
+        return this.controller.getMemoryChildren(node);
+    }
+}
+
 /** @implements {VSCodeCodeLensProvider} */
 class ReviewCodeLensProvider {
     constructor(controller) {
@@ -125,6 +139,7 @@ class ReviewFileDecorationProvider {
 
 module.exports = {
     HotspotsTreeProvider,
+    MemoryTreeProvider,
     OverviewTreeProvider,
     ReviewCodeLensProvider,
     ReviewFileDecorationProvider,

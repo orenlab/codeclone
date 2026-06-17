@@ -12,9 +12,44 @@ from typing import Final
 BASELINE_SCHEMA_VERSION: Final = "2.1"
 BASELINE_FINGERPRINT_VERSION: Final = "1"
 
-CACHE_VERSION: Final = "2.8"
+CACHE_VERSION: Final = "2.10"
 REPORT_SCHEMA_VERSION: Final = "2.11"
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.2"
+ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.7"
+# Semantic retrieval index (Phase 20). Derived, rebuildable sidecar — NOT
+# covered by ENGINEERING_MEMORY_SCHEMA_VERSION. Bump to invalidate the index
+# on an incompatible projection/row-format change (forces a rebuild, not a
+# SQLite migration).
+SEMANTIC_INDEX_FORMAT_VERSION: Final = "2"
+PATCH_TRAIL_SCHEMA_VERSION: Final = "1"
+# Platform observability sqlite store (.codeclone/db/platform_observability.sqlite3):
+# a runtime-profiling plane separate from audit/memory. Bump on an incompatible
+# observability schema change.
+PLATFORM_OBSERVABILITY_SCHEMA_VERSION: Final = "1.1"
+
+# Memory-derived projection/derivation versions. NOT persistence schema
+# versions: bump to supersede previously derived rows on an incompatible
+# projection/scoring/distillation change (re-projection, not a SQLite
+# migration). Defined here so all version constants live in one place; the
+# owning modules re-export these names.
+TRAJECTORY_PROJECTION_VERSION: Final = "trajectory-v3"
+TRAJECTORY_PROJECTION_VERSION_V1: Final = "trajectory-v1"
+TRAJECTORY_QUALITY_SCORE_VERSION: Final = "2"
+EXPERIENCE_DISTILLATION_VERSION: Final = "experience-v1"
+# IDE governance HMAC attestation protocol version (VS Code Memory channel).
+IDE_GOVERNANCE_PROTOCOL_VERSION: Final = 2
+
+# Corpus analytics store (.codeclone/analytics/corpus_clustering.sqlite3) and
+# derived export/representation contracts. Bump independently from memory schema.
+CORPUS_ANALYTICS_STORE_SCHEMA_VERSION: Final = "1.2"
+CORPUS_EXPORT_SCHEMA_VERSION: Final = "1.3"
+CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION: Final = "1"
+CORPUS_CONTROL_PLANE_CONTRACT_VERSION: Final = "1.0"
+CORPUS_REPRESENTATION_CONTRACT_VERSION: Final = "3"
+CORPUS_NORMALIZER_VERSION: Final = "1"
+CORPUS_EMBEDDING_CONTRACT_VERSION: Final = "2"
+CORPUS_AGENT_LABEL_CONTRACT_VERSION: Final = "1"
+CORPUS_PARTITION_MAP_VERSION: Final = "1"
 
 DEFAULT_COMPLEXITY_THRESHOLD: Final = 20
 DEFAULT_COUPLING_THRESHOLD: Final = 10
@@ -35,11 +70,11 @@ DEFAULT_MAX_CACHE_SIZE_MB: Final = 50
 DEFAULT_MAX_BASELINE_SIZE_MB: Final = 5
 DEFAULT_COVERAGE_MIN: Final = 50
 DEFAULT_BASELINE_PATH: Final = "codeclone.baseline.json"
-DEFAULT_HTML_REPORT_PATH: Final = ".cache/codeclone/report.html"
-DEFAULT_JSON_REPORT_PATH: Final = ".cache/codeclone/report.json"
-DEFAULT_MARKDOWN_REPORT_PATH: Final = ".cache/codeclone/report.md"
-DEFAULT_SARIF_REPORT_PATH: Final = ".cache/codeclone/report.sarif"
-DEFAULT_TEXT_REPORT_PATH: Final = ".cache/codeclone/report.txt"
+DEFAULT_HTML_REPORT_PATH: Final = ".codeclone/report.html"
+DEFAULT_JSON_REPORT_PATH: Final = ".codeclone/report.json"
+DEFAULT_MARKDOWN_REPORT_PATH: Final = ".codeclone/report.md"
+DEFAULT_SARIF_REPORT_PATH: Final = ".codeclone/report.sarif"
+DEFAULT_TEXT_REPORT_PATH: Final = ".codeclone/report.txt"
 
 COMPLEXITY_RISK_LOW_MAX: Final = 10
 COMPLEXITY_RISK_MEDIUM_MAX: Final = 20
@@ -100,6 +135,15 @@ __all__ = [
     "COHESION_RISK_MEDIUM_MAX",
     "COMPLEXITY_RISK_LOW_MAX",
     "COMPLEXITY_RISK_MEDIUM_MAX",
+    "CORPUS_AGENT_LABEL_CONTRACT_VERSION",
+    "CORPUS_ANALYTICS_STORE_SCHEMA_VERSION",
+    "CORPUS_CONTROL_PLANE_CONTRACT_VERSION",
+    "CORPUS_EMBEDDING_CONTRACT_VERSION",
+    "CORPUS_EXPORT_SCHEMA_VERSION",
+    "CORPUS_NORMALIZER_VERSION",
+    "CORPUS_PARTITION_MAP_VERSION",
+    "CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION",
+    "CORPUS_REPRESENTATION_CONTRACT_VERSION",
     "COUPLING_RISK_LOW_MAX",
     "COUPLING_RISK_MEDIUM_MAX",
     "DEFAULT_BASELINE_PATH",
@@ -127,15 +171,23 @@ __all__ = [
     "DEFAULT_SEGMENT_MIN_STMT",
     "DEFAULT_TEXT_REPORT_PATH",
     "DOCS_URL",
+    "ENGINEERING_MEMORY_SCHEMA_VERSION",
+    "EXPERIENCE_DISTILLATION_VERSION",
     "HEALTH_DEPENDENCY_CYCLE_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER",
     "HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_P95_MARGIN",
     "HEALTH_WEIGHTS",
+    "IDE_GOVERNANCE_PROTOCOL_VERSION",
     "ISSUES_URL",
     "METRICS_BASELINE_SCHEMA_VERSION",
+    "PATCH_TRAIL_SCHEMA_VERSION",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
+    "SEMANTIC_INDEX_FORMAT_VERSION",
+    "TRAJECTORY_PROJECTION_VERSION",
+    "TRAJECTORY_PROJECTION_VERSION_V1",
+    "TRAJECTORY_QUALITY_SCORE_VERSION",
     "ExitCode",
     "cli_help_epilog",
 ]

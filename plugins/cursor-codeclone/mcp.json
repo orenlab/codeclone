@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "codeclone": {
+      "command": "python3",
+      "args": [
+        "./scripts/launch_mcp.py"
+      ]
+    }
+  }
+}

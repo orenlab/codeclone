@@ -1,10 +1,14 @@
 # CodeClone for Claude Desktop
 
-Local MCP bundle wrapper for `codeclone-mcp` — installs as a `.mcpb` package
-instead of manual JSON editing.
+**Structural Change Controller for AI-assisted Python development** — local MCP
+bundle wrapper for `codeclone-mcp`. Installs as a `.mcpb` package instead of manual JSON editing.
 
-Same canonical MCP surface used by CLI, VS Code, Codex, and Claude Code.
-Read-only, baseline-aware, local stdio only.
+Same canonical default agent MCP surface used by CLI, VS Code, Codex, and
+Claude Code.
+Repository read-only (source, baselines, cache, canonical reports); local stdio
+only. The bundle proxies the full MCP server, including change-control and
+session tools — ephemeral coordination under `.codeclone/intents/` and
+optional audit records when enabled.
 As the local `codeclone-mcp` server gains new canonical surfaces, the bundle
 exposes them without adding a second client-side interpretation layer.
 
@@ -48,10 +52,33 @@ command** in the extension settings to an absolute path.
 
 | Setting                        | Purpose                                              |
 |--------------------------------|------------------------------------------------------|
+| **Workspace root path**        | Optional absolute project root; launcher prefers that workspace `.venv` when Claude starts outside the repo |
 | **CodeClone launcher command** | Absolute path or bare command for `codeclone-mcp`    |
 | **Advanced launcher args**     | JSON array of extra args (transport is always stdio) |
 
 ## Usage
+
+### Change controller workflow
+
+```text
+# 1. Analyze the repository
+Use CodeClone to analyze this repository.
+
+# 2. Declare intent before editing
+Declare a change intent for refactoring codeclone/analysis/parser.py — I plan to
+extract the CFG builder into a separate module.
+
+# 3. Check blast radius
+Show the blast radius for codeclone/analysis/parser.py.
+
+# 4. After editing — verify the patch
+Check my change intent against the current diff.
+
+# 5. Generate the audit artifact
+Create a review receipt for the verified change.
+```
+
+### Analysis and review
 
 ```text
 # Conservative first pass
@@ -82,6 +109,7 @@ npm run pack     # build .mcpb
 
 ## Links
 
-- [Claude Desktop bundle guide](https://orenlab.github.io/codeclone/claude-desktop-bundle/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/mcp/)
+- [Claude Desktop bundle guide](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
+- [Change controller docs](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
 - [Issues](https://github.com/orenlab/codeclone/issues)

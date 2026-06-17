@@ -29,6 +29,8 @@ def _validate_changed_scope_args(*, args: object) -> str | None:
     console = require_status_console(cli_state.get_console())
     diff_against = optional_text_attr(args, "diff_against")
     paths_from_git_diff = optional_text_attr(args, "paths_from_git_diff")
+    if bool_attr(args, "blast_radius"):
+        return None
     if diff_against and paths_from_git_diff:
         console.print(
             ui.fmt_contract_error(
@@ -39,7 +41,11 @@ def _validate_changed_scope_args(*, args: object) -> str | None:
     if paths_from_git_diff:
         set_bool_attr(args, "changed_only", True)
         return paths_from_git_diff
-    if diff_against and not bool_attr(args, "changed_only"):
+    if (
+        diff_against
+        and not bool_attr(args, "changed_only")
+        and not bool_attr(args, "patch_verify")
+    ):
         console.print(ui.fmt_contract_error("--diff-against requires --changed-only."))
         sys.exit(ExitCode.CONTRACT_ERROR)
     if bool_attr(args, "changed_only") and not diff_against:

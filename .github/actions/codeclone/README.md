@@ -1,6 +1,7 @@
 # CodeClone GitHub Action
 
-Baseline-aware structural code quality analysis for Python with:
+**Structural Change Controller for AI-assisted Python development** — CI
+integration with:
 
 - configurable CI gating
 - SARIF upload for GitHub Code Scanning
@@ -82,9 +83,9 @@ jobs:
 | `python-version`        | `3.14`                          | Python version used to run the action                                                                             |
 | `package-version`       | `2.0.2`                         | CodeClone version from PyPI for remote installs; ignored when the action runs from the checked-out CodeClone repo |
 | `path`                  | `.`                             | Project root to analyze                                                                                           |
-| `json-path`             | `.cache/codeclone/report.json`  | JSON report output path                                                                                           |
+| `json-path`             | `.codeclone/report.json`  | JSON report output path                                                                                           |
 | `sarif`                 | `true`                          | Generate SARIF and try to upload it                                                                               |
-| `sarif-path`            | `.cache/codeclone/report.sarif` | SARIF output path                                                                                                 |
+| `sarif-path`            | `.codeclone/report.sarif` | SARIF output path                                                                                                 |
 | `pr-comment`            | `true`                          | Post or update a PR summary comment                                                                               |
 | `fail-on-new`           | `true`                          | Fail if new clone groups are detected                                                                             |
 | `fail-on-new-metrics`   | `false`                         | Fail if metrics regress vs baseline                                                                               |
@@ -182,4 +183,4 @@ Local/self-repo validation:
 
 - [CodeClone repository](https://github.com/orenlab/codeclone)
 - [Documentation](https://orenlab.github.io/codeclone/)
-- [SARIF integration](https://orenlab.github.io/codeclone/sarif/)
+- [SARIF integration](https://orenlab.github.io/codeclone/guide/integrations/sarif/export/)

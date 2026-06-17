@@ -1,0 +1,461 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+
+import pytest
+
+from codeclone.config.memory import MemoryConfig
+from codeclone.contracts import ExitCode
+from codeclone.memory.ingest import InitReport
+from codeclone.surfaces.cli.memory import _CLI_GOVERNANCE_BREAK_GLASS_FLAG, memory_main
+
+from .memory_fixtures import cli_memory_repo
+
+
+class _MemoryCliConsole:
+    def __init__(self) -> None:
+        self.lines: list[str] = []
+
+    def print(self, *objects: object, **_kwargs: object) -> None:
+        self.lines.append(" ".join(str(value) for value in objects))
+
+
+@pytest.mark.parametrize(
+    "rejected_cache_reason, source, expected_substring",
+    [
+        (
+            "digest_mismatch",
+            "trusted_cache",
+            "cached report rejected; running fresh analysis",
+        ),
+        (None, "fresh_analysis", "no trusted cached report; running fresh analysis"),
+        (None, "trusted_cache", "reusing trusted cached report"),
+    ],
+)
+def test_memory_cli_init_renders_init_note_for_cache_states(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    rejected_cache_reason: str | None,
+    source: str,
+    expected_substring: str,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    loaded = SimpleNamespace(
+        rejected_cache_reason=rejected_cache_reason,
+        source=source,
+        document={},
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.load_report_for_memory_init",
+        lambda **_kwargs: loaded,
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.run_memory_init",
+        lambda **_kwargs: InitReport(
+            project_id="proj-test",
+            db_path=None,
+            dry_run=True,
+            analysis_fingerprint="fp",
+            stats={},
+            planned_counts={},
+            warnings=[],
+        ),
+    )
+
+    rendered_messages: list[str] = []
+
+    def _capture_init_note(*, console: object, message: str) -> None:
+        rendered_messages.append(message)
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.render_init_note",
+        _capture_init_note,
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.render_init_result",
+        lambda **_kwargs: None,
+    )
+
+    code = memory_main(
+        [
+            "init",
+            "--root",
+            str(root.resolve()),
+            "--from-report",
+            "ignored.json",
+            "--dry-run",
+            "--no-docs",
+            "--no-tests",
+        ]
+    )
+    assert code == int(ExitCode.SUCCESS)
+    assert any(expected_substring in m for m in rendered_messages)
+
+
+def test_memory_cli_init_fails_when_load_report_throws(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.load_report_for_memory_init",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("boom")),
+    )
+
+    code = memory_main(
+        [
+            "init",
+            "--root",
+            str(root.resolve()),
+            "--from-report",
+            "ignored.json",
+            "--dry-run",
+        ]
+    )
+    assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_memory_cli_init_fails_when_run_init_throws(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    loaded = SimpleNamespace(
+        rejected_cache_reason=None,
+        source="fresh_analysis",
+        document={},
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.load_report_for_memory_init",
+        lambda **_kwargs: loaded,
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.run_memory_init",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("init failed")),
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.render_init_note",
+        lambda **_kwargs: None,
+    )
+
+    code = memory_main(
+        [
+            "init",
+            "--root",
+            str(root.resolve()),
+            "--from-report",
+            "ignored.json",
+            "--dry-run",
+            "--no-docs",
+            "--no-tests",
+        ]
+    )
+    assert code == int(ExitCode.INTERNAL_ERROR)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["search", "fixture", "--root", "__ROOT__"],
+        ["stale", "--root", "__ROOT__"],
+        ["vacuum", "--root", "__ROOT__"],
+        ["coverage", "pkg/mod.py", "--root", "__ROOT__"],
+        ["review-candidates", "--root", "__ROOT__"],
+        ["approve", "mem-missing", "--root", "__ROOT__"],
+        ["reject", "mem-missing", "--root", "__ROOT__"],
+        ["archive", "mem-missing", "--root", "__ROOT__"],
+    ],
+)
+def test_memory_cli_returns_contract_error_when_db_missing(
+    tmp_path: Path,
+    argv: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "empty"
+    root.mkdir()
+    root_str = str(root.resolve())
+    argv_real = [part if part != "__ROOT__" else root_str for part in argv]
+
+    # Ensure we don't accidentally create db via config env overrides.
+    monkeypatch.delenv("CODECLONE_MEMORY_DB_PATH", raising=False)
+
+    code = memory_main(argv_real)
+    assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_memory_cli_search_payload_type_guards(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with cli_memory_repo(tmp_path) as (root, _project, _store):
+        root_str = str(root.resolve())
+
+        monkeypatch.setattr(
+            "codeclone.surfaces.cli.memory.query_engineering_memory",
+            lambda *_args, **_kwargs: {"payload": "not-a-dict"},
+        )
+        monkeypatch.setattr(
+            "codeclone.surfaces.cli.memory.render_search_results",
+            lambda **_kwargs: None,
+        )
+        code = memory_main(["search", "fixture", "--root", root_str])
+        assert code == int(ExitCode.INTERNAL_ERROR)
+
+        captured_records: list[object] = []
+
+        def _capture_render(*, records: list[object], **_kwargs: object) -> None:
+            captured_records.extend(records)
+
+        monkeypatch.setattr(
+            "codeclone.surfaces.cli.memory.query_engineering_memory",
+            lambda *_args, **_kwargs: {"payload": {"records": "not-a-list"}},
+        )
+        monkeypatch.setattr(
+            "codeclone.surfaces.cli.memory.render_search_results",
+            _capture_render,
+        )
+        code = memory_main(["search", "fixture", "--root", root_str])
+        assert code == int(ExitCode.SUCCESS)
+        assert captured_records == []
+
+
+@pytest.mark.parametrize(
+    "command, patch_attr",
+    [
+        ("approve", "approve_record"),
+        ("reject", "reject_record"),
+        ("archive", "archive_record"),
+    ],
+)
+def test_memory_cli_action_failure_returns_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+    patch_attr: str,
+) -> None:
+    with cli_memory_repo(tmp_path) as (root, _project, _store):
+        root_str = str(root.resolve())
+
+        def _boom(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("action failed")
+
+        monkeypatch.setattr(f"codeclone.surfaces.cli.memory.{patch_attr}", _boom)
+
+        if command == "approve":
+            argv = [
+                "approve",
+                "mem-any",
+                "--root",
+                root_str,
+                "--by",
+                "tester",
+                "--i-know-what-im-doing",
+            ]
+        elif command == "reject":
+            argv = [
+                "reject",
+                "mem-any",
+                "--root",
+                root_str,
+                "--by",
+                "tester",
+                "--reason",
+                "nope",
+                "--i-know-what-im-doing",
+            ]
+        else:
+            argv = [
+                "archive",
+                "mem-any",
+                "--root",
+                root_str,
+                "--by",
+                "tester",
+                "--i-know-what-im-doing",
+            ]
+
+        code = memory_main(argv)
+        assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_memory_main_unknown_command_returns_contract_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    class _Parser:
+        def parse_args(self, _argv: list[str]) -> SimpleNamespace:
+            return SimpleNamespace(root=str(root), command="unsupported")
+
+        def print_help(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory._build_parser",
+        lambda: _Parser(),
+    )
+    code = memory_main(["unsupported", "--root", str(root)])
+    assert code == int(ExitCode.CONTRACT_ERROR)
+
+
+@pytest.mark.parametrize("command", ["approve", "reject", "archive"])
+def test_memory_cli_governance_missing_database_reports_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    command: str,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    printed: list[str] = []
+
+    class _Console:
+        def print(self, message: str) -> None:
+            printed.append(message)
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory.memory_console",
+        lambda: _Console(),
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.memory._open_store",
+        lambda _root: (_ for _ in ()).throw(FileNotFoundError("missing.db")),
+    )
+    argv = [
+        command,
+        "mem-1",
+        "--root",
+        str(root),
+        "--by",
+        "tester",
+        _CLI_GOVERNANCE_BREAK_GLASS_FLAG,
+    ]
+    if command == "reject":
+        argv.extend(["--reason", "nope"])
+    code = memory_main(argv)
+    assert code == int(ExitCode.CONTRACT_ERROR)
+    assert any("database not found" in line for line in printed)
+
+
+def test_memory_cli_trajectory_and_job_fallback_edges(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli import memory
+
+    console = _MemoryCliConsole()
+    closed: list[bool] = []
+    monkeypatch.setattr(
+        memory,
+        "_open_store",
+        lambda _root: (
+            SimpleNamespace(close=lambda: closed.append(True)),
+            SimpleNamespace(trajectories_enabled=False),
+            SimpleNamespace(id="project"),
+        ),
+    )
+    assert memory._run_trajectory_rebuild(
+        console=console,
+        root_path=tmp_path,
+    ) == int(ExitCode.CONTRACT_ERROR)
+    assert closed == [True]
+
+    monkeypatch.setattr(
+        memory,
+        "query_engineering_memory",
+        lambda *_args, **_kwargs: {"payload": {}},
+    )
+    monkeypatch.setattr(
+        memory,
+        "_open_store",
+        lambda _root: (
+            SimpleNamespace(close=lambda: None),
+            SimpleNamespace(
+                trajectories_enabled=True,
+                backend="sqlite",
+                db_path=tmp_path / "memory.sqlite3",
+            ),
+            SimpleNamespace(id="project"),
+        ),
+    )
+    args = argparse.Namespace(limit=5, json=False)
+    assert memory._run_trajectory_dashboard(
+        console=console,
+        root_path=tmp_path,
+        args=args,
+    ) == int(ExitCode.SUCCESS)
+
+    monkeypatch.setattr(
+        memory,
+        "query_engineering_memory",
+        lambda *_args, **_kwargs: {
+            "payload": {
+                "status": {"trajectory_count": 0, "latest_projection": None},
+            }
+        },
+    )
+    assert memory._run_trajectory_dashboard(
+        console=console,
+        root_path=tmp_path,
+        args=args,
+    ) == int(ExitCode.SUCCESS)
+
+    assert memory._run_jobs_json(
+        console=console,
+        root_path=tmp_path,
+        action=lambda: {"status": "failed"},
+    ) == int(ExitCode.CONTRACT_ERROR)
+
+    monkeypatch.setattr(
+        memory,
+        "execute_projection_rebuild_status",
+        lambda **_kwargs: {"jobs": ["invalid-row"]},
+    )
+    assert memory._run_jobs_list(
+        console=console,
+        root_path=tmp_path,
+        args=argparse.Namespace(limit=5, json=False),
+    ) == int(ExitCode.SUCCESS)
+
+
+def test_memory_cli_semantic_text_without_subject_path() -> None:
+    from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
+    from codeclone.memory.semantic.models import SemanticSearchResult
+    from codeclone.surfaces.cli import memory
+
+    console = _MemoryCliConsole()
+    result = SemanticSearchResult(
+        source="memory",
+        source_id="mem-1",
+        score=0.5,
+        kind="module_role",
+        preview="Module role",
+    )
+    code = memory._render_semantic_text(
+        console=console,
+        query="module",
+        config=cast(
+            "MemoryConfig",
+            SimpleNamespace(semantic=SimpleNamespace(embedding_provider="diagnostic")),
+        ),
+        provider=DeterministicHashEmbeddingProvider(dimension=8),
+        results=[result],
+    )
+    assert code == int(ExitCode.SUCCESS)
+    assert not any("subject:" in line for line in console.lines)

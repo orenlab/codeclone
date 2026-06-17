@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="860" viewBox="0 0 860 730" role="img">
-    <title>CodeClone analysis pipeline</title>
-    <desc>Deterministic CodeClone pipeline from source discovery and cache reuse to canonical report, gates, and
-        human or agent-facing projections.
+<svg xmlns="http://www.w3.org/2000/svg" width="860" viewBox="0 0 860 828" role="img">
+    <title>CodeClone pipeline</title>
+    <desc>Deterministic CodeClone pipeline from source discovery and cache reuse to a canonical report that powers
+        gates, projections, and the Structural Change Controller with Engineering Memory.
     </desc>
 
     <style>
@@ -123,5 +123,12 @@
     <path d="M390 624 C340 645 286 660 265 670" class="arr" marker-end="url(#arr)"/>
     <path d="M470 624 C520 645 574 660 595 670" class="arr" marker-end="url(#arr)"/>
 
-    <text x="430" y="725" text-anchor="middle" class="sub note">One canonical report powers local review, CI, IDE clients, and agent workflows.</text>
+    <!-- Agent workflow: the Structural Change Controller + Engineering Memory consume the canonical report -->
+    <line x1="430" y1="624" x2="430" y2="714" class="arr-purple" marker-end="url(#arr)"/>
+    <rect x="280" y="716" width="300" height="74" rx="10" class="box-purple"/>
+    <text x="430" y="740" text-anchor="middle" class="lbl t-purple">Structural Change Controller</text>
+    <text x="430" y="759" text-anchor="middle" class="sub note">intent · blast radius · verify · receipt</text>
+    <text x="430" y="776" text-anchor="middle" class="sub note">+ Engineering Memory</text>
+
+    <text x="430" y="812" text-anchor="middle" class="sub note">One canonical report powers local review, CI, IDE clients, and agent workflows.</text>
 </svg>

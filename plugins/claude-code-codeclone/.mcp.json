@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "codeclone": {
+      "command": "python3",
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/scripts/launch_mcp.py"
+      ]
+    }
+  }
+}

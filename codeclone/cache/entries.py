@@ -16,10 +16,12 @@ from ..models import (
     ClassMetrics,
     DeadCandidate,
     FunctionGroupItem,
+    FunctionRelationshipFacts,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    RelationshipRecord,
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentGroupItem,
@@ -40,6 +42,23 @@ class SourceStatsDict(TypedDict):
     functions: int
     methods: int
     classes: int
+
+
+class RelationshipRecordDict(TypedDict):
+    relation_kind: str
+    resolution_status: str
+    origin_lane: str
+    source_qualname: str
+    target_qualname: str | None
+    path: str
+    line: int
+    expression: str | None
+    resolution_rule: str | None
+
+
+class FunctionRelationshipFactsDict(TypedDict):
+    source_qualname: str
+    relationships: list[RelationshipRecordDict]
 
 
 UnitDict = FunctionGroupItem
@@ -201,17 +220,22 @@ class _FileEntryReportFacts(TypedDict, total=False):
     structural_findings: list[StructuralFindingGroupDict]
 
 
-class _FileEntryV27(
+class _FileEntryRelationshipFacts(TypedDict, total=False):
+    function_relationship_facts: list[FunctionRelationshipFactsDict]
+
+
+class _FileEntryV29(
     _FileEntryBase,
     _FileEntryAnalysisFacts,
     _FileEntryQualityFacts,
     _FileEntryReportFacts,
+    _FileEntryRelationshipFacts,
 ):
     pass
 
 
 CacheEntryBase = _FileEntryBase
-CacheEntry = _FileEntryV27
+CacheEntry = _FileEntryV29
 
 
 def _normalize_cached_structural_group(
@@ -283,6 +307,34 @@ def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
             return "medium"
         case "high":
             return "high"
+        case _:
+            return None
+
+
+def _as_relationship_kind(value: object) -> Literal["call", "reference"] | None:
+    match value:
+        case "call" | "reference":
+            return value
+        case _:
+            return None
+
+
+def _as_relationship_resolution_status(
+    value: object,
+) -> Literal["resolved", "unresolved"] | None:
+    match value:
+        case "resolved" | "unresolved":
+            return value
+        case _:
+            return None
+
+
+def _as_relationship_origin_lane(
+    value: object,
+) -> Literal["production", "test"] | None:
+    match value:
+        case "production" | "test":
+            return value
         case _:
             return None
 
@@ -418,6 +470,47 @@ def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
         terminal_kind=unit.terminal_kind,
         try_finally_profile=unit.try_finally_profile,
         side_effect_order_profile=unit.side_effect_order_profile,
+    )
+
+
+def _relationship_record_dict_from_model(
+    record: RelationshipRecord,
+    *,
+    source_qualname: str,
+    filepath: str,
+) -> RelationshipRecordDict:
+    if record.source_qualname != source_qualname:
+        raise ValueError(
+            "Relationship record source_qualname must match its facts container"
+        )
+    return RelationshipRecordDict(
+        relation_kind=record.relation_kind,
+        resolution_status=record.resolution_status,
+        origin_lane=record.origin_lane,
+        source_qualname=source_qualname,
+        target_qualname=record.target_qualname,
+        path=filepath,
+        line=record.line,
+        expression=record.expression,
+        resolution_rule=record.resolution_rule,
+    )
+
+
+def _function_relationship_facts_dict_from_model(
+    facts: FunctionRelationshipFacts,
+    *,
+    filepath: str,
+) -> FunctionRelationshipFactsDict:
+    return FunctionRelationshipFactsDict(
+        source_qualname=facts.source_qualname,
+        relationships=[
+            _relationship_record_dict_from_model(
+                record,
+                source_qualname=facts.source_qualname,
+                filepath=filepath,
+            )
+            for record in facts.relationships
+        ],
     )
 
 
@@ -627,11 +720,13 @@ __all__ = [
     "ClassMetricsDict",
     "DeadCandidateDict",
     "FileStat",
+    "FunctionRelationshipFactsDict",
     "ModuleApiSurfaceDict",
     "ModuleDepDict",
     "ModuleDocstringCoverageDict",
     "ModuleTypingCoverageDict",
     "PublicSymbolDict",
+    "RelationshipRecordDict",
     "RuntimeReachabilityFactDict",
     "SecuritySurfaceDict",
     "SegmentDict",
@@ -640,6 +735,9 @@ __all__ = [
     "StructuralFindingOccurrenceDict",
     "UnitDict",
     "_api_surface_dict_from_model",
+    "_as_relationship_kind",
+    "_as_relationship_origin_lane",
+    "_as_relationship_resolution_status",
     "_as_risk_literal",
     "_as_runtime_reachability_confidence",
     "_as_runtime_reachability_edge_kind",
@@ -653,10 +751,12 @@ __all__ = [
     "_class_metrics_dict_from_model",
     "_dead_candidate_dict_from_model",
     "_docstring_coverage_dict_from_model",
+    "_function_relationship_facts_dict_from_model",
     "_module_dep_dict_from_model",
     "_new_optional_metrics_payload",
     "_normalize_cached_structural_group",
     "_normalize_cached_structural_groups",
+    "_relationship_record_dict_from_model",
     "_runtime_reachability_dict_from_model",
     "_security_surface_dict_from_model",
     "_segment_dict_from_model",

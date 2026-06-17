@@ -1,0 +1,164 @@
+<!-- doc-scope: METRICS MODE AND QUALITY GATE FLAGS.
+     owns: gate flag definitions, threshold semantics, metrics-baseline contract.
+     does-not-own: health score formula (→ 15), dead-code rules (→ 17),
+       config keys (→ 10). -->
+
+# 16. Metrics and Quality Gates
+
+## Purpose
+
+Define metrics mode selection, metrics-baseline behavior, and gating semantics.
+
+## Public surface
+
+- Metrics mode wiring: `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
+- Main orchestration and exit routing: `codeclone/surfaces/cli/workflow.py:_main_impl`
+- Gate evaluation: `codeclone/report/gates/evaluator.py:metric_gate_reasons`,
+  `codeclone/core/reporting.py:gate`
+- Metrics baseline persistence/diff:
+  `codeclone/baseline/metrics_baseline.py:MetricsBaseline`
+
+## Data model
+
+Metrics gate inputs:
+
+- threshold gates:
+  `--fail-complexity`, `--fail-coupling`, `--fail-cohesion`, `--fail-health`
+- adoption threshold gates:
+  `--min-typing-coverage`, `--min-docstring-coverage`
+- current-run Cobertura coverage join:
+  `--coverage`, `--coverage-min`, `--fail-on-untested-hotspots`
+- boolean structural gates:
+  `--fail-cycles`, `--fail-dead-code`
+- baseline-aware delta gates:
+  `--fail-on-new-metrics`,
+  `--fail-on-typing-regression`,
+  `--fail-on-docstring-regression`,
+  `--fail-on-api-break`
+- baseline update:
+  `--update-metrics-baseline`
+- opt-in metrics family:
+  `--api-surface`
+
+Modes:
+
+- `analysis_mode=full`: metrics computed and suggestions enabled
+- `analysis_mode=clones_only`: metrics skipped
+
+Refs:
+
+- `codeclone/surfaces/cli/runtime.py:_metrics_flags_requested`
+- `codeclone/surfaces/cli/runtime.py:_metrics_computed`
+- `codeclone/surfaces/cli/report_meta.py:_build_report_meta`
+- `codeclone/metrics/health.py:compute_health`
+- `codeclone/contracts/__init__.py:HEALTH_WEIGHTS`
+
+## Contracts
+
+- `--skip-metrics` is incompatible with metrics gating/update flags.
+- If metrics are not explicitly requested and no metrics baseline exists, runtime may auto-enable clone-only mode.
+- In clone-only mode, dead-code and dependency analysis are skipped unless explicitly forced by gates.
+- There is currently no user-facing gate or config knob for `dependency_max_depth`;
+  dependency depth contributes to Health Score through the internal adaptive
+  model over `avg_depth`, `p95_depth`, and `max_depth` only.
+- `--coverage` is a current-run signal only; it does not update baseline state.
+- Invalid Cobertura XML becomes `coverage_join.status="invalid"` in normal runs and becomes a contract error only when
+  hotspot gating requires a valid join.
+- `--api-surface` is opt-in, but runtime auto-enables it when API break gating or metrics-baseline update needs it.
+- `--fail-on-new-metrics` requires a trusted metrics baseline unless baseline is being updated in the same run.
+- `--fail-on-typing-regression`, `--fail-on-docstring-regression`, and `--fail-on-api-break` require the corresponding
+  capability in the trusted metrics baseline.
+- In CI mode, if a trusted metrics baseline is loaded, runtime enables `fail_on_new_metrics=true`.
+
+Refs:
+
+- `codeclone/surfaces/cli/runtime.py:_configure_metrics_mode`
+- `codeclone/surfaces/cli/workflow.py:_main_impl`
+- `codeclone/baseline/metrics_baseline.py:MetricsBaseline.verify_compatibility`
+
+## Invariants (MUST)
+
+- Metrics diff is computed only when metrics were computed and metrics baseline is trusted.
+- Gate reasons are emitted in deterministic order.
+- Metric gate reasons are namespaced as `metric:*`.
+
+Refs:
+
+- `codeclone/report/gates/evaluator.py:metric_gate_reasons`
+- `codeclone/core/reporting.py:gate`
+
+## Failure modes
+
+| Condition                                                   | Behavior                             |
+|-------------------------------------------------------------|--------------------------------------|
+| `--skip-metrics` with metrics flags                         | Contract error, exit `2`             |
+| `--fail-on-new-metrics` without trusted baseline            | Contract error, exit `2`             |
+| Coverage/API regression gate without required baseline data | Contract error, exit `2`             |
+| Invalid Cobertura XML without hotspot gate                  | Current-run invalid signal, exit `0` |
+| Coverage hotspot gate without valid `--coverage` input      | Contract error, exit `2`             |
+| `--update-metrics-baseline` when metrics were not computed  | Contract error, exit `2`             |
+| Threshold breach or metrics regressions                     | Gating failure, exit `3`             |
+
+## Determinism / canonicalization
+
+- Metrics baseline snapshot fields are canonicalized and sorted where set-like.
+- Metrics payload hash uses canonical JSON and constant-time comparison.
+- Gate reason generation order is fixed by code path order.
+
+Refs:
+
+- `codeclone/baseline/_metrics_baseline_payload.py:snapshot_from_project_metrics`
+- `codeclone/baseline/_metrics_baseline_payload.py:_compute_payload_sha256`
+- `codeclone/baseline/metrics_baseline.py:MetricsBaseline.verify_integrity`
+
+## Locked by tests
+
+- `tests/test_cli_unit.py::test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags`
+- `tests/test_cli_unit.py::test_main_impl_rejects_update_metrics_baseline_when_metrics_skipped`
+- `tests/test_cli_unit.py::test_main_impl_fail_on_new_metrics_requires_existing_baseline`
+- `tests/test_cli_unit.py::test_main_impl_ci_enables_fail_on_new_metrics_when_metrics_baseline_loaded`
+- `tests/test_pipeline_metrics.py::test_metric_gate_reasons_collects_all_enabled_reasons`
+- `tests/test_pipeline_metrics.py::test_metric_gate_reasons_partial_new_metrics_paths`
+- `tests/test_metrics_baseline.py::test_metrics_baseline_embedded_clone_payload_and_schema_resolution`
+- `tests/test_metrics_modules.py::test_compute_lcom4_honors_ignored_methods`
+- `tests/test_extractor.py::test_extract_protocol_class_excludes_stub_methods_from_lcom4`
+- `tests/test_extractor.py::test_extract_pydantic_cohesion_exclusions`
+
+## LCOM4 cohesion applicability
+
+LCOM4 measures connected components over instance-behavior methods in a class cohesion
+graph. Starting in `2.1.0`, the graph excludes declaration surfaces that do not carry
+instance-level behavioral cohesion:
+
+- **Protocol classes** — when a class inherits from `typing.Protocol` /
+  `typing_extensions.Protocol` (including module aliases), all of its methods are
+  excluded from the LCOM4 graph. The whole class is an interface surface, not a
+  behavior cluster.
+- **Pydantic validation/serialization hooks** — methods decorated with Pydantic
+  validator/serializer hooks resolved from `pydantic` / `pydantic.v1` imports or module
+  aliases are excluded: `field_validator`, `model_validator`, `root_validator`,
+  `validator`, `field_serializer`, and `model_serializer`.
+- **`computed_field` is not excluded** — it commonly reads `self.*` and participates in
+  real object cohesion, so it stays in the graph.
+
+Reporting stays honest:
+
+- `method_count` on class metrics still reflects all methods on the class.
+- Only the LCOM4 graph and component count use the analyzed subset.
+- When one or zero analyzed methods remain, LCOM4 collapses to `1` (no penalty).
+
+Interactive CLI runs may show a one-time migration note when a trusted baseline was
+generated by `2.0.2` and the current CodeClone version is `2.1.0` or newer; see
+[CLI](11-cli.md) tips.
+
+Refs:
+
+- `codeclone/metrics/cohesion.py:compute_lcom4`
+- `codeclone/analysis/_module_walk.py:_cohesion_ignored_method_names`
+- `codeclone/analysis/class_metrics.py:_class_metrics_for_node`
+- `codeclone/surfaces/cli/tips.py:maybe_print_cohesion_lcom4_migration_note`
+
+## Non-guarantees
+
+- Absolute threshold defaults are not frozen by this chapter.
+- Metrics scoring internals may evolve if exit semantics and contract statuses stay stable and are documented honestly.

@@ -574,6 +574,29 @@ def test_cfg_try_star() -> None:
     assert len(cfg.blocks) >= 3
 
 
+def test_cfg_try_star_branch_with_distinct_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.analysis.cfg as cfg_module
+
+    class _DistinctTryStar:
+        def __init__(self) -> None:
+            self.body: list[ast.stmt] = [ast.Pass()]
+            self.handlers: list[ast.ExceptHandler] = []
+            self.orelse: list[ast.stmt] = []
+            self.finalbody: list[ast.stmt] = []
+
+    monkeypatch.setattr(cfg_module, "TryStar", _DistinctTryStar)
+    from codeclone.analysis.cfg_model import CFG
+
+    node = _DistinctTryStar()
+    builder = CFGBuilder()
+    builder.cfg = CFG("f")
+    builder.current = builder.cfg.entry
+    builder._visit(node)  # type: ignore[arg-type]
+    assert len(builder.cfg.blocks) >= 2
+
+
 def test_cfg_match_pattern() -> None:
     """Test that match pattern is recorded in CFG."""
     code = """

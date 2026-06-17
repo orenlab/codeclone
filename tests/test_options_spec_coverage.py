@@ -1,3 +1,8 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
 import re
@@ -28,6 +33,8 @@ def _cli_sample(option: OptionSpec) -> tuple[tuple[str, ...], object]:
         return ((option.flags[0],), False)
     if option.value_type is int:
         return ((option.flags[0], "7"), 7)
+    if option.nargs == "+":
+        return ((option.flags[0], "sample-value"), ["sample-value"])
     return ((option.flags[0], "sample-value"), "sample-value")
 
 
@@ -112,8 +119,12 @@ def test_option_specs_have_pyproject_loading_coverage(
 
 
 def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
-    text = Path("docs/book/04-config-and-defaults.md").read_text(encoding="utf-8")
-    documented = set(re.findall(r"^\| `([a-z0-9_]+)`\s+\|", text, re.MULTILINE))
+    text = Path("docs/book/10-config-and-defaults.md").read_text(encoding="utf-8")
+    # Scope to the core [tool.codeclone] table; the "Engineering Memory (nested
+    # tables)" section below documents the separate [tool.codeclone.memory*]
+    # namespace, which the doc itself marks as not part of the root key set.
+    core_section = text.split("### Engineering Memory (nested tables)", 1)[0]
+    documented = set(re.findall(r"^\| `([a-z0-9_]+)`\s+\|", core_section, re.MULTILINE))
     declared = {
         option.pyproject_key
         for option in PYPROJECT_OPTIONS
@@ -124,6 +135,6 @@ def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
 
 
 def test_config_defaults_doc_explains_coverage_pyproject_to_cli_mapping() -> None:
-    text = Path("docs/book/04-config-and-defaults.md").read_text(encoding="utf-8")
+    text = Path("docs/book/10-config-and-defaults.md").read_text(encoding="utf-8")
     assert "`coverage_xml` is the `[tool.codeclone]` key" in text
     assert "`--coverage FILE`" in text

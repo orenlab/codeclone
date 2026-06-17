@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from ...baseline.metrics_baseline import probe_metrics_baseline_section
 from . import _session_helpers as _helpers
+from ._blast_radius import BlastRadiusResult
+from ._intent import IntentRecord
 from ._session_baseline import (
     CloneBaselineState,
     MetricsBaselineState,
@@ -20,6 +22,7 @@ from ._session_shared import (
     _HEALTH_SCOPE_REPOSITORY,
     _HELP_TOPIC_SPECS,
     _MCP_CONFIG_KEYS,
+    _MCP_GOVERNANCE_CONFIG_KEYS,
     _METRICS_DETAIL_FAMILY_ALIASES,
     _VALID_COMPARISON_FOCUS,
     _VALID_HELP_DETAILS,
@@ -53,6 +56,7 @@ from ._session_shared import (
     Mapping,
     MCPAnalysisRequest,
     MCPGateRequest,
+    MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
     MetricGateConfig,
@@ -71,6 +75,8 @@ from ._session_shared import (
     load_pyproject_config,
     paginate,
 )
+from ._workspace_drift import compute_drift
+from ._workspace_intents import remove_workspace_intent
 
 
 class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
@@ -79,6 +85,9 @@ class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
+    _active_intents: dict[str, IntentRecord]
+    _agent_pid: int
+    _agent_start_epoch: int
 
     def _build_changed_projection(
         self,
@@ -229,16 +238,23 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             debug=False,
             open_html_report=False,
             timestamped_report_paths=False,
+            allow_external_artifacts=request.allow_external_artifacts,
         )
+        try:
+            config_values = load_pyproject_config(root_path)
+        except ConfigValidationError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
         if request.respect_pyproject:
-            try:
-                config_values = load_pyproject_config(root_path)
-            except ConfigValidationError as exc:
-                raise MCPServiceContractError(str(exc)) from exc
-            for key in sorted(_MCP_CONFIG_KEYS.intersection(config_values)):
-                setattr(args, key, config_values[key])
+            config_keys = _MCP_CONFIG_KEYS
+        else:
+            config_keys = _MCP_GOVERNANCE_CONFIG_KEYS
+        for key in sorted(config_keys.intersection(config_values)):
+            setattr(args, key, config_values[key])
 
         self._apply_request_overrides(args=args, root_path=root_path, request=request)
+
+        if isinstance(args.processes, int):
+            args.processes = _helpers._cap_mcp_process_count(args.processes)
 
         if request.analysis_mode == "clones_only":
             args.skip_metrics = True
@@ -286,22 +302,36 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
 
         if request.baseline_path is not None:
             args.baseline = str(
-                _helpers._resolve_optional_path(request.baseline_path, root_path)
+                _helpers._resolve_optional_path(
+                    request.baseline_path,
+                    root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
+                )
             )
         if request.metrics_baseline_path is not None:
             args.metrics_baseline = str(
                 _helpers._resolve_optional_path(
                     request.metrics_baseline_path,
                     root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
         if request.cache_path is not None:
             args.cache_path = str(
-                _helpers._resolve_optional_path(request.cache_path, root_path)
+                _helpers._resolve_optional_path(
+                    request.cache_path,
+                    root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
+                )
             )
         if request.coverage_xml is not None:
             args.coverage_xml = str(
-                _helpers._resolve_optional_path(request.coverage_xml, root_path)
+                _helpers._resolve_optional_path(
+                    request.coverage_xml,
+                    root_path,
+                    allow_external_artifacts=request.allow_external_artifacts,
+                    allow_repo_absolute=True,
+                )
             )
 
     def _resolve_baseline_inputs(
@@ -310,12 +340,22 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         root_path: Path,
         args: Namespace,
     ) -> tuple[Path, bool, Path, bool, dict[str, object] | None]:
-        baseline_path = _helpers._resolve_optional_path(str(args.baseline), root_path)
+        allow_external_artifacts = bool(
+            getattr(args, "allow_external_artifacts", False)
+        )
+        baseline_path = _helpers._resolve_optional_path(
+            str(args.baseline),
+            root_path,
+            allow_external_artifacts=allow_external_artifacts,
+            allow_repo_absolute=True,
+        )
         baseline_exists = baseline_path.exists()
 
         metrics_baseline_arg_path = _helpers._resolve_optional_path(
             str(args.metrics_baseline),
             root_path,
+            allow_external_artifacts=allow_external_artifacts,
+            allow_repo_absolute=True,
         )
         shared_baseline_payload: dict[str, object] | None = None
         if metrics_baseline_arg_path == baseline_path:
@@ -383,6 +423,7 @@ class _MCPSessionRunSummaryBuilderMixin(_MCPSessionAnalysisArgsMixin):
             "resolved_findings": 0,
             "changed_findings": [],
             "coverage_join": _helpers._summary_coverage_join_payload(record),
+            "next_tool": "get_report_section",
         }
 
     def _build_run_summary_payload(
@@ -533,6 +574,10 @@ class _MCPSessionSummaryMixin(_MCPSessionRunSummaryBuilderMixin):
             security_surfaces = _helpers._summary_security_surfaces_payload(record)
             if security_surfaces:
                 payload["security_surfaces"] = security_surfaces
+            payload["drifted_files"] = list(compute_drift(record).drifted_files)
+        payload["next_tool"] = "get_production_triage"
+        if record is not None:
+            _helpers.attach_workspace_hygiene_tips(payload, root=record.root)
         return payload
 
     def _summary_baseline_payload(
@@ -782,6 +827,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
+    _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
+    _active_intents: dict[str, IntentRecord]
+    _intent_sequence: int
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
         record = self._runs.get(request.run_id)
@@ -1008,6 +1056,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         security_surfaces = _helpers._summary_security_surfaces_payload(record)
         if security_surfaces:
             payload["security_surfaces"] = security_surfaces
+        _helpers.attach_workspace_hygiene_tips(payload, root=record.root)
         return payload
 
     def get_help(
@@ -1033,12 +1082,39 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 {"title": title, "url": url} for title, url in spec.doc_links
             ],
         }
-        if validated_detail == "normal":
-            if spec.warnings:
-                payload["warnings"] = list(spec.warnings)
-            if spec.anti_patterns:
-                payload["anti_patterns"] = list(spec.anti_patterns)
+        if spec.anti_patterns:
+            payload["anti_patterns"] = list(spec.anti_patterns)
+        if validated_detail == "normal" and spec.warnings:
+            payload["warnings"] = list(spec.warnings)
         return payload
+
+    def query_platform_observability(
+        self,
+        *,
+        root: str,
+        section: str,
+        detail_level: str = "compact",
+        limit: int = 10,
+        window: str = "latest",
+        operation_id: str | None = None,
+        span_id: str | None = None,
+    ) -> dict[str, object]:
+        # Dev-only telemetry slicer; read-only, never touches analysis/memory/
+        # audit state. Local import keeps the MCP session import-light and avoids
+        # shadowing this method name.
+        from ...observability.query import (
+            query_platform_observability as _query_observability,
+        )
+
+        return _query_observability(
+            root=root,
+            section=section,
+            detail_level=detail_level,
+            limit=limit,
+            window=window,
+            operation_id=operation_id,
+            span_id=span_id,
+        )
 
     def generate_pr_summary(
         self,
@@ -1109,6 +1185,15 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         }
 
     def clear_session_runs(self) -> dict[str, object]:
+        workspace_targets: list[tuple[Path, str]] = []
+        with self._state_lock:
+            intent_snapshot = tuple(self._active_intents.values())
+        for intent in intent_snapshot:
+            try:
+                record = self._runs.get(intent.run_id)
+            except (MCPRunNotFoundError, MCPServiceContractError):
+                continue
+            workspace_targets.append((record.root, intent.intent_id))
         removed_run_ids = self._runs.clear()
         with self._state_lock:
             cleared_review_entries = sum(
@@ -1116,9 +1201,25 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             )
             cleared_gate_results = len(self._last_gate_results)
             cleared_spread_cache_entries = len(self._spread_max_cache)
+            cleared_blast_radius_entries = len(self._blast_radius_cache)
+            cleared_intents = len(self._active_intents)
             self._review_state.clear()
             self._last_gate_results.clear()
             self._spread_max_cache.clear()
+            self._blast_radius_cache.clear()
+            self._active_intents.clear()
+            self._intent_sequence = 0
+        workspace_cleared = True
+        for root_path, intent_id in workspace_targets:
+            workspace_cleared = (
+                remove_workspace_intent(
+                    root=root_path,
+                    pid=self._agent_pid,
+                    start_epoch=self._agent_start_epoch,
+                    intent_id=intent_id,
+                )
+                and workspace_cleared
+            )
         return {
             "cleared_runs": len(removed_run_ids),
             "cleared_run_ids": [
@@ -1127,6 +1228,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             "cleared_review_entries": cleared_review_entries,
             "cleared_gate_results": cleared_gate_results,
             "cleared_spread_cache_entries": cleared_spread_cache_entries,
+            "cleared_blast_radius_entries": cleared_blast_radius_entries,
+            "cleared_intents": cleared_intents,
+            "workspace_cleared": workspace_cleared,
         }
 
     def read_resource(self, uri: str) -> str:
@@ -1139,7 +1243,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
             latest = self._runs.get()
-            suffix = uri[len(latest_prefix) :]
+            suffix = _helpers._validate_resource_suffix(uri[len(latest_prefix) :])
             return self._render_resource(latest, suffix)
         if not uri.startswith(run_prefix):
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
@@ -1147,6 +1251,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         run_id, sep, suffix = remainder.partition("/")
         if not sep:
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
+        suffix = _helpers._validate_resource_suffix(suffix)
         record = self._runs.get(run_id)
         return self._render_resource(record, suffix)
 
@@ -1209,3 +1314,17 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 ]
                 for run_id in stale_run_ids:
                     state_map.pop(run_id, None)
+            stale_blast_radius_keys = [
+                cache_key
+                for cache_key in self._blast_radius_cache
+                if cache_key[0] not in active_run_ids
+            ]
+            for cache_key in stale_blast_radius_keys:
+                self._blast_radius_cache.pop(cache_key, None)
+            stale_intent_ids = [
+                intent_id
+                for intent_id, intent in self._active_intents.items()
+                if intent.run_id not in active_run_ids
+            ]
+            for intent_id in stale_intent_ids:
+                self._active_intents.pop(intent_id, None)

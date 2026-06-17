@@ -11,6 +11,7 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
+from typing import TypeVar
 
 from rich.console import Console as RichConsole
 from rich.progress import (
@@ -29,10 +30,63 @@ from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
 from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.reporting import GatingResult
 from ...models import MetricsDiff
+from ...observability import SpanHandle, is_observability_enabled, span
 from . import state as cli_state
 from .attrs import bool_attr
 from .console import PlainConsole
 from .types import require_status_console
+
+
+def _save_cache_after_analysis(
+    *,
+    cache: Cache,
+    analysis_result: AnalysisResult,
+    cache_update_segment_projection_fn: Callable[[Cache, AnalysisResult], None],
+    printer: object,
+) -> None:
+    cache_update_segment_projection_fn(cache, analysis_result)
+    try:
+        cache.save()
+    except CacheError as exc:
+        require_status_console(printer).print(
+            ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc))
+        )
+
+
+_StageT = TypeVar("_StageT")
+
+
+def _traced_stage(
+    name: str,
+    stage_fn: Callable[..., _StageT],
+    counters: Callable[[SpanHandle, _StageT], None] | None,
+) -> Callable[..., _StageT]:
+    """Wrap a pipeline stage callable so each invocation records a span.
+
+    Stage-level only (never per-file). Inert with no overhead when
+    observability is disabled — ``span`` yields an inert handle.
+    """
+
+    def traced(**kwargs: object) -> _StageT:
+        with span(name=name) as stage_span:
+            result = stage_fn(**kwargs)
+            # Only read result fields for counters when actually recording —
+            # keeps the disabled path zero-work and tolerant of stub results.
+            if counters is not None and is_observability_enabled():
+                counters(stage_span, result)
+            return result
+
+    return traced
+
+
+def _discover_counters(stage_span: SpanHandle, result: DiscoveryResult) -> None:
+    stage_span.set_counter("files_to_process", len(result.files_to_process))
+    stage_span.set_counter("cache_hits", result.cache_hits)
+
+
+def _process_counters(stage_span: SpanHandle, result: PipelineProcessingResult) -> None:
+    stage_span.set_counter("files_analyzed", result.files_analyzed)
+    stage_span.set_counter("failed_files", len(result.failed_files))
 
 
 def run_analysis_stages(
@@ -56,6 +110,10 @@ def run_analysis_stages(
         ],
     ],
 ) -> tuple[DiscoveryResult, PipelineProcessingResult, AnalysisResult]:
+    discover_fn = _traced_stage("pipeline.discover", discover_fn, _discover_counters)
+    process_fn = _traced_stage("pipeline.process", process_fn, _process_counters)
+    analyze_fn = _traced_stage("pipeline.analyze", analyze_fn, None)
+
     def _require_rich_console(value: object) -> RichConsole:
         if isinstance(value, PlainConsole):
             raise RuntimeError("Rich console is required when progress UI is enabled.")
@@ -65,6 +123,9 @@ def run_analysis_stages(
 
     printer = require_status_console(cli_state.get_console())
     use_status = not bool_attr(args, "quiet") and not bool_attr(args, "no_progress")
+    write_cache = not (
+        bool_attr(args, "blast_radius") or bool_attr(args, "patch_verify")
+    )
 
     try:
         if use_status:
@@ -154,22 +215,26 @@ def run_analysis_stages(
                 discovery=discovery_result,
                 processing=processing_result,
             )
-            cache_update_segment_projection_fn(cache, analysis_result)
-            try:
-                cache.save()
-            except CacheError as exc:
-                printer.print(ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc)))
+            if write_cache:
+                _save_cache_after_analysis(
+                    cache=cache,
+                    analysis_result=analysis_result,
+                    cache_update_segment_projection_fn=cache_update_segment_projection_fn,
+                    printer=printer,
+                )
     else:
         analysis_result = analyze_fn(
             boot=boot,
             discovery=discovery_result,
             processing=processing_result,
         )
-        cache_update_segment_projection_fn(cache, analysis_result)
-        try:
-            cache.save()
-        except CacheError as exc:
-            printer.print(ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc)))
+        if write_cache:
+            _save_cache_after_analysis(
+                cache=cache,
+                analysis_result=analysis_result,
+                cache_update_segment_projection_fn=cache_update_segment_projection_fn,
+                printer=printer,
+            )
 
     coverage_join = getattr(analysis_result, "coverage_join", None)
     if (

@@ -1,0 +1,56 @@
+---
+description: "CodeClone MCP integration rules — how to use the structural analysis server correctly"
+alwaysApply: true
+---
+
+# CodeClone MCP Rules
+
+You have access to CodeClone through the local CodeClone MCP server.
+
+## General rules
+
+- Use MCP tools only. Do not fall back to CLI or local report files.
+- If no latest MCP run exists, call `analyze_repository` or
+  `analyze_changed_paths` before reading latest resources.
+- Start with the default analysis profile.
+- Prefer `get_production_triage` after analysis.
+- After analysis, use `get_implementation_context` for bounded pre-edit context;
+  call `help(topic="implementation_context")` when facet or mode semantics are unclear.
+- Use `analyze_changed_paths` for diffs.
+- Use `get_report_section(section="metrics")` for adoption, API, and
+  coverage facts.
+- Call `help(topic="coverage")` when external coverage semantics matter.
+- Never fall back to CLI, local report files, or repository mutation.
+- CodeClone is the source of truth — do not reinterpret findings.
+- Pass absolute `root` to analysis tools; MCP rejects relative roots.
+- Engineering Memory tools require absolute `root` plus a scope selector:
+  `get_relevant_memory(root=abs, scope=... | intent_id=... | symbols=...)`.
+
+## Tool preferences
+
+- Prefer `list_hotspots` or `check_*` before broad `list_findings`.
+- Use `get_finding` or `get_remediation` for one finding.
+- Use `source_kind` filters to cut test noise.
+- After `start_controlled_change` with `edit_allowed=true`, call
+  `get_relevant_memory(root=abs, scope=... or intent_id=...)` before editing
+  scoped Python work, then `get_implementation_context(root=abs, paths=...,
+  intent_id=...)` for bundled structural and safety context
+  (`codeclone-implementation-context` skill).
+- If implementation context reports `freshness.status=drifted`, do not re-analyze
+  in a loop — verify critical facts against source files; re-analyze once before
+  `finish` when the profile requires after-run evidence.
+- Use `help(topic="engineering_memory")` when memory workflow is unclear.
+
+## Change control
+
+**Hard gate:** follow the always-on rule `change-control-gate` before any file
+write and before claiming the task is complete.
+
+Details: `codeclone-change-control` skill (profiles, queue/promote, atomic
+fallback) and `codeclone-engineering-memory` skill (retrieval, drafts, human
+approve boundaries).
+
+Before `finish_controlled_change`, if the cycle had an incident, non-trivial
+complexity, or a decision worth keeping: call
+`manage_engineering_memory(action=record_candidate, …)` — chat text does not
+persist in Engineering Memory.

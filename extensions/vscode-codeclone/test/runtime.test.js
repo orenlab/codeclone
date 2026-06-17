@@ -47,10 +47,10 @@ test("resolveCoverageXmlPath keeps coverage input workspace-local and auto-detec
     const coverageXml = path.join(root, "coverage.xml");
     fs.writeFileSync(coverageXml, "<coverage />\n");
 
-    assert.equal(await resolveCoverageXmlPath(root, "", true), coverageXml);
+    assert.equal(await resolveCoverageXmlPath(root, "", true), "coverage.xml");
     assert.equal(
         await resolveCoverageXmlPath(root, "reports/coverage.xml", true, async () => false),
-        path.join(root, "reports", "coverage.xml")
+        "reports/coverage.xml"
     );
     assert.equal(await resolveCoverageXmlPath(root, "", false), null);
     assert.equal(await resolveCoverageXmlPath(root, "../coverage.xml", true), null);

@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import TracebackType
 from typing import Protocol
 
+from ...utils.repo_paths import RepoPathError, RepoPathPolicy, resolve_under_repo_root
 from . import _session_helpers as _helpers
 from ._session_shared import (
     _CHECK_TO_DIMENSION,
@@ -71,6 +72,34 @@ class _StateLock(Protocol):
     ) -> bool | None: ...
 
 
+def _safe_location_path(
+    *,
+    root: Path,
+    raw_path: str,
+) -> tuple[str, Path] | None:
+    try:
+        relative_path = _helpers._normalize_relative_path(raw_path)
+        if not relative_path:
+            return None
+        absolute_path = resolve_under_repo_root(
+            root,
+            relative_path,
+            policy=RepoPathPolicy(),
+        )
+    except (MCPServiceContractError, RepoPathError):
+        return None
+    return relative_path, absolute_path
+
+
+def _validate_run_root(record: MCPRunRecord, root_path: Path | None) -> None:
+    if root_path is None or record.root.resolve() == root_path.resolve():
+        return
+    raise MCPServiceContractError(
+        "Selected MCP run does not belong to the supplied root. "
+        f"Run root: {record.root}; requested root: {root_path}."
+    )
+
+
 class _MCPSessionFindingMixin:
     _runs: CodeCloneMCPRunStore
     _state_lock: _StateLock
@@ -89,11 +118,6 @@ class _MCPSessionFindingMixin:
             request.cache_policy,
             _VALID_CACHE_POLICIES,
         )
-        if request.cache_policy == "refresh":
-            raise MCPServiceContractError(
-                "cache_policy='refresh' is not supported by the read-only "
-                "CodeClone MCP server. Use 'reuse' or 'off'."
-            )
         if request.analysis_mode == "clones_only" and request.coverage_xml is not None:
             raise MCPServiceContractError(
                 "coverage_xml requires analysis_mode='full' because coverage join "
@@ -210,6 +234,7 @@ class _MCPSessionFindingMixin:
     ) -> MCPRunRecord:
         if run_id is not None:
             record = self._runs.get(run_id)
+            _validate_run_root(record, self._resolve_optional_root(root))
             if _helpers._record_supports_analysis_mode(
                 record,
                 analysis_mode=analysis_mode,
@@ -737,9 +762,13 @@ class _MCPSessionFindingMixin:
         locations: list[dict[str, object]] = []
         for item in _helpers._as_sequence(finding.get("items")):
             item_map = _helpers._as_mapping(item)
-            relative_path = str(item_map.get("relative_path", "")).strip()
-            if not relative_path:
+            resolved_location = _safe_location_path(
+                root=record.root,
+                raw_path=str(item_map.get("relative_path", "")),
+            )
+            if resolved_location is None:
                 continue
+            relative_path, absolute_path = resolved_location
             line = _as_int(item_map.get("start_line", 0) or 0, 0)
             end_line = _as_int(item_map.get("end_line", 0) or 0, 0)
             symbol = str(item_map.get("qualname", item_map.get("module", ""))).strip()
@@ -750,7 +779,6 @@ class _MCPSessionFindingMixin:
                 "symbol": symbol,
             }
             if include_uri:
-                absolute_path = (record.root / relative_path).resolve()
                 uri = absolute_path.as_uri()
                 if line > 0:
                     uri = f"{uri}#L{line}"

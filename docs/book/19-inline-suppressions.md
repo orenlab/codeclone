@@ -1,3 +1,7 @@
+<!-- doc-scope: INLINE SUPPRESSIONS contract (# codeclone: ignore[...]).
+     owns: suppression syntax, rule catalog, scope semantics, finding interaction.
+     does-not-own: dead-code rules (→ 17), report schema (→ 05). -->
+
 # 19. Inline Suppressions
 
 ## Purpose
@@ -36,12 +40,15 @@ Refs:
         - same-line single-line declaration
         - first line of a multiline declaration header
         - closing header line containing `:`
-- Current supported dead-code rule id: `dead-code`.
+- Parsed rule ids: `dead-code`, `clone-cohort-drift`, `clone-guard-exit-divergence`.
+  Only `dead-code` has a runtime effect today. Clone rule ids are reserved:
+  they parse and bind like other rule ids but do not suppress clone findings.
 - Rule list supports comma-separated values and deduplicates deterministically.
 - Suppression applies only to declaration targets (`def`, `async def`, `class`).
 - Suppression is target-scoped:
   class-level suppression does not implicitly suppress unrelated methods.
-- Dead-code suppression is applied in final liveness filtering by rule id.
+- Dead-code suppression is applied in final liveness filtering by rule id
+  (`codeclone/metrics/dead_code.py:find_unused`).
 - Suppressed dead-code candidates are reported separately (not as active
   findings) with deterministic suppression metadata in report metrics.
 
@@ -54,13 +61,14 @@ Refs:
 
 ## Failure modes
 
-| Condition                                         | Behavior                            |
-|---------------------------------------------------|-------------------------------------|
-| malformed `# codeclone: ignore[...]` payload      | ignored silently                    |
-| unknown `codeclone[...]` rule id                  | ignored silently                    |
-| suppression on non-declaration line               | ignored silently                    |
-| duplicate rule ids in one directive               | deduplicated deterministically      |
-| suppression rule mismatch (`dead-code` vs others) | does not suppress dead-code finding |
+| Condition                                         | Behavior                             |
+|---------------------------------------------------|--------------------------------------|
+| malformed `# codeclone: ignore[...]` payload      | ignored silently                     |
+| unknown `codeclone[...]` rule id                  | ignored silently                     |
+| suppression on non-declaration line               | ignored silently                     |
+| duplicate rule ids in one directive               | deduplicated deterministically       |
+| non-`dead-code` rule id on a declaration          | parsed/bound only; no finding effect |
+| suppression rule mismatch (`dead-code` vs others) | does not suppress dead-code finding  |
 
 ## Determinism / canonicalization
 
@@ -85,11 +93,18 @@ Refs:
 - `tests/test_suppressions.py::test_extract_suppression_directives_supports_inline_and_leading_forms`
 - `tests/test_suppressions.py::test_extract_suppression_directives_ignores_invalid_forms[unknown_and_malformed]`
 - `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[adjacent_leading_only]`
-- `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[class_inline_does_not_propagate]`
+-
+
+`tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[class_inline_does_not_propagate]`
+
 - `tests/test_suppressions.py::test_bind_suppressions_targets_expected_declaration_scope[method_target]`
 - `tests/test_suppressions.py::test_build_suppression_index_deduplicates_rules_stably`
-- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
-- `tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
+-
+
+`tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[inline_suppression_per_declaration]`
+-
+`tests/test_extractor.py::test_dead_code_respects_runtime_hooks_and_inline_suppressions[suppression_binding_scoped_to_target]`
+
 - `tests/test_metrics_modules.py::test_find_unused_applies_inline_dead_code_suppression`
 - `tests/test_metrics_modules.py::test_find_suppressed_unused_returns_actionable_suppressed_candidates`
 - `tests/test_report.py::test_report_json_dead_code_suppressed_items_are_reported_separately`
@@ -103,5 +118,5 @@ Refs:
 
 ## See also
 
-- [16-dead-code-contract.md](16-dead-code-contract.md)
-- [08-report.md](08-report.md)
+- [17-dead-code-contract.md](17-dead-code-contract.md)
+- [05-report.md](05-report.md)

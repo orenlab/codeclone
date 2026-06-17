@@ -1,3 +1,8 @@
+<!-- doc-scope: TERMS OF USE — legal content.
+     owns: terms of use text.
+     does-not-own: MCP read-only contract (→ book/25), security model (→ book/21).
+     rule: cross-link to contracts, do not restate them. -->
+
 # Terms of Use
 
 These terms describe the intended operational and integration boundaries of
@@ -33,13 +38,15 @@ Integrations:
 
 CodeClone integrations do not modify or replace the security, account,
 privacy, or usage policies of third-party host applications such as
-Claude Desktop, Codex, VS Code, Anthropic services, or OpenAI services.
+Claude Desktop, Claude Code, Codex, Cursor, VS Code, Anthropic services, or
+OpenAI services.
 
 Those platforms remain governed by their own applicable terms and policies.
 
 ## MCP and automation surfaces
 
-The MCP interface is read-only by contract.
+The MCP interface is read-only by contract with respect to source files,
+baselines, analysis cache, and canonical report artifacts.
 
 CodeClone MCP integrations are intended for deterministic structural analysis,
 review, and triage workflows. They expose canonical findings, metrics, and
@@ -48,8 +55,14 @@ review data, but do not mutate:
 - source files
 - git history
 - baselines
-- repository state
+- analysis cache or canonical report artifacts
 - CI configuration
+
+Ephemeral controller coordination (workspace intent registry: file backend under
+`.codeclone/intents/`, or SQLite under `.codeclone/db/intents.sqlite3`
+when configured) and optional audit trail
+(`.codeclone/db/audit.sqlite3` when `audit_enabled=true`) are the only
+allowed repo-local writes.
 
 Remote, shared, or network-exposed MCP deployments are the responsibility of
 the operator securing and governing those environments.

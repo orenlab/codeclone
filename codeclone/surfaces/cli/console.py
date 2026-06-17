@@ -9,11 +9,12 @@ from __future__ import annotations
 import os
 import re
 import sys
+import types
 from collections.abc import Mapping, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -23,12 +24,15 @@ from .types import CLIArgsLike, PrinterLike, StatusConsole, require_status_conso
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
+    from rich.panel import Panel as RichPanel
     from rich.progress import BarColumn as RichBarColumn
     from rich.progress import Progress as RichProgress
     from rich.progress import SpinnerColumn as RichSpinnerColumn
     from rich.progress import TextColumn as RichTextColumn
     from rich.progress import TimeElapsedColumn as RichTimeElapsedColumn
     from rich.rule import Rule as RichRule
+    from rich.table import Table as RichTable
+    from rich.text import Text as RichText
     from rich.theme import Theme as RichTheme
 
 _RICH_THEME_STYLES: dict[str, str] = {
@@ -44,14 +48,17 @@ _RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
 class PlainConsole:
     """Lightweight console for quiet/no-progress mode."""
 
-    @staticmethod
     def print(
+        self,
         *objects: object,
-        sep: str = " ",
-        end: str = "\n",
-        markup: bool = True,
-        **_: object,
+        **kwargs: object,
     ) -> None:
+        sep_obj = kwargs.get("sep", " ")
+        end_obj = kwargs.get("end", "\n")
+        markup_obj = kwargs.get("markup", True)
+        sep = sep_obj if isinstance(sep_obj, str) else " "
+        end = end_obj if isinstance(end_obj, str) else "\n"
+        markup = markup_obj if isinstance(markup_obj, bool) else True
         text = sep.join(str(obj) for obj in objects)
         if markup:
             text = _RICH_MARKUP_TAG_RE.sub("", text)
@@ -100,6 +107,39 @@ def make_console(*, no_color: bool, width: int) -> RichConsole:
         theme=theme_cls(_RICH_THEME_STYLES),
         no_color=no_color,
         width=width,
+    )
+
+
+def supports_rich_console(console: PrinterLike) -> bool:
+    return console.__class__.__module__.startswith("rich.")
+
+
+@lru_cache(maxsize=1)
+def rich_panel_symbols() -> tuple[
+    types.ModuleType,
+    type[RichPanel],
+    type[RichRule],
+    type[RichTable],
+    type[RichText],
+]:
+    from rich import box
+    from rich.panel import Panel
+    from rich.rule import Rule
+    from rich.table import Table
+    from rich.text import Text
+
+    return box, Panel, Rule, Table, Text
+
+
+def make_query_console(*, no_color: bool | None = None) -> PrinterLike:
+    resolved_no_color = (
+        bool(os.environ.get("NO_COLOR")) or not sys.stdout.isatty()
+        if no_color is None
+        else no_color
+    )
+    return cast(
+        PrinterLike,
+        make_console(no_color=resolved_no_color, width=ui.CLI_AUDIT_MAX_WIDTH),
     )
 
 

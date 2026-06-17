@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "hooks": {
+    "preToolUse": [
+      {
+        "command": "python \"${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py\" pre-tool-use-gate",
+        "type": "command",
+        "timeout": 5,
+        "matcher": "Write|StrReplace|ApplyPatch|Shell",
+        "failClosed": true
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "python \"${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py\" post-tool-use",
+        "type": "command",
+        "timeout": 5,
+        "matcher": "Write|StrReplace|ApplyPatch"
+      }
+    ],
+    "stop": [
+      {
+        "command": "python \"${CURSOR_PLUGIN_ROOT}/hooks/run_hook.py\" session-cleanup",
+        "type": "command",
+        "timeout": 5,
+        "loop_limit": 1
+      }
+    ]
+  }
+}

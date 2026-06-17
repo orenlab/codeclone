@@ -1,11 +1,11 @@
 {
+  "codeclone_exports": [
+    "__version__"
+  ],
   "main_exports": [
     "main"
   ],
   "main_signature": "() -> 'None'",
-  "codeclone_exports": [
-    "__version__"
-  ],
   "mcp_service_public_methods": [
     {
       "name": "analyze_changed_paths",
@@ -36,6 +36,10 @@
       "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, min_severity: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
     },
     {
+      "name": "check_patch_contract",
+      "signature": "(self, *, mode: 'str', run_id: 'str | None' = None, before_run_id: 'str | None' = None, after_run_id: 'str | None' = None, intent_id: 'str | None' = None, strictness: 'str' = 'ci', diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "clear_session_runs",
       "signature": "(self) -> 'dict[str, object]'"
     },
@@ -44,12 +48,32 @@
       "signature": "(self, *, run_id_before: 'str', run_id_after: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
     },
     {
+      "name": "create_review_receipt",
+      "signature": "(self, *, run_id: 'str | None' = None, intent_id: 'str | None' = None, format: 'str' = 'markdown', include_blast_radius: 'bool' = True, include_patch_contract: 'bool' = True) -> 'dict[str, object]'"
+    },
+    {
       "name": "evaluate_gates",
       "signature": "(self, request: 'MCPGateRequest') -> 'dict[str, object]'"
     },
     {
+      "name": "finish_controlled_change",
+      "signature": "(self, *, intent_id: 'str', changed_files: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, after_run_id: 'str | None' = None, review_text: 'str | None' = None, claims_text: 'str | None' = None, create_receipt: 'bool' = True, auto_clear: 'bool' = True, strictness: 'str' = 'ci', propose_memory: 'bool' = False, detail_level: 'str' = 'summary', patch_trail_detail: 'str' = 'summary') -> 'dict[str, object]'"
+    },
+    {
+      "name": "finish_propose_memory",
+      "signature": "(self, *, root_path: 'Path', changed_files: 'Sequence[str]', claims_text: 'str | None', review_text: 'str | None', verification_profile: 'str | None') -> 'dict[str, object]'"
+    },
+    {
       "name": "generate_pr_summary",
       "signature": "(self, *, run_id: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_blast_radius",
+      "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_controller_audit_trail",
+      "signature": "(self: '_RunDictService', **params: 'object') -> 'dict[str, object]'"
     },
     {
       "name": "get_finding",
@@ -60,8 +84,16 @@
       "signature": "(self, *, topic: 'HelpTopic', detail: 'HelpDetail' = 'compact') -> 'dict[str, object]'"
     },
     {
+      "name": "get_implementation_context",
+      "signature": "(self, *, root: 'str', paths: 'Sequence[str] | None' = None, symbols: 'Sequence[str] | None' = None, intent_id: 'str | None' = None, changed_scope: 'bool' = False, mode: 'str' = 'implementation', include: 'Sequence[str] | None' = None, depth: 'int' = 1, detail_level: 'str' = 'compact', budget: 'int' = 50, run_id: 'str | None' = None, query: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "get_production_triage",
       "signature": "(self, *, run_id: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_relevant_memory",
+      "signature": "(self, *, root: 'str', scope: 'Sequence[str] | None' = None, intent_id: 'str | None' = None, symbols: 'Sequence[str] | None' = None, max_records: 'int' = 20, include_stale: 'bool' = False, include_drafts: 'bool' = False) -> 'dict[str, object]'"
     },
     {
       "name": "get_remediation",
@@ -76,6 +108,10 @@
       "signature": "(self, run_id: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "get_workspace_session_stats",
+      "signature": "(self: '_RunDictService', **params: 'object') -> 'dict[str, object]'"
+    },
+    {
       "name": "list_findings",
       "signature": "(self, *, run_id: 'str | None' = None, family: 'FindingFamilyFilter' = 'all', category: 'str | None' = None, severity: 'str | None' = None, source_kind: 'str | None' = None, novelty: 'FindingNoveltyFilter' = 'all', sort_by: 'FindingSort' = 'default', detail_level: 'DetailLevel' = 'summary', changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, exclude_reviewed: 'bool' = False, offset: 'int' = 0, limit: 'int' = 50, max_results: 'int | None' = None) -> 'dict[str, object]'"
     },
@@ -88,12 +124,44 @@
       "signature": "(self, *, run_id: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "manage_change_intent",
+      "signature": "(self, *, action: 'str', run_id: 'str | None' = None, intent_id: 'str | None' = None, scope: 'dict[str, object] | None' = None, intent: 'str | None' = None, expected_effects: 'Sequence[str] | None' = None, diff_ref: 'str | None' = None, changed_files: 'Sequence[str] | None' = None, root: 'str | None' = None, ttl_seconds: 'int | None' = None, lease_seconds: 'int | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "manage_engineering_memory",
+      "signature": "(self, *, root: 'str', action: 'str', record_type: 'str | None' = None, statement: 'str | None' = None, subject_path: 'str | None' = None, text: 'str | None' = None, intent_id: 'str | None' = None, run_id: 'str | None' = None, record_id: 'str | None' = None, decision: 'str | None' = None, ide_governance_key: 'str | None' = None, client_name: 'str | None' = None, client_version: 'str | None' = None, governance_ticket: 'str | None' = None, confirmation_nonce: 'str | None' = None, proof: 'str | None' = None, actor: 'str | None' = None, protocol: 'int | None' = None, reject_reason: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
       "name": "mark_finding_reviewed",
       "signature": "(self, *, finding_id: 'str', run_id: 'str | None' = None, note: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "maybe_auto_enqueue_projection_rebuild",
+      "signature": "(self, *, root_path: 'Path') -> 'dict[str, object] | None'"
+    },
+    {
+      "name": "query_engineering_memory",
+      "signature": "(self, *, root: 'str', mode: 'str', record_id: 'str | None' = None, path: 'str | None' = None, symbol: 'str | None' = None, query: 'str | None' = None, scope: 'Sequence[str] | None' = None, filters: 'Mapping[str, object] | None' = None, max_results: 'int' = 20, include_stale: 'bool' = False, include_drafts: 'bool' = False) -> 'dict[str, object]'"
+    },
+    {
+      "name": "query_platform_observability",
+      "signature": "(self: '_RunDictService', **params: 'object') -> 'dict[str, object]'"
+    },
+    {
       "name": "read_resource",
       "signature": "(self, uri: 'str') -> 'str'"
+    },
+    {
+      "name": "shutdown_cleanup",
+      "signature": "(self) -> 'None'"
+    },
+    {
+      "name": "start_controlled_change",
+      "signature": "(self, *, root: 'str', scope: 'dict[str, object]', intent: 'str', expected_effects: 'Sequence[str] | None' = None, on_conflict: 'str | None' = None, strictness: 'str' = 'ci', ttl_seconds: 'int | None' = None, blast_radius_depth: 'str' = 'auto', dirty_scope_policy: 'str' = 'block') -> 'dict[str, object]'"
+    },
+    {
+      "name": "validate_review_claims",
+      "signature": "(self, *, text: 'str', run_id: 'str | None' = None, require_citations: 'bool' = True, patch_health_delta: 'int | None' = None) -> 'dict[str, object]'"
     }
   ]
 }

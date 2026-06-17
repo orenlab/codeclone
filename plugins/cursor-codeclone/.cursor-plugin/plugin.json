@@ -1,0 +1,39 @@
+{
+  "name": "codeclone",
+  "displayName": "CodeClone",
+  "version": "0.1.0",
+  "description": "Structural Change Controller for AI-assisted Python development. Deterministic structural review, baseline-aware CI gates, and explicit change boundaries for coding agents — powered by codeclone-mcp.",
+  "author": {
+    "name": "Den Rozhnovskiy",
+    "email": "roghnovskiy@gmail.com"
+  },
+  "publisher": "orenlab",
+  "homepage": "https://orenlab.github.io/codeclone/",
+  "repository": "https://github.com/orenlab/codeclone",
+  "license": "MPL-2.0",
+  "logo": "assets/logo.png",
+  "keywords": [
+    "codeclone",
+    "cursor",
+    "mcp",
+    "structural-review",
+    "baseline-aware",
+    "code-quality",
+    "clone-detection",
+    "blast-radius",
+    "python"
+  ],
+  "category": "developer-tools",
+  "tags": [
+    "python",
+    "analysis",
+    "review",
+    "refactoring",
+    "mcp"
+  ],
+  "skills": "skills/",
+  "agents": "agents/",
+  "rules": "rules/",
+  "hooks": "hooks/hooks.json",
+  "mcpServers": "mcp.json"
+}

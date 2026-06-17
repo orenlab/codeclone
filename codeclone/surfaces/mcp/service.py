@@ -8,6 +8,7 @@ from __future__ import annotations
 import inspect
 from typing import Protocol
 
+from ._workspace_intents import safe_remove_own_intent
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
     MCPAnalysisRequest,
@@ -52,6 +53,89 @@ class _QueryServiceMixin:
     def get_help(self: _RunDictService, **params: object) -> dict[str, object]:
         return self._run_dict("get_help", **params)
 
+    def query_platform_observability(
+        self: _RunDictService, **params: object
+    ) -> dict[str, object]:
+        return self._run_dict("query_platform_observability", **params)
+
+    def get_blast_radius(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_blast_radius", **params)
+
+    def get_implementation_context(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_implementation_context", **params)
+
+    def get_workspace_session_stats(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_workspace_session_stats", **params)
+
+    def get_controller_audit_trail(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_controller_audit_trail", **params)
+
+    def get_relevant_memory(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("get_relevant_memory", **params)
+
+    def query_engineering_memory(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("query_engineering_memory", **params)
+
+    def manage_engineering_memory(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("manage_engineering_memory", **params)
+
+    def manage_change_intent(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("manage_change_intent", **params)
+
+    def check_patch_contract(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("check_patch_contract", **params)
+
+    def create_review_receipt(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("create_review_receipt", **params)
+
+    def validate_review_claims(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("validate_review_claims", **params)
+
+    def start_controlled_change(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("start_controlled_change", **params)
+
+    def finish_controlled_change(
+        self: _RunDictService,
+        **params: object,
+    ) -> dict[str, object]:
+        return self._run_dict("finish_controlled_change", **params)
+
     def generate_pr_summary(
         self: _RunDictService,
         **params: object,
@@ -90,8 +174,16 @@ class _QueryServiceMixin:
 
 
 class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
-    def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
-        super().__init__(history_limit=history_limit)
+    def __init__(
+        self,
+        *,
+        history_limit: int = DEFAULT_MCP_HISTORY_LIMIT,
+        ide_governance_channel: bool = False,
+    ) -> None:
+        super().__init__(
+            history_limit=history_limit,
+            ide_governance_channel=ide_governance_channel,
+        )
         self._session_cls = MCPSession
         # Keep a stable seam for tests and monkeypatch-based callers while the
         # service itself now owns the real MCP session state.
@@ -121,6 +213,59 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
 
     def read_resource(self, uri: str) -> str:
         return self._session_cls.read_resource(self, uri)
+
+    def shutdown_cleanup(self) -> None:
+        """Best-effort cleanup of workspace intent files owned by this process.
+
+        Called from FastMCP lifespan teardown at process exit.  Removes
+        only files that THIS process created — identified by matching
+        PID + start_epoch + intent_id.  Never raises.  Does not write to
+        stdout/stderr (the pipe may already be closed).
+        """
+        try:
+            with self._state_lock:
+                snapshot = dict(self._active_intents)
+            for intent_id, intent in snapshot.items():
+                try:
+                    run = self._runs.get(intent.run_id)
+                except Exception:
+                    continue
+                safe_remove_own_intent(
+                    root=run.root,
+                    pid=self._agent_pid,
+                    start_epoch=self._agent_start_epoch,
+                    intent_id=intent_id,
+                )
+        except Exception:
+            pass
+        self._shutdown_close_resources()
+
+    def _shutdown_close_resources(self) -> None:
+        """Best-effort close of passive stores owned by this service."""
+        try:
+            writers = tuple(self._audit_writers.values())
+            self._audit_writers.clear()
+            override = self._audit_writer_override
+            self._audit_writer_override = None
+            if override is not None:
+                writers = (*writers, override)
+            seen: set[int] = set()
+            for writer in writers:
+                writer_id = id(writer)
+                if writer_id in seen:
+                    continue
+                seen.add(writer_id)
+                close = getattr(writer, "close", None)
+                if callable(close):
+                    close()
+        except Exception:
+            pass
+        try:
+            from ._workspace_intent_store import clear_workspace_intent_store_cache
+
+            clear_workspace_intent_store_cache()
+        except Exception:
+            pass
 
 
 _EMPTY = inspect.Signature.empty
@@ -205,6 +350,62 @@ def _apply_public_method_signatures() -> None:
             _kwonly("max_hotspots", "int", 3),
             _kwonly("max_suggestions", "int", 3),
         ),
+        "get_blast_radius": (
+            _kwonly("files", "Sequence[str]"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("depth", "str", "direct"),
+            _kwonly("include", "Sequence[str] | None", None),
+        ),
+        "get_implementation_context": (
+            _kwonly("root", "str"),
+            _kwonly("paths", "Sequence[str] | None", None),
+            _kwonly("symbols", "Sequence[str] | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("changed_scope", "bool", False),
+            _kwonly("mode", "str", "implementation"),
+            _kwonly("include", "Sequence[str] | None", None),
+            _kwonly("depth", "int", 1),
+            _kwonly("detail_level", "str", "compact"),
+            _kwonly("budget", "int", 50),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("query", "str | None", None),
+        ),
+        "check_patch_contract": (
+            _kwonly("mode", "str"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("before_run_id", "str | None", None),
+            _kwonly("after_run_id", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("strictness", "str", "ci"),
+            _kwonly("diff_ref", "str | None", None),
+            _kwonly("changed_files", "Sequence[str] | None", None),
+        ),
+        "create_review_receipt": (
+            _kwonly("run_id", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("format", "str", "markdown"),
+            _kwonly("include_blast_radius", "bool", True),
+            _kwonly("include_patch_contract", "bool", True),
+        ),
+        "validate_review_claims": (
+            _kwonly("text", "str"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("require_citations", "bool", True),
+            _kwonly("patch_health_delta", "int | None", None),
+        ),
+        "manage_change_intent": (
+            _kwonly("action", "str"),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("scope", "dict[str, object] | None", None),
+            _kwonly("intent", "str | None", None),
+            _kwonly("expected_effects", "Sequence[str] | None", None),
+            _kwonly("diff_ref", "str | None", None),
+            _kwonly("changed_files", "Sequence[str] | None", None),
+            _kwonly("root", "str | None", None),
+            _kwonly("ttl_seconds", "int | None", None),
+            _kwonly("lease_seconds", "int | None", None),
+        ),
         "get_remediation": (
             _kwonly("finding_id", "str"),
             _kwonly("run_id", "str | None", None),
@@ -249,6 +450,74 @@ def _apply_public_method_signatures() -> None:
             _kwonly("finding_id", "str"),
             _kwonly("run_id", "str | None", None),
             _kwonly("note", "str | None", None),
+        ),
+        "start_controlled_change": (
+            _kwonly("root", "str"),
+            _kwonly("scope", "dict[str, object]"),
+            _kwonly("intent", "str"),
+            _kwonly("expected_effects", "Sequence[str] | None", None),
+            _kwonly("on_conflict", "str | None", None),
+            _kwonly("strictness", "str", "ci"),
+            _kwonly("ttl_seconds", "int | None", None),
+            _kwonly("blast_radius_depth", "str", "auto"),
+            _kwonly("dirty_scope_policy", "str", "block"),
+        ),
+        "get_relevant_memory": (
+            _kwonly("root", "str"),
+            _kwonly("scope", "Sequence[str] | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("symbols", "Sequence[str] | None", None),
+            _kwonly("max_records", "int", 20),
+            _kwonly("include_stale", "bool", False),
+            _kwonly("include_drafts", "bool", False),
+        ),
+        "query_engineering_memory": (
+            _kwonly("root", "str"),
+            _kwonly("mode", "str"),
+            _kwonly("record_id", "str | None", None),
+            _kwonly("path", "str | None", None),
+            _kwonly("symbol", "str | None", None),
+            _kwonly("query", "str | None", None),
+            _kwonly("scope", "Sequence[str] | None", None),
+            _kwonly("filters", "Mapping[str, object] | None", None),
+            _kwonly("max_results", "int", 20),
+            _kwonly("include_stale", "bool", False),
+            _kwonly("include_drafts", "bool", False),
+        ),
+        "manage_engineering_memory": (
+            _kwonly("root", "str"),
+            _kwonly("action", "str"),
+            _kwonly("record_type", "str | None", None),
+            _kwonly("statement", "str | None", None),
+            _kwonly("subject_path", "str | None", None),
+            _kwonly("text", "str | None", None),
+            _kwonly("intent_id", "str | None", None),
+            _kwonly("run_id", "str | None", None),
+            _kwonly("record_id", "str | None", None),
+            _kwonly("decision", "str | None", None),
+            _kwonly("ide_governance_key", "str | None", None),
+            _kwonly("client_name", "str | None", None),
+            _kwonly("client_version", "str | None", None),
+            _kwonly("governance_ticket", "str | None", None),
+            _kwonly("confirmation_nonce", "str | None", None),
+            _kwonly("proof", "str | None", None),
+            _kwonly("actor", "str | None", None),
+            _kwonly("protocol", "int | None", None),
+            _kwonly("reject_reason", "str | None", None),
+        ),
+        "finish_controlled_change": (
+            _kwonly("intent_id", "str"),
+            _kwonly("changed_files", "Sequence[str] | None", None),
+            _kwonly("diff_ref", "str | None", None),
+            _kwonly("after_run_id", "str | None", None),
+            _kwonly("review_text", "str | None", None),
+            _kwonly("claims_text", "str | None", None),
+            _kwonly("create_receipt", "bool", True),
+            _kwonly("auto_clear", "bool", True),
+            _kwonly("strictness", "str", "ci"),
+            _kwonly("propose_memory", "bool", False),
+            _kwonly("detail_level", "str", "summary"),
+            _kwonly("patch_trail_detail", "str", "summary"),
         ),
     }
     self_param = inspect.Parameter("self", inspect.Parameter.POSITIONAL_OR_KEYWORD)

@@ -54,9 +54,9 @@ def test_build_codeclone_args_includes_enabled_gates_and_paths() -> None:
     action_impl = _load_action_impl()
     inputs = action_impl.ActionInputs(
         path=".",
-        json_path=".cache/codeclone/report.json",
+        json_path=".codeclone/report.json",
         sarif=True,
-        sarif_path=".cache/codeclone/report.sarif",
+        sarif_path=".codeclone/report.sarif",
         fail_on_new=True,
         fail_on_new_metrics=True,
         fail_threshold=5,
@@ -77,9 +77,9 @@ def test_build_codeclone_args_includes_enabled_gates_and_paths() -> None:
     assert args[:5] == [
         ".",
         "--json",
-        ".cache/codeclone/report.json",
+        ".codeclone/report.json",
         "--sarif",
-        ".cache/codeclone/report.sarif",
+        ".codeclone/report.sarif",
     ]
     _assert_contains_all(
         " ".join(args),

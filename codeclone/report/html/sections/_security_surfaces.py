@@ -12,6 +12,35 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.security import (
+    SECURITY_EMPTY_DETAIL,
+    SECURITY_EMPTY_TITLE,
+    SECURITY_REVIEW_BANNER_QUESTION,
+    SECURITY_REVIEW_COVERAGE_JOIN,
+    SECURITY_REVIEW_COVERAGE_UNAVAILABLE,
+    SECURITY_REVIEW_EVIDENCE,
+    SECURITY_REVIEW_EVIDENCE_VALUE,
+    SECURITY_REVIEW_HOW_TO_READ,
+    SECURITY_REVIEW_MEANING,
+    SECURITY_REVIEW_MEANING_VALUE,
+    SECURITY_REVIEW_NO_INVENTORY_ROWS,
+    SECURITY_REVIEW_NO_OVERLAP,
+    SECURITY_REVIEW_ORDER,
+    SECURITY_REVIEW_PRODUCTION_MODULE_ROWS,
+    SECURITY_REVIEW_SIGNAL,
+    SECURITY_REVIEW_SIGNAL_VALUE,
+    SECURITY_REVIEW_START_WITH,
+    SECURITY_REVIEW_THEN_REVIEW,
+    SECURITY_STAT_CATEGORIES,
+    SECURITY_STAT_EXACT_ITEMS,
+    SECURITY_STAT_PRODUCTION,
+    SECURITY_STAT_SURFACES,
+    SECURITY_TABLE_EMPTY,
+    SECURITY_TABLE_EMPTY_DESC,
+    SECURITY_TABLE_HEADERS,
+    SECURITY_TABLE_TITLE,
+    UNKNOWN_LABEL,
+)
 from ..primitives.escape import _escape_html
 from ..primitives.location import location_file_target, relative_location_path
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty_info
@@ -42,15 +71,12 @@ def render_security_surfaces_panel(ctx: ReportContext) -> str:
     )
     if not items:
         return _tab_empty_info(
-            "No security-relevant capability surfaces matched the exact registry.",
-            detail_html=(
-                "This inventory is report-only and focuses on exact boundary "
-                "capabilities rather than vulnerability claims."
-            ),
+            SECURITY_EMPTY_TITLE,
+            detail_html=SECURITY_EMPTY_DETAIL,
         )
     cards = [
         _stat_card(
-            "Surfaces",
+            SECURITY_STAT_SURFACES,
             _as_int(summary.get("items")),
             detail=_micro_badges(("report", "only"), ("evidence", "exact")),
             value_tone="warn" if _as_int(summary.get("items")) > 0 else "muted",
@@ -58,21 +84,21 @@ def render_security_surfaces_panel(ctx: ReportContext) -> str:
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
-            "Categories",
+            SECURITY_STAT_CATEGORIES,
             _as_int(summary.get("category_count")),
             detail=_micro_badges(("modules", _as_int(summary.get("modules")))),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
-            "Production",
+            SECURITY_STAT_PRODUCTION,
             _as_int(summary.get("production")),
             detail=_micro_badges(("tests", _as_int(summary.get("tests")))),
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
-            "Exact items",
+            SECURITY_STAT_EXACT_ITEMS,
             _as_int(summary.get("exact_items")),
             detail=_micro_badges(("fixtures", _as_int(summary.get("fixtures")))),
             css_class="meta-item",
@@ -82,22 +108,12 @@ def render_security_surfaces_panel(ctx: ReportContext) -> str:
     return (
         f'<div class="stat-cards">{"".join(cards)}</div>'
         + _security_surfaces_context_html(ctx, items)
-        + '<h3 class="subsection-title">Security-relevant capability inventory</h3>'
+        + f'<h3 class="subsection-title">{SECURITY_TABLE_TITLE}</h3>'
         + render_rows_table(
-            headers=(
-                "Category",
-                "Capability",
-                "Evidence",
-                "Source",
-                "Location",
-                "Review",
-            ),
+            headers=SECURITY_TABLE_HEADERS,
             rows=_security_surface_rows(ctx, items),
-            empty_message="No exact security surfaces are available.",
-            empty_description=(
-                "CodeClone inventories trust-boundary capabilities but does not "
-                "claim vulnerabilities or exploitability."
-            ),
+            empty_message=SECURITY_TABLE_EMPTY,
+            empty_description=SECURITY_TABLE_EMPTY_DESC,
             raw_html_headers=("Location",),
             ctx=ctx,
         )
@@ -117,7 +133,7 @@ def _security_surface_rows(
         (
             _humanize(str(item.get("category", ""))),
             _humanize(str(item.get("capability", ""))),
-            str(item.get("evidence_symbol", "")).strip() or "(unknown)",
+            str(item.get("evidence_symbol", "")).strip() or UNKNOWN_LABEL,
             _humanize(str(item.get("source_kind", ""))),
             _location_cell_html(ctx, item),
             _review_cell_text(ctx, item, coverage_index=coverage_index),
@@ -155,21 +171,21 @@ def _security_surfaces_context_html(
     review_order_rows = _security_review_order_rows(ctx, items)
     return (
         '<div class="insight-banner insight-info">'
-        '<div class="insight-question">How should I review this inventory?</div>'
+        f'<div class="insight-question">{SECURITY_REVIEW_BANNER_QUESTION}</div>'
         '<div class="insight-answer">'
         '<div class="overview-summary-grid overview-summary-grid--2col">'
         + overview_summary_item_html(
-            label="How to read",
+            label=SECURITY_REVIEW_HOW_TO_READ,
             body_html=_fact_list_html(
                 (
-                    ("Signal", "boundary inventory", None),
-                    ("Evidence", "exact imports/calls/builtins", None),
-                    ("Meaning", "inventory, not vulnerability proof", None),
+                    (SECURITY_REVIEW_SIGNAL, SECURITY_REVIEW_SIGNAL_VALUE, None),
+                    (SECURITY_REVIEW_EVIDENCE, SECURITY_REVIEW_EVIDENCE_VALUE, None),
+                    (SECURITY_REVIEW_MEANING, SECURITY_REVIEW_MEANING_VALUE, None),
                 )
             ),
         )
         + overview_summary_item_html(
-            label="Review order",
+            label=SECURITY_REVIEW_ORDER,
             body_html=_fact_list_html(review_order_rows),
         )
         + "</div></div></div>"
@@ -201,17 +217,17 @@ def _security_review_order_rows(
 
     return (
         (
-            "Start with",
+            SECURITY_REVIEW_START_WITH,
             (
                 f"{production_callable_count} "
                 f"{_pluralize(production_callable_count, 'production callable')}"
                 if production_callable_count > 0
-                else "production module rows only"
+                else SECURITY_REVIEW_PRODUCTION_MODULE_ROWS
             ),
             "warn" if production_callable_count > 0 else None,
         ),
         (
-            "Coverage join",
+            SECURITY_REVIEW_COVERAGE_JOIN,
             _coverage_join_review_text(
                 ctx,
                 overlap_total=coverage_overlap_total,
@@ -221,12 +237,12 @@ def _security_review_order_rows(
             "warn" if coverage_overlap_total > 0 else None,
         ),
         (
-            "Then review",
+            SECURITY_REVIEW_THEN_REVIEW,
             (
                 f"{non_callable_count} "
                 f"{_pluralize(non_callable_count, 'module/class inventory row')}"
                 if non_callable_count > 0
-                else "no inventory-only rows"
+                else SECURITY_REVIEW_NO_INVENTORY_ROWS
             ),
             None,
         ),
@@ -243,9 +259,9 @@ def _coverage_join_review_text(
     coverage_join = _as_mapping(_as_mapping(ctx.metrics_map).get("coverage_join"))
     coverage_summary = _as_mapping(coverage_join.get("summary"))
     if str(coverage_summary.get("status", "")).strip() != "ok":
-        return "unavailable for this run"
+        return SECURITY_REVIEW_COVERAGE_UNAVAILABLE
     if overlap_total <= 0:
-        return "no overlap in current review set"
+        return SECURITY_REVIEW_NO_OVERLAP
     parts = [f"{overlap_total} {_pluralize(overlap_total, 'overlap')}"]
     if scope_gaps > 0:
         parts.append(f"{scope_gaps} {_pluralize(scope_gaps, 'scope gap')}")

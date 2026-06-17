@@ -761,7 +761,7 @@ def test_cli_default_cache_dir_uses_root(
             monkeypatch,
             extra_args=(),
         )
-        == tmp_path / ".cache" / "codeclone" / "cache.json"
+        == tmp_path / ".codeclone" / "cache.json"
     )
 
 
@@ -825,8 +825,8 @@ def test_cli_default_cache_dir_per_root(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root1), "--no-progress"])
     _run_main(monkeypatch, [str(root2), "--no-progress"])
-    assert captured[0] == root1 / ".cache" / "codeclone" / "cache.json"
-    assert captured[1] == root2 / ".cache" / "codeclone" / "cache.json"
+    assert captured[0] == root1 / ".codeclone" / "cache.json"
+    assert captured[1] == root2 / ".codeclone" / "cache.json"
     assert captured[0] != captured[1]
 
 
@@ -837,7 +837,7 @@ def test_cli_cache_not_shared_between_projects(
     root2 = tmp_path / "p2"
     root1.mkdir()
     root2.mkdir()
-    legacy_cache = root1 / ".cache" / "codeclone" / "cache.json"
+    legacy_cache = root1 / ".codeclone" / "cache.json"
     legacy_cache.parent.mkdir(parents=True, exist_ok=True)
     legacy_cache.write_text("{}", "utf-8")
 
@@ -866,7 +866,39 @@ def test_cli_warns_on_legacy_cache(
     out = capsys.readouterr().out
     assert "Legacy cache file found at" in out
     assert "Cache is now stored per-project" in out
-    assert ".cache/ to .gitignore" in out
+    assert "`.codeclone/` to .gitignore" in out
+
+
+def test_cli_warns_on_legacy_repo_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import codeclone.surfaces.cli.state as cli_state_mod
+
+    root = tmp_path / "proj"
+    _prepare_basic_project(root)
+    legacy_dir = root / ".cache" / "codeclone"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "cache.json").write_text("{}", encoding="utf-8")
+    missing_home_legacy = tmp_path / "missing" / "cache.json"
+    monkeypatch.setattr(cli, "LEGACY_CACHE_PATH", missing_home_legacy)
+    monkeypatch.setattr(cli_state_mod, "LEGACY_CACHE_PATH", missing_home_legacy)
+    baseline = _write_baseline(
+        root / "baseline.json",
+        python_version=_current_py_minor(),
+    )
+    _run_parallel_main(
+        monkeypatch,
+        [str(root), "--baseline", str(baseline), "--no-progress"],
+    )
+    captured = capsys.readouterr()
+    out = f"{captured.out}\n{captured.err}"
+    assert_contains_all(
+        out,
+        "Legacy CodeClone workspace (.cache/codeclone/) found at",
+        "Artifacts now live under",
+        "Remove the legacy directory",
+        ".codeclone",
+    )
 
 
 def test_cli_legacy_cache_resolve_failure(
@@ -945,7 +977,7 @@ def test_cli_no_legacy_warning_when_paths_match(
     root = tmp_path / "proj"
     root.mkdir()
     (root / "a.py").write_text("def f():\n    return 1\n", "utf-8")
-    cache_path = root / ".cache" / "codeclone" / "cache.json"
+    cache_path = root / ".codeclone" / "cache.json"
 
     class _LegacyPathSame:
         def __init__(self, resolved: Path) -> None:
@@ -1284,7 +1316,7 @@ def test_cli_timestamped_report_paths_apply_to_bare_report_flags(
             "--no-progress",
         ],
     )
-    cache_dir = tmp_path / ".cache" / "codeclone"
+    cache_dir = tmp_path / ".codeclone"
     assert (cache_dir / "report-20260322T213145Z.html").exists()
     assert (cache_dir / "report-20260322T213145Z.json").exists()
     assert (cache_dir / "report-20260322T213145Z.txt").exists()
@@ -2312,7 +2344,7 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _write_default_source(tmp_path)
-    tips_path = tmp_path / ".cache" / "codeclone" / "tips.json"
+    tips_path = tmp_path / ".codeclone" / "tips.json"
 
     monkeypatch.setenv("TERM_PROGRAM", "vscode")
     monkeypatch.delenv("CI", raising=False)
@@ -2338,6 +2370,32 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
     assert "VS Code detected" not in second_out
 
 
+def test_cli_shows_gitignore_codeclone_cache_tip_when_uncovered(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _write_default_source(tmp_path)
+    monkeypatch.delenv("TERM_PROGRAM", raising=False)
+    monkeypatch.delenv("CI", raising=False)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setattr(cli_tips, "_stream_is_tty", lambda _stream: True)
+
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    out = capsys.readouterr().out
+    _assert_after_summary(
+        out,
+        "Tip:",
+        ".codeclone/",
+        "Suggested entry",
+    )
+
+    (tmp_path / ".gitignore").write_text(".cache/\n", encoding="utf-8")
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
+    covered_out = capsys.readouterr().out
+    assert "Suggested entry: `.codeclone/`" not in covered_out
+
+
 @pytest.mark.parametrize(
     ("generator_version", "expected_message", "expected_tip_key"),
     [
@@ -2350,6 +2408,11 @@ def test_cli_shows_vscode_extension_tip_once_per_version(
             "2.0.1",
             "Dead-code reachability was refined again in 2.0.2",
             "dead_code_reachability_2_0_2_migration_shown",
+        ),
+        (
+            "2.0.2",
+            "Class cohesion (LCOM4) applicability was refined in 2.1.0",
+            "cohesion_lcom4_2_1_migration_shown",
         ),
     ],
 )
@@ -2367,7 +2430,7 @@ def test_cli_shows_dead_code_reachability_migration_note_once(
         python_version=_current_py_minor(),
         generator_version=generator_version,
     )
-    tips_path = tmp_path / ".cache" / "codeclone" / "tips.json"
+    tips_path = tmp_path / ".codeclone" / "tips.json"
 
     monkeypatch.delenv("CI", raising=False)
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
@@ -4124,7 +4187,7 @@ def test_cli_fail_on_new_default_report_path(
 ) -> None:
     src = tmp_path / "a.py"
     src.write_text("def f1():\n    return 1\n\ndef f2():\n    return 1\n", "utf-8")
-    report_path = tmp_path / ".cache" / "codeclone" / "report.html"
+    report_path = tmp_path / ".codeclone" / "report.html"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text("<html>ok</html>", "utf-8")
     baseline_path = tmp_path / "baseline.json"
@@ -4151,7 +4214,7 @@ def test_cli_fail_on_new_default_report_path(
     )
     out = capsys.readouterr().out
     assert "report" in out
-    assert ".cache/codeclone/report.html" in out
+    assert ".codeclone/report.html" in out
 
 
 def test_cli_batch_result_none_no_progress(
