@@ -31,11 +31,9 @@ Environment overrides for registry keys:
 The SQLite backend stores the same signed JSON payloads in WAL mode; integrity
 and validation rules are unchanged. Unlike the file backend, SQLite keeps
 closed intents (`clean`, `expired`, `orphaned`) for audit and purges them only
-after `intent_registry_retention_days` (default `7`, maximum `14` in the
-open-source edition). Values above `14` are rejected with a contract error; see
-[Plans and Retention](../../plans-and-retention.md) for Team (up to 30 days),
-Enterprise (up to 90 days with PostgreSQL backend), premium support, and contact
-details at [sudo@secuapp.ru](mailto:sudo@secuapp.ru).
+after `intent_registry_retention_days` (default `14`, any positive value; no
+edition cap). Managed/hosted retention with backup and compliance is a roadmap
+Team/Enterprise option; see [Plans and Retention](../../plans-and-retention.md).
 
 This detects accidental corruption, not malicious tampering by a user with write
 access. Conflicts are advisory: hard overlap means two agents claimed the same

@@ -68,7 +68,7 @@ Current server characteristics:
 - **Workspace intent registry** — `intent_registry_backend` selects `file`
   (ephemeral JSON under `.codeclone/intents/`) or `sqlite` (auditable
   rows under `.codeclone/db/intents.sqlite3` with closed-row retention;
-  default 7 days, max 14 in open source). See
+  default 14 days, configurable). See
   [Plans and Retention](../../plans-and-retention.md).
 
 !!! warning "Absolute roots and HTTP transport"

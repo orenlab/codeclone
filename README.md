@@ -76,6 +76,14 @@ uv tool install "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
+Install the in-development 2.1 line (alpha/beta prereleases). A plain install
+resolves the latest stable release; add a prerelease flag to get 2.1:
+
+```bash
+uv tool install --prerelease allow "codeclone[mcp]"   # uv
+pip install --pre "codeclone[mcp]"                     # pip
+```
+
 Run the current development line from source:
 
 ```bash
@@ -196,7 +204,7 @@ Agent-created records remain drafts until a human approves them.
 ```bash
 codeclone memory init --root .
 codeclone memory search "baseline schema" --match all
-codeclone memory approve mem-12345678
+codeclone memory approve mem-12345678 --i-know-what-im-doing
 ```
 
 Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical
@@ -237,7 +245,7 @@ Every client uses the same `codeclone-mcp` interface and canonical structural fa
 
 [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/) ·
 [MCP interface contract](https://orenlab.github.io/codeclone/book/25-mcp-interface/) ·
-[Implementation-context tools](https://orenlab.github.io/codeclone/book/25-mcp-interface/tools/analysis/)
+[Implementation-context tools](https://orenlab.github.io/codeclone/book/25-mcp-interface/tools/implementation-context/)
 
 ## Quick workflows
 

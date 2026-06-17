@@ -91,8 +91,9 @@ def test_resolve_intent_registry_retention_days_defaults_and_bounds() -> None:
     assert resolve_intent_registry_retention_days(14) == 14
     with pytest.raises(IntentRegistryConfigError):
         resolve_intent_registry_retention_days(0)
-    with pytest.raises(IntentRegistryConfigError, match="plans-and-retention"):
-        resolve_intent_registry_retention_days(15)
+    # No edition ceiling: any value at or above the minimum is accepted.
+    assert resolve_intent_registry_retention_days(30) == 30
+    assert resolve_intent_registry_retention_days(365) == 365
 
 
 def test_resolve_intent_registry_db_path_rejects_unsafe_values(

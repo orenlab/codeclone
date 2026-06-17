@@ -1,205 +1,159 @@
-<!-- doc-scope: PLANS, PRICING TIERS, AND DATA RETENTION.
-     owns: OSS/Team/Enterprise tier definitions, retention policy.
+<!-- doc-scope: PLANS, EDITIONS, AND DATA RETENTION.
+     owns: Community/Team/Enterprise edition definitions, retention policy.
      does-not-own: config keys (→ book/10), change controller internals (→ book/12).
      rule: cross-link to contracts, do not restate them. -->
 
 # Plans and Retention
 
-CodeClone is open source and runs locally. Some coordination, audit, and
-semantic retrieval features have edition-specific limits. This page describes
-the three editions, their feature boundaries, and how to reach the team for
-Team or Enterprise options.
+CodeClone is open source and runs **fully locally**. Every edition — including
+open source — ships the complete analysis, change-control, memory, and
+integration product; nothing that runs on your machine is paywalled or
+edition-capped. Team and Enterprise add **support and managed/hosted services**
+on top of the same local core. Hosted capabilities are in development and are
+marked **roadmap** below.
 
 ---
 
-## Edition overview
+## What every edition includes (open source)
 
-| Capability                          | Open Source     | Team                                    | Enterprise                          |
-|-------------------------------------|-----------------|-----------------------------------------|-------------------------------------|
-| **Core analysis and CI gating**     | full            | full                                    | full                                |
-| **Change controller**               | full            | full                                    | full                                |
-| **Engineering Memory**              | full            | full                                    | full                                |
-| **Semantic search — local**         | `fastembed`     | `fastembed`                             | `fastembed`                         |
-| **Semantic search — API providers** | —               | OpenAI, Cohere, Voyage, custom endpoint | all Team + on-prem `local_model`    |
-| **Memory record limit**             | 10 000          | 50 000                                  | configurable                        |
-| **Memory draft retention**          | 14 days         | 30 days                                 | configurable                        |
-| **Memory archived retention**       | 365 days        | 730 days                                | configurable                        |
-| **Intent registry retention**       | 7 days (max 14) | up to 30 days                           | up to 90 days                       |
-| **Intent registry backend**         | SQLite (local)  | SQLite or managed                       | PostgreSQL (managed or self-hosted) |
-| **Audit trail retention**           | 30 days         | 90 days                                 | configurable                        |
-| **Audit payloads**                  | compact         | compact or full                         | compact or full                     |
-| **Platform Observability**          | local, opt-in   | local, opt-in                           | local, opt-in                       |
-| **Support**                         | community       | priority onboarding + premium           | dedicated + SLA                     |
+**The full local product is open source (MPL-2.0) and free.** No analysis,
+change-control, memory, or integration capability is gated.
+
+- **Structural analysis & CI** — clones, complexity, coupling, cohesion, dead
+  code, dependency cycles, [Health Score](book/15-health-score.md), and
+  baseline-aware [quality gates](book/16-metrics-and-quality-gates.md).
+- **Report surfaces** — canonical JSON, HTML, Markdown, text, and
+  [SARIF](guide/integrations/sarif/export.md), plus the
+  [GitHub Action](getting-started.md#github-action) (gating, SARIF upload, PR comments).
+- **Report-only signals** — Security Surfaces, Overloaded Modules, API-surface
+  inventory with breaking-change detection, and external Coverage Join.
+- **Structural Change Controller** — intent → blast radius → bounded edit →
+  patch verify → receipt, with Patch Trail and multi-agent coordination
+  ([change control](book/12-structural-change-controller/index.md)).
+- **Live Implementation Context** — bounded structural, call-graph, and contract evidence.
+- **Engineering Memory** — typed evidence-linked facts, FTS + local `fastembed`
+  semantic search, Trajectory Memory, quality passports, anomaly detection, and
+  the [Experience Layer](book/13-engineering-memory/experience-layer.md).
+- **Corpus Analytics** — offline clustering of change-control intents (`codeclone[analytics]`).
+- **33 MCP tools and native integrations** — VS Code, Cursor, Claude Code,
+  Codex, and Claude Desktop on one canonical analysis.
+- **Platform Observability** — opt-in local runtime diagnostics.
+
+Local storage (intent registry, audit trail, Engineering Memory) is SQLite/file
+and **configurable without an edition cap** — retention windows are plain
+`[tool.codeclone]` settings, not license-gated.
 
 ---
 
-## Workspace intent registry retention
+## Editions
 
-When `intent_registry_backend = "sqlite"`, closed workspace intents (`clean`,
-`expired`, `orphaned`) are kept for audit and purged only after
-`intent_registry_retention_days`. The open-source edition enforces these limits
-at configuration time.
+| Capability                                                  | Community (OSS) | Team           | Enterprise      |
+|-------------------------------------------------------------|-----------------|----------------|-----------------|
+| Full local analysis, change control, memory, integrations   | full            | full           | full            |
+| Local semantic search (`fastembed`)                         | full            | full           | full            |
+| Local retention (registry / audit / memory)                 | configurable    | configurable   | configurable    |
+| Support                                                     | community       | priority + SLA | dedicated + SLA |
+| Managed control plane (hosted registry / audit / retention) | —               | roadmap        | roadmap         |
+| Hosted embedding / retrieval service                        | —               | roadmap        | roadmap         |
+| Cross-repo / org-wide trajectory & analytics dashboards     | —               | roadmap        | roadmap         |
+| Managed PostgreSQL backends                                 | —               | —              | roadmap         |
+| On-prem embedding model (`local_model`)                     | —               | —              | roadmap         |
 
-| Edition     | Default retention | Maximum retention | Intent registry backend                    |
-|-------------|-------------------|-------------------|--------------------------------------------|
-| Open source | 7 days            | 14 days           | SQLite (local file under `.codeclone/db/`) |
-| Team        | configurable      | up to 30 days     | SQLite or managed deployment               |
-| Enterprise  | configurable      | up to 90 days     | PostgreSQL (managed or self-hosted)        |
+!!! note "Roadmap items are not yet available"
+    Today CodeClone ships as a single open-source build. Selecting an unbuilt
+    provider or backend (`api`, `local_model`, PostgreSQL) returns a
+    "not available yet" error. Team and Enterprise are available now as
+    **support and licensing** tiers; managed/hosted services are in development.
+    [Contact us](#contact) to shape priorities.
 
-Values above **14 days** in `[tool.codeclone]` on the open-source edition return a
-contract error and point here.
+---
 
-## Engineering Memory
+## Retention (local, configurable)
 
-Engineering Memory stores evidence-linked repository facts — contracts,
-decisions, risk hotspots, agent drafts, git provenance. The store runs locally
-on SQLite and is governed through the VS Code Memory view.
+The intent registry, audit trail, and Engineering Memory store data locally in
+SQLite. Retention windows are configured in `[tool.codeclone]` and are **not
+capped by edition** — full key reference in
+[Config and Defaults](book/10-config-and-defaults.md).
 
-### Retention
+| Store                         | Key                              | Default |
+|-------------------------------|----------------------------------|---------|
+| Intent registry (closed rows) | `intent_registry_retention_days` | `14`    |
+| Audit trail                   | `audit_retention_days`           | `30`    |
+| Memory drafts                 | `draft_retention_days`           | `14`    |
 
-| Record status | Open Source | Team      | Enterprise   |
-|---------------|-------------|-----------|--------------|
-| active        | unlimited   | unlimited | unlimited    |
-| draft         | 14 days     | 30 days   | configurable |
-| stale         | 180 days    | 365 days  | configurable |
-| rejected      | 30 days     | 90 days   | configurable |
-| archived      | 365 days    | 730 days  | configurable |
-| receipt       | 90 days     | 180 days  | configurable |
+You can already set any local window you need. Longer **managed** retention —
+central storage, backup, compliance attestations, and cross-session forensics —
+is the roadmap Team/Enterprise value.
 
-### Record and candidate limits
+---
 
-| Limit                             | Open Source | Team   | Enterprise   |
-|-----------------------------------|-------------|--------|--------------|
-| `max_records`                     | 10 000      | 50 000 | configurable |
-| `max_candidates` (pending drafts) | 1 000       | 5 000  | configurable |
+## Semantic retrieval providers
 
-### Semantic retrieval providers
+| Provider      | Status                   | What it is                                                                                                 |
+|---------------|--------------------------|------------------------------------------------------------------------------------------------------------|
+| `diagnostic`  | available                | Deterministic hash vectors. For tests, not real recall.                                                    |
+| `fastembed`   | available (all editions) | Local `BAAI/bge-small-en-v1.5` via FastEmbed. No network, no API key. Install `codeclone[semantic-local]`. |
+| `api`         | roadmap                  | Hosted embedding / retrieval service. Currently returns "not available yet".                               |
+| `local_model` | roadmap                  | On-prem custom embedding model for air-gapped deployments. Currently returns "not available yet".          |
 
-Semantic search blends LanceDB vector proximity with FTS keyword recall for
-meaning-oriented memory retrieval. The embedding provider determines retrieval
-quality.
+Open source already includes **full local semantic search** with `fastembed` —
+no functionality is removed. Hosted and on-prem providers are in development.
 
-| Provider      | Edition          | What it is                                                                                                                     |
-|---------------|------------------|--------------------------------------------------------------------------------------------------------------------------------|
-| `diagnostic`  | all              | Deterministic hash-based vectors. Useful for tests, not for real recall.                                                       |
-| `fastembed`   | all              | Local `BAAI/bge-small-en-v1.5` via FastEmbed. No network, no API key. Install `codeclone[semantic-local]`.                     |
-| `api`         | Team, Enterprise | External embedding API (OpenAI, Cohere, Voyage, or a custom endpoint). Requires API key in `[tool.codeclone.memory.semantic]`. |
-| `local_model` | Enterprise       | Custom on-premise embedding model. For air-gapped deployments or proprietary models.                                           |
-
-Open-source users get full local semantic search with `fastembed` — no
-functionality is removed. API and custom-model providers add options for teams
-that prefer hosted embedding quality or need on-prem model compliance.
+---
 
 ## Audit trail
 
-The controller audit trail records passive events (intent lifecycle, lease
-transitions, workspace coordination) in a local SQLite database when
-`audit_enabled=true` in effective config (pyproject or env). CLI **display**
-uses `--audit` / `--audit-json` when audit is enabled — there is no
-`--audit-enabled` flag.
+The controller audit trail records intent lifecycle, lease transitions, and
+workspace coordination in a local SQLite database when `audit_enabled=true` in
+effective config. CLI display uses `--audit` / `--audit-json`. Payload mode
+(`audit_payloads`) is `off` / `compact` / `full`; retention
+(`audit_retention_days`, default `30`) is configurable. Managed/hosted audit
+storage is a roadmap Team/Enterprise option.
 
-| Setting                | Open Source  | Team            | Enterprise           |
-|------------------------|--------------|-----------------|----------------------|
-| `audit_retention_days` | 30           | 90              | configurable         |
-| `audit_payloads`       | compact      | compact or full | compact or full      |
-| Audit backend          | local SQLite | local SQLite    | SQLite or PostgreSQL |
-
-Full payloads include complete tool request/response metadata; compact payloads
-include event type, timestamps, and identifiers only.
+---
 
 ## Platform Observability
 
-Platform Observability is a development diagnostic store, not controller audit
+Platform Observability is a development diagnostic store — not controller audit
 retention and not repository quality history. It is disabled by default and
-local in every edition. Automatic retention pruning is not currently enforced;
-operators own the lifecycle of
-`.codeclone/db/platform_observability.sqlite3`.
-
-The observer stores no raw MCP/prompt bodies and never contributes findings,
-gates, baselines, memory facts, or edit authorization. See
+local in every edition; operators own the lifecycle of
+`.codeclone/db/platform_observability.sqlite3`. The observer stores no raw
+MCP/prompt bodies and never contributes findings, gates, baselines, memory
+facts, or edit authorization. See
 [Platform Observability](book/26-platform-observability.md).
 
-## Why longer retention matters
-
-The SQLite intent registry and audit trail are **auditable coordination trails**:
-who declared change intent, when leases expired, how workspace conflicts were
-resolved, and what agent sessions produced. Longer retention helps:
-
-- post-incident review across agent sessions and CI runs;
-- compliance and internal audit without exporting ad hoc JSON files;
-- multi-agent forensics when several tools share one repository;
-- Engineering Memory lifecycle visibility (draft → active → stale → archived).
-
-File-based registry (`intent_registry_backend = "file"`) remains ephemeral by
-design; SQLite is the audit-oriented backend.
-
 ---
 
-## Team plan
+## Team and Enterprise
 
-Team is for engineering groups that need longer local retention, API-powered
-semantic search, and priority support — without operating their own database
-tier.
+**Available now** — priority/dedicated support, SLA, and onboarding for MCP,
+VS Code, and controller workflows, plus help with CI gating and rollout.
 
-**Includes:**
+**In development (roadmap)** — a managed control plane: hosted registry / audit
+/ retention, cross-repo and org-wide dashboards, hosted and on-prem embedding
+providers, and PostgreSQL backends.
 
-- workspace intent retention up to **30 days**;
-- Engineering Memory: **50 000** records, **30-day** draft retention,
-  **730-day** archived retention;
-- semantic search via **API embedding providers** (OpenAI, Cohere, Voyage,
-  custom endpoint);
-- audit trail retention up to **90 days** with optional full payloads;
-- priority onboarding for MCP, VS Code, and controller workflows;
-- **premium support** for integration, CI gating, and upgrade questions;
-- optional assisted rollout of SQLite registry and audit trail in shared
-  workspaces.
-
-Team keeps the same integrity-protected intent and memory payload contracts as
-open source; limits are raised through licensed configuration, not by weakening
-validation.
-
-## Enterprise plan
-
-Enterprise is for organizations that need centralized retention, PostgreSQL,
-on-prem embedding models, and operational support.
-
-**Includes everything in Team, plus:**
-
-- workspace intent retention up to **90 days**;
-- Engineering Memory: **configurable** record limits and retention;
-- semantic search via **on-premise custom models** (`local_model` provider)
-  for air-gapped or compliance-sensitive deployments;
-- **PostgreSQL backend** for the intent registry (high availability, backup,
-  and query from existing ops tooling);
-- audit trail with **configurable** retention and full payload mode;
-- **premium support** with agreed response targets;
-- deployment guidance for air-gapped, multi-repo, or CI-controller topologies;
-- optional alignment with internal security and change-management processes.
-
-PostgreSQL is an Enterprise backend; open source and Team continue to use the
-local SQLite registry unless you adopt Enterprise licensing.
-
----
+The open-source contracts (integrity-protected intents, signed memory payloads,
+deterministic reports) are identical across editions. Managed options add
+operation and scale; they never weaken validation.
 
 ## Contact
 
-For Team or Enterprise pricing, retention entitlements, API provider setup,
-PostgreSQL rollout, or premium support details:
+For support tiers, roadmap timelines, managed-service interest, or compliance
+requirements:
 
 **[sudo@secuapp.ru](mailto:sudo@secuapp.ru)**
 
 ## Related configuration
 
-See [Config and Defaults — workspace intent registry](book/10-config-and-defaults.md)
-and [Structural Change Controller — workspace intent registry](book/12-structural-change-controller/index.md).
-
-Open-source keys:
+See [Config and Defaults](book/10-config-and-defaults.md) and
+[Structural Change Controller — intent registry](book/12-structural-change-controller/index.md).
 
 ```toml
 [tool.codeclone]
 intent_registry_backend = "sqlite"
 intent_registry_path = ".codeclone/db/intents.sqlite3"
-intent_registry_retention_days = 7   # max 14 in open source
+intent_registry_retention_days = 14   # default; any positive value, no edition cap
 
 [tool.codeclone.memory]
 max_records = 10000
@@ -208,11 +162,9 @@ draft_retention_days = 14
 
 [tool.codeclone.memory.semantic]
 enabled = true
-embedding_provider = "fastembed"      # or "api" (Team+), "local_model" (Enterprise)
-# api_key = "..."                     # required for api provider
-# api_base = "https://..."            # optional custom endpoint
+embedding_provider = "fastembed"      # "diagnostic" or "fastembed" today; "api" / "local_model" are roadmap
 allow_model_download = true
 ```
 
-Environment overrides for registry and memory fields:
-[10-config Environment variable overrides](book/10-config-and-defaults.md#environment-variable-overrides).
+Environment overrides:
+[Config and Defaults — environment variable overrides](book/10-config-and-defaults.md#environment-variable-overrides).

@@ -157,15 +157,15 @@ Controller audit trail:
 
 Workspace intent registry:
 
-| Key                              | Type  | Default                         | Meaning                                                                  | Requires / Implies                              |
-|----------------------------------|-------|---------------------------------|--------------------------------------------------------------------------|-------------------------------------------------|
-| `intent_registry_backend`        | `str` | `file`                          | Workspace intent storage backend: `file` or `sqlite`                     | MCP workspace coordination                      |
-| `intent_registry_path`           | `str` | `.codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root             | Used only when `intent_registry_backend=sqlite` |
-| `intent_registry_retention_days` | `int` | `7`                             | Retention window for closed SQLite intent rows (max `14` in open source) | Used only when `intent_registry_backend=sqlite` |
+| Key                              | Type  | Default                         | Meaning                                                                             | Requires / Implies                              |
+|----------------------------------|-------|---------------------------------|-------------------------------------------------------------------------------------|-------------------------------------------------|
+| `intent_registry_backend`        | `str` | `file`                          | Workspace intent storage backend: `file` or `sqlite`                                | MCP workspace coordination                      |
+| `intent_registry_path`           | `str` | `.codeclone/db/intents.sqlite3` | SQLite registry database path, relative to the analysis root                        | Used only when `intent_registry_backend=sqlite` |
+| `intent_registry_retention_days` | `int` | `14`                            | Retention window for closed SQLite intent rows; any positive value (no edition cap) | Used only when `intent_registry_backend=sqlite` |
 
-Values above `14` are contract errors in the open-source edition. See
-[Plans and Retention](../plans-and-retention.md) for Team (up to 30 days) and
-Enterprise (up to 90 days, PostgreSQL backend) options.
+Retention is configurable to any positive number of days; there is no edition
+cap. Managed/hosted retention (central storage, backup, compliance) is a roadmap
+Team/Enterprise option — see [Plans and Retention](../plans-and-retention.md).
 
 ### Engineering Memory (nested tables)
 
@@ -460,7 +460,7 @@ and local hook gate reads.
 |--------------------------------------------|-----------------------------------------|----------------------------------|------------------------------------------------------------------------|
 | `CODECLONE_INTENT_REGISTRY_BACKEND`        | `file`, `sqlite`                        | `intent_registry_backend`        | File-per-intent JSON under `.codeclone/intents/` vs SQLite WAL backend |
 | `CODECLONE_INTENT_REGISTRY_PATH`           | `.sqlite3` / `.db` path under repo root | `intent_registry_path`           | SQLite database path when backend is `sqlite`                          |
-| `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS` | integer `1`–`14` (open source)          | `intent_registry_retention_days` | Closed-row retention for SQLite backend purge                          |
+| `CODECLONE_INTENT_REGISTRY_RETENTION_DAYS` | integer `>= 1`                          | `intent_registry_retention_days` | Closed-row retention for SQLite backend purge                          |
 
 Refs: `codeclone/config/intent_registry.py`.
 

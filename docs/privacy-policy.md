@@ -18,7 +18,7 @@ For the CLI, MCP server, VS Code extension, and Claude Desktop bundle:
 - CodeClone does not send repository contents to an external CodeClone backend
 - CodeClone reads local repository files, local git state, baselines, and cache
   only to perform the requested structural analysis
-- Engineering Memory, trajectory/Experience projections, controller audit, and
+- Engineering Memory, trajectory/Experience projections, Controller audit, and
   Platform Observability are optional local SQLite state under `.codeclone/`
 - Platform Observability records bounded metadata, counters, timings, and
   literal-free SQL fingerprints; it does not store raw prompts or payload bodies

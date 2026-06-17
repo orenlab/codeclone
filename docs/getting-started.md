@@ -37,6 +37,15 @@ uv tool install "codeclone[mcp]"
 pip install "codeclone[mcp]"
 ```
 
+!!! tip "Install the in-development 2.1 prerelease"
+    The 2.1 line ships as alpha/beta prereleases. A plain install resolves the
+    latest **stable** release; add a prerelease flag to get 2.1:
+
+    ```bash
+    uv tool install --prerelease allow "codeclone[mcp]"   # uv
+    pip install --pre "codeclone[mcp]"                     # pip
+    ```
+
 ## First Run
 
 ```bash

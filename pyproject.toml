@@ -207,6 +207,7 @@ golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
 intent_registry_backend = "sqlite"
 intent_registry_path = ".codeclone/db/intents.sqlite3"
+intent_registry_retention_days=30
 audit_enabled = true
 audit_path = ".codeclone/db/audit.sqlite3"
 audit_payloads = "full"    # "off" | "compact" | "full"

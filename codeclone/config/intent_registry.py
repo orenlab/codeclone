@@ -21,8 +21,6 @@ from .intent_registry_defaults import (
     DEFAULT_INTENT_REGISTRY_BACKEND,
     DEFAULT_INTENT_REGISTRY_DB_PATH,
     DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
-    INTENT_REGISTRY_RETENTION_ENTERPRISE_MESSAGE,
-    MAX_INTENT_REGISTRY_RETENTION_DAYS,
     MIN_INTENT_REGISTRY_RETENTION_DAYS,
     IntentRegistryBackend,
 )
@@ -55,8 +53,6 @@ def resolve_intent_registry_retention_days(
         raise IntentRegistryConfigError(
             "intent_registry_retention_days must be an integer"
         )
-    if raw > MAX_INTENT_REGISTRY_RETENTION_DAYS:
-        raise IntentRegistryConfigError(INTENT_REGISTRY_RETENTION_ENTERPRISE_MESSAGE)
     if raw < MIN_INTENT_REGISTRY_RETENTION_DAYS:
         raise IntentRegistryConfigError(
             "intent_registry_retention_days must be at least "
@@ -173,8 +169,6 @@ __all__ = [
     "DEFAULT_INTENT_REGISTRY_DB_PATH",
     "DEFAULT_INTENT_REGISTRY_RETENTION_DAYS",
     "INTENT_REGISTRY_BACKENDS",
-    "INTENT_REGISTRY_RETENTION_ENTERPRISE_MESSAGE",
-    "MAX_INTENT_REGISTRY_RETENTION_DAYS",
     "MIN_INTENT_REGISTRY_RETENTION_DAYS",
     "IntentRegistryBackend",
     "IntentRegistryConfig",

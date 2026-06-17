@@ -2,7 +2,7 @@
      owns: intro paragraph, goal→link routing tables.
      does-not-own: full book TOC (book/README.md), install instructions
        (getting-started.md), local preview commands (publishing.md).
-     rule: keep under 90 lines. Add links, not content. -->
+     rule: keep under 95 lines. Add links, not content. -->
 
 # CodeClone Docs
 
@@ -16,6 +16,9 @@ Humans and AI agents operate on the same structural facts.
 The v2.1 change controller starts before the first edit: an agent declares what
 it intends to change, CodeClone maps the structural blast radius, verifies the
 patch against the declared boundary, and generates an auditable review receipt.
+
+!!! note "Documentation for the in-development v2.1 line"
+    This site tracks the unreleased **v2.1** line; for the current stable release see [CodeClone v2.0.2](https://github.com/orenlab/codeclone/tree/v2.0.2).
 
 ## New here? Follow the path
 
@@ -86,3 +89,5 @@ patch against the declared boundary, and generates an auditable review receipt.
 
 Operating or building CodeClone itself? See [Platform Observability](guide/observability/diagnostics.md)
 and [Corpus Analytics](guide/analytics/overview.md) under the **Maintainers** tab.
+
+**Editions & plans** — CodeClone is open source and runs locally; Team and Enterprise add scaled retention, managed options, and support. Pick the level that fits your needs: [Plans and retention](plans-and-retention.md).
