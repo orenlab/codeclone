@@ -74,6 +74,9 @@ def test_memory_record_frozen_fields() -> None:
         record.statement = "changed"  # type: ignore[misc]
 
 
-def test_parse_payload_json_rejects_non_object() -> None:
-    with pytest.raises(TypeError, match="payload_json must decode to an object"):
-        parse_payload_json("[1, 2]")
+def test_parse_payload_json_tolerates_bad_payload_on_read() -> None:
+    # L3: a damaged row must not crash the read path. Non-object JSON and corrupt
+    # JSON both load as None instead of raising; well-formed objects still parse.
+    assert parse_payload_json("[1, 2]") is None
+    assert parse_payload_json("{not valid json") is None
+    assert parse_payload_json('{"a": 1}') == {"a": 1}

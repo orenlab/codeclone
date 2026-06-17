@@ -188,12 +188,18 @@ def payload_json_text(payload: dict[str, object] | None) -> str | None:
 
 
 def parse_payload_json(text: str | None) -> dict[str, object] | None:
+    # Read-side parser: a single damaged row must not crash the whole read path
+    # (find_record, list_records, retrieval). Fail soft — a corrupt JSON payload
+    # or a payload that does not decode to an object loads as None rather than
+    # raising. Writes still serialize through payload_json_text.
     if text is None or not text.strip():
         return None
-    loaded = orjson.loads(text)
+    try:
+        loaded = orjson.loads(text)
+    except orjson.JSONDecodeError:
+        return None
     if not isinstance(loaded, dict):
-        msg = "payload_json must decode to an object"
-        raise TypeError(msg)
+        return None
     return loaded
 
 
