@@ -254,3 +254,25 @@ def test_ide_governance_prepare_and_commit_reject(tmp_path: Path) -> None:
         assert updated.status == "rejected"
     finally:
         store.close()
+
+
+def test_ide_governance_validate_reject_is_draft_only() -> None:
+    # Audit M7: IDE _validate_record_for_decision now mirrors governance.py —
+    # reject is draft-only (stale is discarded via vacuum, never human-rejected),
+    # approve accepts {draft, stale}, archive accepts active. Closes the gap where
+    # a VS Code reject on a stale record passed IDE validation, then raised a
+    # MemoryContractError inside reject_record.
+    from dataclasses import replace
+
+    from codeclone.memory.ide_governance import _validate_record_for_decision
+    from tests.memory_fixtures import make_module_record
+
+    base = make_module_record("proj-m7", "pkg.mod")
+    stale = replace(base, status="stale")
+    with pytest.raises(
+        MemoryContractError, match="Cannot reject record in status 'stale'"
+    ):
+        _validate_record_for_decision(stale, "reject")
+    # approve on stale (re-verify) and reject on draft both remain valid.
+    _validate_record_for_decision(stale, "approve")
+    _validate_record_for_decision(replace(base, status="draft"), "reject")

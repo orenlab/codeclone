@@ -309,10 +309,18 @@ def _validate_record_for_decision(
     record: MemoryRecord,
     decision: GovernanceDecision,
 ) -> None:
-    if decision in {"approve", "reject"} and record.status not in {"draft", "stale"}:
+    # Mirror governance.py: approve accepts {draft, stale}, reject accepts only
+    # draft (stale is discarded via vacuum, never human-rejected — see the
+    # trust-and-lifecycle state machine), archive accepts only active. Keeps the
+    # IDE channel consistent with reject_record so a VS Code reject on a stale
+    # record fails here with a clear message instead of raising downstream.
+    allowed_by_decision: dict[GovernanceDecision, frozenset[str]] = {
+        "approve": frozenset({"draft", "stale"}),
+        "reject": frozenset({"draft"}),
+        "archive": frozenset({"active"}),
+    }
+    if record.status not in allowed_by_decision[decision]:
         _raise_memory_contract(f"Cannot {decision} record in status '{record.status}'")
-    if decision == "archive" and record.status != "active":
-        _raise_memory_contract(f"Cannot archive record in status '{record.status}'")
 
 
 def register_ide_governance(
