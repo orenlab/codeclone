@@ -1801,7 +1801,33 @@ def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> Non
                 "dependency_pressure",
                 "hub_like_shape",
             ],
-        }
+        },
+        {
+            "module": "pkg.util",
+            "relative_path": "pkg/util.py",
+            "source_kind": "production",
+            "loc": 120,
+            "functions": 2,
+            "methods": 0,
+            "classes": 0,
+            "callable_count": 2,
+            "complexity_total": 8,
+            "complexity_max": 5,
+            "fan_in": 1,
+            "fan_out": 2,
+            "total_deps": 3,
+            "import_edges": 3,
+            "reimport_edges": 0,
+            "reimport_ratio": 0.0,
+            "instability": 0.6667,
+            "hub_balance": 0.5,
+            "size_score": 0.4,
+            "dependency_score": 0.35,
+            "shape_score": 0.3,
+            "score": 0.75,
+            "candidate_status": "ranked_only",
+            "candidate_reasons": [],
+        },
     ]
 
     html = build_html_report(
@@ -1818,11 +1844,17 @@ def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> Non
         "pkg.hub",
         "Top candidates",
         "0.93",
+        "Ranked only",
         "overloaded-modules",
     )
     assert "hub-like shape" not in html
     assert "Candidate cutoff" not in html
     assert "Ranked modules" not in html
+    overloaded_panel = html.split('data-clone-panel="overloaded-modules"', 1)[1].split(
+        "data-clone-panel=", 1
+    )[0]
+    assert "Critical" not in overloaded_panel
+    assert "0.88" in overloaded_panel
 
 
 def test_html_report_overloaded_modules_fallback_module_path_in_overview() -> None:

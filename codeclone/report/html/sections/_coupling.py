@@ -32,6 +32,7 @@ if TYPE_CHECKING:
 
     from .._context import ReportContext
 
+_as_float = _coerce.as_float
 _as_int = _coerce.as_int
 _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
@@ -218,17 +219,18 @@ def _overloaded_cards(
 ) -> str:
     candidates = _as_int(summary.get("candidates"))
     total_modules = _as_int(summary.get("total"))
-    critical = sum(
+    ranked_only = sum(
         1
         for r in rows_data
-        if str(_as_mapping(r).get("candidate_status", "")).strip().lower() == "critical"
+        if str(_as_mapping(r).get("candidate_status", "")).strip().lower()
+        == "ranked_only"
     )
-    scores = [
-        _as_int(_as_mapping(r).get("score"))
-        for r in rows_data
-        if _as_int(_as_mapping(r).get("score")) > 0
-    ]
-    max_score = max(scores) if scores else 0
+    population_status = str(summary.get("population_status", "")).strip().lower()
+    max_score = _as_float(summary.get("top_score"))
+    if max_score <= 0.0:
+        row_scores = [_as_float(_as_mapping(r).get("score")) for r in rows_data]
+        max_score = max(row_scores) if row_scores else 0.0
+    cutoff = _as_float(summary.get("candidate_score_cutoff"))
     locs = [
         _as_int(_as_mapping(r).get("loc"))
         for r in rows_data
@@ -244,15 +246,22 @@ def _overloaded_cards(
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
-            "Critical",
-            critical,
-            value_tone="bad" if critical > 0 else "good",
+            "Ranked only",
+            ranked_only,
+            detail=_micro_badges(("population", population_status))
+            if population_status
+            else "",
+            value_tone=(
+                "warn"
+                if population_status == "limited"
+                else ("muted" if ranked_only else "good")
+            ),
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Max score",
-            max_score,
-            detail=_micro_badges(("threshold", summary.get("threshold", "n/a"))),
+            f"{max_score:.2f}",
+            detail=_micro_badges(("cutoff", f"{cutoff:.2f}")) if cutoff > 0.0 else "",
             value_tone="warn" if max_score > 0 else "muted",
             glossary_tip_fn=glossary_tip,
         ),
