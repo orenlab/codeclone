@@ -10,9 +10,10 @@ from math import ceil
 from typing import TYPE_CHECKING
 
 from ..models import DepGraph, ModuleDep
+from ..utils import coerce
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
 DepAdjacency = dict[str, set[str]]
 
@@ -270,3 +271,80 @@ def build_dep_graph(*, modules: Iterable[str], deps: Sequence[ModuleDep]) -> Dep
         p95_depth=p95_depth,
         longest_chains=chains,
     )
+
+
+def select_dependency_graph_nodes(
+    edges: Sequence[tuple[str, str]],
+    *,
+    dep_cycles: Sequence[object],
+    longest_chains: Sequence[object],
+    max_nodes: int,
+    max_edges: int,
+    node_id_fn: Callable[[str], str] | None = None,
+) -> tuple[list[str], list[tuple[str, str]], dict[str, object]]:
+    """Deterministic subgraph sample over directed import edges.
+
+    Seeds cycle members, then longest-chain members, then fills remaining slots
+    by descending node degree (tie-break id ascending), so structurally
+    important nodes survive downsampling. ``node_id_fn`` maps a module name to
+    the active zoom id (package prefix or identity) before membership checks
+    when seeding from cycles and chains. Returns the shown nodes, the induced
+    (edge-capped) edges, and a truncation metadata mapping.
+    """
+    all_nodes = sorted({part for edge in edges for part in edge})
+    node_universe_count = len(all_nodes)
+    edge_universe_count = len(edges)
+    if node_universe_count > max_nodes:
+        degree_count: dict[str, int] = dict.fromkeys(all_nodes, 0)
+        for source, target in edges:
+            degree_count[source] = degree_count.get(source, 0) + 1
+            degree_count[target] = degree_count.get(target, 0) + 1
+        all_node_set = set(all_nodes)
+        nodes: list[str] = []
+        node_set: set[str] = set()
+
+        def _seed_node(node: object) -> None:
+            node_name = str(node).strip()
+            if node_id_fn is not None:
+                node_name = node_id_fn(node_name)
+            if (
+                not node_name
+                or node_name not in all_node_set
+                or node_name in node_set
+                or len(nodes) >= max_nodes
+            ):
+                return
+            nodes.append(node_name)
+            node_set.add(node_name)
+
+        for cycle in dep_cycles:
+            for node in coerce.as_sequence(cycle):
+                _seed_node(node)
+        for chain in longest_chains:
+            for node in coerce.as_sequence(chain):
+                _seed_node(node)
+        for node in sorted(
+            all_nodes, key=lambda item: (-degree_count.get(item, 0), item)
+        ):
+            _seed_node(node)
+            if len(nodes) >= max_nodes:
+                break
+        nodes.sort()
+    else:
+        nodes = list(all_nodes)
+    node_set = set(nodes)
+    filtered = [
+        (source, target)
+        for source, target in edges
+        if source in node_set and target in node_set
+    ][:max_edges]
+    truncation: dict[str, object] = {
+        "truncated": len(nodes) < node_universe_count
+        or len(filtered) < edge_universe_count,
+        "node_universe_count": node_universe_count,
+        "node_shown_count": len(nodes),
+        "edge_universe_count": edge_universe_count,
+        "edge_shown_count": len(filtered),
+        "seed_policy": "cycles_then_chains_then_degree",
+    }
+    return nodes, filtered, truncation

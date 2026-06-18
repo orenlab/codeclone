@@ -12,6 +12,7 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
+from codeclone.metrics.dependencies import select_dependency_graph_nodes
 from codeclone.utils import coerce as _coerce
 
 from ..primitives.escape import _escape_html
@@ -41,53 +42,15 @@ def _select_dep_nodes(
     dep_cycles: Sequence[object],
     longest_chains: Sequence[object],
 ) -> tuple[list[str], list[tuple[str, str]]]:
-    all_nodes = sorted({part for edge in edges for part in edge})
-    if len(all_nodes) > 20:
-        degree_count: dict[str, int] = dict.fromkeys(all_nodes, 0)
-        for source, target in edges:
-            degree_count[source] = degree_count.get(source, 0) + 1
-            degree_count[target] = degree_count.get(target, 0) + 1
-        all_node_set = set(all_nodes)
-        nodes: list[str] = []
-        node_set: set[str] = set()
-
-        def _seed_node(node: object) -> None:
-            node_name = str(node).strip()
-            if (
-                not node_name
-                or node_name not in all_node_set
-                or node_name in node_set
-                or len(nodes) >= 20
-            ):
-                return
-            nodes.append(node_name)
-            node_set.add(node_name)
-
-        # Keep the visual graph aligned with the dependency tables. When we
-        # downsample a large graph, cycle members and longest-chain nodes must
-        # remain visible instead of being dropped behind high-degree hubs.
-        for cycle in dep_cycles:
-            for node in _as_sequence(cycle):
-                _seed_node(node)
-        for chain in longest_chains:
-            for node in _as_sequence(chain):
-                _seed_node(node)
-
-        for node in sorted(
-            all_nodes, key=lambda item: (-degree_count.get(item, 0), item)
-        ):
-            _seed_node(node)
-            if len(nodes) >= 20:
-                break
-        nodes.sort()
-    else:
-        nodes = all_nodes
-    node_set = set(nodes)
-    filtered = [
-        (source, target)
-        for source, target in edges
-        if source in node_set and target in node_set
-    ][:100]
+    # Shared deterministic sampler (metrics.dependencies). Dependencies tab keeps
+    # its historical caps (20 nodes / 100 edges) and module-level identity zoom.
+    nodes, filtered, _truncation = select_dependency_graph_nodes(
+        edges,
+        dep_cycles=dep_cycles,
+        longest_chains=longest_chains,
+        max_nodes=20,
+        max_edges=100,
+    )
     return nodes, filtered
 
 
