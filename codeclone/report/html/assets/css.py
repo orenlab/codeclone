@@ -854,6 +854,10 @@ _DEPENDENCIES = """\
 .dep-node{transition:fill-opacity var(--dur-fast) var(--ease)}
 .dep-edge{transition:stroke-opacity var(--dur-fast) var(--ease)}
 .dep-label{transition:fill var(--dur-fast) var(--ease)}
+.mm-candidate-ring{fill:none;stroke:var(--warning);stroke-width:1.5;stroke-opacity:.9}
+.mm-truncation-notice{margin-bottom:var(--sp-4);padding:var(--sp-2) var(--sp-4);
+  font-size:.8rem;color:var(--text-muted);background:var(--bg-raised);
+  border:1px solid var(--border);border-radius:var(--radius-lg)}
 
 /* Hub bar */
 .dep-hub-bar{display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap;

@@ -21,12 +21,7 @@ from codeclone.report.html.sections._clones import (
     _render_group_explanation,
 )
 from codeclone.report.html.sections._dead_code import render_dead_code_panel
-from codeclone.report.html.sections._dependencies import (
-    _hub_threshold,
-    _layout_dep_graph,
-    _render_dep_nodes_and_labels,
-    _select_dep_nodes,
-)
+from codeclone.report.html.sections._dependencies import _select_dep_nodes
 from codeclone.report.html.sections._meta import _path_basename, render_meta_panel
 from codeclone.report.html.sections._overview import (
     _directory_hotspot_bucket_body,
@@ -47,6 +42,11 @@ from codeclone.report.html.widgets.badges import _quality_badge_html, _stat_card
 from codeclone.report.html.widgets.components import (
     overview_source_breakdown_html,
     overview_summary_item_html,
+)
+from codeclone.report.html.widgets.dep_graph_layout import (
+    _hub_threshold,
+    _layout_dep_graph,
+    _render_dep_nodes_and_labels,
 )
 from codeclone.report.html.widgets.icons import section_icon_html
 from codeclone.report.html.widgets.snippets import _FileCache

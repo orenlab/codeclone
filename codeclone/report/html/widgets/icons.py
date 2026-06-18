@@ -132,6 +132,13 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<circle cx="12" cy="18" r="2.5"/><path d="M8 7.8l2.7 6.4"/>'
         '<path d="M16 7.8l-2.7 6.4"/>',
     ),
+    "module-map": (
+        "2",
+        '<rect x="9" y="2" width="6" height="6" rx="1"/>'
+        '<rect x="2" y="16" width="6" height="6" rx="1"/>'
+        '<rect x="16" y="16" width="6" height="6" rx="1"/>'
+        '<path d="M12 8v4"/><path d="M5 16v-2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v2"/>',
+    ),
     "dead-code": (
         "2",
         '<path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>'

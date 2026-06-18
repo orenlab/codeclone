@@ -40,6 +40,7 @@ from codeclone.report.html.primitives.location import (
     location_file_target,
     relative_location_path,
 )
+from codeclone.report.html.sections._module_map import render_module_map_panel
 from codeclone.report.html.sections._security_surfaces import (
     _coverage_join_review_text,
     _coverage_review_cues,
@@ -2705,7 +2706,7 @@ def test_html_report_quality_coverage_join_empty_and_invalid_states() -> None:
     )
     invalid_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
     invalid_panel = invalid_panel.split(
-        '<div class="tab-panel" id="panel-dependencies"',
+        '<div class="tab-panel" id="panel-module-map"',
         1,
     )[0]
     assert "Nothing to report - keep up the good work." not in invalid_panel
@@ -2766,7 +2767,7 @@ def test_html_report_quality_coverage_join_edge_states() -> None:
     invalid_html = _render_metrics_html(metrics)
     coverage_join_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
     coverage_join_panel = coverage_join_panel.split(
-        '<div class="tab-panel" id="panel-dependencies"',
+        '<div class="tab-panel" id="panel-module-map"',
         1,
     )[0]
     assert "Source:" not in coverage_join_panel
@@ -3969,3 +3970,295 @@ def test_html_report_overview_uses_canonical_report_overview_hotlists() -> None:
     assert '<div class="overview-summary-value">n/a</div>' not in html
     # Issue breakdown replaces old hotspot sections
     assert "Issue breakdown" in html
+
+
+# ---------------------------------------------------------------------------
+# Module map panel (Phase 32)
+# ---------------------------------------------------------------------------
+
+
+def _mm_node(
+    node_id: str,
+    fan_in: int,
+    fan_out: int,
+    *,
+    in_cycle: bool = False,
+    status: str = "non_candidate",
+    reasons: tuple[str, ...] = (),
+    kinds: tuple[str, ...] = ("production",),
+) -> dict[str, object]:
+    return {
+        "id": node_id,
+        "label": node_id,
+        "fan_in": fan_in,
+        "fan_out": fan_out,
+        "total_degree": fan_in + fan_out,
+        "source_kinds": list(kinds),
+        "in_cycle": in_cycle,
+        "overloaded": {
+            "score": 0.9,
+            "candidate_status": status,
+            "candidate_reasons": list(reasons),
+        },
+    }
+
+
+def _mm_graph(
+    *,
+    zoom: str,
+    package_depth: object,
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]],
+    truncated: bool,
+) -> dict[str, object]:
+    return {
+        "zoom": zoom,
+        "package_depth": package_depth,
+        "truncation": {
+            "truncated": truncated,
+            "node_universe_count": 40 if truncated else len(nodes),
+            "node_shown_count": len(nodes),
+            "edge_universe_count": 30 if truncated else len(edges),
+            "edge_shown_count": len(edges),
+            "seed_policy": "cycles_then_chains_then_degree",
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def _module_map_payload(
+    *,
+    truncated: bool = False,
+    default_zoom: str = "packages",
+    population_status: str = "ok",
+    with_unwind: bool = True,
+    packages_nodes: bool = True,
+) -> dict[str, object]:
+    nodes = [
+        _mm_node(
+            "pkg.core", 12, 8, status="candidate", reasons=("dependency_pressure",)
+        ),
+        _mm_node("pkg.api", 6, 2, in_cycle=True),
+        _mm_node("pkg.svc", 2, 2),
+        _mm_node("pkg.util", 2, 1, kinds=("tests",)),
+        _mm_node("pkg.leaf", 0, 1),
+    ]
+    edges = [
+        {"source": "pkg.api", "target": "pkg.core", "weight": 5},
+        {"source": "pkg.core", "target": "pkg.util", "weight": 1},
+        {"source": "pkg.leaf", "target": "pkg.core", "weight": 2},
+        {"source": "pkg.svc", "target": "pkg.core", "weight": 3},
+    ]
+    unwind = (
+        [
+            {
+                "module": "pkg.core",
+                "filepath": "pkg/core.py",
+                "source_kind": "production",
+                "fan_in": 12,
+                "fan_out": 8,
+                "score": 0.9,
+                "dependency_score": 0.95,
+                "candidate_status": "candidate",
+                "signals": ["dependency_pressure", "chain_bottleneck"],
+            }
+        ]
+        if with_unwind
+        else []
+    )
+    return {
+        "schema_version": "1",
+        "scope": "report_only",
+        "default_zoom": default_zoom,
+        "summary": {
+            "available": True,
+            "module_count": 5,
+            "package_count_depth2": 5,
+            "edge_count": 4,
+            "unwind_candidate_count": len(unwind),
+            "overloaded_candidate_count": 1,
+            "overloaded_population_status": population_status,
+        },
+        "graph_packages": _mm_graph(
+            zoom="packages",
+            package_depth=2,
+            nodes=nodes if packages_nodes else [],
+            edges=edges if packages_nodes else [],
+            truncated=truncated,
+        ),
+        "graph_modules": _mm_graph(
+            zoom="modules",
+            package_depth=None,
+            nodes=nodes,
+            edges=edges,
+            truncated=False,
+        ),
+        "unwind_candidates": unwind,
+    }
+
+
+def _module_map_unavailable_payload() -> dict[str, object]:
+    empty = {
+        "truncated": False,
+        "node_universe_count": 0,
+        "node_shown_count": 0,
+        "edge_universe_count": 0,
+        "edge_shown_count": 0,
+        "seed_policy": "cycles_then_chains_then_degree",
+    }
+    graph: dict[str, object] = {
+        "zoom": "packages",
+        "package_depth": None,
+        "truncation": empty,
+        "nodes": [],
+        "edges": [],
+    }
+    return {
+        "schema_version": "1",
+        "scope": "report_only",
+        "default_zoom": "packages",
+        "summary": {
+            "available": False,
+            "reason": "dependencies_skipped",
+            "module_count": 0,
+            "package_count_depth2": 0,
+            "edge_count": 0,
+            "unwind_candidate_count": 0,
+            "overloaded_candidate_count": 0,
+            "overloaded_population_status": "limited",
+        },
+        "graph_packages": graph,
+        "graph_modules": {**graph, "zoom": "modules"},
+        "unwind_candidates": [],
+    }
+
+
+def _module_map_base_metrics() -> dict[str, object]:
+    return _metrics_payload(
+        health_score=80,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+
+
+def _module_map_metrics() -> dict[str, object]:
+    metrics = _module_map_base_metrics()
+    metrics["overloaded_modules"] = {
+        "summary": {"candidates": 1, "population_status": "ok"},
+        "items": [
+            {
+                "module": "pkg.core",
+                "score": 0.9,
+                "fan_in": 12,
+                "fan_out": 8,
+                "candidate_status": "candidate",
+            },
+            {
+                "module": "pkg.api",
+                "score": 0.4,
+                "fan_in": 6,
+                "fan_out": 2,
+                "candidate_status": "ranked_only",
+            },
+        ],
+    }
+    return metrics
+
+
+def _render_module_map_report(
+    module_map: dict[str, object],
+    *,
+    metrics: dict[str, object] | None = None,
+) -> str:
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=metrics if metrics is not None else _module_map_metrics(),
+        report_document={"derived": {"module_map": module_map}},
+    )
+
+
+def _module_map_panel_slice(html: str) -> str:
+    panel = html.split('id="panel-module-map"', 1)[1]
+    return panel.split('id="panel-dependencies"', 1)[0]
+
+
+def test_html_report_renders_module_map_panel() -> None:
+    html = _render_module_map_report(_module_map_payload())
+    _assert_html_contains(
+        html,
+        "Module map",
+        'id="panel-module-map"',
+        "dep-graph-svg",
+        "mm-candidate-ring",
+        'data-subtab-group="module-map-zoom"',
+        "Report-only import-graph signals for refactor triage.",
+        "Unwind candidates",
+        "Top overloaded modules",
+        "dependency_pressure",
+    )
+    panel = _module_map_panel_slice(html)
+    assert "pkg.core" in panel
+    assert 'stroke-width="3"' in panel  # weight=5 edge -> 1+floor(log2 5)=3
+    assert 'stroke-dasharray="2,2"' in panel  # tests-only node dashed stroke
+    assert 'stroke-dasharray="3,2"' in panel  # in-cycle node dashed stroke
+    # overloaded slice ordered by -score: pkg.core (0.90) row before pkg.api (0.40)
+    overloaded = panel.split("Top overloaded modules", 1)[1]
+    assert overloaded.index("pkg.core") < overloaded.index("pkg.api")
+
+
+def test_module_map_truncation_notice_when_sampled() -> None:
+    html = _render_module_map_report(_module_map_payload(truncated=True))
+    panel = _module_map_panel_slice(html)
+    _assert_html_contains(
+        panel, "mm-truncation-notice", "Showing", "deterministic sample"
+    )
+
+
+def test_module_map_panel_unavailable_when_skipped() -> None:
+    html = _render_module_map_report(_module_map_unavailable_payload())
+    panel = _module_map_panel_slice(html)
+    assert "Dependency graph is not available." in panel
+    assert "dep-graph-svg" not in panel
+    assert 'data-subtab-group="module-map-zoom"' not in panel
+
+
+def test_module_map_panel_metrics_skipped_insight() -> None:
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            derived_map={},
+            overloaded_modules_map={},
+            metrics_available=False,
+        ),
+    )
+    html = render_module_map_panel(ctx)
+    assert "Metrics are skipped for this run." in html
+    assert "Dependency graph is not available." in html
+
+
+def test_module_map_panel_modules_zoom_and_limited_population() -> None:
+    payload = _module_map_payload(
+        default_zoom="modules",
+        population_status="limited",
+        with_unwind=False,
+        packages_nodes=False,
+    )
+    html = _render_module_map_report(payload, metrics=_module_map_base_metrics())
+    panel = _module_map_panel_slice(html)
+    assert "Overload population" in panel
+    assert "No unwind candidates detected." in panel
+    assert "No overloaded modules detected." in panel
+    # modules graph (active) renders an SVG; empty packages graph shows the message
+    assert "dep-graph-svg" in panel
+    assert "Dependency graph is not available." in panel

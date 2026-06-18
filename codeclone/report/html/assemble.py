@@ -40,6 +40,7 @@ from ..messages.chrome import (
     TAB_DEAD_CODE,
     TAB_DEPENDENCIES,
     TAB_FINDINGS,
+    TAB_MODULE_MAP,
     TAB_OVERVIEW,
     TAB_QUALITY,
     TAB_SUGGESTIONS,
@@ -56,6 +57,7 @@ from .sections._coupling import render_quality_panel
 from .sections._dead_code import render_dead_code_panel
 from .sections._dependencies import render_dependencies_panel
 from .sections._meta import build_topbar_provenance_summary, render_meta_panel
+from .sections._module_map import render_module_map_panel
 from .sections._overview import render_overview_panel
 from .sections._structural import render_structural_panel
 from .sections._suggestions import render_suggestions_panel
@@ -113,6 +115,7 @@ def build_html_report(
     overview_html = render_overview_panel(ctx)
     clones_html, _novelty_enabled, _total_new, _total_known = render_clones_panel(ctx)
     quality_html = render_quality_panel(ctx)
+    module_map_html = render_module_map_panel(ctx)
     dependencies_html = render_dependencies_panel(ctx)
     dead_code_html = render_dead_code_panel(ctx)
     suggestions_html = render_suggestions_panel(ctx)
@@ -136,6 +139,10 @@ def build_html_report(
             == CONFIDENCE_HIGH
         )
     dep_cycles = len(_as_sequence(ctx.dependencies_map.get("cycles")))
+    module_map_summary = _as_mapping(
+        _as_mapping(ctx.derived_map.get("module_map")).get("summary")
+    )
+    module_map_unwind = _as_int(module_map_summary.get("unwind_candidate_count"))
     structural_count = len(
         tuple(normalize_structural_findings(ctx.structural_findings))
     )
@@ -169,6 +176,7 @@ def build_html_report(
         "overview": "overview",
         "clones": "clones",
         "quality": "quality",
+        "module-map": "module-map",
         "dependencies": "dependencies",
         "dead-code": "dead-code",
         "suggestions": "suggestions",
@@ -178,6 +186,12 @@ def build_html_report(
         ("overview", TAB_OVERVIEW, overview_html, ""),
         ("clones", TAB_CLONES, clones_html, _tab_badge(ctx.clone_groups_total)),
         ("quality", TAB_QUALITY, quality_html, _tab_badge(quality_issues)),
+        (
+            "module-map",
+            TAB_MODULE_MAP,
+            module_map_html,
+            _tab_badge(module_map_unwind),
+        ),
         ("dependencies", TAB_DEPENDENCIES, dependencies_html, _tab_badge(dep_cycles)),
         ("dead-code", TAB_DEAD_CODE, dead_code_html, _tab_badge(dead_high_conf)),
         (
