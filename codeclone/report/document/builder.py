@@ -23,7 +23,11 @@ if TYPE_CHECKING:
     )
 
 from ._common import _collect_report_file_list
-from .derived import _build_derived_overview, _build_derived_suggestions
+from .derived import (
+    _build_derived_module_map,
+    _build_derived_overview,
+    _build_derived_suggestions,
+)
 from .findings import _build_findings_payload
 from .integrity import _build_integrity_payload
 from .inventory import (
@@ -95,6 +99,7 @@ def build_report_document(
         "suggestions": _build_derived_suggestions(suggestions),
         "overview": overview_payload,
         "hotlists": hotlists_payload,
+        "module_map": _build_derived_module_map(metrics_payload),
     }
     integrity_payload = _build_integrity_payload(
         report_schema_version=report_schema_version,
