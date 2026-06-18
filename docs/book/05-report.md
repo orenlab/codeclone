@@ -78,6 +78,42 @@ Refs:
 - `codeclone/report/document/_findings_groups.py:_build_clone_groups`
 - `codeclone/report/document/_findings_groups.py:_build_structural_groups`
 
+### Module map (`derived.module_map`)
+
+`derived.module_map` is a report-only projection for refactor triage. It does
+not re-scan sources or add a metrics family — it reprojects the existing
+`metrics.families.dependencies` (import edges, cycles, longest chains) and
+`metrics.families.overloaded_modules` facts into graph views and unwind-candidate
+rows. It carries its own `schema_version: "1"` and `scope: "report_only"`; like
+the rest of `derived` it is excluded from the integrity digest, so adding it does
+not bump `report_schema_version`.
+
+Shape:
+
+- `summary` — `available`, `module_count`, `package_count_depth2`, `edge_count`,
+  `unwind_candidate_count`, `overloaded_candidate_count`,
+  `overloaded_population_status` (`reason` is added when `available` is false).
+- `default_zoom` — `"packages"` or `"modules"`, chosen by a deterministic
+  decision table over module/package counts (monolith and over-merge guards
+  included).
+- `graph_packages` / `graph_modules` — precomputed `nodes`, `edges`, and a
+  `truncation` block (`truncated`, universe/shown node and edge counts,
+  `seed_policy: "cycles_then_chains_then_degree"`). Both views are always emitted
+  when `available` is true so consumers can swap zoom without recomputation. The
+  SVG may show a deterministic sample on large repositories; the tables stay
+  full-size.
+- `unwind_candidates[]` — report-only refactor-triage rows over the full
+  `overloaded_modules` set (capped at 25), each with derived `signals` ids.
+
+When the dependencies family is skipped or empty the projection emits an
+unavailable shell (`summary.available: false`, `reason: "dependencies_skipped"`,
+empty graphs and `unwind_candidates`).
+
+Refs:
+
+- `codeclone/report/document/derived.py:_build_derived_module_map`
+- `codeclone/metrics/dependencies.py:select_dependency_graph_nodes`
+
 ## Contracts
 
 - JSON is the source of truth for report semantics.

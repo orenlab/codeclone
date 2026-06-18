@@ -133,6 +133,15 @@ Added
   schema is now `1.2`; JSON export schema `1.3` adds control-plane contract
   `1.0`, profile context/summary, and active selection without changing
   technical-validity semantics.
+* **Module map.** A default-on, report-only `derived.module_map` projection
+  reprojects existing dependency and overloaded-module facts into deterministic
+  package/module graph views and unwind-candidate triage rows for refactor
+  scoping. A new `Module map` HTML tab (between Quality and Dependencies) renders
+  the precomputed graph with a Packages/Modules zoom toggle, candidate/cycle/hub
+  cues, a truncation notice on sampled graphs, and full-size unwind and
+  top-overloaded tables. `get_report_section(section="module_map")` returns the
+  projection directly. No new analysis pass, metrics family, or report schema
+  bump — `derived` stays excluded from the integrity digest.
 
 Changed
 
