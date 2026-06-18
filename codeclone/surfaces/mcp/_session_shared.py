@@ -168,6 +168,7 @@ ReportSection = Literal[
     "metrics",
     "metrics_detail",
     "derived",
+    "module_map",
     "changed",
     "integrity",
 ]
@@ -276,6 +277,7 @@ _VALID_REPORT_SECTIONS = frozenset(
         "metrics",
         "metrics_detail",
         "derived",
+        "module_map",
         "changed",
         "integrity",
     }

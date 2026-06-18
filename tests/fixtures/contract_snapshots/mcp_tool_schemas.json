@@ -1898,7 +1898,7 @@
         },
         "section": {
           "default": "all",
-          "description": "meta, inventory, findings, metrics, metrics_detail, changed, derived, integrity, or all.",
+          "description": "meta, inventory, findings, metrics, metrics_detail, changed, derived, module_map, integrity, or all.",
           "title": "Section",
           "type": "string"
         },

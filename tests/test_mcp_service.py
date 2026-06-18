@@ -18,7 +18,7 @@ from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any, Literal, cast
 from unittest.mock import patch
 
 import pytest
@@ -11557,3 +11557,48 @@ def test_implementation_context_public_surface_full_detail(
     assert rows[0]["record_kind"] == "symbol"
     assert rows[0]["module"] == "pkg.mod"
     assert rows[0]["params"] == [{"name": "value"}]
+
+
+def _module_map_service(
+    tmp_path: Path, *, analysis_mode: Literal["full", "clones_only"] = "full"
+) -> CodeCloneMCPService:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            analysis_mode=analysis_mode,
+        )
+    )
+    return service
+
+
+def test_get_report_section_module_map_matches_derived(tmp_path: Path) -> None:
+    service = _module_map_service(tmp_path)
+    module_map = service.get_report_section(section="module_map")
+    derived = cast(
+        "dict[str, object]", service.get_report_section(section="all")["derived"]
+    )
+    assert module_map == derived["module_map"]
+    assert set(module_map) >= {
+        "schema_version",
+        "scope",
+        "default_zoom",
+        "summary",
+        "graph_packages",
+        "graph_modules",
+        "unwind_candidates",
+    }
+    assert module_map["schema_version"] == "1"
+
+
+def test_get_report_section_module_map_clones_only_returns_shell(
+    tmp_path: Path,
+) -> None:
+    module_map = _module_map_service(
+        tmp_path, analysis_mode="clones_only"
+    ).get_report_section(section="module_map")
+    assert cast("dict[str, object]", module_map["summary"])["available"] is False
+    assert module_map["unwind_candidates"] == []

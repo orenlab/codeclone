@@ -968,6 +968,13 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             )
         if validated_section == "derived":
             return self._derived_section_payload(record)
+        if validated_section == "module_map":
+            derived = _helpers._as_mapping(report_document.get("derived"))
+            if not derived:
+                raise MCPServiceContractError(
+                    "Report section 'module_map' is not available in this run."
+                )
+            return dict(_helpers._as_mapping(derived.get("module_map")))
         payload = report_document.get(validated_section)
         if not isinstance(payload, Mapping):
             raise MCPServiceContractError(
