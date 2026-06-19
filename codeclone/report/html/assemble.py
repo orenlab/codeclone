@@ -159,9 +159,6 @@ def build_html_report(
         _as_int(_as_mapping(ctx.complexity_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.coupling_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.cohesion_map.get("summary")).get("low_cohesion"))
-        + _as_int(
-            _as_mapping(ctx.overloaded_modules_map.get("summary")).get("candidates")
-        )
         + coverage_review_items
         + _as_int(_as_mapping(ctx.security_surfaces_map.get("summary")).get("items"))
     )

@@ -1748,7 +1748,7 @@ def test_html_report_metrics_risk_branches() -> None:
     )
 
 
-def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> None:
+def test_html_report_renders_overloaded_modules_in_module_map_and_overview() -> None:
     payload = _metrics_payload(
         health_score=72,
         health_grade="B",
@@ -1845,16 +1845,22 @@ def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> Non
         "Top candidates",
         "0.93",
         "Ranked only",
-        "overloaded-modules",
     )
     assert "hub-like shape" not in html
     assert "Candidate cutoff" not in html
     assert "Ranked modules" not in html
-    overloaded_panel = html.split('data-clone-panel="overloaded-modules"', 1)[1].split(
-        "data-clone-panel=", 1
+    # Overloaded profile now lives in the Module map tab, not Quality.
+    module_map_panel = html.split('id="panel-module-map"', 1)[1].split(
+        'id="panel-dependencies"', 1
     )[0]
-    assert "Critical" not in overloaded_panel
-    assert "0.88" in overloaded_panel
+    assert "Overloaded Modules" in module_map_panel
+    assert "0.88" in module_map_panel  # candidate score cutoff
+    assert "Critical" not in module_map_panel
+    quality_panel = html.split('id="panel-quality"', 1)[1].split(
+        'id="panel-module-map"', 1
+    )[0]
+    assert "Overloaded Modules" not in quality_panel
+    assert "overloaded-modules" not in quality_panel
 
 
 def test_html_report_overloaded_modules_fallback_module_path_in_overview() -> None:
@@ -4236,7 +4242,8 @@ def test_html_report_renders_module_map_panel() -> None:
         'data-subtab-group="module-map-zoom"',
         "Report-only import-graph signals for refactor triage.",
         "Unwind candidates",
-        "Top overloaded modules",
+        "Overloaded Modules",
+        "Complexity total",
         "dependency_pressure",
     )
     panel = _module_map_panel_slice(html)
@@ -4244,8 +4251,8 @@ def test_html_report_renders_module_map_panel() -> None:
     assert 'stroke-width="3"' in panel  # weight=5 edge -> 1+floor(log2 5)=3
     assert 'stroke-dasharray="2,2"' in panel  # tests-only node dashed stroke
     assert 'stroke-dasharray="3,2"' in panel  # in-cycle node dashed stroke
-    # overloaded slice ordered by -score: pkg.core (0.90) row before pkg.api (0.40)
-    overloaded = panel.split("Top overloaded modules", 1)[1]
+    # overloaded table rows in items order: pkg.core before pkg.api
+    overloaded = panel.split("Overloaded Modules", 1)[1]
     assert overloaded.index("pkg.core") < overloaded.index("pkg.api")
 
 
@@ -4258,11 +4265,15 @@ def test_module_map_truncation_notice_when_sampled() -> None:
 
 
 def test_module_map_panel_unavailable_when_skipped() -> None:
-    html = _render_module_map_report(_module_map_unavailable_payload())
+    # Real skip-dependencies runs drop both the graph and the overloaded family.
+    metrics = _module_map_base_metrics()
+    metrics.pop("overloaded_modules", None)
+    html = _render_module_map_report(_module_map_unavailable_payload(), metrics=metrics)
     panel = _module_map_panel_slice(html)
     assert "Dependency graph is not available." in panel
     assert "dep-graph-svg" not in panel
     assert 'data-subtab-group="module-map-zoom"' not in panel
+    assert "Overloaded Modules" not in panel
 
 
 def test_module_map_panel_metrics_skipped_insight() -> None:
@@ -4288,9 +4299,10 @@ def test_module_map_panel_modules_zoom_and_limited_population() -> None:
     )
     html = _render_module_map_report(payload, metrics=_module_map_base_metrics())
     panel = _module_map_panel_slice(html)
-    assert "Overload population" in panel
+    # overloaded family present but empty -> section heading + empty-profile message
+    assert "Overloaded Modules" in panel
+    assert "Overloaded-module profiling is not available." in panel
     assert "No unwind candidates detected." in panel
-    assert "No overloaded modules detected." in panel
     # modules graph (active) renders an SVG; empty packages graph shows the message
     assert "dep-graph-svg" in panel
     assert "Dependency graph is not available." in panel

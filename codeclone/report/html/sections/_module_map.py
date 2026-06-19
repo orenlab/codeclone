@@ -43,8 +43,10 @@ _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
 _CANDIDATE = "candidate"
-_OVERLOADED_TOP_CAP = 10
+_OVERLOADED_TABLE_CAP = 50
+_OVERLOADED_HEADING = "Overloaded Modules"
 _EMPTY_GRAPH_MESSAGE = "Dependency graph is not available."
+_OVERLOADED_EMPTY_MESSAGE = "Overloaded-module profiling is not available."
 _METRICS_SKIPPED = "Metrics are skipped for this run."
 
 # Mandatory honesty copy (spec §11): report-only, sampled SVG, full tables.
@@ -261,12 +263,6 @@ def _mm_stat_cards(
         _stat_card(
             "Unwind candidates",
             _as_int(summary.get("unwind_candidate_count")),
-            css_class="meta-item",
-            glossary_tip_fn=glossary_tip,
-        ),
-        _stat_card(
-            "Overload candidates",
-            _as_int(summary.get("overloaded_candidate_count")),
             detail=_micro_badges(
                 ("modules", _as_int(summary.get("module_count"))),
                 ("packages", _as_int(summary.get("package_count_depth2"))),
@@ -275,17 +271,6 @@ def _mm_stat_cards(
             glossary_tip_fn=glossary_tip,
         ),
     ]
-    if str(summary.get("overloaded_population_status")) == "limited":
-        cards.append(
-            _stat_card(
-                "Overload population",
-                "limited",
-                detail=_micro_badges(("rings", "off")),
-                value_tone="muted",
-                css_class="meta-item",
-                glossary_tip_fn=glossary_tip,
-            )
-        )
     return "".join(cards)
 
 
@@ -352,33 +337,139 @@ def _mm_unwind_table(unwind_candidates: Sequence[object], ctx: ReportContext) ->
     )
 
 
-def _mm_overloaded_table(ctx: ReportContext) -> str:
-    items = [
-        _as_mapping(item)
-        for item in _as_sequence(ctx.overloaded_modules_map.get("items"))
+def _overloaded_cards(
+    summary: Mapping[str, object],
+    rows_data: Sequence[object],
+) -> str:
+    candidates = _as_int(summary.get("candidates"))
+    total_modules = _as_int(summary.get("total"))
+    ranked_only = sum(
+        1
+        for r in rows_data
+        if str(_as_mapping(r).get("candidate_status", "")).strip().lower()
+        == "ranked_only"
+    )
+    population_status = str(summary.get("population_status", "")).strip().lower()
+    max_score = _as_float(summary.get("top_score"))
+    if max_score <= 0.0:
+        row_scores = [_as_float(_as_mapping(r).get("score")) for r in rows_data]
+        max_score = max(row_scores) if row_scores else 0.0
+    cutoff = _as_float(summary.get("candidate_score_cutoff"))
+    locs = [
+        _as_int(_as_mapping(r).get("loc"))
+        for r in rows_data
+        if _as_int(_as_mapping(r).get("loc")) > 0
     ]
-    ranked = sorted(items, key=lambda item: -_as_float(item.get("score")))
+    avg_loc = int(sum(locs) / len(locs)) if locs else 0
+    cards = [
+        _stat_card(
+            "Overloaded",
+            candidates,
+            detail=_micro_badges(("total analyzed", total_modules)),
+            value_tone="bad" if candidates > 0 else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Ranked only",
+            ranked_only,
+            detail=_micro_badges(("population", population_status))
+            if population_status
+            else "",
+            value_tone=(
+                "warn"
+                if population_status == "limited"
+                else ("muted" if ranked_only else "good")
+            ),
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Max score",
+            f"{max_score:.2f}",
+            detail=_micro_badges(("cutoff", f"{cutoff:.2f}")) if cutoff > 0.0 else "",
+            value_tone="warn" if max_score > 0 else "muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Avg LOC",
+            avg_loc,
+            detail=_micro_badges(("modules", len(locs))),
+            value_tone="muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    return f'<div class="stat-cards">{"".join(cards)}</div>'
+
+
+def _render_overloaded_modules_section(ctx: ReportContext) -> str:
+    """Render the full overloaded-modules profile (cards + table).
+
+    Driven by ``metrics.families.overloaded_modules`` directly, so it renders
+    independently of dependency-graph availability — overloaded responsibility
+    is module-level and belongs in the Module map regardless of graph sampling.
+    """
+    overloaded = _as_mapping(ctx.overloaded_modules_map)
+    if not overloaded:
+        return ""
+    summary = _as_mapping(overloaded.get("summary"))
+    rows_data = _as_sequence(overloaded.get("items"))
     rows = [
         (
-            str(item.get("module")),
-            f"{_as_float(item.get('score')):.2f}",
-            str(_as_int(item.get("fan_in"))),
-            str(_as_int(item.get("fan_out"))),
-            str(item.get("candidate_status")),
+            str(_as_mapping(r).get("module", "")),
+            str(
+                _as_mapping(r).get("relative_path")
+                or _as_mapping(r).get("filepath")
+                or ""
+            ),
+            str(_as_mapping(r).get("score", "")),
+            str(_as_mapping(r).get("candidate_status", "")),
+            str(_as_mapping(r).get("loc", "")),
+            f"{_as_mapping(r).get('fan_in', '')}/{_as_mapping(r).get('fan_out', '')}",
+            str(_as_mapping(r).get("complexity_total", "")),
         )
-        for item in ranked[:_OVERLOADED_TOP_CAP]
+        for r in rows_data[:_OVERLOADED_TABLE_CAP]
     ]
-    return render_rows_table(
-        headers=("Module", "Score", "Fan-in", "Fan-out", "Status"),
-        rows=rows,
-        empty_message="No overloaded modules detected.",
-        ctx=ctx,
+    return (
+        f'<h3 class="subsection-title">{_OVERLOADED_HEADING}</h3>'
+        + _overloaded_cards(summary, rows_data)
+        + render_rows_table(
+            headers=(
+                "Module",
+                "File",
+                "Score",
+                "Status",
+                "LOC",
+                "Fan-in/out",
+                "Complexity total",
+            ),
+            rows=rows,
+            empty_message=_OVERLOADED_EMPTY_MESSAGE,
+            ctx=ctx,
+        )
+    )
+
+
+def _render_graph_block(ctx: ReportContext, module_map: Mapping[str, object]) -> str:
+    summary = _as_mapping(module_map.get("summary"))
+    if not module_map or not bool(summary.get("available")):
+        return _tab_empty(_EMPTY_GRAPH_MESSAGE)
+
+    default_zoom = str(module_map.get("default_zoom") or "packages")
+    graph_packages = _as_mapping(module_map.get("graph_packages"))
+    graph_modules = _as_mapping(module_map.get("graph_modules"))
+    active_graph = graph_packages if default_zoom == "packages" else graph_modules
+
+    return (
+        _mm_truncation_notice(active_graph)
+        + f'<div class="stat-cards">{_mm_stat_cards(summary, active_graph)}</div>'
+        + _mm_zoom_toggle(default_zoom, graph_packages, graph_modules)
+        + _MM_LEGEND
+        + '<h3 class="subsection-title">Unwind candidates</h3>'
+        + _mm_unwind_table(_as_sequence(module_map.get("unwind_candidates")), ctx)
     )
 
 
 def render_module_map_panel(ctx: ReportContext) -> str:
     module_map = _as_mapping(ctx.derived_map.get("module_map"))
-    summary = _as_mapping(module_map.get("summary"))
 
     answer = _MODULE_MAP_INSIGHT if ctx.metrics_available else _METRICS_SKIPPED
     tone: Tone = "info"
@@ -388,22 +479,12 @@ def render_module_map_panel(ctx: ReportContext) -> str:
         tone=tone,
     )
 
-    if not module_map or not bool(summary.get("available")):
-        return insight + _tab_empty(_EMPTY_GRAPH_MESSAGE)
-
-    default_zoom = str(module_map.get("default_zoom") or "packages")
-    graph_packages = _as_mapping(module_map.get("graph_packages"))
-    graph_modules = _as_mapping(module_map.get("graph_modules"))
-    active_graph = graph_packages if default_zoom == "packages" else graph_modules
-
+    # The import graph + unwind triage need the derived projection; the
+    # overloaded-modules profile is a module-level metrics view that renders
+    # independently (it moved here from the Quality tab — single home for
+    # module responsibility).
     return (
         insight
-        + _mm_truncation_notice(active_graph)
-        + f'<div class="stat-cards">{_mm_stat_cards(summary, active_graph)}</div>'
-        + _mm_zoom_toggle(default_zoom, graph_packages, graph_modules)
-        + _MM_LEGEND
-        + '<h3 class="subsection-title">Unwind candidates</h3>'
-        + _mm_unwind_table(_as_sequence(module_map.get("unwind_candidates")), ctx)
-        + '<h3 class="subsection-title">Top overloaded modules</h3>'
-        + _mm_overloaded_table(ctx)
+        + _render_graph_block(ctx, module_map)
+        + _render_overloaded_modules_section(ctx)
     )
