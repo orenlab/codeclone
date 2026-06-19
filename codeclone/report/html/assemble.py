@@ -163,10 +163,11 @@ def build_html_report(
         + _as_int(_as_mapping(ctx.security_surfaces_map.get("summary")).get("items"))
     )
 
-    def _tab_badge(count: int) -> str:
+    def _tab_badge(count: int, unit: str) -> str:
         if count == 0:
             return ""
-        return f'<span class="tab-count">{count}</span>'
+        title = f"{count} {unit}"
+        return f'<span class="tab-count" title="{_escape_html(title)}">{count}</span>'
 
     # -- Main tab navigation --
     tab_icon_keys: dict[str, str] = {
@@ -181,27 +182,42 @@ def build_html_report(
     }
     tab_defs = [
         ("overview", TAB_OVERVIEW, overview_html, ""),
-        ("clones", TAB_CLONES, clones_html, _tab_badge(ctx.clone_groups_total)),
-        ("quality", TAB_QUALITY, quality_html, _tab_badge(quality_issues)),
+        (
+            "clones",
+            TAB_CLONES,
+            clones_html,
+            _tab_badge(ctx.clone_groups_total, "clone groups"),
+        ),
+        ("quality", TAB_QUALITY, quality_html, _tab_badge(quality_issues, "issues")),
         (
             "module-map",
             TAB_MODULE_MAP,
             module_map_html,
-            _tab_badge(module_map_unwind),
+            _tab_badge(module_map_unwind, "unwind candidates"),
         ),
-        ("dependencies", TAB_DEPENDENCIES, dependencies_html, _tab_badge(dep_cycles)),
-        ("dead-code", TAB_DEAD_CODE, dead_code_html, _tab_badge(dead_high_conf)),
+        (
+            "dependencies",
+            TAB_DEPENDENCIES,
+            dependencies_html,
+            _tab_badge(dep_cycles, "dependency cycles"),
+        ),
+        (
+            "dead-code",
+            TAB_DEAD_CODE,
+            dead_code_html,
+            _tab_badge(dead_high_conf, "high-confidence dead-code items"),
+        ),
         (
             "suggestions",
             TAB_SUGGESTIONS,
             suggestions_html,
-            _tab_badge(len(ctx.suggestions)),
+            _tab_badge(len(ctx.suggestions), "suggestions"),
         ),
         (
             "structural-findings",
             TAB_FINDINGS,
             structural_html,
-            _tab_badge(structural_count),
+            _tab_badge(structural_count, "structural findings"),
         ),
     ]
 

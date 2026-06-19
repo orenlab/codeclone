@@ -24,15 +24,12 @@ from ..widgets.badges import (
 )
 from ..widgets.components import Tone, insight_block
 from ..widgets.dep_graph_layout import (
+    BlockNodeStyle,
     _build_cycle_edges,
     _build_degree_maps,
-    _build_layer_groups,
-    _build_node_radii,
-    _build_svg_defs,
     _hub_threshold,
-    _layout_dep_graph,
-    _render_dep_edges,
-    _render_dep_nodes_and_labels,
+    block_node_style_for,
+    render_block_diagram,
 )
 from ..widgets.glossary import glossary_tip
 from ..widgets.tables import render_rows_table
@@ -64,6 +61,21 @@ def _select_dep_nodes(
     return nodes, filtered
 
 
+def _dep_node_style(
+    node: str,
+    *,
+    degree: int,
+    hub_threshold: int,
+    in_cycle: bool,
+) -> BlockNodeStyle:
+    return block_node_style_for(
+        in_cycle=in_cycle,
+        is_hub=degree >= hub_threshold and degree > 2,
+        is_leaf=degree <= 1,
+        title=node,
+    )
+
+
 def _render_dep_svg(
     edges: Sequence[tuple[str, str]],
     cycle_node_set: set[str],
@@ -79,50 +91,23 @@ def _render_dep_svg(
         longest_chains=longest_chains,
     )
     in_degree, out_degree = _build_degree_maps(nodes, filtered_edges)
-    layer_groups = _build_layer_groups(nodes, filtered_edges, in_degree, out_degree)
-    width, height, max_per_layer, positions = _layout_dep_graph(
-        layer_groups,
-        in_degree=in_degree,
-        out_degree=out_degree,
-    )
-    prefer_horizontal = width > height
     hub_threshold = _hub_threshold(nodes, in_degree, out_degree)
-    node_radii = _build_node_radii(
-        nodes,
-        in_degree,
-        out_degree,
-        cycle_node_set,
-        hub_threshold,
-    )
     cycle_edges = _build_cycle_edges(dep_cycles)
-    defs = _build_svg_defs()
-    edge_svg = _render_dep_edges(filtered_edges, positions, node_radii, cycle_edges)
-    node_svg, label_svg = _render_dep_nodes_and_labels(
+
+    def _style(node: str) -> BlockNodeStyle:
+        return _dep_node_style(
+            node,
+            degree=in_degree.get(node, 0) + out_degree.get(node, 0),
+            hub_threshold=hub_threshold,
+            in_cycle=node in cycle_node_set,
+        )
+
+    return render_block_diagram(
         nodes,
-        positions=positions,
-        node_radii=node_radii,
-        in_degree=in_degree,
-        out_degree=out_degree,
-        cycle_node_set=cycle_node_set,
-        hub_threshold=hub_threshold,
-        max_per_layer=max_per_layer,
-        prefer_horizontal=prefer_horizontal,
-    )
-
-    label_pad = 44 if prefer_horizontal else (50 if max_per_layer > 6 else 0)
-    label_pad_x = 52 if prefer_horizontal else (28 if max_per_layer > 6 else 0)
-    vb_x = -label_pad_x
-    vb_y = -label_pad
-    vb_w = width + label_pad_x * 2
-    vb_h = height + label_pad
-
-    return (
-        '<div class="dep-graph-wrap">'
-        f'<svg viewBox="{vb_x} {vb_y} {vb_w} {vb_h}" class="dep-graph-svg" role="img" '
-        'preserveAspectRatio="xMidYMid meet" '
-        'aria-label="Module dependency graph">'
-        f"{defs}{''.join(edge_svg)}{''.join(node_svg)}{''.join(label_svg)}"
-        "</svg></div>"
+        filtered_edges,
+        style_fn=_style,
+        aria_label="Module dependency graph",
+        danger_edges=cycle_edges,
     )
 
 
@@ -232,16 +217,19 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
         else ""
     )
 
-    # Legend
+    # Legend (box swatches matching the block-diagram nodes)
     legend = (
         '<div class="dep-legend">'
         '<span class="dep-legend-item">'
-        '<svg width="12" height="12"><circle cx="6" cy="6" r="5" fill="var(--accent-primary)"/></svg> Hub</span>'
+        '<svg width="16" height="12"><rect x="0.5" y="1" width="15" height="10" rx="3" '
+        'fill="var(--accent-primary)"/></svg> Hub</span>'
         '<span class="dep-legend-item">'
-        '<svg width="12" height="12"><circle cx="6" cy="6" r="3" fill="var(--text-muted)" fill-opacity="0.4"/></svg> Leaf</span>'
+        '<svg width="16" height="12"><rect x="0.5" y="1" width="15" height="10" rx="3" '
+        'fill="var(--bg-surface)" stroke="var(--border)"/></svg> Leaf</span>'
         '<span class="dep-legend-item">'
-        '<svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="none" '
-        'stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="3,2"/></svg> Cycle</span></div>'
+        '<svg width="16" height="12"><rect x="0.5" y="1" width="15" height="10" rx="3" '
+        'fill="var(--bg-surface)" stroke="var(--danger)" stroke-dasharray="4,3"/></svg> '
+        "Cycle</span></div>"
     )
 
     # Tables

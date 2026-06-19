@@ -1744,7 +1744,8 @@ def test_html_report_metrics_risk_branches() -> None:
         "5 candidates total; 2 high-confidence items; 0 suppressed.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',
-        '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>',
+        '<span class="main-tab-label">Dead Code</span>'
+        '<span class="tab-count" title="2 high-confidence dead-code items">2</span>',
     )
 
 
@@ -2246,8 +2247,8 @@ def test_html_report_quality_includes_coverage_join_subtab() -> None:
         "Coverage hotspots: 1; scope gaps: 0.",
     )
     assert (
-        '<span class="main-tab-label">Quality</span><span class="tab-count">1</span>'
-        in html
+        '<span class="main-tab-label">Quality</span>'
+        '<span class="tab-count" title="1 issues">1</span>' in html
     )
 
 
@@ -2324,7 +2325,8 @@ def test_html_report_quality_includes_security_surfaces_subtab() -> None:
         html,
         'data-subtab-group="quality"',
         'data-clone-tab="security-surfaces"',
-        '<span class="main-tab-label">Quality</span><span class="tab-count">2</span>',
+        '<span class="main-tab-label">Quality</span>'
+        '<span class="tab-count" title="2 issues">2</span>',
         "Security Surfaces",
         "How to read",
         "Review order",
@@ -3439,16 +3441,14 @@ def test_html_report_dependency_graph_keeps_chain_and_cycle_nodes_when_truncated
     )
     assert view_box is not None
     assert int(view_box.group(1)) < 0
-    assert int(view_box.group(3)) > int(view_box.group(4))
+    assert int(view_box.group(3)) > 0
+    assert int(view_box.group(4)) > 0
+    # Block-diagram nodes are boxes with the label inside (no rotated scatter text)
+    assert re.search(r'<rect class="block-node" data-node="z\.chain\.three"', html)
     assert re.search(
-        r'<text class="dep-label" data-node="z\.chain\.three".*?rotate\(-45\)">',
-        html,
+        r'<text class="block-node-label" data-node="z\.chain\.three"', html
     )
-    assert re.search(
-        r'<text class="dep-label" data-node="z\.chain\.three".*?font-size="8"'
-        r'.*?rotate\(-45\)">',
-        html,
-    )
+    assert "rotate(-45)" not in html
 
 
 def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() -> None:
@@ -4238,7 +4238,8 @@ def test_html_report_renders_module_map_panel() -> None:
         "Module map",
         'id="panel-module-map"',
         "dep-graph-svg",
-        "mm-candidate-ring",
+        'class="block-node"',
+        "block-node-ring",
         'data-subtab-group="module-map-zoom"',
         "Report-only import-graph signals for refactor triage.",
         "Unwind candidates",
@@ -4249,8 +4250,8 @@ def test_html_report_renders_module_map_panel() -> None:
     panel = _module_map_panel_slice(html)
     assert "pkg.core" in panel
     assert 'stroke-width="3"' in panel  # weight=5 edge -> 1+floor(log2 5)=3
-    assert 'stroke-dasharray="2,2"' in panel  # tests-only node dashed stroke
-    assert 'stroke-dasharray="3,2"' in panel  # in-cycle node dashed stroke
+    assert 'stroke-dasharray="4,3"' in panel  # tests / in-cycle dashed box border
+    assert 'stroke="var(--danger)"' in panel  # in-cycle node danger border
     # overloaded table rows in items order: pkg.core before pkg.api
     overloaded = panel.split("Overloaded Modules", 1)[1]
     assert overloaded.index("pkg.core") < overloaded.index("pkg.api")

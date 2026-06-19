@@ -463,33 +463,51 @@ _SUGGESTIONS = """\
 
 _DEP_GRAPH = """\
 (function initDepGraph(){
-  const svg=$('.dep-graph-svg');
-  if(!svg)return;
-  const nodes=$$('.dep-node');
-  const labels=$$('.dep-label');
-  const edges=$$('.dep-edge');
+  $$('.dep-graph-svg').forEach(svg=>{
+    const q=s=>[...svg.querySelectorAll(s)];
+    const nodes=q('.block-node');
+    const labels=q('.block-node-label');
+    const rings=q('.block-node-ring');
+    const edges=q('.dep-edge');
+    if(!nodes.length)return;
 
-  function highlight(name){
-    nodes.forEach(n=>{n.style.fillOpacity=n.dataset.node===name?'1':'0.15'});
-    labels.forEach(l=>{l.style.fill=l.dataset.node===name?'var(--text-primary)':'var(--text-muted)';
-      l.style.fillOpacity=l.dataset.node===name?'1':'0.3'});
+    const adj={};
     edges.forEach(e=>{
-      const connected=e.dataset.source===name||e.dataset.target===name;
-      e.style.strokeOpacity=connected?'0.8':'0.05';
-      e.style.strokeWidth=connected?'2':'1';
+      const s=e.dataset.source,t=e.dataset.target;
+      e.dataset.baseWidth=e.getAttribute('stroke-width')||'1';
+      e.dataset.baseMarker=e.getAttribute('marker-end')||'';
+      (adj[s]=adj[s]||new Set()).add(t);
+      (adj[t]=adj[t]||new Set()).add(s);
     });
-  }
 
-  function reset(){
-    nodes.forEach(n=>{n.style.fillOpacity=''});
-    labels.forEach(l=>{l.style.fill='';l.style.fillOpacity=''});
-    edges.forEach(e=>{e.style.strokeOpacity='';e.style.strokeWidth=''});
-  }
+    function highlight(name){
+      const near=adj[name]||new Set();
+      const on=n=>n===name||near.has(n);
+      [...nodes,...labels,...rings].forEach(el=>{
+        el.style.opacity=on(el.dataset.node)?'1':'0.16';
+      });
+      edges.forEach(e=>{
+        const connected=e.dataset.source===name||e.dataset.target===name;
+        e.style.strokeOpacity=connected?'0.9':'0.06';
+        e.style.strokeWidth=connected?String(Number(e.dataset.baseWidth||1)+0.7):e.dataset.baseWidth;
+        e.setAttribute('marker-end',connected?e.dataset.baseMarker:'none');
+      });
+    }
 
-  [...nodes,...labels].forEach(el=>{
-    el.addEventListener('mouseenter',()=>highlight(el.dataset.node));
-    el.addEventListener('mouseleave',reset);
-    el.style.cursor='pointer';
+    function reset(){
+      [...nodes,...labels,...rings].forEach(el=>{el.style.opacity=''});
+      edges.forEach(e=>{
+        e.style.strokeOpacity='';
+        e.style.strokeWidth=e.dataset.baseWidth||'';
+        e.setAttribute('marker-end',e.dataset.baseMarker||'');
+      });
+    }
+
+    [...nodes,...labels].forEach(el=>{
+      el.addEventListener('mouseenter',()=>highlight(el.dataset.node));
+      el.addEventListener('mouseleave',reset);
+      el.style.cursor='pointer';
+    });
   });
 })();
 """

@@ -401,7 +401,27 @@ _TABLES = """\
 .table .col-risk,.table .col-badge,.table .col-cat{white-space:nowrap}
 .table .col-steps{max-width:120px;word-break:break-word}
 .table .col-wide{max-width:320px;word-break:break-all}
+.table .col-score{min-width:130px;white-space:nowrap}
+.table .col-chips{max-width:300px}
 .table-empty{padding:var(--sp-8);text-align:center;color:var(--text-muted);font-size:.9rem}
+
+/* Typed table cells: score bar, status pill, chips (shared badge vocabulary) */
+.score-bar{display:inline-flex;align-items:center;gap:7px;min-width:110px}
+.score-bar-track{flex:1;height:5px;border-radius:3px;background:var(--accent-muted);overflow:hidden}
+.score-bar-fill{display:block;height:100%;border-radius:3px;background:var(--accent-primary)}
+.score-bar--strong .score-bar-fill{background:var(--accent-hover)}
+.score-bar-val{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
+  font-size:.78rem;color:var(--text-secondary)}
+.score-bar--strong .score-bar-val{color:var(--accent-primary);font-weight:600}
+.status-pill{display:inline-flex;align-items:center;font-size:.68rem;font-weight:500;
+  padding:2px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.01em;
+  font-family:var(--font-sans)}
+.status-pill--candidate{background:var(--accent-muted);color:var(--accent-primary)}
+.status-pill--ranked{background:var(--bg-overlay);color:var(--text-secondary)}
+.status-pill--neutral{background:var(--bg-overlay);color:var(--text-muted)}
+.chip{display:inline-flex;align-items:center;font-size:.66rem;font-family:var(--font-mono);
+  padding:2px 7px;margin:1px 3px 1px 0;border-radius:var(--radius-sm);
+  background:var(--bg-overlay);color:var(--text-secondary);border:1px solid var(--border)}
 """
 
 # ---------------------------------------------------------------------------
@@ -664,6 +684,13 @@ _OVERVIEW = """\
 .meta-item .meta-value--bad{color:var(--error)}
 .meta-item .meta-value--warn{color:var(--warning)}
 .meta-item .meta-value--muted{color:var(--text-muted)}
+.meta-item .meta-value--accent{color:var(--accent-primary)}
+.meta-item .meta-value-sec{font-family:var(--font-numeric);font-size:.9rem;font-weight:500;
+  color:var(--text-muted);margin-left:5px;letter-spacing:0}
+.meta-item .meta-subtext{font-family:var(--font-sans);font-size:.7rem;color:var(--text-muted);
+  margin-top:3px;line-height:1.35}
+.meta-item--accent{border-color:var(--accent-primary)}
+.meta-item--accent:hover{border-color:var(--accent-primary)}
 .kpi-detail{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
 .kpi-detail code{font-size:.78rem}
 .kpi-micro{display:inline-flex;align-items:center;gap:3px;font-size:.62rem;
@@ -848,13 +875,20 @@ _DEPENDENCIES = """\
 .stat-cards .meta-item .meta-value,.dep-stats .meta-item .meta-value{display:flex;align-items:center}
 .stat-cards .kpi-detail,.dep-stats .kpi-detail{margin-top:0;align-self:end}
 .dep-graph-wrap{overflow:hidden;margin-bottom:var(--sp-4);border:1px solid var(--border);
-  border-radius:var(--radius-lg);background:var(--bg-surface);padding:var(--sp-4)}
-.dep-graph-svg{display:block;width:100%;height:auto;max-height:680px;margin:0 auto}
-.dep-graph-svg text{fill:var(--text-secondary);font-family:var(--font-mono)}
-.dep-node{transition:fill-opacity var(--dur-fast) var(--ease)}
-.dep-edge{transition:stroke-opacity var(--dur-fast) var(--ease)}
-.dep-label{transition:fill var(--dur-fast) var(--ease)}
-.mm-candidate-ring{fill:none;stroke:var(--warning);stroke-width:1.5;stroke-opacity:.9}
+  border-radius:var(--radius-lg);
+  background:linear-gradient(180deg,var(--bg-surface),var(--bg-raised));
+  padding:var(--sp-5)}
+.dep-graph-svg{display:block;height:auto;margin:0 auto;overflow:visible}
+.dep-graph-svg text{font-family:var(--font-mono)}
+.dep-edge{transition:stroke-opacity var(--dur-fast) var(--ease),stroke-width var(--dur-fast) var(--ease)}
+.block-node{transition:opacity var(--dur-fast) var(--ease),filter var(--dur-fast) var(--ease);
+  vector-effect:non-scaling-stroke}
+.block-node-label{font-size:12px;font-weight:600;pointer-events:none;
+  letter-spacing:.01em;transition:opacity var(--dur-fast) var(--ease)}
+.block-node-ring{pointer-events:none;transition:opacity var(--dur-fast) var(--ease);
+  vector-effect:non-scaling-stroke}
+.dep-graph-svg[data-graph-density="wide"] .block-node-label{font-size:12.5px}
+.dep-graph-svg .block-node:hover{filter:brightness(1.08) drop-shadow(0 2px 6px rgb(79 70 229 / .18))}
 .mm-truncation-notice{margin-bottom:var(--sp-4);padding:var(--sp-2) var(--sp-4);
   font-size:.8rem;color:var(--text-muted);background:var(--bg-raised);
   border:1px solid var(--border);border-radius:var(--radius-lg)}

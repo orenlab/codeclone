@@ -19,7 +19,9 @@ from codeclone.models import MetricsDiff, ReportLocation, Suggestion
 from codeclone.report.html.sections._clones import (
     _derive_group_display_name,
     _render_group_explanation,
+    _suppressed_group_label,
 )
+from codeclone.report.html.sections._coverage_join import _status_cell_label
 from codeclone.report.html.sections._dead_code import render_dead_code_panel
 from codeclone.report.html.sections._dependencies import _select_dep_nodes
 from codeclone.report.html.sections._meta import _path_basename, render_meta_panel
@@ -28,8 +30,10 @@ from codeclone.report.html.sections._overview import (
     _directory_kind_meta_parts,
     _health_gauge_html,
     _issue_breakdown_html,
+    _overloaded_modules_section,
     render_overview_panel,
 )
+from codeclone.report.html.sections._security_surfaces import _coverage_join_review_text
 from codeclone.report.html.sections._suggestions import (
     _format_source_breakdown,
     _priority_badge_label,
@@ -38,15 +42,23 @@ from codeclone.report.html.sections._suggestions import (
     _spread_label,
     _suggestion_context_labels,
 )
-from codeclone.report.html.widgets.badges import _quality_badge_html, _stat_card
+from codeclone.report.html.widgets.badges import (
+    _chips_html,
+    _quality_badge_html,
+    _score_bar_html,
+    _stat_card,
+    _status_pill_html,
+)
 from codeclone.report.html.widgets.components import (
     overview_source_breakdown_html,
     overview_summary_item_html,
 )
 from codeclone.report.html.widgets.dep_graph_layout import (
+    BlockNodeStyle,
+    _box_width,
     _hub_threshold,
-    _layout_dep_graph,
-    _render_dep_nodes_and_labels,
+    _layout_block_diagram,
+    render_block_diagram,
 )
 from codeclone.report.html.widgets.icons import section_icon_html
 from codeclone.report.html.widgets.snippets import _FileCache
@@ -140,7 +152,34 @@ def test_clone_display_name_falls_back_to_short_key_when_items_have_no_labels() 
     )
 
 
-def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
+def test_html_fallback_helpers_cover_empty_label_and_review_text() -> None:
+    ctx = SimpleNamespace(
+        bare_qualname=lambda _qualname, _filepath: "",
+        relative_path=lambda _filepath: "",
+        metrics_map={"coverage_join": {"summary": {"status": "ok"}}},
+        overloaded_modules_map={
+            "summary": {"candidates": 1},
+            "items": [{"module": "pkg.mod", "candidate_status": "ranked_only"}],
+        },
+    )
+
+    label, filepath = _suppressed_group_label({"id": "suppressed-1"}, cast(Any, ctx))
+    assert label == "suppressed-1"
+    assert filepath == ""
+    assert _status_cell_label({"coverage_status": "covered"}) == "covered"
+    assert (
+        _coverage_join_review_text(
+            cast(Any, ctx),
+            overlap_total=2,
+            scope_gaps=1,
+            hotspots=0,
+        )
+        == "2 overlaps · 1 scope gap"
+    )
+    assert _overloaded_modules_section(cast(Any, ctx)) == ""
+
+
+def test_dependency_sampler_cap_and_hub_threshold_empty() -> None:
     edges = [(f"n{i}", f"n{i + 1}") for i in range(21)]
     nodes, filtered = _select_dep_nodes(
         edges,
@@ -151,82 +190,127 @@ def test_dependency_helpers_cover_dense_and_empty_branches() -> None:
     assert len(filtered) <= 100
     assert _hub_threshold([], {}, {}) == 99
 
-    node_svg, label_svg = _render_dep_nodes_and_labels(
-        [f"n{i}" for i in range(9)],
-        positions={f"n{i}": (float(i), float(i + 1)) for i in range(9)},
-        node_radii={f"n{i}": 3.0 for i in range(9)},
-        in_degree={f"n{i}": 1 for i in range(9)},
-        out_degree={f"n{i}": 1 for i in range(9)},
-        cycle_node_set={"n0"},
-        hub_threshold=1,
-        max_per_layer=9,
-        prefer_horizontal=True,
+
+def test_block_diagram_renders_boxes_edges_rings_and_weights() -> None:
+    nodes = ["pkg.a", "pkg.b", "pkg.c"]
+    # a -> b -> c -> a: the back-edge exercises same-layer/upward routing.
+    edges = [("pkg.a", "pkg.b"), ("pkg.b", "pkg.c"), ("pkg.c", "pkg.a")]
+
+    def _style(node: str) -> BlockNodeStyle:
+        if node == "pkg.a":
+            return BlockNodeStyle(
+                fill="var(--accent-primary)",
+                text_fill="#fff",
+                ring="var(--warning)",
+            )
+        if node == "pkg.c":
+            return BlockNodeStyle(
+                fill="var(--bg-surface)",
+                text_fill="var(--danger)",
+                dashed=True,
+            )
+        return BlockNodeStyle(
+            fill="var(--bg-overlay)", text_fill="var(--text-secondary)"
+        )
+
+    svg = render_block_diagram(
+        nodes,
+        edges,
+        style_fn=_style,
+        aria_label="Test graph",
+        danger_edges={("pkg.c", "pkg.a")},
+        edge_weight_fn=lambda edge: 5 if edge == ("pkg.a", "pkg.b") else 1,
     )
-    assert len(node_svg) == 9
-    assert len(label_svg) == 9
-    assert "rotate(-45)" in label_svg[0]
+    assert_all_contained(
+        svg,
+        'class="dep-graph-svg"',
+        'data-graph-density="compact"',
+        'aria-label="Test graph"',
+        'class="block-node"',
+        'data-node="pkg.a"',
+        'class="block-node-ring"',  # candidate ring on pkg.a
+        'stroke-dasharray="4,3"',  # dashed border on pkg.c
+        "block-arrow-danger-",  # danger marker on the cycle back-edge
+        'stroke-linecap="round"',
+        'stroke-width="3"',  # weight 5 -> 1+floor(log2 5)=3
+        "<title>pkg.a → pkg.b</title>",
+    )
+    assert "dep-graph-scroll-note" not in svg
 
 
-def test_dependency_layout_covers_horizontal_and_non_rotated_label_paths() -> None:
-    layer_groups = {
-        0: ["alpha", "beta", "gamma"],
-        1: ["delta", "epsilon", "zeta"],
-        2: ["eta"],
-        3: ["theta"],
-        4: ["iota"],
-        5: ["kappa"],
-    }
-    in_degree = {
-        "alpha": 0,
-        "beta": 1,
-        "gamma": 3,
-        "delta": 2,
-        "epsilon": 1,
-        "zeta": 1,
-        "eta": 2,
-        "theta": 1,
-        "iota": 1,
-        "kappa": 1,
-    }
-    out_degree = {
-        "alpha": 1,
-        "beta": 2,
-        "gamma": 4,
-        "delta": 2,
-        "epsilon": 1,
-        "zeta": 1,
-        "eta": 2,
-        "theta": 1,
-        "iota": 1,
-        "kappa": 0,
-    }
-    width, height, max_per_layer, positions = _layout_dep_graph(
-        layer_groups,
-        in_degree=in_degree,
-        out_degree=out_degree,
-    )
-    assert width > height
-    assert max_per_layer == 3
-    assert positions["beta"][1] != positions["gamma"][1]
-    assert positions["delta"][0] > positions["alpha"][0]
+def test_block_diagram_dense_graph_wraps_without_scroll_canvas() -> None:
+    nodes = [f"pkg.node{i:02d}" for i in range(19)]
+    edges = [("pkg.node00", node) for node in nodes[1:]]
 
-    node_svg, label_svg = _render_dep_nodes_and_labels(
-        ["leaf", "hub"],
-        positions={"leaf": (10.0, 20.0), "hub": (40.0, 20.0)},
-        node_radii={"leaf": 3.0, "hub": 6.0},
-        in_degree={"leaf": 0, "hub": 2},
-        out_degree={"leaf": 1, "hub": 2},
-        cycle_node_set=set(),
-        hub_threshold=3,
-        max_per_layer=2,
-        prefer_horizontal=False,
+    svg = render_block_diagram(
+        nodes,
+        edges,
+        style_fn=lambda _node: BlockNodeStyle(
+            fill="var(--bg-overlay)", text_fill="var(--text-secondary)"
+        ),
+        aria_label="Wide graph",
     )
-    assert len(node_svg) == 2
-    assert len(label_svg) == 2
-    assert 'text-anchor="middle"' in label_svg[0]
-    assert 'font-size="8"' in label_svg[0]
-    assert 'font-size="10"' in label_svg[1]
-    assert "rotate(-45)" not in label_svg[0]
+
+    assert_all_contained(
+        svg,
+        'data-graph-density="wide"',
+        "width:100%;max-width:",
+        "block-arrow-",
+    )
+    assert "max-width:none" not in svg
+    assert "dep-graph-scroll-note" not in svg
+
+
+def test_block_diagram_medium_graph_uses_comfortable_density() -> None:
+    nodes = [f"pkg.mid{i}" for i in range(9)]
+    edges = [(nodes[index], nodes[index + 1]) for index in range(len(nodes) - 1)]
+    svg = render_block_diagram(
+        nodes,
+        edges,
+        style_fn=lambda _node: BlockNodeStyle(
+            fill="var(--bg-overlay)", text_fill="var(--text-secondary)"
+        ),
+        aria_label="Medium graph",
+    )
+
+    assert_all_contained(
+        svg,
+        'data-graph-density="comfortable"',
+        "width:100%;max-width:900px",
+    )
+
+
+def test_block_diagram_truncates_long_underscore_labels_inside_boxes() -> None:
+    node = "pkg.metrics_baseline_payload"
+    svg = render_block_diagram(
+        [node],
+        [],
+        style_fn=lambda _node: BlockNodeStyle(
+            fill="var(--bg-overlay)", text_fill="var(--text-secondary)"
+        ),
+        aria_label="Label fit graph",
+    )
+
+    assert_all_contained(
+        svg,
+        'width="184.0"',
+        'textLength="156.0" lengthAdjust="spacingAndGlyphs"',
+        f"<title>{node}</title>",
+        ">metrics_b..e_payload</text>",
+    )
+    assert ">metrics_ba..ine_payload</text>" not in svg
+
+
+def test_block_diagram_layout_centers_rows_and_clamps_box_width() -> None:
+    # gap layer (index 1 has no members) exercises the empty-row branch
+    width, height, positions = _layout_block_diagram(
+        {0: ["a", "b"], 2: ["c"]}, {"a": 80, "b": 80, "c": 120}
+    )
+    assert width >= 120
+    assert height > 0
+    assert positions["c"][1] > positions["a"][1]  # layer 2 sits below layer 0
+    assert _box_width("x") == 76  # clamped to the minimum
+    assert _box_width("x" * 40) == 184  # clamped to the maximum
 
 
 def test_cli_runtime_warning_formatter_covers_baseline_and_legacy_cache_paths() -> None:
@@ -665,3 +749,27 @@ def test_render_meta_panel_covers_status_tones_and_runtime_mismatch() -> None:
     assert f'<span class="prov-badge-val">runtime {runtime_tag}</span>' in meta_html
     assert '<span class="prov-badge-val">verified</span>' in meta_html
     assert '<span class="prov-badge-lbl">Metrics baseline</span>' in meta_html
+
+
+def test_badge_vocabulary_helpers_cover_typed_cell_branches() -> None:
+    assert "status-pill--candidate" in _status_pill_html("candidate")
+    assert "status-pill--ranked" in _status_pill_html("ranked_only")
+    assert "status-pill--neutral" in _status_pill_html("mystery-status")
+    assert _status_pill_html("   ") == ""
+
+    strong = _score_bar_html("0.93")
+    assert "score-bar--strong" in strong
+    assert "width:93%" in strong
+    assert ">0.93<" in strong
+    weak = _score_bar_html("0.40")
+    assert "score-bar--strong" not in weak
+    assert "width:40%" in weak
+    assert _score_bar_html("n/a") == "n/a"
+
+    chips = _chips_html("dependency_pressure, chain_bottleneck")
+    assert chips.count('class="chip"') == 2
+    assert _chips_html("  ") == ""
+
+    card = _stat_card("Nodes shown", 6, secondary="/ 28", subtext="sampled")
+    assert '<span class="meta-value-sec">/ 28</span>' in card
+    assert '<div class="meta-subtext">sampled</div>' in card

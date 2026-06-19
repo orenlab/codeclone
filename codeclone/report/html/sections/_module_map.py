@@ -14,22 +14,18 @@ computed once in ``report.document.derived``.
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
-from ..primitives.escape import _escape_html
-from ..widgets.badges import _micro_badges, _short_label, _stat_card, _tab_empty
+from ..widgets.badges import _micro_badges, _stat_card, _tab_empty
 from ..widgets.components import Tone, insight_block
 from ..widgets.dep_graph_layout import (
-    _build_degree_maps,
-    _build_layer_groups,
-    _build_node_radii,
-    _build_svg_defs,
+    BlockNodeStyle,
     _hub_threshold,
-    _layout_dep_graph,
+    block_node_style_for,
+    render_block_diagram,
 )
 from ..widgets.glossary import glossary_tip
 from ..widgets.tables import render_rows_table
@@ -60,79 +56,21 @@ _MODULE_MAP_INSIGHT = (
 _MM_LEGEND = (
     '<div class="dep-legend">'
     '<span class="dep-legend-item">'
-    '<svg width="12" height="12"><circle cx="6" cy="6" r="5" '
+    '<svg width="16" height="12"><rect x="0.5" y="1" width="15" height="10" rx="3" '
     'fill="var(--accent-primary)"/></svg> Hub</span>'
     '<span class="dep-legend-item">'
-    '<svg width="14" height="14"><circle cx="7" cy="7" r="4" '
-    'fill="var(--accent-primary)" fill-opacity="0.7"/>'
-    '<circle cx="7" cy="7" r="6" class="mm-candidate-ring"/></svg> '
-    "Overload candidate</span>"
+    '<svg width="20" height="14"><rect x="2.5" y="2" width="15" height="10" rx="3" '
+    'fill="var(--bg-overlay)" stroke="var(--border-strong)"/>'
+    '<rect x="0.5" y="0.5" width="19" height="13" rx="4" fill="none" '
+    'stroke="var(--warning)" stroke-width="1.5"/></svg> Overload candidate</span>'
     '<span class="dep-legend-item">'
-    '<svg width="12" height="12"><circle cx="6" cy="6" r="4" fill="none" '
-    'stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="3,2"/></svg> '
+    '<svg width="16" height="12"><rect x="0.5" y="1" width="15" height="10" rx="3" '
+    'fill="var(--bg-surface)" stroke="var(--danger)" stroke-dasharray="4,3"/></svg> '
     "In cycle</span>"
     '<span class="dep-legend-item">'
-    '<svg width="12" height="12"><circle cx="6" cy="6" r="3" '
-    'fill="var(--text-muted)" fill-opacity="0.4"/></svg> Leaf</span></div>'
+    '<svg width="16" height="12"><rect x="0.5" y="1" width="15" height="10" rx="3" '
+    'fill="var(--bg-surface)" stroke="var(--border)"/></svg> Leaf</span></div>'
 )
-
-
-def _mm_edge_stroke_width(weight: int) -> int:
-    if weight <= 1:
-        return 1
-    return 1 + min(3, math.floor(math.log2(weight)))
-
-
-def _render_mm_edges(
-    edges: Sequence[tuple[str, str]],
-    positions: Mapping[str, tuple[float, float]],
-    node_radii: Mapping[str, float],
-    weights: Mapping[tuple[str, str], int],
-) -> list[str]:
-    rendered: list[str] = []
-    for source, target in edges:
-        x1, y1 = positions[source]
-        x2, y2 = positions[target]
-        ux, uy = _unit_vector(x1, y1, x2, y2)
-        sx, sy = x1 + ux * (node_radii[source] + 2), y1 + uy * (node_radii[source] + 2)
-        tx, ty = x2 - ux * (node_radii[target] + 4), y2 - uy * (node_radii[target] + 4)
-        stroke_width = _mm_edge_stroke_width(weights.get((source, target), 1))
-        rendered.append(
-            f'<line class="dep-edge" '
-            f'data-source="{_escape_html(source)}" '
-            f'data-target="{_escape_html(target)}" '
-            f'x1="{sx:.1f}" y1="{sy:.1f}" x2="{tx:.1f}" y2="{ty:.1f}" '
-            f'stroke="var(--border-strong)" stroke-opacity="0.35" '
-            f'stroke-width="{stroke_width}" marker-end="url(#dep-arrow)"/>'
-        )
-    return rendered
-
-
-def _unit_vector(x1: float, y1: float, x2: float, y2: float) -> tuple[float, float]:
-    dx, dy = x2 - x1, y2 - y1
-    distance = math.hypot(dx, dy) or 1.0
-    return dx / distance, dy / distance
-
-
-def _mm_node_fill(
-    *, in_cycle: bool, is_hub: bool, total_degree: int, is_tests: bool
-) -> tuple[str, str, str]:
-    if in_cycle:
-        return (
-            "var(--danger)",
-            "0.85",
-            'stroke="var(--danger)" stroke-width="1.5" stroke-dasharray="3,2"',
-        )
-    if is_hub:
-        return "var(--accent-primary)", "1", 'filter="url(#glow)"'
-    if total_degree <= 1:
-        return "var(--text-muted)", "0.4", ""
-    extra = (
-        'stroke="var(--border-strong)" stroke-width="1" stroke-dasharray="2,2"'
-        if is_tests
-        else ""
-    )
-    return "var(--accent-primary)", "0.7", extra
 
 
 def _mm_node_title(node: Mapping[str, object], overloaded: Mapping[str, object]) -> str:
@@ -149,48 +87,19 @@ def _mm_node_title(node: Mapping[str, object], overloaded: Mapping[str, object])
     return title
 
 
-def _render_mm_nodes(
-    nodes: Sequence[Mapping[str, object]],
-    *,
-    positions: Mapping[str, tuple[float, float]],
-    node_radii: Mapping[str, float],
-    hub_threshold: int,
-) -> tuple[list[str], list[str]]:
-    nodes_svg: list[str] = []
-    labels_svg: list[str] = []
-    for node in nodes:
-        node_id = str(node.get("id"))
-        x, y = positions[node_id]
-        radius = node_radii[node_id]
-        total_degree = _as_int(node.get("total_degree"))
-        overloaded = _as_mapping(node.get("overloaded"))
-        is_hub = total_degree >= hub_threshold and total_degree > 2
-        is_tests = [str(k) for k in _as_sequence(node.get("source_kinds"))] == ["tests"]
-        fill, opacity, extra = _mm_node_fill(
-            in_cycle=bool(node.get("in_cycle")),
-            is_hub=is_hub,
-            total_degree=total_degree,
-            is_tests=is_tests,
-        )
-        nodes_svg.append(
-            f'<circle class="dep-node" data-node="{_escape_html(node_id)}" '
-            f'cx="{x:.1f}" cy="{y:.1f}" r="{radius:.1f}" '
-            f'fill="{fill}" fill-opacity="{opacity}" {extra}/>'
-        )
-        if str(overloaded.get("candidate_status")) == _CANDIDATE:
-            nodes_svg.append(
-                f'<circle class="mm-candidate-ring" cx="{x:.1f}" cy="{y:.1f}" '
-                f'r="{radius + 2.5:.1f}"/>'
-            )
-        labels_svg.append(
-            f'<text class="dep-label" data-node="{_escape_html(node_id)}" '
-            f'x="0" y="0" font-size="9" text-anchor="start" '
-            f'transform="translate({x + radius + 4:.1f},{y - radius - 2:.1f}) '
-            f'rotate(-45)"><title>'
-            f"{_escape_html(_mm_node_title(node, overloaded))}</title>"
-            f"{_escape_html(_short_label(node_id))}</text>"
-        )
-    return nodes_svg, labels_svg
+def _mm_node_style(node: Mapping[str, object], *, hub_threshold: int) -> BlockNodeStyle:
+    total_degree = _as_int(node.get("total_degree"))
+    overloaded = _as_mapping(node.get("overloaded"))
+    is_candidate = str(overloaded.get("candidate_status")) == _CANDIDATE
+    is_tests = [str(k) for k in _as_sequence(node.get("source_kinds"))] == ["tests"]
+    return block_node_style_for(
+        in_cycle=bool(node.get("in_cycle")),
+        is_hub=total_degree >= hub_threshold and total_degree > 2,
+        is_leaf=total_degree <= 1,
+        ring="var(--warning)" if is_candidate else "",
+        dashed=is_tests,
+        title=_mm_node_title(node, overloaded),
+    )
 
 
 def _render_module_map_svg(graph: Mapping[str, object]) -> str:
@@ -198,42 +107,25 @@ def _render_module_map_svg(graph: Mapping[str, object]) -> str:
     if not nodes:
         return _tab_empty(_EMPTY_GRAPH_MESSAGE)
     node_ids = [str(node.get("id")) for node in nodes]
+    by_id = {str(node.get("id")): node for node in nodes}
     edge_rows = [_as_mapping(edge) for edge in _as_sequence(graph.get("edges"))]
     edges = [(str(e.get("source")), str(e.get("target"))) for e in edge_rows]
     weights = {
         (str(e.get("source")), str(e.get("target"))): _as_int(e.get("weight"))
         for e in edge_rows
     }
-    cycle_node_set = {
-        str(node.get("id")) for node in nodes if bool(node.get("in_cycle"))
-    }
-    total_in = {str(n.get("id")): _as_int(n.get("total_degree")) for n in nodes}
-    total_out = dict.fromkeys(node_ids, 0)
+    total_degree = {nid: _as_int(by_id[nid].get("total_degree")) for nid in node_ids}
+    hub_threshold = _hub_threshold(node_ids, total_degree, dict.fromkeys(node_ids, 0))
 
-    layout_in, layout_out = _build_degree_maps(node_ids, edges)
-    layer_groups = _build_layer_groups(node_ids, edges, layout_in, layout_out)
-    width, height, _max_per_layer, positions = _layout_dep_graph(
-        layer_groups, in_degree=layout_in, out_degree=layout_out
-    )
-    hub_threshold = _hub_threshold(node_ids, total_in, total_out)
-    node_radii = _build_node_radii(
-        node_ids, total_in, total_out, cycle_node_set, hub_threshold
-    )
+    def _style(node_id: str) -> BlockNodeStyle:
+        return _mm_node_style(by_id[node_id], hub_threshold=hub_threshold)
 
-    defs = _build_svg_defs()
-    edge_svg = _render_mm_edges(edges, positions, node_radii, weights)
-    node_svg, label_svg = _render_mm_nodes(
-        nodes, positions=positions, node_radii=node_radii, hub_threshold=hub_threshold
-    )
-
-    pad = 60
-    return (
-        '<div class="dep-graph-wrap">'
-        f'<svg viewBox="{-pad} {-pad} {width + pad * 2} {height + pad}" '
-        'class="dep-graph-svg" role="img" preserveAspectRatio="xMidYMid meet" '
-        'aria-label="Module map graph">'
-        f"{defs}{''.join(edge_svg)}{''.join(node_svg)}{''.join(label_svg)}"
-        "</svg></div>"
+    return render_block_diagram(
+        node_ids,
+        edges,
+        style_fn=_style,
+        aria_label="Module map graph",
+        edge_weight_fn=lambda edge: weights.get(edge, 1),
     )
 
 
@@ -241,33 +133,37 @@ def _mm_stat_cards(
     summary: Mapping[str, object], active_graph: Mapping[str, object]
 ) -> str:
     truncation = _as_mapping(active_graph.get("truncation"))
+    node_total = _as_int(truncation.get("node_universe_count"))
+    edge_total = _as_int(truncation.get("edge_universe_count"))
+    graph_subtext = (
+        "deterministic sample" if bool(truncation.get("truncated")) else "full graph"
+    )
     cards = [
         _stat_card(
             "Nodes shown",
             _as_int(truncation.get("node_shown_count")),
-            detail=_micro_badges(
-                ("of", _as_int(truncation.get("node_universe_count")))
-            ),
+            secondary=f"/ {node_total}",
+            subtext=graph_subtext,
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Edges shown",
             _as_int(truncation.get("edge_shown_count")),
-            detail=_micro_badges(
-                ("of", _as_int(truncation.get("edge_universe_count")))
-            ),
+            secondary=f"/ {edge_total}",
+            subtext=graph_subtext,
             css_class="meta-item",
             glossary_tip_fn=glossary_tip,
         ),
         _stat_card(
             "Unwind candidates",
             _as_int(summary.get("unwind_candidate_count")),
-            detail=_micro_badges(
-                ("modules", _as_int(summary.get("module_count"))),
-                ("packages", _as_int(summary.get("package_count_depth2"))),
+            subtext=(
+                f"of {_as_int(summary.get('module_count'))} modules · "
+                f"{_as_int(summary.get('package_count_depth2'))} packages"
             ),
-            css_class="meta-item",
+            value_tone="accent",
+            css_class="meta-item meta-item--accent",
             glossary_tip_fn=glossary_tip,
         ),
     ]
@@ -333,6 +229,7 @@ def _mm_unwind_table(unwind_candidates: Sequence[object], ctx: ReportContext) ->
         headers=("Module", "Fan-in", "Fan-out", "Score", "Status", "Signals"),
         rows=rows,
         empty_message="No unwind candidates detected.",
+        column_types={"Score": "score", "Status": "status", "Signals": "chips"},
         ctx=ctx,
     )
 
@@ -443,6 +340,7 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
             ),
             rows=rows,
             empty_message=_OVERLOADED_EMPTY_MESSAGE,
+            column_types={"Score": "score", "Status": "status"},
             ctx=ctx,
         )
     )
