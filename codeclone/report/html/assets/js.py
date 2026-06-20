@@ -869,6 +869,65 @@ _TOOLTIPS = """\
 """
 
 # ---------------------------------------------------------------------------
+# Review hub: per-finding reviewed state (localStorage) + progress + filters
+# ---------------------------------------------------------------------------
+
+_REVIEW = """\
+(function initReview(){
+  const panel=$('[data-review-panel]');
+  if(!panel)return;
+  const KEY='codeclone-reviewed';
+  function load(){try{return new Set(JSON.parse(localStorage.getItem(KEY)||'[]'))}catch(e){return new Set()}}
+  function save(s){try{localStorage.setItem(KEY,JSON.stringify([...s]))}catch(e){}}
+  const reviewed=load();
+  const cards=$$('[data-review-card]');
+  const total=cards.length;
+  const bar=$('[data-review-progress-bar]');
+  const label=$('[data-review-progress-label]');
+  function refresh(){
+    let done=0;
+    cards.forEach(c=>{
+      const on=reviewed.has(c.dataset.findingId);
+      c.classList.toggle('is-reviewed',on);
+      const btn=c.querySelector('[data-review-toggle]');
+      if(btn)btn.setAttribute('aria-pressed',on?'true':'false');
+      if(on)done++;
+    });
+    if(bar)bar.style.width=(total?Math.round(done/total*100):0)+'%';
+    if(label)label.textContent=done+' / '+total;
+  }
+  panel.addEventListener('click',function(e){
+    const btn=e.target.closest('[data-review-toggle]');
+    if(!btn)return;
+    const card=btn.closest('[data-review-card]');
+    if(!card)return;
+    const id=card.dataset.findingId;
+    if(reviewed.has(id))reviewed.delete(id);else reviewed.add(id);
+    save(reviewed);refresh();
+  });
+  const active={severity:'',family:''};
+  function applyFilters(){
+    cards.forEach(c=>{
+      const okS=!active.severity||c.dataset.severity===active.severity;
+      const okF=!active.family||c.dataset.family===active.family;
+      c.style.display=(okS&&okF)?'':'none';
+    });
+  }
+  $$('[data-review-filter]').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      const dim=btn.dataset.reviewFilter,val=btn.dataset.reviewValue;
+      active[dim]=active[dim]===val?'':val;
+      $$('[data-review-filter="'+dim+'"]').forEach(function(b){
+        b.classList.toggle('is-active',b.dataset.reviewValue===active[dim]);
+      });
+      applyFilters();
+    });
+  });
+  refresh();
+})();
+"""
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -883,6 +942,7 @@ _ALL_MODULES = (
     _MODALS,
     _SUGGESTIONS,
     _DEP_GRAPH,
+    _REVIEW,
     _META_PANEL,
     _EXPORT,
     _CMD_PALETTE,

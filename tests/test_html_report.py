@@ -4307,3 +4307,117 @@ def test_module_map_panel_modules_zoom_and_limited_population() -> None:
     # modules graph (active) renders an SVG; empty packages graph shows the message
     assert "dep-graph-svg" in panel
     assert "Dependency graph is not available." in panel
+
+
+def _review_queue_payload(*, with_items: bool = True) -> dict[str, object]:
+    items: list[dict[str, object]] = []
+    if with_items:
+        items = [
+            {
+                "id": "suggestion:clone-a",
+                "finding_id": "clone:a",
+                "family": "clones",
+                "category": "clone",
+                "severity": "critical",
+                "priority": 0.91,
+                "source_kind": "production",
+                "title": "Duplicated branch logic",
+                "summary": "3 near-identical branches",
+                "location": "pkg/a.py:12",
+                "representative_locations": [],
+                "effort": "hard",
+                "steps": ["extract a handler"],
+            },
+            {
+                "id": "suggestion:struct-b",
+                "finding_id": "struct:b",
+                "family": "structural",
+                "category": "structural",
+                "severity": "warning",
+                "priority": 0.6,
+                "source_kind": "tests",
+                "title": "Repeated assertions",
+                "summary": "repeated assert template",
+                "location": "tests/test_b.py:30",
+                "representative_locations": [],
+                "effort": "easy",
+                "steps": ["collapse"],
+            },
+        ]
+    return {
+        "schema_version": "1",
+        "scope": "report_only",
+        "summary": {
+            "total": len(items),
+            "reviewed": 0,
+            "by_severity": {
+                "critical": 1 if with_items else 0,
+                "warning": 1 if with_items else 0,
+                "info": 0,
+            },
+            "by_family": {"clones": 1, "structural": 1} if with_items else {},
+            "top_priority": 0.91 if with_items else 0.0,
+        },
+        "items": items,
+    }
+
+
+def _render_review_report(review_queue: dict[str, object]) -> str:
+    metrics = _metrics_payload(
+        health_score=80,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=metrics,
+        report_document={"derived": {"review_queue": review_queue}},
+    )
+
+
+def test_html_report_renders_review_panel() -> None:
+    html = _render_review_report(_review_queue_payload())
+    _assert_html_contains(
+        html,
+        '<span class="main-tab-label">Review</span>',
+        'id="panel-review"',
+        "data-review-panel",
+        "data-review-progress-bar",
+        "What needs review, and in what order?",
+    )
+    panel = html.split('id="panel-review"', 1)[1].split('id="panel-clones"', 1)[0]
+    _assert_html_contains(
+        panel,
+        'data-review-card="true"',
+        'data-finding-id="clone:a"',
+        'data-severity="critical"',
+        'data-family="clones"',
+        "finding-card--critical",
+        "data-review-toggle",
+        "Duplicated branch logic",
+        'data-review-filter="severity"',
+        'data-review-value="critical"',
+    )
+    # priority order preserved (input order): critical clone before warning struct
+    assert panel.index("Duplicated branch logic") < panel.index("Repeated assertions")
+
+
+def test_review_panel_empty_when_no_items() -> None:
+    html = _render_review_report(_review_queue_payload(with_items=False))
+    panel = html.split('id="panel-review"', 1)[1].split('id="panel-clones"', 1)[0]
+    assert "No findings to review." in panel
+    assert "data-review-card" not in panel
+    # tab badge hidden when zero
+    assert (
+        '<span class="main-tab-label">Review</span><span class="tab-count"' not in html
+    )

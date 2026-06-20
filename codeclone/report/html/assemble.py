@@ -43,6 +43,7 @@ from ..messages.chrome import (
     TAB_MODULE_MAP,
     TAB_OVERVIEW,
     TAB_QUALITY,
+    TAB_REVIEW,
     TAB_SUGGESTIONS,
     TABLIST_ARIA_LABEL,
     THEME_BUTTON_TEXT,
@@ -59,6 +60,7 @@ from .sections._dependencies import render_dependencies_panel
 from .sections._meta import build_topbar_provenance_summary, render_meta_panel
 from .sections._module_map import render_module_map_panel
 from .sections._overview import render_overview_panel
+from .sections._review import render_review_panel
 from .sections._structural import render_structural_panel
 from .sections._suggestions import render_suggestions_panel
 from .template import FONT_CSS_URL, REPORT_TEMPLATE
@@ -113,6 +115,7 @@ def build_html_report(
 
     # -- Render sections --
     overview_html = render_overview_panel(ctx)
+    review_html = render_review_panel(ctx)
     clones_html, _novelty_enabled, _total_new, _total_known = render_clones_panel(ctx)
     quality_html = render_quality_panel(ctx)
     module_map_html = render_module_map_panel(ctx)
@@ -143,6 +146,11 @@ def build_html_report(
         _as_mapping(ctx.derived_map.get("module_map")).get("summary")
     )
     module_map_unwind = _as_int(module_map_summary.get("unwind_candidate_count"))
+    review_total = _as_int(
+        _as_mapping(
+            _as_mapping(ctx.derived_map.get("review_queue")).get("summary")
+        ).get("total")
+    )
     structural_count = len(
         tuple(normalize_structural_findings(ctx.structural_findings))
     )
@@ -172,6 +180,7 @@ def build_html_report(
     # -- Main tab navigation --
     tab_icon_keys: dict[str, str] = {
         "overview": "overview",
+        "review": "review",
         "clones": "clones",
         "quality": "quality",
         "module-map": "module-map",
@@ -182,6 +191,12 @@ def build_html_report(
     }
     tab_defs = [
         ("overview", TAB_OVERVIEW, overview_html, ""),
+        (
+            "review",
+            TAB_REVIEW,
+            review_html,
+            _tab_badge(review_total, "findings to review"),
+        ),
         (
             "clones",
             TAB_CLONES,

@@ -115,6 +115,11 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/>'
         '<rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
     ),
+    "review": (
+        "2",
+        '<path d="M4 5h10"/><path d="M4 12h10"/><path d="M4 19h7"/>'
+        '<path d="M17.5 16.5l2 2 3-3.5"/>',
+    ),
     "clones": (
         "2",
         '<rect x="9" y="9" width="11" height="11" rx="2"/>'

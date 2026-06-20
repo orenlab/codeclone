@@ -14,6 +14,7 @@ REPORT_TITLE_DEFAULT: Final = "CodeClone Report"
 BRAND_TITLE: Final = "CodeClone Report"
 
 TAB_OVERVIEW: Final = "Overview"
+TAB_REVIEW: Final = "Review"
 TAB_CLONES: Final = "Clones"
 TAB_QUALITY: Final = "Quality"
 TAB_MODULE_MAP: Final = "Module map"
