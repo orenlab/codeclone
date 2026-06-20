@@ -637,7 +637,7 @@ ObservabilitySectionParam = Annotated[
         description=(
             "Telemetry section to project: summary | slow_operations | "
             "memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | "
-            "correlated_chains | costly_noops | pipeline."
+            "correlated_chains | costly_noops | pipeline | analysis_phase_cost."
         ),
     ),
 ]

@@ -132,8 +132,14 @@ store is an informational empty state and exits successfully.
 
 The HTML cockpit is self-contained and includes operation chains, a span
 waterfall, pipeline and Engineering Memory costs, MCP tool aggregates, database
-costs, normalized SQL fingerprints, agent context, and costly no-op signals.
-It has no external assets or JavaScript dependency.
+costs, normalized SQL fingerprints, agent context, analysis extract phases, and
+costly no-op signals. It has no external assets or JavaScript dependency.
+
+When analysis phase counters are present, the cockpit shows **Analysis extract
+phases** after the pipeline section. These values are summed per-file worker
+elapsed time from `pipeline.process` counters. Under parallel execution the sum
+can exceed the parent `pipeline.process` wall time; this is expected and is not
+CPU time.
 
 ## MCP projection
 
@@ -148,11 +154,17 @@ It has no external assets or JavaScript dependency.
 - `correlated_chains`
 - `costly_noops`
 - `pipeline`
+- `analysis_phase_cost`
 
 `detail_level=compact` returns at most five rows. `normal` honors `limit`,
 clamped to `1..50`; `full` currently downgrades to `normal`. `window` accepts
 `latest` or a correlation ID. `operation_id` and `span_id` are reserved and
 reported as ignored parameters.
+
+`analysis_phase_cost` projects the same phase rows shown in HTML: parse,
+qualname indexing, module walks, CFG build, normalization, block/segment
+extraction, and module-level metric passes. It is a CodeClone runtime diagnostic,
+not repository quality evidence.
 
 The response explicitly declares a CodeClone-development audience and states
 that it is not user-facing quality evidence. See

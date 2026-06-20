@@ -26,6 +26,7 @@ from html import escape
 from .views import (
     AgentTokenRow,
     AggregatesView,
+    AnalysisPhaseRow,
     DbCostRow,
     DbFingerprintRow,
     McpToolAggregate,
@@ -42,6 +43,22 @@ from .views import (
 # A no-op span only deserves a "costly" warning once it has actually spent time.
 _NOOP_COSTLY_MS = 50.0
 _KNOWN_SURFACES = frozenset({"mcp", "cli", "memory"})
+_ANALYSIS_PHASE_LABELS = {
+    "parse": "Parse (ast.parse)",
+    "qualname": "Qualname index",
+    "module_walk": "Module walk",
+    "relationship": "Relationship facts",
+    "suppressions": "Suppressions",
+    "unit_cfg": "CFG build",
+    "unit_normalize_cfg": "Normalize (CFG blocks)",
+    "unit_structural": "Structural scan",
+    "unit_normalize_stmt": "Normalize (statements)",
+    "unit_blocks": "Block extract",
+    "unit_segments": "Segment extract",
+    "class_metrics": "Class metrics",
+    "dead_code": "Dead-code collect",
+    "module_passes": "Module passes",
+}
 
 # Reuse of the CodeClone brand mark (report/html/widgets/icons.py:BRAND_LOGO).
 _LOGO = (
@@ -451,6 +468,20 @@ def _highlights(agg: AggregatesView) -> str:
                 metric_html=f"{_esc(_ms(cpu_ms))} · {ratio:.1f}x wall",
             )
         )
+    if agg.analysis_phases:
+        top = agg.analysis_phases[0]
+        rows.append(
+            _highlight_row(
+                "Hottest extract phase",
+                badge_html="",
+                primary=top.phase,
+                context=_ANALYSIS_PHASE_LABELS.get(top.phase, top.phase),
+                metric_html=(
+                    f"{_esc(_ms(top.worker_elapsed_ms))} · "
+                    f"{top.share_permille / 10:.1f}%"
+                ),
+            )
+        )
     return f'<div class="panel hipanel">{"".join(rows)}</div>' if rows else ""
 
 
@@ -825,6 +856,48 @@ def _pipeline_section(agg: AggregatesView) -> str:
     )
 
 
+def _analysis_phase_row(row: AnalysisPhaseRow) -> str:
+    chip_cls = " warn" if row.verdict == "phase_heavy" else ""
+    label = _ANALYSIS_PHASE_LABELS.get(row.phase, row.phase)
+    return (
+        f'<tr><td class="t"><div class="shape">{_esc(label)}</div>'
+        f'<div class="sqlraw">{_esc(row.phase)}</div></td>'
+        f'<td class="r">{_esc(_ms(row.worker_elapsed_ms))}</td>'
+        f'<td class="r">{row.share_permille / 10:.1f}%</td>'
+        f'<td><span class="chip{chip_cls}">{_esc(row.verdict)}</span></td></tr>'
+    )
+
+
+def _analysis_phases_section(agg: AggregatesView) -> str:
+    if not agg.analysis_phases:
+        return ""
+    rows = "".join(_analysis_phase_row(row) for row in agg.analysis_phases)
+    headers = (
+        ("Phase", False),
+        ("Worker elapsed", True),
+        ("Share", True),
+        ("Signal", False),
+    )
+    footer = (
+        f"Worker elapsed (summed): "
+        f"{_ms(agg.analysis_phase_worker_elapsed_total_ms or 0.0)} · "
+        f"pipeline.process wall: {_ms(agg.analysis_phase_pipeline_wall_ms or 0.0)} · "
+        f"files timed: {agg.analysis_phase_files_timed} · "
+        f"units eligible: {agg.analysis_phase_units_eligible}"
+    )
+    body = _table(headers, rows) + f'<p class="shint">{_esc(footer)}</p>'
+    return _section(
+        "Analysis extract phases",
+        body,
+        subtitle=(
+            "Summed per-file worker elapsed time inside pipeline.process "
+            "(parse, walk, CFG, normalize). Dev-only; not repository quality. "
+            "Under parallel execution, summed worker elapsed may exceed parent "
+            "pipeline wall time."
+        ),
+    )
+
+
 def render_trace_html(trace: TraceView) -> str:
     """Render a ``TraceView`` as a self-contained, branded diagnosis cockpit."""
     foot = f"CodeClone · platform observability · schema {_esc(trace.schema_version)}"
@@ -844,6 +917,7 @@ def render_trace_html(trace: TraceView) -> str:
         + _agent(trace.aggregates)
         + _mcp(trace.aggregates.mcp_tools)
         + _pipeline_section(trace.aggregates)
+        + _analysis_phases_section(trace.aggregates)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"
     )

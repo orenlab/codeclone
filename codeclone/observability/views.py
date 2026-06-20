@@ -132,6 +132,14 @@ class DbFingerprintRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisPhaseRow:
+    phase: str
+    worker_elapsed_ms: float
+    share_permille: int
+    verdict: str
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTokenRow:
     """One MCP tool's cumulative token economics across the window."""
 
@@ -197,6 +205,12 @@ class AggregatesView:
     heaviest_cpu: OperationView | None = None
     pipeline: tuple[PipelineGroup, ...] = ()
     db_fingerprints: tuple[DbFingerprintRow, ...] = ()
+    analysis_phases: tuple[AnalysisPhaseRow, ...] = ()
+    analysis_phase_worker_elapsed_total_ms: float | None = None
+    analysis_phase_pipeline_wall_ms: float | None = None
+    analysis_phase_source_spans: int = 0
+    analysis_phase_files_timed: int = 0
+    analysis_phase_units_eligible: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +258,7 @@ __all__ = [
     "AgentTokenRow",
     "AgentView",
     "AggregatesView",
+    "AnalysisPhaseRow",
     "DbCostRow",
     "DbFingerprintRow",
     "McpToolAggregate",

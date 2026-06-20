@@ -7,7 +7,10 @@
 from __future__ import annotations
 
 import ast
+from collections.abc import Callable
+from functools import partial
 from hashlib import sha1 as _sha1
+from typing import TypeVar
 
 from .. import qualnames as _qualnames
 from ..blocks import extract_blocks, extract_segments
@@ -43,10 +46,18 @@ from .class_metrics import _class_metrics_for_node, _node_line_span
 from .fingerprint import _cfg_fingerprint_and_complexity, bucket_loc
 from .normalizer import NormalizationConfig, stmt_hashes
 from .parser import PARSE_TIMEOUT_SECONDS, _parse_with_limits
+from .phase_ledger import (
+    INERT_PHASE_LEDGER,
+    AnalysisPhaseKey,
+    AnalysisVolumeKey,
+    PhaseLedger,
+)
 from .reachability import collect_runtime_reachability
 from .security_surfaces import collect_security_surfaces
 
 __all__ = ["extract_units_and_stats_from_source"]
+
+_TCloneUnit = TypeVar("_TCloneUnit", BlockUnit, SegmentUnit)
 
 
 def _stmt_count(node: ast.AST) -> int:
@@ -86,6 +97,19 @@ def _eligible_unit_shape(
     return start, end, loc, stmt_count
 
 
+def _collect_timed_clone_units(
+    *,
+    phase_ledger: PhaseLedger,
+    phase_key: AnalysisPhaseKey,
+    volume_key: AnalysisVolumeKey,
+    collect: Callable[[], list[_TCloneUnit]],
+) -> list[_TCloneUnit]:
+    with phase_ledger.phase(phase_key):
+        items = collect()
+    phase_ledger.add_volume(volume_key, len(items))
+    return items
+
+
 def extract_units_and_stats_from_source(
     source: str,
     filepath: str,
@@ -101,6 +125,7 @@ def extract_units_and_stats_from_source(
     collect_structural_findings: bool = True,
     collect_api_surface: bool = False,
     api_include_private_modules: bool = False,
+    phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
 ) -> tuple[
     list[Unit],
     list[BlockUnit],
@@ -110,26 +135,29 @@ def extract_units_and_stats_from_source(
     list[StructuralFindingGroup],
 ]:
     try:
-        tree = _parse_with_limits(source, PARSE_TIMEOUT_SECONDS)
+        with phase_ledger.phase(AnalysisPhaseKey.PARSE):
+            tree = _parse_with_limits(source, PARSE_TIMEOUT_SECONDS)
     except SyntaxError as e:
         raise ParseError(f"Failed to parse {filepath}: {e}") from e
     if not isinstance(tree, ast.Module):
         raise ParseError(f"Failed to parse {filepath}: expected module AST root")
 
     collector = _qualnames.QualnameCollector()
-    collector.visit(tree)
+    with phase_ledger.phase(AnalysisPhaseKey.QUALNAME):
+        collector.visit(tree)
     source_lines = source.splitlines()
     source_line_count = len(source_lines)
 
     is_test_file = is_test_filepath(filepath)
 
     # Single-pass AST walk replaces 3 separate functions / 4 walks.
-    _walk = _collect_module_walk_data(
-        tree=tree,
-        module_name=module_name,
-        collector=collector,
-        collect_referenced_names=not is_test_file,
-    )
+    with phase_ledger.phase(AnalysisPhaseKey.MODULE_WALK):
+        _walk = _collect_module_walk_data(
+            tree=tree,
+            module_name=module_name,
+            collector=collector,
+            collect_referenced_names=not is_test_file,
+        )
     import_names = _walk.import_names
     module_deps = _walk.module_deps
     referenced_names = _walk.referenced_names
@@ -139,20 +167,22 @@ def extract_units_and_stats_from_source(
     non_runtime_decorator_aliases = _walk.non_runtime_decorator_aliases
     pydantic_module_aliases = _walk.pydantic_module_aliases
     cohesion_ignored_decorator_aliases = _walk.cohesion_ignored_decorator_aliases
-    function_relationship_facts = _collect_function_relationship_facts(
-        tree=tree,
-        module_name=module_name,
-        filepath=filepath,
-        collector=collector,
-        origin_lane="test" if is_test_file else "production",
-    )
+    with phase_ledger.phase(AnalysisPhaseKey.RELATIONSHIP):
+        function_relationship_facts = _collect_function_relationship_facts(
+            tree=tree,
+            module_name=module_name,
+            filepath=filepath,
+            collector=collector,
+            origin_lane="test" if is_test_file else "production",
+        )
 
-    suppression_index = _build_suppression_index_for_source(
-        source=source,
-        filepath=filepath,
-        module_name=module_name,
-        collector=collector,
-    )
+    with phase_ledger.phase(AnalysisPhaseKey.SUPPRESSIONS):
+        suppression_index = _build_suppression_index_for_source(
+            source=source,
+            filepath=filepath,
+            module_name=module_name,
+            collector=collector,
+        )
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
     module_import_names = set(import_names)
     module_class_names = set(class_names)
@@ -164,6 +194,7 @@ def extract_units_and_stats_from_source(
     structural_findings: list[StructuralFindingGroup] = []
 
     for local_name, node in collector.units:
+        phase_ledger.add_volume(AnalysisVolumeKey.UNITS_SEEN)
         unit_shape = _eligible_unit_shape(
             node,
             min_loc=min_loc,
@@ -171,16 +202,24 @@ def extract_units_and_stats_from_source(
         )
         if unit_shape is None:
             continue
+        phase_ledger.add_volume(AnalysisVolumeKey.UNITS_ELIGIBLE)
         start, end, loc, stmt_count = unit_shape
 
         qualname = f"{module_name}:{local_name}"
-        fingerprint, complexity = _cfg_fingerprint_and_complexity(node, cfg, qualname)
-        structure_facts = scan_function_structure(
+        fingerprint, complexity = _cfg_fingerprint_and_complexity(
             node,
-            filepath,
+            cfg,
             qualname,
-            collect_findings=collect_structural_findings,
+            phase_ledger=phase_ledger,
         )
+        phase_ledger.add_volume(AnalysisVolumeKey.UNITS_FINGERPRINTED)
+        with phase_ledger.phase(AnalysisPhaseKey.UNIT_STRUCTURAL):
+            structure_facts = scan_function_structure(
+                node,
+                filepath,
+                qualname,
+                collect_findings=collect_structural_findings,
+            )
         depth = structure_facts.nesting_depth
         risk = risk_level(complexity)
         raw_hash = _raw_source_hash_for_range(source_lines, start, end)
@@ -223,11 +262,16 @@ def extract_units_and_stats_from_source(
             body = getattr(node, "body", None)
             hashes: list[str] | None = None
             if isinstance(body, list):
-                hashes = stmt_hashes(body, cfg)
+                with phase_ledger.phase(AnalysisPhaseKey.UNIT_NORMALIZE_STMT):
+                    hashes = stmt_hashes(body, cfg)
 
             if needs_blocks:
-                block_units.extend(
-                    extract_blocks(
+                blocks = _collect_timed_clone_units(
+                    phase_ledger=phase_ledger,
+                    phase_key=AnalysisPhaseKey.UNIT_BLOCKS,
+                    volume_key=AnalysisVolumeKey.BLOCKS_EMITTED,
+                    collect=partial(
+                        extract_blocks,
                         node,
                         filepath=filepath,
                         qualname=qualname,
@@ -235,12 +279,17 @@ def extract_units_and_stats_from_source(
                         block_size=4,
                         max_blocks=15,
                         precomputed_hashes=hashes,
-                    )
+                    ),
                 )
+                block_units.extend(blocks)
 
             if needs_segments:
-                segment_units.extend(
-                    extract_segments(
+                segments = _collect_timed_clone_units(
+                    phase_ledger=phase_ledger,
+                    phase_key=AnalysisPhaseKey.UNIT_SEGMENTS,
+                    volume_key=AnalysisVolumeKey.SEGMENTS_EMITTED,
+                    collect=partial(
+                        extract_segments,
                         node,
                         filepath=filepath,
                         qualname=qualname,
@@ -248,42 +297,45 @@ def extract_units_and_stats_from_source(
                         window_size=6,
                         max_segments=60,
                         precomputed_hashes=hashes,
-                    )
+                    ),
                 )
+                segment_units.extend(segments)
 
         if collect_structural_findings:
             structural_findings.extend(structure_facts.structural_findings)
 
-    for class_qualname, class_node in collector.class_nodes:
-        cohesion_ignored_methods = _cohesion_ignored_method_names(
-            class_node,
+    with phase_ledger.phase(AnalysisPhaseKey.CLASS_METRICS):
+        for class_qualname, class_node in collector.class_nodes:
+            cohesion_ignored_methods = _cohesion_ignored_method_names(
+                class_node,
+                protocol_symbol_aliases=protocol_symbol_aliases,
+                protocol_module_aliases=protocol_module_aliases,
+                pydantic_module_aliases=pydantic_module_aliases,
+                cohesion_ignored_decorator_aliases=cohesion_ignored_decorator_aliases,
+            )
+            class_metric = _class_metrics_for_node(
+                module_name=module_name,
+                class_qualname=class_qualname,
+                class_node=class_node,
+                filepath=filepath,
+                module_import_names=module_import_names,
+                module_class_names=module_class_names,
+                cohesion_ignored_methods=cohesion_ignored_methods,
+            )
+            if class_metric is not None:
+                class_metrics.append(class_metric)
+
+    with phase_ledger.phase(AnalysisPhaseKey.DEAD_CODE):
+        dead_candidates = _collect_dead_candidates(
+            filepath=filepath,
+            module_name=module_name,
+            collector=collector,
             protocol_symbol_aliases=protocol_symbol_aliases,
             protocol_module_aliases=protocol_module_aliases,
+            non_runtime_decorator_aliases=non_runtime_decorator_aliases,
             pydantic_module_aliases=pydantic_module_aliases,
-            cohesion_ignored_decorator_aliases=cohesion_ignored_decorator_aliases,
+            suppression_rules_by_target=suppression_index,
         )
-        class_metric = _class_metrics_for_node(
-            module_name=module_name,
-            class_qualname=class_qualname,
-            class_node=class_node,
-            filepath=filepath,
-            module_import_names=module_import_names,
-            module_class_names=module_class_names,
-            cohesion_ignored_methods=cohesion_ignored_methods,
-        )
-        if class_metric is not None:
-            class_metrics.append(class_metric)
-
-    dead_candidates = _collect_dead_candidates(
-        filepath=filepath,
-        module_name=module_name,
-        collector=collector,
-        protocol_symbol_aliases=protocol_symbol_aliases,
-        protocol_module_aliases=protocol_module_aliases,
-        non_runtime_decorator_aliases=non_runtime_decorator_aliases,
-        pydantic_module_aliases=pydantic_module_aliases,
-        suppression_rules_by_target=suppression_index,
-    )
 
     sorted_class_metrics = tuple(
         sorted(
@@ -296,34 +348,35 @@ def extract_units_and_stats_from_source(
             ),
         )
     )
-    typing_coverage, docstring_coverage = collect_module_adoption(
-        tree=tree,
-        module_name=module_name,
-        filepath=filepath,
-        collector=collector,
-        imported_names=import_names,
-    )
-    api_surface = None
-    if collect_api_surface:
-        api_surface = collect_module_api_surface(
+    with phase_ledger.phase(AnalysisPhaseKey.MODULE_PASSES):
+        typing_coverage, docstring_coverage = collect_module_adoption(
             tree=tree,
             module_name=module_name,
             filepath=filepath,
             collector=collector,
             imported_names=import_names,
-            include_private_modules=api_include_private_modules,
         )
-    security_surfaces = collect_security_surfaces(
-        tree=tree,
-        module_name=module_name,
-        filepath=filepath,
-    )
-    runtime_reachability = collect_runtime_reachability(
-        tree=tree,
-        module_name=module_name,
-        filepath=filepath,
-        collector=collector,
-    )
+        api_surface = None
+        if collect_api_surface:
+            api_surface = collect_module_api_surface(
+                tree=tree,
+                module_name=module_name,
+                filepath=filepath,
+                collector=collector,
+                imported_names=import_names,
+                include_private_modules=api_include_private_modules,
+            )
+        security_surfaces = collect_security_surfaces(
+            tree=tree,
+            module_name=module_name,
+            filepath=filepath,
+        )
+        runtime_reachability = collect_runtime_reachability(
+            tree=tree,
+            module_name=module_name,
+            filepath=filepath,
+            collector=collector,
+        )
 
     return (
         units,

@@ -23,6 +23,7 @@ from codeclone.observability.views import (
     AgentTokenRow,
     AgentView,
     AggregatesView,
+    AnalysisPhaseRow,
     DbCostRow,
     DbFingerprintRow,
     McpToolAggregate,
@@ -134,6 +135,53 @@ def test_render_trace_html_shows_db_query_shapes() -> None:
         "select * from memory_evidence where memory_id = ?",
     ):
         assert needle in html
+
+
+def test_render_trace_html_shows_analysis_phase_section() -> None:
+    agg = AggregatesView(
+        operation_count=1,
+        analysis_phases=(
+            AnalysisPhaseRow(
+                phase="unit_cfg",
+                worker_elapsed_ms=2.5,
+                share_permille=833,
+                verdict="phase_heavy",
+            ),
+            AnalysisPhaseRow(
+                phase="parse",
+                worker_elapsed_ms=0.5,
+                share_permille=167,
+                verdict="ok",
+            ),
+        ),
+        analysis_phase_worker_elapsed_total_ms=3.0,
+        analysis_phase_pipeline_wall_ms=2.0,
+        analysis_phase_source_spans=1,
+        analysis_phase_files_timed=2,
+        analysis_phase_units_eligible=3,
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=agg,
+    )
+
+    html = render_trace_html(trace)
+    _assert_html_contains(
+        html,
+        "Hottest extract phase",
+        "Analysis extract phases",
+        "CFG build",
+        "Parse (ast.parse)",
+        "phase_heavy",
+        "Worker elapsed (summed): 3ms",
+        "pipeline.process wall: 2ms",
+        "files timed: 2",
+        "units eligible: 3",
+    )
+    payload = json.loads(render_trace_json(trace))
+    assert payload["aggregates"]["analysis_phases"][0]["phase"] == "unit_cfg"
 
 
 def _cockpit_trace() -> TraceView:

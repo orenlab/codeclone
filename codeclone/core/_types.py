@@ -8,9 +8,10 @@ from __future__ import annotations
 
 from argparse import Namespace
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import orjson
 
@@ -42,6 +43,9 @@ from ..models import (
     Unit,
 )
 from ..utils.coerce import as_int, as_mapping, as_str
+
+if TYPE_CHECKING:
+    from ..analysis.phase_ledger import PhaseSnapshot
 
 MAX_FILE_SIZE = 10 * 1024 * 1024
 DEFAULT_BATCH_SIZE = 100
@@ -115,6 +119,11 @@ class FileProcessResult:
     error_kind: str | None = None
     file_metrics: FileMetrics | None = None
     structural_findings: list[StructuralFindingGroup] | None = None
+    phase_snapshot: PhaseSnapshot | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +152,11 @@ class ProcessingResult:
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
     function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
     source_stats_by_file: tuple[tuple[str, int, int, int, int], ...] = ()
+    phase_snapshot: PhaseSnapshot | None = field(
+        default=None,
+        compare=False,
+        repr=False,
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -37,6 +37,7 @@ _DB_CHATTY_QPC = 200
 _CONTEXT_HEAVY_PCT = 25
 _MEMORY_HEAVY_MB = 200.0
 _CONTEXT_PRESSURE_TOKENS = 8000
+_ANALYSIS_HEAVY_WORKER_MS = 2000.0
 
 _AGGREGATE_SECTIONS = (
     "summary",
@@ -48,6 +49,7 @@ _AGGREGATE_SECTIONS = (
     "correlated_chains",
     "costly_noops",
     "pipeline",
+    "analysis_phase_cost",
 )
 
 
@@ -225,6 +227,32 @@ def _agent_context_body(agg: AggregatesView, cap: int) -> dict[str, object]:
     return {"total_response_tokens": total, "rows": rows}
 
 
+def _analysis_phase_body(agg: AggregatesView, cap: int) -> dict[str, object]:
+    rows = [
+        {
+            "phase": row.phase,
+            "worker_elapsed_ms": row.worker_elapsed_ms,
+            "share_permille": row.share_permille,
+            "verdict": row.verdict,
+        }
+        for row in agg.analysis_phases[:cap]
+    ]
+    body: dict[str, object] = {
+        "phase_worker_elapsed_total_ms": (agg.analysis_phase_worker_elapsed_total_ms),
+        "pipeline_process_wall_ms": agg.analysis_phase_pipeline_wall_ms,
+        "source_spans": agg.analysis_phase_source_spans,
+        "files_timed": agg.analysis_phase_files_timed,
+        "units_eligible": agg.analysis_phase_units_eligible,
+        "rows": rows,
+    }
+    if not rows:
+        body["message"] = (
+            "no analysis phase counters in window; run with "
+            "CODECLONE_OBSERVABILITY_ENABLED=1 and a full analyze."
+        )
+    return body
+
+
 def _chain_descendant_names(op: OperationView) -> list[str]:
     names: list[str] = []
     for child in op.children:
@@ -328,18 +356,34 @@ def _context_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
     }
 
 
+def _analysis_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
+    if not agg.analysis_phases:
+        return None
+    top = agg.analysis_phases[0]
+    if top.verdict != "phase_heavy":
+        return None
+    return {
+        "kind": "analysis",
+        "message": (
+            f"{top.phase} consumed {top.share_permille / 10:.0f}% of measured "
+            f"extract time ({top.worker_elapsed_ms:.0f} ms)."
+        ),
+    }
+
+
 def _top_diagnostics(agg: AggregatesView) -> list[dict[str, object]]:
     candidates = (
         _memory_diagnostic(agg),
         _db_diagnostic(agg),
         _context_diagnostic(agg),
+        _analysis_diagnostic(agg),
     )
     return [d for d in candidates if d is not None][:_MAX_DIAGNOSTICS]
 
 
 def _summary_body(trace: TraceView) -> dict[str, object]:
     agg = trace.aggregates
-    return {
+    body: dict[str, object] = {
         "operations": agg.operation_count,
         "peak_rss_delta_mb": _round1(agg.max_rss_delta_mb),
         "peak_rss_mb": _round1(agg.max_peak_rss_mb),
@@ -347,6 +391,18 @@ def _summary_body(trace: TraceView) -> dict[str, object]:
         "costly_noops": sum(1 for s in agg.semantic_costs if s.no_op),
         "top_diagnostics": _top_diagnostics(agg),
     }
+    if agg.analysis_phases:
+        body["analysis_phase_worker_elapsed_total_ms"] = (
+            agg.analysis_phase_worker_elapsed_total_ms
+        )
+        body["top_analysis_phases"] = [
+            {
+                "phase": row.phase,
+                "share_permille": row.share_permille,
+            }
+            for row in agg.analysis_phases[:_MAX_DIAGNOSTICS]
+        ]
+    return body
 
 
 def _recommended_next_sections(
@@ -371,6 +427,16 @@ def _recommended_next_sections(
     if any(s.no_op for s in agg.semantic_costs):
         recs.append(
             {"section": "costly_noops", "reason": "a span ran but produced nothing."}
+        )
+    if (
+        agg.analysis_phase_worker_elapsed_total_ms is not None
+        and agg.analysis_phase_worker_elapsed_total_ms >= _ANALYSIS_HEAVY_WORKER_MS
+    ) or any(row.verdict == "phase_heavy" for row in agg.analysis_phases):
+        recs.append(
+            {
+                "section": "analysis_phase_cost",
+                "reason": "pipeline.process phase breakdown available.",
+            }
         )
     return recs
 
@@ -432,6 +498,8 @@ def query_platform_observability(
         response.update(_summary_body(trace))
     elif section == "agent_context":
         response.update(_agent_context_body(agg, row_cap))
+    elif section == "analysis_phase_cost":
+        response.update(_analysis_phase_body(agg, row_cap))
     elif section == "correlated_chains":
         response["rows"] = _correlated_chains(trace, row_cap)
     else:

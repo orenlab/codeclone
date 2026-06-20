@@ -627,8 +627,13 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "Sections: summary | slow_operations | memory_pipeline_cost | "
                 "db_cost | agent_context | mcp_tool_matrix | correlated_chains "
-                "| costly_noops | pipeline. Start at summary, then follow "
-                "recommended_next_sections."
+                "| costly_noops | pipeline | analysis_phase_cost. Start at "
+                "summary, then follow recommended_next_sections."
+            ),
+            (
+                "analysis_phase_cost breaks pipeline.process into summed worker "
+                "elapsed micro-phases (parse, walk, CFG, normalize); under "
+                "ProcessPool this may exceed parent pipeline wall time."
             ),
             (
                 "detail_level compact|normal; full is reserved for future "

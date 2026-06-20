@@ -117,6 +117,43 @@ def _seed(tmp_path: Path) -> None:
         conn.close()
 
 
+def _seed_analysis_phases(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="P",
+                correlation_id="P",
+                surface="cli",
+                name="cli.analyze",
+                started_at_utc="2026-06-12T00:00:00Z",
+                duration_ms=200.0,
+                status="ok",
+                spans=(
+                    SpanRecord(
+                        span_id="process",
+                        operation_id="P",
+                        name="pipeline.process",
+                        started_at_utc="2026-06-12T00:00:00Z",
+                        duration_ms=180.0,
+                        status="ok",
+                        counters={
+                            "files_analyzed": 2,
+                            "failed_files": 0,
+                            "phase_parse_us": 500,
+                            "phase_unit_cfg_us": 2500,
+                            "files_timed": 2,
+                            "units_eligible": 3,
+                        },
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+
+
 def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(root=tmp_path, section="summary")
@@ -128,6 +165,42 @@ def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> Non
     assert {"memory", "db", "context"} <= kinds
     routed = {r["section"] for r in _rows(out["recommended_next_sections"])}
     assert {"db_cost", "agent_context", "costly_noops"} <= routed
+
+
+def test_analysis_phase_cost_section_and_summary_routing(tmp_path: Path) -> None:
+    _seed_analysis_phases(tmp_path)
+
+    out = query_platform_observability(
+        root=tmp_path,
+        section="analysis_phase_cost",
+        detail_level="normal",
+    )
+
+    expected_scalars = {
+        "phase_worker_elapsed_total_ms": 3.0,
+        "pipeline_process_wall_ms": 180.0,
+        "source_spans": 1,
+        "files_timed": 2,
+        "units_eligible": 3,
+    }
+    assert {key: out[key] for key in expected_scalars} == expected_scalars
+    assert _rows(out["rows"])[0] == {
+        "phase": "unit_cfg",
+        "worker_elapsed_ms": 2.5,
+        "share_permille": 833,
+        "verdict": "phase_heavy",
+    }
+
+    summary = query_platform_observability(root=tmp_path, section="summary")
+    assert summary["analysis_phase_worker_elapsed_total_ms"] == 3.0
+    assert _rows(summary["top_analysis_phases"])[0] == {
+        "phase": "unit_cfg",
+        "share_permille": 833,
+    }
+    routed = {r["section"] for r in _rows(summary["recommended_next_sections"])}
+    assert "analysis_phase_cost" in routed
+    diagnostics = {d["kind"] for d in _rows(summary["top_diagnostics"])}
+    assert "analysis" in diagnostics
 
 
 def test_summary_does_not_embed_raw_trace(tmp_path: Path) -> None:
@@ -220,6 +293,7 @@ def test_unknown_section_returns_validation_envelope(tmp_path: Path) -> None:
     assert out["status"] == "invalid_section"
     assert out["section"] == "bogus"
     assert "summary" in _texts(out["available_sections"])
+    assert "analysis_phase_cost" in _texts(out["available_sections"])
     assert out["rows"] == []
 
 

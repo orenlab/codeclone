@@ -131,9 +131,10 @@ QUERY_PLATFORM_OBSERVABILITY: Final = (
     "bad; high MCP payload != code quality low; hot semantic reindex != unsafe "
     "change. Sections: summary, slow_operations, memory_pipeline_cost, "
     "db_cost, agent_context, mcp_tool_matrix, correlated_chains, costly_noops, "
-    "pipeline. detail_level compact|normal (full downgrades to normal for "
-    "aggregate sections). Intended for CodeClone maintainers and development "
-    "agents; do not use it to make user-facing quality claims about a repo."
+    "pipeline, analysis_phase_cost. detail_level compact|normal (full "
+    "downgrades to normal for aggregate sections). Intended for CodeClone "
+    "maintainers and development agents; do not use it to make user-facing "
+    "quality claims about a repo."
 )
 
 EVALUATE_GATES: Final = (

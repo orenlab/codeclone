@@ -16,6 +16,7 @@ from .normalizer import (
     NormalizationConfig,
     normalized_ast_dump_from_list,
 )
+from .phase_ledger import INERT_PHASE_LEDGER, AnalysisPhaseKey, PhaseLedger
 
 
 def sha1(s: str) -> str:
@@ -37,6 +38,8 @@ def _cfg_fingerprint_and_complexity(
     node: _qualnames.FunctionNode,
     cfg: NormalizationConfig,
     qualname: str,
+    *,
+    phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
 ) -> tuple[str, int]:
     """
     Generate a structural fingerprint for a function using CFG analysis.
@@ -60,7 +63,8 @@ def _cfg_fingerprint_and_complexity(
         40-character hex SHA-1 hash of the normalized CFG
     """
     builder = CFGBuilder()
-    graph = builder.build(qualname, node)
+    with phase_ledger.phase(AnalysisPhaseKey.UNIT_CFG):
+        graph = builder.build(qualname, node)
     cfg_normalizer = AstNormalizer(cfg)
 
     # Use generator to avoid building large list of strings
@@ -69,11 +73,12 @@ def _cfg_fingerprint_and_complexity(
         succ_ids = ",".join(
             str(s.id) for s in sorted(block.successors, key=lambda s: s.id)
         )
-        block_dump = normalized_ast_dump_from_list(
-            block.statements,
-            cfg,
-            normalizer=cfg_normalizer,
-        )
+        with phase_ledger.phase(AnalysisPhaseKey.UNIT_NORMALIZE_CFG):
+            block_dump = normalized_ast_dump_from_list(
+                block.statements,
+                cfg,
+                normalizer=cfg_normalizer,
+            )
         parts.append(f"BLOCK[{block.id}]:{block_dump}|SUCCESSORS:{succ_ids}")
     return sha1("|".join(parts)), cyclomatic_complexity(graph)
 

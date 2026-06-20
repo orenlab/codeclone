@@ -39,9 +39,16 @@ Supported sections:
 - `correlated_chains`
 - `costly_noops`
 - `pipeline`
+- `analysis_phase_cost`
 
 Each call returns one section only. Compact detail is bounded to five rows;
 normal detail is bounded by `limit`.
+
+`analysis_phase_cost` reports summed worker elapsed time inside
+`pipeline.process`, grouped by analysis micro-phase. The top-level scalar
+`phase_worker_elapsed_total_ms` may exceed `pipeline_process_wall_ms` when
+analysis ran in a process pool. Treat the section as a CodeClone performance
+diagnostic only; it does not indicate repository quality.
 
 ## Inert states
 

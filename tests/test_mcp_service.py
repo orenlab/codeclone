@@ -2582,6 +2582,7 @@ def test_help_observability_topic_surfaces_query_tool() -> None:
     assert "query_platform_observability" in str(payload["recommended_tools"])
     text = str(payload["key_points"]).lower()
     assert "anti-inference" in text and "dev-only" in text
+    assert "analysis_phase_cost" in text
 
 
 def test_mcp_service_help_validates_topic_and_detail() -> None:
