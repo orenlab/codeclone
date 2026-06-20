@@ -958,35 +958,40 @@ _SUGGESTIONS = """\
 /* List layout */
 .suggestions-list{display:flex;flex-direction:column;gap:var(--sp-2)}
 
-/* Card — full-width row */
-.suggestion-card{background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--radius-lg);
-  overflow:hidden;transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
-.suggestion-card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
-.suggestion-card[data-severity="critical"]{border-left:3px solid var(--error)}
-.suggestion-card[data-severity="warning"]{border-left:3px solid var(--warning)}
-.suggestion-card[data-severity="info"]{border-left:3px solid var(--info)}
-
-/* Header row: severity pill · title · meta badges */
-.suggestion-head{padding:var(--sp-3) var(--sp-4);display:flex;align-items:center;
-  gap:var(--sp-2);flex-wrap:wrap}
-.suggestion-sev{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.04em;
-  padding:2px var(--sp-2);border-radius:var(--radius-sm);white-space:nowrap}
-.suggestion-sev--critical{background:var(--error-muted);color:var(--error)}
-.suggestion-sev--warning{background:var(--warning-muted);color:var(--warning)}
-.suggestion-sev--info{background:var(--info-muted);color:var(--info)}
-.suggestion-sev-inline{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
-  border-radius:var(--radius-sm)}
-.suggestion-title{font-weight:600;font-size:.85rem;color:var(--text-primary);flex:1;min-width:0}
-.suggestion-meta{display:flex;align-items:center;gap:var(--sp-2);flex-shrink:0;flex-wrap:wrap}
-.suggestion-meta-badge{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
+/* Finding / review card — shared chrome (severity stripe · head · meta · body).
+   One source of truth for findings, suggestions, and the review queue. */
+.finding-card{position:relative;display:flex;background:var(--bg-surface);
+  border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;
+  transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
+.finding-card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
+.finding-card-stripe{flex:0 0 4px;align-self:stretch;background:var(--border-strong)}
+.finding-card--critical .finding-card-stripe{background:var(--error)}
+.finding-card--warning .finding-card-stripe{background:var(--warning)}
+.finding-card--info .finding-card-stripe{background:var(--info)}
+.finding-card-main{flex:1;min-width:0;padding:var(--sp-3) var(--sp-4)}
+.finding-card-head{display:flex;justify-content:space-between;gap:var(--sp-3);
+  align-items:flex-start}
+.finding-card-headings{min-width:0}
+.finding-card-eyebrow{font-size:.66rem;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--text-muted)}
+.finding-card-title{display:flex;align-items:center;gap:var(--sp-2);margin-top:2px}
+.finding-card-title-text{font-size:.9rem;font-weight:600;color:var(--text-primary);
+  min-width:0;overflow:hidden;text-overflow:ellipsis}
+.finding-card-loc{font-family:var(--font-mono);font-size:.74rem;color:var(--text-secondary);
+  margin-top:4px;word-break:break-all}
+.finding-card-actions{flex-shrink:0}
+.finding-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.finding-meta-badge{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
   border-radius:var(--radius-sm);background:var(--bg-overlay);color:var(--text-muted);
   white-space:nowrap;line-height:1.2;font-variant-numeric:tabular-nums}
-.suggestion-effort--easy{color:var(--success);background:var(--success-muted, rgba(34,197,94,.1))}
-.suggestion-effort--moderate{color:var(--warning);background:var(--warning-muted)}
-.suggestion-effort--hard{color:var(--error);background:var(--error-muted)}
+.finding-meta-badge--easy{color:var(--success);background:var(--success-muted, rgba(34,197,94,.1))}
+.finding-meta-badge--moderate{color:var(--warning);background:var(--warning-muted)}
+.finding-meta-badge--hard{color:var(--error);background:var(--error-muted)}
+.suggestion-sev-inline{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
+  border-radius:var(--radius-sm)}
 
 /* Body — context + summary */
-.suggestion-body{padding:0 var(--sp-4) var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-1)}
+.finding-card-body{margin-top:9px;display:flex;flex-direction:column;gap:var(--sp-1)}
 .suggestion-context{display:flex;gap:var(--sp-1);flex-wrap:wrap}
 .suggestion-chip{font-size:.68rem;font-weight:500;padding:2px var(--sp-2);border-radius:var(--radius-sm);
   background:var(--bg-overlay);color:var(--text-muted);white-space:nowrap}

@@ -49,6 +49,11 @@ from codeclone.report.html.widgets.badges import (
     _stat_card,
     _status_pill_html,
 )
+from codeclone.report.html.widgets.cards import (
+    finding_card,
+    meta_badge_html,
+    severity_key,
+)
 from codeclone.report.html.widgets.components import (
     overview_source_breakdown_html,
     overview_summary_item_html,
@@ -641,13 +646,11 @@ def test_suggestion_meta_labels_are_more_readable() -> None:
         _make_suggestion(effort="easy", priority=1.5), cast(Any, _section_ctx())
     )
     assert (
-        '<span class="suggestion-meta-badge suggestion-effort--easy">Easy</span>'
+        '<span class="finding-meta-badge finding-meta-badge--easy">Easy</span>'
         in card_html
     )
-    assert '<span class="suggestion-meta-badge">Priority 1.5</span>' in card_html
-    assert (
-        '<span class="suggestion-meta-badge">3 functions · 2 files</span>' in card_html
-    )
+    assert '<span class="finding-meta-badge">Priority 1.5</span>' in card_html
+    assert '<span class="finding-meta-badge">3 functions · 2 files</span>' in card_html
     assert "<div><dt>Spread</dt><dd>3 functions · 2 files</dd></div>" in card_html
 
 
@@ -773,3 +776,33 @@ def test_badge_vocabulary_helpers_cover_typed_cell_branches() -> None:
     card = _stat_card("Nodes shown", 6, secondary="/ 28", subtext="sampled")
     assert '<span class="meta-value-sec">/ 28</span>' in card
     assert '<div class="meta-subtext">sampled</div>' in card
+
+
+def test_finding_card_renders_all_slots_and_severity_fallback() -> None:
+    assert severity_key("CRITICAL") == "critical"
+    assert severity_key("nonsense") == "info"
+    assert "finding-meta-badge--hard" in meta_badge_html("Hard", tone="hard")
+    assert meta_badge_html("plain") == '<span class="finding-meta-badge">plain</span>'
+
+    card = finding_card(
+        severity="warning",
+        title="Overloaded module",
+        eyebrow="overload · production",
+        location="pkg/mod.py:12",
+        meta_badges=(meta_badge_html("priority 0.9"),),
+        body_html="<p>why</p>",
+        details_html="<details></details>",
+        actions_html="<button>ok</button>",
+        card_class="review-card",
+        data_attrs=' data-id="x"',
+    )
+    assert_all_contained(
+        card,
+        'class="finding-card finding-card--warning review-card" data-id="x"',
+        '<span class="finding-card-stripe"',
+        "finding-card-eyebrow",
+        "finding-card-loc",
+        "finding-card-actions",
+        "severity-badge severity-warning",  # reused severity badge
+        "Overloaded module",
+    )
