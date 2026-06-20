@@ -398,11 +398,12 @@ def _suggestion_finding_id(suggestion: Suggestion) -> str:
     )
 
 
-def _build_derived_suggestions(
+def _sorted_suggestions(
     suggestions: Sequence[Suggestion] | None,
-) -> list[dict[str, object]]:
-    suggestion_rows = list(suggestions or ())
-    suggestion_rows.sort(
+) -> list[Suggestion]:
+    """Deterministic priority order shared by every suggestion-derived view."""
+    rows = list(suggestions or ())
+    rows.sort(
         key=lambda suggestion: (
             -suggestion.priority,
             SEVERITY_ORDER.get(suggestion.severity, 9),
@@ -410,6 +411,12 @@ def _build_derived_suggestions(
             _suggestion_finding_id(suggestion),
         )
     )
+    return rows
+
+
+def _build_derived_suggestions(
+    suggestions: Sequence[Suggestion] | None,
+) -> list[dict[str, object]]:
     return [
         {
             "id": f"suggestion:{_suggestion_finding_id(suggestion)}",
@@ -423,8 +430,65 @@ def _build_derived_suggestions(
                 "steps": list(suggestion.steps),
             },
         }
-        for suggestion in suggestion_rows
+        for suggestion in _sorted_suggestions(suggestions)
     ]
+
+
+_REVIEW_QUEUE_SCHEMA_VERSION: Final = "1"
+_REVIEW_SEVERITIES: Final = ("critical", "warning", "info")
+
+
+def _review_item_row(suggestion: Suggestion) -> dict[str, object]:
+    finding_id = _suggestion_finding_id(suggestion)
+    return {
+        "id": f"suggestion:{finding_id}",
+        "finding_id": finding_id,
+        "family": suggestion.finding_family,
+        "category": suggestion.category,
+        "severity": suggestion.severity,
+        "priority": suggestion.priority,
+        "source_kind": suggestion.source_kind,
+        "title": suggestion.title,
+        "summary": suggestion.fact_summary,
+        "location": suggestion.location_label or suggestion.location,
+        "representative_locations": _representative_location_rows(suggestion),
+        "effort": suggestion.effort,
+        "steps": list(suggestion.steps),
+    }
+
+
+def _build_derived_review_queue(
+    suggestions: Sequence[Suggestion] | None,
+) -> dict[str, object]:
+    """Prioritised cross-family actionable queue that drives the review hub.
+
+    Items are the actionable suggestions (clones, structural, dead-code, design
+    all normalise into suggestions), ordered by priority; the summary carries the
+    counts the UI needs for progress and filters. ``reviewed`` starts at 0 — the
+    HTML tracks per-finding review state client-side.
+    """
+    rows = _sorted_suggestions(suggestions)
+    by_severity = dict.fromkeys(_REVIEW_SEVERITIES, 0)
+    by_family: dict[str, int] = {}
+    for suggestion in rows:
+        by_severity[suggestion.severity] += 1
+        by_family[suggestion.finding_family] = (
+            by_family.get(suggestion.finding_family, 0) + 1
+        )
+    return {
+        "schema_version": _REVIEW_QUEUE_SCHEMA_VERSION,
+        "scope": "report_only",
+        "summary": {
+            "total": len(rows),
+            "reviewed": 0,
+            "by_severity": by_severity,
+            "by_family": dict(sorted(by_family.items())),
+            "top_priority": max(
+                (suggestion.priority for suggestion in rows), default=0.0
+            ),
+        },
+        "items": [_review_item_row(suggestion) for suggestion in rows],
+    }
 
 
 _MODULE_MAP_SCHEMA_VERSION: Final = "1"

@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, cast
 
+from codeclone.models import Suggestion
 from codeclone.report.document.derived import _build_derived_module_map
 
 
@@ -217,3 +218,92 @@ def test_ranked_only_population_has_no_candidate_overlay() -> None:
         for node in module_map["graph_modules"]["nodes"]
     }
     assert "candidate" not in statuses
+
+
+def _review_suggestion(
+    *,
+    severity: str,
+    category: str,
+    family: str,
+    title: str,
+    priority: float,
+    effort: str,
+    subject_key: str,
+) -> Suggestion:
+    return Suggestion(
+        severity=cast("Any", severity),
+        category=cast("Any", category),
+        title=title,
+        location=f"pkg/{subject_key}.py:1",
+        steps=("do the thing",),
+        effort=cast("Any", effort),
+        priority=priority,
+        finding_family=cast("Any", family),
+        subject_key=subject_key,
+        fact_summary=f"{title} summary",
+    )
+
+
+def test_build_derived_review_queue_orders_and_summarizes() -> None:
+    from codeclone.report.document.derived import _build_derived_review_queue
+
+    suggestions = [
+        _review_suggestion(
+            severity="warning",
+            category="structural",
+            family="structural",
+            title="B structural",
+            priority=0.5,
+            effort="moderate",
+            subject_key="b",
+        ),
+        _review_suggestion(
+            severity="critical",
+            category="clone",
+            family="clones",
+            title="A duplicated",
+            priority=0.9,
+            effort="hard",
+            subject_key="a",
+        ),
+        _review_suggestion(
+            severity="info",
+            category="dead_code",
+            family="metrics",
+            title="C unused",
+            priority=0.2,
+            effort="easy",
+            subject_key="c",
+        ),
+    ]
+    queue: Any = _build_derived_review_queue(suggestions)
+    assert queue["schema_version"] == "1"
+    assert queue["scope"] == "report_only"
+    summary = queue["summary"]
+    assert summary["total"] == 3
+    assert summary["reviewed"] == 0
+    assert summary["by_severity"] == {"critical": 1, "warning": 1, "info": 1}
+    assert summary["by_family"] == {"clones": 1, "metrics": 1, "structural": 1}
+    assert summary["top_priority"] == 0.9
+    # priority-ordered: A(0.9) -> B(0.5) -> C(0.2)
+    assert [item["title"] for item in queue["items"]] == [
+        "A duplicated",
+        "B structural",
+        "C unused",
+    ]
+    first = queue["items"][0]
+    assert first["family"] == "clones"
+    assert first["severity"] == "critical"
+    assert first["effort"] == "hard"
+    assert first["location"] == "pkg/a.py:1"
+    assert str(first["id"]).startswith("suggestion:")
+
+
+def test_build_derived_review_queue_empty_shell() -> None:
+    from codeclone.report.document.derived import _build_derived_review_queue
+
+    queue: Any = _build_derived_review_queue(None)
+    assert queue["items"] == []
+    assert queue["summary"]["total"] == 0
+    assert queue["summary"]["top_priority"] == 0.0
+    assert queue["summary"]["by_severity"] == {"critical": 0, "warning": 0, "info": 0}
