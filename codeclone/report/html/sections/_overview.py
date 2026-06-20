@@ -786,6 +786,45 @@ def _overloaded_modules_section(ctx: ReportContext) -> str:
     )
 
 
+_LAUNCHPAD_SEVERITIES = (
+    ("critical", "critical"),
+    ("warning", "warning"),
+    ("info", "info"),
+)
+_LAUNCHPAD_ARROW = (
+    '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" '
+    'stroke="currentColor" stroke-width="2" stroke-linecap="round" '
+    'stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>'
+)
+
+
+def _review_launchpad_html(ctx: ReportContext) -> str:
+    """Entry banner: surface the review queue and jump into the Review tab."""
+    derived = _as_mapping(getattr(ctx, "derived_map", {}))
+    summary = _as_mapping(_as_mapping(derived.get("review_queue")).get("summary"))
+    total = _as_int(summary.get("total"))
+    if total <= 0:
+        return ""
+    by_severity = _as_mapping(summary.get("by_severity"))
+    chips = "".join(
+        f'<span class="launchpad-sev launchpad-sev--{key}">'
+        f"{_as_int(by_severity.get(key))} {label}</span>"
+        for key, label in _LAUNCHPAD_SEVERITIES
+        if _as_int(by_severity.get(key)) > 0
+    )
+    noun = "finding" if total == 1 else "findings"
+    return (
+        '<div class="review-launchpad">'
+        '<div class="review-launchpad-text">'
+        f'<div class="review-launchpad-title">{total} {noun} ready to review</div>'
+        f'<div class="review-launchpad-sevs">{chips}</div>'
+        "</div>"
+        '<button type="button" class="review-launchpad-cta" data-goto-tab="review">'
+        f"Start review{_LAUNCHPAD_ARROW}</button>"
+        "</div>"
+    )
+
+
 def render_overview_panel(ctx: ReportContext) -> str:
     """Build the Overview tab panel HTML."""
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
@@ -1042,6 +1081,7 @@ def render_overview_panel(ctx: ReportContext) -> str:
             answer=overview_answer,
             tone=overview_tone,
         )
+        + _review_launchpad_html(ctx)
         + '<div class="overview-kpi-grid overview-kpi-grid--with-health">'
         + health_gauge
         + '<div class="overview-kpi-cards">'

@@ -91,6 +91,14 @@ _TABS = """\
 
   tabs.forEach(t=>t.addEventListener('click',()=>activate(t.dataset.tab)));
 
+  // Cross-tab jump buttons (e.g. Overview launchpad -> Review)
+  $$('[data-goto-tab]').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const id=el.dataset.gotoTab;
+      if(tabs.some(t=>t.dataset.tab===id)){activate(id);window.scrollTo(0,0)}
+    });
+  });
+
   // Keyboard: arrow left/right
   const tabList=$('[role="tablist"].main-tabs');
   if(tabList){

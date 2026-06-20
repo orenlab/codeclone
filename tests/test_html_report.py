@@ -4421,3 +4421,25 @@ def test_review_panel_empty_when_no_items() -> None:
     assert (
         '<span class="main-tab-label">Review</span><span class="tab-count"' not in html
     )
+
+
+def test_overview_launchpad_links_to_review() -> None:
+    html = _render_review_report(_review_queue_payload())
+    overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
+    _assert_html_contains(
+        overview,
+        "review-launchpad",
+        'data-goto-tab="review"',
+        "2 findings ready to review",
+        "Start review",
+        "launchpad-sev--critical",
+    )
+    # JS cross-tab jump handler shipped
+    assert "gotoTab" in html
+
+
+def test_overview_launchpad_absent_when_queue_empty() -> None:
+    html = _render_review_report(_review_queue_payload(with_items=False))
+    overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
+    assert "review-launchpad" not in overview
+    assert "data-goto-tab" not in overview

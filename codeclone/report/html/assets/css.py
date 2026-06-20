@@ -993,6 +993,26 @@ _SUGGESTIONS = """\
 /* Body — context + summary */
 .finding-card-body{margin-top:9px;display:flex;flex-direction:column;gap:var(--sp-1)}
 
+/* Overview launchpad: entry banner into the Review hub */
+.review-launchpad{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-4);
+  flex-wrap:wrap;margin-bottom:var(--sp-4);padding:var(--sp-3) var(--sp-4);
+  border:1px solid var(--accent-primary);border-radius:var(--radius-lg);
+  background:var(--accent-muted)}
+.review-launchpad-title{font-size:.95rem;font-weight:600;color:var(--text-primary)}
+.review-launchpad-sevs{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.launchpad-sev{font-size:.7rem;font-weight:500;padding:2px 9px;border-radius:999px;
+  font-family:var(--font-numeric);color:var(--text-secondary);background:var(--bg-overlay)}
+.launchpad-sev--critical{color:var(--danger);
+  background:color-mix(in oklch,var(--danger) 14%,transparent)}
+.launchpad-sev--warning{color:var(--warning);
+  background:color-mix(in oklch,var(--warning) 14%,transparent)}
+.review-launchpad-cta{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;
+  font-size:.82rem;font-weight:600;font-family:var(--font-sans);cursor:pointer;
+  padding:9px 16px;border-radius:var(--radius-md);border:0;
+  color:#fff;background:var(--accent-primary);
+  transition:background var(--dur-fast) var(--ease)}
+.review-launchpad-cta:hover{background:var(--accent-hover)}
+
 /* Review hub: progress · filters · queue · per-item reviewed toggle */
 .review-progress{background:var(--bg-surface);border:1px solid var(--border);
   border-radius:var(--radius-lg);padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-4)}
