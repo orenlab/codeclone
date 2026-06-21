@@ -279,6 +279,18 @@ _CONTROLS = """\
 .btn.ghost:hover{background:var(--bg-raised);border-color:var(--border)}
 .btn.btn-icon{padding:var(--sp-1);min-width:28px;justify-content:center}
 .btn svg{width:14px;height:14px}
+.btn:hover{box-shadow:var(--shadow-sm)}
+
+/* Smart controls — one accent focus ring for every button + tactile press */
+button:focus-visible{outline:2px solid var(--accent-primary);outline-offset:2px}
+.btn:active,.prov-pill:active,.theme-toggle:active,.badge-btn:active,.badge-tab:active,
+.review-launchpad-cta:active,.review-toggle:active,.review-chip:active,
+.clone-nav-btn:active{transform:translateY(.5px) scale(.985)}
+@media(prefers-reduced-motion:reduce){
+  .btn:active,.prov-pill:active,.theme-toggle:active,.badge-btn:active,.badge-tab:active,
+  .review-launchpad-cta:active,.review-toggle:active,.review-chip:active,
+  .clone-nav-btn:active{transform:none}
+}
 
 /* Inputs */
 input[type="text"]{padding:var(--sp-1) var(--sp-3);font-size:.85rem;border:1px solid var(--border);
