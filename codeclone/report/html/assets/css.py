@@ -106,7 +106,7 @@ _TOKENS_LIGHT = """\
    so the whole theme feels like one family in both modes. */
 @media(prefers-color-scheme:light){
   :root:not([data-theme]){
-    --bg-body:oklch(99% 0.003 275);--bg-surface:#ffffff;--bg-glow:transparent;
+    --bg-body:oklch(98.5% 0.006 275);--bg-surface:#ffffff;--bg-glow:transparent;
     --bg-raised:oklch(97% 0.010 275);--bg-overlay:oklch(93% 0.015 275);--bg-subtle:oklch(88% 0.020 275);
     --border:oklch(92% 0.010 275);--border-strong:oklch(85% 0.016 275);
     --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
@@ -122,7 +122,7 @@ _TOKENS_LIGHT = """\
   }
 }
 [data-theme="light"]{
-  --bg-body:oklch(99% 0.003 275);--bg-surface:#ffffff;--bg-glow:transparent;
+  --bg-body:oklch(98.5% 0.006 275);--bg-surface:#ffffff;--bg-glow:transparent;
   --bg-raised:oklch(97% 0.010 275);--bg-overlay:oklch(93% 0.015 275);--bg-subtle:oklch(88% 0.020 275);
   --border:oklch(92% 0.010 275);--border-strong:oklch(85% 0.016 275);
   --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
