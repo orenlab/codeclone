@@ -11,14 +11,31 @@ project's experiences wholesale (dormant lifecycle is deferred to E.2)."""
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import TypeVar
 
+from ...utils.iterutils import chunked
 from .models import (
     Experience,
     ExperienceEvidence,
     ExperienceFacet,
     ExperienceFacetKind,
     ExperienceStatus,
+)
+
+_SQLITE_IN_QUERY_BATCH = 500
+_T = TypeVar("_T")
+_FACETS_BATCH_SQL = (
+    "SELECT experience_id, facet_kind, facet_value, count "
+    "FROM memory_experience_facets "
+    "WHERE experience_id IN ({placeholders}) "
+    "ORDER BY experience_id ASC, facet_kind ASC, facet_value ASC"
+)
+_EVIDENCE_BATCH_SQL = (
+    "SELECT experience_id, trajectory_id, outcome, finished_at_utc "
+    "FROM memory_experience_evidence "
+    "WHERE experience_id IN ({placeholders}) "
+    "ORDER BY experience_id ASC, finished_at_utc ASC, trajectory_id ASC"
 )
 
 
@@ -33,15 +50,133 @@ def replace_experiences(
     experiences: Sequence[Experience],
 ) -> int:
     """Replace all experiences for a project with the distilled set."""
-    conn.execute("DELETE FROM memory_experiences WHERE project_id=?", (project_id,))
-    for experience in experiences:
-        _insert_experience(conn, experience)
+    if not experiences:
+        conn.execute("DELETE FROM memory_experiences WHERE project_id=?", (project_id,))
+        conn.commit()
+        return 0
+
+    new_by_digest = {
+        experience.experience_digest: experience for experience in experiences
+    }
+    stored_by_digest = _experiences_by_digest(conn, project_id=project_id)
+    existing_digests = set(stored_by_digest)
+    new_digests = set(new_by_digest)
+
+    remove_digests = existing_digests - new_digests
+    refresh: list[Experience] = []
+    for digest in sorted(new_digests):
+        incoming = new_by_digest[digest]
+        stored = stored_by_digest.get(digest)
+        if stored is None:
+            refresh.append(incoming)
+            continue
+        if _experience_content_key(stored) != _experience_content_key(incoming):
+            remove_digests.add(digest)
+            refresh.append(incoming)
+
+    if not remove_digests and not refresh:
+        return len(experiences)
+
+    for batch in chunked(tuple(sorted(remove_digests)), _SQLITE_IN_QUERY_BATCH):
+        placeholders = ", ".join("?" for _ in batch)
+        conn.execute(
+            f"DELETE FROM memory_experiences WHERE project_id=? "
+            f"AND experience_digest IN ({placeholders})",
+            (project_id, *batch),
+        )
+    if refresh:
+        _batch_insert_experiences(conn, refresh)
     conn.commit()
     return len(experiences)
 
 
-def _insert_experience(conn: sqlite3.Connection, experience: Experience) -> None:
-    conn.execute(
+def _experiences_by_digest(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+) -> dict[str, Experience]:
+    _use_row_factory(conn)
+    rows = conn.execute(
+        "SELECT * FROM memory_experiences WHERE project_id=?",
+        (project_id,),
+    ).fetchall()
+    if not rows:
+        return {}
+    return {
+        experience.experience_digest: experience
+        for experience in _hydrate_experience_rows(conn, rows)
+    }
+
+
+def _group_rows_by_experience_id(
+    conn: sqlite3.Connection,
+    *,
+    ids: Sequence[str],
+    sql: str,
+    build: Callable[[sqlite3.Row], _T],
+) -> dict[str, list[_T]]:
+    grouped: dict[str, list[_T]] = {experience_id: [] for experience_id in ids}
+    for batch in chunked(tuple(ids), _SQLITE_IN_QUERY_BATCH):
+        placeholders = ", ".join("?" for _ in batch)
+        rows = conn.execute(sql.format(placeholders=placeholders), batch).fetchall()
+        for row in rows:
+            grouped.setdefault(str(row["experience_id"]), []).append(build(row))
+    return grouped
+
+
+def _hydrate_experience_rows(
+    conn: sqlite3.Connection,
+    rows: Sequence[sqlite3.Row],
+) -> list[Experience]:
+    experience_ids = [str(row["id"]) for row in rows]
+    facets_by_id = _group_rows_by_experience_id(
+        conn,
+        ids=experience_ids,
+        sql=_FACETS_BATCH_SQL,
+        build=_row_to_facet,
+    )
+    evidence_by_id = _group_rows_by_experience_id(
+        conn,
+        ids=experience_ids,
+        sql=_EVIDENCE_BATCH_SQL,
+        build=_row_to_evidence,
+    )
+    return [
+        _row_to_experience(
+            row,
+            facets=tuple(facets_by_id.get(str(row["id"]), [])),
+            evidence=tuple(evidence_by_id.get(str(row["id"]), [])),
+        )
+        for row in rows
+    ]
+
+
+def _experience_content_key(experience: Experience) -> tuple[object, ...]:
+    """Comparable payload excluding distill timestamps refreshed every run."""
+    return (
+        experience.id,
+        experience.repo_root_digest,
+        experience.subject_family,
+        experience.signal,
+        experience.outcome_class,
+        experience.support,
+        experience.quality_min,
+        experience.information_value,
+        experience.status,
+        experience.statement,
+        experience.distillation_version,
+        experience.first_observed_at_utc,
+        experience.last_observed_at_utc,
+        experience.facets,
+        experience.evidence,
+    )
+
+
+def _batch_insert_experiences(
+    conn: sqlite3.Connection,
+    experiences: Sequence[Experience],
+) -> None:
+    conn.executemany(
         """
         INSERT INTO memory_experiences(
             id, project_id, repo_root_digest, subject_family, signal,
@@ -51,42 +186,52 @@ def _insert_experience(conn: sqlite3.Connection, experience: Experience) -> None
             updated_at_utc
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (
-            experience.id,
-            experience.project_id,
-            experience.repo_root_digest,
-            experience.subject_family,
-            experience.signal,
-            experience.outcome_class,
-            experience.support,
-            experience.quality_min,
-            experience.information_value,
-            experience.status,
-            experience.statement,
-            experience.experience_digest,
-            experience.distillation_version,
-            experience.first_observed_at_utc,
-            experience.last_observed_at_utc,
-            experience.distilled_at_utc,
-            experience.updated_at_utc,
-        ),
-    )
-    conn.executemany(
-        "INSERT INTO memory_experience_facets("
-        "experience_id, facet_kind, facet_value, count) VALUES (?, ?, ?, ?)",
         [
-            (experience.id, facet.facet_kind, facet.facet_value, facet.count)
-            for facet in experience.facets
+            (
+                experience.id,
+                experience.project_id,
+                experience.repo_root_digest,
+                experience.subject_family,
+                experience.signal,
+                experience.outcome_class,
+                experience.support,
+                experience.quality_min,
+                experience.information_value,
+                experience.status,
+                experience.statement,
+                experience.experience_digest,
+                experience.distillation_version,
+                experience.first_observed_at_utc,
+                experience.last_observed_at_utc,
+                experience.distilled_at_utc,
+                experience.updated_at_utc,
+            )
+            for experience in experiences
         ],
     )
-    conn.executemany(
-        "INSERT INTO memory_experience_evidence("
-        "experience_id, trajectory_id, outcome, finished_at_utc) VALUES (?, ?, ?, ?)",
-        [
-            (experience.id, item.trajectory_id, item.outcome, item.finished_at_utc)
-            for item in experience.evidence
-        ],
-    )
+    facet_rows = [
+        (experience.id, facet.facet_kind, facet.facet_value, facet.count)
+        for experience in experiences
+        for facet in experience.facets
+    ]
+    if facet_rows:
+        conn.executemany(
+            "INSERT INTO memory_experience_facets("
+            "experience_id, facet_kind, facet_value, count) VALUES (?, ?, ?, ?)",
+            facet_rows,
+        )
+    evidence_rows = [
+        (experience.id, item.trajectory_id, item.outcome, item.finished_at_utc)
+        for experience in experiences
+        for item in experience.evidence
+    ]
+    if evidence_rows:
+        conn.executemany(
+            "INSERT INTO memory_experience_evidence("
+            "experience_id, trajectory_id, outcome, finished_at_utc) "
+            "VALUES (?, ?, ?, ?)",
+            evidence_rows,
+        )
 
 
 def count_experiences(conn: sqlite3.Connection, *, project_id: str) -> int:
@@ -108,7 +253,7 @@ def list_experiences(
         "ORDER BY subject_family ASC, signal ASC, outcome_class ASC",
         (project_id,),
     ).fetchall()
-    return [_row_to_experience(conn, row) for row in rows]
+    return _hydrate_experience_rows(conn, rows)
 
 
 def list_experiences_for_subject_family(
@@ -123,7 +268,7 @@ def list_experiences_for_subject_family(
         "ORDER BY signal ASC, outcome_class ASC",
         (project_id, subject_family),
     ).fetchall()
-    return [_row_to_experience(conn, row) for row in rows]
+    return _hydrate_experience_rows(conn, rows)
 
 
 def find_experience(
@@ -136,45 +281,24 @@ def find_experience(
         "SELECT * FROM memory_experiences WHERE id=?",
         (experience_id,),
     ).fetchone()
-    return _row_to_experience(conn, row) if row is not None else None
+    if row is None:
+        return None
+    return _hydrate_experience_rows(conn, [row])[0]
 
 
-def _facets_for_experience(
-    conn: sqlite3.Connection,
-    experience_id: str,
-) -> tuple[ExperienceFacet, ...]:
-    rows = conn.execute(
-        "SELECT facet_kind, facet_value, count FROM memory_experience_facets "
-        "WHERE experience_id=? ORDER BY facet_kind ASC, facet_value ASC",
-        (experience_id,),
-    ).fetchall()
-    return tuple(
-        ExperienceFacet(
-            facet_kind=_facet_kind(str(row["facet_kind"])),
-            facet_value=str(row["facet_value"]),
-            count=int(row["count"]),
-        )
-        for row in rows
+def _row_to_facet(row: sqlite3.Row) -> ExperienceFacet:
+    return ExperienceFacet(
+        facet_kind=_facet_kind(str(row["facet_kind"])),
+        facet_value=str(row["facet_value"]),
+        count=int(row["count"]),
     )
 
 
-def _evidence_for_experience(
-    conn: sqlite3.Connection,
-    experience_id: str,
-) -> tuple[ExperienceEvidence, ...]:
-    rows = conn.execute(
-        "SELECT trajectory_id, outcome, finished_at_utc "
-        "FROM memory_experience_evidence WHERE experience_id=? "
-        "ORDER BY finished_at_utc ASC, trajectory_id ASC",
-        (experience_id,),
-    ).fetchall()
-    return tuple(
-        ExperienceEvidence(
-            trajectory_id=str(row["trajectory_id"]),
-            outcome=str(row["outcome"]),
-            finished_at_utc=str(row["finished_at_utc"]),
-        )
-        for row in rows
+def _row_to_evidence(row: sqlite3.Row) -> ExperienceEvidence:
+    return ExperienceEvidence(
+        trajectory_id=str(row["trajectory_id"]),
+        outcome=str(row["outcome"]),
+        finished_at_utc=str(row["finished_at_utc"]),
     )
 
 
@@ -185,7 +309,12 @@ def _facet_kind(value: str) -> ExperienceFacetKind:
     raise ValueError(msg)
 
 
-def _row_to_experience(conn: sqlite3.Connection, row: sqlite3.Row) -> Experience:
+def _row_to_experience(
+    row: sqlite3.Row,
+    *,
+    facets: tuple[ExperienceFacet, ...] | None = None,
+    evidence: tuple[ExperienceEvidence, ...] | None = None,
+) -> Experience:
     experience_id = str(row["id"])
     return Experience(
         id=experience_id,
@@ -205,8 +334,8 @@ def _row_to_experience(conn: sqlite3.Connection, row: sqlite3.Row) -> Experience
         last_observed_at_utc=str(row["last_observed_at_utc"]),
         distilled_at_utc=str(row["distilled_at_utc"]),
         updated_at_utc=str(row["updated_at_utc"]),
-        facets=_facets_for_experience(conn, experience_id),
-        evidence=_evidence_for_experience(conn, experience_id),
+        facets=facets if facets is not None else (),
+        evidence=evidence if evidence is not None else (),
     )
 
 
