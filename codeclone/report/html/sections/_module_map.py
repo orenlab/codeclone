@@ -229,7 +229,13 @@ def _mm_unwind_table(unwind_candidates: Sequence[object], ctx: ReportContext) ->
         headers=("Module", "Fan-in", "Fan-out", "Score", "Status", "Signals"),
         rows=rows,
         empty_message="No unwind candidates detected.",
-        column_types={"Score": "score", "Status": "status", "Signals": "chips"},
+        column_types={
+            "Fan-in": "meter",
+            "Fan-out": "meter",
+            "Score": "score",
+            "Status": "status",
+            "Signals": "chips",
+        },
         ctx=ctx,
     )
 
@@ -340,7 +346,12 @@ def _render_overloaded_modules_section(ctx: ReportContext) -> str:
             ),
             rows=rows,
             empty_message=_OVERLOADED_EMPTY_MESSAGE,
-            column_types={"Score": "score", "Status": "status"},
+            column_types={
+                "Score": "score",
+                "Status": "status",
+                "LOC": "meter",
+                "Complexity total": "meter",
+            },
             ctx=ctx,
         )
     )

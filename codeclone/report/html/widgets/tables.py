@@ -17,6 +17,7 @@ from .badges import (
     _metric_meter_html,
     _quality_badge_html,
     _score_bar_html,
+    _source_kind_badge_html,
     _status_pill_html,
     _tab_empty,
 )
@@ -46,6 +47,11 @@ _COL_WIDTHS: dict[str, str] = {
     "kind": "76px",
     "steps": "120px",
     "coupled classes": "360px",
+    "fan-in": "96px",
+    "fan-out": "100px",
+    "loc": "100px",
+    "complexity total": "136px",
+    "source": "104px",
 }
 
 _COL_CLS: dict[str, str] = {}
@@ -78,6 +84,7 @@ _CELL_RENDERERS = {
     "score": _score_bar_html,
     "status": _status_pill_html,
     "chips": _chips_html,
+    "source_kind": _source_kind_badge_html,
 }
 
 
@@ -92,6 +99,7 @@ _CELL_TYPE_CLS = {
     "score": "col-score",
     "status": "col-badge",
     "chips": "col-chips",
+    "source_kind": "col-badge",
 }
 
 

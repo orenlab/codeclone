@@ -102,6 +102,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         headers=("Name", "File", "Line", "Kind", "Confidence", "Rule", "Source"),
         rows=suppressed_rows,
         empty_message="No suppressed dead-code candidates.",
+        column_types={"Source": "source_kind"},
         ctx=ctx,
     )
 

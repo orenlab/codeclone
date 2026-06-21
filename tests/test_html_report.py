@@ -4517,3 +4517,17 @@ def test_render_rows_table_meter_handles_non_numeric() -> None:
     )
     assert "n/a" in html
     assert "metric-meter-fill" not in html
+
+
+def test_render_rows_table_source_kind_column_renders_badge() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "Source"),
+        rows=[("x", "production"), ("y", "tests")],
+        empty_message="none",
+        column_types={"Source": "source_kind"},
+    )
+    assert "source-kind-badge" in html
+    assert "source-kind-production" in html
+    assert "source-kind-tests" in html

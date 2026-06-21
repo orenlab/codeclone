@@ -271,6 +271,7 @@ def render_dependencies_panel(ctx: ReportContext) -> str:
             rows=dep_chain_rows,
             empty_message="No dependency chains detected.",
             raw_html_headers=("Longest chain",),
+            column_types={"Length": "meter"},
             ctx=ctx,
         )
         + '<h3 class="subsection-title">Detected cycles</h3>'
