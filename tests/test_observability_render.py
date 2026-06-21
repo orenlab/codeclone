@@ -184,6 +184,43 @@ def test_render_trace_html_shows_analysis_phase_section() -> None:
     assert payload["aggregates"]["analysis_phases"][0]["phase"] == "unit_cfg"
 
 
+def test_render_trace_html_explains_cache_only_analysis_phase_window() -> None:
+    process_span = SpanView(
+        span_id="sp",
+        name="pipeline.process",
+        duration_ms=1.0,
+        status="ok",
+        counters={"files_analyzed": 0, "failed_files": 0},
+    )
+    op = OperationView(
+        operation_id="op",
+        correlation_id="op",
+        surface="cli",
+        name="cli.analyze",
+        started_at_utc="2026-06-10T04:00:00Z",
+        duration_ms=10.0,
+        status="ok",
+        spans=(process_span,),
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=AggregatesView(operation_count=1),
+        operation_tree=(op,),
+    )
+
+    html = render_trace_html(trace)
+    _assert_html_contains(
+        html,
+        "Analysis extract phases",
+        "No uncached files were processed",
+        "served from cache",
+        "files_analyzed=0",
+        "failed_files=0",
+    )
+
+
 def _cockpit_trace() -> TraceView:
     reindex = SpanView(
         span_id="sx",

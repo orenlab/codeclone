@@ -20,7 +20,7 @@ dark-light), inline SVG bars, no JS, no external assets, no ``report`` import.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from html import escape
 
 from .views import (
@@ -868,9 +868,68 @@ def _analysis_phase_row(row: AnalysisPhaseRow) -> str:
     )
 
 
-def _analysis_phases_section(agg: AggregatesView) -> str:
-    if not agg.analysis_phases:
+def _iter_operation_tree(ops: tuple[OperationView, ...]) -> Iterable[OperationView]:
+    for op in ops:
+        yield op
+        yield from _iter_operation_tree(op.children)
+
+
+def _pipeline_process_spans(trace: TraceView) -> tuple[SpanView, ...]:
+    roots = trace.operation_tree or trace.correlated_operations
+    spans: list[SpanView] = []
+    seen: set[str] = set()
+    for op in _iter_operation_tree(roots):
+        for span in op.spans:
+            if span.name == "pipeline.process" and span.span_id not in seen:
+                spans.append(span)
+                seen.add(span.span_id)
+    return tuple(spans)
+
+
+def _empty_analysis_phase_section(trace: TraceView) -> str:
+    process_spans = _pipeline_process_spans(trace)
+    if not process_spans:
         return ""
+    files_analyzed = sum(
+        span.counters.get("files_analyzed", 0) for span in process_spans
+    )
+    failed_files = sum(span.counters.get("failed_files", 0) for span in process_spans)
+    if files_analyzed == 0:
+        reason = (
+            "No uncached files were processed in this window; the analysis was "
+            "served from cache, so file extraction micro-stages did not run. "
+            "Use a cold cache or changed files to capture phase timings."
+        )
+    else:
+        reason = (
+            "pipeline.process ran, but no analysis phase counters were recorded. "
+            "Restart the producing process with CODECLONE_OBSERVABILITY_ENABLED=1 "
+            "and Phase 33 instrumentation."
+        )
+    counters = (
+        f"pipeline.process files_analyzed={files_analyzed} · "
+        f"failed_files={failed_files}"
+    )
+    body = (
+        '<div class="panel"><div class="empty">'
+        f"{_esc(reason)}"
+        f'<div class="sqlraw">{_esc(counters)}</div>'
+        "</div></div>"
+    )
+    return _section(
+        "Analysis extract phases",
+        body,
+        subtitle=(
+            "Summed per-file worker elapsed time inside pipeline.process "
+            "(parse, walk, CFG, normalize). Dev-only; not repository quality."
+        ),
+    )
+
+
+def _analysis_phases_section(trace: TraceView) -> str:
+    agg = trace.aggregates
+    if not agg.analysis_phases:
+        return _empty_analysis_phase_section(trace)
     rows = "".join(_analysis_phase_row(row) for row in agg.analysis_phases)
     headers = (
         ("Phase", False),
@@ -917,7 +976,7 @@ def render_trace_html(trace: TraceView) -> str:
         + _agent(trace.aggregates)
         + _mcp(trace.aggregates.mcp_tools)
         + _pipeline_section(trace.aggregates)
-        + _analysis_phases_section(trace.aggregates)
+        + _analysis_phases_section(trace)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"
     )
