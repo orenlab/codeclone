@@ -131,7 +131,11 @@ _RESET = """\
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-font-smoothing:antialiased;
   -moz-osx-font-smoothing:grayscale;scroll-behavior:smooth;scrollbar-gutter:stable}
 body{font-family:var(--font-sans);font-size:14px;line-height:1.6;color:var(--text-primary);
-  background:var(--bg-body);overflow-x:hidden;
+  background:
+    radial-gradient(1200px 520px at 50% -10%,
+      color-mix(in oklch,var(--accent-primary) 10%,transparent),transparent 72%),
+    var(--bg-body);
+  background-attachment:fixed;overflow-x:hidden;
   /* Inter stylistic alternates:
        zero  — slashed zero (disambiguates 0 from O in metric values)
        ss02  — disambiguation set (I/l/1/0 clear apart)
@@ -390,10 +394,11 @@ _TABLES = """\
     linear-gradient(to right,rgba(0,0,0,.15),transparent) left center / 14px 100% no-repeat scroll,
     linear-gradient(to left,rgba(0,0,0,.15),transparent) right center / 14px 100% no-repeat scroll}
 .table{inline-size:max-content;min-inline-size:100%;border-collapse:collapse;font-size:.82rem;
-  font-family:var(--font-mono)}
+  font-family:var(--font-sans)}
 .table th{position:sticky;top:0;z-index:2;padding:var(--sp-2) var(--sp-3);text-align:left;font-family:var(--font-sans);
-  font-weight:600;font-size:.75rem;text-transform:uppercase;letter-spacing:.05em;
-  color:var(--text-muted);background:var(--bg-overlay);border-bottom:1px solid var(--border);
+  font-weight:600;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--text-secondary);background:var(--bg-overlay);
+  border-bottom:2px solid color-mix(in oklch,var(--accent-primary) 30%,var(--border));
   white-space:nowrap;cursor:default;user-select:none}
 .table th[data-sortable]{cursor:pointer}
 .table th[data-sortable]:hover{color:var(--text-primary)}
@@ -401,13 +406,15 @@ _TABLES = """\
 .table th[aria-sort] .sort-icon{opacity:1;color:var(--accent-primary)}
 .table td{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);color:var(--text-secondary);
   vertical-align:top}
-.table tr:last-child td{border-bottom:none}
-.table tr:hover td{background:var(--bg-raised)}
+.table tbody tr:nth-child(even) td{background:color-mix(in oklch,var(--bg-raised) 45%,transparent)}
+.table tbody tr:last-child td{border-bottom:none}
+.table tbody tr:hover td{background:var(--accent-muted)}
 .table .col-name{font-weight:500;color:var(--text-primary);max-width:360px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .table .col-file,.table .col-path{color:var(--text-muted);max-width:240px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
-.table .col-number,.table .col-num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.table .col-number,.table .col-num{font-family:var(--font-numeric);
+  font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap;color:var(--text-primary)}
 .table .col-risk,.table .col-badge,.table .col-cat{white-space:nowrap}
 .table .col-steps{max-width:120px;word-break:break-word}
 .table .col-wide{max-width:320px;word-break:break-all}
