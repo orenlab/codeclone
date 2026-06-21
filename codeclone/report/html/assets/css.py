@@ -67,6 +67,14 @@ _TOKENS_DARK = """\
   --radius-lg:8px;
   --radius-xl:12px;
 
+  /* badge design code — one scale for every read-only label badge */
+  --badge-font:var(--font-sans);
+  --badge-size:.68rem;
+  --badge-weight:600;
+  --badge-tracking:.015em;
+  --badge-pad:2px var(--sp-2);
+  --badge-radius:var(--radius-sm);
+
   /* spacing */
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-10:40px;
 
@@ -442,15 +450,11 @@ _TABLES = """\
 .metric-meter--mid .metric-meter-val{color:var(--warning)}
 .metric-meter--high .metric-meter-fill{background:var(--error)}
 .metric-meter--high .metric-meter-val{color:var(--error);font-weight:600}
-.status-pill{display:inline-flex;align-items:center;font-size:.68rem;font-weight:500;
-  padding:2px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.01em;
-  font-family:var(--font-sans)}
 .status-pill--candidate{background:var(--accent-muted);color:var(--accent-primary)}
 .status-pill--ranked{background:var(--bg-overlay);color:var(--text-secondary)}
 .status-pill--neutral{background:var(--bg-overlay);color:var(--text-muted)}
-.chip{display:inline-flex;align-items:center;font-size:.66rem;font-family:var(--font-mono);
-  padding:2px 7px;margin:1px 3px 1px 0;border-radius:var(--radius-sm);
-  background:var(--bg-overlay);color:var(--text-secondary);border:1px solid var(--border)}
+.chip{margin:1px 3px 1px 0;background:var(--bg-overlay);color:var(--text-secondary);
+  border:1px solid var(--border)}
 """
 
 # ---------------------------------------------------------------------------
@@ -563,8 +567,16 @@ _CODE = """\
 # ---------------------------------------------------------------------------
 
 _BADGES = """\
-.risk-badge,.severity-badge{display:inline-flex;align-items:center;font-size:.68rem;font-weight:600;
-  padding:2px var(--sp-2);border-radius:var(--radius-sm);text-transform:uppercase;letter-spacing:.02em}
+/* One typographic scale for every read-only label badge; color/background and
+   any per-variant tweaks (uppercase, etc.) live in the modifiers below. */
+.risk-badge,.severity-badge,.source-kind-badge,.status-pill,
+.finding-meta-badge,.suggestion-chip,.chip,.launchpad-sev{
+  display:inline-flex;align-items:center;white-space:nowrap;line-height:1.2;
+  font-family:var(--badge-font);font-size:var(--badge-size);
+  font-weight:var(--badge-weight);letter-spacing:var(--badge-tracking);
+  padding:var(--badge-pad);border-radius:var(--badge-radius);
+  font-variant-numeric:tabular-nums}
+.risk-badge,.severity-badge{text-transform:uppercase}
 .risk-critical,.severity-critical{background:var(--error-muted);color:var(--error)}
 .risk-high,.severity-high{background:var(--error-muted);color:var(--error)}
 .risk-warning,.severity-warning{background:var(--warning-muted);color:var(--warning)}
@@ -572,8 +584,7 @@ _BADGES = """\
 .risk-low,.severity-low{background:var(--success-muted);color:var(--success)}
 .risk-info,.severity-info{background:var(--info-muted);color:var(--info)}
 
-.source-kind-badge{display:inline-flex;align-items:center;font-size:.68rem;font-weight:500;
-  padding:2px var(--sp-2);border-radius:var(--radius-sm);background:var(--bg-overlay);color:var(--text-muted)}
+.source-kind-badge{background:var(--bg-overlay);color:var(--text-muted)}
 .source-kind-production{background:var(--error-muted);color:var(--error)}
 .source-kind-test,.source-kind-test_util{background:var(--info-muted);color:var(--info)}
 .source-kind-fixture,.source-kind-conftest{background:var(--warning-muted);color:var(--warning)}
@@ -1020,9 +1031,7 @@ _SUGGESTIONS = """\
   margin-top:4px;word-break:break-all}
 .finding-card-actions{flex-shrink:0}
 .finding-card-meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
-.finding-meta-badge{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
-  border-radius:var(--radius-sm);background:var(--bg-overlay);color:var(--text-muted);
-  white-space:nowrap;line-height:1.2;font-variant-numeric:tabular-nums}
+.finding-meta-badge{background:var(--bg-overlay);color:var(--text-muted)}
 .finding-meta-badge--easy{color:var(--success);background:var(--success-muted, rgba(34,197,94,.1))}
 .finding-meta-badge--moderate{color:var(--warning);background:var(--warning-muted)}
 .finding-meta-badge--hard{color:var(--error);background:var(--error-muted)}
@@ -1041,8 +1050,7 @@ _SUGGESTIONS = """\
   background:var(--accent-muted)}
 .review-launchpad-title{font-size:.95rem;font-weight:600;color:var(--text-primary)}
 .review-launchpad-sevs{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
-.launchpad-sev{font-size:.7rem;font-weight:500;padding:2px 9px;border-radius:999px;
-  font-family:var(--font-numeric);color:var(--text-secondary);background:var(--bg-overlay)}
+.launchpad-sev{color:var(--text-secondary);background:var(--bg-overlay)}
 .launchpad-sev--critical{color:var(--danger);
   background:color-mix(in oklch,var(--danger) 14%,transparent)}
 .launchpad-sev--warning{color:var(--warning);
@@ -1091,8 +1099,7 @@ _SUGGESTIONS = """\
 .review-card.is-reviewed .review-toggle{background:var(--accent-primary);
   border-color:var(--accent-primary);color:#fff}
 .suggestion-context{display:flex;gap:var(--sp-1);flex-wrap:wrap}
-.suggestion-chip{font-size:.68rem;font-weight:500;padding:2px var(--sp-2);border-radius:var(--radius-sm);
-  background:var(--bg-overlay);color:var(--text-muted);white-space:nowrap}
+.suggestion-chip{background:var(--bg-overlay);color:var(--text-muted)}
 .suggestion-summary{font-size:.8rem;font-family:var(--font-mono);color:var(--text-secondary);line-height:1.5}
 .suggestion-action{display:flex;align-items:center;gap:var(--sp-1);
   font-size:.8rem;font-weight:500;color:var(--accent-primary);margin-top:var(--sp-1)}
