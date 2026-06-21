@@ -75,6 +75,11 @@ _TOKENS_DARK = """\
   --badge-pad:2px var(--sp-2);
   --badge-radius:var(--radius-sm);
 
+  /* count sort — tabular numerals shared by counts and micro-stats */
+  --count-font:var(--font-numeric);
+  --count-size:.64rem;
+  --count-weight:700;
+
   /* spacing */
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-8:32px;--sp-10:40px;
 
@@ -221,7 +226,9 @@ _LAYOUT = """\
 .main-tab[aria-selected="true"] .main-tab-icon{opacity:1}
 .main-tab-label{display:inline-flex;align-items:center}
 .tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;
-  height:18px;padding:0 5px;font-size:.68rem;font-weight:700;border-radius:var(--radius-sm);
+  height:18px;padding:0 5px;border-radius:var(--radius-sm);
+  font-family:var(--count-font);font-size:var(--count-size);font-weight:var(--count-weight);
+  font-variant-numeric:tabular-nums;
   background:var(--bg-overlay);color:var(--text-muted);margin-left:var(--sp-1)}
 .main-tab[aria-selected="true"] .tab-count{background:rgba(255,255,255,.24);
   color:#fff}
@@ -744,11 +751,11 @@ _OVERVIEW = """\
 .meta-item--accent:hover{border-color:var(--accent-primary)}
 .kpi-detail{display:flex;flex-wrap:wrap;gap:3px;margin-top:2px}
 .kpi-detail code{font-size:.78rem}
-.kpi-micro{display:inline-flex;align-items:center;gap:3px;font-size:.62rem;
+.kpi-micro{display:inline-flex;align-items:center;gap:3px;font-size:var(--count-size);
   padding:1px 5px;border-radius:var(--radius-sm);background:var(--bg-raised);
-  white-space:nowrap;line-height:1.3;font-family:inherit}
-.kpi-micro-val{font-family:inherit;font-weight:500;font-variant-numeric:tabular-nums;
-  color:var(--text-muted)}
+  white-space:nowrap;line-height:1.3;font-family:var(--font-sans)}
+.kpi-micro-val{font-family:var(--count-font);font-weight:var(--count-weight);
+  font-variant-numeric:tabular-nums;color:var(--text-muted)}
 .kpi-micro-lbl{font-weight:400;color:var(--text-muted);text-transform:lowercase}
 .kpi-micro--baselined{color:var(--success);font-weight:500;font-size:.6rem}
 .kpi-delta{font-size:.62rem;font-weight:700;margin-left:auto;
@@ -1091,8 +1098,8 @@ _SUGGESTIONS = """\
   background:color-mix(in oklch,var(--danger) 16%,transparent)}
 .review-chip--warning.is-active{border-color:var(--warning);color:var(--warning);
   background:color-mix(in oklch,var(--warning) 16%,transparent)}
-.review-chip-count{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
-  font-size:.66rem;opacity:.85}
+.review-chip-count{font-family:var(--count-font);font-size:var(--count-size);
+  font-weight:var(--count-weight);font-variant-numeric:tabular-nums;opacity:.85}
 .review-queue{display:flex;flex-direction:column;gap:9px}
 .review-toggle{display:inline-flex;align-items:center;justify-content:center;
   width:30px;height:30px;border-radius:8px;cursor:pointer;color:var(--text-muted);
