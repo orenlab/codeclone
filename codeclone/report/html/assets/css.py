@@ -28,9 +28,9 @@ _TOKENS_DARK = """\
   --bg-overlay:oklch(29% 0.033 275);
   --bg-subtle:oklch(34% 0.038 275);
 
-  /* Border — same hue, higher chroma for legibility */
-  --border:oklch(32% 0.035 275);
-  --border-strong:oklch(44% 0.045 275);
+  /* Border — quiet hairlines; -strong only for hover/emphasis */
+  --border:oklch(28% 0.018 275);
+  --border-strong:oklch(40% 0.028 275);
 
   /* Text — muted greys keep a trace of indigo so they feel alive */
   --text-primary:oklch(95% 0.010 275);
@@ -55,17 +55,17 @@ _TOKENS_DARK = """\
   --info:oklch(72% 0.13 238);
   --info-muted:color-mix(in oklch,oklch(72% 0.13 238) 18%,transparent);
 
-  /* elevation */
-  --shadow-sm:0 1px 2px rgba(0,0,0,.25);
-  --shadow-md:0 2px 8px rgba(0,0,0,.3);
-  --shadow-lg:0 4px 16px rgba(0,0,0,.35);
-  --shadow-xl:0 8px 32px rgba(0,0,0,.4);
+  /* elevation — soft, diffuse, layered */
+  --shadow-sm:0 1px 2px rgba(0,0,0,.18);
+  --shadow-md:0 4px 14px -3px rgba(0,0,0,.34);
+  --shadow-lg:0 10px 30px -8px rgba(0,0,0,.44);
+  --shadow-xl:0 20px 50px -14px rgba(0,0,0,.55);
 
   /* radii */
-  --radius-sm:4px;
-  --radius-md:6px;
-  --radius-lg:8px;
-  --radius-xl:12px;
+  --radius-sm:5px;
+  --radius-md:8px;
+  --radius-lg:11px;
+  --radius-xl:16px;
 
   /* badge design code — one scale for every read-only label badge */
   --badge-font:var(--font-sans);
@@ -105,7 +105,7 @@ _TOKENS_LIGHT = """\
   :root:not([data-theme]){
     --bg-body:oklch(98.5% 0.006 275);--bg-surface:#ffffff;
     --bg-raised:oklch(97% 0.010 275);--bg-overlay:oklch(93% 0.015 275);--bg-subtle:oklch(88% 0.020 275);
-    --border:oklch(88% 0.020 275);--border-strong:oklch(78% 0.028 275);
+    --border:oklch(92% 0.010 275);--border-strong:oklch(85% 0.016 275);
     --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
     --accent-primary:#4f46e5;--accent-hover:#6366f1;--accent-muted:color-mix(in oklch,#4f46e5 12%,transparent);
     --accent-soft:oklch(94% 0.045 275);
@@ -113,15 +113,15 @@ _TOKENS_LIGHT = """\
     --warning:oklch(60% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
     --error:oklch(55% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
     --danger:oklch(55% 0.22 20);--info:oklch(52% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
-    --shadow-sm:0 1px 2px rgba(0,0,0,.06);--shadow-md:0 2px 8px rgba(0,0,0,.08);
-    --shadow-lg:0 4px 16px rgba(0,0,0,.1);--shadow-xl:0 8px 32px rgba(0,0,0,.12);
+    --shadow-sm:0 1px 2px rgba(17,20,38,.05);--shadow-md:0 4px 14px -3px rgba(17,20,38,.08);
+    --shadow-lg:0 12px 30px -8px rgba(17,20,38,.12);--shadow-xl:0 22px 50px -14px rgba(17,20,38,.16);
     color-scheme:light;
   }
 }
 [data-theme="light"]{
   --bg-body:oklch(98.5% 0.006 275);--bg-surface:#ffffff;
   --bg-raised:oklch(97% 0.010 275);--bg-overlay:oklch(93% 0.015 275);--bg-subtle:oklch(88% 0.020 275);
-  --border:oklch(88% 0.020 275);--border-strong:oklch(78% 0.028 275);
+  --border:oklch(92% 0.010 275);--border-strong:oklch(85% 0.016 275);
   --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
   --accent-primary:#4f46e5;--accent-hover:#6366f1;--accent-muted:color-mix(in oklch,#4f46e5 12%,transparent);
   --accent-soft:oklch(94% 0.045 275);
@@ -129,8 +129,8 @@ _TOKENS_LIGHT = """\
   --warning:oklch(60% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
   --error:oklch(55% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
   --danger:oklch(55% 0.22 20);--info:oklch(52% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
-  --shadow-sm:0 1px 2px rgba(0,0,0,.06);--shadow-md:0 2px 8px rgba(0,0,0,.08);
-  --shadow-lg:0 4px 16px rgba(0,0,0,.1);--shadow-xl:0 8px 32px rgba(0,0,0,.12);
+  --shadow-sm:0 1px 2px rgba(17,20,38,.05);--shadow-md:0 4px 14px -3px rgba(17,20,38,.08);
+  --shadow-lg:0 12px 30px -8px rgba(17,20,38,.12);--shadow-xl:0 22px 50px -14px rgba(17,20,38,.16);
   color-scheme:light;
 }
 """
