@@ -20,13 +20,21 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean, median, pstdev
-from typing import Literal
+from typing import Literal, cast
 
 from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
 
-BENCHMARK_SCHEMA_VERSION = "1.0"
+BENCHMARK_SCHEMA_VERSION = "1.1"
 BENCHMARK_CLI_MODULE = "codeclone.main"
+BenchmarkProfile = Literal["smoke", "extended", "diagnostic"]
+ReportFormat = Literal["html", "md", "sarif", "text"]
+REPORT_FORMAT_SPECS: Mapping[ReportFormat, tuple[str, str]] = {
+    "html": ("--html", ".html"),
+    "md": ("--md", ".md"),
+    "sarif": ("--sarif", ".sarif"),
+    "text": ("--text", ".txt"),
+}
 BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "--no-fail-on-new",
     "--no-fail-on-new-metrics",
@@ -59,17 +67,40 @@ BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
 class Scenario:
     name: str
     mode: Literal["cold", "warm"]
-    extra_args: tuple[str, ...]
+    extra_args: tuple[str, ...] = ()
+    report_formats: tuple[ReportFormat, ...] = ()
+    run_cap: int | None = None
+    warmup_cap: int | None = None
+    expected_exit_codes: tuple[int, ...] = (0,)
 
 
 @dataclass(frozen=True)
 class RunMeasurement:
     elapsed_seconds: float
+    child_user_seconds: float
+    child_system_seconds: float
+    exit_code: int
     digest: str
     files_found: int
     files_analyzed: int
     files_cached: int
     files_skipped: int
+    artifact_bytes: dict[str, int]
+    cache_bytes: int
+
+
+@dataclass(frozen=True)
+class StartupProbe:
+    name: str
+    args: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ProbeMeasurement:
+    elapsed_seconds: float
+    child_user_seconds: float
+    child_system_seconds: float
+    exit_code: int
 
 
 def _percentile(sorted_values: list[float], q: float) -> float:
@@ -103,6 +134,71 @@ def _stats(values: list[float]) -> dict[str, float]:
         "p95": _percentile(ordered, 0.95),
         "stdev": pstdev(ordered) if len(ordered) > 1 else 0.0,
     }
+
+
+def _as_float(value: object, default: float = 0.0) -> float:
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return default
+    return default
+
+
+def _resource_usage_seconds() -> tuple[float, float]:
+    try:
+        import resource
+    except ImportError:
+        return (0.0, 0.0)
+    usage = resource.getrusage(resource.RUSAGE_CHILDREN)
+    return (float(usage.ru_utime), float(usage.ru_stime))
+
+
+def _resource_delta(
+    before: tuple[float, float],
+    after: tuple[float, float],
+) -> tuple[float, float]:
+    return (
+        max(0.0, after[0] - before[0]),
+        max(0.0, after[1] - before[1]),
+    )
+
+
+def _normalized_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env["PYTHONHASHSEED"] = "0"
+    env["LC_ALL"] = "C.UTF-8"
+    env["LANG"] = "C.UTF-8"
+    env["TZ"] = "UTC"
+    return env
+
+
+def _artifact_paths(
+    *,
+    report_path: Path,
+    report_formats: tuple[ReportFormat, ...],
+) -> dict[str, Path]:
+    paths: dict[str, Path] = {"json": report_path}
+    for report_format in report_formats:
+        _flag, suffix = REPORT_FORMAT_SPECS[report_format]
+        paths[report_format] = report_path.with_suffix(suffix)
+    return paths
+
+
+def _artifact_size_map(paths: Mapping[str, Path]) -> dict[str, int]:
+    return {
+        name: path.stat().st_size
+        for name, path in sorted(paths.items())
+        if path.exists()
+    }
+
+
+def _file_size(path: Path) -> int:
+    return path.stat().st_size if path.exists() else 0
 
 
 def _read_report(report_path: Path) -> tuple[str, dict[str, int]]:
@@ -155,21 +251,25 @@ def _run_cli_once(
     cache_path: Path,
     report_path: Path,
     extra_args: tuple[str, ...],
+    report_formats: tuple[ReportFormat, ...] = (),
+    expected_exit_codes: tuple[int, ...] = (0,),
 ) -> RunMeasurement:
-    env = dict(os.environ)
-    env["PYTHONHASHSEED"] = "0"
-    env["LC_ALL"] = "C.UTF-8"
-    env["LANG"] = "C.UTF-8"
-    env["TZ"] = "UTC"
-
+    env = _normalized_env()
+    artifact_paths = _artifact_paths(
+        report_path=report_path,
+        report_formats=report_formats,
+    )
+    report_args: list[str] = ["--json", str(report_path)]
+    for report_format in report_formats:
+        flag, _suffix = REPORT_FORMAT_SPECS[report_format]
+        report_args.extend([flag, str(artifact_paths[report_format])])
     cmd = [
         python_executable,
         "-m",
         BENCHMARK_CLI_MODULE,
         str(target),
         *BENCHMARK_NEUTRAL_ARGS,
-        "--json",
-        str(report_path),
+        *report_args,
         "--cache-path",
         str(cache_path),
         "--no-progress",
@@ -177,6 +277,7 @@ def _run_cli_once(
         *extra_args,
     ]
 
+    usage_before = _resource_usage_seconds()
     start = time.perf_counter()
     completed = subprocess.run(
         cmd,
@@ -186,7 +287,11 @@ def _run_cli_once(
         env=env,
     )
     elapsed_seconds = time.perf_counter() - start
-    if completed.returncode != 0:
+    child_user_seconds, child_system_seconds = _resource_delta(
+        usage_before,
+        _resource_usage_seconds(),
+    )
+    if completed.returncode not in expected_exit_codes:
         stderr_tail = "\n".join(completed.stderr.splitlines()[-20:])
         stdout_tail = "\n".join(completed.stdout.splitlines()[-20:])
         raise RuntimeError(
@@ -197,11 +302,16 @@ def _run_cli_once(
     digest, files = _read_report(report_path)
     return RunMeasurement(
         elapsed_seconds=elapsed_seconds,
+        child_user_seconds=child_user_seconds,
+        child_system_seconds=child_system_seconds,
+        exit_code=completed.returncode,
         digest=digest,
         files_found=files["found"],
         files_analyzed=files["analyzed"],
         files_cached=files["cached"],
         files_skipped=files["skipped"],
+        artifact_bytes=_artifact_size_map(artifact_paths),
+        cache_bytes=_file_size(cache_path),
     )
 
 
@@ -252,6 +362,22 @@ def _print_bulleted_lines(header: str, lines: Sequence[str]) -> None:
         print(f"- {line}")
 
 
+def _effective_count(requested: int, cap: int | None) -> int:
+    return min(requested, cap) if cap is not None else requested
+
+
+def _exit_code_counts(measurements: Sequence[RunMeasurement]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for measurement in measurements:
+        key = str(measurement.exit_code)
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), key=lambda item: int(item[0])))
+
+
+def _artifact_total_kib(artifact_bytes: Mapping[str, int]) -> float:
+    return sum(artifact_bytes.values()) / 1024.0
+
+
 def _scenario_result(
     *,
     scenario: Scenario,
@@ -266,6 +392,8 @@ def _scenario_result(
         shutil.rmtree(scenario_dir)
     scenario_dir.mkdir(parents=True, exist_ok=True)
 
+    effective_runs = _effective_count(runs, scenario.run_cap)
+    effective_warmups = _effective_count(warmups, scenario.warmup_cap)
     warm_cache_path = scenario_dir / "shared-cache.json"
     cold_cache_path = scenario_dir / "cold-cache.json"
 
@@ -276,9 +404,11 @@ def _scenario_result(
             cache_path=warm_cache_path,
             report_path=scenario_dir / "seed-report.json",
             extra_args=scenario.extra_args,
+            report_formats=scenario.report_formats,
+            expected_exit_codes=scenario.expected_exit_codes,
         )
 
-    for idx in range(warmups):
+    for idx in range(effective_warmups):
         if scenario.mode == "warm":
             cache_path = warm_cache_path
         else:
@@ -290,10 +420,12 @@ def _scenario_result(
             cache_path=cache_path,
             report_path=scenario_dir / f"warmup-report-{idx}.json",
             extra_args=scenario.extra_args,
+            report_formats=scenario.report_formats,
+            expected_exit_codes=scenario.expected_exit_codes,
         )
 
     measurements: list[RunMeasurement] = []
-    for idx in range(runs):
+    for idx in range(effective_runs):
         if scenario.mode == "warm":
             cache_path = warm_cache_path
         else:
@@ -305,6 +437,8 @@ def _scenario_result(
             cache_path=cache_path,
             report_path=scenario_dir / f"run-report-{idx}.json",
             extra_args=scenario.extra_args,
+            report_formats=scenario.report_formats,
+            expected_exit_codes=scenario.expected_exit_codes,
         )
         _validate_inventory_sample(scenario=scenario, measurement=measurement)
         measurements.append(measurement)
@@ -318,24 +452,176 @@ def _scenario_result(
         )
 
     timings = [m.elapsed_seconds for m in measurements]
+    child_user = [m.child_user_seconds for m in measurements]
+    child_system = [m.child_system_seconds for m in measurements]
+    child_cpu = [m.child_user_seconds + m.child_system_seconds for m in measurements]
     sample = measurements[0]
     return {
         "name": scenario.name,
         "mode": scenario.mode,
         "extra_args": list(scenario.extra_args),
-        "warmups": warmups,
-        "runs": runs,
+        "report_formats": list(scenario.report_formats),
+        "warmups": effective_warmups,
+        "runs": effective_runs,
+        "requested_warmups": warmups,
+        "requested_runs": runs,
+        "run_cap": scenario.run_cap,
+        "warmup_cap": scenario.warmup_cap,
+        "expected_exit_codes": list(scenario.expected_exit_codes),
+        "exit_code_counts": _exit_code_counts(measurements),
         "deterministic": deterministic,
         "digest": digests[0],
         "timings_seconds": timings,
         "stats_seconds": _stats(timings),
+        "child_user_stats_seconds": _stats(child_user),
+        "child_system_stats_seconds": _stats(child_system),
+        "child_cpu_stats_seconds": _stats(child_cpu),
         "inventory_sample": {
             "found": sample.files_found,
             "analyzed": sample.files_analyzed,
             "cached": sample.files_cached,
             "skipped": sample.files_skipped,
         },
+        "artifact_bytes_sample": sample.artifact_bytes,
+        "artifact_total_kib_sample": _artifact_total_kib(sample.artifact_bytes),
+        "cache_bytes_sample": sample.cache_bytes,
     }
+
+
+def _run_probe_once(
+    *,
+    python_executable: str,
+    probe: StartupProbe,
+) -> ProbeMeasurement:
+    cmd = [python_executable, *probe.args]
+    usage_before = _resource_usage_seconds()
+    start = time.perf_counter()
+    completed = subprocess.run(
+        cmd,
+        check=False,
+        capture_output=True,
+        text=True,
+        env=_normalized_env(),
+    )
+    elapsed_seconds = time.perf_counter() - start
+    child_user_seconds, child_system_seconds = _resource_delta(
+        usage_before,
+        _resource_usage_seconds(),
+    )
+    if completed.returncode != 0:
+        stderr_tail = "\n".join(completed.stderr.splitlines()[-20:])
+        stdout_tail = "\n".join(completed.stdout.splitlines()[-20:])
+        raise RuntimeError(
+            f"startup probe {probe.name} failed with exit {completed.returncode}"
+            f"\nSTDOUT:\n{stdout_tail}\nSTDERR:\n{stderr_tail}"
+        )
+    return ProbeMeasurement(
+        elapsed_seconds=elapsed_seconds,
+        child_user_seconds=child_user_seconds,
+        child_system_seconds=child_system_seconds,
+        exit_code=completed.returncode,
+    )
+
+
+def _startup_probes() -> tuple[StartupProbe, ...]:
+    return (
+        StartupProbe(name="python_empty", args=("-c", "pass")),
+        StartupProbe(name="import_codeclone", args=("-c", "import codeclone")),
+        StartupProbe(
+            name="import_codeclone_main",
+            args=("-c", "import codeclone.main"),
+        ),
+        StartupProbe(
+            name="cli_version",
+            args=("-m", BENCHMARK_CLI_MODULE, "--version"),
+        ),
+    )
+
+
+def _probe_result(
+    *,
+    probe: StartupProbe,
+    python_executable: str,
+    runs: int,
+) -> dict[str, object]:
+    measurements = [
+        _run_probe_once(python_executable=python_executable, probe=probe)
+        for _idx in range(runs)
+    ]
+    timings = [m.elapsed_seconds for m in measurements]
+    child_user = [m.child_user_seconds for m in measurements]
+    child_system = [m.child_system_seconds for m in measurements]
+    child_cpu = [m.child_user_seconds + m.child_system_seconds for m in measurements]
+    return {
+        "name": probe.name,
+        "args": list(probe.args),
+        "runs": runs,
+        "timings_seconds": timings,
+        "stats_seconds": _stats(timings),
+        "first_seconds": timings[0] if timings else 0.0,
+        "subsequent_stats_seconds": _stats(timings[1:]) if len(timings) > 1 else None,
+        "child_user_stats_seconds": _stats(child_user),
+        "child_system_stats_seconds": _stats(child_system),
+        "child_cpu_stats_seconds": _stats(child_cpu),
+        "exit_code_counts": {
+            str(code): sum(1 for item in measurements if item.exit_code == code)
+            for code in sorted({item.exit_code for item in measurements})
+        },
+    }
+
+
+def _scenario_profile(profile: BenchmarkProfile) -> tuple[Scenario, ...]:
+    core = (
+        Scenario(name="cold_full", mode="cold"),
+        Scenario(name="warm_full", mode="warm"),
+        Scenario(name="warm_clones_only", mode="warm", extra_args=("--skip-metrics",)),
+    )
+    report_scenarios = (
+        Scenario(
+            name="cold_html",
+            mode="cold",
+            report_formats=("html",),
+            run_cap=3,
+            warmup_cap=1,
+        ),
+        Scenario(
+            name="warm_html",
+            mode="warm",
+            report_formats=("html",),
+            run_cap=5,
+            warmup_cap=1,
+        ),
+        Scenario(
+            name="cold_all_reports",
+            mode="cold",
+            report_formats=("html", "md", "sarif", "text"),
+            run_cap=3,
+            warmup_cap=1,
+        ),
+        Scenario(
+            name="warm_all_reports",
+            mode="warm",
+            report_formats=("html", "md", "sarif", "text"),
+            run_cap=5,
+            warmup_cap=1,
+        ),
+    )
+    diagnostic_scenarios = (
+        Scenario(
+            name="ci_cold_diagnostic",
+            mode="cold",
+            extra_args=("--ci",),
+            report_formats=("html",),
+            run_cap=3,
+            warmup_cap=0,
+            expected_exit_codes=(0, 2, 3),
+        ),
+    )
+    if profile == "smoke":
+        return core
+    if profile == "extended":
+        return core + report_scenarios
+    return core + report_scenarios + diagnostic_scenarios
 
 
 def _cgroup_value(path: Path) -> str | None:
@@ -396,12 +682,28 @@ def _comparison_metrics(scenarios: list[dict[str, object]]) -> dict[str, float]:
     cold_full = _median_for("cold_full")
     warm_full = _median_for("warm_full")
     warm_clones = _median_for("warm_clones_only")
+    cold_html = _median_for("cold_html")
+    warm_html = _median_for("warm_html")
+    cold_all_reports = _median_for("cold_all_reports")
+    warm_all_reports = _median_for("warm_all_reports")
 
     comparisons: dict[str, float] = {}
     if cold_full and warm_full:
         comparisons["warm_full_speedup_vs_cold_full"] = cold_full / warm_full
     if warm_full and warm_clones:
         comparisons["warm_clones_only_speedup_vs_warm_full"] = warm_full / warm_clones
+    if cold_full and cold_html:
+        comparisons["cold_html_overhead_vs_cold_full"] = cold_html / cold_full
+    if warm_full and warm_html:
+        comparisons["warm_html_overhead_vs_warm_full"] = warm_html / warm_full
+    if cold_full and cold_all_reports:
+        comparisons["cold_all_reports_overhead_vs_cold_full"] = (
+            cold_all_reports / cold_full
+        )
+    if warm_full and warm_all_reports:
+        comparisons["warm_all_reports_overhead_vs_warm_full"] = (
+            warm_all_reports / warm_full
+        )
     return comparisons
 
 
@@ -470,7 +772,7 @@ def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Deterministic Docker-oriented benchmark for CodeClone CLI "
-            "(cold/warm cache scenarios)."
+            "(cold/warm cache, report, and startup scenarios)."
         )
     )
     parser.add_argument(
@@ -501,6 +803,27 @@ def _parse_args() -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("CODECLONE_BENCH_WARMUPS", "3")),
         help="Warmup runs per scenario",
+    )
+    parser.add_argument(
+        "--scenario-profile",
+        choices=("smoke", "extended", "diagnostic"),
+        default=os.environ.get("CODECLONE_BENCH_PROFILE", "smoke"),
+        help=(
+            "Scenario set: smoke keeps the historical core set; extended adds "
+            "report-format scenarios with per-scenario caps; diagnostic also "
+            "adds a CI-gate timing scenario that may exit non-zero."
+        ),
+    )
+    parser.add_argument(
+        "--startup-runs",
+        type=int,
+        default=int(os.environ.get("CODECLONE_BENCH_STARTUP_RUNS", "3")),
+        help="Measured runs per startup/import probe",
+    )
+    parser.add_argument(
+        "--no-startup-probes",
+        action="store_true",
+        help="Skip Python/import startup probes.",
     )
     parser.add_argument(
         "--tmp-dir",
@@ -534,6 +857,8 @@ def main() -> int:
         raise SystemExit("--runs must be > 0")
     if args.warmups < 0:
         raise SystemExit("--warmups must be >= 0")
+    if args.startup_runs <= 0:
+        raise SystemExit("--startup-runs must be > 0")
     if args.max_regression_pct < 0:
         raise SystemExit("--max-regression-pct must be >= 0")
     target = args.target.resolve()
@@ -547,11 +872,10 @@ def main() -> int:
         shutil.rmtree(workspace)
     workspace.mkdir(parents=True, exist_ok=True)
 
-    scenarios = [
-        Scenario(name="cold_full", mode="cold", extra_args=()),
-        Scenario(name="warm_full", mode="warm", extra_args=()),
-        Scenario(name="warm_clones_only", mode="warm", extra_args=("--skip-metrics",)),
-    ]
+    scenario_profile = str(args.scenario_profile)
+    if scenario_profile not in {"smoke", "extended", "diagnostic"}:
+        raise SystemExit(f"unknown scenario profile: {scenario_profile}")
+    scenarios = _scenario_profile(cast(BenchmarkProfile, scenario_profile))
     scenario_results = [
         _scenario_result(
             scenario=scenario,
@@ -563,6 +887,18 @@ def main() -> int:
         )
         for scenario in scenarios
     ]
+    startup_probe_results = (
+        [
+            _probe_result(
+                probe=probe,
+                python_executable=args.python_executable,
+                runs=args.startup_runs,
+            )
+            for probe in _startup_probes()
+        ]
+        if not args.no_startup_probes
+        else []
+    )
 
     comparisons = _comparison_metrics(scenario_results)
 
@@ -577,9 +913,13 @@ def main() -> int:
             "target": str(target),
             "runs": args.runs,
             "warmups": args.warmups,
+            "scenario_profile": scenario_profile,
+            "startup_runs": args.startup_runs,
+            "startup_probes": not args.no_startup_probes,
             "python_executable": args.python_executable,
         },
         "environment": _environment(),
+        "startup_probes": startup_probe_results,
         "scenarios": scenario_results,
         "comparisons": comparisons,
         "generated_at_utc": datetime.now(timezone.utc)
@@ -612,17 +952,44 @@ def main() -> int:
 
     print("CodeClone Docker benchmark")
     print(f"target={target}")
-    print(f"runs={args.runs} warmups={args.warmups}")
+    print(
+        f"profile={scenario_profile} runs={args.runs} "
+        f"warmups={args.warmups} startup_runs={args.startup_runs}"
+    )
+    if startup_probe_results:
+        print("startup probes:")
+        for probe in startup_probe_results:
+            name = str(probe["name"])
+            stats = probe["stats_seconds"]
+            cpu_stats = probe["child_cpu_stats_seconds"]
+            assert isinstance(stats, dict)
+            assert isinstance(cpu_stats, dict)
+            print(
+                f"- {name:22s} median={_as_float(stats['median']):.4f}s "
+                f"first={_as_float(probe['first_seconds']):.4f}s "
+                f"cpu={_as_float(cpu_stats['median']):.4f}s"
+            )
     for scenario in scenario_results:
         name = str(scenario["name"])
         stats = scenario["stats_seconds"]
+        cpu_stats = scenario["child_cpu_stats_seconds"]
+        inventory = scenario["inventory_sample"]
+        exit_counts = scenario["exit_code_counts"]
         assert isinstance(stats, dict)
+        assert isinstance(cpu_stats, dict)
+        assert isinstance(inventory, dict)
+        assert isinstance(exit_counts, dict)
         median_s = float(stats["median"])
         p95_s = float(stats["p95"])
         stdev_s = float(stats["stdev"])
+        cpu_median_s = float(cpu_stats["median"])
         print(
-            f"- {name:16s} median={median_s:.4f}s "
+            f"- {name:20s} median={median_s:.4f}s "
             f"p95={p95_s:.4f}s stdev={stdev_s:.4f}s "
+            f"cpu={cpu_median_s:.4f}s "
+            f"files={inventory.get('analyzed', 0)}/{inventory.get('cached', 0)} "
+            f"artifacts={_as_float(scenario['artifact_total_kib_sample']):.1f}KiB "
+            f"exit={exit_counts} "
             f"digest={scenario['digest']}"
         )
     _print_bulleted_lines(
