@@ -29,6 +29,7 @@ from ..widgets.dep_graph_layout import (
 )
 from ..widgets.glossary import glossary_tip
 from ..widgets.tables import render_rows_table
+from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
     from .._context import ReportContext
@@ -190,26 +191,25 @@ def _mm_zoom_toggle(
     graph_packages: Mapping[str, object],
     graph_modules: Mapping[str, object],
 ) -> str:
-    packages_svg = _render_module_map_svg(graph_packages)
-    modules_svg = _render_module_map_svg(graph_modules)
     package_count = len(_as_sequence(graph_packages.get("nodes")))
     module_count = len(_as_sequence(graph_modules.get("nodes")))
-    packages_active = "active" if default_zoom == "packages" else ""
-    modules_active = "" if default_zoom == "packages" else "active"
-    return (
-        '<nav class="clone-nav" role="tablist" data-subtab-group="module-map-zoom">'
-        f'<button class="clone-nav-btn {packages_active}" '
-        'data-clone-tab="packages" data-subtab-group="module-map-zoom" '
-        f'type="button">Packages <span class="tab-count">{package_count}</span>'
-        "</button>"
-        f'<button class="clone-nav-btn {modules_active}" '
-        'data-clone-tab="modules" data-subtab-group="module-map-zoom" '
-        f'type="button">Modules <span class="tab-count">{module_count}</span>'
-        "</button></nav>"
-        f'<div class="clone-panel {packages_active}" data-clone-panel="packages" '
-        f'data-subtab-group="module-map-zoom">{packages_svg}</div>'
-        f'<div class="clone-panel {modules_active}" data-clone-panel="modules" '
-        f'data-subtab-group="module-map-zoom">{modules_svg}</div>'
+    return render_split_tabs(
+        group_id="module-map-zoom",
+        active_id=default_zoom,
+        tabs=[
+            (
+                "packages",
+                "Packages",
+                package_count,
+                _render_module_map_svg(graph_packages),
+            ),
+            (
+                "modules",
+                "Modules",
+                module_count,
+                _render_module_map_svg(graph_modules),
+            ),
+        ],
     )
 
 
