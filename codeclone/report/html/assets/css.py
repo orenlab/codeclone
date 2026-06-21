@@ -295,17 +295,21 @@ button:focus-visible{outline:2px solid var(--accent-primary);outline-offset:2px}
 /* Inputs */
 input[type="text"]{padding:var(--sp-1) var(--sp-3);font-size:.85rem;border:1px solid var(--border);
   border-radius:var(--radius-md);background:var(--bg-body);color:var(--text-primary);outline:none;
-  transition:border-color var(--dur-fast) var(--ease)}
-input[type="text"]:focus{border-color:var(--accent-primary);box-shadow:0 0 0 2px var(--accent-muted)}
+  transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
+input[type="text"]:hover{border-color:var(--border-strong)}
+input[type="text"]:focus{border-color:var(--accent-primary);box-shadow:0 0 0 3px var(--accent-muted)}
 input[type="text"]::placeholder{color:var(--text-muted)}
 
 /* Selects */
 .select{padding:var(--sp-1) var(--sp-3);padding-right:var(--sp-6);font-size:.8rem;
   border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-raised);
-  color:var(--text-secondary);cursor:pointer;appearance:none;
+  color:var(--text-secondary);cursor:pointer;appearance:none;outline:none;
+  transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease),
+    color var(--dur-fast) var(--ease);
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='none' stroke='%236b6f88' stroke-width='2'%3E%3Cpath d='M3 4.5l3 3 3-3'/%3E%3C/svg%3E");
   background-repeat:no-repeat;background-position:right 8px center}
-.select:focus{border-color:var(--accent-primary);outline:none}
+.select:hover{border-color:var(--border-strong);color:var(--text-primary)}
+.select:focus{border-color:var(--accent-primary);box-shadow:0 0 0 3px var(--accent-muted)}
 
 /* Checkbox labels */
 .inline-check{display:inline-flex;align-items:center;gap:var(--sp-1);font-size:.8rem;
