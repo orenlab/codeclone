@@ -1244,7 +1244,7 @@ _META_PANEL = """\
   border:1px solid var(--border);
   box-shadow:0 1px 2px color-mix(in srgb,var(--text-primary) 3%,transparent)}
 .prov-section:last-child{margin-bottom:0}
-.prov-section-title{font-size:.66rem;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
+.prov-section-title{font-size:.66rem;font-weight:600;text-transform:uppercase;letter-spacing:.06em;
   color:var(--text-secondary);margin:0 calc(-1*var(--sp-4)) var(--sp-2);
   padding:0 var(--sp-4) var(--sp-2);border:none;
   border-bottom:1px solid color-mix(in srgb,var(--border) 60%,transparent);
@@ -1262,11 +1262,12 @@ _META_PANEL = """\
 /* Provenance summary badges */
 .prov-summary{display:flex;flex-wrap:wrap;align-items:center;gap:6px;
   padding:var(--sp-2) var(--sp-4);border-top:1px solid var(--border)}
-.prov-badge{display:inline-flex;align-items:center;gap:4px;font-size:.68rem;
-  padding:2px var(--sp-2);border-radius:var(--radius-sm);background:var(--bg-raised);
+.prov-badge{display:inline-flex;align-items:center;gap:4px;font-size:var(--badge-size);
+  padding:2px var(--sp-2);border-radius:var(--badge-radius);background:var(--bg-raised);
   white-space:nowrap;line-height:1.3;border:1px solid color-mix(in srgb,var(--border) 55%,transparent);
-  font-family:var(--font-mono);letter-spacing:.005em}
-.prov-badge-val{font-weight:600;font-variant-numeric:tabular-nums;color:var(--text-primary)}
+  font-family:var(--badge-font);letter-spacing:var(--badge-tracking)}
+.prov-badge-val{font-family:var(--count-font);font-weight:var(--count-weight);
+  font-variant-numeric:tabular-nums;color:var(--text-primary)}
 .prov-badge-lbl{font-weight:400;color:var(--text-muted);text-transform:lowercase}
 .prov-badge--inline{padding:2px 8px}
 .prov-badge--inline .prov-badge-val{font-weight:500}
