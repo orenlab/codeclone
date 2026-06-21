@@ -40,7 +40,13 @@ _REVIEW_INSIGHT = (
     "progress is saved in your browser. Report-only triage: verify in source "
     "before editing."
 )
-_FAMILY_LABELS = {"clones": "Clones", "structural": "Structural", "metrics": "Quality"}
+_FAMILY_LABELS = {
+    "clones": "Clones",
+    "structural": "Structural",
+    "dead_code": "Dead code",
+    "design": "Quality",
+    "metrics": "Quality",
+}
 _SEVERITIES = ("critical", "warning", "info")
 
 _REVIEW_TOGGLE = (
@@ -62,23 +68,26 @@ def _render_review_item(item: Mapping[str, object]) -> str:
     family = str(item.get("family"))
     severity = str(item.get("severity"))
     effort = str(item.get("effort"))
-    meta_badges = (
-        meta_badge_html(f"priority {_as_float(item.get('priority')):.2f}"),
-        meta_badge_html(effort, tone=effort),
-        meta_badge_html(_family_label(family)),
-    )
+    novelty = str(item.get("novelty"))
+    meta_badges = [meta_badge_html(f"priority {_as_float(item.get('priority')):.2f}")]
+    if effort:
+        meta_badges.append(meta_badge_html(effort, tone=effort))
+    meta_badges.append(meta_badge_html(_family_label(family)))
+    if novelty == "new":
+        meta_badges.append(meta_badge_html("new", tone="new"))
     data_attrs = (
         ' data-review-card="true" '
         f'data-finding-id="{_escape_html(finding_id)}" '
         f'data-severity="{_escape_html(severity)}" '
-        f'data-family="{_escape_html(family)}"'
+        f'data-family="{_escape_html(family)}" '
+        f'data-novelty="{_escape_html(novelty)}"'
     )
     return finding_card(
         severity=severity,
         title=str(item.get("title")),
         eyebrow=f"{_family_label(family)} · {item.get('source_kind')}",
         location=str(item.get("location")),
-        meta_badges=meta_badges,
+        meta_badges=tuple(meta_badges),
         body_html=_escape_html(str(item.get("summary"))),
         actions_html=_REVIEW_TOGGLE,
         card_class="review-card",

@@ -987,6 +987,8 @@ _SUGGESTIONS = """\
 .finding-meta-badge--easy{color:var(--success);background:var(--success-muted, rgba(34,197,94,.1))}
 .finding-meta-badge--moderate{color:var(--warning);background:var(--warning-muted)}
 .finding-meta-badge--hard{color:var(--error);background:var(--error-muted)}
+.finding-meta-badge--new{color:var(--accent-primary);background:var(--accent-muted);
+  text-transform:uppercase;letter-spacing:.04em}
 .suggestion-sev-inline{font-size:.68rem;font-weight:600;padding:2px var(--sp-2);
   border-radius:var(--radius-sm)}
 

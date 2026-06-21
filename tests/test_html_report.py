@@ -3139,8 +3139,12 @@ def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
         "Hotspots by Directory",
         'title="tests/fixtures">tests/fixtures</code>',
     )
-    assert "golden_project" not in html
-    assert "clone_metrics_cycle" not in html
+    # Directory hotspots (in the Overview panel) collapse to scope roots and must
+    # not leak raw fixture paths. The Review queue legitimately surfaces the
+    # finding itself, so scope the negative assertion to the Overview panel.
+    overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
+    assert "golden_project" not in overview
+    assert "clone_metrics_cycle" not in overview
 
 
 def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:
@@ -4320,13 +4324,15 @@ def _review_queue_payload(*, with_items: bool = True) -> dict[str, object]:
     if with_items:
         items = [
             {
-                "id": "suggestion:clone-a",
+                "id": "clone:a",
                 "finding_id": "clone:a",
                 "family": "clones",
-                "category": "clone",
+                "category": "function",
                 "severity": "critical",
                 "priority": 0.91,
+                "novelty": "new",
                 "source_kind": "production",
+                "has_action": True,
                 "title": "Duplicated branch logic",
                 "summary": "3 near-identical branches",
                 "location": "pkg/a.py:12",
@@ -4335,13 +4341,15 @@ def _review_queue_payload(*, with_items: bool = True) -> dict[str, object]:
                 "steps": ["extract a handler"],
             },
             {
-                "id": "suggestion:struct-b",
+                "id": "struct:b",
                 "finding_id": "struct:b",
                 "family": "structural",
-                "category": "structural",
+                "category": "duplicated_branches",
                 "severity": "warning",
                 "priority": 0.6,
+                "novelty": "known",
                 "source_kind": "tests",
+                "has_action": True,
                 "title": "Repeated assertions",
                 "summary": "repeated assert template",
                 "location": "tests/test_b.py:30",
@@ -4349,19 +4357,42 @@ def _review_queue_payload(*, with_items: bool = True) -> dict[str, object]:
                 "effort": "easy",
                 "steps": ["collapse"],
             },
+            {
+                "id": "dead:c",
+                "finding_id": "dead:c",
+                "family": "dead_code",
+                "category": "function",
+                "severity": "info",
+                "priority": 0.3,
+                "novelty": "known",
+                "source_kind": "production",
+                "has_action": False,
+                "title": "Unused function: pkg.mod:helper",
+                "summary": "1 occurrence · production",
+                "location": "pkg/mod.py:40",
+                "representative_locations": [],
+                "effort": "",
+                "steps": [],
+            },
         ]
     return {
-        "schema_version": "1",
+        "schema_version": "2",
         "scope": "report_only",
         "summary": {
             "total": len(items),
             "reviewed": 0,
+            "actionable": 2 if with_items else 0,
             "by_severity": {
                 "critical": 1 if with_items else 0,
                 "warning": 1 if with_items else 0,
-                "info": 0,
+                "info": 1 if with_items else 0,
             },
-            "by_family": {"clones": 1, "structural": 1} if with_items else {},
+            "by_family": (
+                {"clones": 1, "dead_code": 1, "structural": 1} if with_items else {}
+            ),
+            "by_novelty": {"new": 1, "known": 2}
+            if with_items
+            else {"new": 0, "known": 0},
             "top_priority": 0.91 if with_items else 0.0,
         },
         "items": items,
@@ -4413,6 +4444,13 @@ def test_html_report_renders_review_panel() -> None:
         "Duplicated branch logic",
         'data-review-filter="severity"',
         'data-review-value="critical"',
+        # novelty marker on the new finding
+        'data-novelty="new"',
+        "finding-meta-badge--new",
+        # cross-family findings (incl. a no-action dead-code item) are reviewable
+        'data-family="dead_code"',
+        'data-finding-id="dead:c"',
+        "Unused function: pkg.mod:helper",
     )
     # priority order preserved (input order): critical clone before warning struct
     assert panel.index("Duplicated branch logic") < panel.index("Repeated assertions")
@@ -4436,7 +4474,7 @@ def test_overview_launchpad_links_to_review() -> None:
         overview,
         "review-launchpad",
         'data-goto-tab="review"',
-        "2 findings ready to review",
+        "3 findings ready to review",
         "Start review",
         "launchpad-sev--critical",
     )

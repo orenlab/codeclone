@@ -434,19 +434,132 @@ def _build_derived_suggestions(
     ]
 
 
-_REVIEW_QUEUE_SCHEMA_VERSION: Final = "1"
+_REVIEW_QUEUE_SCHEMA_VERSION: Final = "2"
 _REVIEW_SEVERITIES: Final = ("critical", "warning", "info")
+_REVIEW_FAMILIES: Final = ("clones", "structural", "dead_code", "design")
+_REVIEW_FAMILY_BY_FINDING: Final = {
+    FAMILY_CLONE: "clones",
+    FAMILY_STRUCTURAL: "structural",
+    FAMILY_DEAD_CODE: "dead_code",
+    FAMILY_DESIGN: "design",
+}
+_REVIEW_FAMILY_BY_SUGGESTION: Final = {
+    FAMILY_CLONES: "clones",
+    FAMILY_STRUCTURAL: "structural",
+}
+_CLONE_REVIEW_TITLES: Final = {
+    CLONE_KIND_FUNCTION: "Function clone group",
+    CLONE_KIND_BLOCK: "Block clone group",
+    CLONE_KIND_SEGMENT: "Segment clone group",
+}
 
 
-def _review_item_row(suggestion: Suggestion) -> dict[str, object]:
-    finding_id = _suggestion_finding_id(suggestion)
+def _humanize(value: str) -> str:
+    text = value.replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _flatten_finding_groups(
+    findings: Mapping[str, object],
+) -> list[Mapping[str, object]]:
+    """Canonical findings across families, flattened (mirrors overview)."""
+    groups = _as_mapping(findings.get("groups"))
+    clones = _as_mapping(groups.get(FAMILY_CLONES))
+    flat: list[Mapping[str, object]] = [
+        _as_mapping(group)
+        for key in ("functions", "blocks", "segments")
+        for group in _as_sequence(clones.get(key))
+    ]
+    for family_key in (FAMILY_STRUCTURAL, FAMILY_DEAD_CODE, "design"):
+        flat.extend(
+            _as_mapping(group)
+            for group in _as_sequence(_as_mapping(groups.get(family_key)).get("groups"))
+        )
+    return flat
+
+
+def _finding_first_item(group: Mapping[str, object]) -> Mapping[str, object]:
+    items = _as_sequence(group.get("items"))
+    return _as_mapping(items[0]) if items else {}
+
+
+def _finding_review_title(group: Mapping[str, object]) -> str:
+    family = str(group.get("family"))
+    category = str(group.get("category"))
+    qualname = str(_finding_first_item(group).get("qualname", "")).strip()
+    if family == FAMILY_CLONE:
+        base = _CLONE_REVIEW_TITLES.get(category, "Clone group")
+        return f"{base} ({_as_int(group.get('count'))} occurrences)"
+    if family == FAMILY_DEAD_CODE:
+        return f"Unused {category}: {qualname}" if qualname else f"Unused {category}"
+    if family == FAMILY_DESIGN:
+        return f"{_humanize(category)}: {qualname}" if qualname else _humanize(category)
+    return _humanize(category)
+
+
+def _finding_review_location(group: Mapping[str, object]) -> str:
+    first = _finding_first_item(group)
+    # `path` is "" for absolute paths, so we never surface an absolute path —
+    # we fall back to the qualified name instead.
+    path = _safe_relative_path(first)
+    qualname = str(first.get("qualname", "")).strip()
+    line = _as_int(first.get("start_line"))
+    base = (f"{path}:{line}" if line else path) if path else qualname
+    extra = _as_int(group.get("count")) - 1
+    if extra > 0:
+        return f"{base} +{extra} more" if base else f"{extra + 1} locations"
+    return base
+
+
+def _finding_review_summary(group: Mapping[str, object]) -> str:
+    count = _as_int(group.get("count"))
+    spread = _as_mapping(group.get("spread"))
+    files = _as_int(spread.get("files"))
+    functions = _as_int(spread.get("functions"))
+    scope = str(_as_mapping(group.get("source_scope")).get("dominant_kind", "")).strip()
+    parts = [f"{count} occurrence{'s' if count != 1 else ''}"]
+    if functions or files:
+        parts.append(
+            f"{functions} function{'s' if functions != 1 else ''}"
+            f" / {files} file{'s' if files != 1 else ''}"
+        )
+    if scope:
+        parts.append(scope)
+    return " · ".join(parts)
+
+
+def _safe_relative_path(item: Mapping[str, object]) -> str:
+    """Relative path only — never surface an absolute path in the payload."""
+    path = str(item.get("relative_path", "")).strip()
+    return path if path and not _is_absolute_path(path) else ""
+
+
+def _finding_representative_rows(
+    group: Mapping[str, object],
+) -> list[dict[str, object]]:
+    rows = [
+        {
+            "relative_path": _safe_relative_path(item),
+            "start_line": _as_int(item.get("start_line")),
+            "end_line": _as_int(item.get("end_line")),
+            "qualname": str(item.get("qualname", "")),
+            "source_kind": str(item.get("source_kind", "")),
+        }
+        for item in (_as_mapping(row) for row in _as_sequence(group.get("items")))
+    ]
+    rows.sort(
+        key=lambda row: (
+            str(row["relative_path"]),
+            _as_int(row["start_line"]),
+            str(row["qualname"]),
+        )
+    )
+    return rows[:3]
+
+
+def _suggestion_review_fields(suggestion: Suggestion) -> dict[str, object]:
+    """Remediation fields shared by every suggestion-backed review item."""
     return {
-        "id": f"suggestion:{finding_id}",
-        "finding_id": finding_id,
-        "family": suggestion.finding_family,
-        "category": suggestion.category,
-        "severity": suggestion.severity,
-        "priority": suggestion.priority,
         "source_kind": suggestion.source_kind,
         "title": suggestion.title,
         "summary": suggestion.fact_summary,
@@ -454,40 +567,150 @@ def _review_item_row(suggestion: Suggestion) -> dict[str, object]:
         "representative_locations": _representative_location_rows(suggestion),
         "effort": suggestion.effort,
         "steps": list(suggestion.steps),
+        "has_action": True,
+    }
+
+
+def _finding_identity(group: Mapping[str, object]) -> dict[str, object]:
+    finding_id = str(group.get("id"))
+    return {
+        "id": finding_id,
+        "finding_id": finding_id,
+        "family": _REVIEW_FAMILY_BY_FINDING.get(str(group.get("family")), "design"),
+        "category": str(group.get("category", "")),
+        "severity": str(group.get("severity", SEVERITY_INFO)),
+        "priority": _as_float(group.get("priority")),
+        "novelty": str(group.get("novelty") or "known"),
+    }
+
+
+def _finding_review_item(
+    group: Mapping[str, object],
+    suggestion: Suggestion | None,
+) -> dict[str, object]:
+    item = _finding_identity(group)
+    if suggestion is not None:
+        item.update(_suggestion_review_fields(suggestion))
+    else:
+        item.update(
+            {
+                "source_kind": str(
+                    _as_mapping(group.get("source_scope")).get("dominant_kind", "")
+                ),
+                "title": _finding_review_title(group),
+                "summary": _finding_review_summary(group),
+                "location": _finding_review_location(group),
+                "representative_locations": _finding_representative_rows(group),
+                "effort": "",
+                "steps": [],
+                "has_action": False,
+            }
+        )
+    return item
+
+
+def _suggestion_review_item(suggestion: Suggestion) -> dict[str, object]:
+    finding_id = _suggestion_finding_id(suggestion)
+    family = _REVIEW_FAMILY_BY_SUGGESTION.get(suggestion.finding_family) or (
+        "dead_code" if suggestion.category == CATEGORY_DEAD_CODE else "design"
+    )
+    return {
+        "id": finding_id,
+        "finding_id": finding_id,
+        "family": family,
+        "category": suggestion.category,
+        "severity": suggestion.severity,
+        "priority": suggestion.priority,
+        "novelty": "known",
+        **_suggestion_review_fields(suggestion),
+    }
+
+
+def _review_sort_key(item: Mapping[str, object]) -> tuple[float, int, str, str]:
+    return (
+        -_as_float(item.get("priority")),
+        SEVERITY_ORDER.get(str(item.get("severity")), 9),
+        str(item.get("title")),
+        str(item.get("finding_id")),
+    )
+
+
+def _dedup_append(
+    items: list[dict[str, object]],
+    seen: set[str],
+    finding_id: str,
+    item: dict[str, object],
+) -> None:
+    """Append a review item once per finding id (first writer wins)."""
+    if finding_id in seen:
+        return
+    seen.add(finding_id)
+    items.append(item)
+
+
+def _review_summary(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    by_severity = dict.fromkeys(_REVIEW_SEVERITIES, 0)
+    by_family = dict.fromkeys(_REVIEW_FAMILIES, 0)
+    by_novelty = {"new": 0, "known": 0}
+    actionable = 0
+    for item in items:
+        severity = str(item.get("severity"))
+        if severity in by_severity:
+            by_severity[severity] += 1
+        family = str(item.get("family"))
+        by_family[family] = by_family.get(family, 0) + 1
+        by_novelty["new" if str(item.get("novelty")) == "new" else "known"] += 1
+        if item.get("has_action"):
+            actionable += 1
+    return {
+        "total": len(items),
+        "reviewed": 0,
+        "actionable": actionable,
+        "by_severity": by_severity,
+        "by_family": {key: count for key, count in sorted(by_family.items()) if count},
+        "by_novelty": by_novelty,
+        "top_priority": max(
+            (_as_float(item.get("priority")) for item in items), default=0.0
+        ),
     }
 
 
 def _build_derived_review_queue(
+    findings: Mapping[str, object],
     suggestions: Sequence[Suggestion] | None,
 ) -> dict[str, object]:
-    """Prioritised cross-family actionable queue that drives the review hub.
+    """Prioritised cross-family review queue projected over canonical findings.
 
-    Items are the actionable suggestions (clones, structural, dead-code, design
-    all normalise into suggestions), ordered by priority; the summary carries the
-    counts the UI needs for progress and filters. ``reviewed`` starts at 0 — the
-    HTML tracks per-finding review state client-side.
+    Every finding in ``findings.groups`` (clones, structural, dead-code, design)
+    becomes one review item, enriched with the matching suggestion's remediation
+    steps when one exists (the suggestion wins on title/summary/location).
+    Findings without a suggestion carry ``has_action=False``. The summary carries
+    the severity/family/novelty counts the review hub needs; ``reviewed`` starts
+    at 0 — the HTML tracks per-finding review state client-side.
     """
-    rows = _sorted_suggestions(suggestions)
-    by_severity = dict.fromkeys(_REVIEW_SEVERITIES, 0)
-    by_family: dict[str, int] = {}
-    for suggestion in rows:
-        by_severity[suggestion.severity] += 1
-        by_family[suggestion.finding_family] = (
-            by_family.get(suggestion.finding_family, 0) + 1
+    suggestion_by_id: dict[str, Suggestion] = {}
+    for suggestion in suggestions or ():
+        suggestion_by_id.setdefault(_suggestion_finding_id(suggestion), suggestion)
+
+    items: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for group in _flatten_finding_groups(findings):
+        finding_id = str(group.get("id"))
+        _dedup_append(
+            items,
+            seen,
+            finding_id,
+            _finding_review_item(group, suggestion_by_id.get(finding_id)),
         )
+    for finding_id, suggestion in suggestion_by_id.items():
+        _dedup_append(items, seen, finding_id, _suggestion_review_item(suggestion))
+
+    items.sort(key=_review_sort_key)
     return {
         "schema_version": _REVIEW_QUEUE_SCHEMA_VERSION,
         "scope": "report_only",
-        "summary": {
-            "total": len(rows),
-            "reviewed": 0,
-            "by_severity": by_severity,
-            "by_family": dict(sorted(by_family.items())),
-            "top_priority": max(
-                (suggestion.priority for suggestion in rows), default=0.0
-            ),
-        },
-        "items": [_review_item_row(suggestion) for suggestion in rows],
+        "summary": _review_summary(items),
+        "items": items,
     }
 
 

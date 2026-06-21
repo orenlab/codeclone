@@ -101,7 +101,7 @@ def build_report_document(
         "overview": overview_payload,
         "hotlists": hotlists_payload,
         "module_map": _build_derived_module_map(metrics_payload),
-        "review_queue": _build_derived_review_queue(suggestions),
+        "review_queue": _build_derived_review_queue(findings_payload, suggestions),
     }
     integrity_payload = _build_integrity_payload(
         report_schema_version=report_schema_version,

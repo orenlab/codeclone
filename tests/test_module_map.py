@@ -244,66 +244,190 @@ def _review_suggestion(
     )
 
 
-def test_build_derived_review_queue_orders_and_summarizes() -> None:
+def _finding_group(
+    *,
+    gid: str,
+    family: str,
+    category: str,
+    severity: str,
+    priority: float,
+    novelty: str = "known",
+    count: int = 1,
+    source_kind: str = "production",
+    qualname: str = "pkg.mod:fn",
+    path: str = "pkg/mod.py",
+    line: int = 10,
+) -> dict[str, Any]:
+    return {
+        "id": gid,
+        "family": family,
+        "category": category,
+        "kind": category,
+        "severity": severity,
+        "priority": priority,
+        "novelty": novelty,
+        "count": count,
+        "source_scope": {"dominant_kind": source_kind, "impact_scope": "runtime"},
+        "spread": {"files": 1, "functions": 1},
+        "items": [
+            {
+                "relative_path": path,
+                "qualname": qualname,
+                "start_line": line,
+                "end_line": line + 3,
+                "source_kind": source_kind,
+            }
+        ],
+    }
+
+
+def _findings_payload(
+    *,
+    clones: tuple[dict[str, Any], ...] = (),
+    structural: tuple[dict[str, Any], ...] = (),
+    dead_code: tuple[dict[str, Any], ...] = (),
+    design: tuple[dict[str, Any], ...] = (),
+) -> dict[str, Any]:
+    from codeclone.domain.findings import (
+        FAMILY_CLONES,
+        FAMILY_DEAD_CODE,
+        FAMILY_STRUCTURAL,
+    )
+
+    return {
+        "groups": {
+            FAMILY_CLONES: {"functions": list(clones), "blocks": [], "segments": []},
+            FAMILY_STRUCTURAL: {"groups": list(structural)},
+            FAMILY_DEAD_CODE: {"groups": list(dead_code)},
+            "design": {"groups": list(design)},
+        }
+    }
+
+
+def test_build_derived_review_queue_projects_findings_across_families() -> None:
+    from codeclone.domain.findings import (
+        CLONE_KIND_FUNCTION,
+        FAMILY_CLONE,
+        FAMILY_DEAD_CODE,
+        FAMILY_DESIGN,
+        FAMILY_STRUCTURAL,
+    )
     from codeclone.report.document.derived import _build_derived_review_queue
 
-    suggestions = [
-        _review_suggestion(
-            severity="warning",
-            category="structural",
-            family="structural",
-            title="B structural",
-            priority=0.5,
-            effort="moderate",
-            subject_key="b",
+    findings = _findings_payload(
+        clones=(
+            _finding_group(
+                gid="clone:a",
+                family=FAMILY_CLONE,
+                category=CLONE_KIND_FUNCTION,
+                severity="critical",
+                priority=0.9,
+                count=3,
+            ),
         ),
-        _review_suggestion(
-            severity="critical",
-            category="clone",
-            family="clones",
-            title="A duplicated",
-            priority=0.9,
-            effort="hard",
-            subject_key="a",
+        structural=(
+            _finding_group(
+                gid="struct:b",
+                family=FAMILY_STRUCTURAL,
+                category="duplicated_branches",
+                severity="info",
+                priority=0.4,
+                novelty="new",
+            ),
         ),
-        _review_suggestion(
-            severity="info",
-            category="dead_code",
-            family="metrics",
-            title="C unused",
-            priority=0.2,
-            effort="easy",
-            subject_key="c",
+        dead_code=(
+            _finding_group(
+                gid="dead:c",
+                family=FAMILY_DEAD_CODE,
+                category="function",
+                severity="warning",
+                priority=0.6,
+            ),
         ),
-    ]
-    queue: Any = _build_derived_review_queue(suggestions)
-    assert queue["schema_version"] == "1"
+        design=(
+            _finding_group(
+                gid="design:d",
+                family=FAMILY_DESIGN,
+                category="complexity",
+                severity="warning",
+                priority=0.5,
+            ),
+        ),
+    )
+    queue: Any = _build_derived_review_queue(findings, None)
+    assert queue["schema_version"] == "2"
     assert queue["scope"] == "report_only"
-    summary = queue["summary"]
-    assert summary["total"] == 3
-    assert summary["reviewed"] == 0
-    assert summary["by_severity"] == {"critical": 1, "warning": 1, "info": 1}
-    assert summary["by_family"] == {"clones": 1, "metrics": 1, "structural": 1}
-    assert summary["top_priority"] == 0.9
-    # priority-ordered: A(0.9) -> B(0.5) -> C(0.2)
-    assert [item["title"] for item in queue["items"]] == [
-        "A duplicated",
-        "B structural",
-        "C unused",
+    assert queue["summary"] == {
+        "total": 4,
+        "reviewed": 0,
+        "actionable": 0,
+        "by_severity": {"critical": 1, "warning": 2, "info": 1},
+        "by_family": {"clones": 1, "dead_code": 1, "design": 1, "structural": 1},
+        "by_novelty": {"new": 1, "known": 3},
+        "top_priority": 0.9,
+    }
+    # priority-ordered: clone(0.9) -> dead(0.6) -> design(0.5) -> struct(0.4)
+    assert [item["finding_id"] for item in queue["items"]] == [
+        "clone:a",
+        "dead:c",
+        "design:d",
+        "struct:b",
     ]
-    first = queue["items"][0]
-    assert first["family"] == "clones"
-    assert first["severity"] == "critical"
-    assert first["effort"] == "hard"
-    assert first["location"] == "pkg/a.py:1"
-    assert str(first["id"]).startswith("suggestion:")
+    clone_item = queue["items"][0]
+    assert clone_item["family"] == "clones"
+    assert clone_item["has_action"] is False
+    assert clone_item["title"] == "Function clone group (3 occurrences)"
+    assert str(clone_item["location"]).startswith("pkg/mod.py:10")
+    struct_item = queue["items"][-1]
+    assert struct_item["novelty"] == "new"
+    assert struct_item["title"] == "Duplicated branches"
+
+
+def test_build_derived_review_queue_enriches_with_matching_suggestion() -> None:
+    from codeclone.domain.findings import FAMILY_STRUCTURAL
+    from codeclone.findings.ids import structural_group_id
+    from codeclone.report.document.derived import _build_derived_review_queue
+
+    gid = structural_group_id("duplicated_branches", "b")
+    findings = _findings_payload(
+        structural=(
+            _finding_group(
+                gid=gid,
+                family=FAMILY_STRUCTURAL,
+                category="duplicated_branches",
+                severity="warning",
+                priority=0.5,
+            ),
+        )
+    )
+    suggestion = _review_suggestion(
+        severity="warning",
+        category="structural",
+        family="structural",
+        title="Refactor duplicated branches",
+        priority=0.5,
+        effort="moderate",
+        subject_key="b",
+    )
+    queue: Any = _build_derived_review_queue(findings, [suggestion])
+    assert queue["summary"]["total"] == 1
+    assert queue["summary"]["actionable"] == 1
+    item = queue["items"][0]
+    assert item["finding_id"] == gid
+    assert item["has_action"] is True
+    # suggestion wins on title + carries remediation steps
+    assert item["title"] == "Refactor duplicated branches"
+    assert item["effort"] == "moderate"
+    assert item["steps"] == ["do the thing"]
 
 
 def test_build_derived_review_queue_empty_shell() -> None:
     from codeclone.report.document.derived import _build_derived_review_queue
 
-    queue: Any = _build_derived_review_queue(None)
+    queue: Any = _build_derived_review_queue({}, None)
     assert queue["items"] == []
     assert queue["summary"]["total"] == 0
     assert queue["summary"]["top_priority"] == 0.0
     assert queue["summary"]["by_severity"] == {"critical": 0, "warning": 0, "info": 0}
+    assert queue["summary"]["by_novelty"] == {"new": 0, "known": 0}
+    assert queue["summary"]["by_family"] == {}
