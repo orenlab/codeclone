@@ -148,6 +148,33 @@ def _score_bar_html(value: str) -> str:
     )
 
 
+def _metric_meter_html(value: str, *, fraction: float) -> str:
+    """Render a numeric metric as its value plus a magnitude bar.
+
+    *fraction* (0..1) is the value's share of the column maximum; the bar fills
+    to that share and tints by band (low/mid/high) so table magnitudes read at a
+    glance without altering the underlying number.
+    """
+    text = str(value).strip()
+    try:
+        float(text)
+    except (TypeError, ValueError):
+        return _escape_html(text)
+    pct = max(0, min(100, round(fraction * 100)))
+    if fraction >= 0.66:
+        band = " metric-meter--high"
+    elif fraction >= 0.33:
+        band = " metric-meter--mid"
+    else:
+        band = ""
+    return (
+        f'<span class="metric-meter{band}">'
+        f'<span class="metric-meter-track">'
+        f'<span class="metric-meter-fill" style="width:{pct}%"></span></span>'
+        f'<span class="metric-meter-val">{_escape_html(text)}</span></span>'
+    )
+
+
 def _chips_html(text: str) -> str:
     """Render a comma-separated string as a row of compact chips."""
     parts = [part.strip() for part in str(text).split(",") if part.strip()]

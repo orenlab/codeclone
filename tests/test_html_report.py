@@ -906,10 +906,7 @@ def test_html_report_table_css_matches_rendered_column_classes() -> None:
             ".table .col-file,.table .col-path{color:var(--text-muted);"
             "max-width:240px;overflow:hidden;"
         ),
-        (
-            ".table .col-number,.table .col-num{font-variant-numeric:"
-            "tabular-nums;text-align:right;white-space:nowrap}"
-        ),
+        ".table .col-number,.table .col-num{font-family:var(--font-numeric);",
         ".table .col-risk,.table .col-badge,.table .col-cat{white-space:nowrap}",
     )
 
@@ -4487,3 +4484,36 @@ def test_overview_launchpad_absent_when_queue_empty() -> None:
     overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
     assert "review-launchpad" not in overview
     assert "data-goto-tab" not in overview
+
+
+def test_render_rows_table_meter_column_self_scales() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "CC"),
+        rows=[("alpha", "20"), ("beta", "10"), ("gamma", "5")],
+        empty_message="none",
+        column_types={"CC": "meter"},
+    )
+    assert "metric-meter" in html
+    # column max (20) fills 100% and reads as the high band
+    assert 'style="width:100%"' in html
+    assert "metric-meter--high" in html
+    # half the max (10) fills 50% and reads as the mid band
+    assert 'style="width:50%"' in html
+    assert "metric-meter--mid" in html
+    # the underlying numbers are preserved verbatim
+    assert ">20</span>" in html and ">5</span>" in html
+
+
+def test_render_rows_table_meter_handles_non_numeric() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "CC"),
+        rows=[("alpha", "n/a")],
+        empty_message="none",
+        column_types={"CC": "meter"},
+    )
+    assert "n/a" in html
+    assert "metric-meter-fill" not in html

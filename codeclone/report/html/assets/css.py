@@ -430,6 +430,18 @@ _TABLES = """\
 .score-bar-val{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
   font-size:.78rem;color:var(--text-secondary)}
 .score-bar--strong .score-bar-val{color:var(--accent-primary);font-weight:600}
+.metric-meter{display:inline-flex;align-items:center;gap:8px;width:100%;
+  flex-direction:row-reverse;justify-content:flex-start}
+.metric-meter-track{flex:1;max-width:60px;height:5px;border-radius:3px;
+  background:var(--bg-overlay);overflow:hidden}
+.metric-meter-fill{display:block;height:100%;border-radius:3px;
+  background:color-mix(in oklch,var(--accent-primary) 70%,var(--text-muted))}
+.metric-meter-val{font-family:var(--font-numeric);font-variant-numeric:tabular-nums;
+  font-size:.8rem;color:var(--text-primary);min-width:22px;text-align:right}
+.metric-meter--mid .metric-meter-fill{background:var(--warning)}
+.metric-meter--mid .metric-meter-val{color:var(--warning)}
+.metric-meter--high .metric-meter-fill{background:var(--error)}
+.metric-meter--high .metric-meter-val{color:var(--error);font-weight:600}
 .status-pill{display:inline-flex;align-items:center;font-size:.68rem;font-weight:500;
   padding:2px 9px;border-radius:999px;white-space:nowrap;letter-spacing:.01em;
   font-family:var(--font-sans)}

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from ..primitives.escape import _escape_html
 from .badges import (
     _chips_html,
+    _metric_meter_html,
     _quality_badge_html,
     _score_bar_html,
     _status_pill_html,
@@ -79,6 +80,14 @@ _CELL_RENDERERS = {
     "chips": _chips_html,
 }
 
+
+def _safe_abs_float(value: object) -> float:
+    try:
+        return abs(float(str(value).strip()))
+    except (TypeError, ValueError):
+        return 0.0
+
+
 _CELL_TYPE_CLS = {
     "score": "col-score",
     "status": "col-badge",
@@ -110,6 +119,14 @@ def render_rows_table(
     raw_html_set = {h.lower() for h in raw_html_headers}
     typed_cols = {h.lower(): t for h, t in (column_types or {}).items()}
 
+    # Meter columns self-scale: each bar fills relative to that column's max.
+    meter_max: dict[int, float] = {}
+    for col_idx, header in enumerate(lower_headers):
+        if typed_cols.get(header) != "meter":
+            continue
+        values = [_safe_abs_float(row[col_idx]) for row in rows if col_idx < len(row)]
+        meter_max[col_idx] = max([*values, 0.0])
+
     # colgroup
     cg = ["<colgroup>"]
     for h in lower_headers:
@@ -126,6 +143,11 @@ def render_rows_table(
     def _td(col_idx: int, cell: str) -> str:
         h = lower_headers[col_idx] if col_idx < len(lower_headers) else ""
         cell_type = typed_cols.get(h)
+        if cell_type == "meter":
+            colmax = meter_max.get(col_idx, 0.0)
+            fraction = _safe_abs_float(cell) / colmax if colmax > 0 else 0.0
+            meter = _metric_meter_html(cell, fraction=fraction)
+            return f'<td class="col-num">{meter}</td>'
         if cell_type in _CELL_RENDERERS:
             cls = _CELL_TYPE_CLS[cell_type]
             return f'<td class="{cls}">{_CELL_RENDERERS[cell_type](cell)}</td>'

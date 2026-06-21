@@ -283,6 +283,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         headers=("Function", "File", "CC", "Nesting", "Risk"),
         rows=cx_rows,
         empty_message="Complexity metrics are not available.",
+        column_types={"CC": "meter", "Nesting": "meter"},
         ctx=ctx,
     )
 
@@ -306,6 +307,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         rows=cp_rows,
         empty_message="Coupling metrics are not available.",
         raw_html_headers=("Coupled classes",),
+        column_types={"CBO": "meter"},
         ctx=ctx,
     )
 
@@ -329,6 +331,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         headers=("Class", "File", "LCOM4", "Risk", "Methods", "Fields"),
         rows=ch_rows,
         empty_message="Cohesion metrics are not available.",
+        column_types={"LCOM4": "meter", "Methods": "meter", "Fields": "meter"},
         ctx=ctx,
     )
 
