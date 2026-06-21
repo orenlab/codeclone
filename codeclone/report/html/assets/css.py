@@ -603,10 +603,14 @@ _OVERVIEW = """\
 .overview-kpi-grid--with-health .meta-item{min-width:0}
 .overview-kpi-grid--with-health .meta-item{min-height:0}
 .overview-kpi-cards .meta-item{display:grid;grid-template-rows:auto 1fr auto;
-  align-items:start;padding:var(--sp-3) var(--sp-4);gap:var(--sp-2);min-height:0}
-.overview-kpi-cards .meta-item .meta-label{font-size:.75rem;min-height:18px}
+  align-items:start;padding:var(--sp-3) var(--sp-4);gap:var(--sp-2);min-height:0;
+  box-shadow:var(--shadow-sm);transition:border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-normal) var(--ease),transform var(--dur-fast) var(--ease)}
+.overview-kpi-cards .meta-item:hover{box-shadow:var(--shadow-md);transform:translateY(-1px)}
+.overview-kpi-cards .meta-item .meta-label{font-size:.68rem;min-height:18px;
+  text-transform:uppercase;letter-spacing:.05em;font-weight:600}
 .overview-kpi-cards .meta-item .meta-value{display:flex;align-items:center;
-  font-size:1.55rem;line-height:1;padding:var(--sp-1) 0}
+  font-size:1.85rem;line-height:1;padding:var(--sp-1) 0;letter-spacing:-0.02em}
 .overview-kpi-cards .kpi-detail{margin-top:0;gap:4px;align-self:end}
 .overview-kpi-cards .kpi-micro{padding:2px 6px;font-size:.65rem}
 .overview-kpi-grid--with-health .overview-health-card{padding:var(--sp-2)}
@@ -645,10 +649,11 @@ _OVERVIEW = """\
   transition:stroke-dashoffset 1s var(--ease)}
 .health-ring-label{position:absolute;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center}
-.health-ring-score{font-family:var(--font-numeric);font-size:1.85rem;font-weight:680;
+.health-ring-score{font-family:var(--font-numeric);font-size:2.15rem;font-weight:700;
   color:var(--text-primary);font-variant-numeric:tabular-nums;line-height:1;
-  letter-spacing:-0.018em}
-.health-ring-grade{font-size:.72rem;font-weight:500;color:var(--text-muted);margin-top:3px}
+  letter-spacing:-0.022em}
+.health-ring-grade{font-size:.7rem;font-weight:600;color:var(--text-muted);margin-top:4px;
+  text-transform:uppercase;letter-spacing:.06em}
 .health-ring-delta{font-size:.65rem;font-weight:600;margin-top:3px}
 .health-ring-delta--up{color:var(--success)}
 .health-ring-delta--down{color:var(--error)}
@@ -991,10 +996,15 @@ _SUGGESTIONS = """\
    One source of truth for findings, suggestions, and the review queue. */
 .finding-card{position:relative;display:flex;background:var(--bg-surface);
   border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;
-  transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
-.finding-card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
+  box-shadow:var(--shadow-sm);
+  transition:border-color var(--dur-fast) var(--ease),
+    box-shadow var(--dur-normal) var(--ease),transform var(--dur-fast) var(--ease)}
+.finding-card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-md);
+  transform:translateY(-1px)}
 .finding-card-stripe{flex:0 0 4px;align-self:stretch;background:var(--border-strong)}
+.finding-card--critical{border-color:color-mix(in oklch,var(--error) 22%,var(--border))}
 .finding-card--critical .finding-card-stripe{background:var(--error)}
+.finding-card--warning{border-color:color-mix(in oklch,var(--warning) 16%,var(--border))}
 .finding-card--warning .finding-card-stripe{background:var(--warning)}
 .finding-card--info .finding-card-stripe{background:var(--info)}
 .finding-card-main{flex:1;min-width:0;padding:var(--sp-3) var(--sp-4)}
