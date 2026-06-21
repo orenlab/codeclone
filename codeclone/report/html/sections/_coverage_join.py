@@ -85,6 +85,7 @@ def render_coverage_join_panel(ctx: ReportContext) -> str:
             empty_message=_coverage_join_empty_message(),
             empty_description=_coverage_join_empty_description(),
             raw_html_headers=("Location",),
+            column_types={"CC": "meter", "Status": "chips"},
             ctx=ctx,
         )
     )
