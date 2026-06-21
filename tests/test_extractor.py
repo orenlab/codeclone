@@ -1899,6 +1899,84 @@ class OrjsonJSON(TypeDecorator[object]):
     )
 
 
+def test_dead_code_uses_extended_framework_runtime_reachability() -> None:
+    source = """
+from fastapi import FastAPI
+from fastapi.routing import APIRoute
+from pydantic.json_schema import GenerateJsonSchema as _GenerateJsonSchema
+
+app = FastAPI()
+
+@app.on_event("startup")
+async def startup_event():
+    return None
+
+@app.exception_handler(ValueError)
+async def value_error_handler(request, exc):
+    return request
+
+@app.middleware("http")
+async def audit_middleware(request, call_next):
+    return await call_next(request)
+
+class CustomJsonSchema(_GenerateJsonSchema):
+    def bytes_schema(self, schema):
+        return {"type": "string", "format": "base64"}
+
+    def schema_helper(self):
+        return None
+
+class CustomRoute(APIRoute):
+    def get_path(self, scope):
+        return scope["path"]
+
+    async def get_response(self, path, scope):
+        return path
+
+    def route_helper(self):
+        return None
+
+class CustomApp(FastAPI):
+    def build_middleware_stack(self):
+        return super().build_middleware_stack()
+
+    def app_helper(self):
+        return None
+
+def orphan():
+    return 1
+"""
+
+    dead = set(_dead_qualnames_from_source(source))
+    assert {
+        "pkg.mod:startup_event",
+        "pkg.mod:value_error_handler",
+        "pkg.mod:audit_middleware",
+        "pkg.mod:CustomJsonSchema.bytes_schema",
+        "pkg.mod:CustomRoute.get_path",
+        "pkg.mod:CustomRoute.get_response",
+        "pkg.mod:CustomApp.build_middleware_stack",
+    }.isdisjoint(dead)
+    assert dead >= {
+        "pkg.mod:orphan",
+        "pkg.mod:CustomJsonSchema.schema_helper",
+        "pkg.mod:CustomRoute.route_helper",
+        "pkg.mod:CustomApp.app_helper",
+    }
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+    by_evidence = {(fact.target_qualname, fact.evidence_symbol): fact for fact in facts}
+    assert by_evidence[("pkg.mod:startup_event", "app.on_event")].framework == "fastapi"
+    assert by_evidence[("pkg.mod:audit_middleware", "app.middleware")].confidence == (
+        "high"
+    )
+    assert by_target["pkg.mod:CustomJsonSchema.bytes_schema"].framework == "pydantic"
+    assert by_target["pkg.mod:CustomRoute.get_path"].edge_kind == "runtime_hook"
+    assert by_target["pkg.mod:CustomApp.build_middleware_stack"].evidence_symbol == (
+        "FastAPI.build_middleware_stack"
+    )
+
+
 def test_runtime_reachability_ignores_type_checking_only_frameworks() -> None:
     source = """
 from typing import TYPE_CHECKING

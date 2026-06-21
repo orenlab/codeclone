@@ -24,8 +24,11 @@ _RuntimeObjectKind = str
 _FASTAPI_ROUTE_METHODS = {
     "api_route",
     "delete",
+    "exception_handler",
     "get",
     "head",
+    "middleware",
+    "on_event",
     "options",
     "patch",
     "post",
@@ -125,6 +128,101 @@ _SQLALCHEMY_TYPE_DECORATOR_HOOKS = {
     "process_bind_param",
     "process_literal_param",
     "process_result_value",
+}
+_PYDANTIC_JSON_SCHEMA_SYMBOLS = {
+    "pydantic.json_schema.GenerateJsonSchema",
+}
+_PYDANTIC_JSON_SCHEMA_HOOKS = {
+    "any_schema",
+    "arguments_schema",
+    "arguments_v3_schema",
+    "bool_schema",
+    "bytes_schema",
+    "call_schema",
+    "callable_schema",
+    "chain_schema",
+    "complex_schema",
+    "computed_field_schema",
+    "custom_error_schema",
+    "dataclass_args_schema",
+    "dataclass_field_schema",
+    "dataclass_schema",
+    "date_schema",
+    "datetime_schema",
+    "decimal_schema",
+    "default_schema",
+    "definition_ref_schema",
+    "definitions_schema",
+    "dict_schema",
+    "enum_schema",
+    "float_schema",
+    "frozenset_schema",
+    "function_after_schema",
+    "function_before_schema",
+    "function_plain_schema",
+    "function_wrap_schema",
+    "generator_schema",
+    "get_cache_defs_ref_schema",
+    "handle_invalid_for_json_schema",
+    "int_schema",
+    "invalid_schema",
+    "is_instance_schema",
+    "is_subclass_schema",
+    "json_or_python_schema",
+    "json_schema",
+    "kw_arguments_schema",
+    "lax_or_strict_schema",
+    "list_schema",
+    "literal_schema",
+    "missing_sentinel_schema",
+    "model_field_schema",
+    "model_fields_schema",
+    "model_schema",
+    "multi_host_url_schema",
+    "none_schema",
+    "nullable_schema",
+    "p_arguments_schema",
+    "resolve_ref_schema",
+    "ser_schema",
+    "set_schema",
+    "str_schema",
+    "tagged_union_schema",
+    "time_schema",
+    "timedelta_schema",
+    "tuple_positional_schema",
+    "tuple_schema",
+    "tuple_variable_schema",
+    "typed_dict_field_schema",
+    "typed_dict_schema",
+    "union_schema",
+    "url_schema",
+    "uuid_schema",
+}
+_STARLETTE_ROUTE_BASE_SYMBOLS = {
+    "starlette.routing.Route",
+}
+_FASTAPI_ROUTE_CLASS_BASE_SYMBOLS = {
+    "fastapi.routing.APIRoute",
+}
+_STARLETTE_ROUTE_HOOKS = {
+    "handle",
+    "matches",
+}
+_FASTAPI_ROUTE_CLASS_HOOKS = {
+    "get_path",
+    "get_response",
+    "handle",
+    "matches",
+}
+_STARLETTE_APP_BASE_SYMBOLS = {
+    "starlette.applications.Starlette",
+}
+_FASTAPI_APP_BASE_SYMBOLS = {
+    "fastapi.FastAPI",
+    "fastapi.applications.FastAPI",
+}
+_FRAMEWORK_APP_HOOKS = {
+    "build_middleware_stack",
 }
 _TYPING_CAST_SYMBOLS = {
     "typing.cast",
@@ -627,6 +725,9 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
         self._handle_dependency_injector_container(node)
         self._handle_starlette_base_http_middleware(node)
         self._handle_sqlalchemy_type_decorator(node)
+        self._handle_pydantic_generate_json_schema(node)
+        self._handle_starlette_route_subclass(node)
+        self._handle_framework_application_subclass(node)
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
@@ -964,12 +1065,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
                 else f"{self._module_name}:{node.name}",
             )
 
-    def _handle_sqlalchemy_type_decorator(self, node: ast.ClassDef) -> None:
-        if not any(
-            _resolve_symbol(base, self._aliases) in _SQLALCHEMY_TYPE_DECORATOR_SYMBOLS
-            for base in node.bases
-        ):
-            return
+    def _class_hook_context(self, node: ast.ClassDef) -> tuple[str, str]:
         class_target = self._class_targets.get(id(node))
         class_qualname = (
             class_target.qualname.split(":", 1)[-1]
@@ -981,19 +1077,100 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
             if class_target is not None
             else f"{self._module_name}:{node.name}"
         )
+        return class_qualname, source_qualname
+
+    def _emit_subclass_runtime_hooks(
+        self,
+        *,
+        node: ast.ClassDef,
+        hook_names: set[str],
+        framework: RuntimeReachabilityFramework,
+        evidence: str,
+        evidence_symbol_prefix: str,
+    ) -> None:
+        class_qualname, source_qualname = self._class_hook_context(node)
         for method in self._methods_by_class.get(class_qualname, []):
             method_name = method.qualname.rsplit(".", 1)[-1]
-            if method_name not in _SQLALCHEMY_TYPE_DECORATOR_HOOKS:
+            if method_name not in hook_names:
                 continue
             self._emit(
                 target=method,
-                framework="sqlalchemy",
+                framework=framework,
                 edge_kind="runtime_hook",
                 confidence="medium",
-                evidence="SQLAlchemy TypeDecorator hook",
-                evidence_symbol=f"TypeDecorator.{method_name}",
+                evidence=evidence,
+                evidence_symbol=f"{evidence_symbol_prefix}.{method_name}",
                 source_qualname=source_qualname,
             )
+
+    def _handle_sqlalchemy_type_decorator(self, node: ast.ClassDef) -> None:
+        if not any(
+            _resolve_symbol(base, self._aliases) in _SQLALCHEMY_TYPE_DECORATOR_SYMBOLS
+            for base in node.bases
+        ):
+            return
+        self._emit_subclass_runtime_hooks(
+            node=node,
+            hook_names=set(_SQLALCHEMY_TYPE_DECORATOR_HOOKS),
+            framework="sqlalchemy",
+            evidence="SQLAlchemy TypeDecorator hook",
+            evidence_symbol_prefix="TypeDecorator",
+        )
+
+    def _handle_pydantic_generate_json_schema(self, node: ast.ClassDef) -> None:
+        if not any(
+            _resolve_symbol(base, self._aliases) in _PYDANTIC_JSON_SCHEMA_SYMBOLS
+            for base in node.bases
+        ):
+            return
+        self._emit_subclass_runtime_hooks(
+            node=node,
+            hook_names=set(_PYDANTIC_JSON_SCHEMA_HOOKS),
+            framework="pydantic",
+            evidence="Pydantic GenerateJsonSchema hook",
+            evidence_symbol_prefix="GenerateJsonSchema",
+        )
+
+    def _handle_starlette_route_subclass(self, node: ast.ClassDef) -> None:
+        resolved_bases = [_resolve_symbol(base, self._aliases) for base in node.bases]
+        is_starlette_route = any(
+            base in _STARLETTE_ROUTE_BASE_SYMBOLS for base in resolved_bases
+        )
+        is_fastapi_route = any(
+            base in _FASTAPI_ROUTE_CLASS_BASE_SYMBOLS for base in resolved_bases
+        )
+        if not is_starlette_route and not is_fastapi_route:
+            return
+        hook_names = set(_STARLETTE_ROUTE_HOOKS)
+        if is_fastapi_route:
+            hook_names |= _FASTAPI_ROUTE_CLASS_HOOKS
+        base_symbol = "APIRoute" if is_fastapi_route else "Route"
+        self._emit_subclass_runtime_hooks(
+            node=node,
+            hook_names=hook_names,
+            framework="fastapi" if is_fastapi_route else "starlette",
+            evidence=f"{base_symbol} runtime hook",
+            evidence_symbol_prefix=base_symbol,
+        )
+
+    def _handle_framework_application_subclass(self, node: ast.ClassDef) -> None:
+        resolved_bases = [_resolve_symbol(base, self._aliases) for base in node.bases]
+        is_starlette_app = any(
+            base in _STARLETTE_APP_BASE_SYMBOLS for base in resolved_bases
+        )
+        is_fastapi_app = any(
+            base in _FASTAPI_APP_BASE_SYMBOLS for base in resolved_bases
+        )
+        if not is_starlette_app and not is_fastapi_app:
+            return
+        base_symbol = "FastAPI" if is_fastapi_app else "Starlette"
+        self._emit_subclass_runtime_hooks(
+            node=node,
+            hook_names=set(_FRAMEWORK_APP_HOOKS),
+            framework="fastapi" if is_fastapi_app else "starlette",
+            evidence=f"{base_symbol} runtime hook",
+            evidence_symbol_prefix=base_symbol,
+        )
 
     def _handle_dependency_injector_container(self, node: ast.ClassDef) -> None:
         if not any(

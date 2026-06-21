@@ -86,11 +86,14 @@ Refs:
   observes a deterministic edge from modern Python runtime surfaces:
   FastAPI/Starlette route and dependency registration, including
   typed route decorator factories, `Annotated[..., Depends(...)]` and
-  `Annotated[..., Security(...)]` route parameters, Starlette
-  `BaseHTTPMiddleware.dispatch` hooks, Aiogram router observer decorators,
+  `Annotated[..., Security(...)]` route parameters, FastAPI lifecycle
+  decorators (`on_event`, `exception_handler`, `middleware`), Starlette
+  `BaseHTTPMiddleware.dispatch` hooks, Starlette/FastAPI route and application
+  subclass runtime hooks, Aiogram router observer decorators,
   Flask/Blueprint routes, aiohttp `RouteTableDef` decorators, Django URL
   patterns, Dependency Injector providers, Typer/Click commands, Celery tasks,
-  and SQLAlchemy `TypeDecorator` runtime hooks.
+  Pydantic `GenerateJsonSchema` runtime hooks, and SQLAlchemy `TypeDecorator`
+  runtime hooks.
 - Runtime reachability facts are evidence, not a full call graph. High- and
   medium-confidence facts prevent false dead-code findings; low-confidence
   facts, if introduced later, must remain report-only until explicitly wired.
@@ -178,6 +181,7 @@ Refs:
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_route_and_dependency_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_annotated_dependency_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_fastapi_route_decorator_factory_reachability`
+- `tests/test_extractor.py::test_dead_code_uses_extended_framework_runtime_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_aiogram_router_observer_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_flask_and_aiohttp_route_reachability`
 - `tests/test_extractor.py::test_dead_code_uses_starlette_base_http_middleware_dispatch_hook`
