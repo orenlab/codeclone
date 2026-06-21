@@ -142,6 +142,17 @@ Added
   top-overloaded tables. `get_report_section(section="module_map")` returns the
   projection directly. No new analysis pass, metrics family, or report schema
   bump — `derived` stays excluded from the integrity digest.
+* **Guided finding review.** A default-on, report-only `derived.review_queue`
+  projection orders the existing suggestions into a prioritized, cross-family
+  actionable queue (severity, priority, family, location, effort) with summary
+  counts. A new `Review` HTML tab (between Overview and Clones) renders it as a
+  walkable list of shared finding cards with a per-finding reviewed toggle
+  (persisted in `localStorage`), a progress bar, and severity/family filters; the
+  `Overview` tab gains a launchpad banner that links into it. A new shared
+  `finding_card` component centralizes the card chrome now used by the
+  Suggestions, Review, and Structural Findings surfaces. No new analysis pass,
+  metrics family, or report schema bump — `derived` stays excluded from the
+  integrity digest.
 
 Changed
 

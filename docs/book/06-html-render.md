@@ -36,8 +36,21 @@ Output:
 
 - HTML must not recompute detection semantics; it renders facts from report/core layers.
 - Provenance panels mirror canonical report/meta facts.
-- Overview, Quality, Module map, Suggestions, Dead Code, Dependencies, and
-  Clones tabs are projections over canonical report sections.
+- Overview, Review, Quality, Module map, Suggestions, Dead Code, Dependencies,
+  and Clones tabs are projections over canonical report sections.
+- The `Review` tab (between Overview and Clones) is render-only and is the guided
+  entry point for triaging findings. It draws the precomputed
+  `derived.review_queue` — a prioritized, cross-family actionable queue — as a list
+  of shared finding cards. The reviewed state (per finding id, persisted in
+  `localStorage`), the progress bar, and the severity/family filters are
+  client-side UX over those rendered facts; it recomputes nothing. The `Overview`
+  launchpad surfaces the queue total plus severity counts and jumps into this tab
+  via `data-goto-tab`; the queue is empty (and the launchpad hidden) when there are
+  no suggestions, mirroring `derived.suggestions` exactly.
+- `codeclone/report/html/widgets/cards.py:finding_card` is the single card chrome
+  shared by the Suggestions, Review, and Structural Findings surfaces — one
+  severity stripe + badge + meta/body/details/actions shell, so per-surface markup
+  is not duplicated.
 - Quality covers per-function/class metrics (Complexity, Coupling, Cohesion) plus
   report-only subtabs such as `Coverage Join` and `Security Surfaces`; these
   remain factual projections over canonical metrics families rather than
@@ -60,6 +73,8 @@ Output:
 Refs:
 
 - `codeclone/report/html/assemble.py:build_html_report`
+- `codeclone/report/html/sections/_review.py:render_review_panel`
+- `codeclone/report/html/widgets/cards.py:finding_card`
 - `codeclone/report/html/sections/_clones.py:_render_group_explanation`
 - `codeclone/report/html/sections/_module_map.py:render_module_map_panel`
 - `codeclone/report/html/widgets/dep_graph_layout.py`
