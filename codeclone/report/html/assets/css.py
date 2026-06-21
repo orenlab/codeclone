@@ -202,13 +202,16 @@ _LAYOUT = """\
   border:none;cursor:pointer;font-size:.85rem;font-weight:500;color:var(--text-muted);
   white-space:nowrap;border-radius:var(--radius-md);transition:all var(--dur-fast) var(--ease)}
 .main-tab:hover{color:var(--text-primary);background:var(--bg-raised)}
-.main-tab[aria-selected="true"]{color:var(--accent-primary);background:var(--accent-muted)}
+.main-tab[aria-selected="true"]{color:#fff;background:var(--accent-primary);
+  box-shadow:0 1px 4px color-mix(in oklch,var(--accent-primary) 42%,transparent)}
+.main-tab[aria-selected="true"]:hover{background:var(--accent-hover)}
 .main-tab-icon{flex-shrink:0;opacity:.72}
+.main-tab[aria-selected="true"] .main-tab-icon{opacity:1}
 .main-tab-label{display:inline-flex;align-items:center}
 .tab-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;
   height:18px;padding:0 5px;font-size:.68rem;font-weight:700;border-radius:var(--radius-sm);
   background:var(--bg-overlay);color:var(--text-muted);margin-left:var(--sp-1)}
-.main-tab[aria-selected="true"] .tab-count{background:var(--accent-primary);
+.main-tab[aria-selected="true"] .tab-count{background:rgba(255,255,255,.24);
   color:#fff}
 
 /* Tab panels */
@@ -350,16 +353,23 @@ _TOOLBAR = """\
 # ---------------------------------------------------------------------------
 
 _INSIGHT = """\
-.insight-banner{padding:var(--sp-3) var(--sp-4);border-radius:var(--radius-md);
-  margin-bottom:var(--sp-4);border-left:3px solid var(--border);background:none}
-.insight-question{font-size:.78rem;font-weight:500;color:var(--text-muted);
-  text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px}
-.insight-answer{font-size:.82rem;color:var(--text-secondary);line-height:1.5}
+.insight-banner{position:relative;padding:var(--sp-4) var(--sp-5);
+  border-radius:var(--radius-lg);margin-bottom:var(--sp-5);
+  border:1px solid var(--border);background:var(--bg-surface);overflow:hidden}
+.insight-banner::before{content:"";position:absolute;inset:0 auto 0 0;width:3px;
+  background:var(--border-strong)}
+.insight-question{font-size:.72rem;font-weight:600;color:var(--text-muted);
+  text-transform:uppercase;letter-spacing:.06em;margin-bottom:5px}
+.insight-answer{font-size:.88rem;color:var(--text-secondary);line-height:1.55}
 
-.insight-ok{border-left-color:var(--success);background:var(--success-muted)}
-.insight-warn{border-left-color:var(--warning);background:var(--warning-muted)}
-.insight-risk{border-left-color:var(--error);background:var(--error-muted)}
-.insight-info{border-left-color:var(--info);background:var(--info-muted)}
+.insight-ok::before{background:var(--success)}
+.insight-ok{background:color-mix(in oklch,var(--success-muted) 55%,var(--bg-surface))}
+.insight-warn::before{background:var(--warning)}
+.insight-warn{background:color-mix(in oklch,var(--warning-muted) 55%,var(--bg-surface))}
+.insight-risk::before{background:var(--error)}
+.insight-risk{background:color-mix(in oklch,var(--error-muted) 55%,var(--bg-surface))}
+.insight-info::before{background:var(--info)}
+.insight-info{background:color-mix(in oklch,var(--info-muted) 55%,var(--bg-surface))}
 .insight-banner .overview-summary-grid{margin:0}
 .insight-banner .overview-summary-item{background:none;border:none;border-radius:0;padding:0}
 .insight-banner .overview-summary-label{font-size:.76rem;margin-bottom:var(--sp-2);
