@@ -181,6 +181,14 @@ def _chips_html(text: str) -> str:
     return "".join(f'<span class="chip">{_escape_html(part)}</span>' for part in parts)
 
 
+def _code_chip_html(text: str) -> str:
+    """Render an identifier / glob value as a compact monospace code chip."""
+    value = str(text).strip()
+    if not value or value == "-":
+        return _escape_html(value)
+    return f'<code class="code-chip">{_escape_html(value)}</code>'
+
+
 _INLINE_EMPTY_ICONS: dict[str, str] = {
     "good": (
         '<svg class="inline-empty-icon" viewBox="0 0 24 24" width="22" height="22" '

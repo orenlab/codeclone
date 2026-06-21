@@ -4531,3 +4531,17 @@ def test_render_rows_table_source_kind_column_renders_badge() -> None:
     assert "source-kind-badge" in html
     assert "source-kind-production" in html
     assert "source-kind-tests" in html
+
+
+def test_render_rows_table_code_column_renders_code_chip() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "Rule"),
+        rows=[("x", "golden_fixture@project_config"), ("y", "-")],
+        empty_message="none",
+        column_types={"Rule": "code"},
+    )
+    assert '<code class="code-chip">golden_fixture@project_config</code>' in html
+    # the placeholder dash stays plain, not chipped
+    assert '<code class="code-chip">-</code>' not in html

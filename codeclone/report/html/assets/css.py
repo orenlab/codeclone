@@ -455,6 +455,12 @@ _TABLES = """\
 .status-pill--neutral{background:var(--bg-overlay);color:var(--text-muted)}
 .chip{margin:1px 3px 1px 0;background:var(--bg-overlay);color:var(--text-secondary);
   border:1px solid var(--border)}
+/* Code sort: identifiers / globs in mono, distinct from sans label badges */
+.code-chip{display:inline-flex;align-items:center;max-width:100%;font-family:var(--font-mono);
+  font-size:.72rem;padding:2px var(--sp-2);border-radius:var(--radius-sm);
+  background:var(--bg-overlay);color:var(--text-secondary);border:1px solid var(--border);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.table .col-code{max-width:240px}
 """
 
 # ---------------------------------------------------------------------------

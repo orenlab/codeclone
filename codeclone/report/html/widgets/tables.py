@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from ..primitives.escape import _escape_html
 from .badges import (
     _chips_html,
+    _code_chip_html,
     _metric_meter_html,
     _quality_badge_html,
     _score_bar_html,
@@ -85,6 +86,7 @@ _CELL_RENDERERS = {
     "status": _status_pill_html,
     "chips": _chips_html,
     "source_kind": _source_kind_badge_html,
+    "code": _code_chip_html,
 }
 
 
@@ -100,6 +102,7 @@ _CELL_TYPE_CLS = {
     "status": "col-badge",
     "chips": "col-chips",
     "source_kind": "col-badge",
+    "code": "col-code",
 }
 
 
