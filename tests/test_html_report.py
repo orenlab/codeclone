@@ -4003,8 +4003,14 @@ def test_html_report_overview_uses_canonical_report_overview_hotlists() -> None:
         "source-kind-badge source-kind-fixtures",
         "source-kind-badge source-kind-production",
         'breakdown-count">1</span>',
+        # Structural findings use the shared finding_card chrome (Stage 4)
+        "finding-card finding-card--info sf-card",
+        'data-sf-group="true"',
+        "data-finding-why-btn",
     ):
         assert needle in html
+    # Bespoke sf-card chrome was fully replaced by the shared component
+    assert '<article class="sf-card"' not in html
     assert '<div class="overview-summary-value">n/a</div>' not in html
     # Issue breakdown replaces old hotspot sections
     assert "Issue breakdown" in html

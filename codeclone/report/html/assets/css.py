@@ -1103,22 +1103,8 @@ _SUGGESTIONS = """\
 _STRUCTURAL = """\
 /* Structural findings — list layout */
 .sf-list{display:flex;flex-direction:column;gap:var(--sp-2)}
-.sf-card{background:var(--bg-surface);border:1px solid var(--border);border-left:3px solid var(--info);
-  border-radius:var(--radius-lg);
-  overflow:hidden;transition:border-color var(--dur-fast) var(--ease),box-shadow var(--dur-fast) var(--ease)}
-.sf-card:hover{border-color:var(--border-strong);box-shadow:var(--shadow-sm)}
-
-/* Header row */
-.sf-head{padding:var(--sp-3) var(--sp-4);display:flex;align-items:center;gap:var(--sp-2);flex-wrap:wrap}
-.sf-kind-badge{font-size:.68rem;font-weight:600;text-transform:uppercase;letter-spacing:.03em;
-  padding:2px var(--sp-2);border-radius:var(--radius-sm);white-space:nowrap;
-  background:var(--info-muted);color:var(--info)}
-.sf-title{font-weight:600;font-size:.85rem;color:var(--text-primary);flex:1;min-width:0}
-.sf-meta{display:flex;align-items:center;gap:var(--sp-1);flex-shrink:0;flex-wrap:wrap}
+/* Card chrome is the shared .finding-card; only structural content rules below. */
 .sf-why-btn{font-size:.72rem;color:var(--accent-primary);font-weight:500}
-
-/* Body */
-.sf-body{padding:0 var(--sp-4) var(--sp-3);display:flex;flex-direction:column;gap:var(--sp-2)}
 .sf-chips{display:flex;flex-wrap:wrap;gap:var(--sp-1)}
 .sf-scope-text{font-size:.8rem;font-family:var(--font-mono);color:var(--text-secondary)}
 .sf-inline-action{display:flex;align-items:flex-start;gap:var(--sp-2);padding:var(--sp-2) var(--sp-3);
@@ -1418,8 +1404,6 @@ _UTILITY = """\
   .overview-row-spread{margin-left:0;width:100%}
   .suggestion-head{flex-direction:column;align-items:flex-start}
   .suggestion-facts{grid-template-columns:1fr}
-  .sf-head{flex-direction:column;align-items:flex-start}
-  .sf-meta{width:100%}
   .dir-hotspot-head{flex-wrap:wrap;align-items:flex-start}
   .dir-hotspot-detail{flex-wrap:wrap;align-items:flex-start}
   .dir-hotspot-bar-track{width:min(148px,42%);min-width:96px}

@@ -34,6 +34,7 @@ from ...suggestions import (
 )
 from ..primitives.escape import _escape_html
 from ..widgets.badges import _source_kind_badge_html, _tab_empty
+from ..widgets.cards import finding_card, meta_badge_html
 from ..widgets.snippets import _FileCache, _render_code_block
 from ..widgets.tabs import render_split_tabs
 
@@ -401,44 +402,49 @@ def _render_finding_card(
     func_word = "function" if spread["functions"] == 1 else "functions"
     file_word = "file" if spread["files"] == 1 else "files"
     kind_label = _KIND_LABEL.get(group.finding_kind, group.finding_kind)
-    source_chip = _escape_html(source_kind_label(source_kind))
-    finding_kind_chip = _escape_html(group.finding_kind.replace("_", " "))
-    context_chips = (
-        f'<span class="suggestion-chip">{source_chip}</span>'
-        f'<span class="suggestion-chip">{finding_kind_chip}</span>'
-    )
     scope_text = _finding_scope_text(deduped_items)
     finding_id = structural_group_id(group.finding_kind, group.finding_key)
     chips_html = _signature_chips_html(group.signature)
 
-    return (
-        f'<article class="sf-card"'
-        f' id="finding-{_escape_html(finding_id)}"'
-        f' data-finding-id="{_escape_html(finding_id)}"'
-        f' data-sf-group="true"'
-        f' data-source-kind="{_escape_html(source_kind)}"'
-        f' data-spread-bucket="{_escape_html(spread_bucket)}">'
-        '<div class="sf-head">'
-        '<span class="sf-kind-badge">info</span>'
-        f'<span class="sf-title">{_escape_html(kind_label)}</span>'
-        '<span class="sf-meta">'
-        f'<span class="suggestion-meta-badge">'
-        f"{spread['functions']} {func_word} \u00b7 {spread['files']} {file_word}</span>"
-        f'<button class="btn ghost sf-why-btn" type="button" '
+    why_button = (
+        '<button class="btn ghost sf-why-btn" type="button" '
         f'data-finding-why-btn="{_escape_html(why_template_id)}" '
         f'aria-haspopup="dialog">{explain_msgs.STRUCTURAL_WHY_BUTTON}</button>'
-        "</span></div>"
-        '<div class="sf-body">'
-        f'<div class="suggestion-context">{context_chips}</div>'
+    )
+    spread_badge = meta_badge_html(
+        f"{spread['functions']} {func_word} \u00b7 {spread['files']} {file_word}"
+    )
+    body_html = (
         f'<div class="sf-chips">{chips_html}</div>'
         f'<div class="sf-scope-text">{_escape_html(scope_text)}</div>'
         f"{inline_action_html}"
-        "</div>"
+    )
+    details_html = (
         '<details class="sf-details">'
         f"<summary>Occurrences ({count})</summary>"
         f'<div class="sf-details-body">{table_html}</div>'
         "</details>"
-        "</article>",
+    )
+    data_attrs = (
+        f' id="finding-{_escape_html(finding_id)}"'
+        f' data-finding-id="{_escape_html(finding_id)}"'
+        ' data-sf-group="true"'
+        f' data-source-kind="{_escape_html(source_kind)}"'
+        f' data-spread-bucket="{_escape_html(spread_bucket)}"'
+    )
+
+    return (
+        finding_card(
+            severity="info",
+            title=kind_label,
+            eyebrow=source_kind_label(source_kind),
+            meta_badges=(spread_badge,),
+            body_html=body_html,
+            details_html=details_html,
+            actions_html=why_button,
+            card_class="sf-card",
+            data_attrs=data_attrs,
+        ),
         source_kind,
     )
 
