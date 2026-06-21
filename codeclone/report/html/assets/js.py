@@ -913,24 +913,28 @@ _REVIEW = """\
     if(reviewed.has(id))reviewed.delete(id);else reviewed.add(id);
     save(reviewed);refresh();
   });
-  const active={severity:'',family:''};
+  const sevSel=$('[data-review-severity]');
+  const famSel=$('[data-review-family]');
+  const countLabel=$('[data-review-count]');
+  const filtersBadge=$('[data-filters-count="review"]');
   function applyFilters(){
+    const sev=sevSel?.value||'';
+    const fam=famSel?.value||'';
+    let shown=0;
     cards.forEach(c=>{
-      const okS=!active.severity||c.dataset.severity===active.severity;
-      const okF=!active.family||c.dataset.family===active.family;
-      c.style.display=(okS&&okF)?'':'none';
+      const hide=!!((sev&&c.dataset.severity!==sev)||(fam&&c.dataset.family!==fam));
+      c.setAttribute('data-filter-hidden',hide?'true':'false');
+      if(!hide)shown++;
     });
+    if(countLabel)countLabel.textContent=shown+' shown';
+    if(filtersBadge){
+      let n=0;if(sev)n++;if(fam)n++;
+      filtersBadge.hidden=n===0;filtersBadge.textContent=String(n);
+    }
   }
-  $$('[data-review-filter]').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      const dim=btn.dataset.reviewFilter,val=btn.dataset.reviewValue;
-      active[dim]=active[dim]===val?'':val;
-      $$('[data-review-filter="'+dim+'"]').forEach(function(b){
-        b.classList.toggle('is-active',b.dataset.reviewValue===active[dim]);
-      });
-      applyFilters();
-    });
-  });
+  [sevSel,famSel].forEach(function(el){if(el)el.addEventListener('change',applyFilters)});
+  wireFiltersPopover($('[data-filters-toggle="review"]'));
+  applyFilters();
   refresh();
 })();
 """

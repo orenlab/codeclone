@@ -382,7 +382,7 @@ _TOOLBAR = """\
   border-color:var(--border-strong)}
 
 /* Suggestions count pill (right side of the shared toolbar). */
-.suggestions-count-label{font-size:.8rem;color:var(--text-muted);font-weight:500;
+.suggestions-count-label,.toolbar-count-label{font-size:.8rem;color:var(--text-muted);font-weight:500;
   font-variant-numeric:tabular-nums;white-space:nowrap}
 """
 
@@ -1107,24 +1107,8 @@ _SUGGESTIONS = """\
 .review-progress-track{height:7px;border-radius:4px;background:var(--bg-overlay);overflow:hidden}
 .review-progress-bar{height:100%;border-radius:4px;background:var(--accent-primary);
   transition:width var(--dur-base) var(--ease)}
-.review-filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:var(--sp-4)}
-.review-filter-sep{width:1px;align-self:stretch;background:var(--border);margin:2px var(--sp-1)}
-.review-chip{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;
-  font-family:var(--font-sans);padding:4px 10px;border-radius:var(--radius-sm);cursor:pointer;
-  background:var(--bg-overlay);color:var(--text-secondary);border:1px solid var(--border);
-  transition:border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
-.review-chip:hover{border-color:var(--border-strong)}
-.review-chip.is-active{border-color:var(--accent-primary);color:var(--accent-primary);
-  background:var(--accent-muted)}
-.review-chip--critical.is-active{border-color:var(--danger);color:var(--danger);
-  background:color-mix(in oklch,var(--danger) 16%,transparent)}
-.review-chip--warning.is-active{border-color:var(--warning);color:var(--warning);
-  background:color-mix(in oklch,var(--warning) 16%,transparent)}
-.review-chip--info.is-active{border-color:var(--info);color:var(--info);
-  background:color-mix(in oklch,var(--info) 16%,transparent)}
-.review-chip-count{font-family:var(--count-font);font-size:var(--count-size);
-  font-weight:var(--count-weight);font-variant-numeric:tabular-nums;opacity:.85}
 .review-queue{display:flex;flex-direction:column;gap:9px}
+.review-card[data-filter-hidden="true"]{display:none}
 .review-toggle{display:inline-flex;align-items:center;justify-content:center;
   width:30px;height:30px;border-radius:8px;cursor:pointer;color:var(--text-muted);
   background:transparent;border:1px solid var(--border);

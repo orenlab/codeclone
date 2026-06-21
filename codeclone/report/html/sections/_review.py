@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ..primitives.escape import _escape_html
+from ..primitives.filters import _render_select
 from ..widgets.badges import _tab_empty
 from ..widgets.cards import finding_card, meta_badge_html
 from ..widgets.components import Tone, insight_block
@@ -108,28 +109,55 @@ def _review_progress(total: int) -> str:
     )
 
 
-def _review_filter_chips(summary: Mapping[str, object]) -> str:
+def _review_toolbar(summary: Mapping[str, object], total: int) -> str:
+    """Shared filter toolbar (Filters popover + selects), like Suggestions."""
     by_severity = _as_mapping(summary.get("by_severity"))
     by_family = _as_mapping(summary.get("by_family"))
-    severity_chips = "".join(
-        f'<button type="button" class="review-chip review-chip--{severity}" '
-        f'data-review-filter="severity" data-review-value="{severity}">'
-        f"{severity.title()} "
-        f'<span class="review-chip-count">{_as_int(by_severity.get(severity))}</span>'
-        "</button>"
+    sev_opts = tuple(
+        (severity, severity.title())
         for severity in _SEVERITIES
         if _as_int(by_severity.get(severity)) > 0
     )
-    family_chips = "".join(
-        f'<button type="button" class="review-chip" '
-        f'data-review-filter="family" data-review-value="{_escape_html(family)}">'
-        f"{_escape_html(_family_label(family))} "
-        f'<span class="review-chip-count">{_as_int(count)}</span></button>'
-        for family, count in sorted(by_family.items())
+    fam_opts = tuple((family, _family_label(family)) for family in sorted(by_family))
+    filters_menu = (
+        '<div class="filters-menu" role="group" hidden>'
+        '<div class="filters-row">'
+        '<label class="filters-label" for="review-severity">Severity</label>'
+        + _render_select(
+            element_id="review-severity",
+            data_attr="data-review-severity",
+            options=sev_opts,
+            all_label="All",
+        )
+        + "</div>"
+        '<div class="filters-row">'
+        '<label class="filters-label" for="review-family">Family</label>'
+        + _render_select(
+            element_id="review-family",
+            data_attr="data-review-family",
+            options=fam_opts,
+            all_label="All",
+        )
+        + "</div></div>"
     )
     return (
-        '<div class="review-filters" data-review-filters>'
-        f'{severity_chips}<span class="review-filter-sep"></span>{family_chips}</div>'
+        '<div class="toolbar" role="toolbar" aria-label="Review filters">'
+        '<div class="toolbar-left"><div class="filters-popover">'
+        '<button class="btn filters-btn" type="button" '
+        'data-filters-toggle="review" aria-expanded="false" '
+        'aria-haspopup="true" title="Filter findings">'
+        '<svg class="filters-btn-ico" viewBox="0 0 16 16" width="13" height="13" '
+        'fill="none" stroke="currentColor" stroke-width="1.7" '
+        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+        '<path d="M2 3.5h12M4 8h8M6.5 12.5h3"/></svg>'
+        "<span>Filters</span>"
+        '<span class="filters-count" data-filters-count="review" hidden>0</span>'
+        "</button>"
+        f"{filters_menu}"
+        "</div></div>"
+        '<div class="toolbar-right">'
+        f'<span class="toolbar-count-label" data-review-count>{total} shown</span>'
+        "</div></div>"
     )
 
 
@@ -153,6 +181,6 @@ def render_review_panel(ctx: ReportContext) -> str:
         "<div data-review-panel>"
         + insight
         + _review_progress(len(items))
-        + _review_filter_chips(summary)
-        + f'<div class="review-queue">{cards}</div></div>'
+        + _review_toolbar(summary, len(items))
+        + f'<div class="review-queue" data-review-body>{cards}</div></div>'
     )

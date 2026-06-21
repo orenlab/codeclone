@@ -4439,8 +4439,12 @@ def test_html_report_renders_review_panel() -> None:
         "finding-card--critical",
         "data-review-toggle",
         "Duplicated branch logic",
-        'data-review-filter="severity"',
-        'data-review-value="critical"',
+        # shared filter system (Filters popover + selects), not bespoke chips
+        'data-filters-toggle="review"',
+        "data-review-severity",
+        "data-review-family",
+        "data-review-count",
+        "data-review-body",
         # novelty marker on the new finding
         'data-novelty="new"',
         "finding-meta-badge--new",
