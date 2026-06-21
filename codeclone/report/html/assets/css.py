@@ -978,7 +978,8 @@ _DEPENDENCIES = """\
 .dep-hub-pill{display:inline-flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);
   border-radius:var(--radius-sm);background:var(--bg-overlay);font-size:.8rem}
 .dep-hub-name{color:var(--text-primary);font-family:var(--font-mono);font-size:.8rem}
-.dep-hub-deg{font-size:.68rem;font-weight:600;color:var(--accent-primary);
+.dep-hub-deg{font-family:var(--count-font);font-size:var(--count-size);
+  font-weight:var(--count-weight);font-variant-numeric:tabular-nums;color:var(--accent-primary);
   background:var(--accent-muted);padding:2px var(--sp-2);border-radius:var(--radius-sm)}
 
 /* Legend */
