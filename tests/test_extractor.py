@@ -3449,7 +3449,10 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
         _node: ast.FunctionDef | ast.AsyncFunctionDef,
         _cfg: NormalizationConfig,
         _qualname: str,
+        *,
+        phase_ledger: object,
     ) -> tuple[str, int]:
+        del phase_ledger
         return "f" * 40, 1
 
     def _fake_extract_segments(
