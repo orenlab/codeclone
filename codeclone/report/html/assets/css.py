@@ -44,7 +44,8 @@ _TOKENS_DARK = """\
   --accent-soft:oklch(30% 0.12 275);
 
   /* Semantic — brand-adjacent, hue-rotated so they read as siblings
-     of the indigo instead of raw Tailwind defaults */
+     of the indigo instead of raw Tailwind defaults. Light-mode lightness is
+     tuned so severity badge text clears WCAG AA (>=4.5:1) on its muted bg. */
   --success:oklch(74% 0.15 162);
   --success-muted:color-mix(in oklch,oklch(74% 0.15 162) 18%,transparent);
   --warning:oklch(80% 0.15 82);
@@ -112,10 +113,10 @@ _TOKENS_LIGHT = """\
     --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
     --accent-primary:#4f46e5;--accent-hover:#6366f1;--accent-muted:color-mix(in oklch,#4f46e5 12%,transparent);
     --accent-soft:oklch(94% 0.045 275);
-    --success:oklch(52% 0.16 162);--success-muted:color-mix(in oklch,oklch(52% 0.16 162) 12%,transparent);
-    --warning:oklch(60% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
-    --error:oklch(55% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
-    --danger:oklch(55% 0.22 20);--info:oklch(52% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
+    --success:oklch(47% 0.16 162);--success-muted:color-mix(in oklch,oklch(52% 0.16 162) 12%,transparent);
+    --warning:oklch(51.5% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
+    --error:oklch(50.5% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
+    --danger:oklch(50.5% 0.22 20);--info:oklch(48.5% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
     --shadow-sm:0 1px 2px rgba(17,20,38,.05);--shadow-md:0 4px 14px -3px rgba(17,20,38,.08);
     --shadow-lg:0 12px 30px -8px rgba(17,20,38,.12);--shadow-xl:0 22px 50px -14px rgba(17,20,38,.16);
     color-scheme:light;
@@ -128,10 +129,10 @@ _TOKENS_LIGHT = """\
   --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
   --accent-primary:#4f46e5;--accent-hover:#6366f1;--accent-muted:color-mix(in oklch,#4f46e5 12%,transparent);
   --accent-soft:oklch(94% 0.045 275);
-  --success:oklch(52% 0.16 162);--success-muted:color-mix(in oklch,oklch(52% 0.16 162) 12%,transparent);
-  --warning:oklch(60% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
-  --error:oklch(55% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
-  --danger:oklch(55% 0.22 20);--info:oklch(52% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
+  --success:oklch(47% 0.16 162);--success-muted:color-mix(in oklch,oklch(52% 0.16 162) 12%,transparent);
+  --warning:oklch(51.5% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
+  --error:oklch(50.5% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
+  --danger:oklch(50.5% 0.22 20);--info:oklch(48.5% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
   --shadow-sm:0 1px 2px rgba(17,20,38,.05);--shadow-md:0 4px 14px -3px rgba(17,20,38,.08);
   --shadow-lg:0 12px 30px -8px rgba(17,20,38,.12);--shadow-xl:0 22px 50px -14px rgba(17,20,38,.16);
   color-scheme:light;
