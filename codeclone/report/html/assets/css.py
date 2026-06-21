@@ -61,11 +61,14 @@ _TOKENS_DARK = """\
   --shadow-lg:0 10px 30px -8px rgba(0,0,0,.44);
   --shadow-xl:0 20px 50px -14px rgba(0,0,0,.55);
 
-  /* radii */
-  --radius-sm:5px;
-  --radius-md:8px;
-  --radius-lg:11px;
-  --radius-xl:16px;
+  /* radii — crisp, not bubbly */
+  --radius-sm:4px;
+  --radius-md:6px;
+  --radius-lg:8px;
+  --radius-xl:12px;
+
+  /* page-background glow (dark only; light overrides to transparent) */
+  --bg-glow:color-mix(in oklch,var(--accent-primary) 9%,transparent);
 
   /* badge design code — one scale for every read-only label badge */
   --badge-font:var(--font-sans);
@@ -103,7 +106,7 @@ _TOKENS_LIGHT = """\
    so the whole theme feels like one family in both modes. */
 @media(prefers-color-scheme:light){
   :root:not([data-theme]){
-    --bg-body:oklch(98.5% 0.006 275);--bg-surface:#ffffff;
+    --bg-body:oklch(99% 0.003 275);--bg-surface:#ffffff;--bg-glow:transparent;
     --bg-raised:oklch(97% 0.010 275);--bg-overlay:oklch(93% 0.015 275);--bg-subtle:oklch(88% 0.020 275);
     --border:oklch(92% 0.010 275);--border-strong:oklch(85% 0.016 275);
     --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
@@ -119,7 +122,7 @@ _TOKENS_LIGHT = """\
   }
 }
 [data-theme="light"]{
-  --bg-body:oklch(98.5% 0.006 275);--bg-surface:#ffffff;
+  --bg-body:oklch(99% 0.003 275);--bg-surface:#ffffff;--bg-glow:transparent;
   --bg-raised:oklch(97% 0.010 275);--bg-overlay:oklch(93% 0.015 275);--bg-subtle:oklch(88% 0.020 275);
   --border:oklch(92% 0.010 275);--border-strong:oklch(85% 0.016 275);
   --text-primary:oklch(22% 0.040 275);--text-secondary:oklch(42% 0.048 275);--text-muted:oklch(58% 0.040 275);
@@ -145,8 +148,7 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%;-webkit-font-smoothing:
   -moz-osx-font-smoothing:grayscale;scroll-behavior:smooth;scrollbar-gutter:stable}
 body{font-family:var(--font-sans);font-size:14px;line-height:1.6;color:var(--text-primary);
   background:
-    radial-gradient(1200px 520px at 50% -10%,
-      color-mix(in oklch,var(--accent-primary) 10%,transparent),transparent 72%),
+    radial-gradient(1100px 460px at 50% -12%,var(--bg-glow),transparent 70%),
     var(--bg-body);
   background-attachment:fixed;overflow-x:hidden;
   /* Inter stylistic alternates:
@@ -354,7 +356,7 @@ _TOOLBAR = """\
 .filters-btn{display:inline-flex;align-items:center;gap:var(--sp-1);white-space:nowrap}
 .filters-btn-ico{flex:none}
 .filters-count{display:inline-flex;align-items:center;justify-content:center;
-  min-width:18px;height:18px;padding:0 5px;border-radius:999px;
+  min-width:18px;height:18px;padding:0 5px;border-radius:var(--radius-sm);
   background:var(--accent-primary);color:#fff;font-size:.68rem;font-weight:600;
   line-height:1}
 .filters-btn[aria-expanded="true"]{border-color:var(--accent-primary);
@@ -1104,7 +1106,7 @@ _SUGGESTIONS = """\
 .review-filters{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:var(--sp-4)}
 .review-filter-sep{width:1px;align-self:stretch;background:var(--border);margin:2px var(--sp-1)}
 .review-chip{display:inline-flex;align-items:center;gap:5px;font-size:.72rem;
-  font-family:var(--font-sans);padding:4px 10px;border-radius:999px;cursor:pointer;
+  font-family:var(--font-sans);padding:4px 10px;border-radius:var(--radius-sm);cursor:pointer;
   background:var(--bg-overlay);color:var(--text-secondary);border:1px solid var(--border);
   transition:border-color var(--dur-fast) var(--ease),color var(--dur-fast) var(--ease)}
 .review-chip:hover{border-color:var(--border-strong)}
@@ -1421,7 +1423,7 @@ dialog.prov-modal{max-width:720px;width:92vw;max-height:86vh;padding:0;overflow:
     color-mix(in srgb,var(--bg-raised) 55%,transparent) 0%,
     var(--bg-surface) 100%)}
 .prov-hero-badge{display:inline-flex;align-items:center;gap:7px;
-  padding:6px 12px 6px 10px;border-radius:999px;font-weight:700;font-size:.78rem;
+  padding:6px 12px 6px 10px;border-radius:var(--radius-md);font-weight:700;font-size:.78rem;
   letter-spacing:.005em;white-space:nowrap;flex-shrink:0;
   border:1px solid var(--border);background:var(--bg-surface)}
 .prov-hero-icon{flex-shrink:0}
