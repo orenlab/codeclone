@@ -1087,6 +1087,8 @@ _SUGGESTIONS = """\
   background:color-mix(in oklch,var(--danger) 14%,transparent)}
 .launchpad-sev--warning{color:var(--warning);
   background:color-mix(in oklch,var(--warning) 14%,transparent)}
+.launchpad-sev--info{color:var(--info);
+  background:color-mix(in oklch,var(--info) 14%,transparent)}
 .review-launchpad-cta{display:inline-flex;align-items:center;gap:7px;flex-shrink:0;
   font-size:.82rem;font-weight:600;font-family:var(--font-sans);cursor:pointer;
   padding:9px 16px;border-radius:var(--radius-md);border:0;
@@ -1117,6 +1119,8 @@ _SUGGESTIONS = """\
   background:color-mix(in oklch,var(--danger) 16%,transparent)}
 .review-chip--warning.is-active{border-color:var(--warning);color:var(--warning);
   background:color-mix(in oklch,var(--warning) 16%,transparent)}
+.review-chip--info.is-active{border-color:var(--info);color:var(--info);
+  background:color-mix(in oklch,var(--info) 16%,transparent)}
 .review-chip-count{font-family:var(--count-font);font-size:var(--count-size);
   font-weight:var(--count-weight);font-variant-numeric:tabular-nums;opacity:.85}
 .review-queue{display:flex;flex-direction:column;gap:9px}
