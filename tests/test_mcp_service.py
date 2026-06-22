@@ -7221,8 +7221,21 @@ def test_mcp_service_create_review_receipt_minimal_and_deterministic(
     assert compact["verdict"] == "incomplete"
 
     markdown = service.create_review_receipt(run_id="receipt12")
+    receipt_digest = cast("dict[str, object]", markdown["receipt_digest"])
     assert markdown["run_id"] == "receipt1"
-    assert markdown["format"] == "markdown"
+    assert {
+        "format": markdown["format"],
+        "receipt_version": markdown["receipt_version"],
+        "verdict": markdown["verdict"],
+        "digest_kind": receipt_digest["kind"],
+        "digest_algorithm": receipt_digest["algorithm"],
+    } == {
+        "format": "markdown",
+        "receipt_version": mcp_review_receipt_mod.RECEIPT_VERSION,
+        "verdict": "incomplete",
+        "digest_kind": "receipt_v1",
+        "digest_algorithm": "sha256",
+    }
     assert "## CodeClone Agent Review Receipt" in str(markdown["content"])
     assert "No intent declared." in str(markdown["content"])
 
@@ -9946,13 +9959,22 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     assert cast("dict[str, object]", cleared["summary"])["receipt"] == "created"
     receipt_payload = cast("dict[str, object]", cleared["receipt"])
     typed_receipt = cast("dict[str, object]", receipt_payload["receipt"])
+    receipt_digest = cast("dict[str, object]", receipt_payload["receipt_digest"])
     assert {
         "format": receipt_payload["format"],
+        "top_receipt_version": receipt_payload["receipt_version"],
+        "verdict": receipt_payload["verdict"],
+        "typed_verdict": typed_receipt["verdict"],
+        "digest_kind": receipt_digest["kind"],
         "has_content": isinstance(receipt_payload["content"], str),
         "receipt_version": typed_receipt["receipt_version"],
         "has_provenance": "provenance" in typed_receipt,
     } == {
         "format": "markdown",
+        "top_receipt_version": "1",
+        "verdict": "incomplete",
+        "typed_verdict": "incomplete",
+        "digest_kind": "receipt_v1",
         "has_content": True,
         "receipt_version": "1",
         "has_provenance": True,

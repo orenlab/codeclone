@@ -38,12 +38,13 @@ compatibility contract.
 
 Current `finish_controlled_change` compatibility facts:
 
-| Field             | Current role                                              | Compatibility decision                                                                 |
-|-------------------|-----------------------------------------------------------|----------------------------------------------------------------------------------------|
-| `summary.receipt` | compact created / skipped / failed status                 | keep; dashboards and skills use it as the receipt status signal                        |
-| `receipt.content` | complete human-readable markdown receipt                  | keep until durable typed receipt drill-down exists                                     |
-| `receipt.receipt` | complete typed receipt alias nested under markdown output | keep as the machine-readable compatibility path until another typed path is advertised |
-| `receipt_error`   | receipt failure reason                                    | keep; failed receipt creation prevents `auto_clear`                                    |
+| Field                                                         | Current role                                              | Compatibility decision                                                                 |
+|---------------------------------------------------------------|-----------------------------------------------------------|----------------------------------------------------------------------------------------|
+| `summary.receipt`                                             | compact created / skipped / failed status                 | keep; dashboards and skills use it as the receipt status signal                        |
+| `receipt.receipt_version` / `verdict` / `receipt_digest`      | top-level receipt identity and compact routing fields     | prefer for identity checks before reading the full typed alias                         |
+| `receipt.content`                                             | complete human-readable markdown receipt                  | keep until durable typed receipt drill-down exists                                     |
+| `receipt.receipt`                                             | complete typed receipt alias nested under markdown output | keep as the machine-readable compatibility path until another typed path is advertised |
+| `receipt_error`                                               | receipt failure reason                                    | keep; failed receipt creation prevents `auto_clear`                                    |
 
 Client and integration audit:
 

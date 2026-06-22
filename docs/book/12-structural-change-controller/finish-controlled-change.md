@@ -79,6 +79,11 @@ Findings/hotspots tools still honor all three levels.
 | `patch_trail`                   | Deterministic scope/verify forensics for this finish (see below); not authorization                   |
 | `projection_rebuild`            | Optional job enqueue on accept when projection policy is not `off` (non-CI)                           |
 
+Markdown receipt payloads expose top-level `receipt_version`, `verdict`, and
+`receipt_digest` for compact identity checks. The nested `receipt.receipt`
+typed alias remains the complete machine-readable receipt until durable typed
+receipt drill-down is available after `auto_clear=true`.
+
 ### Patch Trail on finish
 
 Patch Trail is computed when scope `check` reaches `violated` (**before**

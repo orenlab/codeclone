@@ -13,6 +13,7 @@ from ...audit import EVENT_RECEIPT_CREATED
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
+from ._context_governance import context_governance_digest
 from ._intent import IntentRecord
 from ._review_receipt import (
     RECEIPT_VERSION,
@@ -121,6 +122,9 @@ class _MCPSessionReviewReceiptMixin:
         payload: dict[str, object] = {
             "run_id": _helpers._short_run_id(record.run_id),
             "format": output_format,
+            "receipt_version": RECEIPT_VERSION,
+            "verdict": str(receipt.get("verdict", "")),
+            "receipt_digest": context_governance_digest("receipt_v1", receipt),
             "content": render_receipt_markdown(receipt),
             "receipt": receipt,
         }
