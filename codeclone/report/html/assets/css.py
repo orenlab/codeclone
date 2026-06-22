@@ -285,7 +285,8 @@ _CONTROLS = """\
 .btn:hover{box-shadow:var(--shadow-sm)}
 
 /* Smart controls — one accent focus ring for every button + tactile press */
-button:focus-visible{outline:2px solid var(--accent-primary);outline-offset:2px}
+button:focus-visible,a:focus-visible,summary:focus-visible{
+  outline:2px solid var(--accent-primary);outline-offset:2px}
 .btn:active,.prov-pill:active,.theme-toggle:active,.badge-btn:active,.badge-tab:active,
 .review-launchpad-cta:active,.review-toggle:active,.review-chip:active,
 .clone-nav-btn:active{transform:translateY(.5px) scale(.985)}
@@ -514,8 +515,8 @@ _SUB_TABS = """\
 
 _SECTIONS = """\
 .section{margin-bottom:var(--sp-6)}
-.subsection-title{font-size:1rem;font-weight:600;color:var(--text-primary);
-  margin-bottom:var(--sp-3);padding-bottom:var(--sp-2);border-bottom:1px solid var(--border)}
+.subsection-title{font-size:.95rem;font-weight:600;color:var(--text-primary);
+  margin:var(--sp-4) 0 var(--sp-2);padding-bottom:var(--sp-2);border-bottom:1px solid var(--border)}
 .section-body{display:flex;flex-direction:column;gap:var(--sp-3)}
 
 /* Clone groups */
@@ -804,7 +805,8 @@ _OVERVIEW = """\
 .overview-cluster-copy{font-size:.82rem;color:var(--text-muted);margin-top:2px}
 .overview-cluster-empty{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2);
   padding:var(--sp-5);text-align:center;color:var(--text-muted);font-size:.85rem}
-.empty-icon{color:var(--success);opacity:.35;width:32px;height:32px;flex-shrink:0}
+.empty-icon{color:var(--success);opacity:.35;width:32px;height:32px;flex-shrink:0;
+  margin-bottom:var(--sp-3)}
 .overview-list{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--sp-2)}
 
 /* Overview rows */
@@ -875,7 +877,7 @@ _OVERVIEW = """\
 .breakdown-row .source-kind-badge{justify-content:center;min-width:0;width:100%;text-align:center}
 .breakdown-count{font-size:.8rem;font-weight:600;font-variant-numeric:tabular-nums;
   color:var(--text-primary);text-align:right}
-.breakdown-bar-track{height:6px;border-radius:3px;background:var(--bg-raised);overflow:hidden}
+.breakdown-bar-track{height:6px;border-radius:3px;background:var(--bg-raised);overflow:hidden;display:flex}
 .breakdown-bar-fill{display:block;height:100%;border-radius:3px;
   background:var(--accent-primary);transition:width .6s var(--ease)}
 /* Directory hotspot entries */
@@ -932,7 +934,6 @@ _OVERVIEW = """\
 .families-label{font-size:.75rem;font-weight:500;color:var(--text-secondary);text-align:right}
 .families-count{font-size:.8rem;font-weight:600;font-variant-numeric:tabular-nums;
   color:var(--text-primary);text-align:right}
-.breakdown-bar-track{display:flex}
 .breakdown-bar-fill--baselined{opacity:.5}
 .breakdown-bar-fill--new{border-radius:0 3px 3px 0}
 .families-delta{font-size:.65rem;font-weight:600;font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -1143,7 +1144,7 @@ _SUGGESTIONS = """\
   border-color:var(--accent-primary);color:#fff}
 .suggestion-context{display:flex;gap:var(--sp-1);flex-wrap:wrap}
 .suggestion-chip{background:var(--bg-overlay);color:var(--text-muted)}
-.suggestion-summary{font-size:.8rem;font-family:var(--font-mono);color:var(--text-secondary);line-height:1.5}
+.suggestion-summary{font-size:.8rem;font-family:var(--font-sans);color:var(--text-secondary);line-height:1.5}
 .suggestion-action{display:flex;align-items:center;gap:var(--sp-1);
   font-size:.8rem;font-weight:500;color:var(--accent-primary);margin-top:var(--sp-1)}
 .suggestion-action-icon{flex-shrink:0;color:var(--accent-primary)}
@@ -1217,7 +1218,6 @@ _STRUCTURAL = """\
 .sf-table{table-layout:fixed}
 
 .sf-kind-meta{font-weight:normal;font-size:.8rem;color:var(--text-muted)}
-.subsection-title{font-size:.95rem;margin:var(--sp-4) 0 var(--sp-2)}
 .finding-occurrences-more summary{font-size:.8rem;color:var(--accent-primary);cursor:pointer;
   padding:var(--sp-1) var(--sp-3)}
 .sf-card[data-filter-hidden="true"]{display:none}
@@ -1350,7 +1350,6 @@ _MICRO_INTERACTIONS = """\
 _EMPTY = """\
 .empty{display:flex;align-items:center;justify-content:center;padding:var(--sp-10)}
 .empty-card{text-align:center;max-width:400px}
-.empty-icon{margin-bottom:var(--sp-3);color:var(--success)}
 .empty-icon svg{width:40px;height:40px}
 .empty-card h2{margin-bottom:var(--sp-2)}
 .empty-card p{color:var(--text-secondary);font-size:.9rem}
