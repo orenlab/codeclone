@@ -421,7 +421,7 @@ Refs:
 | `CODECLONE_OBSERVABILITY_FORCE`                 | truthy / falsy | Lift the CI collection guard; does not enable collection by itself. |
 | `CODECLONE_OBSERVABILITY_PROFILE`               | truthy / falsy | Capture process metrics; requires `codeclone[perf]`.                |
 | `CODECLONE_OBSERVABILITY_PERSIST`               | truthy / falsy | Persist completed operations; default true when enabled.            |
-| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES` | truthy / falsy | Capture bounded size/token estimates; default true.                 |
+| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES` | truthy / falsy | Capture bounded size/context-unit estimates; default true.          |
 | `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT`      | reserved       | Rejected; raw payload snapshots are unsupported.                    |
 | `CODECLONE_OBSERVABILITY_CORRELATION_ID`        | internal ID    | Worker handoff for cross-process correlation; set by CodeClone.     |
 | `CODECLONE_OBSERVABILITY_PARENT_OPERATION_ID`   | internal ID    | Worker handoff for the parent operation; set by CodeClone.          |

@@ -315,7 +315,8 @@ def test_render_cockpit_sections() -> None:
         "no-op",
         "Hottest span",
         "51 B",
-        "469",
+        "resp ctx p95",
+        "469 cu",
     )
 
 
@@ -410,6 +411,7 @@ def test_render_agent_context() -> None:
     html = render_trace_html(trace)
     assert "Agent context" in html
     assert "context pressure" in html
+    assert "1.0k cu" in html
     assert "get_relevant_memory" in html
     assert "80%" in html  # 800 / 1000 context share for the top consumer
 
@@ -426,7 +428,7 @@ def test_render_waste_section() -> None:
                     kind="high payload",
                     subject="get_relevant_memory",
                     surface="mcp",
-                    detail="p95 20 KB resp · 11000 tok",
+                    detail="p95 20 KB resp · 11000 cu",
                     severity=20480.0,
                 ),
                 WasteItem(
@@ -597,7 +599,12 @@ def test_observability_main_no_store(
 def test_html_format_helpers_and_semantic_cost_rows() -> None:
     from dataclasses import replace
 
-    from codeclone.observability.render_html import _bytes, _mb, _semantic_row, _tokens
+    from codeclone.observability.render_html import (
+        _bytes,
+        _context_units,
+        _mb,
+        _semantic_row,
+    )
 
     assert _mb(None) == "—"
     assert "GB" in _mb(2048.0)
@@ -606,9 +613,9 @@ def test_html_format_helpers_and_semantic_cost_rows() -> None:
     assert "MB" in _bytes(1024 * 1024)
     assert "KB" in _bytes(2048)
     assert _bytes(12).endswith(" B")
-    assert _tokens(None) == "—"
-    assert _tokens(0) == "—"
-    assert _tokens(1500).endswith("k")
+    assert _context_units(None) == "—"
+    assert _context_units(0) == "—"
+    assert _context_units(1500) == "1.5k cu"
 
     costly = SpanCostView(
         span_id="s1",

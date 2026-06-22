@@ -315,10 +315,11 @@ def _bytes(value: int | None) -> str:
     return f"{value} B"
 
 
-def _tokens(value: int | None) -> str:
+def _context_units(value: int | None) -> str:
     if not value:
         return "—"
-    return f"{value / 1000:.1f}k" if value >= 1000 else str(value)
+    amount = f"{value / 1000:.1f}k" if value >= 1000 else str(value)
+    return f"{amount} cu"
 
 
 def _bar(
@@ -835,7 +836,7 @@ def _mcp_row(tool: McpToolAggregate, *, lead: bool) -> str:
         f'<td class="r">{_ms(tool.p95_duration_ms)}</td>'
         f'<td class="r">{_bytes(tool.p95_request_bytes)}</td>'
         f'<td class="r">{_bytes(tool.p95_response_bytes)}</td>'
-        f'<td class="r">{_tokens(tool.p95_response_tokens)}</td></tr>'
+        f'<td class="r">{_context_units(tool.p95_response_tokens)}</td></tr>'
     )
 
 
@@ -855,13 +856,13 @@ def _mcp(tools: tuple[McpToolAggregate, ...]) -> str:
         ("p95", True),
         ("↑ req p95", True),
         ("↓ resp p95", True),
-        ("resp tok p95", True),
+        ("resp ctx p95", True),
     )
     return _section(
         "MCP tool matrix",
         _table(headers, rows),
         subtitle="Per-tool latency and payload — spot tools that flood request "
-        "or response bytes.",
+        "or response context units.",
     )
 
 
@@ -908,8 +909,8 @@ def _agent_row(row: AgentTokenRow, total_response: int, *, lead: bool) -> str:
     return (
         f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.name)}</td>'
         f'<td class="r">{row.calls}</td>'
-        f'<td class="r">{_tokens(row.request_tokens)}</td>'
-        f'<td class="r">{_tokens(row.response_tokens)}</td>'
+        f'<td class="r">{_context_units(row.request_tokens)}</td>'
+        f'<td class="r">{_context_units(row.response_tokens)}</td>'
         f'<td class="r">{share}%</td></tr>'
     )
 
@@ -920,8 +921,8 @@ def _agent(agg: AggregatesView) -> str:
         return ""
     cards = (
         '<div class="stats">'
-        + _stat(_tokens(view.response_tokens), "context pressure (tok)", "accent")
-        + _stat(_tokens(view.request_tokens), "sent (tok)")
+        + _stat(_context_units(view.response_tokens), "context pressure", "accent")
+        + _stat(_context_units(view.request_tokens), "sent context")
         + _stat(str(view.mcp_calls), "mcp calls")
         + _stat(str(len(view.consumers)), "tools")
         + "</div>"
@@ -938,15 +939,15 @@ def _agent(agg: AggregatesView) -> str:
     headers = (
         ("Tool", False),
         ("Calls", True),
-        ("↑ tok", True),
-        ("↓ tok", True),
+        ("↑ ctx", True),
+        ("↓ ctx", True),
         ("Context %", True),
     )
     return _section(
         "Agent context",
         cards + _table(headers, rows),
-        subtitle="Tokens MCP tools push back into the agent's context — the real "
-        "per-call cost for an LLM. The top row is your biggest context consumer.",
+        subtitle="Estimated context units MCP tools push back into the agent's "
+        "context. The top row is your biggest context consumer.",
     )
 
 
@@ -1179,7 +1180,7 @@ _TAB_LEADS: Mapping[str, str] = {
     "shared time axis.",
     "operations": "What ran — the finish→worker causality chains, nested by call "
     "depth.",
-    "cost": "What it cost — language-model tokens, MCP payloads, and database work.",
+    "cost": "What it cost — context units, MCP payloads, and database work.",
     "phases": "Inside analysis — pipeline stages and per-phase extract cost.",
 }
 

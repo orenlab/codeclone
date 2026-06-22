@@ -161,8 +161,16 @@ def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> Non
     assert out["user_facing"] is False
     assert out["operations"] == 4
     assert out["costly_noops"] == 1
+    assert out["context_pressure_units"] == out["context_pressure_tokens"]
     kinds = {d["kind"] for d in _rows(out["top_diagnostics"])}
     assert {"memory", "db", "context"} <= kinds
+    context_messages = [
+        cast("str", d["message"])
+        for d in _rows(out["top_diagnostics"])
+        if d["kind"] == "context"
+    ]
+    assert context_messages
+    assert "returned context units" in context_messages[0]
     routed = {r["section"] for r in _rows(out["recommended_next_sections"])}
     assert {"db_cost", "agent_context", "costly_noops"} <= routed
 
@@ -308,14 +316,16 @@ def test_correlated_chains_flattens_root_and_children(tmp_path: Path) -> None:
     assert chain["peak_rss_delta_mb"] == 440.0
 
 
-def test_agent_context_ranks_token_consumers(tmp_path: Path) -> None:
+def test_agent_context_ranks_context_unit_consumers(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(
         root=tmp_path, section="agent_context", detail_level="normal"
     )
     assert out["total_response_tokens"] == 11100
+    assert out["total_response_context_units"] == 11100
     top = _rows(out["rows"])[0]
     assert top["tool"] == "mcp.get_relevant_memory"
+    assert top["response_context_units"] == top["response_tokens"]
     assert top["verdict"] == "context_heavy"
 
 
@@ -450,6 +460,7 @@ def test_projection_helpers_and_diagnostic_edges(
     assert query_mod._correlated_chains(trace, 1)[0]["peak_rss_delta_mb"] == 4.0
     assert query_mod._agent_context_body(AggregatesView(0), 1) == {
         "total_response_tokens": 0,
+        "total_response_context_units": 0,
         "rows": [],
     }
     assert query_mod._memory_diagnostic(AggregatesView(0)) is None

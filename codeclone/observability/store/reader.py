@@ -61,7 +61,7 @@ _PHASE_HEAVY_PERMILLE = 250
 # an MCP response is "heavy" past these payload sizes.
 _WASTE_NOOP_MS = 50.0
 _HIGH_PAYLOAD_BYTES = 16 * 1024
-_HIGH_PAYLOAD_TOKENS = 4000
+_HIGH_PAYLOAD_CONTEXT_UNITS = 4000
 
 
 def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
@@ -340,13 +340,13 @@ def _waste(
             surface="mcp",
             detail=(
                 f"p95 {tool.p95_response_bytes / 1024:.0f} KB resp · "
-                f"{tool.p95_response_tokens} tok"
+                f"{tool.p95_response_tokens} cu"
             ),
             severity=float(tool.p95_response_bytes),
         )
         for tool in mcp_tools
         if tool.p95_response_bytes >= _HIGH_PAYLOAD_BYTES
-        or tool.p95_response_tokens >= _HIGH_PAYLOAD_TOKENS
+        or tool.p95_response_tokens >= _HIGH_PAYLOAD_CONTEXT_UNITS
     )
     items.sort(key=lambda w: (-w.severity, w.kind, w.subject))
     return tuple(items)

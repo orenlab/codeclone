@@ -141,7 +141,11 @@ class AnalysisPhaseRow:
 
 @dataclass(frozen=True, slots=True)
 class AgentTokenRow:
-    """One MCP tool's cumulative token economics across the window."""
+    """One MCP tool's cumulative context-unit economics across the window.
+
+    Field names keep the historical ``*_tokens`` spelling for storage/query
+    compatibility; values are deterministic context-unit estimates.
+    """
 
     name: str
     calls: int
@@ -151,9 +155,9 @@ class AgentTokenRow:
 
 @dataclass(frozen=True, slots=True)
 class AgentView:
-    """Agentic context economics: how many tokens MCP tools pushed back into
-    the agent's context (``response_tokens`` = context pressure), ranked by the
-    biggest consumer. Built only when MCP operations are present."""
+    """Agentic context economics: context units MCP tools pushed back into the
+    agent context (``response_tokens`` = legacy field for context pressure),
+    ranked by the biggest consumer. Built only when MCP operations are present."""
 
     mcp_calls: int = 0
     request_tokens: int = 0

@@ -205,7 +205,7 @@ def _observability_session_id() -> str:
 
 def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
     """Wrap a registered MCP tool so each call records an observability operation
-    with request/response payload sizes (bytes + tokens).
+    with request/response payload sizes (bytes + context-unit estimates).
 
     Inert direct passthrough when observability is disabled. Signature-preserving
     (``functools.wraps`` + explicit ``__signature__``) so FastMCP schema
@@ -222,9 +222,10 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
             bind_root(Path(root))
         with operation(name=f"mcp.{tool_name}", surface="mcp") as op:
             if payload_capture_enabled():
-                request_bytes, request_tokens = measure_payload(kwargs)
+                request_bytes, request_context_units = measure_payload(kwargs)
                 op.set_request(
-                    request_bytes=request_bytes, request_tokens=request_tokens
+                    request_bytes=request_bytes,
+                    request_tokens=request_context_units,
                 )
             # Open a root span around the handler: record_db_query attributes
             # SQL to the active span, not the operation. Without this span every
@@ -233,9 +234,10 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
             with span(name=f"mcp.{tool_name}"):
                 result = func(*args, **kwargs)
             if payload_capture_enabled() and isinstance(result, Mapping):
-                response_bytes, response_tokens = measure_payload(result)
+                response_bytes, response_context_units = measure_payload(result)
                 op.set_response(
-                    response_bytes=response_bytes, response_tokens=response_tokens
+                    response_bytes=response_bytes,
+                    response_tokens=response_context_units,
                 )
             return result
 

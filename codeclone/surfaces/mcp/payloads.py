@@ -21,11 +21,11 @@ T = TypeVar("T")
 
 
 def measure_payload(payload: Mapping[str, object]) -> tuple[int, int]:
-    """Return ``(byte_size, token_estimate)`` for a payload's canonical JSON.
+    """Return ``(byte_size, context_unit_estimate)`` for canonical JSON.
 
-    ``byte_size`` is the UTF-8 length of the canonical JSON; tokens reuse the
-    shared budget estimator (chars-approx default — no ``tiktoken`` import). Never
-    raises: payload measurement must never break the tool call it wraps.
+    ``byte_size`` is the UTF-8 length of the canonical JSON; context units reuse
+    the shared deterministic estimator or a valid ``context_governance`` envelope.
+    Never raises: payload measurement must never break the tool call it wraps.
     """
     text = _canonical_payload_text(payload)
     if text is None:

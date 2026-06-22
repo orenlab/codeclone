@@ -36,7 +36,7 @@ _MAX_DIAGNOSTICS = 3
 _DB_CHATTY_QPC = 200
 _CONTEXT_HEAVY_PCT = 25
 _MEMORY_HEAVY_MB = 200.0
-_CONTEXT_PRESSURE_TOKENS = 8000
+_CONTEXT_PRESSURE_UNITS = 8000
 _ANALYSIS_HEAVY_WORKER_MS = 2000.0
 
 _AGGREGATE_SECTIONS = (
@@ -208,13 +208,18 @@ def _pipeline(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
 def _agent_context_body(agg: AggregatesView, cap: int) -> dict[str, object]:
     agent = agg.agent
     if agent is None:
-        return {"total_response_tokens": 0, "rows": []}
+        return {
+            "total_response_tokens": 0,
+            "total_response_context_units": 0,
+            "rows": [],
+        }
     total = agent.response_tokens
     rows = [
         {
             "tool": c.name,
             "calls": c.calls,
             "response_tokens": c.response_tokens,
+            "response_context_units": c.response_tokens,
             "context_percent": round(100 * c.response_tokens / total) if total else 0,
             "verdict": (
                 "context_heavy"
@@ -224,7 +229,11 @@ def _agent_context_body(agg: AggregatesView, cap: int) -> dict[str, object]:
         }
         for c in agent.consumers[:cap]
     ]
-    return {"total_response_tokens": total, "rows": rows}
+    return {
+        "total_response_tokens": total,
+        "total_response_context_units": total,
+        "rows": rows,
+    }
 
 
 def _analysis_phase_body(agg: AggregatesView, cap: int) -> dict[str, object]:
@@ -352,7 +361,7 @@ def _context_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
         return None
     return {
         "kind": "context",
-        "message": f"{lead.name} consumed {pct}% of returned tokens.",
+        "message": f"{lead.name} consumed {pct}% of returned context units.",
     }
 
 
@@ -388,6 +397,7 @@ def _summary_body(trace: TraceView) -> dict[str, object]:
         "peak_rss_delta_mb": _round1(agg.max_rss_delta_mb),
         "peak_rss_mb": _round1(agg.max_peak_rss_mb),
         "context_pressure_tokens": agg.agent.response_tokens if agg.agent else 0,
+        "context_pressure_units": agg.agent.response_tokens if agg.agent else 0,
         "costly_noops": sum(1 for s in agg.semantic_costs if s.no_op),
         "top_diagnostics": _top_diagnostics(agg),
     }
@@ -420,9 +430,9 @@ def _recommended_next_sections(
                     "reason": f"high query count in {top.span_name}.",
                 }
             )
-    if agg.agent and agg.agent.response_tokens >= _CONTEXT_PRESSURE_TOKENS:
+    if agg.agent and agg.agent.response_tokens >= _CONTEXT_PRESSURE_UNITS:
         recs.append(
-            {"section": "agent_context", "reason": "high context-token pressure."}
+            {"section": "agent_context", "reason": "high context-unit pressure."}
         )
     if any(s.no_op for s in agg.semantic_costs):
         recs.append(

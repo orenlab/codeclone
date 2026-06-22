@@ -69,7 +69,7 @@ def test_registrar_records_operation_with_payload_sizes(tmp_path: Path) -> None:
     assert row[0] == "mcp"
     assert row[1] == "mcp._sample_tool"
     assert row[2] == "mcp-test"
-    # Payload sizes captured on both directions (bytes + tokens, all positive).
+    # Payload sizes captured on both directions (bytes + context units).
     assert row[3] > 0
     assert row[4] > 0
     assert row[5] > 0
