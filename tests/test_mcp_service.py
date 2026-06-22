@@ -9945,12 +9945,45 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     assert cleared["intent_cleared"] is True
     assert cast("dict[str, object]", cleared["summary"])["receipt"] == "created"
     receipt_payload = cast("dict[str, object]", cleared["receipt"])
-    assert receipt_payload["format"] == "markdown"
-    assert isinstance(receipt_payload["content"], str)
     typed_receipt = cast("dict[str, object]", receipt_payload["receipt"])
-    assert typed_receipt["receipt_version"] == "1"
-    assert "provenance" in typed_receipt
+    assert {
+        "format": receipt_payload["format"],
+        "has_content": isinstance(receipt_payload["content"], str),
+        "receipt_version": typed_receipt["receipt_version"],
+        "has_provenance": "provenance" in typed_receipt,
+    } == {
+        "format": "markdown",
+        "has_content": True,
+        "receipt_version": "1",
+        "has_provenance": True,
+    }
     assert cast("dict[str, object]", typed_receipt["scope"])["intent_id"] == (intent_id)
+    context_governance = cast("dict[str, object]", cleared["context_governance"])
+    assert {
+        "contract_version": context_governance["contract_version"],
+        "estimator": context_governance["estimator"],
+        "mode": context_governance["mode"],
+        "truncated": context_governance["truncated"],
+        "mandatory_overflow": context_governance["mandatory_overflow"],
+    } == {
+        "contract_version": "1.0",
+        "estimator": "utf8_bytes_div_4_v1",
+        "mode": "observe",
+        "truncated": False,
+        "mandatory_overflow": False,
+    }
+    assert context_governance["enforcement"] == {
+        "response_budget": False,
+        "nested_budget": False,
+        "omission": False,
+    }
+    assert (
+        cast("dict[str, object]", context_governance["capabilities"])[
+            "typed_receipt_alias"
+        ]
+        is True
+    )
+    assert isinstance(context_governance["estimated"], int)
 
 
 def test_mcp_workflow_finish_python_structural_and_receipt_edges(

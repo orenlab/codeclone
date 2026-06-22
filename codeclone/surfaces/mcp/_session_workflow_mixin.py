@@ -29,6 +29,7 @@ from ...audit.events import EVENT_PATCH_TRAIL_COMPUTED
 from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
+from ._context_governance import attach_passive_context_governance
 from ._intent import IntentRecord, IntentStatus
 from ._patch_contract import PatchContractStatus
 from ._patch_trail_bridge import build_patch_trail_inputs
@@ -279,19 +280,21 @@ class _MCPSessionWorkflowMixin:
 
         # Queued intents cannot be verified
         if active_intent.status == IntentStatus.QUEUED:
-            return {
-                "intent_id": intent_id,
-                "status": "unverified",
-                "reason": "intent_not_active",
-                "scope_check": None,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "intent_cleared": False,
-                "user_action_required": False,
-                "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
-                "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
-            }
+            return attach_passive_context_governance(
+                {
+                    "intent_id": intent_id,
+                    "status": "unverified",
+                    "reason": "intent_not_active",
+                    "scope_check": None,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "intent_cleared": False,
+                    "user_action_required": False,
+                    "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
+                    "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
+                }
+            )
 
         # 2. Resolve changed files — exactly one source
         resolved_files = self._resolve_changed_files_once(
@@ -336,20 +339,22 @@ class _MCPSessionWorkflowMixin:
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
-            return {
-                "intent_id": intent_id,
-                "status": "unverified",
-                "reason": "workspace_hygiene",
-                "scope_check": None,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "intent_cleared": False,
-                "user_action_required": True,
-                "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
-                "workspace_hygiene_after": workspace_hygiene_after,
-                "message": detail_message,
-            }
+            return attach_passive_context_governance(
+                {
+                    "intent_id": intent_id,
+                    "status": "unverified",
+                    "reason": "workspace_hygiene",
+                    "scope_check": None,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "intent_cleared": False,
+                    "user_action_required": True,
+                    "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
+                    "workspace_hygiene_after": workspace_hygiene_after,
+                    "message": detail_message,
+                }
+            )
 
         scope_files = (
             finish_hygiene.files_for_scope_check
@@ -369,46 +374,49 @@ class _MCPSessionWorkflowMixin:
 
         # Expired intent
         if check_status == IntentStatus.EXPIRED.value:
-            return {
-                "intent_id": intent_id,
-                "status": "expired",
-                "reason": "report_digest_mismatch",
-                "scope_check": check_payload,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "intent_cleared": False,
-                "user_action_required": True,
-                "next_step": workflow_msgs.FINISH_DIGEST_MISMATCH_NEXT,
-                "message": workflow_msgs.FINISH_DIGEST_MISMATCH,
-            }
+            return attach_passive_context_governance(
+                {
+                    "intent_id": intent_id,
+                    "status": "expired",
+                    "reason": "report_digest_mismatch",
+                    "scope_check": check_payload,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "intent_cleared": False,
+                    "user_action_required": True,
+                    "next_step": workflow_msgs.FINISH_DIGEST_MISMATCH_NEXT,
+                    "message": workflow_msgs.FINISH_DIGEST_MISMATCH,
+                }
+            )
 
         # 4. Scope violation — early exit
         if check_status == IntentStatus.VIOLATED.value:
-            patch_trail_payload = self._finish_patch_trail(
-                record=record,
-                intent=active_intent,
-                check_payload=check_payload,
-                verify_payload=_NOT_REACHED_VERIFY_PAYLOAD,
-                finish_hygiene=finish_hygiene,
-                scope_check_audit_sequence=scope_check_audit_sequence,
-                patch_verify_audit_sequence=None,
-                patch_trail_detail=patch_trail_detail,
+            return attach_passive_context_governance(
+                {
+                    "intent_id": intent_id,
+                    "status": "violated",
+                    "reason": "scope_violation",
+                    "scope_check": check_payload,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "patch_trail": self._finish_patch_trail(
+                        record=record,
+                        intent=active_intent,
+                        check_payload=check_payload,
+                        verify_payload=_NOT_REACHED_VERIFY_PAYLOAD,
+                        finish_hygiene=finish_hygiene,
+                        scope_check_audit_sequence=scope_check_audit_sequence,
+                        patch_verify_audit_sequence=None,
+                        patch_trail_detail=patch_trail_detail,
+                    ),
+                    "intent_cleared": False,
+                    "user_action_required": True,
+                    "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
+                    "message": workflow_msgs.FINISH_SCOPE_VIOLATION,
+                }
             )
-            return {
-                "intent_id": intent_id,
-                "status": "violated",
-                "reason": "scope_violation",
-                "scope_check": check_payload,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "patch_trail": patch_trail_payload,
-                "intent_cleared": False,
-                "user_action_required": True,
-                "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
-                "message": workflow_msgs.FINISH_SCOPE_VIOLATION,
-            }
 
         # 5. Verify (before_run_id auto-resolves from intent)
         verify_payload = self._patch_contract_verify(
@@ -434,35 +442,36 @@ class _MCPSessionWorkflowMixin:
 
         # 6. Non-accepted verification — return without receipt/clear
         if verify_status not in _ACCEPTED_STATUSES:
-            verify_reason = str(verify_payload.get("reason", ""))
-            return {
-                "intent_id": intent_id,
-                "status": verify_status,
-                "reason": verify_reason,
-                "scope_check": check_payload,
-                "verification": verify_payload,
-                "claims": None,
-                "receipt": None,
-                "patch_trail": patch_trail_payload,
-                "intent_cleared": False,
-                "workspace_hygiene_after": workspace_hygiene_after,
-                "summary": _finish_summary(
-                    verify_status=verify_status,
-                    intent_cleared=False,
-                    check_payload=check_payload,
-                    verify_payload=verify_payload,
-                    claims_payload=None,
-                    receipt_payload=None,
-                    receipt_error=None,
-                    workspace_hygiene_after=workspace_hygiene_after,
-                    review_text_present=bool(review_text),
-                    claims_text_present=bool(claims_text),
-                ),
-                "user_action_required": verify_status
-                == PatchContractStatus.VIOLATED.value,
-                "next_step": verify_payload.get("next_step"),
-                "message": str(verify_payload.get("message", "")),
-            }
+            return attach_passive_context_governance(
+                {
+                    "intent_id": intent_id,
+                    "status": verify_status,
+                    "reason": str(verify_payload.get("reason", "")),
+                    "scope_check": check_payload,
+                    "verification": verify_payload,
+                    "claims": None,
+                    "receipt": None,
+                    "patch_trail": patch_trail_payload,
+                    "intent_cleared": False,
+                    "workspace_hygiene_after": workspace_hygiene_after,
+                    "summary": _finish_summary(
+                        verify_status=verify_status,
+                        intent_cleared=False,
+                        check_payload=check_payload,
+                        verify_payload=verify_payload,
+                        claims_payload=None,
+                        receipt_payload=None,
+                        receipt_error=None,
+                        workspace_hygiene_after=workspace_hygiene_after,
+                        review_text_present=bool(review_text),
+                        claims_text_present=bool(claims_text),
+                    ),
+                    "user_action_required": verify_status
+                    == PatchContractStatus.VIOLATED.value,
+                    "next_step": verify_payload.get("next_step"),
+                    "message": str(verify_payload.get("message", "")),
+                }
+            )
 
         health_regression_advisory = verify_payload.get("health_regression_advisory")
         claims_payload = self._conditional_claim_validation(
@@ -551,7 +560,7 @@ class _MCPSessionWorkflowMixin:
             )
             if projection_hook is not None:
                 result["projection_rebuild"] = projection_hook
-        return result
+        return attach_passive_context_governance(result)
 
     def _finish_patch_trail(
         self,
