@@ -85,6 +85,7 @@ _CSS = """
 --font:"Inter","Inter Variable",-apple-system,BlinkMacSystemFont,"Segoe UI",
 Roboto,sans-serif;
 --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+--radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;
 }
 @media (prefers-color-scheme:light){:root{
 --bg:oklch(98.5% 0.006 275);--surface:#fff;--surface-2:oklch(97.3% 0.006 275);
@@ -110,14 +111,14 @@ h2{font-size:11px;text-transform:uppercase;letter-spacing:0.09em;
 color:var(--mute);font-weight:600;margin:0 0 4px 2px}
 .shint{color:var(--mute);font-size:12px;margin:0 0 11px 2px}
 .panel{background:var(--surface);border:1px solid var(--border);
-border-radius:11px;overflow:hidden}
+border-radius:var(--radius-xl);overflow:hidden}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
 gap:10px;margin-bottom:12px}
 .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;
 margin-bottom:12px}
 @media (max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .card{background:var(--surface);border:1px solid var(--border);
-border-radius:11px;padding:14px 16px}
+border-radius:var(--radius-xl);padding:14px 16px}
 .card .v{font-size:24px;font-weight:600;letter-spacing:-0.02em;
 font-family:var(--mono)}
 .card .l{color:var(--mute);font-size:10.5px;text-transform:uppercase;
@@ -150,11 +151,12 @@ text-overflow:ellipsis;white-space:nowrap}
 .lin{color:var(--mute);font-size:11.5px;font-family:var(--mono)}
 .lmetric{font-family:var(--mono);font-size:14px;font-weight:600;white-space:nowrap}
 .badge{font-size:10px;font-weight:600;font-family:var(--mono);padding:2px 7px;
-border-radius:5px;text-transform:uppercase;letter-spacing:0.03em;flex-shrink:0;
+border-radius:var(--radius-sm);text-transform:uppercase;letter-spacing:0.03em;flex-shrink:0;
 background:color-mix(in oklch,var(--c,var(--accent)) 16%,transparent);
 color:var(--c,var(--accent))}
 .surf-mcp{--c:var(--mcp)}.surf-cli{--c:var(--cli)}.surf-memory{--c:var(--memory)}
-.chip{font-size:10.5px;font-family:var(--mono);padding:1px 8px;border-radius:20px;
+.chip{font-size:10.5px;font-family:var(--mono);padding:1px 8px;
+border-radius:var(--radius-sm);
 background:var(--surface-2);color:var(--dim);border:1px solid var(--border);
 white-space:nowrap}
 .chip.warn{color:var(--warn);border-color:transparent;background:var(--warn-soft);
@@ -200,7 +202,7 @@ align-items:center;column-gap:12px;padding:2px 0}
 text-overflow:ellipsis;white-space:nowrap}
 .wf-label.op{color:var(--text);font-weight:550}
 .wf-label.span{color:var(--dim)}
-.wf-track{position:relative;height:14px;background:var(--track);border-radius:4px}
+.wf-track{position:relative;height:14px;background:var(--track);border-radius:var(--radius-sm)}
 .wf-bar{position:absolute;top:2px;height:10px;border-radius:3px;
 background:var(--c,var(--accent))}
 .wf-bar.span{top:3px;height:8px;opacity:0.8}
@@ -222,6 +224,30 @@ tr.flag td{background:var(--warn-soft)}
 .empty{padding:30px;text-align:center;color:var(--mute);font-size:13px}
 .foot{margin-top:38px;color:var(--mute);font-size:11px;text-align:center;
 font-family:var(--mono)}
+/* Tabbed information architecture — CSS-only, radio-driven (no JS) */
+.obs-tab-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.obs-tabs{display:flex;flex-wrap:wrap;gap:2px;margin:0 0 26px;
+border-bottom:1px solid var(--border)}
+.obs-tab{padding:9px 15px;font-size:12.5px;font-weight:550;color:var(--mute);
+cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+border-radius:var(--radius-sm) var(--radius-sm) 0 0;user-select:none;
+transition:color 0.15s,border-color 0.15s}
+.obs-tab:hover{color:var(--text)}
+.obs-tab-input:focus-visible+.obs-tab{outline:2px solid var(--accent);
+outline-offset:-2px}
+.obs-panel{display:none}
+.obs-panel>section:first-child{margin-top:0}
+#t-overview:checked~.obs-tabs .obs-tab[for="t-overview"],
+#t-timeline:checked~.obs-tabs .obs-tab[for="t-timeline"],
+#t-operations:checked~.obs-tabs .obs-tab[for="t-operations"],
+#t-cost:checked~.obs-tabs .obs-tab[for="t-cost"],
+#t-phases:checked~.obs-tabs .obs-tab[for="t-phases"]{
+color:var(--accent);border-bottom-color:var(--accent)}
+#t-overview:checked~.obs-panels #p-overview,
+#t-timeline:checked~.obs-panels #p-timeline,
+#t-operations:checked~.obs-panels #p-operations,
+#t-cost:checked~.obs-panels #p-cost,
+#t-phases:checked~.obs-panels #p-phases{display:block}
 """
 
 
@@ -957,26 +983,71 @@ def _analysis_phases_section(trace: TraceView) -> str:
     )
 
 
+_TABS: tuple[tuple[str, str], ...] = (
+    ("overview", "Overview"),
+    ("timeline", "Timeline"),
+    ("operations", "Operations"),
+    ("cost", "Cost"),
+    ("phases", "Phases"),
+)
+
+
+def _tab_shell(panels: Mapping[str, str]) -> str:
+    """Wrap the section panels in CSS-only radio tabs.
+
+    The radio inputs are emitted first so the ``:checked ~`` sibling selectors
+    can light the active tab label and reveal the matching panel without any
+    script. An empty panel falls back to a placeholder so a view is never blank.
+    """
+    inputs = "".join(
+        f'<input type="radio" name="obs-tab" class="obs-tab-input" '
+        f'id="t-{tid}"{" checked" if idx == 0 else ""}>'
+        for idx, (tid, _) in enumerate(_TABS)
+    )
+    nav = (
+        '<nav class="obs-tabs" aria-label="Observability views">'
+        + "".join(
+            f'<label class="obs-tab" for="t-{tid}">{_esc(label)}</label>'
+            for tid, label in _TABS
+        )
+        + "</nav>"
+    )
+    sections: list[str] = []
+    for tid, label in _TABS:
+        inner = panels.get(tid, "")
+        if not inner.strip():
+            inner = (
+                f'<div class="panel empty">No {_esc(label.lower())} data '
+                f"recorded for this window.</div>"
+            )
+        sections.append(f'<section class="obs-panel" id="p-{tid}">{inner}</section>')
+    return f'{inputs}{nav}<div class="obs-panels">{"".join(sections)}</div>'
+
+
 def render_trace_html(trace: TraceView) -> str:
     """Render a ``TraceView`` as a self-contained, branded diagnosis cockpit."""
+    agg = trace.aggregates
     foot = f"CodeClone · platform observability · schema {_esc(trace.schema_version)}"
+    panels = {
+        "overview": _summary(trace) + _waste_section(agg),
+        "timeline": _waterfall(trace),
+        "operations": _chain(trace),
+        "cost": (
+            _semantic(agg)
+            + _db_cost(agg)
+            + _db_fingerprints(agg)
+            + _agent(agg)
+            + _mcp(agg.mcp_tools)
+        ),
+        "phases": _pipeline_section(agg) + _analysis_phases_section(trace),
+    }
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         "<title>CodeClone · Platform Observability</title>"
         f'<style>{_CSS}</style></head><body><div class="wrap">'
         + _header(trace)
-        + _summary(trace)
-        + _waste_section(trace.aggregates)
-        + _waterfall(trace)
-        + _chain(trace)
-        + _semantic(trace.aggregates)
-        + _db_cost(trace.aggregates)
-        + _db_fingerprints(trace.aggregates)
-        + _agent(trace.aggregates)
-        + _mcp(trace.aggregates.mcp_tools)
-        + _pipeline_section(trace.aggregates)
-        + _analysis_phases_section(trace)
+        + _tab_shell(panels)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"
     )
