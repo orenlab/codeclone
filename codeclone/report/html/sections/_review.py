@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ..primitives.escape import _escape_html
-from ..primitives.filters import _render_select
+from ..primitives.filters import _render_filter_chips
 from ..widgets.badges import _tab_empty
 from ..widgets.cards import finding_card, meta_badge_html
 from ..widgets.components import Tone, insight_block
@@ -110,52 +110,28 @@ def _review_progress(total: int) -> str:
 
 
 def _review_toolbar(summary: Mapping[str, object], total: int) -> str:
-    """Shared filter toolbar (Filters popover + selects), like Suggestions."""
+    """Inline density of the shared filter system: one-click chips + count."""
     by_severity = _as_mapping(summary.get("by_severity"))
     by_family = _as_mapping(summary.get("by_family"))
     sev_opts = tuple(
-        (severity, severity.title())
+        (severity, severity.title(), _as_int(by_severity.get(severity)))
         for severity in _SEVERITIES
         if _as_int(by_severity.get(severity)) > 0
     )
-    fam_opts = tuple((family, _family_label(family)) for family in sorted(by_family))
-    filters_menu = (
-        '<div class="filters-menu" role="group" hidden>'
-        '<div class="filters-row">'
-        '<label class="filters-label" for="review-severity">Severity</label>'
-        + _render_select(
-            element_id="review-severity",
-            data_attr="data-review-severity",
-            options=sev_opts,
-            all_label="All",
-        )
-        + "</div>"
-        '<div class="filters-row">'
-        '<label class="filters-label" for="review-family">Family</label>'
-        + _render_select(
-            element_id="review-family",
-            data_attr="data-review-family",
-            options=fam_opts,
-            all_label="All",
-        )
-        + "</div></div>"
+    fam_opts = tuple(
+        (family, _family_label(family), _as_int(count))
+        for family, count in sorted(by_family.items())
     )
     return (
-        '<div class="toolbar" role="toolbar" aria-label="Review filters">'
-        '<div class="toolbar-left"><div class="filters-popover">'
-        '<button class="btn filters-btn" type="button" '
-        'data-filters-toggle="review" aria-expanded="false" '
-        'aria-haspopup="true" title="Filter findings">'
-        '<svg class="filters-btn-ico" viewBox="0 0 16 16" width="13" height="13" '
-        'fill="none" stroke="currentColor" stroke-width="1.7" '
-        'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
-        '<path d="M2 3.5h12M4 8h8M6.5 12.5h3"/></svg>'
-        "<span>Filters</span>"
-        '<span class="filters-count" data-filters-count="review" hidden>0</span>'
-        "</button>"
-        f"{filters_menu}"
-        "</div></div>"
+        '<div class="toolbar toolbar--filters" role="toolbar" '
+        'aria-label="Review filters" data-review-filters>'
+        '<div class="toolbar-left">'
+        + _render_filter_chips(dim="severity", options=sev_opts)
+        + _render_filter_chips(dim="family", options=fam_opts)
+        + "</div>"
         '<div class="toolbar-right">'
+        '<button type="button" class="btn filter-reset" data-filter-reset hidden>'
+        "Clear</button>"
         f'<span class="toolbar-count-label" data-review-count>{total} shown</span>'
         "</div></div>"
     )

@@ -4440,9 +4440,12 @@ def test_html_report_renders_review_panel() -> None:
         "data-review-toggle",
         "Duplicated branch logic",
         # shared filter system (Filters popover + selects), not bespoke chips
-        'data-filters-toggle="review"',
-        "data-review-severity",
-        "data-review-family",
+        # shared filter system, inline density: one-click toggle chips
+        'class="filter-chip',
+        'data-filter-dim="severity"',
+        'data-filter-value="critical"',
+        'data-filter-dim="family"',
+        "data-filter-reset",
         "data-review-count",
         "data-review-body",
         # novelty marker on the new finding
