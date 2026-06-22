@@ -84,6 +84,14 @@ Markdown receipt payloads expose top-level `receipt_version`, `verdict`, and
 typed alias remains the complete machine-readable receipt until durable typed
 receipt drill-down is available after `auto_clear=true`.
 
+`context_governance` measures the complete finish response as one payload and
+publishes a `finish_projection_v1` digest under
+`context_governance.response`. Current finish responses stay in
+`mode="observe"` and `evidence_policy="observe_only_no_omission"`: receipt
+content, typed receipt evidence, Patch Trail, scope checks, verification, and
+workspace hygiene are not omitted while exact durable drill-down remains
+blocked.
+
 ### Patch Trail on finish
 
 Patch Trail is computed when scope `check` reaches `violated` (**before**

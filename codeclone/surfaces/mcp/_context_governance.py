@@ -24,6 +24,7 @@ CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.0"
 CONTEXT_GOVERNANCE_DIGEST_VERSION: Final = "1"
 CONTEXT_GOVERNANCE_ESTIMATOR: Final = "utf8_bytes_div_4_v1"
 DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2200
+FINISH_RESPONSE_PROJECTION_KIND: Final = "finish_projection_v1"
 
 _OBSERVE_ENFORCEMENT: Final[dict[str, bool]] = {
     "response_budget": False,
@@ -81,6 +82,7 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
 
 _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
     "response_budget": [
+        "receipt_retrieval_unavailable",
         "durable_receipt_lookup",
         "durable_patch_trail_lookup",
         "immutable_blast_artifact",
@@ -141,11 +143,16 @@ def attach_passive_context_governance(
     payload: Mapping[str, object],
     *,
     limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    response: Mapping[str, object] | None = None,
+    projection_kind: str | None = None,
 ) -> dict[str, object]:
     """Attach a passive ``context_governance`` envelope without omitting data."""
 
     result = dict(payload)
-    result["context_governance"] = {
+    response_context = _response_context_metadata(
+        result, response=response, projection_kind=projection_kind
+    )
+    context_governance: dict[str, object] = {
         "contract_version": CONTEXT_GOVERNANCE_CONTRACT_VERSION,
         "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
         "limit": limit,
@@ -158,10 +165,48 @@ def attach_passive_context_governance(
         "capabilities": passive_context_capabilities(),
         "drill_down": passive_drill_down_reachability(),
     }
+    context_governance.update(response_context)
+    result["context_governance"] = context_governance
     governance = result["context_governance"]
     assert isinstance(governance, dict)
     governance["estimated"] = estimate_response_context_units(result)
     return result
+
+
+def attach_finish_context_governance(
+    payload: Mapping[str, object],
+    *,
+    limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+) -> dict[str, object]:
+    """Attach whole-response governance metadata for finish responses."""
+
+    return attach_passive_context_governance(
+        payload,
+        limit=limit,
+        projection_kind=FINISH_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "finish_controlled_change",
+            "budget_scope": "whole_response",
+            "evidence_policy": "observe_only_no_omission",
+            "receipt_content": "mandatory_until_durable_lookup",
+        },
+    )
+
+
+def _response_context_metadata(
+    payload: Mapping[str, object],
+    *,
+    response: Mapping[str, object] | None,
+    projection_kind: str | None,
+) -> dict[str, object]:
+    if response is None:
+        return {}
+    response_payload = dict(response)
+    if projection_kind is not None:
+        response_payload["projection_digest"] = context_governance_digest(
+            projection_kind, payload
+        )
+    return {"response": response_payload}
 
 
 def _canonical_context_bytes(payload: object) -> bytes:
@@ -194,6 +239,8 @@ __all__ = [
     "CONTEXT_GOVERNANCE_DIGEST_VERSION",
     "CONTEXT_GOVERNANCE_ESTIMATOR",
     "DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT",
+    "FINISH_RESPONSE_PROJECTION_KIND",
+    "attach_finish_context_governance",
     "attach_passive_context_governance",
     "context_governance_digest",
     "estimate_response_context_units",

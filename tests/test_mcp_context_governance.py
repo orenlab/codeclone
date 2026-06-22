@@ -18,6 +18,8 @@ from codeclone.surfaces.mcp._context_governance import (
     CONTEXT_GOVERNANCE_DIGEST_VERSION,
     CONTEXT_GOVERNANCE_ESTIMATOR,
     DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    FINISH_RESPONSE_PROJECTION_KIND,
+    attach_finish_context_governance,
     attach_passive_context_governance,
     context_governance_digest,
     estimate_response_context_units,
@@ -92,7 +94,7 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     }
     blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
     assert {
-        "response": "durable_receipt_lookup" in blocked["response_budget"],
+        "response": "receipt_retrieval_unavailable" in blocked["response_budget"],
         "nested": "implementation_context_artifact_pages" in blocked["nested_budget"],
         "omission": "exact_continuation_for_omitted_tails" in blocked["omission"],
     } == {
@@ -104,6 +106,33 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     assert capabilities["typed_receipt_alias"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
+
+
+def test_finish_context_governance_marks_whole_response_projection() -> None:
+    payload = attach_finish_context_governance(
+        {"intent_id": "intent-1", "status": "accepted"}
+    )
+    envelope = cast("dict[str, object]", payload["context_governance"])
+    response = cast("dict[str, object]", envelope["response"])
+    digest = cast("dict[str, object]", response["projection_digest"])
+    blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
+
+    assert {
+        "tool": response["tool"],
+        "budget_scope": response["budget_scope"],
+        "policy": response["evidence_policy"],
+        "receipt_content": response["receipt_content"],
+        "digest_kind": digest["kind"],
+        "receipt_blocker": "receipt_retrieval_unavailable"
+        in blocked["response_budget"],
+    } == {
+        "tool": "finish_controlled_change",
+        "budget_scope": "whole_response",
+        "policy": "observe_only_no_omission",
+        "receipt_content": "mandatory_until_durable_lookup",
+        "digest_kind": FINISH_RESPONSE_PROJECTION_KIND,
+        "receipt_blocker": True,
+    }
 
 
 def test_context_governance_declares_drill_down_reachability() -> None:

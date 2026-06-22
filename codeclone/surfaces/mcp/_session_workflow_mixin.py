@@ -29,7 +29,7 @@ from ...audit.events import EVENT_PATCH_TRAIL_COMPUTED
 from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
-from ._context_governance import attach_passive_context_governance
+from ._context_governance import attach_finish_context_governance
 from ._intent import IntentRecord, IntentStatus
 from ._patch_contract import PatchContractStatus
 from ._patch_trail_bridge import build_patch_trail_inputs
@@ -280,7 +280,7 @@ class _MCPSessionWorkflowMixin:
 
         # Queued intents cannot be verified
         if active_intent.status == IntentStatus.QUEUED:
-            return attach_passive_context_governance(
+            return attach_finish_context_governance(
                 {
                     "intent_id": intent_id,
                     "status": "unverified",
@@ -339,7 +339,7 @@ class _MCPSessionWorkflowMixin:
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
-            return attach_passive_context_governance(
+            return attach_finish_context_governance(
                 {
                     "intent_id": intent_id,
                     "status": "unverified",
@@ -374,7 +374,7 @@ class _MCPSessionWorkflowMixin:
 
         # Expired intent
         if check_status == IntentStatus.EXPIRED.value:
-            return attach_passive_context_governance(
+            return attach_finish_context_governance(
                 {
                     "intent_id": intent_id,
                     "status": "expired",
@@ -392,7 +392,7 @@ class _MCPSessionWorkflowMixin:
 
         # 4. Scope violation — early exit
         if check_status == IntentStatus.VIOLATED.value:
-            return attach_passive_context_governance(
+            return attach_finish_context_governance(
                 {
                     "intent_id": intent_id,
                     "status": "violated",
@@ -442,7 +442,7 @@ class _MCPSessionWorkflowMixin:
 
         # 6. Non-accepted verification — return without receipt/clear
         if verify_status not in _ACCEPTED_STATUSES:
-            return attach_passive_context_governance(
+            return attach_finish_context_governance(
                 {
                     "intent_id": intent_id,
                     "status": verify_status,
@@ -560,7 +560,7 @@ class _MCPSessionWorkflowMixin:
             )
             if projection_hook is not None:
                 result["projection_rebuild"] = projection_hook
-        return attach_passive_context_governance(result)
+        return attach_finish_context_governance(result)
 
     def _finish_patch_trail(
         self,

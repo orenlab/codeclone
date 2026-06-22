@@ -84,9 +84,17 @@ It estimates the returned response but does **not** omit evidence yet:
 | `enforcement_blocked`              | missing exact retrieval capabilities that prevent safe response-budget enforcement                         |
 | `capabilities.typed_receipt_alias` | `true` while `receipt.receipt` remains the typed compatibility path                                       |
 | `drill_down`                       | exact object routes and blocked continuation/snapshot routes for evidence that may later be omitted        |
+| `response`                         | optional tool-specific response budget scope and projection digest                                        |
 
 Treat `mode="observe"` as telemetry and compatibility metadata, not as proof
 that the response is already bounded.
+
+For `finish_controlled_change`, `context_governance.response` describes the
+whole returned finish response. It includes `tool="finish_controlled_change"`,
+`budget_scope="whole_response"`, `evidence_policy="observe_only_no_omission"`,
+and a `finish_projection_v1` digest. The response is measured as one payload,
+but no evidence is removed while receipt, Patch Trail, blast artifact, or
+omitted-tail drill-down remains blocked.
 
 Current drill-down reachability is intentionally conservative:
 

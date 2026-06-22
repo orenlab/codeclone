@@ -9999,6 +9999,27 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "nested_budget": False,
         "omission": False,
     }
+    governance_response = cast("dict[str, object]", context_governance["response"])
+    response_digest = cast(
+        "dict[str, object]", governance_response["projection_digest"]
+    )
+    enforcement_blocked = cast(
+        "dict[str, list[str]]", context_governance["enforcement_blocked"]
+    )
+    assert {
+        "tool": governance_response["tool"],
+        "budget_scope": governance_response["budget_scope"],
+        "evidence_policy": governance_response["evidence_policy"],
+        "digest_kind": response_digest["kind"],
+        "receipt_blocker": "receipt_retrieval_unavailable"
+        in enforcement_blocked["response_budget"],
+    } == {
+        "tool": "finish_controlled_change",
+        "budget_scope": "whole_response",
+        "evidence_policy": "observe_only_no_omission",
+        "digest_kind": "finish_projection_v1",
+        "receipt_blocker": True,
+    }
     assert (
         cast("dict[str, object]", context_governance["capabilities"])[
             "typed_receipt_alias"
