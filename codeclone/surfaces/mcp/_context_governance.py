@@ -30,6 +30,7 @@ IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND: Final = (
     "implementation_context_projection_v1"
 )
 MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = "memory_retrieval_projection_v1"
+START_RESPONSE_PROJECTION_KIND: Final = "start_projection_v1"
 
 _OBSERVE_ENFORCEMENT: Final[dict[str, bool]] = {
     "response_budget": False,
@@ -198,6 +199,26 @@ def attach_finish_context_governance(
     )
 
 
+def attach_start_context_governance(
+    payload: Mapping[str, object],
+    *,
+    limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+) -> dict[str, object]:
+    """Attach whole-response governance metadata for start responses."""
+
+    return attach_passive_context_governance(
+        payload,
+        limit=limit,
+        projection_kind=START_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "start_controlled_change",
+            "budget_scope": "whole_response",
+            "evidence_policy": "observe_only_no_omission",
+            "blast_radius_content": "full_until_immutable_artifact",
+        },
+    )
+
+
 def _response_context_metadata(
     payload: Mapping[str, object],
     *,
@@ -248,8 +269,10 @@ __all__ = [
     "IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT",
     "IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND",
     "MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND",
+    "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",
     "attach_passive_context_governance",
+    "attach_start_context_governance",
     "context_governance_digest",
     "estimate_response_context_units",
     "passive_context_capabilities",

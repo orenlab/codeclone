@@ -9844,6 +9844,35 @@ def _init_git_readme(root: Path, content: str = "stable\n") -> None:
     )
 
 
+def _assert_start_context_governance(payload: Mapping[str, object]) -> None:
+    governance = cast("dict[str, object]", payload["context_governance"])
+    governance_response = cast("dict[str, object]", governance["response"])
+    projection_digest = cast(
+        "dict[str, object]",
+        governance_response["projection_digest"],
+    )
+    assert {
+        "mode": governance["mode"],
+        "tool": governance_response["tool"],
+        "budget_scope": governance_response["budget_scope"],
+        "policy": governance_response["evidence_policy"],
+        "blast_radius_content": governance_response["blast_radius_content"],
+        "digest_kind": projection_digest["kind"],
+    } == {
+        "mode": "observe",
+        "tool": "start_controlled_change",
+        "budget_scope": "whole_response",
+        "policy": "observe_only_no_omission",
+        "blast_radius_content": "full_until_immutable_artifact",
+        "digest_kind": mcp_context_governance_mod.START_RESPONSE_PROJECTION_KIND,
+    }
+    assert governance["enforcement"] == {
+        "response_budget": False,
+        "nested_budget": False,
+        "omission": False,
+    }
+
+
 def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     needs = service.start_controlled_change(
@@ -9853,6 +9882,7 @@ def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     )
     assert needs["status"] == "needs_analysis"
     assert needs["edit_allowed"] is False
+    _assert_start_context_governance(needs)
 
     _register_docs_patch_run(service, tmp_path)
     started = service.start_controlled_change(
@@ -9864,6 +9894,7 @@ def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     assert started["status"] == "active"
     blast = cast("dict[str, object]", started["blast_radius"])
     assert "transitive_summary" in blast
+    _assert_start_context_governance(started)
 
     with pytest.raises(MCPServiceContractError, match="blast_radius_depth"):
         service.start_controlled_change(
@@ -9919,6 +9950,7 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
     governance = cast("dict[str, object]", replay["context_governance"])
     assert governance["mode"] == "observe"
     assert isinstance(governance["estimated"], int)
+    _assert_start_context_governance(replay)
 
 
 def test_mcp_workflow_start_replay_rejects_workspace_drift(tmp_path: Path) -> None:
@@ -9955,6 +9987,7 @@ def test_mcp_workflow_start_queued_and_latest_run(
     )
     assert queued["status"] == "queued"
     assert "blast_radius" not in queued
+    _assert_start_context_governance(queued)
     workspace = cast("dict[str, object]", queued["workspace"])
     blocked_by = cast("list[object]", queued["blocked_by"])
     concurrent = cast("list[object]", workspace["concurrent_intents"])

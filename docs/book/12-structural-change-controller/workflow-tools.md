@@ -98,6 +98,12 @@ methods as the atomic tools and emit the same semantic audit events.
 `analyze_repository` remains a separate explicit call — workflow tools
 never run analysis implicitly.
 
+`start_controlled_change` responses include passive `context_governance`
+metadata with a `start_projection_v1` digest and estimated context units for the
+serialized response. In `mode="observe"` this is measurement only: `edit_allowed`
+and explicit status fields remain the permission contract, and full blast-radius
+evidence is not omitted by response governance.
+
 Repeated identical `start_controlled_change` calls in the same MCP session may
 return an explicit compact replay instead of re-emitting the full blast-radius
 and budget payload. A replay sets `idempotent_replay=true`, keeps the same

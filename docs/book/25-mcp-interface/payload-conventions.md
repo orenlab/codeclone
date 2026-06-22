@@ -98,6 +98,12 @@ and a `finish_projection_v1` digest. The response is measured as one payload,
 but no evidence is removed while receipt, Patch Trail, blast artifact, or
 omitted-tail drill-down remains blocked.
 
+For `start_controlled_change`, `context_governance.response` describes the
+whole returned start response with `tool="start_controlled_change"` and a
+`start_projection_v1` digest. Full blast-radius evidence remains in the default
+response until immutable blast-artifact retrieval exists; the envelope is
+measurement only.
+
 For `get_relevant_memory`, `context_governance.response` describes the whole
 memory retrieval response with `tool="get_relevant_memory"` and a
 `memory_retrieval_projection_v1` digest. The existing `records`,

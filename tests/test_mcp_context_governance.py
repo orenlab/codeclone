@@ -19,8 +19,10 @@ from codeclone.surfaces.mcp._context_governance import (
     CONTEXT_GOVERNANCE_ESTIMATOR,
     DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
     FINISH_RESPONSE_PROJECTION_KIND,
+    START_RESPONSE_PROJECTION_KIND,
     attach_finish_context_governance,
     attach_passive_context_governance,
+    attach_start_context_governance,
     context_governance_digest,
     estimate_response_context_units,
 )
@@ -132,6 +134,31 @@ def test_finish_context_governance_marks_whole_response_projection() -> None:
         "receipt_content": "mandatory_until_durable_lookup",
         "digest_kind": FINISH_RESPONSE_PROJECTION_KIND,
         "receipt_blocker": True,
+    }
+
+
+def test_start_context_governance_marks_whole_response_projection() -> None:
+    payload = attach_start_context_governance(
+        {"intent_id": "intent-1", "status": "active"}
+    )
+    envelope = cast("dict[str, object]", payload["context_governance"])
+    response = cast("dict[str, object]", envelope["response"])
+    digest = cast("dict[str, object]", response["projection_digest"])
+
+    assert {
+        "tool": response["tool"],
+        "budget_scope": response["budget_scope"],
+        "policy": response["evidence_policy"],
+        "blast_radius_content": response["blast_radius_content"],
+        "digest_kind": digest["kind"],
+        "mode": envelope["mode"],
+    } == {
+        "tool": "start_controlled_change",
+        "budget_scope": "whole_response",
+        "policy": "observe_only_no_omission",
+        "blast_radius_content": "full_until_immutable_artifact",
+        "digest_kind": START_RESPONSE_PROJECTION_KIND,
+        "mode": "observe",
     }
 
 

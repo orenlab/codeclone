@@ -31,7 +31,7 @@ from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
 from ._context_governance import (
     attach_finish_context_governance,
-    attach_passive_context_governance,
+    attach_start_context_governance,
     context_governance_digest,
 )
 from ._intent import (
@@ -111,16 +111,18 @@ class _MCPSessionWorkflowMixin:
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
         if record is None:
-            return _helpers.attach_workspace_hygiene_tips(
-                {
-                    "status": "needs_analysis",
-                    "intent_id": None,
-                    "edit_allowed": False,
-                    "root": str(root_path),
-                    "message": workflow_msgs.START_NEEDS_ANALYSIS,
-                    "workspace": _workspace_summary_from_declare({}, {}),
-                },
-                root=root_path,
+            return attach_start_context_governance(
+                _helpers.attach_workspace_hygiene_tips(
+                    {
+                        "status": "needs_analysis",
+                        "intent_id": None,
+                        "edit_allowed": False,
+                        "root": str(root_path),
+                        "message": workflow_msgs.START_NEEDS_ANALYSIS,
+                        "workspace": _workspace_summary_from_declare({}, {}),
+                    },
+                    root=root_path,
+                )
             )
 
         current_workspace_state_digest = _start_workspace_state_digest(root_path)
@@ -167,9 +169,11 @@ class _MCPSessionWorkflowMixin:
             dirty_snapshot = declare_payload.get("dirty_snapshot")
             if isinstance(dirty_snapshot, dict):
                 queued_payload["dirty_snapshot"] = dirty_snapshot
-            return _helpers.attach_workspace_hygiene_tips(
-                queued_payload,
-                root=root_path,
+            return attach_start_context_governance(
+                _helpers.attach_workspace_hygiene_tips(
+                    queued_payload,
+                    root=root_path,
+                )
             )
 
         # 4. Fresh workspace snapshot after declare
@@ -300,7 +304,9 @@ class _MCPSessionWorkflowMixin:
                 "budget_projection_v1", _budget_summary(budget_payload)
             ),
         )
-        return _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
+        return attach_start_context_governance(
+            _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
+        )
 
     def _start_replay_payload(
         self,
@@ -345,7 +351,7 @@ class _MCPSessionWorkflowMixin:
             "next_tool": "get_relevant_memory",
             "message": "Repeated start unchanged; reusing the active intent.",
         }
-        return attach_passive_context_governance(payload)
+        return attach_start_context_governance(payload)
 
     def _store_start_replay(
         self,
