@@ -1186,9 +1186,7 @@ def _start_registry_digest(workspace_payload: Mapping[str, object]) -> dict[str,
             "own_start_epoch": workspace_payload.get("own_start_epoch"),
             "registry_backend": workspace_payload.get("registry_backend"),
             "registry_storage": workspace_payload.get("registry_storage"),
-            "registry_retention_days": workspace_payload.get(
-                "registry_retention_days"
-            ),
+            "registry_retention_days": workspace_payload.get("registry_retention_days"),
         },
     )
 

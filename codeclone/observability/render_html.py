@@ -783,9 +783,7 @@ def _semantic_row(span: SpanCostView, *, lead: bool) -> str:
     reason = (
         _esc(span.reason_kind) if span.reason_kind else '<span class="muted">—</span>'
     )
-    cls = " ".join(
-        name for name, on in (("flag", costly), ("lead", lead)) if on
-    )
+    cls = " ".join(name for name, on in (("flag", costly), ("lead", lead)) if on)
     return (
         f'<tr class="{cls}">'
         f'<td class="t">{_esc(span.name)}</td>'
@@ -972,9 +970,7 @@ def _db_cost(agg: AggregatesView) -> str:
         key=lambda i: agg.db_costs[i].total_queries,
         default=-1,
     )
-    rows = "".join(
-        _db_row(row, lead=(i == lead)) for i, row in enumerate(agg.db_costs)
-    )
+    rows = "".join(_db_row(row, lead=(i == lead)) for i, row in enumerate(agg.db_costs))
     headers = (
         ("Span", False),
         ("Spans", True),
@@ -1050,8 +1046,7 @@ def _pipeline_section(agg: AggregatesView) -> str:
         default=-1,
     )
     rows = "".join(
-        _pipeline_row(group, lead=(i == lead))
-        for i, group in enumerate(agg.pipeline)
+        _pipeline_row(group, lead=(i == lead)) for i, group in enumerate(agg.pipeline)
     )
     headers = (("Subsystem", False), ("Ops", True), ("Wall", True), ("CPU", True))
     return _section(
