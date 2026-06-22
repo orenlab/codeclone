@@ -21,6 +21,7 @@ dark-light), inline SVG bars, no JS, no external assets, no ``report`` import.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from html import escape
 
 from .views import (
@@ -283,6 +284,16 @@ def _esc(value: object) -> str:
     return escape(str(value))
 
 
+def _epoch_ms(value: str) -> float | None:
+    """Parse an ISO-8601 UTC timestamp to epoch milliseconds, or None."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp() * 1000.0
+    except ValueError:
+        return None
+
+
 def _ms(value: float) -> str:
     return f"{value / 1000:.2f}s" if value >= 1000 else f"{value:.0f}ms"
 
@@ -309,14 +320,26 @@ def _tokens(value: int | None) -> str:
     return f"{value / 1000:.1f}k" if value >= 1000 else str(value)
 
 
-def _bar(value: float, maximum: float, *, color: str = "var(--accent)") -> str:
-    frac = value / maximum if maximum > 0 else 0.0
-    fill = max(1.5, round(frac * 100, 1))
+def _bar(
+    value: float,
+    maximum: float,
+    *,
+    color: str = "var(--accent)",
+    offset_ms: float = 0.0,
+) -> str:
+    """A thin meter bar. ``offset_ms`` shifts the fill rightward (as a fraction
+    of *maximum*) so sequential items cascade into a start-offset staircase;
+    the default 0 keeps the fill left-aligned (pure magnitude)."""
+    span = maximum if maximum > 0 else 1.0
+    start = round(min(offset_ms / span * 100, 99.0), 1) if offset_ms > 0 else 0.0
+    fill = max(1.5, round(value / span * 100, 1))
+    if start + fill > 100:
+        fill = max(1.5, round(100 - start, 1))
     return (
         '<svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" '
         'aria-hidden="true">'
         '<rect width="100" height="6" rx="2" fill="var(--track)"/>'
-        f'<rect width="{fill}" height="6" rx="2" fill="{color}"/></svg>'
+        f'<rect x="{start}" width="{fill}" height="6" rx="2" fill="{color}"/></svg>'
     )
 
 
@@ -453,7 +476,7 @@ def _header(trace: TraceView) -> str:
     )
     digest = f" · repo {_esc(trace.repo_root_digest)}" if trace.repo_root_digest else ""
     return (
-        f'<div class="head">{_LOGO}<h1>Platform Observability</h1></div>'
+        f'<div class="head">{_LOGO}<h1>CodeClone Platform Observability</h1></div>'
         f'<p class="sub"><b>{agg.operation_count}</b> operations · '
         f"{window}{digest}</p>"
     )
@@ -684,13 +707,23 @@ def _op_row(op: OperationView, group_max: float) -> str:
     )
 
 
-def _span_row(span: SpanView, op_duration: float) -> str:
+def _span_offset_ms(op_start_ms: float | None, span: SpanView) -> float:
+    """Span start relative to its operation's start (ms), for the staircase."""
+    if op_start_ms is None:
+        return 0.0
+    span_start = _epoch_ms(span.started_at_utc)
+    if span_start is None:
+        return 0.0
+    return max(0.0, span_start - op_start_ms)
+
+
+def _span_row(span: SpanView, op_duration: float, *, offset_ms: float = 0.0) -> str:
     color = "var(--warn)" if span.reason_kind == "unknown" else "var(--accent)"
     return (
         '<div class="spanrow"><span class="lead-cell">'
         f'<span class="tick">▸</span>'
         f'<span class="spanname">{_esc(span.name)}</span></span>'
-        f"{_bar(span.duration_ms, op_duration, color=color)}"
+        f"{_bar(span.duration_ms, op_duration, color=color, offset_ms=offset_ms)}"
         f'<span class="dur">{_ms(span.duration_ms)}</span>'
         f'<span class="mem">{_view_rss_text(span)}</span>'
         f'<span class="extra">{_reason_chip(span.reason_kind)}</span>'
@@ -700,7 +733,11 @@ def _span_row(span: SpanView, op_duration: float) -> str:
 
 def _op_block(op: OperationView, group_max: float) -> str:
     op_duration = op.duration_ms or 1.0
-    spans = "".join(_span_row(span, op_duration) for span in op.spans)
+    op_start = _epoch_ms(op.started_at_utc)
+    spans = "".join(
+        _span_row(span, op_duration, offset_ms=_span_offset_ms(op_start, span))
+        for span in op.spans
+    )
     spans_block = f'<div class="spans">{spans}</div>' if spans else ""
     kids = "".join(_op_block(child, group_max) for child in op.children)
     kids_block = f'<div class="kids">{kids}</div>' if kids else ""
@@ -729,8 +766,8 @@ def _chain(trace: TraceView) -> str:
         "Correlated event chains",
         f'<div class="panel chain">{groups}</div>',
         subtitle="What triggered what, across processes — finish → spawned worker. "
-        "Bars are magnitude — each step's share of its chain's slowest step, not a "
-        "time axis; for start order and timing see the Timeline tab.",
+        "Span bars cascade by start offset within their operation (the staircase is "
+        "the real order); width is duration.",
     )
 
 
