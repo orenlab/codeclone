@@ -177,7 +177,7 @@ min-width:0;overflow:hidden}
 .crumb .cname{font-family:var(--mono);font-size:12px;color:var(--text)}
 .crumb .arrow{color:var(--mute);font-size:13px}
 .oprow,.spanrow{display:grid;
-grid-template-columns:minmax(0,1fr) 140px 56px 70px 120px;
+grid-template-columns:minmax(0,1fr) 104px 56px 70px 120px;
 align-items:center;column-gap:13px;row-gap:2px;padding:5px 0}
 .lead-cell{display:flex;align-items:center;gap:9px;min-width:0}
 .opname{font-family:var(--mono);font-size:13px;font-weight:550;overflow:hidden;
@@ -196,7 +196,7 @@ color:var(--mute);display:flex;flex-wrap:wrap;gap:0 15px}
 .wf-cap{display:flex;align-items:center;gap:8px;margin-bottom:9px;
 font-family:var(--mono);font-size:11px;color:var(--mute)}
 .wf-cap b{color:var(--dim);font-weight:600}
-.wf-row{display:grid;grid-template-columns:minmax(150px,238px) minmax(0,1fr) 58px;
+.wf-row{display:grid;grid-template-columns:minmax(150px,220px) minmax(0,520px) 58px;
 align-items:center;column-gap:12px;padding:2px 0}
 .wf-label{font-family:var(--mono);font-size:11.5px;overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
@@ -307,14 +307,25 @@ def _reason_chip(reason_kind: str | None) -> str:
     return f'<span class="chip{extra}">{_esc(reason_kind)}</span>'
 
 
+# Operations surfaces only operator-meaningful span counters, in this order.
+# Raw extract/phase telemetry (phase_*_us, blocks/segments/units_seen, …) is
+# interpreted in the Phases tab — never dumped verbatim here.
+_COUNTER_DISPLAY: tuple[tuple[str, str], ...] = (
+    ("files_analyzed", "files"),
+    ("failed_files", "failed"),
+    ("units_fingerprinted", "units"),
+    ("db_queries", "db reads"),
+    ("db_writes", "db writes"),
+)
+
+
 def _counters(counters: Mapping[str, int]) -> str:
-    if not counters:
-        return ""
     items = "".join(
-        f"<span><b>{_esc(key)}</b>{value}</span>"
-        for key, value in sorted(counters.items())
+        f"<span><b>{_esc(label)}</b>{counters[key]}</span>"
+        for key, label in _COUNTER_DISPLAY
+        if counters.get(key)
     )
-    return f'<span class="counters">{items}</span>'
+    return f'<span class="counters">{items}</span>' if items else ""
 
 
 def _rss_text(
@@ -638,7 +649,9 @@ def _chain(trace: TraceView) -> str:
     return _section(
         "Correlated event chains",
         f'<div class="panel chain">{groups}</div>',
-        subtitle="What triggered what, across processes — finish → spawned worker.",
+        subtitle="What triggered what, across processes — finish → spawned worker. "
+        "Bars are magnitude — each step's share of its chain's slowest step, not a "
+        "time axis; for start order and timing see the Timeline tab.",
     )
 
 
@@ -1002,8 +1015,7 @@ _TAB_LEADS: Mapping[str, str] = {
     "shared time axis.",
     "operations": "What ran — the finish→worker causality chains, nested by call "
     "depth.",
-    "cost": "What it cost — language-model tokens, MCP payloads, and database "
-    "work.",
+    "cost": "What it cost — language-model tokens, MCP payloads, and database work.",
     "phases": "Inside analysis — pipeline stages and per-phase extract cost.",
 }
 
