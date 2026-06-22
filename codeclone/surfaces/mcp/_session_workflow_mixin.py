@@ -29,8 +29,17 @@ from ...audit.events import EVENT_PATCH_TRAIL_COMPUTED
 from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
-from ._context_governance import attach_finish_context_governance
-from ._intent import IntentRecord, IntentStatus
+from ._context_governance import (
+    attach_finish_context_governance,
+    attach_passive_context_governance,
+    context_governance_digest,
+)
+from ._intent import (
+    IntentRecord,
+    IntentStatus,
+    normalize_expected_effects,
+    normalize_intent_scope,
+)
 from ._patch_contract import PatchContractStatus
 from ._patch_trail_bridge import build_patch_trail_inputs
 from ._session_shared import (
@@ -61,6 +70,7 @@ class _MCPSessionWorkflowMixin:
 
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _start_replay_cache: dict[str, dict[str, object]]
 
     # ------------------------------------------------------------------
     # start_controlled_change
@@ -82,9 +92,21 @@ class _MCPSessionWorkflowMixin:
         validated_depth = _validated_blast_radius_depth(blast_radius_depth)
         validated_dirty_scope_policy = _validated_dirty_scope_policy(dirty_scope_policy)
         root_path = _helpers._resolve_root(root)
+        request_key = _start_replay_request_key(
+            root_path=root_path,
+            scope=scope,
+            intent=intent,
+            expected_effects=expected_effects,
+            on_conflict=on_conflict,
+            strictness=strictness,
+            blast_radius_depth=validated_depth,
+            dirty_scope_policy=validated_dirty_scope_policy,
+            actor_pid=self._agent_pid,
+            actor_start_epoch=self._agent_start_epoch,
+        )
 
         # 1. Workspace check (lazy close inside list_workspace)
-        self._list_workspace_intents(root=root)
+        workspace_before = self._list_workspace_intents(root=root)
 
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
@@ -100,6 +122,17 @@ class _MCPSessionWorkflowMixin:
                 },
                 root=root_path,
             )
+
+        current_workspace_state_digest = _start_workspace_state_digest(root_path)
+        registry_digest = _start_registry_digest(workspace_before)
+        replay_payload = self._start_replay_payload(
+            request_key=request_key,
+            record=record,
+            workspace_state_digest=current_workspace_state_digest,
+            registry_digest=registry_digest,
+        )
+        if replay_payload is not None:
+            return replay_payload
 
         # 3. Declare intent
         declare_payload = self._declare_change_intent(
@@ -250,7 +283,97 @@ class _MCPSessionWorkflowMixin:
                 hygiene=hygiene,
                 dirty_scope_policy=validated_dirty_scope_policy,
             )
+        self._store_start_replay(
+            request_key=request_key,
+            record=record,
+            intent=active_intent,
+            payload=payload,
+            workspace_after=workspace_after,
+            workspace_state_digest=_start_workspace_state_digest(root_path),
+            scope_digest=context_governance_digest(
+                "boundary_v1", active_intent.scope.to_payload()
+            ),
+            blast_radius_digest=context_governance_digest(
+                "blast_projection_v1", blast_payload
+            ),
+            budget_digest=context_governance_digest(
+                "budget_projection_v1", _budget_summary(budget_payload)
+            ),
+        )
         return _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
+
+    def _start_replay_payload(
+        self,
+        *,
+        request_key: str,
+        record: MCPRunRecord,
+        workspace_state_digest: dict[str, str],
+        registry_digest: dict[str, str],
+    ) -> dict[str, object] | None:
+        entry = self._start_replay_cache.get(request_key)
+        if entry is None or entry.get("run_id") != record.run_id:
+            return None
+        if entry.get("workspace_state_digest") != workspace_state_digest:
+            return None
+        if entry.get("registry_digest") != registry_digest:
+            return None
+        intent_id = str(entry.get("intent_id", ""))
+        with self._state_lock:
+            active_intent = self._active_intents.get(intent_id)
+        if active_intent is None or active_intent.status != IntentStatus.ACTIVE:
+            return None
+        payload: dict[str, object] = {
+            "intent_id": intent_id,
+            "status": active_intent.status.value,
+            "run_id": _helpers._short_run_id(record.run_id),
+            "edit_allowed": bool(entry.get("edit_allowed")),
+            "idempotent_replay": True,
+            "scope_unchanged": True,
+            "analysis_run_unchanged": True,
+            "workspace_unchanged": True,
+            "lease_expires_at_utc": entry.get("lease_expires_at_utc"),
+            "renew_required": False,
+            "scope_digest": entry["scope_digest"],
+            "workspace_state_digest": workspace_state_digest,
+            "blast_radius_digest": entry["blast_radius_digest"],
+            "budget_digest": entry["budget_digest"],
+            "boundary_drill_down": {
+                "allowed_files": None,
+                "forbidden": None,
+                "do_not_touch": None,
+            },
+            "next_tool": "get_relevant_memory",
+            "message": "Repeated start unchanged; reusing the active intent.",
+        }
+        return attach_passive_context_governance(payload)
+
+    def _store_start_replay(
+        self,
+        *,
+        request_key: str,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+        payload: Mapping[str, object],
+        workspace_after: Mapping[str, object],
+        workspace_state_digest: dict[str, str],
+        scope_digest: dict[str, str],
+        blast_radius_digest: dict[str, str],
+        budget_digest: dict[str, str],
+    ) -> None:
+        self._start_replay_cache[request_key] = {
+            "intent_id": intent.intent_id,
+            "run_id": record.run_id,
+            "status": intent.status.value,
+            "edit_allowed": bool(payload.get("edit_allowed")),
+            "lease_expires_at_utc": _start_lease_expires_at(
+                workspace_after, intent.intent_id
+            ),
+            "scope_digest": scope_digest,
+            "workspace_state_digest": workspace_state_digest,
+            "registry_digest": _start_registry_digest(workspace_after),
+            "blast_radius_digest": blast_radius_digest,
+            "budget_digest": budget_digest,
+        }
 
     # ------------------------------------------------------------------
     # finish_controlled_change
@@ -1003,6 +1126,101 @@ def _budget_summary(budget_payload: dict[str, object]) -> dict[str, object]:
         "gate_preview": budget_payload.get("gate_preview"),
         "message": budget_payload.get("message"),
     }
+
+
+def _start_replay_request_key(
+    *,
+    root_path: Path,
+    scope: dict[str, object],
+    intent: str,
+    expected_effects: Sequence[str] | None,
+    on_conflict: str | None,
+    strictness: str,
+    blast_radius_depth: str,
+    dirty_scope_policy: str,
+    actor_pid: int,
+    actor_start_epoch: int,
+) -> str:
+    payload = {
+        "root": str(root_path),
+        "scope": normalize_intent_scope(scope).to_payload(),
+        "intent": intent.strip(),
+        "expected_effects": list(normalize_expected_effects(expected_effects)),
+        "on_conflict": on_conflict,
+        "strictness": strictness,
+        "blast_radius_depth": blast_radius_depth,
+        "dirty_scope_policy": dirty_scope_policy,
+        "actor": {
+            "kind": "session_local",
+            "pid": actor_pid,
+            "start_epoch": actor_start_epoch,
+        },
+        "config_digest": "session-defaults-v1",
+    }
+    return context_governance_digest("start_request_v1", payload)["value"]
+
+
+def _start_workspace_state_digest(root_path: Path) -> dict[str, str]:
+    from ._workspace_hygiene import collect_dirty_snapshot
+
+    snapshot = collect_dirty_snapshot(root_path).to_payload()
+    return context_governance_digest(
+        "workspace_state_v1",
+        {
+            "git_available": snapshot.get("git_available"),
+            "entries": snapshot.get("entries", {}),
+        },
+    )
+
+
+def _start_registry_digest(workspace_payload: Mapping[str, object]) -> dict[str, str]:
+    return context_governance_digest(
+        "workspace_registry_v1",
+        {
+            "workspace_intents": _start_stable_workspace_intents(workspace_payload),
+            "recovery_available": workspace_payload.get("recovery_available", []),
+            "stale_count": workspace_payload.get("stale_count"),
+            "orphaned_count": workspace_payload.get("orphaned_count"),
+            "total_agents": workspace_payload.get("total_agents"),
+            "own_pid": workspace_payload.get("own_pid"),
+            "own_start_epoch": workspace_payload.get("own_start_epoch"),
+            "registry_backend": workspace_payload.get("registry_backend"),
+            "registry_storage": workspace_payload.get("registry_storage"),
+            "registry_retention_days": workspace_payload.get(
+                "registry_retention_days"
+            ),
+        },
+    )
+
+
+def _start_stable_workspace_intents(
+    workspace_payload: Mapping[str, object],
+) -> list[dict[str, object]]:
+    intents = workspace_payload.get("workspace_intents", [])
+    if not isinstance(intents, Sequence) or isinstance(intents, (str, bytes)):
+        return []
+    stable: list[dict[str, object]] = []
+    for item in intents:
+        if not isinstance(item, Mapping):
+            continue
+        item_payload = dict(item)
+        item_payload.pop("lease_expires_in_seconds", None)
+        stable.append(item_payload)
+    return stable
+
+
+def _start_lease_expires_at(
+    workspace_payload: Mapping[str, object], intent_id: str
+) -> object:
+    intents = workspace_payload.get("workspace_intents", [])
+    if not isinstance(intents, Sequence) or isinstance(intents, (str, bytes)):
+        return None
+    for item in intents:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("intent_id") == intent_id:
+            return item.get("expires_at_utc")
+    return None
 
 
 __all__ = ["_MCPSessionWorkflowMixin"]

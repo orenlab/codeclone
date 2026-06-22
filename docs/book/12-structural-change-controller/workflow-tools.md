@@ -98,6 +98,14 @@ methods as the atomic tools and emit the same semantic audit events.
 `analyze_repository` remains a separate explicit call — workflow tools
 never run analysis implicitly.
 
+Repeated identical `start_controlled_change` calls in the same MCP session may
+return an explicit compact replay instead of re-emitting the full blast-radius
+and budget payload. A replay sets `idempotent_replay=true`, keeps the same
+`intent_id`, includes scope/workspace/blast/budget digests, and points the agent
+to `get_relevant_memory`. Replay is session-local, does not renew the lease, and
+is disabled when the analysis run, workspace content, registry state, scope,
+request parameters, or owner session changes.
+
 `finish_controlled_change` keeps human notes and validated claims separate:
 `review_text` is a note, while `claims_text` is the only finish parameter passed
 to Claim Guard. The response includes a compact `summary` for humans while

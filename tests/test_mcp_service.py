@@ -9766,6 +9766,30 @@ def _start_docs_workflow(service: CodeCloneMCPService, root: Path) -> str:
     return str(started["intent_id"])
 
 
+def _init_git_readme(root: Path, content: str = "stable\n") -> None:
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    root.joinpath("README.md").write_text(content, "utf-8")
+    subprocess.run(
+        ["git", "add", "README.md"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@e.com",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@e.com",
+        },
+    )
+
+
 def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     needs = service.start_controlled_change(
@@ -9794,6 +9818,74 @@ def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
             intent="invalid depth",
             blast_radius_depth="wide",
         )
+
+
+def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
+    _init_git_readme(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+
+    first = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+        expected_effects=["docs wording"],
+    )
+    replay = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+        expected_effects=["docs wording"],
+    )
+
+    assert {
+        "status": replay["status"],
+        "intent_id": replay["intent_id"],
+        "idempotent_replay": replay["idempotent_replay"],
+        "scope_unchanged": replay["scope_unchanged"],
+        "analysis_run_unchanged": replay["analysis_run_unchanged"],
+        "workspace_unchanged": replay["workspace_unchanged"],
+        "next_tool": replay["next_tool"],
+        "has_blast_radius": "blast_radius" in replay,
+    } == {
+        "status": "active",
+        "intent_id": first["intent_id"],
+        "idempotent_replay": True,
+        "scope_unchanged": True,
+        "analysis_run_unchanged": True,
+        "workspace_unchanged": True,
+        "next_tool": "get_relevant_memory",
+        "has_blast_radius": False,
+    }
+    assert cast("dict[str, object]", replay["scope_digest"])["kind"] == "boundary_v1"
+    assert (
+        cast("dict[str, object]", replay["workspace_state_digest"])["kind"]
+        == "workspace_state_v1"
+    )
+    governance = cast("dict[str, object]", replay["context_governance"])
+    assert governance["mode"] == "observe"
+    assert isinstance(governance["estimated"], int)
+
+
+def test_mcp_workflow_start_replay_rejects_workspace_drift(tmp_path: Path) -> None:
+    _init_git_readme(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+
+    first = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+    )
+    tmp_path.joinpath("README.md").write_text("changed\n", "utf-8")
+    second = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+    )
+
+    assert "idempotent_replay" not in second
+    assert second["intent_id"] != first["intent_id"]
 
 
 def test_mcp_workflow_start_queued_and_latest_run(

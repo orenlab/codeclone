@@ -131,6 +131,7 @@ class MCPSession(
             BlastRadiusResult,
         ] = {}
         self._active_intents: dict[str, IntentRecord] = {}
+        self._start_replay_cache: dict[str, dict[str, object]] = {}
         self._intent_sequence = 0
         self._agent_pid = os.getpid()
         self._agent_start_epoch = int(time.time())
