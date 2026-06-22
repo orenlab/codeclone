@@ -232,12 +232,13 @@ tr.flag td{background:var(--warn-soft)}
 .ph{padding:6px 16px 14px}
 .ph-row{display:grid;
 grid-template-columns:minmax(150px,210px) minmax(0,360px) 66px 50px auto;
-align-items:center;column-gap:14px;padding:8px 0;border-top:1px solid var(--border)}
+align-items:center;column-gap:14px;padding:8px 0 8px 12px;
+border-top:1px solid var(--border);border-left:2px solid transparent}
 .ph-row:first-child{border-top:none}
 .ph-namecell{display:flex;flex-direction:column;min-width:0}
 .ph-name{font-family:var(--font);font-size:13px;color:var(--text);overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
-.ph-row.lead{box-shadow:inset 2px 0 0 var(--accent)}
+.ph-row.lead{border-left-color:var(--accent)}
 .ph-row.lead .ph-name{font-weight:600}
 .ph-raw{font-family:var(--mono);font-size:10.5px;color:var(--mute);overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
