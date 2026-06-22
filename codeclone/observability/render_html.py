@@ -226,8 +226,9 @@ tr.flag td{background:var(--warn-soft)}
 font-family:var(--mono)}
 /* Tabbed information architecture — CSS-only, radio-driven (no JS) */
 .obs-tab-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
-.obs-tabs{display:flex;flex-wrap:wrap;gap:2px;margin:0 0 26px;
-border-bottom:1px solid var(--border)}
+.obs-tabs{display:flex;flex-wrap:wrap;gap:2px;margin:0 0 24px;
+border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;
+background:var(--bg);padding-top:6px}
 .obs-tab{padding:9px 15px;font-size:12.5px;font-weight:550;color:var(--mute);
 cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
 border-radius:var(--radius-sm) var(--radius-sm) 0 0;user-select:none;
@@ -237,6 +238,8 @@ transition:color 0.15s,border-color 0.15s}
 outline-offset:-2px}
 .obs-panel{display:none}
 .obs-panel>section:first-child{margin-top:0}
+.obs-lead{font-size:13px;color:var(--dim);line-height:1.55;
+margin:2px 0 22px;max-width:74ch}
 #t-overview:checked~.obs-tabs .obs-tab[for="t-overview"],
 #t-timeline:checked~.obs-tabs .obs-tab[for="t-timeline"],
 #t-operations:checked~.obs-tabs .obs-tab[for="t-operations"],
@@ -991,6 +994,19 @@ _TABS: tuple[tuple[str, str], ...] = (
     ("phases", "Phases"),
 )
 
+# One plain-language lead per tab: what the view answers, what to look at first.
+_TAB_LEADS: Mapping[str, str] = {
+    "overview": "Start here — what this run did, and where its time and memory "
+    "actually went.",
+    "timeline": "When everything happened — operations and their spans on one "
+    "shared time axis.",
+    "operations": "What ran — the finish→worker causality chains, nested by call "
+    "depth.",
+    "cost": "What it cost — language-model tokens, MCP payloads, and database "
+    "work.",
+    "phases": "Inside analysis — pipeline stages and per-phase extract cost.",
+}
+
 
 def _tab_shell(panels: Mapping[str, str]) -> str:
     """Wrap the section panels in CSS-only radio tabs.
@@ -1020,7 +1036,11 @@ def _tab_shell(panels: Mapping[str, str]) -> str:
                 f'<div class="panel empty">No {_esc(label.lower())} data '
                 f"recorded for this window.</div>"
             )
-        sections.append(f'<section class="obs-panel" id="p-{tid}">{inner}</section>')
+        lead = _TAB_LEADS.get(tid, "")
+        lead_html = f'<p class="obs-lead">{_esc(lead)}</p>' if lead else ""
+        sections.append(
+            f'<section class="obs-panel" id="p-{tid}">{lead_html}{inner}</section>'
+        )
     return f'{inputs}{nav}<div class="obs-panels">{"".join(sections)}</div>'
 
 
