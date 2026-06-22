@@ -77,6 +77,7 @@ class _FakeSource:
         self._name = name
         self._projections = projections
         self._available = available
+        self.iter_calls = 0
 
     def name(self) -> str:
         return self._name
@@ -85,6 +86,7 @@ class _FakeSource:
         return self._available
 
     def iter_projections(self) -> Iterator[SemanticProjection]:
+        self.iter_calls += 1
         yield from self._projections
 
 
@@ -111,6 +113,9 @@ def test_rebuild_embeds_and_upserts() -> None:
     assert isinstance(report, RebuildReport)
     assert report.indexed == 2
     assert report.by_source == {"memory": 2}
+    # by_source is counted during the single index pass — the source must not be
+    # re-iterated just to populate the report (the trajectory lane is expensive).
+    assert source.iter_calls == 1
     assert {row.id for row in writer.rows} == {"mem-1", "mem-2"}
     assert all(len(row.vector) == 32 for row in writer.rows)
     assert all(row.embedding_model == "diagnostic-hash-v1" for row in writer.rows)

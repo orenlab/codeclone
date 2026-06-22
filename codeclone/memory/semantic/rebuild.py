@@ -56,6 +56,7 @@ class _SourceIndexStats:
     seen_ids: set[str]
     embedded: int
     skipped_unchanged: int
+    projection_count: int = 0
 
 
 def rebuild_semantic_index(
@@ -91,7 +92,7 @@ def rebuild_semantic_index(
                 embed_batch_limits=limits,
             )
         if stats.seen_ids:
-            by_source[source.name()] = _count_source_documents(source)
+            by_source[source.name()] = stats.projection_count
             seen_ids |= stats.seen_ids
         embedded += stats.embedded
         skipped += stats.skipped_unchanged
@@ -113,10 +114,6 @@ def rebuild_semantic_index(
     )
 
 
-def _count_source_documents(source: IndexSource) -> int:
-    return sum(1 for _ in source.iter_projections())
-
-
 def _index_source(
     source: IndexSource,
     *,
@@ -128,7 +125,9 @@ def _index_source(
     seen: set[str] = set()
     embedded = 0
     skipped = 0
+    projection_count = 0
     for page in chunked(source.iter_projections(), _FINGERPRINT_PAGE_SIZE):
+        projection_count += len(page)
         units: list[IndexedSemanticUnit] = []
         for projection in page:
             units.extend(expand_projection(projection, chunker))
@@ -155,6 +154,7 @@ def _index_source(
         seen_ids=seen,
         embedded=embedded,
         skipped_unchanged=skipped,
+        projection_count=projection_count,
     )
 
 
