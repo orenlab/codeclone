@@ -30,4 +30,41 @@ thresholds. Boolean policy gates use `forbid_*` names.
 **Long context** — `do_not_touch`, `review_context`, and similar sections
 include `total`, `shown`, and `truncated` summaries.
 
+## Phase 34A compatibility audit
+
+Phase 34A introduces response context governance in small slices. Until the
+capability marker exists, clients must assume the current payload shape is the
+compatibility contract.
+
+Current `finish_controlled_change` compatibility facts:
+
+| Field | Current role | Compatibility decision |
+|-------|--------------|------------------------|
+| `summary.receipt` | compact created / skipped / failed status | keep; dashboards and skills use it as the receipt status signal |
+| `receipt.content` | complete human-readable markdown receipt | keep until durable typed receipt drill-down exists |
+| `receipt.receipt` | complete typed receipt alias nested under markdown output | keep as the machine-readable compatibility path until another typed path is advertised |
+| `receipt_error` | receipt failure reason | keep; failed receipt creation prevents `auto_clear` |
+
+Client and integration audit:
+
+| Surface | Current dependency | Phase 34A requirement |
+|---------|--------------------|-----------------------|
+| MCP tests / snapshots | assert `summary.receipt` and nested typed receipt fields | update first when the compatibility alias moves |
+| VS Code extension | discovers tools through `tools/list`; does not own a separate finish schema | tolerate current shape and future capability metadata |
+| Claude Desktop bundle | launches `codeclone-mcp`; no independent payload parser | no bundle shape change before MCP capability metadata |
+| Claude Code plugin | skills describe the workflow, not a custom parser | sync skills when finish response governance is enforced |
+| Codex plugin | skills describe the workflow, not a custom parser | sync skills when finish response governance is enforced |
+| Cursor plugin | skills/rules describe the workflow and receipt requirement | sync skills and rules when finish response governance is enforced |
+
+Before any default payload removal, MCP must advertise pre-call capability
+metadata for the response-governance contract. Clients should be able to detect:
+
+- context-governance contract version;
+- passive `observe` mode vs enforced response budgets;
+- whether `finish_controlled_change` still includes the typed receipt alias;
+- whether durable receipt, Patch Trail, blast-radius, and omitted-evidence
+  drill-down resources are available.
+
+Payload slimming without that metadata is a contract break, even during alpha.
+
 ---

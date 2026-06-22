@@ -9943,6 +9943,14 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     )
     assert cleared["status"] == "accepted"
     assert cleared["intent_cleared"] is True
+    assert cast("dict[str, object]", cleared["summary"])["receipt"] == "created"
+    receipt_payload = cast("dict[str, object]", cleared["receipt"])
+    assert receipt_payload["format"] == "markdown"
+    assert isinstance(receipt_payload["content"], str)
+    typed_receipt = cast("dict[str, object]", receipt_payload["receipt"])
+    assert typed_receipt["receipt_version"] == "1"
+    assert "provenance" in typed_receipt
+    assert cast("dict[str, object]", typed_receipt["scope"])["intent_id"] == (intent_id)
 
 
 def test_mcp_workflow_finish_python_structural_and_receipt_edges(
