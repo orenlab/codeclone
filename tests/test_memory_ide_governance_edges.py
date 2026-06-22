@@ -82,8 +82,18 @@ def test_register_ide_governance_rejects_invalid_hex_key(tmp_path: Path) -> None
         store.close()
 
 
-def test_register_ide_governance_rejects_unknown_client(
+@pytest.mark.parametrize(
+    ("client_name", "client_version", "expected_status"),
+    [
+        ("Unknown IDE", "0.3.0", "rejected"),
+        ("CodeClone JetBrains", "0.1.0", "ok"),
+    ],
+)
+def test_register_ide_governance_client_allowlist(
     tmp_path: Path,
+    client_name: str,
+    client_version: str,
+    expected_status: str,
 ) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -95,11 +105,13 @@ def test_register_ide_governance_rejects_unknown_client(
         payload = register_ide_governance(
             state,
             ide_governance_key=_valid_key_hex(),
-            client_name="Unknown IDE",
-            client_version="0.3.0",
+            client_name=client_name,
+            client_version=client_version,
         )
-        assert payload["status"] == "rejected"
+        assert payload["status"] == expected_status
         assert payload["action"] == "register_ide_governance"
+        if expected_status == "ok":
+            assert payload["client_name"] == client_name
     finally:
         store.close()
 
