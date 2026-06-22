@@ -57,6 +57,7 @@ Symbols use a COLON: `module:symbol` (`pkg.mod:func`). Dot notation does not res
 | `change_control.edit_allowed`                           | MIRROR of start — not a grant                                                       |
 | `*_summary.{truncated,omitted}`                         | collection is bounded — not full coverage                                           |
 | `context_artifact_digest` / `context_projection_digest` | run+artifact binding / request+response binding                                     |
+| `context_governance.mode="observe"`                     | response-size metadata only — facets were not omitted by this envelope              |
 
 ## Non-goals
 
