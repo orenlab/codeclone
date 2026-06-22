@@ -278,6 +278,16 @@ disable_error_code = ["attr-defined", "misc"]
 module = ["psutil"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# numpy arrives only as a transitive dependency (we never import it directly).
+# Its installed stubs use PEP 695 `type` statements that mypy refuses to parse
+# under python_version = "3.10" (which we keep, since we support 3.10+). Skip
+# following mypy into numpy's stubs so the hook does not choke on .venv.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 88
 target-version = "py310"
