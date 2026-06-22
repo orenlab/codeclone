@@ -30,10 +30,10 @@ thresholds. Boolean policy gates use `forbid_*` names.
 **Long context** — `do_not_touch`, `review_context`, and similar sections
 include `total`, `shown`, and `truncated` summaries.
 
-## Phase 34A compatibility audit
+## Response governance compatibility audit
 
-Phase 34A introduces response context governance in small slices. Until the
-capability marker exists, clients must assume the current payload shape is the
+Response context governance rolls out additively. Until capability metadata
+advertises a leaner shape, clients must treat the current payload shape as the
 compatibility contract.
 
 Current `finish_controlled_change` compatibility facts:
@@ -48,7 +48,7 @@ Current `finish_controlled_change` compatibility facts:
 
 Client and integration audit:
 
-| Surface               | Current dependency                                                          | Phase 34A requirement                                             |
+| Surface               | Current dependency                                                          | Response-governance requirement                                   |
 |-----------------------|-----------------------------------------------------------------------------|-------------------------------------------------------------------|
 | MCP tests / snapshots | assert `summary.receipt` and nested typed receipt fields                    | update first when the compatibility alias moves                   |
 | VS Code extension     | discovers tools through `tools/list`; does not own a separate finish schema | tolerate current shape and future capability metadata             |
@@ -81,9 +81,20 @@ It estimates the returned response but does **not** omit evidence yet:
 | `limit`                            | active default response target, currently advisory                                                        |
 | `mode`                             | `observe` until evidence omission is enforced                                                             |
 | `enforcement.response_budget`      | `false` while no response evidence is omitted                                                             |
+| `enforcement_blocked`              | missing exact retrieval capabilities that prevent safe response-budget enforcement                         |
 | `capabilities.typed_receipt_alias` | `true` while `receipt.receipt` remains the typed compatibility path                                       |
+| `drill_down`                       | exact object routes and blocked continuation/snapshot routes for evidence that may later be omitted        |
 
 Treat `mode="observe"` as telemetry and compatibility metadata, not as proof
 that the response is already bounded.
+
+Current drill-down reachability is intentionally conservative:
+
+- known memory records and known trajectories have exact object lookup through
+  `query_engineering_memory`;
+- structured receipt JSON remains available through `receipt.receipt` in the
+  response, but durable post-clear lookup is not advertised yet;
+- Patch Trail, blast artifacts, implementation-context facet pages, and omitted
+  evidence tails are marked blocked until exact read-only retrieval exists.
 
 ---

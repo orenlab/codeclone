@@ -6,10 +6,10 @@
 
 """Deterministic MCP response context-governance helpers.
 
-Phase 34A uses estimated context units for response-policy decisions without
-binding CodeClone to a model-specific token counter. The estimator is
-intentionally simple, versioned, and deterministic: canonical UTF-8 JSON bytes
-divided by 4.
+Response context governance uses estimated context units for response-policy
+decisions without binding CodeClone to a model-specific token counter. The
+estimator is intentionally simple, versioned, and deterministic: canonical
+UTF-8 JSON bytes divided by 4.
 """
 
 from __future__ import annotations
@@ -39,6 +39,63 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "omitted_evidence_continuation": False,
 }
 
+_PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
+    "memory_record": {
+        "object_lookup": "available",
+        "route": "query_engineering_memory(mode='get', record_id=...)",
+        "continuation": "blocked",
+        "snapshot_identity": "blocked",
+    },
+    "trajectory": {
+        "object_lookup": "available",
+        "route": "query_engineering_memory(mode='trajectory_get', record_id=...)",
+        "continuation": "blocked",
+        "snapshot_identity": "blocked",
+    },
+    "experience": {
+        "object_lookup": "blocked",
+        "continuation": "blocked",
+        "snapshot_identity": "blocked",
+    },
+    "structured_receipt": {
+        "object_lookup": "blocked",
+        "continuation": "blocked",
+        "current_complete_path": "receipt.receipt",
+    },
+    "patch_trail": {
+        "object_lookup": "blocked",
+        "continuation": "blocked",
+        "current_complete_path": "patch_trail",
+    },
+    "blast_artifact": {
+        "object_lookup": "blocked",
+        "continuation": "blocked",
+        "current_route_is_recomputation": "get_blast_radius",
+    },
+    "implementation_context_facet": {
+        "object_lookup": "blocked",
+        "continuation": "blocked",
+        "snapshot_identity": "blocked",
+    },
+}
+
+_PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
+    "response_budget": [
+        "durable_receipt_lookup",
+        "durable_patch_trail_lookup",
+        "immutable_blast_artifact",
+        "omitted_evidence_continuation",
+    ],
+    "nested_budget": [
+        "implementation_context_artifact_pages",
+        "memory_tail_continuation",
+    ],
+    "omission": [
+        "exact_continuation_for_omitted_tails",
+        "post_clear_receipt_lookup",
+    ],
+}
+
 
 def estimate_response_context_units(payload: object) -> int:
     """Return deterministic estimated context units for an MCP response."""
@@ -48,7 +105,7 @@ def estimate_response_context_units(payload: object) -> int:
 
 
 def context_governance_digest(kind: str, payload: object) -> dict[str, str]:
-    """Return the canonical Phase 34A digest representation for *payload*."""
+    """Return the canonical response-governance digest for *payload*."""
 
     normalized_kind = kind.strip()
     if not normalized_kind:
@@ -68,6 +125,18 @@ def passive_context_capabilities() -> dict[str, object]:
     return dict(_PASSIVE_CAPABILITIES)
 
 
+def passive_drill_down_reachability() -> dict[str, dict[str, object]]:
+    """Return exact drill-down routes and blocked continuations for observe mode."""
+
+    return {key: dict(value) for key, value in _PASSIVE_DRILL_DOWN.items()}
+
+
+def passive_enforcement_blockers() -> dict[str, list[str]]:
+    """Return missing exact retrieval capabilities that block enforcement."""
+
+    return {key: list(value) for key, value in _PASSIVE_ENFORCEMENT_BLOCKED.items()}
+
+
 def attach_passive_context_governance(
     payload: Mapping[str, object],
     *,
@@ -85,7 +154,9 @@ def attach_passive_context_governance(
         "mandatory_overflow": False,
         "mode": "observe",
         "enforcement": dict(_OBSERVE_ENFORCEMENT),
+        "enforcement_blocked": passive_enforcement_blockers(),
         "capabilities": passive_context_capabilities(),
+        "drill_down": passive_drill_down_reachability(),
     }
     governance = result["context_governance"]
     assert isinstance(governance, dict)
@@ -127,4 +198,6 @@ __all__ = [
     "context_governance_digest",
     "estimate_response_context_units",
     "passive_context_capabilities",
+    "passive_drill_down_reachability",
+    "passive_enforcement_blockers",
 ]

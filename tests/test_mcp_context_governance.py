@@ -90,10 +90,48 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
         "nested_budget": False,
         "omission": False,
     }
+    blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
+    assert {
+        "response": "durable_receipt_lookup" in blocked["response_budget"],
+        "nested": "implementation_context_artifact_pages" in blocked["nested_budget"],
+        "omission": "exact_continuation_for_omitted_tails" in blocked["omission"],
+    } == {
+        "response": True,
+        "nested": True,
+        "omission": True,
+    }
     capabilities = cast("dict[str, object]", envelope["capabilities"])
     assert capabilities["typed_receipt_alias"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
+
+
+def test_context_governance_declares_drill_down_reachability() -> None:
+    payload = attach_passive_context_governance({"status": "accepted"})
+    envelope = cast("dict[str, object]", payload["context_governance"])
+    drill_down = cast("dict[str, dict[str, object]]", envelope["drill_down"])
+
+    assert {
+        "memory_record_lookup": drill_down["memory_record"]["object_lookup"],
+        "memory_record_route": drill_down["memory_record"]["route"],
+        "memory_tail_continuation": drill_down["memory_record"]["continuation"],
+        "trajectory_lookup": drill_down["trajectory"]["object_lookup"],
+        "receipt_current_path": drill_down["structured_receipt"][
+            "current_complete_path"
+        ],
+        "receipt_lookup": drill_down["structured_receipt"]["object_lookup"],
+        "blast_route": drill_down["blast_artifact"]["current_route_is_recomputation"],
+        "experience_lookup": drill_down["experience"]["object_lookup"],
+    } == {
+        "memory_record_lookup": "available",
+        "memory_record_route": "query_engineering_memory(mode='get', record_id=...)",
+        "memory_tail_continuation": "blocked",
+        "trajectory_lookup": "available",
+        "receipt_current_path": "receipt.receipt",
+        "receipt_lookup": "blocked",
+        "blast_route": "get_blast_radius",
+        "experience_lookup": "blocked",
+    }
 
 
 def test_context_governance_has_no_tokenizer_dependency() -> None:
