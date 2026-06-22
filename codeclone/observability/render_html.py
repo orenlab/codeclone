@@ -221,6 +221,24 @@ th.r,td.r{text-align:right}
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
 tr.flag td{background:var(--warn-soft)}
 .muted{color:var(--mute)}
+/* Analysis micro-phases — ranked share bars (core's most important timings) */
+.ph{padding:6px 16px 14px}
+.ph-row{display:grid;
+grid-template-columns:minmax(150px,210px) minmax(0,360px) 66px 50px auto;
+align-items:center;column-gap:14px;padding:8px 0;border-top:1px solid var(--border)}
+.ph-row:first-child{border-top:none}
+.ph-namecell{display:flex;flex-direction:column;min-width:0}
+.ph-name{font-family:var(--font);font-size:13px;color:var(--text);overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
+.ph-row.heavy .ph-name{font-weight:600}
+.ph-raw{font-family:var(--mono);font-size:10.5px;color:var(--mute);overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
+.ph-dur{font-family:var(--mono);font-size:12.5px;color:var(--dim);text-align:right;
+white-space:nowrap}
+.ph-share{font-family:var(--mono);font-size:13px;font-weight:600;text-align:right;
+white-space:nowrap}
+.ph-row.heavy .ph-share{color:var(--warn)}
+.ph-sig{display:flex;justify-content:flex-end}
 .empty{padding:30px;text-align:center;color:var(--mute);font-size:13px}
 .foot{margin-top:38px;color:var(--mute);font-size:11px;text-align:center;
 font-family:var(--mono)}
@@ -898,15 +916,19 @@ def _pipeline_section(agg: AggregatesView) -> str:
     )
 
 
-def _analysis_phase_row(row: AnalysisPhaseRow) -> str:
-    chip_cls = " warn" if row.verdict == "phase_heavy" else ""
+def _analysis_phase_row(row: AnalysisPhaseRow, max_permille: int) -> str:
+    heavy = row.verdict == "phase_heavy"
     label = _ANALYSIS_PHASE_LABELS.get(row.phase, row.phase)
+    color = "var(--warn)" if heavy else "var(--accent)"
+    sig = '<span class="chip warn">bottleneck</span>' if heavy else ""
     return (
-        f'<tr><td class="t"><div class="shape">{_esc(label)}</div>'
-        f'<div class="sqlraw">{_esc(row.phase)}</div></td>'
-        f'<td class="r">{_esc(_ms(row.worker_elapsed_ms))}</td>'
-        f'<td class="r">{row.share_permille / 10:.1f}%</td>'
-        f'<td><span class="chip{chip_cls}">{_esc(row.verdict)}</span></td></tr>'
+        f'<div class="ph-row{" heavy" if heavy else ""}">'
+        f'<span class="ph-namecell"><span class="ph-name">{_esc(label)}</span>'
+        f'<span class="ph-raw">{_esc(row.phase)}</span></span>'
+        f"{_bar(row.share_permille, max_permille, color=color)}"
+        f'<span class="ph-dur">{_esc(_ms(row.worker_elapsed_ms))}</span>'
+        f'<span class="ph-share">{row.share_permille / 10:.1f}%</span>'
+        f'<span class="ph-sig">{sig}</span></div>'
     )
 
 
@@ -972,12 +994,10 @@ def _analysis_phases_section(trace: TraceView) -> str:
     agg = trace.aggregates
     if not agg.analysis_phases:
         return _empty_analysis_phase_section(trace)
-    rows = "".join(_analysis_phase_row(row) for row in agg.analysis_phases)
-    headers = (
-        ("Phase", False),
-        ("Worker elapsed", True),
-        ("Share", True),
-        ("Signal", False),
+    max_permille = max((row.share_permille for row in agg.analysis_phases), default=1)
+    max_permille = max_permille or 1
+    rows = "".join(
+        _analysis_phase_row(row, max_permille) for row in agg.analysis_phases
     )
     footer = (
         f"Worker elapsed (summed): "
@@ -986,15 +1006,18 @@ def _analysis_phases_section(trace: TraceView) -> str:
         f"files timed: {agg.analysis_phase_files_timed} · "
         f"units eligible: {agg.analysis_phase_units_eligible}"
     )
-    body = _table(headers, rows) + f'<p class="shint">{_esc(footer)}</p>'
+    body = (
+        f'<div class="panel ph">{rows}</div>'
+        f'<p class="shint">{_esc(footer)}</p>'
+    )
     return _section(
         "Analysis extract phases",
         body,
         subtitle=(
-            "Summed per-file worker elapsed time inside pipeline.process "
-            "(parse, walk, CFG, normalize). Dev-only; not repository quality. "
-            "Under parallel execution, summed worker elapsed may exceed parent "
-            "pipeline wall time."
+            "Where the core spends its per-file extract time, ranked by share — "
+            "bars are scaled to the heaviest phase. Summed worker elapsed inside "
+            "pipeline.process; dev-only, not repository quality, and may exceed "
+            "parent pipeline wall under parallel execution."
         ),
     )
 

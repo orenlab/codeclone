@@ -174,7 +174,9 @@ def test_render_trace_html_shows_analysis_phase_section() -> None:
         "Analysis extract phases",
         "CFG build",
         "Parse (ast.parse)",
-        "phase_heavy",
+        # phase_heavy now renders as a ranked-bar row flagged "bottleneck"
+        'class="ph-row',
+        "bottleneck",
         "Worker elapsed (summed): 3ms",
         "pipeline.process wall: 2ms",
         "files timed: 2",
