@@ -25,6 +25,7 @@ import pytest
 
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._claim_guard as mcp_claim_guard_mod
+import codeclone.surfaces.mcp._context_governance as mcp_context_governance_mod
 import codeclone.surfaces.mcp._graph_search as mcp_graph_search_mod
 import codeclone.surfaces.mcp._implementation_context as mcp_context_projection_mod
 import codeclone.surfaces.mcp._intent as mcp_intent_mod
@@ -1082,6 +1083,33 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
     assert context == repeated
     assert context["status"] == "ok"
     assert context["mode"] == "implementation"
+    governance = cast("dict[str, object]", context["context_governance"])
+    governance_response = cast("dict[str, object]", governance["response"])
+    projection_digest = cast(
+        "dict[str, object]",
+        governance_response["projection_digest"],
+    )
+    assert {
+        "governance_mode": governance["mode"],
+        "limit": governance["limit"],
+        "tool": governance_response["tool"],
+        "budget_scope": governance_response["budget_scope"],
+        "policy": governance_response["evidence_policy"],
+        "item_budget": governance_response["item_budget"],
+        "digest_kind": projection_digest["kind"],
+    } == {
+        "governance_mode": "observe",
+        "limit": (
+            mcp_context_governance_mod.IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT
+        ),
+        "tool": "get_implementation_context",
+        "budget_scope": "whole_response",
+        "policy": "observe_only_no_omission",
+        "item_budget": "budget_summary",
+        "digest_kind": (
+            mcp_context_governance_mod.IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND
+        ),
+    }
     subject = cast("dict[str, object]", context["subject"])
     assert subject["resolved_from"] == "explicit_paths"
     assert subject["paths"] == ["pkg/target.py"]
@@ -2683,6 +2711,32 @@ def test_mcp_service_get_relevant_memory_bootstraps_from_run(
     assert memory_sync["status"] == "completed"
     assert memory_sync["reason"] == "missing_db"
     assert result["records"]
+    governance = cast("dict[str, object]", result["context_governance"])
+    governance_response = cast("dict[str, object]", governance["response"])
+    projection_digest = cast(
+        "dict[str, object]",
+        governance_response["projection_digest"],
+    )
+    assert {
+        "mode": governance["mode"],
+        "tool": governance_response["tool"],
+        "budget_scope": governance_response["budget_scope"],
+        "policy": governance_response["evidence_policy"],
+        "digest_kind": projection_digest["kind"],
+    } == {
+        "mode": "observe",
+        "tool": "get_relevant_memory",
+        "budget_scope": "whole_response",
+        "policy": "observe_only_no_omission",
+        "digest_kind": (
+            mcp_context_governance_mod.MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND
+        ),
+    }
+    assert governance["enforcement"] == {
+        "response_budget": False,
+        "nested_budget": False,
+        "omission": False,
+    }
 
 
 def test_mcp_service_manage_engineering_memory_refresh_from_run(

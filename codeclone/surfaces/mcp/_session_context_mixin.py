@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, cast
@@ -16,6 +16,11 @@ from typing import Protocol, cast
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
+from ._context_governance import (
+    IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+    attach_passive_context_governance,
+)
 from ._graph_search import search_graph
 from ._implementation_context import (
     DEFAULT_CONTRACT_FACETS,
@@ -45,6 +50,22 @@ _DEFAULT_FACETS_BY_MODE: dict[str, tuple[Facet, ...]] = {
     "impact": DEFAULT_IMPACT_FACETS,
     "contract": DEFAULT_CONTRACT_FACETS,
 }
+
+
+def _implementation_context_response(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    return attach_passive_context_governance(
+        payload,
+        limit=IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+        projection_kind=IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_implementation_context",
+            "budget_scope": "whole_response",
+            "evidence_policy": "observe_only_no_omission",
+            "item_budget": "budget_summary",
+        },
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,26 +122,30 @@ class _MCPSessionContextMixin:
             intent=intent,
         )
         if record is None:
-            return {
-                "status": "needs_analysis",
-                "root": str(root_path),
-                "message": (
-                    "No MCP analysis run exists for this repository root. "
-                    "Run analyze_repository first."
-                ),
-                "next_tool": "analyze_repository",
-            }
+            return _implementation_context_response(
+                {
+                    "status": "needs_analysis",
+                    "root": str(root_path),
+                    "message": (
+                        "No MCP analysis run exists for this repository root. "
+                        "Run analyze_repository first."
+                    ),
+                    "next_tool": "analyze_repository",
+                }
+            )
         if query is not None:
             if paths or symbols or changed_scope:
                 raise MCPServiceContractError(
                     "query is mutually exclusive with paths, symbols, and "
                     "changed_scope."
                 )
-            return search_graph(
-                record=record,
-                root=root_path,
-                query=query,
-                budget=budget,
+            return _implementation_context_response(
+                search_graph(
+                    record=record,
+                    root=root_path,
+                    query=query,
+                    budget=budget,
+                )
             )
         self._validate_context_request(
             paths=paths,
@@ -142,18 +167,20 @@ class _MCPSessionContextMixin:
             changed_scope=changed_scope,
         )
         if subject is None:
-            return {
-                "status": "no_current_work",
-                "root": str(root_path),
-                "analysis": {
-                    "run_id": record.run_id,
-                    "report_digest": record.run_id,
-                },
-                "message": (
-                    "No explicit subject, active intent scope, or live git-dirty "
-                    "path is available. Whole-repository context is never inferred."
-                ),
-            }
+            return _implementation_context_response(
+                {
+                    "status": "no_current_work",
+                    "root": str(root_path),
+                    "analysis": {
+                        "run_id": record.run_id,
+                        "report_digest": record.run_id,
+                    },
+                    "message": (
+                        "No explicit subject, active intent scope, or live git-dirty "
+                        "path is available. Whole-repository context is never inferred."
+                    ),
+                }
+            )
         normalized_include = self._validated_context_include(
             include,
             mode=mode,
@@ -186,26 +213,28 @@ class _MCPSessionContextMixin:
                 include_drafts=True,
                 detail_level=detail_level,
             )
-        return build_implementation_context(
-            record=record,
-            paths=subject.paths,
-            symbols=subject.symbols,
-            subject_resolved_from=subject.resolved_from,
-            subject_source_summary=subject.source_summary,
-            resolved_symbols=subject.resolved_symbols,
-            unresolved_symbols=subject.unresolved_symbols,
-            mode=mode,
-            include=normalized_include,
-            depth=depth,
-            detail_level=detail_level,
-            budget=budget,
-            blast_radius=blast_payload,
-            memory_result=memory_result,
-            change_control=(
-                self._context_change_control(intent, blast_payload)
-                if intent is not None
-                else None
-            ),
+        return _implementation_context_response(
+            build_implementation_context(
+                record=record,
+                paths=subject.paths,
+                symbols=subject.symbols,
+                subject_resolved_from=subject.resolved_from,
+                subject_source_summary=subject.source_summary,
+                resolved_symbols=subject.resolved_symbols,
+                unresolved_symbols=subject.unresolved_symbols,
+                mode=mode,
+                include=normalized_include,
+                depth=depth,
+                detail_level=detail_level,
+                budget=budget,
+                blast_radius=blast_payload,
+                memory_result=memory_result,
+                change_control=(
+                    self._context_change_control(intent, blast_payload)
+                    if intent is not None
+                    else None
+                ),
+            )
         )
 
     def _context_record(

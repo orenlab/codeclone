@@ -47,6 +47,7 @@ After `start_controlled_change` returns `edit_allowed:true`:
 | `contradiction_note`                       | conflicting records for your scope — surface before editing                     |
 | `coverage`                                 | visibility metadata, NOT correctness or approval                                |
 | `subjects_truncated`                       | more subjects exist — use `mode=get` / `detail_level=full`                      |
+| `context_governance.mode="observe"`        | response-size metadata only — no memory lane was omitted by this envelope       |
 
 ## Non-goals
 

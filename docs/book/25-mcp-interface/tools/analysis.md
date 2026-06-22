@@ -28,6 +28,12 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 and memory evidence from one stored run. It is read-only and never authorizes
 edits.
 
+Responses include passive `context_governance` metadata with estimated context
+units for the serialized payload. In `mode="observe"` this is telemetry and
+compatibility metadata only: no evidence is omitted. The existing
+`budget_summary` remains an item-count budget for context entries, not a
+serialized response budget.
+
 Key parameters:
 
 - `changed_scope` — when `true`, use the bounded live git-dirty set as the

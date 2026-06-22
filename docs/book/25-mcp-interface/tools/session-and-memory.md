@@ -18,3 +18,9 @@ itself. It never contributes repository findings, gates, baselines, memory
 facts, or edit authorization, and it does not expose raw SQL or payload bodies.
 See the dedicated
 [Platform Observability tool contract](platform-observability.md).
+
+`get_relevant_memory` responses may include passive `context_governance`
+metadata with estimated context units for the serialized payload. In
+`mode="observe"` this is measurement only: `records`, `trajectories`,
+`experiences`, coverage, and retrieval-policy fields keep their documented lane
+semantics and are not omitted by response governance.

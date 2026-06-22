@@ -70,8 +70,9 @@ Payload slimming without that metadata is a contract break, even during alpha.
 
 ### Passive `context_governance`
 
-`finish_controlled_change` now includes a passive `context_governance` envelope.
-It estimates the returned response but does **not** omit evidence yet:
+Selected workflow and evidence tools now include a passive
+`context_governance` envelope. It estimates the returned response but does
+**not** omit evidence yet:
 
 | Field                              | Meaning                                                                                                   |
 |------------------------------------|-----------------------------------------------------------------------------------------------------------|
@@ -87,7 +88,8 @@ It estimates the returned response but does **not** omit evidence yet:
 | `response`                         | optional tool-specific response budget scope and projection digest                                        |
 
 Treat `mode="observe"` as telemetry and compatibility metadata, not as proof
-that the response is already bounded.
+that the response is already bounded. It also does not authorize edits, weaken
+findings, or replace tool-specific contracts.
 
 For `finish_controlled_change`, `context_governance.response` describes the
 whole returned finish response. It includes `tool="finish_controlled_change"`,
@@ -95,6 +97,19 @@ whole returned finish response. It includes `tool="finish_controlled_change"`,
 and a `finish_projection_v1` digest. The response is measured as one payload,
 but no evidence is removed while receipt, Patch Trail, blast artifact, or
 omitted-tail drill-down remains blocked.
+
+For `get_relevant_memory`, `context_governance.response` describes the whole
+memory retrieval response with `tool="get_relevant_memory"` and a
+`memory_retrieval_projection_v1` digest. The existing `records`,
+`trajectories`, `experiences`, coverage, and retrieval-policy fields remain
+present according to their current lane caps; `context_governance` is
+measurement only.
+
+For `get_implementation_context`, `context_governance.response` describes the
+whole implementation-context response with `tool="get_implementation_context"`
+and an `implementation_context_projection_v1` digest. The existing
+`budget_summary` remains an item-count budget for emitted context entries; it is
+not the serialized response context budget.
 
 Current drill-down reachability is intentionally conservative:
 

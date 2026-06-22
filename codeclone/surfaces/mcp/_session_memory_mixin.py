@@ -37,6 +37,10 @@ from ...memory.semantic import (
 )
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from . import _session_helpers as _helpers
+from ._context_governance import (
+    MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+    attach_passive_context_governance,
+)
 from ._intent import IntentRecord
 from ._session_shared import (
     CodeCloneMCPRunStore,
@@ -99,7 +103,17 @@ class _MCPSessionMemoryMixin:
             if memory_sync is not None:
                 result = dict(result)
                 result["memory_sync"] = memory_sync
-            return result
+            return attach_passive_context_governance(
+                result,
+                projection_kind=MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+                response={
+                    "tool": "get_relevant_memory",
+                    "budget_scope": "whole_response",
+                    "evidence_policy": "observe_only_no_omission",
+                    "detail_level": detail_level,
+                    "max_records": max_records,
+                },
+            )
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
