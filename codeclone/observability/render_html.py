@@ -186,8 +186,11 @@ text-overflow:ellipsis;white-space:nowrap}
 text-overflow:ellipsis;white-space:nowrap}
 .tick{color:var(--accent);opacity:0.6;font-size:11px;flex-shrink:0}
 .spanrow .counters{grid-column:2/-1;font-family:var(--mono);font-size:10.5px;
-color:var(--mute);display:flex;flex-wrap:wrap;gap:0 15px}
-.counters b{color:var(--dim);font-weight:550;margin-right:4px}
+color:var(--mute);display:flex;flex-direction:column;gap:2px;margin-top:4px;
+padding-left:17px}
+.cgroup{display:block;line-height:1.55}
+.cgroup>b{display:inline-block;min-width:54px;margin-right:8px;color:var(--mute);
+font-weight:700;text-transform:uppercase;letter-spacing:0.04em;font-size:9px}
 .spans{padding-left:17px}
 .kids{margin-left:13px;padding-left:17px;border-left:2px solid var(--accent-soft)}
 .wf{padding:8px 16px 12px}
@@ -325,25 +328,73 @@ def _reason_chip(reason_kind: str | None) -> str:
     return f'<span class="chip{extra}">{_esc(reason_kind)}</span>'
 
 
-# Operations surfaces only operator-meaningful span counters, in this order.
-# Raw extract/phase telemetry (phase_*_us, blocks/segments/units_seen, …) is
-# interpreted in the Phases tab — never dumped verbatim here.
-_COUNTER_DISPLAY: tuple[tuple[str, str], ...] = (
-    ("files_analyzed", "files"),
-    ("failed_files", "failed"),
-    ("units_fingerprinted", "units"),
-    ("db_queries", "db reads"),
-    ("db_writes", "db writes"),
+# Operations shows the FULL span counter set, grouped + formatted (never an
+# alphabetical raw dump, never silently dropped). Each group: (label, ((key,
+# short-label), …)). phase_* microsecond timings are converted to ms and ranked;
+# any key not mapped below still appears under "other" so nothing is lost.
+_COUNTER_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "files",
+        (("files_analyzed", "analyzed"), ("files_timed", "timed"),
+         ("failed_files", "failed")),
+    ),
+    (
+        "units",
+        (("units_seen", "seen"), ("units_eligible", "eligible"),
+         ("units_fingerprinted", "fingerprinted")),
+    ),
+    ("output", (("blocks_emitted", "blocks"), ("segments_emitted", "segments"))),
+    ("db", (("db_queries", "reads"), ("db_writes", "writes"))),
 )
 
 
+def _us_ms(micros: int) -> str:
+    ms = micros / 1000
+    return f"{ms:.0f}ms" if ms >= 10 else f"{ms:.1f}ms"
+
+
+def _counter_group(label: str, pairs: list[str]) -> str:
+    if not pairs:
+        return ""
+    return f'<span class="cgroup"><b>{_esc(label)}</b>{" · ".join(pairs)}</span>'
+
+
 def _counters(counters: Mapping[str, int]) -> str:
-    items = "".join(
-        f"<span><b>{_esc(label)}</b>{counters[key]}</span>"
-        for key, label in _COUNTER_DISPLAY
-        if counters.get(key)
+    if not counters:
+        return ""
+    seen: set[str] = set()
+    groups: list[str] = []
+    for label, keys in _COUNTER_GROUPS:
+        pairs: list[str] = []
+        for key, short in keys:
+            if key in counters:
+                seen.add(key)
+                pairs.append(f"{short} {counters[key]:,}")
+        groups.append(_counter_group(label, pairs))
+    phases = sorted(
+        ((key, value) for key, value in counters.items() if key.startswith("phase_")),
+        key=lambda kv: kv[1],
+        reverse=True,
     )
-    return f'<span class="counters">{items}</span>' if items else ""
+    if phases:
+        seen.update(key for key, _ in phases)
+        groups.append(
+            _counter_group(
+                "phases",
+                [
+                    f"{_esc(key.removeprefix('phase_').removesuffix('_us'))} "
+                    f"{_us_ms(value)}"
+                    for key, value in phases
+                ],
+            )
+        )
+    other = sorted((key, value) for key, value in counters.items() if key not in seen)
+    if other:
+        groups.append(
+            _counter_group("other", [f"{_esc(key)} {value:,}" for key, value in other])
+        )
+    body = "".join(group for group in groups if group)
+    return f'<span class="counters">{body}</span>' if body else ""
 
 
 def _rss_text(
