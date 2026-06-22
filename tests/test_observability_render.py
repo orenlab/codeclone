@@ -174,9 +174,10 @@ def test_render_trace_html_shows_analysis_phase_section() -> None:
         "Analysis extract phases",
         "CFG build",
         "Parse (ast.parse)",
-        # phase_heavy now renders as a ranked-bar row flagged "bottleneck"
+        # phase rows are ranked bars; the heaviest is the accent "lead" (peak)
         'class="ph-row',
-        "bottleneck",
+        "ph-row lead",
+        ">peak<",
         "Worker elapsed (summed): 3ms",
         "pipeline.process wall: 2ms",
         "files timed: 2",
@@ -619,16 +620,16 @@ def test_html_format_helpers_and_semantic_cost_rows() -> None:
         no_op=True,
         reason_kind="schema_version_changed",
     )
-    costly_html = _semantic_row(costly)
+    costly_html = _semantic_row(costly, lead=False)
     assert "no-op · costly" in costly_html
     assert "schema_version_changed" in costly_html
 
     noop = replace(costly, duration_ms=10.0)
-    assert "no-op" in _semantic_row(noop)
-    assert "costly" not in _semantic_row(noop)
+    assert "no-op" in _semantic_row(noop, lead=False)
+    assert "costly" not in _semantic_row(noop, lead=False)
 
     productive = replace(noop, no_op=False, reason_kind=None)
-    assert "productive" in _semantic_row(productive)
+    assert "productive" in _semantic_row(productive, lead=False)
 
 
 def test_rss_text_includes_end_peak_and_peak_delta() -> None:

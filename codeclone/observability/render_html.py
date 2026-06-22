@@ -161,7 +161,7 @@ background:var(--surface-2);color:var(--dim);border:1px solid var(--border);
 white-space:nowrap}
 .chip.warn{color:var(--warn);border-color:transparent;background:var(--warn-soft);
 font-weight:600}
-.bar{display:block;width:100%;height:7px}
+.bar{display:block;width:100%;height:6px}
 .dur{font-family:var(--mono);font-size:12.5px;text-align:right;white-space:nowrap;
 color:var(--dim)}
 .mem{font-family:var(--mono);font-size:11.5px;color:var(--warn);font-weight:550;
@@ -205,10 +205,10 @@ align-items:center;column-gap:12px;padding:2px 0}
 text-overflow:ellipsis;white-space:nowrap}
 .wf-label.op{color:var(--text);font-weight:550}
 .wf-label.span{color:var(--dim)}
-.wf-track{position:relative;height:14px;background:var(--track);border-radius:var(--radius-sm)}
-.wf-bar{position:absolute;top:2px;height:10px;border-radius:3px;
-background:var(--c,var(--accent))}
-.wf-bar.span{top:3px;height:8px;opacity:0.8}
+.wf-track{position:relative;height:6px;background:var(--track);border-radius:2px}
+.wf-bar{position:absolute;top:0;height:6px;border-radius:2px;
+background:var(--accent)}
+.wf-bar.span{opacity:0.6}
 .wf-dur{font-family:var(--mono);font-size:11px;color:var(--mute);text-align:right;
 white-space:nowrap}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -219,6 +219,9 @@ td{padding:9px 16px;border-top:1px solid var(--border);font-family:var(--mono);
 white-space:nowrap}
 td.t{font-family:var(--font)}
 th.r,td.r{text-align:right}
+/* "Most expensive" — one delicate idiom: accent left rule + faint tint */
+tr.lead td{background:color-mix(in oklch,var(--accent) 7%,transparent)}
+tr.lead td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .shape{font-family:var(--font);font-size:12.5px}
 .sqlraw{font-family:var(--mono);font-size:11px;color:var(--mute);max-width:440px;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
@@ -233,14 +236,15 @@ align-items:center;column-gap:14px;padding:8px 0;border-top:1px solid var(--bord
 .ph-namecell{display:flex;flex-direction:column;min-width:0}
 .ph-name{font-family:var(--font);font-size:13px;color:var(--text);overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
-.ph-row.heavy .ph-name{font-weight:600}
+.ph-row.lead{box-shadow:inset 2px 0 0 var(--accent)}
+.ph-row.lead .ph-name{font-weight:600}
 .ph-raw{font-family:var(--mono);font-size:10.5px;color:var(--mute);overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
 .ph-dur{font-family:var(--mono);font-size:12.5px;color:var(--dim);text-align:right;
 white-space:nowrap}
 .ph-share{font-family:var(--mono);font-size:13px;font-weight:600;text-align:right;
 white-space:nowrap}
-.ph-row.heavy .ph-share{color:var(--warn)}
+.ph-row.lead .ph-share{color:var(--accent)}
 .ph-sig{display:flex;justify-content:flex-end}
 .empty{padding:30px;text-align:center;color:var(--mute);font-size:13px}
 .foot{margin-top:38px;color:var(--mute);font-size:11px;text-align:center;
@@ -309,10 +313,10 @@ def _bar(value: float, maximum: float, *, color: str = "var(--accent)") -> str:
     frac = value / maximum if maximum > 0 else 0.0
     fill = max(1.5, round(frac * 100, 1))
     return (
-        '<svg class="bar" viewBox="0 0 100 7" preserveAspectRatio="none" '
+        '<svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" '
         'aria-hidden="true">'
-        '<rect width="100" height="7" rx="3.5" fill="var(--track)"/>'
-        f'<rect width="{fill}" height="7" rx="3.5" fill="{color}"/></svg>'
+        '<rect width="100" height="6" rx="2" fill="var(--track)"/>'
+        f'<rect width="{fill}" height="6" rx="2" fill="{color}"/></svg>'
     )
 
 
@@ -335,13 +339,19 @@ def _reason_chip(reason_kind: str | None) -> str:
 _COUNTER_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
     (
         "files",
-        (("files_analyzed", "analyzed"), ("files_timed", "timed"),
-         ("failed_files", "failed")),
+        (
+            ("files_analyzed", "analyzed"),
+            ("files_timed", "timed"),
+            ("failed_files", "failed"),
+        ),
     ),
     (
         "units",
-        (("units_seen", "seen"), ("units_eligible", "eligible"),
-         ("units_fingerprinted", "fingerprinted")),
+        (
+            ("units_seen", "seen"),
+            ("units_eligible", "eligible"),
+            ("units_fingerprinted", "fingerprinted"),
+        ),
     ),
     ("output", (("blocks_emitted", "blocks"), ("segments_emitted", "segments"))),
     ("db", (("db_queries", "reads"), ("db_writes", "writes"))),
@@ -724,7 +734,7 @@ def _chain(trace: TraceView) -> str:
     )
 
 
-def _semantic_row(span: SpanCostView) -> str:
+def _semantic_row(span: SpanCostView, *, lead: bool) -> str:
     costly = span.no_op and span.duration_ms >= _NOOP_COSTLY_MS
     if costly:
         verdict = '<span class="chip warn">no-op · costly</span>'
@@ -735,8 +745,11 @@ def _semantic_row(span: SpanCostView) -> str:
     reason = (
         _esc(span.reason_kind) if span.reason_kind else '<span class="muted">—</span>'
     )
+    cls = " ".join(
+        name for name, on in (("flag", costly), ("lead", lead)) if on
+    )
     return (
-        f'<tr class="{"flag" if costly else ""}">'
+        f'<tr class="{cls}">'
         f'<td class="t">{_esc(span.name)}</td>'
         f'<td class="t muted">{_esc(span.operation_name)}</td>'
         f"<td>{reason}</td>"
@@ -751,7 +764,15 @@ def _semantic_row(span: SpanCostView) -> str:
 def _semantic(agg: AggregatesView) -> str:
     if not agg.semantic_costs:
         return ""
-    rows = "".join(_semantic_row(span) for span in agg.semantic_costs)
+    lead = max(
+        range(len(agg.semantic_costs)),
+        key=lambda i: agg.semantic_costs[i].duration_ms,
+        default=-1,
+    )
+    rows = "".join(
+        _semantic_row(span, lead=(i == lead))
+        for i, span in enumerate(agg.semantic_costs)
+    )
     headers = (
         ("Span", False),
         ("Operation", False),
@@ -770,9 +791,9 @@ def _semantic(agg: AggregatesView) -> str:
     )
 
 
-def _mcp_row(tool: McpToolAggregate) -> str:
+def _mcp_row(tool: McpToolAggregate, *, lead: bool) -> str:
     return (
-        f'<tr><td class="t">{_esc(tool.name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(tool.name)}</td>'
         f'<td class="r">{tool.count}</td>'
         f'<td class="r">{_ms(tool.p50_duration_ms)}</td>'
         f'<td class="r">{_ms(tool.p95_duration_ms)}</td>'
@@ -785,7 +806,12 @@ def _mcp_row(tool: McpToolAggregate) -> str:
 def _mcp(tools: tuple[McpToolAggregate, ...]) -> str:
     if not tools:
         return ""
-    rows = "".join(_mcp_row(tool) for tool in tools)
+    lead = max(
+        range(len(tools)),
+        key=lambda i: tools[i].p95_response_bytes or 0,
+        default=-1,
+    )
+    rows = "".join(_mcp_row(tool, lead=(i == lead)) for i, tool in enumerate(tools))
     headers = (
         ("Tool", False),
         ("Calls", True),
@@ -808,13 +834,12 @@ def _wf_bar(row: WaterfallRow, total_ms: float) -> str:
     left = round(min(row.offset_ms / span * 100, 99.0), 2)
     width = max(0.6, round(row.duration_ms / span * 100, 2))
     kind = "op" if row.kind == "operation" else "span"
-    surf = f"surf-{row.surface}" if row.surface in _KNOWN_SURFACES else ""
     tick = '<span class="tick">▸</span>' if kind == "span" else ""
     return (
         '<div class="wf-row">'
         f'<span class="wf-label {kind}" style="padding-left:{row.depth * 13}px">'
         f"{tick}{_esc(row.label)}</span>"
-        f'<div class="wf-track"><div class="wf-bar {kind} {surf}" '
+        f'<div class="wf-track"><div class="wf-bar {kind}" '
         f'style="left:{left}%;width:{width}%"></div></div>'
         f'<span class="wf-dur">{_ms(row.duration_ms)}</span></div>'
     )
@@ -842,10 +867,10 @@ def _waterfall(trace: TraceView) -> str:
     )
 
 
-def _agent_row(row: AgentTokenRow, total_response: int) -> str:
+def _agent_row(row: AgentTokenRow, total_response: int, *, lead: bool) -> str:
     share = round(row.response_tokens / total_response * 100) if total_response else 0
     return (
-        f'<tr><td class="t">{_esc(row.name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.name)}</td>'
         f'<td class="r">{row.calls}</td>'
         f'<td class="r">{_tokens(row.request_tokens)}</td>'
         f'<td class="r">{_tokens(row.response_tokens)}</td>'
@@ -865,7 +890,15 @@ def _agent(agg: AggregatesView) -> str:
         + _stat(str(len(view.consumers)), "tools")
         + "</div>"
     )
-    rows = "".join(_agent_row(row, view.response_tokens) for row in view.consumers)
+    lead = max(
+        range(len(view.consumers)),
+        key=lambda i: view.consumers[i].response_tokens,
+        default=-1,
+    )
+    rows = "".join(
+        _agent_row(row, view.response_tokens, lead=(i == lead))
+        for i, row in enumerate(view.consumers)
+    )
     headers = (
         ("Tool", False),
         ("Calls", True),
@@ -881,10 +914,10 @@ def _agent(agg: AggregatesView) -> str:
     )
 
 
-def _db_row(row: DbCostRow) -> str:
+def _db_row(row: DbCostRow, *, lead: bool) -> str:
     per_call = round(row.total_queries / row.span_count) if row.span_count else 0
     return (
-        f'<tr><td class="t">{_esc(row.span_name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.span_name)}</td>'
         f'<td class="r">{row.span_count}</td>'
         f'<td class="r">{row.total_queries}</td>'
         f'<td class="r">{row.total_writes}</td>'
@@ -896,7 +929,14 @@ def _db_row(row: DbCostRow) -> str:
 def _db_cost(agg: AggregatesView) -> str:
     if not agg.db_costs:
         return ""
-    rows = "".join(_db_row(row) for row in agg.db_costs)
+    lead = max(
+        range(len(agg.db_costs)),
+        key=lambda i: agg.db_costs[i].total_queries,
+        default=-1,
+    )
+    rows = "".join(
+        _db_row(row, lead=(i == lead)) for i, row in enumerate(agg.db_costs)
+    )
     headers = (
         ("Span", False),
         ("Spans", True),
@@ -913,12 +953,12 @@ def _db_cost(agg: AggregatesView) -> str:
     )
 
 
-def _db_fingerprint_row(row: DbFingerprintRow) -> str:
+def _db_fingerprint_row(row: DbFingerprintRow, *, lead: bool) -> str:
     table = _esc(row.table_hint) if row.table_hint else "—"
     shape = _esc(row.summary) if row.summary else "—"
     raw = _esc(row.fingerprint)
     return (
-        f'<tr><td class="t">{_esc(row.span_name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.span_name)}</td>'
         f"<td>{table}</td>"
         f'<td class="muted">{_esc(row.kind.upper())}</td>'
         f'<td class="r">{row.count}</td>'
@@ -930,7 +970,15 @@ def _db_fingerprint_row(row: DbFingerprintRow) -> str:
 def _db_fingerprints(agg: AggregatesView) -> str:
     if not agg.db_fingerprints:
         return ""
-    rows = "".join(_db_fingerprint_row(row) for row in agg.db_fingerprints)
+    lead = max(
+        range(len(agg.db_fingerprints)),
+        key=lambda i: agg.db_fingerprints[i].count,
+        default=-1,
+    )
+    rows = "".join(
+        _db_fingerprint_row(row, lead=(i == lead))
+        for i, row in enumerate(agg.db_fingerprints)
+    )
     headers = (
         ("Span", False),
         ("Table", False),
@@ -946,9 +994,9 @@ def _db_fingerprints(agg: AggregatesView) -> str:
     )
 
 
-def _pipeline_row(group: PipelineGroup) -> str:
+def _pipeline_row(group: PipelineGroup, *, lead: bool) -> str:
     return (
-        f'<tr><td class="t">{_esc(group.name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(group.name)}</td>'
         f'<td class="r">{group.op_count}</td>'
         f'<td class="r">{_ms(group.duration_ms)}</td>'
         f'<td class="r">{_ms(group.cpu_ms)}</td></tr>'
@@ -958,7 +1006,15 @@ def _pipeline_row(group: PipelineGroup) -> str:
 def _pipeline_section(agg: AggregatesView) -> str:
     if not agg.pipeline:
         return ""
-    rows = "".join(_pipeline_row(group) for group in agg.pipeline)
+    lead = max(
+        range(len(agg.pipeline)),
+        key=lambda i: agg.pipeline[i].duration_ms,
+        default=-1,
+    )
+    rows = "".join(
+        _pipeline_row(group, lead=(i == lead))
+        for i, group in enumerate(agg.pipeline)
+    )
     headers = (("Subsystem", False), ("Ops", True), ("Wall", True), ("CPU", True))
     return _section(
         "Pipeline",
@@ -967,16 +1023,14 @@ def _pipeline_section(agg: AggregatesView) -> str:
     )
 
 
-def _analysis_phase_row(row: AnalysisPhaseRow, max_permille: int) -> str:
-    heavy = row.verdict == "phase_heavy"
+def _analysis_phase_row(row: AnalysisPhaseRow, max_permille: int, *, lead: bool) -> str:
     label = _ANALYSIS_PHASE_LABELS.get(row.phase, row.phase)
-    color = "var(--warn)" if heavy else "var(--accent)"
-    sig = '<span class="chip warn">bottleneck</span>' if heavy else ""
+    sig = '<span class="chip">peak</span>' if lead else ""
     return (
-        f'<div class="ph-row{" heavy" if heavy else ""}">'
+        f'<div class="ph-row{" lead" if lead else ""}">'
         f'<span class="ph-namecell"><span class="ph-name">{_esc(label)}</span>'
         f'<span class="ph-raw">{_esc(row.phase)}</span></span>'
-        f"{_bar(row.share_permille, max_permille, color=color)}"
+        f"{_bar(row.share_permille, max_permille)}"
         f'<span class="ph-dur">{_esc(_ms(row.worker_elapsed_ms))}</span>'
         f'<span class="ph-share">{row.share_permille / 10:.1f}%</span>'
         f'<span class="ph-sig">{sig}</span></div>'
@@ -1047,8 +1101,14 @@ def _analysis_phases_section(trace: TraceView) -> str:
         return _empty_analysis_phase_section(trace)
     max_permille = max((row.share_permille for row in agg.analysis_phases), default=1)
     max_permille = max_permille or 1
+    lead_idx = max(
+        range(len(agg.analysis_phases)),
+        key=lambda i: agg.analysis_phases[i].share_permille,
+        default=-1,
+    )
     rows = "".join(
-        _analysis_phase_row(row, max_permille) for row in agg.analysis_phases
+        _analysis_phase_row(row, max_permille, lead=(i == lead_idx))
+        for i, row in enumerate(agg.analysis_phases)
     )
     footer = (
         f"Worker elapsed (summed): "
@@ -1057,10 +1117,7 @@ def _analysis_phases_section(trace: TraceView) -> str:
         f"files timed: {agg.analysis_phase_files_timed} · "
         f"units eligible: {agg.analysis_phase_units_eligible}"
     )
-    body = (
-        f'<div class="panel ph">{rows}</div>'
-        f'<p class="shint">{_esc(footer)}</p>'
-    )
+    body = f'<div class="panel ph">{rows}</div><p class="shint">{_esc(footer)}</p>'
     return _section(
         "Analysis extract phases",
         body,
