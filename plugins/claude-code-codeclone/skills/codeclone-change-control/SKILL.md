@@ -60,6 +60,7 @@ present the patch as fully clean.
 | `finish.verification.status`           | accepted / unverified (missing evidence) / violated (regression)                        |
 | `finish_block_reason`                  | missing_evidence / foreign_dirty_overlap / own_unscoped_dirty (strict only)             |
 | `intent_cleared`                       | false = intent still open = NOT done                                                    |
+| `context_governance.mode="observe"`    | response-size telemetry only — NEVER edit permission or evidence omission               |
 
 ## Verification profiles (controller derives — you do not choose)
 

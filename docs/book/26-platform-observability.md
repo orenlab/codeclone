@@ -57,7 +57,7 @@ observability table.
 | `CODECLONE_OBSERVABILITY_FORCE=1`                 | Permit observation in CI; it does not enable instrumentation by itself. |
 | `CODECLONE_OBSERVABILITY_PROFILE=1`               | Capture optional process metrics; requires `codeclone[perf]`.           |
 | `CODECLONE_OBSERVABILITY_PERSIST=0`               | Instrument without persisting completed operations.                     |
-| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES=0` | Disable request/response size and token estimates.                      |
+| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES=0` | Disable request/response size and context-unit estimates.               |
 | `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT=1`      | Reserved and rejected: raw payload snapshots are not supported.         |
 
 An explicit `CODECLONE_OBSERVABILITY_ENABLED=1` is sufficient in CI.
@@ -74,10 +74,16 @@ written in one transaction.
 
 An operation records stable identifiers, parent/correlation IDs, surface,
 operation name, timestamps, duration, status, bounded error classification,
-session and root digests, request/response sizes, token estimates, and optional
+session and root digests, request/response sizes, context-unit estimates, and optional
 process metrics (`rss_mb`, `rss_delta_mb`, `peak_rss_mb`, `peak_rss_delta_mb`,
 CPU time, thread count, open file descriptors when `codeclone[perf]` is
 installed).
+
+MCP response context pressure is an estimated context-unit signal, not an exact
+model tokenizer count. When a response includes `context_governance`, the
+observer uses that envelope's `estimated` value. Older storage and projection
+fields may still be named `response_tokens`; interpret those values as
+deterministic context units.
 
 A span records its parent, duration, reason kind, deduplication state, numeric
 counters, the same optional process metrics, and at most eight normalized SQL

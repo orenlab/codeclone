@@ -91,6 +91,11 @@ Treat `mode="observe"` as telemetry and compatibility metadata, not as proof
 that the response is already bounded. It also does not authorize edits, weaken
 findings, or replace tool-specific contracts.
 
+Platform Observability uses `context_governance.estimated` as the MCP response
+context-pressure estimate when the envelope is present. Older observer storage
+fields may still be named `response_tokens`; treat their values as deterministic
+context units, not model-specific tokenizer counts.
+
 For `finish_controlled_change`, `context_governance.response` describes the
 whole returned finish response. It includes `tool="finish_controlled_change"`,
 `budget_scope="whole_response"`, `evidence_policy="observe_only_no_omission"`,

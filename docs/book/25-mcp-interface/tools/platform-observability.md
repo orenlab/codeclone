@@ -50,6 +50,11 @@ normal detail is bounded by `limit`.
 analysis ran in a process pool. Treat the section as a CodeClone performance
 diagnostic only; it does not indicate repository quality.
 
+`agent_context` and `mcp_tool_matrix` report context pressure as deterministic
+context units. For MCP responses that carry `context_governance`, the observer
+uses `context_governance.estimated`; legacy field names such as
+`response_tokens` are compatibility names, not exact model-token counts.
+
 ## Inert states
 
 When observability is disabled, the tool returns a disabled status. When no

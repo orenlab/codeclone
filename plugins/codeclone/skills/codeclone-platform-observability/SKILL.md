@@ -58,6 +58,10 @@ Human cockpit (not MCP): `codeclone observability trace --root . --last 50 --htm
 | `costly_noops`                                       | redundant-work hints                                                                    |
 | `affects_analysis_truth` / `affects_edit_permission` | always false — observer never gates or authorizes                                       |
 
+MCP payload context metrics are estimated context units. For responses carrying
+`context_governance`, the observer uses that envelope's `estimated` value; do not
+describe it as an exact model tokenizer count.
+
 ## Non-goals
 
 - Never treat observer metrics as findings, gates, or edit permission.

@@ -11423,6 +11423,52 @@ def test_measure_payload_estimate_failure_uses_char_fallback(
     assert tokens > 0
 
 
+def test_measure_payload_prefers_context_governance_estimate() -> None:
+    from codeclone.surfaces.mcp._context_governance import (
+        CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+        CONTEXT_GOVERNANCE_ESTIMATOR,
+    )
+    from codeclone.surfaces.mcp.payloads import measure_payload
+
+    byte_size, tokens = measure_payload(
+        {
+            "items": list(range(100)),
+            "context_governance": {
+                "contract_version": CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+                "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
+                "estimated": 17,
+                "mode": "observe",
+            },
+        }
+    )
+
+    assert byte_size > 0
+    assert tokens == 17
+
+
+def test_measure_payload_ignores_invalid_context_governance_estimate() -> None:
+    from codeclone.surfaces.mcp._context_governance import (
+        CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+        CONTEXT_GOVERNANCE_ESTIMATOR,
+    )
+    from codeclone.surfaces.mcp.payloads import measure_payload
+
+    _byte_size, tokens = measure_payload(
+        {
+            "items": list(range(100)),
+            "context_governance": {
+                "contract_version": CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+                "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
+                "estimated": True,
+                "mode": "observe",
+            },
+        }
+    )
+
+    assert tokens != 1
+    assert tokens > 17
+
+
 def test_mcp_payload_paginate_and_finding_resolution() -> None:
     from codeclone.surfaces.mcp.payloads import (
         PageWindow,
