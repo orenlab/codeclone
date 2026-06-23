@@ -30,6 +30,11 @@ class SemanticProjection(BaseModel):
     status: str | None = None
     text: str = Field(min_length=1)
     text_hash: str = Field(min_length=1)
+    # Cheap, projection-free revision key (Stage 2). Derived identically by the
+    # inventory scan and the full projection, so an unchanged source row's stored
+    # revision always equals its freshly scanned one. Default "" = legacy/unknown
+    # = always changed; a real projection always sets a non-empty revision.
+    source_revision: str = ""
 
 
 class SemanticRow(BaseModel):
@@ -54,14 +59,17 @@ class SemanticRow(BaseModel):
     status: str | None = None
     text_hash: str = Field(min_length=1)
     embedding_model: str = Field(min_length=1)
+    source_revision: str = ""
     vector: tuple[float, ...]
 
 
 class SemanticRowFingerprint(BaseModel):
     """Identity of a stored row without its vector.
 
-    The incremental rebuild fetches these (id + ``text_hash`` + model) to decide
-    what to re-embed, so it never loads vectors to check freshness.
+    The incremental rebuild fetches these (id + ``text_hash`` + model +
+    ``source_revision``) to decide what to re-embed, so it never loads vectors to
+    check freshness. ``source_revision`` guarantees a revision-changed row is
+    re-embedded (and its new revision persisted) even when its text is unchanged.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
@@ -69,6 +77,29 @@ class SemanticRowFingerprint(BaseModel):
     id: str = Field(min_length=1)
     text_hash: str = Field(min_length=1)
     embedding_model: str = Field(min_length=1)
+    source_revision: str = ""
+
+
+class ExistingSourceRevision(BaseModel):
+    """Stored revision state for one source object, grouped from its index rows.
+
+    The incremental rebuild reads these once (a single metadata scan, no vectors)
+    to partition each lane's source ids into new / unchanged / changed / deleted.
+    ``source_id`` is the row ``parent_id`` for chunked trajectories, else the row
+    ``id``; every row of one source shares the same ``source_revision``, so the
+    grouped value is unambiguous. ``row_ids`` are all index rows for that source
+    (every chunk), used to keep unchanged rows in ``seen_ids`` during reconcile.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source: SemanticSource
+    source_revision: str = ""
+    # Embedding model the stored rows were built with; a source whose revision is
+    # unchanged but whose model differs from the current provider is still stale
+    # (a model swap must re-embed every lane), so the partition checks both.
+    embedding_model: str = ""
+    row_ids: frozenset[str]
 
 
 class SemanticHit(BaseModel):
@@ -120,6 +151,7 @@ class SemanticSearchResult(BaseModel):
 
 
 __all__ = [
+    "ExistingSourceRevision",
     "SemanticHit",
     "SemanticIndexStatus",
     "SemanticProjection",

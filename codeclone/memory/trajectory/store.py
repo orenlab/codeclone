@@ -483,7 +483,7 @@ def list_trajectories(
     rows = conn.execute(
         """
         SELECT id, workflow_id, outcome, quality_tier, quality_score, event_count,
-               started_at_utc, finished_at_utc, summary
+               started_at_utc, finished_at_utc, summary, trajectory_digest
         FROM memory_trajectories
         WHERE project_id=?
         ORDER BY finished_at_utc DESC, id ASC
@@ -502,6 +502,7 @@ def list_trajectories(
             started_at_utc=str(row["started_at_utc"]),
             finished_at_utc=str(row["finished_at_utc"]),
             summary=str(row["summary"]),
+            trajectory_digest=str(row["trajectory_digest"]),
         )
         for row in rows
     ]

@@ -18,6 +18,7 @@ from .chunking import (
     trajectory_chunk_row_id,
 )
 from .models import (
+    ExistingSourceRevision,
     SemanticHit,
     SemanticIndexStatus,
     SemanticProjection,
@@ -85,8 +86,15 @@ class SemanticIndexWriter(SemanticIndex, Protocol):
     def known_ids(self) -> set[str]: ...
 
     def row_fingerprints(self, ids: Sequence[str]) -> dict[str, SemanticRowFingerprint]:
-        """Stored (text_hash, embedding_model) for the given ids, vectors not
-        loaded. Missing ids are omitted; empty ``ids`` returns ``{}``."""
+        """Stored (text_hash, embedding_model, source_revision) for the given ids,
+        vectors not loaded. Missing ids are omitted; empty ``ids`` returns ``{}``."""
+        ...
+
+    def existing_revisions(self) -> dict[str, ExistingSourceRevision]:
+        """Every stored row grouped by source id -> (lane, source_revision,
+        row_ids), from one metadata scan. The rebuild diffs this against each
+        source's cheap ``scan`` to project only changed sources; vectors are
+        never loaded."""
         ...
 
 
@@ -188,6 +196,7 @@ __all__ = [
     "INDEXED_MEMORY_TYPES",
     "SEMANTIC_CHUNK_STRATEGY_VERSION",
     "AuditIndexSource",
+    "ExistingSourceRevision",
     "IndexSource",
     "MemoryIndexSource",
     "NullSemanticIndex",

@@ -12,14 +12,16 @@ import pytest
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
 from codeclone.memory.semantic import RebuildReport, rebuild_semantic_index
 from codeclone.memory.semantic.models import (
+    ExistingSourceRevision,
     SemanticHit,
     SemanticIndexStatus,
     SemanticProjection,
     SemanticRow,
     SemanticRowFingerprint,
+    SemanticSource,
 )
 from codeclone.memory.semantic.projection import text_hash
-from codeclone.memory.semantic.sources import SourceScanError
+from codeclone.memory.semantic.sources import SourceScan, SourceScanError
 
 
 class _FakeWriter:
@@ -61,9 +63,24 @@ class _FakeWriter:
                 id=row_id,
                 text_hash=by_id[row_id].text_hash,
                 embedding_model=by_id[row_id].embedding_model,
+                source_revision=by_id[row_id].source_revision,
             )
             for row_id in ids
             if row_id in by_id
+        }
+
+    def existing_revisions(self) -> dict[str, ExistingSourceRevision]:
+        by_source: dict[str, list[SemanticRow]] = {}
+        for row in self.rows:
+            by_source.setdefault(row.parent_id or row.id, []).append(row)
+        return {
+            source_id: ExistingSourceRevision(
+                source=grouped[0].source,
+                source_revision=grouped[0].source_revision,
+                embedding_model=grouped[0].embedding_model,
+                row_ids=frozenset(row.id for row in grouped),
+            )
+            for source_id, grouped in by_source.items()
         }
 
 
@@ -74,11 +91,16 @@ class _FakeSource:
         projections: list[SemanticProjection],
         *,
         available: bool = True,
+        scan_status: str = "complete",
+        raise_on_scan: bool = False,
     ) -> None:
         self._name = name
         self._projections = projections
         self._available = available
-        self.iter_calls = 0
+        self._scan_status = scan_status
+        self._raise_on_scan = raise_on_scan
+        self.scan_calls = 0
+        self.projected_ids: list[str] = []
 
     def name(self) -> str:
         return self._name
@@ -87,8 +109,21 @@ class _FakeSource:
         return self._available
 
     def iter_projections(self) -> Iterator[SemanticProjection]:
-        self.iter_calls += 1
         yield from self._projections
+
+    def scan(self) -> SourceScan:
+        self.scan_calls += 1
+        if self._raise_on_scan:
+            raise SourceScanError("read failed")
+        return SourceScan(
+            revisions={p.source_id: p.source_revision for p in self._projections},
+            status=self._scan_status,  # type: ignore[arg-type]
+        )
+
+    def project(self, source_ids: Sequence[str]) -> Iterator[SemanticProjection]:
+        wanted = set(source_ids)
+        self.projected_ids.extend(source_ids)
+        return iter([p for p in self._projections if p.source_id in wanted])
 
 
 def _projection(source_id: str, text: str) -> SemanticProjection:
@@ -98,6 +133,7 @@ def _projection(source_id: str, text: str) -> SemanticProjection:
         kind="contract_note",
         text=text,
         text_hash=text_hash(text),
+        source_revision=f"rev-{source_id}",
     )
 
 
@@ -114,9 +150,10 @@ def test_rebuild_embeds_and_upserts() -> None:
     assert isinstance(report, RebuildReport)
     assert report.indexed == 2
     assert report.by_source == {"memory": 2}
-    # by_source is counted during the single index pass — the source must not be
-    # re-iterated just to populate the report (the trajectory lane is expensive).
-    assert source.iter_calls == 1
+    # The lane is scanned once (cheap revisions) and only the changed ids are
+    # projected — the expensive source is never iterated wholesale for the report.
+    assert source.scan_calls == 1
+    assert sorted(source.projected_ids) == ["mem-1", "mem-2"]
     assert {row.id for row in writer.rows} == {"mem-1", "mem-2"}
     assert all(len(row.vector) == 32 for row in writer.rows)
     assert all(row.embedding_model == "diagnostic-hash-v1" for row in writer.rows)
@@ -192,6 +229,7 @@ def test_rebuild_indexes_trajectory_chunks(monkeypatch: pytest.MonkeyPatch) -> N
         kind="trajectory",
         text="long trajectory",
         text_hash=text_hash("long trajectory"),
+        source_revision="rev-traj-1",
     )
     source = _FakeSource("trajectory", [projection])
 
@@ -206,24 +244,7 @@ def test_rebuild_indexes_trajectory_chunks(monkeypatch: pytest.MonkeyPatch) -> N
     assert all(row.parent_id == "traj-1" for row in writer.rows)
 
 
-class _FailingSource:
-    """A source whose read fails: iterating its projections raises."""
-
-    def __init__(self, name: str) -> None:
-        self._name = name
-
-    def name(self) -> str:
-        return self._name
-
-    def available(self) -> bool:
-        return True
-
-    def iter_projections(self) -> Iterator[SemanticProjection]:
-        raise SourceScanError("read failed")
-        yield  # pragma: no cover - marks this a generator
-
-
-def _stored_row(row_id: str, source: str) -> SemanticRow:
+def _stored_row(row_id: str, source: SemanticSource) -> SemanticRow:
     return SemanticRow(
         id=row_id,
         source=source,
@@ -246,7 +267,10 @@ def test_rebuild_defers_pruning_when_a_source_read_fails() -> None:
     report = rebuild_semantic_index(
         writer=writer,
         provider=provider,
-        sources=[_FakeSource("memory", []), _FailingSource("audit")],
+        sources=[
+            _FakeSource("memory", []),
+            _FakeSource("audit", [], raise_on_scan=True),
+        ],
     )
 
     known = writer.known_ids()

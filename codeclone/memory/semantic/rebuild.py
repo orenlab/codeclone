@@ -27,7 +27,7 @@ from .chunking import (
     expand_projection,
     resolve_passage_chunker,
 )
-from .models import SemanticRow, SemanticRowFingerprint
+from .models import ExistingSourceRevision, SemanticRow, SemanticRowFingerprint
 from .sources import SourceScanError
 
 if TYPE_CHECKING:
@@ -43,13 +43,19 @@ _FINGERPRINT_PAGE_SIZE = 256
 @dataclass(frozen=True, slots=True)
 class RebuildReport:
     """Outcome of a semantic rebuild: indexed total, deletions, and the
-    embedded vs hash-skipped split (per source)."""
+    embedded vs skipped-unchanged split (per source).
+
+    ``incomplete_lanes`` names sources whose scan was degraded this cycle; those
+    lanes were preserved (no pruning) instead of reconciled, so the rebuild is
+    advisory-degraded rather than authoritative for them.
+    """
 
     indexed: int
     deleted: int = 0
     embedded: int = 0
     skipped_unchanged: int = 0
     by_source: dict[str, int] = field(default_factory=dict)
+    incomplete_lanes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +63,7 @@ class _SourceIndexStats:
     seen_ids: set[str]
     embedded: int
     skipped_unchanged: int
-    projection_count: int = 0
+    document_count: int = 0
 
 
 def rebuild_semantic_index(
@@ -67,22 +73,27 @@ def rebuild_semantic_index(
     sources: Sequence[IndexSource],
     embed_batch_limits: EmbedBatchLimits | None = None,
 ) -> RebuildReport:
-    """Reconcile the semantic index against its sources by content hash.
+    """Reconcile the semantic index against its sources by source revision.
 
-    A row is re-embedded only when its projection ``text_hash`` (or the
-    embedding model) differs from the stored fingerprint; unchanged rows are
-    skipped without loading their vectors, so an unchanged corpus never loads
-    the embedding model. The index is a derived, rebuildable sidecar, never
-    updated on the write hot path.
+    Each source is scanned for a cheap ``source_revision`` per current row (no
+    projection, no full hydration). Only sources whose revision differs from the
+    stored one are re-projected and re-embedded; an unchanged source is never
+    sourced past the scan, so an unchanged corpus does no projection, embedding,
+    or row writes. A source whose scan is degraded preserves its lane (its stored
+    rows are kept and never pruned). The index is a derived, rebuildable sidecar,
+    never updated on the write hot path.
     """
     limits = embed_batch_limits or EmbedBatchLimits()
     chunker = resolve_passage_chunker(provider)
-    # Index each available source; a failed read (SourceScanError) records a
-    # scan failure instead of an empty result so that pruning, which is
-    # destructive, is deferred this cycle — a transient failure must never
-    # masquerade as an empty source and delete still-live rows.
+    # One metadata scan of the stored rows, diffed per source against each
+    # source's cheap revision scan. A degraded source (SourceScanError or a
+    # non-complete scan status) preserves its lane: pruning, which is
+    # destructive, is gated off for the whole cycle and the lane's stored rows
+    # stay in seen_ids — a transient failure must never masquerade as an empty
+    # source and delete still-live rows.
+    existing = writer.existing_revisions()
     scanned: list[tuple[str, _SourceIndexStats]] = []
-    scan_failed = False
+    incomplete_lanes: list[str] = []
     for source in sources:
         if not source.available():
             continue
@@ -91,23 +102,44 @@ def rebuild_semantic_index(
             writer=writer,
             provider=provider,
             chunker=chunker,
+            existing=existing,
             embed_batch_limits=limits,
         )
         if stats is None:
-            scan_failed = True
+            incomplete_lanes.append(source.name())
         else:
             scanned.append((source.name(), stats))
     seen_ids = {row_id for _, stats in scanned for row_id in stats.seen_ids}
-    deleted = _reconcile(writer, seen_ids=seen_ids, prune=not scan_failed)
+    seen_ids |= _preserved_lane_rows(existing, incomplete_lanes)
+    deleted = _reconcile(writer, seen_ids=seen_ids, prune=not incomplete_lanes)
     return RebuildReport(
         indexed=len(seen_ids),
         deleted=deleted,
         embedded=sum(stats.embedded for _, stats in scanned),
         skipped_unchanged=sum(stats.skipped_unchanged for _, stats in scanned),
         by_source={
-            name: stats.projection_count for name, stats in scanned if stats.seen_ids
+            name: stats.document_count
+            for name, stats in scanned
+            if stats.document_count
         },
+        incomplete_lanes=tuple(incomplete_lanes),
     )
+
+
+def _preserved_lane_rows(
+    existing: dict[str, ExistingSourceRevision],
+    incomplete_lanes: Sequence[str],
+) -> set[str]:
+    """Every stored row id of a degraded lane, so reconcile keeps it this cycle."""
+    if not incomplete_lanes:
+        return set()
+    lanes = set(incomplete_lanes)
+    return {
+        row_id
+        for ex in existing.values()
+        if ex.source in lanes
+        for row_id in ex.row_ids
+    }
 
 
 def _scan_source(
@@ -116,9 +148,10 @@ def _scan_source(
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
     chunker: PassageChunker,
+    existing: dict[str, ExistingSourceRevision],
     embed_batch_limits: EmbedBatchLimits,
 ) -> _SourceIndexStats | None:
-    """Index one source, or None when its read failed (its lane is preserved)."""
+    """Index one source, or None when its scan was degraded (lane preserved)."""
     try:
         with span(name=f"memory.semantic.source.{source.name()}"):
             return _index_source(
@@ -126,6 +159,7 @@ def _scan_source(
                 writer=writer,
                 provider=provider,
                 chunker=chunker,
+                existing=existing,
                 embed_batch_limits=embed_batch_limits,
             )
     except SourceScanError:
@@ -160,14 +194,67 @@ def _index_source(
     writer: SemanticIndexWriter,
     provider: EmbeddingProvider,
     chunker: PassageChunker,
+    existing: dict[str, ExistingSourceRevision],
     embed_batch_limits: EmbedBatchLimits,
-) -> _SourceIndexStats:
+) -> _SourceIndexStats | None:
+    scan = source.scan()
+    if scan.status != "complete":
+        return None
+    lane = source.name()
+    stored = {sid: ex for sid, ex in existing.items() if ex.source == lane}
+    seen: set[str] = set()
+    changed_ids: list[str] = []
+    unchanged_rows = 0
+    for source_id, revision in scan.revisions.items():
+        ex = stored.get(source_id)
+        # NEW (absent) / CHANGED (revision differs) / legacy ("" stored revision)
+        # / model-swapped (rows built with a different embedding model) are all
+        # re-projected; an unchanged source contributes its stored rows to
+        # seen_ids without any projection or embedding.
+        if (
+            ex is None
+            or ex.source_revision == ""
+            or ex.source_revision != revision
+            or ex.embedding_model != provider.model_id
+        ):
+            changed_ids.append(source_id)
+        else:
+            seen.update(ex.row_ids)
+            unchanged_rows += len(ex.row_ids)
+    changed_seen, embedded, skipped = _project_and_embed(
+        source,
+        changed_ids,
+        writer=writer,
+        provider=provider,
+        chunker=chunker,
+        embed_batch_limits=embed_batch_limits,
+    )
+    seen |= changed_seen
+    return _SourceIndexStats(
+        seen_ids=seen,
+        embedded=embedded,
+        skipped_unchanged=unchanged_rows + skipped,
+        document_count=len(scan.revisions),
+    )
+
+
+def _project_and_embed(
+    source: IndexSource,
+    source_ids: Sequence[str],
+    *,
+    writer: SemanticIndexWriter,
+    provider: EmbeddingProvider,
+    chunker: PassageChunker,
+    embed_batch_limits: EmbedBatchLimits,
+) -> tuple[set[str], int, int]:
+    """Project + embed only the changed ``source_ids``; returns their row ids
+    (for seen_ids), the embedded count, and the text-hash/model skip count. Each
+    batch is upserted (source_revision + vector together) before reconcile runs,
+    so a crash mid-cycle leaves rows the next rebuild re-converges."""
     seen: set[str] = set()
     embedded = 0
     skipped = 0
-    projection_count = 0
-    for page in chunked(source.iter_projections(), _FINGERPRINT_PAGE_SIZE):
-        projection_count += len(page)
+    for page in chunked(source.project(source_ids), _FINGERPRINT_PAGE_SIZE):
         units: list[IndexedSemanticUnit] = []
         for projection in page:
             units.extend(expand_projection(projection, chunker))
@@ -177,11 +264,7 @@ def _index_source(
         changed = [
             unit
             for unit in units
-            if _needs_embed(
-                fingerprints.get(unit.row_id),
-                unit,
-                provider.model_id,
-            )
+            if _needs_embed(fingerprints.get(unit.row_id), unit, provider.model_id)
         ]
         skipped += len(units) - len(changed)
         embedded += _embed_and_upsert(
@@ -190,12 +273,7 @@ def _index_source(
             provider=provider,
             embed_batch_limits=embed_batch_limits,
         )
-    return _SourceIndexStats(
-        seen_ids=seen,
-        embedded=embedded,
-        skipped_unchanged=skipped,
-        projection_count=projection_count,
-    )
+    return seen, embedded, skipped
 
 
 def _embed_and_upsert(
@@ -273,6 +351,7 @@ def _needs_embed(
     return (
         fingerprint.text_hash != unit.text_hash
         or fingerprint.embedding_model != model_id
+        or fingerprint.source_revision != unit.source_revision
     )
 
 
@@ -293,6 +372,7 @@ def _row(
         status=unit.status,
         text_hash=unit.text_hash,
         embedding_model=model_id,
+        source_revision=unit.source_revision,
         vector=tuple(vector),
     )
 

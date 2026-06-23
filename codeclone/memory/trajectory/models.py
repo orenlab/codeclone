@@ -145,6 +145,10 @@ class TrajectoryListItem:
     started_at_utc: str
     finished_at_utc: str
     summary: str
+    # Content-addressed digest of the trajectory (Stage 2): lets the semantic
+    # source compute a cheap revision token from the list scan alone, without
+    # hydrating each trajectory. Defaults "" so older callers stay valid.
+    trajectory_digest: str = ""
 
 
 __all__ = [

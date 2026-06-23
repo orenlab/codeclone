@@ -9,10 +9,21 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Iterable
 
+from ...contracts import (
+    AUDIT_PROJECTION_VERSION,
+    MEMORY_PROJECTION_VERSION,
+    SEMANTIC_PROJECTION_REVISION_VERSION,
+    TRAJECTORY_PROJECTION_VERSION,
+)
 from ..models import MemoryRecord
 from ..trajectory.models import Trajectory
 from ..trajectory.retrieval import trajectory_semantic_text_parts
 from .models import SemanticProjection
+
+# Field separator for the source_revision payload — an ASCII unit separator that
+# cannot appear in version tags, source ids, or content tokens, so the joined
+# fields can never collide.
+_REVISION_FIELD_SEP = "\x1f"
 
 # Prose/decision subset only. Structural records (module_role, test_anchor,
 # document_link, public_surface, stale_marker) are served by exact subject
@@ -46,6 +57,41 @@ INDEXED_AUDIT_EVENTS: frozenset[str] = frozenset(
 def text_hash(text: str) -> str:
     """Stable sha256 of the projected text — the idempotent upsert key."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def source_revision(*, source_kind: str, source_id: str, content_token: str) -> str:
+    """Cheap, projection-free revision key for one source row (Stage 2).
+
+    Folds the global ``SEMANTIC_PROJECTION_REVISION_VERSION`` escape hatch with the
+    source kind/id and a per-source content token (which carries that source's
+    projection version). It is derivable identically from the cheap inventory
+    scan and from the full projection, so an unchanged source row always hashes to
+    the same revision through both paths — that equality is what lets the rebuild
+    skip re-projecting it. It is NOT the projected text hash: computing the text
+    hash needs the expensive projection, which is exactly what this avoids.
+    """
+    payload = _REVISION_FIELD_SEP.join(
+        (SEMANTIC_PROJECTION_REVISION_VERSION, source_kind, source_id, content_token)
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def memory_content_token(record: MemoryRecord) -> str:
+    """Cheap change token for a memory record: its projection version, mutation
+    timestamp, and status. No statement/subjects read required."""
+    return f"{MEMORY_PROJECTION_VERSION}:{record.updated_at_utc}:{record.status}"
+
+
+def audit_content_token() -> str:
+    """Audit events are immutable, so the token is the projection version alone:
+    a new event_id is the only thing that changes a row's revision."""
+    return AUDIT_PROJECTION_VERSION
+
+
+def trajectory_content_token(*, trajectory_digest: str) -> str:
+    """Trajectory change token: projection version plus the content-addressed
+    trajectory digest (the cheap list scan already returns it)."""
+    return f"{TRAJECTORY_PROJECTION_VERSION}:{trajectory_digest}"
 
 
 def is_indexed_memory_type(record_type: str) -> bool:
@@ -82,6 +128,11 @@ def project_memory_record(
         status=record.status,
         text=text,
         text_hash=text_hash(text),
+        source_revision=source_revision(
+            source_kind="memory",
+            source_id=record.id,
+            content_token=memory_content_token(record),
+        ),
     )
 
 
@@ -107,6 +158,11 @@ def project_audit_event(
         status=None,
         text=text,
         text_hash=text_hash(text),
+        source_revision=source_revision(
+            source_kind="audit",
+            source_id=event_id,
+            content_token=audit_content_token(),
+        ),
     )
 
 
@@ -129,6 +185,13 @@ def project_trajectory(
         status=trajectory.outcome,
         text=text,
         text_hash=text_hash(text),
+        source_revision=source_revision(
+            source_kind="trajectory",
+            source_id=trajectory.id,
+            content_token=trajectory_content_token(
+                trajectory_digest=trajectory.trajectory_digest
+            ),
+        ),
     )
 
 
@@ -142,10 +205,14 @@ def _primary_trajectory_path(trajectory: Trajectory) -> str | None:
 __all__ = [
     "INDEXED_AUDIT_EVENTS",
     "INDEXED_MEMORY_TYPES",
+    "audit_content_token",
     "is_indexed_audit_event",
     "is_indexed_memory_type",
+    "memory_content_token",
     "project_audit_event",
     "project_memory_record",
     "project_trajectory",
+    "source_revision",
     "text_hash",
+    "trajectory_content_token",
 ]
