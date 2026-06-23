@@ -59,15 +59,17 @@ def test_compact_payload_for_patch_trail_and_receipt() -> None:
     assert patch_trail["declared"] == 1
     assert patch_trail["truncation"] is True
 
+    # Forensic-retention policy (Phase 34): the review receipt payload is preserved
+    # complete under compaction so it stays exactly retrievable post-clear.
+    receipt_payload = {
+        "format": "markdown",
+        "receipt": {"verdict": "clean", "human_decision_points": [{"id": "x"}]},
+    }
     receipt = compact_payload_for_event(
         event_type=EVENT_RECEIPT_CREATED,
-        payload={
-            "format": "markdown",
-            "receipt": {"verdict": "clean", "human_decision_points": [{"id": "x"}]},
-        },
+        payload=receipt_payload,
     )
-    assert receipt["verdict"] == "clean"
-    assert receipt["human_decisions"] == 1
+    assert receipt == receipt_payload
 
 
 def test_event_core_for_workspace_and_queue_events() -> None:

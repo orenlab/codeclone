@@ -148,7 +148,9 @@ from .messages.params import (
     PrFormatParam,
     ProcessesParam,
     ProposeMemoryParam,
+    ReceiptDigestParam,
     ReceiptFormatParam,
+    ReceiptRetrievalFormatParam,
     ReportSectionParam,
     RequireCitationsParam,
     RespectPyprojectParam,
@@ -755,6 +757,25 @@ def build_mcp_server(
             format=format,
             include_blast_radius=include_blast_radius,
             include_patch_contract=include_patch_contract,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_REVIEW_RECEIPT,
+        description=mcp_tools.GET_REVIEW_RECEIPT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_review_receipt(
+        root: RootParam,
+        run_id: RunIdParam = None,
+        receipt_digest: ReceiptDigestParam = None,
+        format: ReceiptRetrievalFormatParam = "structured",
+    ) -> dict[str, object]:
+        return service.get_review_receipt(
+            root=root,
+            run_id=run_id,
+            receipt_digest=receipt_digest,
+            format=format,
         )
 
     @tool(

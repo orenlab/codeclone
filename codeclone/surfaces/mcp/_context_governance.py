@@ -30,6 +30,7 @@ IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND: Final = (
     "implementation_context_projection_v1"
 )
 MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = "memory_retrieval_projection_v1"
+REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND: Final = "review_receipt_projection_v1"
 START_RESPONSE_PROJECTION_KIND: Final = "start_projection_v1"
 
 _OBSERVE_ENFORCEMENT: Final[dict[str, bool]] = {
@@ -40,7 +41,9 @@ _OBSERVE_ENFORCEMENT: Final[dict[str, bool]] = {
 
 _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "typed_receipt_alias": True,
-    "durable_receipt_lookup": False,
+    # Phase 34.4: a durable post-clear receipt lookup now exists
+    # (get_review_receipt over the audit trail), so this prerequisite is met.
+    "durable_receipt_lookup": True,
     "durable_patch_trail_lookup": False,
     "immutable_blast_artifact": False,
     "omitted_evidence_continuation": False,
@@ -65,7 +68,8 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
         "snapshot_identity": "blocked",
     },
     "structured_receipt": {
-        "object_lookup": "blocked",
+        "object_lookup": "available",
+        "route": "get_review_receipt(run_id=..., receipt_digest=...)",
         "continuation": "blocked",
         "current_complete_path": "receipt.receipt",
     },
@@ -87,9 +91,10 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
 }
 
 _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
+    # receipt_retrieval_unavailable / durable_receipt_lookup / post_clear_receipt_lookup
+    # cleared in Phase 34.4 (get_review_receipt). Response-budget and omission stay
+    # blocked on the remaining unbuilt retrieval prerequisites.
     "response_budget": [
-        "receipt_retrieval_unavailable",
-        "durable_receipt_lookup",
         "durable_patch_trail_lookup",
         "immutable_blast_artifact",
         "omitted_evidence_continuation",
@@ -100,7 +105,6 @@ _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
     ],
     "omission": [
         "exact_continuation_for_omitted_tails",
-        "post_clear_receipt_lookup",
     ],
 }
 
@@ -194,7 +198,9 @@ def attach_finish_context_governance(
             "tool": "finish_controlled_change",
             "budget_scope": "whole_response",
             "evidence_policy": "observe_only_no_omission",
-            "receipt_content": "mandatory_until_durable_lookup",
+            # Durable lookup now exists (get_review_receipt); finish still inlines
+            # the receipt under observe until the 34.3 dedup slice omits it.
+            "receipt_content": "inlined_durable_lookup_available",
         },
     )
 
@@ -269,6 +275,7 @@ __all__ = [
     "IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT",
     "IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND",
     "MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND",
+    "REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND",
     "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",
     "attach_passive_context_governance",

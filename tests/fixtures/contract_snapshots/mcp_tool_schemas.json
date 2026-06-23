@@ -1946,6 +1946,55 @@
     }
   },
   {
+    "name": "get_review_receipt",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "receipt_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact receipt digest (sha256 hex value) for durable lookup.",
+          "title": "Receipt Digest"
+        },
+        "format": {
+          "default": "structured",
+          "description": "Stored receipt output: structured (typed, default) or markdown.",
+          "title": "Format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "get_review_receiptArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "get_run_summary",
     "input_schema": {
       "properties": {

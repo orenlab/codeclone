@@ -98,6 +98,18 @@ CREATE_REVIEW_RECEIPT: Final = (
     "repository state."
 )
 
+GET_REVIEW_RECEIPT: Final = (
+    "Fetch a durably stored review receipt from the audit trail by run id "
+    "and/or receipt digest, exactly as it was created. It survives auto_clear "
+    "and is never re-derived from current state. Returns the canonical typed "
+    "receipt (format='structured', the default) or its rendered markdown "
+    "(format='markdown'). At least one lookup key is required; if both are given "
+    "they must identify the same receipt. Durability is bounded by audit "
+    "retention. Fail-closed statuses: ok, not_found, ambiguous, digest_mismatch, "
+    "malformed_stored_receipt, unsupported_format. Read-only; does not mutate "
+    "repository state."
+)
+
 VALIDATE_REVIEW_CLAIMS: Final = (
     "Validate cited review text against canonical report semantics. "
     "Detects deterministic mischaracterizations: Security Surfaces "
@@ -300,6 +312,7 @@ TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"
 TITLE_MANAGE_ENGINEERING_MEMORY: Final = "Manage Engineering Memory"
 TITLE_CHECK_PATCH_CONTRACT: Final = "Check Patch Contract"
 TITLE_CREATE_REVIEW_RECEIPT: Final = "Create Review Receipt"
+TITLE_GET_REVIEW_RECEIPT: Final = "Get Review Receipt"
 TITLE_VALIDATE_REVIEW_CLAIMS: Final = "Validate Review Claims"
 TITLE_HELP: Final = "Help"
 TITLE_QUERY_PLATFORM_OBSERVABILITY: Final = "Query Platform Observability"

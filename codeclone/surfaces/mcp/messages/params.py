@@ -211,6 +211,18 @@ ReceiptFormatParam = Annotated[
     str,
     Field(description="markdown or json receipt output."),
 ]
+ReceiptRetrievalFormatParam = Annotated[
+    str,
+    Field(
+        description="Stored receipt output: structured (typed, default) or markdown.",
+    ),
+]
+ReceiptDigestParam = Annotated[
+    str | None,
+    Field(
+        description="Exact receipt digest (sha256 hex value) for durable lookup.",
+    ),
+]
 ReviewTextParam = Annotated[
     str,
     Field(description="Review claims text to validate against the run."),

@@ -7,16 +7,18 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 
+from codeclone.audit import EVENT_RECEIPT_CREATED, AuditEvent
 from codeclone.audit.analysis_completed import ANALYSIS_SOURCE_CLI
 from codeclone.audit.reader import (
     _analysis_payload_from_json,
     _analysis_run_source_label,
     _short_run_id,
+    lookup_review_receipt,
     read_audit_summary,
     read_latest_analysis_run,
 )
@@ -28,6 +30,7 @@ from codeclone.audit.validation import (
     resolve_audit_path,
     validate_event_row,
 )
+from codeclone.audit.writer import SqliteAuditWriter
 
 from .audit_fixtures import write_compact_analysis_completed_event
 
@@ -230,3 +233,142 @@ def test_validate_event_row_rejects_invalid_agent_start_epoch() -> None:
         match="agent_start_epoch must be non-negative",
     ):
         validate_event_row(row_negative)
+
+
+def _receipt_payload(
+    *, verdict: str = "clean", digest: str = "abc123"
+) -> dict[str, object]:
+    return {
+        "run_id": "30b56d21",
+        "format": "markdown",
+        "receipt_version": "1",
+        "verdict": verdict,
+        "receipt_digest": {
+            "kind": "receipt_v1",
+            "algorithm": "sha256",
+            "digest_version": "1",
+            "value": digest,
+        },
+        "content": "## CodeClone Agent Review Receipt\n...",
+        "receipt": {"receipt_version": "1", "verdict": verdict, "provenance": {}},
+    }
+
+
+def _write_receipt_event(
+    db_path: Path,
+    *,
+    run_id: str,
+    payload: dict[str, object],
+    payloads: str = "compact",
+) -> None:
+    writer = SqliteAuditWriter(
+        db_path=db_path,
+        payloads=cast("Any", payloads),
+        retention_days=30,
+    )
+    writer.emit(
+        AuditEvent(
+            event_type=EVENT_RECEIPT_CREATED,
+            severity="info",
+            repo_root_digest="rootdigest0000",
+            agent_pid=1,
+            agent_start_epoch=1,
+            agent_label="test",
+            run_id=run_id,
+            intent_id=None,
+            report_digest="reportdigest",
+            status=str(payload.get("verdict", "")),
+            payload=payload,
+        )
+    )
+    writer.close()
+
+
+def test_lookup_review_receipt_by_run_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(db_path, run_id="30b56d21", payload=_receipt_payload())
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21")
+
+    assert result.status == "ok"
+    assert result.receipt is not None
+    assert result.receipt.receipt_digest == "abc123"
+    assert result.receipt.verdict == "clean"
+    # Returns the stored typed receipt, not a recomputed one.
+    assert result.receipt.payload["receipt"] == {
+        "receipt_version": "1",
+        "verdict": "clean",
+        "provenance": {},
+    }
+
+
+def test_lookup_review_receipt_compact_mode_preserves_full_receipt(
+    tmp_path: Path,
+) -> None:
+    # The whole point of the forensic-retention policy: even the default compact
+    # audit mode keeps the complete typed receipt durably retrievable.
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(), payloads="compact"
+    )
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21", receipt_digest="abc123")
+
+    assert result.status == "ok"
+    assert result.receipt is not None
+    typed = cast("dict[str, object]", result.receipt.payload["receipt"])
+    assert typed["verdict"] == "clean"
+
+
+def test_lookup_review_receipt_not_found(tmp_path: Path) -> None:
+    missing = tmp_path / "absent.sqlite3"
+    assert lookup_review_receipt(missing, run_id="30b56d21").status == "not_found"
+
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(db_path, run_id="30b56d21", payload=_receipt_payload())
+    assert lookup_review_receipt(db_path, run_id="ffffffff").status == "not_found"
+
+
+def test_lookup_review_receipt_ambiguous(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(digest="aaa")
+    )
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(digest="bbb")
+    )
+
+    # run id alone cannot pick between two receipts.
+    assert lookup_review_receipt(db_path, run_id="30b56d21").status == "ambiguous"
+    # the digest disambiguates exactly.
+    exact = lookup_review_receipt(db_path, run_id="30b56d21", receipt_digest="bbb")
+    assert exact.status == "ok"
+    assert exact.receipt is not None
+    assert exact.receipt.receipt_digest == "bbb"
+
+
+def test_lookup_review_receipt_digest_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(digest="aaa")
+    )
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21", receipt_digest="zzz")
+    assert result.status == "digest_mismatch"
+    assert result.receipt is None
+
+
+def test_lookup_review_receipt_malformed(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(db_path, run_id="30b56d21", payload=_receipt_payload())
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE controller_events SET payload_json='{not valid json' "
+        "WHERE event_type=?",
+        (EVENT_RECEIPT_CREATED,),
+    )
+    conn.commit()
+    conn.close()
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21")
+    assert result.status == "malformed_stored_receipt"

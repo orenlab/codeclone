@@ -17,6 +17,7 @@ from .events import (
     ANALYSIS_SOURCE_CLI,
     ANALYSIS_SOURCE_MCP,
     EVENT_ANALYSIS_COMPLETED,
+    EVENT_RECEIPT_CREATED,
     repo_root_digest,
 )
 from .schema import get_meta, open_audit_db_readonly
@@ -58,6 +59,148 @@ class AuditRecord:
     token_encoding: str | None = None
     payload_characters: int | None = None
     payload_json: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StoredReviewReceipt:
+    """A review receipt recovered from the durable audit trail.
+
+    It is the exact payload persisted when the receipt was created
+    (``controller_events`` ``review_receipt.created``); it survives
+    ``auto_clear`` and is never re-derived from current state.
+    """
+
+    run_id: str | None
+    receipt_digest: str | None
+    verdict: str | None
+    receipt_version: str | None
+    receipt_format: str | None
+    created_at_utc: str
+    payload: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewReceiptLookup:
+    """Fail-closed result of a durable review-receipt lookup."""
+
+    status: str
+    receipt: StoredReviewReceipt | None = None
+    match_count: int = 0
+
+
+def lookup_review_receipt(
+    db_path: Path,
+    *,
+    run_id: str | None = None,
+    receipt_digest: str | None = None,
+) -> ReviewReceiptLookup:
+    """Look up a durably stored review receipt by run id and/or receipt digest.
+
+    Read-only and exact: returns the receipt payload exactly as persisted in the
+    audit trail, never re-derives it from current state. ``run_id`` matches the
+    stored short id or a full id that starts with it; ``receipt_digest`` is an
+    exact (non-prefix) match. Fail-closed: ``ambiguous`` when more than one
+    receipt matches, ``digest_mismatch`` when the run has receipts but none with
+    the requested digest, ``malformed_stored_receipt`` when the only matching
+    rows cannot be parsed.
+    """
+    if not db_path.exists():
+        return ReviewReceiptLookup(status="not_found")
+    try:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        rows = conn.execute(
+            "SELECT run_id, created_at_utc, payload_json FROM controller_events "
+            "WHERE event_type = ? "
+            "ORDER BY created_at_utc DESC, id DESC",
+            (EVENT_RECEIPT_CREATED,),
+        ).fetchall()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+    return _resolve_stored_review_receipt(
+        rows, run_id=run_id, receipt_digest=receipt_digest
+    )
+
+
+def _resolve_stored_review_receipt(
+    rows: list[tuple[object, object, object]],
+    *,
+    run_id: str | None,
+    receipt_digest: str | None,
+) -> ReviewReceiptLookup:
+    run_filtered = [
+        row for row in rows if run_id is None or _run_id_matches(row[0], run_id)
+    ]
+    if not run_filtered:
+        return ReviewReceiptLookup(status="not_found")
+    parsed: list[StoredReviewReceipt] = []
+    malformed = 0
+    for stored_run_id, created_at, payload_json in run_filtered:
+        receipt = _stored_review_receipt(stored_run_id, created_at, payload_json)
+        if receipt is None:
+            malformed += 1
+            continue
+        parsed.append(receipt)
+    if receipt_digest is not None:
+        candidates = [item for item in parsed if item.receipt_digest == receipt_digest]
+    else:
+        candidates = parsed
+    if len(candidates) == 1:
+        return ReviewReceiptLookup(status="ok", receipt=candidates[0], match_count=1)
+    if len(candidates) > 1:
+        return ReviewReceiptLookup(status="ambiguous", match_count=len(candidates))
+    if receipt_digest is not None and parsed:
+        return ReviewReceiptLookup(status="digest_mismatch")
+    if malformed and not parsed:
+        return ReviewReceiptLookup(status="malformed_stored_receipt")
+    return ReviewReceiptLookup(status="not_found")
+
+
+def _run_id_matches(stored: object, requested: str) -> bool:
+    stored_id = _str_or_none(stored)
+    if not stored_id:
+        return False
+    return stored_id == requested or requested.startswith(stored_id)
+
+
+def _stored_review_receipt(
+    stored_run_id: object,
+    created_at: object,
+    payload_json: object,
+) -> StoredReviewReceipt | None:
+    if not isinstance(payload_json, str) or not payload_json:
+        return None
+    try:
+        payload = json.loads(payload_json)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    typed = payload.get("receipt")
+    if not isinstance(typed, Mapping):
+        return None
+    return StoredReviewReceipt(
+        run_id=_str_or_none(payload.get("run_id")) or _str_or_none(stored_run_id),
+        receipt_digest=_receipt_digest_value(payload),
+        verdict=_str_or_none(payload.get("verdict"))
+        or _str_or_none(typed.get("verdict")),
+        receipt_version=_str_or_none(payload.get("receipt_version"))
+        or _str_or_none(typed.get("receipt_version")),
+        receipt_format=_str_or_none(payload.get("format")),
+        created_at_utc=_str_or_none(created_at) or "",
+        payload=payload,
+    )
+
+
+def _receipt_digest_value(payload: Mapping[str, object]) -> str | None:
+    digest = payload.get("receipt_digest")
+    if isinstance(digest, Mapping):
+        return _str_or_none(digest.get("value"))
+    return _str_or_none(digest)
 
 
 @dataclass(frozen=True, slots=True)

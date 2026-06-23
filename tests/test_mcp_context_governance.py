@@ -96,7 +96,7 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     }
     blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
     assert {
-        "response": "receipt_retrieval_unavailable" in blocked["response_budget"],
+        "response": "immutable_blast_artifact" in blocked["response_budget"],
         "nested": "implementation_context_artifact_pages" in blocked["nested_budget"],
         "omission": "exact_continuation_for_omitted_tails" in blocked["omission"],
     } == {
@@ -104,8 +104,13 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
         "nested": True,
         "omission": True,
     }
+    # Phase 34.4: durable receipt retrieval exists, so its blockers are cleared.
+    assert "receipt_retrieval_unavailable" not in blocked["response_budget"]
+    assert "durable_receipt_lookup" not in blocked["response_budget"]
+    assert "post_clear_receipt_lookup" not in blocked["omission"]
     capabilities = cast("dict[str, object]", envelope["capabilities"])
     assert capabilities["typed_receipt_alias"] is True
+    assert capabilities["durable_receipt_lookup"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
 
@@ -125,15 +130,15 @@ def test_finish_context_governance_marks_whole_response_projection() -> None:
         "policy": response["evidence_policy"],
         "receipt_content": response["receipt_content"],
         "digest_kind": digest["kind"],
-        "receipt_blocker": "receipt_retrieval_unavailable"
+        "receipt_retrieval_blocked": "receipt_retrieval_unavailable"
         in blocked["response_budget"],
     } == {
         "tool": "finish_controlled_change",
         "budget_scope": "whole_response",
         "policy": "observe_only_no_omission",
-        "receipt_content": "mandatory_until_durable_lookup",
+        "receipt_content": "inlined_durable_lookup_available",
         "digest_kind": FINISH_RESPONSE_PROJECTION_KIND,
-        "receipt_blocker": True,
+        "receipt_retrieval_blocked": False,
     }
 
 
@@ -184,7 +189,7 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "memory_tail_continuation": "blocked",
         "trajectory_lookup": "available",
         "receipt_current_path": "receipt.receipt",
-        "receipt_lookup": "blocked",
+        "receipt_lookup": "available",
         "blast_route": "get_blast_radius",
         "experience_lookup": "blocked",
     }

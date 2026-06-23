@@ -83,6 +83,13 @@ PAYLOAD_MODES = frozenset({"off", "compact", "full"})
 
 # Compact mode keeps the intent description as a bounded forensic field.
 _COMPACT_TEXT_LIMIT = 500
+
+# Forensic-retention policy (Phase 34): payload compaction never strips these
+# event types. They are durable evidence that must survive auto_clear and stay
+# exactly retrievable after the run/intent is cleared (review receipt drill-down
+# via get_review_receipt). Their complete payload is preserved under every
+# payload mode; only the separately bounded event-core/replay projection applies.
+_FULL_PAYLOAD_EVENT_TYPES: frozenset[str] = frozenset({EVENT_RECEIPT_CREATED})
 _EVENT_CORE_SCOPE_PATH_LIMIT = 50
 _EVENT_CORE_CITATION_LIMIT = 32
 _PROJECTION_SUPPLEMENT_FACT_KEYS = frozenset(
@@ -202,6 +209,10 @@ def compact_payload_for_event(
 ) -> dict[str, object]:
     if payload is None:
         return {}
+    if event_type in _FULL_PAYLOAD_EVENT_TYPES:
+        # Forensic-retention policy: preserve the complete payload (e.g. the full
+        # typed review receipt) so it stays exactly retrievable post-clear.
+        return dict(payload)
     if event_type in _INTENT_PAYLOAD_EVENTS:
         return _compact_intent_payload(payload)
     if event_type == EVENT_INTENT_QUEUE_BLOCKED:
@@ -251,16 +262,6 @@ def compact_payload_for_event(
             "valid": bool(payload.get("valid")),
             "violations": len(_sequence(payload.get("violations"))),
             "warnings": len(_sequence(payload.get("warnings"))),
-        }
-    if event_type == EVENT_RECEIPT_CREATED:
-        receipt = _mapping(payload.get("receipt"))
-        return {
-            "format": str(payload.get("format", "")),
-            "verdict": str(receipt.get("verdict", "")),
-            "human_decisions": _sequence_field_count(
-                receipt,
-                "human_decision_points",
-            ),
         }
     if event_type == EVENT_PATCH_TRAIL_COMPUTED:
         return _compact_patch_trail_payload(payload)

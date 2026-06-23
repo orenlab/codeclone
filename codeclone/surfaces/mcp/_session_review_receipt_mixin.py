@@ -8,12 +8,23 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 
-from ...audit import EVENT_RECEIPT_CREATED
+from ...audit import (
+    DEFAULT_AUDIT_PATH,
+    EVENT_RECEIPT_CREATED,
+    AuditReadError,
+    resolve_audit_path,
+)
+from ...audit.reader import StoredReviewReceipt, lookup_review_receipt
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
-from ._context_governance import context_governance_digest
+from ._context_governance import (
+    REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND,
+    attach_passive_context_governance,
+    context_governance_digest,
+)
 from ._intent import IntentRecord
 from ._review_receipt import (
     RECEIPT_VERSION,
@@ -31,6 +42,11 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
+
+# Retrieval output formats for get_review_receipt: structured is the typed JSON
+# receipt (canonical), markdown is the rendered view. "structured" avoids the
+# ambiguity of "json" (the whole MCP response is already JSON transport).
+_RECEIPT_RETRIEVAL_FORMATS = frozenset({"structured", "markdown"})
 
 
 class _MCPSessionReviewReceiptMixin:
@@ -116,7 +132,13 @@ class _MCPSessionReviewReceiptMixin:
                 intent_id=intent.intent_id if intent is not None else None,
                 report_digest=self._receipt_digest(record),
                 status=str(receipt.get("verdict", "")),
-                payload={"receipt": receipt, "format": output_format},
+                payload={
+                    "receipt": receipt,
+                    "format": output_format,
+                    # Persist the canonical digest so durable lookup by digest is
+                    # uniform across markdown and json receipt events.
+                    "receipt_digest": context_governance_digest("receipt_v1", receipt),
+                },
             )
             return receipt
         payload: dict[str, object] = {
@@ -139,6 +161,95 @@ class _MCPSessionReviewReceiptMixin:
             payload=payload,
         )
         return payload
+
+    def get_review_receipt(
+        self,
+        *,
+        root: str,
+        run_id: str | None = None,
+        receipt_digest: str | None = None,
+        format: str = "structured",
+    ) -> dict[str, object]:
+        """Return a durably stored review receipt from the audit trail.
+
+        Read-only and exact: it returns the receipt exactly as persisted when it
+        was created (survives ``auto_clear``), never re-derived from current
+        state. At least one of ``run_id`` / ``receipt_digest`` is required; if both
+        are given they must identify the same receipt. Durability is bounded by
+        audit retention. Fail-closed statuses: ok, not_found, ambiguous,
+        digest_mismatch, malformed_stored_receipt, unsupported_format.
+        """
+        if format not in _RECEIPT_RETRIEVAL_FORMATS:
+            return self._review_receipt_envelope(
+                {
+                    "status": "unsupported_format",
+                    "requested_format": format,
+                    "supported_formats": sorted(_RECEIPT_RETRIEVAL_FORMATS),
+                }
+            )
+        if not run_id and not receipt_digest:
+            raise MCPServiceContractError(
+                "get_review_receipt requires run_id or receipt_digest."
+            )
+        audit_path = resolve_audit_path(root_path=Path(root), value=DEFAULT_AUDIT_PATH)
+        try:
+            lookup = lookup_review_receipt(
+                audit_path, run_id=run_id, receipt_digest=receipt_digest
+            )
+        except AuditReadError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
+        if lookup.status != "ok" or lookup.receipt is None:
+            return self._review_receipt_envelope(
+                {
+                    "status": lookup.status,
+                    "run_id": run_id,
+                    "receipt_digest": receipt_digest,
+                    "match_count": lookup.match_count,
+                    "source": "audit_event",
+                    "durable": True,
+                }
+            )
+        return self._review_receipt_envelope(
+            self._render_stored_receipt(lookup.receipt, output_format=format)
+        )
+
+    @staticmethod
+    def _render_stored_receipt(
+        receipt: StoredReviewReceipt,
+        *,
+        output_format: str,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "status": "ok",
+            "run_id": receipt.run_id,
+            "receipt_digest": receipt.receipt_digest,
+            "verdict": receipt.verdict,
+            "receipt_version": receipt.receipt_version,
+            "created_at_utc": receipt.created_at_utc,
+            "source": "audit_event",
+            "durable": True,
+            "retention_bounded": True,
+        }
+        if output_format == "markdown":
+            payload["format"] = "markdown"
+            payload["content"] = _stored_receipt_markdown(receipt)
+            return payload
+        payload["format"] = "structured"
+        payload["structured_receipt"] = receipt.payload.get("receipt")
+        return payload
+
+    @staticmethod
+    def _review_receipt_envelope(payload: dict[str, object]) -> dict[str, object]:
+        return attach_passive_context_governance(
+            payload,
+            projection_kind=REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND,
+            response={
+                "tool": "get_review_receipt",
+                "budget_scope": "whole_response",
+                "evidence_policy": "observe_only_no_omission",
+                "retrieval": "durable_audit_event",
+            },
+        )
 
     def _validated_receipt_format(self, value: str) -> str:
         if value not in VALID_RECEIPT_FORMATS:
@@ -443,6 +554,18 @@ def _coerce_str_list(value: object) -> list[str]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
     return [str(item) for item in value if str(item).strip()]
+
+
+def _stored_receipt_markdown(receipt: StoredReviewReceipt) -> str:
+    """Markdown for a stored receipt: the persisted historical content when
+    present, else re-rendered from the canonical typed receipt."""
+    content = receipt.payload.get("content")
+    if isinstance(content, str) and content:
+        return content
+    typed = receipt.payload.get("receipt")
+    if isinstance(typed, Mapping):
+        return render_receipt_markdown(dict(typed))
+    return ""
 
 
 __all__ = ["_MCPSessionReviewReceiptMixin"]
