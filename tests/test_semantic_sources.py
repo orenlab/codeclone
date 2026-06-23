@@ -27,6 +27,7 @@ from codeclone.memory.retrieval.semantic import audit_event_row
 from codeclone.memory.semantic.sources import (
     AuditIndexSource,
     MemoryIndexSource,
+    SourceScanError,
     TrajectoryIndexSource,
 )
 from codeclone.memory.trajectory.models import (
@@ -207,12 +208,15 @@ def test_audit_index_source_skips_whitespace_only_summary(tmp_path: Path) -> Non
     assert list(source.iter_projections()) == []
 
 
-def test_audit_index_source_tolerates_sqlite_errors(tmp_path: Path) -> None:
+def test_audit_index_source_raises_on_unreadable_db(tmp_path: Path) -> None:
     db_path = tmp_path / "audit.sqlite3"
     db_path.write_text("not sqlite", encoding="utf-8")
     source = AuditIndexSource(enabled=True, db_path=db_path)
     assert source.available() is True
-    assert list(source.iter_projections()) == []
+    # A read failure raises SourceScanError so the rebuild preserves the lane,
+    # instead of mistaking the failure for an empty source and deleting it.
+    with pytest.raises(SourceScanError):
+        list(source.iter_projections())
 
 
 def test_memory_index_source_paginates_records() -> None:
@@ -293,7 +297,7 @@ def test_trajectory_source_name_missing_record_and_pagination() -> None:
     assert len(projections) == 201
 
 
-def test_audit_source_tolerates_query_failure(
+def test_audit_source_raises_on_query_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -317,9 +321,9 @@ def test_audit_source_tolerates_query_failure(
         "open_audit_db_readonly",
         lambda _path: connection,
     )
-    assert (
-        list(AuditIndexSource(enabled=True, db_path=db_path).iter_projections()) == []
-    )
+    with pytest.raises(SourceScanError):
+        list(AuditIndexSource(enabled=True, db_path=db_path).iter_projections())
+    # The failure still releases the connection (the finally clause runs).
     assert connection.closed is True
 
 

@@ -19,6 +19,7 @@ from codeclone.memory.semantic.models import (
     SemanticRowFingerprint,
 )
 from codeclone.memory.semantic.projection import text_hash
+from codeclone.memory.semantic.sources import SourceScanError
 
 
 class _FakeWriter:
@@ -203,3 +204,54 @@ def test_rebuild_indexes_trajectory_chunks(monkeypatch: pytest.MonkeyPatch) -> N
         "trajectory:traj-1:chunk:001",
     }
     assert all(row.parent_id == "traj-1" for row in writer.rows)
+
+
+class _FailingSource:
+    """A source whose read fails: iterating its projections raises."""
+
+    def __init__(self, name: str) -> None:
+        self._name = name
+
+    def name(self) -> str:
+        return self._name
+
+    def available(self) -> bool:
+        return True
+
+    def iter_projections(self) -> Iterator[SemanticProjection]:
+        raise SourceScanError("read failed")
+        yield  # pragma: no cover - marks this a generator
+
+
+def _stored_row(row_id: str, source: str) -> SemanticRow:
+    return SemanticRow(
+        id=row_id,
+        source=source,
+        kind="contract_note",
+        text_hash=text_hash(row_id),
+        embedding_model="diagnostic-hash-v1",
+        vector=tuple([0.0] * 32),
+    )
+
+
+def test_rebuild_defers_pruning_when_a_source_read_fails() -> None:
+    writer = _FakeWriter()
+    provider = DeterministicHashEmbeddingProvider(dimension=32)
+    # Pre-existing rows in two lanes.
+    writer.rows.extend(
+        [_stored_row("mem-old", "memory"), _stored_row("aud-1", "audit")]
+    )
+    # The memory lane scans clean (yields nothing, so mem-old would be stale), but
+    # the audit lane's read fails — pruning is destructive, so it is deferred.
+    report = rebuild_semantic_index(
+        writer=writer,
+        provider=provider,
+        sources=[_FakeSource("memory", []), _FailingSource("audit")],
+    )
+
+    known = writer.known_ids()
+    # Nothing is deleted: a failed read must never delete still-live rows, even
+    # in lanes that scanned clean. The deletions wait for the next clean rebuild.
+    assert "mem-old" in known
+    assert "aud-1" in known
+    assert report.deleted == 0

@@ -30,6 +30,16 @@ _INDEXED_STATUSES: frozenset[str] = frozenset({"active", "draft", "stale"})
 _PAGE_SIZE = 200
 
 
+class SourceScanError(Exception):
+    """A source could not enumerate its current rows (a transient read failure).
+
+    The rebuild treats the lane as *incomplete* and preserves it: a failed read
+    must never masquerade as an empty source, or reconcile would delete the
+    whole lane. ``available()`` returning False is a different, deliberate state
+    (the source is off) and is reconciled as a complete-empty lane.
+    """
+
+
 def _primary_path(subjects: Sequence[MemorySubject]) -> str | None:
     for subject in subjects:
         if subject.subject_kind == "path":
@@ -182,8 +192,8 @@ class AuditIndexSource:
         placeholders = ", ".join("?" for _ in event_types)
         try:
             conn = open_audit_db_readonly(self._db_path)
-        except (sqlite3.Error, AuditSchemaError, OSError):
-            return
+        except (sqlite3.Error, AuditSchemaError, OSError) as exc:
+            raise SourceScanError("audit source could not open its database") from exc
         try:
             rows = conn.execute(
                 "SELECT event_id, event_type, summary FROM controller_events "
@@ -192,8 +202,8 @@ class AuditIndexSource:
                 "ORDER BY created_at_utc ASC, id ASC",
                 event_types,
             ).fetchall()
-        except (sqlite3.Error, AuditSchemaError):
-            return
+        except (sqlite3.Error, AuditSchemaError) as exc:
+            raise SourceScanError("audit source could not read its events") from exc
         finally:
             conn.close()
         for event_id, event_type, summary in rows:
@@ -210,5 +220,6 @@ __all__ = [
     "AuditIndexSource",
     "IndexSource",
     "MemoryIndexSource",
+    "SourceScanError",
     "TrajectoryIndexSource",
 ]

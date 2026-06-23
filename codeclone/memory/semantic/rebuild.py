@@ -28,6 +28,7 @@ from .chunking import (
     resolve_passage_chunker,
 )
 from .models import SemanticRow, SemanticRowFingerprint
+from .sources import SourceScanError
 
 if TYPE_CHECKING:
     from ..embedding import EmbeddingProvider
@@ -76,42 +77,81 @@ def rebuild_semantic_index(
     """
     limits = embed_batch_limits or EmbedBatchLimits()
     chunker = resolve_passage_chunker(provider)
-    by_source: dict[str, int] = {}
-    seen_ids: set[str] = set()
-    embedded = 0
-    skipped = 0
+    # Index each available source; a failed read (SourceScanError) records a
+    # scan failure instead of an empty result so that pruning, which is
+    # destructive, is deferred this cycle — a transient failure must never
+    # masquerade as an empty source and delete still-live rows.
+    scanned: list[tuple[str, _SourceIndexStats]] = []
+    scan_failed = False
     for source in sources:
         if not source.available():
             continue
+        stats = _scan_source(
+            source,
+            writer=writer,
+            provider=provider,
+            chunker=chunker,
+            embed_batch_limits=limits,
+        )
+        if stats is None:
+            scan_failed = True
+        else:
+            scanned.append((source.name(), stats))
+    seen_ids = {row_id for _, stats in scanned for row_id in stats.seen_ids}
+    deleted = _reconcile(writer, seen_ids=seen_ids, prune=not scan_failed)
+    return RebuildReport(
+        indexed=len(seen_ids),
+        deleted=deleted,
+        embedded=sum(stats.embedded for _, stats in scanned),
+        skipped_unchanged=sum(stats.skipped_unchanged for _, stats in scanned),
+        by_source={
+            name: stats.projection_count for name, stats in scanned if stats.seen_ids
+        },
+    )
+
+
+def _scan_source(
+    source: IndexSource,
+    *,
+    writer: SemanticIndexWriter,
+    provider: EmbeddingProvider,
+    chunker: PassageChunker,
+    embed_batch_limits: EmbedBatchLimits,
+) -> _SourceIndexStats | None:
+    """Index one source, or None when its read failed (its lane is preserved)."""
+    try:
         with span(name=f"memory.semantic.source.{source.name()}"):
-            stats = _index_source(
+            return _index_source(
                 source,
                 writer=writer,
                 provider=provider,
                 chunker=chunker,
-                embed_batch_limits=limits,
+                embed_batch_limits=embed_batch_limits,
             )
-        if stats.seen_ids:
-            by_source[source.name()] = stats.projection_count
-            seen_ids |= stats.seen_ids
-        embedded += stats.embedded
-        skipped += stats.skipped_unchanged
-    deleted = 0
+    except SourceScanError:
+        return None
+
+
+def _reconcile(
+    writer: SemanticIndexWriter,
+    *,
+    seen_ids: set[str],
+    prune: bool,
+) -> int:
+    """Delete rows absent from this rebuild. Pruning is skipped when ``prune`` is
+    false (a source could not be read), so a transient read failure never deletes
+    still-live rows; the deletions are simply deferred to the next clean rebuild."""
     with span(name="memory.semantic.reconcile") as reconcile_span:
-        stale = writer.known_ids() - seen_ids
-        if stale:
-            writer.delete(sorted(stale))
-        deleted = len(stale)
+        deleted = 0
+        if prune:
+            stale = writer.known_ids() - seen_ids
+            if stale:
+                writer.delete(sorted(stale))
+            deleted = len(stale)
         if is_observability_enabled():
             reconcile_span.set_counter("indexed", len(seen_ids))
             reconcile_span.set_counter("deleted", deleted)
-    return RebuildReport(
-        indexed=len(seen_ids),
-        deleted=deleted,
-        embedded=embedded,
-        skipped_unchanged=skipped,
-        by_source=by_source,
-    )
+    return deleted
 
 
 def _index_source(
