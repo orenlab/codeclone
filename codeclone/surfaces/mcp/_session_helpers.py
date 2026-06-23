@@ -27,6 +27,7 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
+from ...utils import coerce as _coerce
 from ...utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -185,13 +186,11 @@ def _dict_list(value: object) -> list[dict[str, object]]:
 
 
 def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
+    return _coerce.as_mapping(value)
 
 
 def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
+    return _coerce.as_sequence(value)
 
 
 def _short_run_id(run_id: str) -> str:

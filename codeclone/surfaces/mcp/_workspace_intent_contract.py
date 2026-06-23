@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Final
 
 from ...cache.integrity import canonical_json
+from ...utils.coerce import as_mapping as _as_mapping
 
 LEGACY_REGISTRY_VERSION: Final = "1"
 REGISTRY_VERSION: Final = "2"
@@ -79,10 +80,6 @@ def compute_scope_digest(scope: Mapping[str, object]) -> str:
 def compute_intent_digest(data: Mapping[str, object]) -> str:
     digestable = {key: value for key, value in data.items() if key != "integrity"}
     return hashlib.sha256(canonical_json(digestable).encode("utf-8")).hexdigest()
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
 
 
 def _is_hex_digest(value: object) -> bool:

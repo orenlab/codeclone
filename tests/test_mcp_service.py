@@ -69,6 +69,7 @@ from codeclone.surfaces.mcp.session import (
     MCPServiceContractError,
     MCPServiceError,
 )
+from codeclone.utils import coerce as _coerce
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests.memory_fixtures import cli_memory_repo
 
@@ -3901,7 +3902,7 @@ def test_mcp_service_helper_filters_and_metrics_payload() -> None:
         )
         is False
     )
-    assert mcp_helpers_mod._as_sequence("not-a-sequence") == ()
+    assert _coerce.as_sequence("not-a-sequence") == ()
 
 
 def test_mcp_service_git_diff_and_helper_branch_edges(
@@ -5473,7 +5474,7 @@ def test_mcp_service_manage_change_intent_additional_edges(
         )["remaining"]
         == 0
     )
-    assert mcp_session_intent_mod._as_sequence("not-a-sequence") == ()
+    assert _coerce.as_sequence("not-a-sequence") == ()
     assert mcp_session_intent_mod._parse_utc("not-a-date") is None
     assert mcp_session_intent_mod._parse_utc("2026-01-01T00:00:00") is None
     assert (
@@ -6764,7 +6765,7 @@ def test_claim_guard_input_warning_and_dedupe_edges() -> None:
             "message": "Finding citation 'F-99' is not present in this run.",
         }
     ]
-    assert mcp_claim_guard_mod._as_sequence("abc") == ()
+    assert _coerce.as_sequence("abc") == ()
     assert mcp_claim_guard_mod._extract_qualnames_from_finding(
         "dead_code:pkg.mod:func",
         {"items": [{"target_qualname": "pkg.mod:func"}]},

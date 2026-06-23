@@ -12,6 +12,7 @@ from enum import Enum
 from typing import Final, Literal
 
 from ...contracts import DEFAULT_COVERAGE_MIN
+from ...utils.coerce import as_mapping as _as_mapping
 
 StrictnessProfile = Literal["ci", "strict", "relaxed"]
 PatchContractMode = Literal["budget", "verify"]
@@ -179,10 +180,6 @@ def _none_to_unlimited(value: int | None) -> int:
 
 def _none_if_unlimited(value: int) -> int | None:
     return value if value >= 0 else None
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
 
 
 __all__ = [

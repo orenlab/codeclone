@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from ...utils import coerce as _coerce
 from .messages import claims as claim_msgs
 
 MAX_REVIEW_CLAIM_TEXT_CHARS: Final = 50_000
@@ -18,6 +19,11 @@ TEXT_WINDOW_RADIUS: Final = 80
 SECURITY_SURFACES_FAMILY: Final = "security_surfaces"
 
 CitationKind = Literal["finding", "metric_family"]
+
+
+def _as_sequence(value: object) -> Sequence[object]:
+    return _coerce.as_sequence(value)
+
 
 SECURITY_OVERCLAIM_KEYWORDS: Final = (
     "vulnerab",
@@ -597,7 +603,3 @@ def _collect_qualname_fields(
         value = str(payload.get(field_name, "")).strip()
         if value:
             qualnames.add(value)
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    return value if isinstance(value, Sequence) and not isinstance(value, str) else ()

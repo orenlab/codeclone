@@ -18,6 +18,8 @@ import orjson
 
 from ...models import RelationshipRecord
 from ...paths import classify_source_kind
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 from ._blast_radius import _path_to_module
 from ._session_shared import MCPRunRecord, MCPUnitLocation
 from ._workspace_drift import WorkspaceDrift, compute_drift
@@ -1568,16 +1570,6 @@ def _digest(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(
         orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
     ).hexdigest()
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def _as_int(value: object) -> int:

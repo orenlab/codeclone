@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from ..paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
+from ..utils.coerce import as_mapping as _as_mapping
+from ..utils.coerce import as_sequence as _as_sequence
 
 BlastRadiusDepth = Literal["direct", "transitive"]
 
@@ -64,16 +66,6 @@ class BlastRadiusResult:
     do_not_touch: tuple[dict[str, str], ...]
     review_context: tuple[dict[str, str], ...]
     guardrails: tuple[str, ...]
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def _as_int(value: object, default: int = 0) -> int:
