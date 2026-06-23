@@ -37,6 +37,7 @@ when you need ONLY blast fields.
 ## Rules
 
 - MCP tools only (CodeClone plugin). Absolute `root`. No latest run → `analyze_repository` first.
+- Do not fall back to CLI / local report files. CodeClone is the source of truth.
 - Present `do_not_touch` as hard boundaries, `clone_cohort_members` as comparison, `review_context` as informational.
 - `radius_level` high → recommend `codeclone-change-control` for the actual edit.
 
