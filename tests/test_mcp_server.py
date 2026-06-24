@@ -777,15 +777,14 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert claim_guard["valid"] is True
     assert claim_guard["citations_found"] == 1
     assert "## CodeClone Agent Review Receipt" in str(receipt["content"])
-    receipt_payload = cast("dict[str, object]", receipt["receipt"])
-    assert cast("dict[str, object]", receipt_payload["scope"])["intent_id"] == (
-        intent_id
-    )
+    # 34.3 dedup: the duplicate nested typed receipt is omitted by default and is
+    # reachable via the get_review_receipt drill-down pointer.
+    assert "receipt" not in receipt
+    retrieval = cast("dict[str, object]", receipt["receipt_retrieval"])
+    assert retrieval["tool"] == "get_review_receipt"
     assert (
-        cast("dict[str, object]", receipt_payload["reviewed_evidence"])[
-            "reviewed_count"
-        ]
-        == 1
+        retrieval["receipt_digest"]
+        == cast("dict[str, object]", receipt["receipt_digest"])["value"]
     )
 
     run_summary_resource = list(

@@ -10138,28 +10138,29 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     assert cleared["intent_cleared"] is True
     assert cast("dict[str, object]", cleared["summary"])["receipt"] == "created"
     receipt_payload = cast("dict[str, object]", cleared["receipt"])
-    typed_receipt = cast("dict[str, object]", receipt_payload["receipt"])
     receipt_digest = cast("dict[str, object]", receipt_payload["receipt_digest"])
+    retrieval = cast("dict[str, object]", receipt_payload["receipt_retrieval"])
     assert {
         "format": receipt_payload["format"],
         "top_receipt_version": receipt_payload["receipt_version"],
         "verdict": receipt_payload["verdict"],
-        "typed_verdict": typed_receipt["verdict"],
         "digest_kind": receipt_digest["kind"],
         "has_content": isinstance(receipt_payload["content"], str),
-        "receipt_version": typed_receipt["receipt_version"],
-        "has_provenance": "provenance" in typed_receipt,
+        # 34.3 dedup: the duplicate nested typed receipt is omitted by default.
+        "has_nested_typed": "receipt" in receipt_payload,
+        "retrieval_tool": retrieval["tool"],
     } == {
         "format": "markdown",
         "top_receipt_version": "1",
         "verdict": "incomplete",
-        "typed_verdict": "incomplete",
         "digest_kind": "receipt_v1",
         "has_content": True,
-        "receipt_version": "1",
-        "has_provenance": True,
+        "has_nested_typed": False,
+        "retrieval_tool": "get_review_receipt",
     }
-    assert cast("dict[str, object]", typed_receipt["scope"])["intent_id"] == (intent_id)
+    # The drill-down pointer carries the canonical digest for fetching the omitted
+    # typed receipt; reachability is exercised in test_review_receipt_retrieval.
+    assert retrieval["receipt_digest"] == receipt_digest["value"]
     context_governance = cast("dict[str, object]", cleared["context_governance"])
     assert {
         "contract_version": context_governance["contract_version"],

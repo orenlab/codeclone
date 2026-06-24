@@ -198,9 +198,11 @@ def attach_finish_context_governance(
             "tool": "finish_controlled_change",
             "budget_scope": "whole_response",
             "evidence_policy": "observe_only_no_omission",
-            # Durable lookup now exists (get_review_receipt); finish still inlines
-            # the receipt under observe until the 34.3 dedup slice omits it.
-            "receipt_content": "inlined_durable_lookup_available",
+            # 34.3 dedup: finish inlines only the human-complete markdown content
+            # plus identity; the duplicate typed receipt is omitted and reachable
+            # via get_review_receipt (durable). Full response-budget enforcement
+            # stays for the later 34.5 slice.
+            "receipt_content": "markdown_inlined_typed_via_lookup",
         },
     )
 

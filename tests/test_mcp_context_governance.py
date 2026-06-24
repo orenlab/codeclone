@@ -136,7 +136,7 @@ def test_finish_context_governance_marks_whole_response_projection() -> None:
         "tool": "finish_controlled_change",
         "budget_scope": "whole_response",
         "policy": "observe_only_no_omission",
-        "receipt_content": "inlined_durable_lookup_available",
+        "receipt_content": "markdown_inlined_typed_via_lookup",
         "digest_kind": FINISH_RESPONSE_PROJECTION_KIND,
         "receipt_retrieval_blocked": False,
     }

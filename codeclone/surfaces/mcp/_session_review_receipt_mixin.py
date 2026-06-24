@@ -141,26 +141,48 @@ class _MCPSessionReviewReceiptMixin:
                 },
             )
             return receipt
-        payload: dict[str, object] = {
-            "run_id": _helpers._short_run_id(record.run_id),
+        digest = context_governance_digest("receipt_v1", receipt)
+        short_run_id = _helpers._short_run_id(record.run_id)
+        verdict = str(receipt.get("verdict", ""))
+        content = render_receipt_markdown(receipt)
+        # The audit event preserves the complete typed receipt (forensic-retention
+        # policy) so it stays durably retrievable post-clear.
+        audit_payload: dict[str, object] = {
+            "run_id": short_run_id,
             "format": output_format,
             "receipt_version": RECEIPT_VERSION,
-            "verdict": str(receipt.get("verdict", "")),
-            "receipt_digest": context_governance_digest("receipt_v1", receipt),
-            "content": render_receipt_markdown(receipt),
+            "verdict": verdict,
+            "receipt_digest": digest,
+            "content": content,
             "receipt": receipt,
         }
         self._audit_emit(
             root=record.root,
             event_type=EVENT_RECEIPT_CREATED,
             severity="info",
-            run_id=_helpers._short_run_id(record.run_id),
+            run_id=short_run_id,
             intent_id=intent.intent_id if intent is not None else None,
             report_digest=self._receipt_digest(record),
-            status=str(receipt.get("verdict", "")),
-            payload=payload,
+            status=verdict,
+            payload=audit_payload,
         )
-        return payload
+        # Phase 34.3 dedup: the default response keeps the human-complete markdown
+        # content plus identity and omits the duplicate nested typed receipt — now
+        # durably retrievable post-clear via get_review_receipt.
+        return {
+            "run_id": short_run_id,
+            "format": output_format,
+            "receipt_version": RECEIPT_VERSION,
+            "verdict": verdict,
+            "receipt_digest": digest,
+            "content": content,
+            "receipt_retrieval": {
+                "tool": "get_review_receipt",
+                "run_id": short_run_id,
+                "receipt_digest": digest["value"],
+                "format": "structured",
+            },
+        }
 
     def get_review_receipt(
         self,
