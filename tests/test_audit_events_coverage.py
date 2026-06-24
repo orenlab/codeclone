@@ -42,22 +42,25 @@ def _event(event_type: str, **payload: object) -> AuditEvent:
 
 
 def test_compact_payload_for_patch_trail_and_receipt() -> None:
+    # Forensic-retention policy (Phase 34): the full patch-trail payload is preserved
+    # complete under compaction so it stays exactly retrievable post-clear via
+    # get_patch_trail; only the separate event-core projection is bounded.
+    patch_trail_payload = {
+        "patch_trail_digest": "abc",
+        "scope_check_status": "clean",
+        "verification_status": "accepted",
+        "declared_files": ["a.py"],
+        "changed_files": ["a.py"],
+        "untouched_in_declared": [],
+        "unexpected_files": [],
+        "forbidden_touched": [],
+        "truncation": {"declared_files": True},
+    }
     patch_trail = compact_payload_for_event(
         event_type=EVENT_PATCH_TRAIL_COMPUTED,
-        payload={
-            "patch_trail_digest": "abc",
-            "scope_check_status": "clean",
-            "verification_status": "accepted",
-            "declared_files": ["a.py"],
-            "changed_files": ["a.py"],
-            "untouched_in_declared": [],
-            "unexpected_files": [],
-            "forbidden_touched": [],
-            "truncation": {"declared_files": True},
-        },
+        payload=patch_trail_payload,
     )
-    assert patch_trail["declared"] == 1
-    assert patch_trail["truncation"] is True
+    assert patch_trail == patch_trail_payload
 
     # Forensic-retention policy (Phase 34): the review receipt payload is preserved
     # complete under compaction so it stays exactly retrievable post-clear.

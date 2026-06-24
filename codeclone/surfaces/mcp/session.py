@@ -23,6 +23,7 @@ from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
 from ._implementation_context import build_unit_location_inventory
 from ._intent import IntentRecord
+from ._session_audit_artifact_mixin import _MCPSessionAuditArtifactMixin
 from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
@@ -103,6 +104,7 @@ class MCPSession(
     _MCPSessionWorkflowMixin,
     _MCPSessionClaimGuardMixin,
     _MCPSessionReviewReceiptMixin,
+    _MCPSessionAuditArtifactMixin,
     _MCPSessionPatchContractMixin,
     _MCPSessionIntentMixin,
     _MCPSessionMemoryMixin,

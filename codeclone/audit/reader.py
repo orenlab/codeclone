@@ -8,20 +8,24 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
 from .events import (
     ANALYSIS_SOURCE_CLI,
     ANALYSIS_SOURCE_MCP,
     EVENT_ANALYSIS_COMPLETED,
+    EVENT_PATCH_TRAIL_COMPUTED,
     EVENT_RECEIPT_CREATED,
     repo_root_digest,
 )
 from .schema import get_meta, open_audit_db_readonly
 from .validation import AuditReadError, AuditSchemaError
+
+_ArtifactT = TypeVar("_ArtifactT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +92,33 @@ class ReviewReceiptLookup:
     match_count: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class StoredPatchTrail:
+    """A patch trail recovered from the durable audit trail.
+
+    It is the exact full forensic payload persisted when the trail was computed
+    (``controller_events`` ``patch_trail.computed``); it survives ``auto_clear``
+    and is never re-derived from current state.
+    """
+
+    run_id: str | None
+    patch_trail_digest: str | None
+    scope_check_status: str | None
+    verification_status: str | None
+    schema_version: str | None
+    created_at_utc: str
+    payload: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PatchTrailLookup:
+    """Fail-closed result of a durable patch-trail lookup."""
+
+    status: str
+    patch_trail: StoredPatchTrail | None = None
+    match_count: int = 0
+
+
 def lookup_review_receipt(
     db_path: Path,
     *,
@@ -104,60 +135,118 @@ def lookup_review_receipt(
     the requested digest, ``malformed_stored_receipt`` when the only matching
     rows cannot be parsed.
     """
+    status, receipt, match_count = _lookup_audit_event_artifact(
+        db_path,
+        event_type=EVENT_RECEIPT_CREATED,
+        run_id=run_id,
+        digest=receipt_digest,
+        build=_build_review_receipt,
+        digest_of=_receipt_digest_value,
+        malformed_status="malformed_stored_receipt",
+    )
+    return ReviewReceiptLookup(status=status, receipt=receipt, match_count=match_count)
+
+
+def lookup_patch_trail(
+    db_path: Path,
+    *,
+    run_id: str | None = None,
+    patch_trail_digest: str | None = None,
+) -> PatchTrailLookup:
+    """Look up a durably stored patch trail by run id and/or patch-trail digest.
+
+    Read-only and exact, mirroring :func:`lookup_review_receipt`: returns the
+    full forensic patch-trail payload exactly as persisted in the audit trail
+    (``patch_trail.computed``), never re-derived. ``run_id`` matches the stored
+    short id or a full id that starts with it; ``patch_trail_digest`` is an exact
+    match. Fail-closed: ``ambiguous`` when more than one trail matches,
+    ``digest_mismatch`` when the run has trails but none with the requested
+    digest, ``malformed_stored_patch_trail`` when the only matching rows cannot
+    be parsed.
+    """
+    status, trail, match_count = _lookup_audit_event_artifact(
+        db_path,
+        event_type=EVENT_PATCH_TRAIL_COMPUTED,
+        run_id=run_id,
+        digest=patch_trail_digest,
+        build=_build_patch_trail,
+        digest_of=_patch_trail_digest_value,
+        malformed_status="malformed_stored_patch_trail",
+    )
+    return PatchTrailLookup(status=status, patch_trail=trail, match_count=match_count)
+
+
+def _lookup_audit_event_artifact(
+    db_path: Path,
+    *,
+    event_type: str,
+    run_id: str | None,
+    digest: str | None,
+    build: Callable[[object, object, Mapping[str, object]], _ArtifactT | None],
+    digest_of: Callable[[Mapping[str, object]], str | None],
+    malformed_status: str,
+) -> tuple[str, _ArtifactT | None, int]:
+    """Fail-closed lookup of a durable audit-event artifact by run id and digest.
+
+    Shared by the typed-artifact retrieval tools (review receipt, patch trail).
+    ``build`` turns one stored ``(run_id, created_at, payload)`` row into the
+    typed artifact (or ``None`` when the row is malformed); ``digest_of`` reads
+    the artifact's exact digest from its payload. Returns
+    ``(status, artifact, match_count)`` with ``status`` one of ``ok``,
+    ``not_found``, ``ambiguous``, ``digest_mismatch`` or ``malformed_status``.
+    """
     if not db_path.exists():
-        return ReviewReceiptLookup(status="not_found")
+        return ("not_found", None, 0)
+    rows = _read_event_payload_rows(db_path, event_type)
+    run_filtered = [
+        row for row in rows if run_id is None or _run_id_matches(row[0], run_id)
+    ]
+    if not run_filtered:
+        return ("not_found", None, 0)
+    parsed: list[tuple[Mapping[str, object], _ArtifactT]] = []
+    malformed = 0
+    for stored_run_id, created_at, payload_json in run_filtered:
+        payload = _parse_payload_mapping(payload_json)
+        artifact = (
+            None if payload is None else build(stored_run_id, created_at, payload)
+        )
+        if payload is None or artifact is None:
+            malformed += 1
+            continue
+        parsed.append((payload, artifact))
+    if digest is not None:
+        candidates = [item for payload, item in parsed if digest_of(payload) == digest]
+    else:
+        candidates = [item for _payload, item in parsed]
+    if len(candidates) == 1:
+        return ("ok", candidates[0], 1)
+    if len(candidates) > 1:
+        return ("ambiguous", None, len(candidates))
+    if digest is not None and parsed:
+        return ("digest_mismatch", None, 0)
+    if malformed and not parsed:
+        return (malformed_status, None, 0)
+    return ("not_found", None, 0)
+
+
+def _read_event_payload_rows(
+    db_path: Path, event_type: str
+) -> list[tuple[object, object, object]]:
     try:
         conn = open_audit_db_readonly(db_path)
     except (sqlite3.Error, AuditSchemaError, OSError) as exc:
         raise AuditReadError(f"cannot open audit database: {exc}") from exc
     try:
-        rows = conn.execute(
+        return conn.execute(
             "SELECT run_id, created_at_utc, payload_json FROM controller_events "
             "WHERE event_type = ? "
             "ORDER BY created_at_utc DESC, id DESC",
-            (EVENT_RECEIPT_CREATED,),
+            (event_type,),
         ).fetchall()
     except (sqlite3.Error, AuditSchemaError) as exc:
         raise AuditReadError(f"cannot read audit database: {exc}") from exc
     finally:
         conn.close()
-    return _resolve_stored_review_receipt(
-        rows, run_id=run_id, receipt_digest=receipt_digest
-    )
-
-
-def _resolve_stored_review_receipt(
-    rows: list[tuple[object, object, object]],
-    *,
-    run_id: str | None,
-    receipt_digest: str | None,
-) -> ReviewReceiptLookup:
-    run_filtered = [
-        row for row in rows if run_id is None or _run_id_matches(row[0], run_id)
-    ]
-    if not run_filtered:
-        return ReviewReceiptLookup(status="not_found")
-    parsed: list[StoredReviewReceipt] = []
-    malformed = 0
-    for stored_run_id, created_at, payload_json in run_filtered:
-        receipt = _stored_review_receipt(stored_run_id, created_at, payload_json)
-        if receipt is None:
-            malformed += 1
-            continue
-        parsed.append(receipt)
-    if receipt_digest is not None:
-        candidates = [item for item in parsed if item.receipt_digest == receipt_digest]
-    else:
-        candidates = parsed
-    if len(candidates) == 1:
-        return ReviewReceiptLookup(status="ok", receipt=candidates[0], match_count=1)
-    if len(candidates) > 1:
-        return ReviewReceiptLookup(status="ambiguous", match_count=len(candidates))
-    if receipt_digest is not None and parsed:
-        return ReviewReceiptLookup(status="digest_mismatch")
-    if malformed and not parsed:
-        return ReviewReceiptLookup(status="malformed_stored_receipt")
-    return ReviewReceiptLookup(status="not_found")
 
 
 def _run_id_matches(stored: object, requested: str) -> bool:
@@ -167,11 +256,7 @@ def _run_id_matches(stored: object, requested: str) -> bool:
     return stored_id == requested or requested.startswith(stored_id)
 
 
-def _stored_review_receipt(
-    stored_run_id: object,
-    created_at: object,
-    payload_json: object,
-) -> StoredReviewReceipt | None:
+def _parse_payload_mapping(payload_json: object) -> Mapping[str, object] | None:
     if not isinstance(payload_json, str) or not payload_json:
         return None
     try:
@@ -180,6 +265,14 @@ def _stored_review_receipt(
         return None
     if not isinstance(payload, Mapping):
         return None
+    return payload
+
+
+def _build_review_receipt(
+    stored_run_id: object,
+    created_at: object,
+    payload: Mapping[str, object],
+) -> StoredReviewReceipt | None:
     typed = payload.get("receipt")
     if not isinstance(typed, Mapping):
         return None
@@ -196,11 +289,34 @@ def _stored_review_receipt(
     )
 
 
+def _build_patch_trail(
+    stored_run_id: object,
+    created_at: object,
+    payload: Mapping[str, object],
+) -> StoredPatchTrail | None:
+    digest = _str_or_none(payload.get("patch_trail_digest"))
+    if digest is None:
+        return None
+    return StoredPatchTrail(
+        run_id=_str_or_none(stored_run_id),
+        patch_trail_digest=digest,
+        scope_check_status=_str_or_none(payload.get("scope_check_status")),
+        verification_status=_str_or_none(payload.get("verification_status")),
+        schema_version=_str_or_none(payload.get("schema_version")),
+        created_at_utc=_str_or_none(created_at) or "",
+        payload=payload,
+    )
+
+
 def _receipt_digest_value(payload: Mapping[str, object]) -> str | None:
     digest = payload.get("receipt_digest")
     if isinstance(digest, Mapping):
         return _str_or_none(digest.get("value"))
     return _str_or_none(digest)
+
+
+def _patch_trail_digest_value(payload: Mapping[str, object]) -> str | None:
+    return _str_or_none(payload.get("patch_trail_digest"))
 
 
 @dataclass(frozen=True, slots=True)

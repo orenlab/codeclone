@@ -86,10 +86,13 @@ _COMPACT_TEXT_LIMIT = 500
 
 # Forensic-retention policy (Phase 34): payload compaction never strips these
 # event types. They are durable evidence that must survive auto_clear and stay
-# exactly retrievable after the run/intent is cleared (review receipt drill-down
-# via get_review_receipt). Their complete payload is preserved under every
-# payload mode; only the separately bounded event-core/replay projection applies.
-_FULL_PAYLOAD_EVENT_TYPES: frozenset[str] = frozenset({EVENT_RECEIPT_CREATED})
+# exactly retrievable after the run/intent is cleared (review-receipt drill-down
+# via get_review_receipt; full forensic patch trail via get_patch_trail). Their
+# complete payload is preserved under every payload mode; only the separately
+# bounded event-core/replay projection applies.
+_FULL_PAYLOAD_EVENT_TYPES: frozenset[str] = frozenset(
+    {EVENT_RECEIPT_CREATED, EVENT_PATCH_TRAIL_COMPUTED}
+)
 _EVENT_CORE_SCOPE_PATH_LIMIT = 50
 _EVENT_CORE_CITATION_LIMIT = 32
 _PROJECTION_SUPPLEMENT_FACT_KEYS = frozenset(
@@ -263,8 +266,6 @@ def compact_payload_for_event(
             "violations": len(_sequence(payload.get("violations"))),
             "warnings": len(_sequence(payload.get("warnings"))),
         }
-    if event_type == EVENT_PATCH_TRAIL_COMPUTED:
-        return _compact_patch_trail_payload(payload)
     return _compact_identifiers(payload)
 
 
@@ -580,22 +581,6 @@ def _compact_budget_payload(payload: Mapping[str, object]) -> dict[str, object]:
         "do_not_touch_count": _int_value(blast.get("do_not_touch_count")),
         "review_context_count": _int_value(blast.get("review_context_count")),
         "gate_would_fail": bool(gate.get("would_fail")),
-    }
-
-
-def _compact_patch_trail_payload(payload: Mapping[str, object]) -> dict[str, object]:
-    counts = _patch_trail_counts(payload)
-    truncation = _mapping(payload.get("truncation"))
-    return {
-        "patch_trail_digest": str(payload.get("patch_trail_digest", "")),
-        "scope_check_status": str(payload.get("scope_check_status", "")),
-        "verification_status": str(payload.get("verification_status", "")),
-        "declared": _int_value(counts.get("declared")),
-        "changed": _int_value(counts.get("changed")),
-        "untouched_in_declared": _int_value(counts.get("untouched_in_declared")),
-        "unexpected": _int_value(counts.get("unexpected")),
-        "forbidden_touched": _int_value(counts.get("forbidden_touched")),
-        "truncation": bool(any(bool(value) for value in truncation.values())),
     }
 
 

@@ -110,6 +110,18 @@ GET_REVIEW_RECEIPT: Final = (
     "repository state."
 )
 
+GET_PATCH_TRAIL: Final = (
+    "Fetch a durably stored patch trail from the audit trail by run id and/or "
+    "patch-trail digest, exactly as it was computed. It survives auto_clear and "
+    "is never re-derived from current state. Returns the full forensic trail "
+    "(declared/changed/untouched files, scope check, verification, workspace "
+    "hygiene, evidence) that the default response omits or summarizes. At least "
+    "one lookup key is required; if both are given they must identify the same "
+    "trail. Durability is bounded by audit retention. Fail-closed statuses: ok, "
+    "not_found, ambiguous, digest_mismatch, malformed_stored_patch_trail, "
+    "unsupported_format. Read-only; does not mutate repository state."
+)
+
 VALIDATE_REVIEW_CLAIMS: Final = (
     "Validate cited review text against canonical report semantics. "
     "Detects deterministic mischaracterizations: Security Surfaces "
@@ -313,6 +325,7 @@ TITLE_MANAGE_ENGINEERING_MEMORY: Final = "Manage Engineering Memory"
 TITLE_CHECK_PATCH_CONTRACT: Final = "Check Patch Contract"
 TITLE_CREATE_REVIEW_RECEIPT: Final = "Create Review Receipt"
 TITLE_GET_REVIEW_RECEIPT: Final = "Get Review Receipt"
+TITLE_GET_PATCH_TRAIL: Final = "Get Patch Trail"
 TITLE_VALIDATE_REVIEW_CLAIMS: Final = "Validate Review Claims"
 TITLE_HELP: Final = "Help"
 TITLE_QUERY_PLATFORM_OBSERVABILITY: Final = "Query Platform Observability"

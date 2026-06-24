@@ -108,9 +108,12 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     assert "receipt_retrieval_unavailable" not in blocked["response_budget"]
     assert "durable_receipt_lookup" not in blocked["response_budget"]
     assert "post_clear_receipt_lookup" not in blocked["omission"]
+    # Phase 34: durable patch-trail retrieval (get_patch_trail) clears its blocker.
+    assert "durable_patch_trail_lookup" not in blocked["response_budget"]
     capabilities = cast("dict[str, object]", envelope["capabilities"])
     assert capabilities["typed_receipt_alias"] is True
     assert capabilities["durable_receipt_lookup"] is True
+    assert capabilities["durable_patch_trail_lookup"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
 
@@ -181,6 +184,8 @@ def test_context_governance_declares_drill_down_reachability() -> None:
             "current_complete_path"
         ],
         "receipt_lookup": drill_down["structured_receipt"]["object_lookup"],
+        "patch_trail_lookup": drill_down["patch_trail"]["object_lookup"],
+        "patch_trail_route": drill_down["patch_trail"]["route"],
         "blast_route": drill_down["blast_artifact"]["current_route_is_recomputation"],
         "experience_lookup": drill_down["experience"]["object_lookup"],
     } == {
@@ -190,6 +195,8 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "trajectory_lookup": "available",
         "receipt_current_path": "receipt.receipt",
         "receipt_lookup": "available",
+        "patch_trail_lookup": "available",
+        "patch_trail_route": "get_patch_trail(run_id=..., patch_trail_digest=...)",
         "blast_route": "get_blast_radius",
         "experience_lookup": "blocked",
     }

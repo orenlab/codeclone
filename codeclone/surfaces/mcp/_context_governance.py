@@ -30,6 +30,9 @@ IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND: Final = (
     "implementation_context_projection_v1"
 )
 MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = "memory_retrieval_projection_v1"
+PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = (
+    "patch_trail_retrieval_projection_v1"
+)
 REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND: Final = "review_receipt_projection_v1"
 START_RESPONSE_PROJECTION_KIND: Final = "start_projection_v1"
 
@@ -44,7 +47,9 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     # Phase 34.4: a durable post-clear receipt lookup now exists
     # (get_review_receipt over the audit trail), so this prerequisite is met.
     "durable_receipt_lookup": True,
-    "durable_patch_trail_lookup": False,
+    # Phase 34: a durable post-clear patch-trail lookup now exists
+    # (get_patch_trail over the audit trail), so this prerequisite is met.
+    "durable_patch_trail_lookup": True,
     "immutable_blast_artifact": False,
     "omitted_evidence_continuation": False,
 }
@@ -74,7 +79,8 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
         "current_complete_path": "receipt.receipt",
     },
     "patch_trail": {
-        "object_lookup": "blocked",
+        "object_lookup": "available",
+        "route": "get_patch_trail(run_id=..., patch_trail_digest=...)",
         "continuation": "blocked",
         "current_complete_path": "patch_trail",
     },
@@ -91,11 +97,10 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
 }
 
 _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
-    # receipt_retrieval_unavailable / durable_receipt_lookup / post_clear_receipt_lookup
-    # cleared in Phase 34.4 (get_review_receipt). Response-budget and omission stay
-    # blocked on the remaining unbuilt retrieval prerequisites.
+    # durable_receipt_lookup cleared in Phase 34.4 (get_review_receipt);
+    # durable_patch_trail_lookup cleared here (get_patch_trail). Response-budget and
+    # omission stay blocked on the remaining unbuilt retrieval prerequisites.
     "response_budget": [
-        "durable_patch_trail_lookup",
         "immutable_blast_artifact",
         "omitted_evidence_continuation",
     ],
@@ -277,6 +282,7 @@ __all__ = [
     "IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT",
     "IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND",
     "MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND",
+    "PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND",
     "REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND",
     "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",

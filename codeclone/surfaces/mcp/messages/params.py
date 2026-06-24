@@ -223,6 +223,12 @@ ReceiptDigestParam = Annotated[
         description="Exact receipt digest (sha256 hex value) for durable lookup.",
     ),
 ]
+PatchTrailDigestParam = Annotated[
+    str | None,
+    Field(
+        description="Exact patch-trail digest (sha256 hex) for durable lookup.",
+    ),
+]
 ReviewTextParam = Annotated[
     str,
     Field(description="Review claims text to validate against the run."),

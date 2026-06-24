@@ -1724,6 +1724,49 @@
     }
   },
   {
+    "name": "get_patch_trail",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "patch_trail_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact patch-trail digest (sha256 hex) for durable lookup.",
+          "title": "Patch Trail Digest"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "get_patch_trailArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "get_production_triage",
     "input_schema": {
       "properties": {
