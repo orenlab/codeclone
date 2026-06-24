@@ -115,6 +115,9 @@ def test_codex_plugin_skill_exists() -> None:
     blast_radius_skill_path = (
         plugin_root / "skills" / "codeclone-blast-radius" / "SKILL.md"
     )
+    architecture_triage_skill_path = (
+        plugin_root / "skills" / "codeclone-architecture-triage" / "SKILL.md"
+    )
     skill_text = skill_path.read_text(encoding="utf-8")
     hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
     change_control_skill_text = change_control_skill_path.read_text(encoding="utf-8")
@@ -131,6 +134,9 @@ def test_codex_plugin_skill_exists() -> None:
         encoding="utf-8"
     )
     blast_radius_skill_text = blast_radius_skill_path.read_text(encoding="utf-8")
+    architecture_triage_skill_text = architecture_triage_skill_path.read_text(
+        encoding="utf-8"
+    )
     manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
     assert isinstance(manifest, dict)
 
@@ -232,6 +238,48 @@ def test_codex_plugin_skill_exists() -> None:
             "codeclone-change-control",
             "MCP tools only",
             "Do not fall back to CLI / local report files.",
+        ),
+    )
+    assert_all_contained(
+        architecture_triage_skill_text,
+        *(
+            "name: codeclone-architecture-triage",
+            "never CodeClone findings",
+            '"module_map"',
+            "get_implementation_context",
+            "structural prominence",
+            "import_hub",
+            "dependency_inversion",
+            "hidden_contract",
+            "blast_hotspot",
+            "boundary_violation",
+            "ownership_drift",
+            "domain_logic_leakage",
+            "duplicated_application_semantics",
+            "responsibility_overload",
+            "one absolute `root` + one stored `run_id`",
+            "Triage basis",
+            "Response-local only",
+            "Each tier applies once",
+            "same-tier signals do not stack",
+            "architecture shape, coupling hubs, ownership",
+            "do not substitute CLI output or parsed reports",
+            "targeted source/rule verification",
+            "codeclone-production-triage",
+            "codeclone-change-control",
+            "Heading band must equal validated arithmetic",
+            "alter bands narratively",
+            "named subject's own impact result",
+            "one named subject",
+            "compound scope, package, neighbor, or composition",
+            "direct subject importers",
+            "direct hub importers",
+            "transitive consumers",
+            "watchlist",
+            "Defect predicate",
+            "Final validation",
+            "Policy scan",
+            "responsibility overload has no B",
         ),
     )
 

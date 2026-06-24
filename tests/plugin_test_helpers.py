@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Final
 
 CODEX_PLUGIN_SKILL_NAMES: Final[tuple[str, ...]] = (
+    "codeclone-architecture-triage",
     "codeclone-blast-radius",
     "codeclone-change-control",
     "codeclone-engineering-memory",
@@ -149,10 +150,12 @@ def assert_codex_plugin_readme_contract(readme_text: str) -> None:
         "without relying on `sh -lc`",
         'uv tool install "codeclone[mcp]"',
         "codeclone-change-control",
+        "codeclone-architecture-triage",
         "codeclone-implementation-context",
         "codeclone-production-triage",
+        "codeclone-architecture-triage",
         "codeclone-blast-radius",
-        "Eight skills ship in the plugin",
+        "Nine skills ship in the plugin",
         "Structural Change Controller for AI-assisted Python",
     )
 
