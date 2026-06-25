@@ -60,6 +60,10 @@ analyze_repository(root=<abs>)
   `blast_radius_detail="full"` only when you truly need the compatibility
   projection inline. If artifact storage is unavailable, start returns full
   blast evidence inline.
+- Repeated identical `start_controlled_change` calls may return
+  `idempotent_replay:true` instead of re-emitting rich blast evidence. If the
+  replay is `status:"active"` with `edit_allowed:true`, continue with the same
+  `intent_id` and call `get_relevant_memory`; the replay does not renew TTL.
 
 ## Scope
 
