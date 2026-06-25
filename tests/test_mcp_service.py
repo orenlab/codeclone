@@ -10004,6 +10004,9 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
         intent="update readme",
         expected_effects=["docs wording"],
     )
+    replay_cache_before = list(service._start_replay_cache.values())
+    assert len(replay_cache_before) == 1
+    expected_expires_at = replay_cache_before[0]["lease_expires_at_utc"]
     replay = service.start_controlled_change(
         root=str(tmp_path),
         scope={"allowed_files": ["README.md"]},
@@ -10018,6 +10021,8 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
         "scope_unchanged": replay["scope_unchanged"],
         "analysis_run_unchanged": replay["analysis_run_unchanged"],
         "workspace_unchanged": replay["workspace_unchanged"],
+        "lease_expires_at_utc": replay["lease_expires_at_utc"],
+        "renew_required": replay["renew_required"],
         "next_tool": replay["next_tool"],
         "has_blast_radius": "blast_radius" in replay,
     } == {
@@ -10027,9 +10032,13 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
         "scope_unchanged": True,
         "analysis_run_unchanged": True,
         "workspace_unchanged": True,
+        "lease_expires_at_utc": expected_expires_at,
+        "renew_required": False,
         "next_tool": "get_relevant_memory",
         "has_blast_radius": False,
     }
+    replay_cache_after = list(service._start_replay_cache.values())
+    assert replay_cache_after[0]["lease_expires_at_utc"] == expected_expires_at
     assert cast("dict[str, object]", replay["scope_digest"])["kind"] == "boundary_v1"
     assert (
         cast("dict[str, object]", replay["workspace_state_digest"])["kind"]
