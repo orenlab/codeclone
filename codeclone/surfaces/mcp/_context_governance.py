@@ -54,16 +54,16 @@ _OBSERVE_ENFORCEMENT: Final[dict[str, bool]] = {
 
 _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "typed_receipt_alias": True,
-    # Phase 34.4: a durable post-clear receipt lookup now exists
-    # (get_review_receipt over the audit trail), so this prerequisite is met.
+    # Durable post-clear receipt lookup exists through get_review_receipt over
+    # the audit trail, so this prerequisite is met.
     "durable_receipt_lookup": True,
-    # Phase 34: a durable post-clear patch-trail lookup now exists
-    # (get_patch_trail over the audit trail), so this prerequisite is met.
+    # Durable post-clear patch-trail lookup exists through get_patch_trail over
+    # the audit trail, so this prerequisite is met.
     "durable_patch_trail_lookup": True,
     "immutable_blast_artifact": True,
     "memory_tail_continuation": True,
     "implementation_context_artifact_pages": True,
-    "omitted_evidence_continuation": False,
+    "omitted_evidence_continuation": True,
 }
 
 _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
@@ -126,18 +126,12 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
 }
 
 _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
-    # durable_receipt_lookup cleared in Phase 34.4 (get_review_receipt);
-    # durable_patch_trail_lookup cleared by get_patch_trail; immutable
-    # blast-artifact lookup cleared by get_blast_artifact. Memory tails and
-    # implementation-context pages have exact page tools, but global response
-    # budget and omission still wait for the adopted omission-policy slice.
-    "response_budget": [
-        "omitted_evidence_continuation",
-    ],
+    # Durable receipt, Patch Trail, blast-artifact, memory-tail, and
+    # implementation-context facet lookups are available. Budget enforcement
+    # remains observe-only until a packing policy actually omits evidence.
+    "response_budget": [],
     "nested_budget": [],
-    "omission": [
-        "exact_continuation_for_omitted_tails",
-    ],
+    "omission": [],
 }
 
 
@@ -230,10 +224,10 @@ def attach_finish_context_governance(
             "tool": "finish_controlled_change",
             "budget_scope": "whole_response",
             "evidence_policy": "observe_only_no_omission",
-            # 34.3 dedup: finish inlines only the human-complete markdown content
-            # plus identity; the duplicate typed receipt is omitted and reachable
-            # via get_review_receipt (durable). Full response-budget enforcement
-            # stays for the later 34.5 slice.
+            # Finish inlines only the human-complete markdown content plus
+            # identity; the duplicate typed receipt is reachable via durable
+            # get_review_receipt. Full response-budget enforcement waits until
+            # a packing policy actually omits evidence.
             "receipt_content": "markdown_inlined_typed_via_lookup",
         },
     )

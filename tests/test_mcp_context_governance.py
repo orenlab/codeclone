@@ -95,20 +95,16 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
         "omission": False,
     }
     blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
-    assert {
-        "response": "immutable_blast_artifact" in blocked["response_budget"],
-        "nested": "implementation_context_artifact_pages" in blocked["nested_budget"],
-        "omission": "exact_continuation_for_omitted_tails" in blocked["omission"],
-    } == {
-        "response": False,
-        "nested": False,
-        "omission": True,
+    assert blocked == {
+        "response_budget": [],
+        "nested_budget": [],
+        "omission": [],
     }
-    # Phase 34.4: durable receipt retrieval exists, so its blockers are cleared.
+    # Exact drill-down and continuation routes exist; enforcement still stays
+    # observe-only until a packing policy actually omits evidence.
     assert "receipt_retrieval_unavailable" not in blocked["response_budget"]
     assert "durable_receipt_lookup" not in blocked["response_budget"]
     assert "post_clear_receipt_lookup" not in blocked["omission"]
-    # Phase 34: durable patch-trail retrieval (get_patch_trail) clears its blocker.
     assert "durable_patch_trail_lookup" not in blocked["response_budget"]
     assert "immutable_blast_artifact" not in blocked["response_budget"]
     assert "memory_tail_continuation" not in blocked["nested_budget"]
@@ -120,7 +116,7 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     assert capabilities["immutable_blast_artifact"] is True
     assert capabilities["memory_tail_continuation"] is True
     assert capabilities["implementation_context_artifact_pages"] is True
-    assert capabilities["omitted_evidence_continuation"] is False
+    assert capabilities["omitted_evidence_continuation"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
 
