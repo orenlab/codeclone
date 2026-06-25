@@ -10,6 +10,7 @@ import json
 
 from codeclone.audit.events import (
     EVENT_ANALYSIS_COMPLETED,
+    EVENT_BLAST_ARTIFACT_CREATED,
     EVENT_INTENT_CLEARED,
     EVENT_INTENT_QUEUE_BLOCKED,
     EVENT_PATCH_TRAIL_COMPUTED,
@@ -41,7 +42,7 @@ def _event(event_type: str, **payload: object) -> AuditEvent:
     )
 
 
-def test_compact_payload_for_patch_trail_and_receipt() -> None:
+def test_compact_payload_preserves_durable_artifacts() -> None:
     # Forensic-retention policy (Phase 34): the full patch-trail payload is preserved
     # complete under compaction so it stays exactly retrievable post-clear via
     # get_patch_trail; only the separate event-core projection is bounded.
@@ -73,6 +74,18 @@ def test_compact_payload_for_patch_trail_and_receipt() -> None:
         payload=receipt_payload,
     )
     assert receipt == receipt_payload
+
+    blast_artifact_payload = {
+        "blast_artifact_id": "blast-abc",
+        "projection_digest": {"value": "abc"},
+        "detail_contract_version": "1",
+        "blast_radius": {"direct_dependents": ["pkg/a.py"]},
+    }
+    blast_artifact = compact_payload_for_event(
+        event_type=EVENT_BLAST_ARTIFACT_CREATED,
+        payload=blast_artifact_payload,
+    )
+    assert blast_artifact == blast_artifact_payload
 
 
 def test_event_core_for_workspace_and_queue_events() -> None:

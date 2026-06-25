@@ -43,6 +43,18 @@ GET_BLAST_RADIUS: Final = (
     "performed."
 )
 
+GET_BLAST_ARTIFACT: Final = (
+    "Fetch a durably stored start-time blast artifact from the audit trail by "
+    "run id, blast artifact id, and/or projection digest, exactly as it was "
+    "persisted when start_controlled_change produced its slim summary. It is "
+    "never re-derived from current state. Returns the full omitted blast "
+    "projection for direct/transitive dependents, clone cohorts, review "
+    "context, cycles, and risk details. Durability is bounded by audit "
+    "retention. Fail-closed statuses: ok, not_found, ambiguous, "
+    "digest_mismatch, artifact_id_mismatch, malformed_stored_blast_artifact, "
+    "unsupported_format. Read-only; does not mutate repository state."
+)
+
 GET_IMPLEMENTATION_CONTEXT: Final = (
     "Return deterministic, bounded implementation context from one existing "
     "analysis run. Resolves explicit repo-relative paths and module:symbol "
@@ -318,6 +330,7 @@ TITLE_ANALYZE_CHANGED_PATHS: Final = "Analyze Changed Paths"
 TITLE_GET_RUN_SUMMARY: Final = "Get Run Summary"
 TITLE_GET_PRODUCTION_TRIAGE: Final = "Get Production Triage"
 TITLE_GET_BLAST_RADIUS: Final = "Get Blast Radius"
+TITLE_GET_BLAST_ARTIFACT: Final = "Get Blast Artifact"
 TITLE_GET_IMPLEMENTATION_CONTEXT: Final = "Get Implementation Context"
 TITLE_GET_RELEVANT_MEMORY: Final = "Get Relevant Memory"
 TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"

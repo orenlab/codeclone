@@ -101,12 +101,21 @@ never run analysis implicitly.
 `start_controlled_change` responses include passive `context_governance`
 metadata with a `start_projection_v1` digest and estimated context units for the
 serialized response. In `mode="observe"` this is measurement only: `edit_allowed`
-and explicit status fields remain the permission contract, and full blast-radius
-evidence is not omitted by response governance.
+and explicit status fields remain the permission contract.
+
+Start blast-radius evidence is summary-first when CodeClone can persist an
+immutable audit-backed artifact for the full projection. The summary keeps
+control facts, `do_not_touch`, `do_not_touch_summary`, workspace blocking facts,
+and artifact identity inline; full omitted evidence is retrieved through the
+read-only `get_blast_artifact` tool by `run_id` and `blast_artifact_id`. This
+retrieval returns the exact stored start-time projection. `get_blast_radius`
+remains available for current recomputation, and
+`blast_radius_detail="full"` keeps the compatibility projection inline. If the
+artifact cannot be stored, start fails closed by returning full blast evidence.
 
 Repeated identical `start_controlled_change` calls in the same MCP session may
-return an explicit compact replay instead of re-emitting the full blast-radius
-and budget payload. A replay sets `idempotent_replay=true`, keeps the same
+return an explicit compact replay instead of re-emitting blast-radius and budget
+payloads. A replay sets `idempotent_replay=true`, keeps the same
 `intent_id`, includes scope/workspace/blast/budget digests, and points the agent
 to `get_relevant_memory`. Replay is session-local, does not renew the lease, and
 is disabled when the analysis run, workspace content, registry state, scope,

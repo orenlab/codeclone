@@ -229,6 +229,14 @@ PatchTrailDigestParam = Annotated[
         description="Exact patch-trail digest (sha256 hex) for durable lookup.",
     ),
 ]
+BlastArtifactIdParam = Annotated[
+    str | None,
+    Field(description="Exact immutable blast artifact id returned by start."),
+]
+BlastArtifactDigestParam = Annotated[
+    str | None,
+    Field(description="Exact blast artifact projection digest (sha256 hex)."),
+]
 ReviewTextParam = Annotated[
     str,
     Field(description="Review claims text to validate against the run."),
@@ -396,6 +404,15 @@ TtlSecondsParam = Annotated[
 BlastRadiusDepthParam = Annotated[
     str,
     Field(description="auto, direct, or transitive pre-edit blast radius."),
+]
+BlastRadiusDetailParam = Annotated[
+    str,
+    Field(
+        description=(
+            "summary (default) returns safety-complete slim blast with artifact "
+            "lookup; full returns the compatibility blast projection inline."
+        ),
+    ),
 ]
 DirtyScopePolicyParam = Annotated[
     str,

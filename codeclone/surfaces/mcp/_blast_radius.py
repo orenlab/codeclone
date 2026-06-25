@@ -13,6 +13,11 @@ from typing import Final, Literal
 
 from codeclone.analysis import blast_radius as _core
 
+from ._context_governance import (
+    BLAST_ARTIFACT_PROJECTION_KIND,
+    context_governance_digest,
+)
+
 BlastRadiusDepth = _core.BlastRadiusDepth
 BlastRadiusResult = _core.BlastRadiusResult
 DEFAULT_DO_NOT_TOUCH_PATTERNS = _core.DEFAULT_DO_NOT_TOUCH_PATTERNS
@@ -60,6 +65,7 @@ DEFAULT_BLAST_RADIUS_INCLUDE: Final[tuple[BlastRadiusInclude, ...]] = (
     "review_context",
     "cycles",
 )
+BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION: Final = "1"
 
 
 def _bounded_entries(
@@ -152,7 +158,147 @@ def blast_radius_to_payload(
     }
 
 
+def blast_radius_artifact_payload(
+    blast_payload: Mapping[str, object],
+    *,
+    source_tool: str,
+) -> dict[str, object]:
+    """Return the immutable audit payload for exact blast drill-down."""
+
+    full_projection = dict(blast_payload)
+    projection_digest = context_governance_digest(
+        BLAST_ARTIFACT_PROJECTION_KIND,
+        full_projection,
+    )
+    digest_value = projection_digest["value"]
+    return {
+        "artifact_schema_version": "1",
+        "blast_artifact_id": f"blast-{digest_value}",
+        "run_id": str(full_projection.get("run_id", "")),
+        "projection_digest": projection_digest,
+        "detail_contract_version": BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION,
+        "source_tool": source_tool,
+        "source": "audit_event",
+        "durable": True,
+        "retention_bounded": True,
+        "blast_radius": full_projection,
+    }
+
+
+def blast_radius_summary_payload(
+    blast_payload: Mapping[str, object],
+    *,
+    artifact: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the safety-complete summary projection for start responses."""
+
+    direct = _object_sequence(blast_payload.get("direct_dependents"))
+    transitive = _object_sequence(blast_payload.get("transitive_dependents"))
+    cohorts = _object_sequence(blast_payload.get("clone_cohort_members"))
+    cycles = _object_sequence(blast_payload.get("in_dependency_cycle"))
+    review = _object_sequence(blast_payload.get("review_context"))
+    return {
+        "run_id": blast_payload.get("run_id"),
+        "origin": list(_object_sequence(blast_payload.get("origin"))),
+        "depth": blast_payload.get("depth"),
+        "radius_level": blast_payload.get("radius_level"),
+        "direct_dependents": [],
+        "direct_dependents_summary": _list_summary(direct),
+        "transitive_dependents": [],
+        "transitive_dependents_summary": _list_summary(transitive),
+        "clone_cohort_members": [],
+        "clone_cohort_summary": _list_summary(cohorts),
+        "in_dependency_cycle": [],
+        "cycle_summary": _list_summary(cycles),
+        "structural_risk": {},
+        "structural_risk_summary": _structural_risk_summary(blast_payload),
+        "do_not_touch": list(_object_sequence(blast_payload.get("do_not_touch"))),
+        "do_not_touch_summary": blast_payload.get("do_not_touch_summary", {}),
+        "review_context": [],
+        "review_context_summary": blast_payload.get(
+            "review_context_summary",
+            _list_summary(review),
+        ),
+        "guardrails": list(_object_sequence(blast_payload.get("guardrails"))),
+        "blast_artifact": blast_artifact_reference(artifact),
+        "omitted_evidence": {
+            "direct_dependents": _omitted_summary(direct, artifact),
+            "transitive_dependents": _omitted_summary(transitive, artifact),
+            "clone_cohort_members": _omitted_summary(cohorts, artifact),
+            "review_context": _omitted_summary(review, artifact),
+            "in_dependency_cycle": _omitted_summary(cycles, artifact),
+            "structural_risk": _omitted_summary(
+                _flatten_structural_risk(blast_payload),
+                artifact,
+            ),
+        },
+    }
+
+
+def blast_artifact_reference(artifact: Mapping[str, object]) -> dict[str, object]:
+    """Return the stable read-only route metadata for a blast artifact."""
+
+    return {
+        "blast_artifact_id": artifact.get("blast_artifact_id"),
+        "run_id": artifact.get("run_id"),
+        "projection_digest": artifact.get("projection_digest"),
+        "detail_contract_version": artifact.get("detail_contract_version"),
+        "retrieval_tool": "get_blast_artifact",
+        "route": "get_blast_artifact(root=..., run_id=..., blast_artifact_id=...)",
+        "retention_bounded": bool(artifact.get("retention_bounded")),
+        "source": artifact.get("source"),
+    }
+
+
+def _object_sequence(value: object) -> tuple[object, ...]:
+    if isinstance(value, (list, tuple)):
+        return tuple(value)
+    return ()
+
+
+def _list_summary(items: Sequence[object]) -> dict[str, object]:
+    return {
+        "total": len(items),
+        "shown": 0,
+        "truncated": bool(items),
+    }
+
+
+def _omitted_summary(
+    items: Sequence[object],
+    artifact: Mapping[str, object],
+) -> dict[str, object]:
+    summary = _list_summary(items)
+    summary["retrieval"] = blast_artifact_reference(artifact)
+    return summary
+
+
+def _structural_risk_summary(
+    blast_payload: Mapping[str, object],
+) -> dict[str, object]:
+    risk = blast_payload.get("structural_risk")
+    if not isinstance(risk, Mapping):
+        return {}
+    return {
+        str(key): _list_summary(_object_sequence(value))
+        for key, value in sorted(risk.items(), key=lambda item: str(item[0]))
+    }
+
+
+def _flatten_structural_risk(
+    blast_payload: Mapping[str, object],
+) -> tuple[object, ...]:
+    risk = blast_payload.get("structural_risk")
+    if not isinstance(risk, Mapping):
+        return ()
+    flattened: list[object] = []
+    for value in risk.values():
+        flattened.extend(_object_sequence(value))
+    return tuple(flattened)
+
+
 __all__ = [
+    "BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION",
     "DEFAULT_BLAST_RADIUS_INCLUDE",
     "DEFAULT_DO_NOT_TOUCH_PATTERNS",
     "MAX_CONTEXT_ITEMS",
@@ -161,6 +307,9 @@ __all__ = [
     "BlastRadiusDepth",
     "BlastRadiusInclude",
     "BlastRadiusResult",
+    "blast_artifact_reference",
+    "blast_radius_artifact_payload",
+    "blast_radius_summary_payload",
     "blast_radius_to_payload",
     "compute_blast_radius",
 ]

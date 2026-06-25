@@ -35,6 +35,7 @@ EVENT_INTENT_EXPIRED = "intent.expired"
 EVENT_WORKSPACE_CONFLICT = "workspace.conflict_detected"
 EVENT_WORKSPACE_GC = "workspace.gc_completed"
 EVENT_BLAST_RADIUS = "blast_radius.computed"
+EVENT_BLAST_ARTIFACT_CREATED = "blast_artifact.created"
 EVENT_PATCH_BUDGET = "patch_budget.computed"
 EVENT_PATCH_VERIFIED = "patch_contract.verified"
 EVENT_PATCH_VIOLATED = "patch_contract.violated"
@@ -66,6 +67,7 @@ KNOWN_EVENT_TYPES = frozenset(
         EVENT_WORKSPACE_CONFLICT,
         EVENT_WORKSPACE_GC,
         EVENT_BLAST_RADIUS,
+        EVENT_BLAST_ARTIFACT_CREATED,
         EVENT_PATCH_BUDGET,
         EVENT_PATCH_VERIFIED,
         EVENT_PATCH_VIOLATED,
@@ -87,11 +89,12 @@ _COMPACT_TEXT_LIMIT = 500
 # Forensic-retention policy (Phase 34): payload compaction never strips these
 # event types. They are durable evidence that must survive auto_clear and stay
 # exactly retrievable after the run/intent is cleared (review-receipt drill-down
-# via get_review_receipt; full forensic patch trail via get_patch_trail). Their
-# complete payload is preserved under every payload mode; only the separately
-# bounded event-core/replay projection applies.
+# via get_review_receipt; full forensic patch trail via get_patch_trail; start
+# blast drill-down via get_blast_artifact). Their complete payload is preserved
+# under every payload mode; only the separately bounded event-core/replay
+# projection applies.
 _FULL_PAYLOAD_EVENT_TYPES: frozenset[str] = frozenset(
-    {EVENT_RECEIPT_CREATED, EVENT_PATCH_TRAIL_COMPUTED}
+    {EVENT_RECEIPT_CREATED, EVENT_PATCH_TRAIL_COMPUTED, EVENT_BLAST_ARTIFACT_CREATED}
 )
 _EVENT_CORE_SCOPE_PATH_LIMIT = 50
 _EVENT_CORE_CITATION_LIMIT = 32
@@ -249,6 +252,8 @@ def compact_payload_for_event(
         }
     if event_type == EVENT_BLAST_RADIUS:
         return _compact_blast_radius_payload(payload)
+    if event_type == EVENT_BLAST_ARTIFACT_CREATED:
+        return _compact_blast_artifact_payload(payload)
     if event_type == EVENT_ANALYSIS_COMPLETED:
         return _compact_analysis_completed_payload(payload)
     if event_type == EVENT_PATCH_BUDGET:
@@ -315,6 +320,8 @@ def _event_core_facts(
         }, False
     if event_type == EVENT_BLAST_RADIUS:
         return _compact_blast_radius_payload(payload), False
+    if event_type == EVENT_BLAST_ARTIFACT_CREATED:
+        return _blast_artifact_event_core_facts(payload)
     if event_type == EVENT_ANALYSIS_COMPLETED:
         return _compact_analysis_completed_payload(payload), False
     if event_type == EVENT_PATCH_BUDGET:
@@ -449,11 +456,19 @@ def _summary_receipt_created(payload: Mapping[str, object]) -> str:
     return f"review receipt: {verdict}"
 
 
+def _summary_blast_artifact_created(payload: Mapping[str, object]) -> str:
+    blast = _mapping(payload.get("blast_radius"))
+    artifact_id = str(payload.get("blast_artifact_id", "")).strip() or "unknown"
+    radius_level = str(blast.get("radius_level", "")).strip() or "unknown"
+    return f"blast artifact: {artifact_id}; radius={radius_level}"
+
+
 # Incident events whose summary needs bespoke per-type field extraction.
 _INCIDENT_BUILDERS: dict[str, Callable[[Mapping[str, object]], str]] = {
     EVENT_PATCH_VIOLATED: _summary_patch_violated,
     EVENT_BASELINE_ABUSE: _summary_baseline_abuse,
     EVENT_RECEIPT_CREATED: _summary_receipt_created,
+    EVENT_BLAST_ARTIFACT_CREATED: _summary_blast_artifact_created,
 }
 
 
@@ -570,6 +585,31 @@ def _compact_blast_radius_payload(payload: Mapping[str, object]) -> dict[str, ob
         "review_context": len(_sequence(payload.get("review_context"))),
         "risk_keys": sorted(str(key) for key in structural_risk),
     }
+
+
+def _compact_blast_artifact_payload(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    blast = _mapping(payload.get("blast_radius"))
+    projection = _mapping(payload.get("projection_digest"))
+    return {
+        "blast_artifact_id": str(payload.get("blast_artifact_id", "")),
+        "run_id": str(payload.get("run_id", "")),
+        "projection_digest": str(projection.get("value", "")),
+        "detail_contract_version": str(payload.get("detail_contract_version", "")),
+        "radius_level": str(blast.get("radius_level", "")),
+        "direct_dependents": len(_sequence(blast.get("direct_dependents"))),
+        "transitive_dependents": len(_sequence(blast.get("transitive_dependents"))),
+        "clone_cohort_members": len(_sequence(blast.get("clone_cohort_members"))),
+        "do_not_touch": len(_sequence(blast.get("do_not_touch"))),
+        "review_context": len(_sequence(blast.get("review_context"))),
+    }
+
+
+def _blast_artifact_event_core_facts(
+    payload: Mapping[str, object],
+) -> tuple[dict[str, object], bool]:
+    return _compact_blast_artifact_payload(payload), False
 
 
 def _compact_budget_payload(payload: Mapping[str, object]) -> dict[str, object]:
@@ -760,6 +800,7 @@ __all__ = [
     "AUDIT_EVENT_CORE_VERSION",
     "EVENT_ANALYSIS_COMPLETED",
     "EVENT_BASELINE_ABUSE",
+    "EVENT_BLAST_ARTIFACT_CREATED",
     "EVENT_BLAST_RADIUS",
     "EVENT_CLAIM_COMPLETED",
     "EVENT_CLAIM_VIOLATED",

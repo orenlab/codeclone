@@ -7,11 +7,12 @@
 """Durable post-clear retrieval of typed audit-trail artifacts.
 
 A single read-only surface for fetching artifacts exactly as they were persisted
-in the audit trail — the review receipt (``get_review_receipt``) and the full
-forensic patch trail (``get_patch_trail``). Both survive ``auto_clear`` and are
-never re-derived from current state. The class holds only the two tool entry
-points; the shared retrieval skeleton and the per-artifact render / envelope /
-lookup helpers are module-level functions so the class stays cohesive.
+in the audit trail — the review receipt (``get_review_receipt``), the full
+forensic patch trail (``get_patch_trail``), and the start-time blast artifact
+(``get_blast_artifact``). They survive ``auto_clear`` and are never re-derived
+from current state. The class holds only the tool entry points; the shared
+retrieval skeleton and the per-artifact render / envelope / lookup helpers are
+module-level functions so the class stays cohesive.
 """
 
 from __future__ import annotations
@@ -26,12 +27,15 @@ from ...audit import (
     resolve_audit_path,
 )
 from ...audit.reader import (
+    StoredBlastArtifact,
     StoredPatchTrail,
     StoredReviewReceipt,
+    lookup_blast_artifact,
     lookup_patch_trail,
     lookup_review_receipt,
 )
 from ._context_governance import (
+    BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND,
     attach_passive_context_governance,
@@ -46,10 +50,39 @@ _RECEIPT_RETRIEVAL_FORMATS = frozenset({"structured", "markdown"})
 # get_patch_trail returns the full forensic trail; "structured" is the only
 # output (the bounded summary already rides finish/the trajectory lane).
 _PATCH_TRAIL_RETRIEVAL_FORMATS = frozenset({"structured"})
+_BLAST_ARTIFACT_RETRIEVAL_FORMATS = frozenset({"structured"})
 
 
 class _MCPSessionAuditArtifactMixin:
     """Read-only durable retrieval of typed audit-trail artifacts."""
+
+    def get_blast_artifact(
+        self,
+        *,
+        root: str,
+        run_id: str | None = None,
+        blast_artifact_id: str | None = None,
+        projection_digest: str | None = None,
+        format: str = "structured",
+    ) -> dict[str, object]:
+        """Return a durably stored start-time blast artifact.
+
+        Read-only and exact: it returns the full blast projection exactly as
+        persisted when ``start_controlled_change`` produced its slim summary,
+        never re-derived from current state. At least one of ``run_id`` /
+        ``blast_artifact_id`` / ``projection_digest`` is required; if multiple
+        keys are given they must identify the same artifact. Durability is
+        bounded by audit retention. Fail-closed statuses: ok, not_found,
+        ambiguous, digest_mismatch, artifact_id_mismatch,
+        malformed_stored_blast_artifact, unsupported_format.
+        """
+        return _blast_artifact_response(
+            root=root,
+            run_id=run_id,
+            blast_artifact_id=blast_artifact_id,
+            projection_digest=projection_digest,
+            output_format=format,
+        )
 
     def get_review_receipt(
         self,
@@ -165,6 +198,78 @@ def _durable_artifact_response(
     return envelope(render(artifact, output_format))
 
 
+def _blast_artifact_response(
+    *,
+    root: str,
+    run_id: str | None,
+    blast_artifact_id: str | None,
+    projection_digest: str | None,
+    output_format: str,
+) -> dict[str, object]:
+    if output_format not in _BLAST_ARTIFACT_RETRIEVAL_FORMATS:
+        return _blast_artifact_envelope(
+            {
+                "status": "unsupported_format",
+                "requested_format": output_format,
+                "supported_formats": sorted(_BLAST_ARTIFACT_RETRIEVAL_FORMATS),
+            }
+        )
+    if not run_id and not blast_artifact_id and not projection_digest:
+        raise MCPServiceContractError(
+            "get_blast_artifact requires run_id, blast_artifact_id, "
+            "or projection_digest."
+        )
+    audit_path = resolve_audit_path(root_path=Path(root), value=DEFAULT_AUDIT_PATH)
+    try:
+        result = lookup_blast_artifact(
+            audit_path,
+            run_id=run_id,
+            blast_artifact_id=blast_artifact_id,
+            projection_digest=projection_digest,
+        )
+    except AuditReadError as exc:
+        raise MCPServiceContractError(str(exc)) from exc
+    if result.status != "ok" or result.blast_artifact is None:
+        return _blast_artifact_envelope(
+            {
+                "status": result.status,
+                "run_id": run_id,
+                "blast_artifact_id": blast_artifact_id,
+                "projection_digest": projection_digest,
+                "match_count": result.match_count,
+                "source": "audit_event",
+                "durable": True,
+            }
+        )
+    return _blast_artifact_envelope(
+        _render_stored_blast_artifact(
+            result.blast_artifact,
+            output_format=output_format,
+        )
+    )
+
+
+def _render_stored_blast_artifact(
+    artifact: StoredBlastArtifact,
+    *,
+    output_format: str,
+) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "run_id": artifact.run_id,
+        "blast_artifact_id": artifact.blast_artifact_id,
+        "projection_digest": artifact.projection_digest,
+        "detail_contract_version": artifact.detail_contract_version,
+        "radius_level": artifact.radius_level,
+        "created_at_utc": artifact.created_at_utc,
+        "format": output_format,
+        "source": "audit_event",
+        "durable": True,
+        "retention_bounded": True,
+        "blast_radius": artifact.payload.get("blast_radius"),
+    }
+
+
 def _render_stored_receipt(
     receipt: StoredReviewReceipt,
     *,
@@ -217,6 +322,19 @@ def _review_receipt_envelope(payload: dict[str, object]) -> dict[str, object]:
         projection_kind=REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND,
         response={
             "tool": "get_review_receipt",
+            "budget_scope": "whole_response",
+            "evidence_policy": "observe_only_no_omission",
+            "retrieval": "durable_audit_event",
+        },
+    )
+
+
+def _blast_artifact_envelope(payload: dict[str, object]) -> dict[str, object]:
+    return attach_passive_context_governance(
+        payload,
+        projection_kind=BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_blast_artifact",
             "budget_scope": "whole_response",
             "evidence_policy": "observe_only_no_omission",
             "retrieval": "durable_audit_event",

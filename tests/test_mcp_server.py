@@ -146,6 +146,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_run_summary",
         "get_production_triage",
         "get_blast_radius",
+        "get_blast_artifact",
         "get_implementation_context",
         "get_relevant_memory",
         "query_engineering_memory",
@@ -189,6 +190,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_run_summary",
                 "get_production_triage",
                 "get_blast_radius",
+                "get_blast_artifact",
                 "get_implementation_context",
                 "get_relevant_memory",
                 "query_engineering_memory",
@@ -235,6 +237,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
+    assert "durably stored start-time blast artifact" in str(
+        tools["get_blast_artifact"].description
+    )
+    assert "never re-derived" in str(tools["get_blast_artifact"].description)
     assert "bounded implementation context" in str(
         tools["get_implementation_context"].description
     )

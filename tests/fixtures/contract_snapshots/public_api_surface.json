@@ -68,6 +68,10 @@
       "signature": "(self, *, run_id: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
     },
     {
+      "name": "get_blast_artifact",
+      "signature": "(self, *, root: 'str', run_id: 'str | None' = None, blast_artifact_id: 'str | None' = None, projection_digest: 'str | None' = None, format: 'str' = 'structured') -> 'dict[str, object]'"
+    },
+    {
       "name": "get_blast_radius",
       "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
     },

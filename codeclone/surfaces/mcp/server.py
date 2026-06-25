@@ -50,8 +50,11 @@ from .messages.params import (
     AuditTrailLimitParam,
     AutoClearParam,
     BeforeRunIdParam,
+    BlastArtifactDigestParam,
+    BlastArtifactIdParam,
     BlastDepthParam,
     BlastRadiusDepthParam,
+    BlastRadiusDetailParam,
     CachePolicyParam,
     CategoryParam,
     ChangedFilesParam,
@@ -562,6 +565,25 @@ def build_mcp_server(
             run_id=run_id,
             depth=depth,
             include=include,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_BLAST_ARTIFACT,
+        description=mcp_tools.GET_BLAST_ARTIFACT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_blast_artifact(
+        root: RootParam,
+        run_id: RunIdParam = None,
+        blast_artifact_id: BlastArtifactIdParam = None,
+        projection_digest: BlastArtifactDigestParam = None,
+    ) -> dict[str, object]:
+        return service.get_blast_artifact(
+            root=root,
+            run_id=run_id,
+            blast_artifact_id=blast_artifact_id,
+            projection_digest=projection_digest,
         )
 
     @tool(
@@ -1215,6 +1237,7 @@ def build_mcp_server(
         strictness: StrictnessParam = "ci",
         ttl_seconds: TtlSecondsParam = None,
         blast_radius_depth: BlastRadiusDepthParam = "auto",
+        blast_radius_detail: BlastRadiusDetailParam = "summary",
         dirty_scope_policy: DirtyScopePolicyParam = "block",
     ) -> dict[str, object]:
         return service.start_controlled_change(
@@ -1226,6 +1249,7 @@ def build_mcp_server(
             strictness=strictness,
             ttl_seconds=ttl_seconds,
             blast_radius_depth=blast_radius_depth,
+            blast_radius_detail=blast_radius_detail,
             dirty_scope_policy=dirty_scope_policy,
         )
 

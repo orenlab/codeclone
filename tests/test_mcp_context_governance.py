@@ -100,7 +100,7 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
         "nested": "implementation_context_artifact_pages" in blocked["nested_budget"],
         "omission": "exact_continuation_for_omitted_tails" in blocked["omission"],
     } == {
-        "response": True,
+        "response": False,
         "nested": True,
         "omission": True,
     }
@@ -110,10 +110,12 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     assert "post_clear_receipt_lookup" not in blocked["omission"]
     # Phase 34: durable patch-trail retrieval (get_patch_trail) clears its blocker.
     assert "durable_patch_trail_lookup" not in blocked["response_budget"]
+    assert "immutable_blast_artifact" not in blocked["response_budget"]
     capabilities = cast("dict[str, object]", envelope["capabilities"])
     assert capabilities["typed_receipt_alias"] is True
     assert capabilities["durable_receipt_lookup"] is True
     assert capabilities["durable_patch_trail_lookup"] is True
+    assert capabilities["immutable_blast_artifact"] is True
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
 
@@ -164,7 +166,7 @@ def test_start_context_governance_marks_whole_response_projection() -> None:
         "tool": "start_controlled_change",
         "budget_scope": "whole_response",
         "policy": "observe_only_no_omission",
-        "blast_radius_content": "full_until_immutable_artifact",
+        "blast_radius_content": "summary_with_immutable_artifact_lookup",
         "digest_kind": START_RESPONSE_PROJECTION_KIND,
         "mode": "observe",
     }
@@ -186,7 +188,8 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "receipt_lookup": drill_down["structured_receipt"]["object_lookup"],
         "patch_trail_lookup": drill_down["patch_trail"]["object_lookup"],
         "patch_trail_route": drill_down["patch_trail"]["route"],
-        "blast_route": drill_down["blast_artifact"]["current_route_is_recomputation"],
+        "blast_lookup": drill_down["blast_artifact"]["object_lookup"],
+        "blast_route": drill_down["blast_artifact"]["route"],
         "experience_lookup": drill_down["experience"]["object_lookup"],
     } == {
         "memory_record_lookup": "available",
@@ -197,7 +200,8 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "receipt_lookup": "available",
         "patch_trail_lookup": "available",
         "patch_trail_route": "get_patch_trail(run_id=..., patch_trail_digest=...)",
-        "blast_route": "get_blast_radius",
+        "blast_lookup": "available",
+        "blast_route": "get_blast_artifact(run_id=..., blast_artifact_id=...)",
         "experience_lookup": "blocked",
     }
 

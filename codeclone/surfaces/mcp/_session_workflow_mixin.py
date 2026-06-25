@@ -25,10 +25,16 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Final
 
-from ...audit.events import EVENT_PATCH_TRAIL_COMPUTED
+from ...audit.events import EVENT_BLAST_ARTIFACT_CREATED, EVENT_PATCH_TRAIL_COMPUTED
 from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
-from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
+from ._blast_radius import (
+    BlastRadiusResult,
+    blast_artifact_reference,
+    blast_radius_artifact_payload,
+    blast_radius_summary_payload,
+    blast_radius_to_payload,
+)
 from ._context_governance import (
     attach_finish_context_governance,
     attach_start_context_governance,
@@ -56,6 +62,7 @@ TRANSITIVE_SUMMARY_LIMIT: Final[int] = 10
 VALID_BLAST_RADIUS_DEPTHS: Final[frozenset[str]] = frozenset(
     {"direct", "transitive", "auto"}
 )
+VALID_BLAST_RADIUS_DETAIL: Final[frozenset[str]] = frozenset({"summary", "full"})
 
 _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     {
@@ -87,9 +94,11 @@ class _MCPSessionWorkflowMixin:
         strictness: str = "ci",
         ttl_seconds: int | None = None,
         blast_radius_depth: str = "auto",
+        blast_radius_detail: str = "summary",
         dirty_scope_policy: str = "block",
     ) -> dict[str, object]:
         validated_depth = _validated_blast_radius_depth(blast_radius_depth)
+        validated_blast_detail = _validated_blast_radius_detail(blast_radius_detail)
         validated_dirty_scope_policy = _validated_dirty_scope_policy(dirty_scope_policy)
         root_path = _helpers._resolve_root(root)
         request_key = _start_replay_request_key(
@@ -100,6 +109,7 @@ class _MCPSessionWorkflowMixin:
             on_conflict=on_conflict,
             strictness=strictness,
             blast_radius_depth=validated_depth,
+            blast_radius_detail=validated_blast_detail,
             dirty_scope_policy=validated_dirty_scope_policy,
             actor_pid=self._agent_pid,
             actor_start_epoch=self._agent_start_epoch,
@@ -217,6 +227,30 @@ class _MCPSessionWorkflowMixin:
         )
         if transitive_summary is not None:
             blast_payload["transitive_summary"] = transitive_summary
+        blast_artifact = blast_radius_artifact_payload(
+            blast_payload,
+            source_tool="start_controlled_change",
+        )
+        blast_artifact_ref = blast_artifact_reference(blast_artifact)
+        blast_artifact_audit_sequence = self._audit_emit(
+            root=record.root,
+            event_type=EVENT_BLAST_ARTIFACT_CREATED,
+            severity="info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent_id,
+            report_digest=self._report_digest_value(record),
+            status=str(blast_payload.get("radius_level", "")),
+            payload=blast_artifact,
+        )
+        artifact_available = blast_artifact_audit_sequence is not None
+        effective_blast_detail = (
+            validated_blast_detail if artifact_available else "full"
+        )
+        response_blast_payload = _start_blast_projection(
+            blast_payload=blast_payload,
+            blast_artifact=blast_artifact if artifact_available else None,
+            detail=effective_blast_detail,
+        )
 
         # 7. Budget
         budget_payload = self._patch_contract_budget(
@@ -259,7 +293,9 @@ class _MCPSessionWorkflowMixin:
                 workspace_after,
                 declare_payload,
             ),
-            "blast_radius": blast_payload,
+            "blast_radius_detail": effective_blast_detail,
+            "requested_blast_radius_detail": validated_blast_detail,
+            "blast_radius": response_blast_payload,
             "budget": _budget_summary(budget_payload),
             "scope": active_intent.scope.to_payload(),
             "edit_allowed": edit_allowed,
@@ -300,6 +336,7 @@ class _MCPSessionWorkflowMixin:
             blast_radius_digest=context_governance_digest(
                 "blast_projection_v1", blast_payload
             ),
+            blast_artifact=blast_artifact_ref if artifact_available else None,
             budget_digest=context_governance_digest(
                 "budget_projection_v1", _budget_summary(budget_payload)
             ),
@@ -342,6 +379,7 @@ class _MCPSessionWorkflowMixin:
             "scope_digest": entry["scope_digest"],
             "workspace_state_digest": workspace_state_digest,
             "blast_radius_digest": entry["blast_radius_digest"],
+            "blast_artifact": entry.get("blast_artifact"),
             "budget_digest": entry["budget_digest"],
             "boundary_drill_down": {
                 "allowed_files": None,
@@ -364,6 +402,7 @@ class _MCPSessionWorkflowMixin:
         workspace_state_digest: dict[str, str],
         scope_digest: dict[str, str],
         blast_radius_digest: dict[str, str],
+        blast_artifact: Mapping[str, object] | None,
         budget_digest: dict[str, str],
     ) -> None:
         self._start_replay_cache[request_key] = {
@@ -378,6 +417,7 @@ class _MCPSessionWorkflowMixin:
             "workspace_state_digest": workspace_state_digest,
             "registry_digest": _start_registry_digest(workspace_after),
             "blast_radius_digest": blast_radius_digest,
+            "blast_artifact": None if blast_artifact is None else dict(blast_artifact),
             "budget_digest": budget_digest,
         }
 
@@ -895,6 +935,44 @@ def _validated_blast_radius_depth(value: str) -> str:
     return value
 
 
+def _validated_blast_radius_detail(value: str) -> str:
+    if value not in VALID_BLAST_RADIUS_DETAIL:
+        raise MCPServiceContractError(
+            err_msgs.invalid_choice(
+                "blast_radius_detail",
+                value,
+                VALID_BLAST_RADIUS_DETAIL,
+            )
+        )
+    return value
+
+
+def _start_blast_projection(
+    *,
+    blast_payload: Mapping[str, object],
+    blast_artifact: Mapping[str, object] | None,
+    detail: str,
+) -> dict[str, object]:
+    if detail == "full":
+        full_payload = dict(blast_payload)
+        if blast_artifact is None:
+            full_payload["blast_artifact"] = {
+                "object_lookup": "unavailable",
+                "reason": "audit_artifact_write_failed_or_disabled",
+            }
+        else:
+            full_payload["blast_artifact"] = blast_artifact_reference(blast_artifact)
+        return full_payload
+    if blast_artifact is None:
+        raise MCPServiceContractError(
+            "start summary blast requires a stored blast artifact."
+        )
+    return blast_radius_summary_payload(
+        blast_payload,
+        artifact=blast_artifact,
+    )
+
+
 def _workspace_summary_from_declare(
     workspace: dict[str, object],
     declare_payload: dict[str, object],
@@ -1143,6 +1221,7 @@ def _start_replay_request_key(
     on_conflict: str | None,
     strictness: str,
     blast_radius_depth: str,
+    blast_radius_detail: str,
     dirty_scope_policy: str,
     actor_pid: int,
     actor_start_epoch: int,
@@ -1155,6 +1234,7 @@ def _start_replay_request_key(
         "on_conflict": on_conflict,
         "strictness": strictness,
         "blast_radius_depth": blast_radius_depth,
+        "blast_radius_detail": blast_radius_detail,
         "dirty_scope_policy": dirty_scope_policy,
         "actor": {
             "kind": "session_local",

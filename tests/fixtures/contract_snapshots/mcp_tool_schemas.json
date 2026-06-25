@@ -1457,6 +1457,62 @@
     }
   },
   {
+    "name": "get_blast_artifact",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        },
+        "blast_artifact_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact immutable blast artifact id returned by start.",
+          "title": "Blast Artifact Id"
+        },
+        "projection_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exact blast artifact projection digest (sha256 hex).",
+          "title": "Projection Digest"
+        }
+      },
+      "required": [
+        "root"
+      ],
+      "title": "get_blast_artifactArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "get_blast_radius",
     "input_schema": {
       "properties": {
@@ -3067,6 +3123,12 @@
           "default": "auto",
           "description": "auto, direct, or transitive pre-edit blast radius.",
           "title": "Blast Radius Depth",
+          "type": "string"
+        },
+        "blast_radius_detail": {
+          "default": "summary",
+          "description": "summary (default) returns safety-complete slim blast with artifact lookup; full returns the compatibility blast projection inline.",
+          "title": "Blast Radius Detail",
           "type": "string"
         },
         "dirty_scope_policy": {

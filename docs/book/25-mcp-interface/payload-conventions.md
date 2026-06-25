@@ -105,9 +105,12 @@ omitted-tail drill-down remains blocked.
 
 For `start_controlled_change`, `context_governance.response` describes the
 whole returned start response with `tool="start_controlled_change"` and a
-`start_projection_v1` digest. Full blast-radius evidence remains in the default
-response until immutable blast-artifact retrieval exists; the envelope is
-measurement only.
+`start_projection_v1` digest. When a durable blast artifact is stored, default
+start responses carry a safety-complete blast summary and a
+`blast_artifact` pointer. Full omitted blast evidence is retrieved exactly with
+`get_blast_artifact(root, run_id, blast_artifact_id)`. `get_blast_radius`
+remains current recomputation, not historical drill-down. If artifact storage is
+unavailable, start returns full blast evidence inline.
 
 For `get_relevant_memory`, `context_governance.response` describes the whole
 memory retrieval response with `tool="get_relevant_memory"` and a

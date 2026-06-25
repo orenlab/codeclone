@@ -46,6 +46,7 @@ import codeclone.surfaces.mcp._workspace_intents as mcp_workspace_intents_mod
 import codeclone.surfaces.mcp.server as mcp_server_mod
 import codeclone.surfaces.mcp.service as mcp_service_mod
 import codeclone.surfaces.mcp.session as mcp_session_mod
+from codeclone.audit import DEFAULT_AUDIT_PATH, resolve_audit_path
 from codeclone.audit.events import AuditEvent
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
 from codeclone.baseline import Baseline, current_python_tag
@@ -9864,7 +9865,7 @@ def _assert_start_context_governance(payload: Mapping[str, object]) -> None:
         "tool": "start_controlled_change",
         "budget_scope": "whole_response",
         "policy": "observe_only_no_omission",
-        "blast_radius_content": "full_until_immutable_artifact",
+        "blast_radius_content": "summary_with_immutable_artifact_lookup",
         "digest_kind": mcp_context_governance_mod.START_RESPONSE_PROJECTION_KIND,
     }
     assert governance["enforcement"] == {
@@ -9904,6 +9905,64 @@ def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
             intent="invalid depth",
             blast_radius_depth="wide",
         )
+    with pytest.raises(MCPServiceContractError, match="blast_radius_detail"):
+        service.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["README.md"]},
+            intent="invalid detail",
+            blast_radius_detail="wide",
+        )
+
+
+def test_mcp_workflow_start_summary_uses_durable_blast_artifact(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    audit_path = resolve_audit_path(root_path=tmp_path, value=DEFAULT_AUDIT_PATH)
+    writer = SqliteAuditWriter(
+        db_path=audit_path,
+        payloads="compact",
+        retention_days=30,
+    )
+    service._audit_writer_override = writer
+    _register_docs_patch_run(service, tmp_path)
+
+    try:
+        started = service.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["README.md"]},
+            intent="update readme",
+            blast_radius_depth="transitive",
+        )
+        writer.close()
+        service._audit_writer_override = None
+
+        blast = cast("dict[str, object]", started["blast_radius"])
+        artifact = cast("dict[str, object]", blast["blast_artifact"])
+        assert started["blast_radius_detail"] == "summary"
+        assert started["requested_blast_radius_detail"] == "summary"
+        assert blast["direct_dependents"] == []
+        assert blast["transitive_dependents"] == []
+        assert artifact["retrieval_tool"] == "get_blast_artifact"
+
+        retrieved = CodeCloneMCPService(history_limit=4).get_blast_artifact(
+            root=str(tmp_path),
+            run_id=str(artifact["run_id"]),
+            blast_artifact_id=str(artifact["blast_artifact_id"]),
+        )
+        full_blast = cast("dict[str, object]", retrieved["blast_radius"])
+        assert retrieved["status"] == "ok"
+        assert full_blast["origin"] == ["README.md"]
+        assert (
+            retrieved["projection_digest"]
+            == cast(
+                "dict[str, object]",
+                artifact["projection_digest"],
+            )["value"]
+        )
+        assert "transitive_summary" in full_blast
+    finally:
+        service.shutdown_cleanup()
 
 
 def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:

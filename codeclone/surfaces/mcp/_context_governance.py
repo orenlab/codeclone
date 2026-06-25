@@ -26,6 +26,10 @@ CONTEXT_GOVERNANCE_ESTIMATOR: Final = "utf8_bytes_div_4_v1"
 DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2200
 IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT: Final = 2600
 FINISH_RESPONSE_PROJECTION_KIND: Final = "finish_projection_v1"
+BLAST_ARTIFACT_PROJECTION_KIND: Final = "blast_artifact_projection_v1"
+BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = (
+    "blast_artifact_retrieval_projection_v1"
+)
 IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND: Final = (
     "implementation_context_projection_v1"
 )
@@ -50,7 +54,7 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     # Phase 34: a durable post-clear patch-trail lookup now exists
     # (get_patch_trail over the audit trail), so this prerequisite is met.
     "durable_patch_trail_lookup": True,
-    "immutable_blast_artifact": False,
+    "immutable_blast_artifact": True,
     "omitted_evidence_continuation": False,
 }
 
@@ -85,9 +89,10 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
         "current_complete_path": "patch_trail",
     },
     "blast_artifact": {
-        "object_lookup": "blocked",
+        "object_lookup": "available",
+        "route": "get_blast_artifact(run_id=..., blast_artifact_id=...)",
         "continuation": "blocked",
-        "current_route_is_recomputation": "get_blast_radius",
+        "snapshot_identity": "blast_artifact_id + run_id + projection_digest",
     },
     "implementation_context_facet": {
         "object_lookup": "blocked",
@@ -98,10 +103,10 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
 
 _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
     # durable_receipt_lookup cleared in Phase 34.4 (get_review_receipt);
-    # durable_patch_trail_lookup cleared here (get_patch_trail). Response-budget and
-    # omission stay blocked on the remaining unbuilt retrieval prerequisites.
+    # durable_patch_trail_lookup cleared by get_patch_trail; immutable
+    # blast-artifact lookup cleared by get_blast_artifact. Response-budget and
+    # omission stay blocked on omitted-tail continuation until that slice ships.
     "response_budget": [
-        "immutable_blast_artifact",
         "omitted_evidence_continuation",
     ],
     "nested_budget": [
@@ -227,7 +232,7 @@ def attach_start_context_governance(
             "tool": "start_controlled_change",
             "budget_scope": "whole_response",
             "evidence_policy": "observe_only_no_omission",
-            "blast_radius_content": "full_until_immutable_artifact",
+            "blast_radius_content": "summary_with_immutable_artifact_lookup",
         },
     )
 

@@ -14,6 +14,12 @@ start a change workflow.
 analyze_repository(root=<abs>) → get_blast_radius(files=[...], depth="transitive")
 ```
 
+`get_blast_radius` is current recomputation from the stored run. When
+`start_controlled_change` returns a slim `blast_radius` summary with
+`blast_artifact`, use `get_blast_artifact(root, run_id, blast_artifact_id)` for
+the exact full evidence omitted from that start response. Do not substitute a
+fresh `get_blast_radius` call when exact historical start evidence is required.
+
 For a BUNDLED projection (blast + call_context + memory lanes + freshness + optional
 `change_control` with `intent_id`), prefer `get_implementation_context`. Use this skill
 when you need ONLY blast fields.
@@ -33,6 +39,7 @@ when you need ONLY blast fields.
 | `do_not_touch`                                | HARD boundaries — separate explicit approval required                          |
 | `review_context`                              | supporting context — NOT a ban on editing                                      |
 | `guardrails`                                  | actionable review reminders                                                    |
+| `blast_artifact`                              | exact retrieval pointer for full start-time blast evidence                     |
 
 ## Rules
 
