@@ -31,10 +31,8 @@ from ...utils import coerce as _coerce
 from ...utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
-    RepoPathPolicy,
-    resolve_under_repo_root,
 )
-from ._session_runtime import resolve_cache_path
+from ._session_runtime import resolve_artifact_path, resolve_cache_path
 from ._session_shared import (
     _COMPACT_ITEM_EMPTY_VALUES,
     _COMPACT_ITEM_PATH_KEYS,
@@ -272,19 +270,19 @@ def _resolve_optional_path(
     value: str,
     root_path: Path,
     *,
+    kind: str | None = None,
     allow_external_artifacts: bool = False,
     allow_repo_absolute: bool = False,
 ) -> Path:
     from .messages import errors as err_msgs
 
     try:
-        return resolve_under_repo_root(
-            root_path,
+        return resolve_artifact_path(
             value,
-            policy=RepoPathPolicy(
-                allow_absolute=allow_external_artifacts or allow_repo_absolute,
-                allow_external=allow_external_artifacts,
-            ),
+            root_path,
+            kind=kind,
+            allow_external_artifacts=allow_external_artifacts,
+            allow_repo_absolute=allow_repo_absolute,
         )
     except (PathOutsideRepoError, RepoPathError) as exc:
         raise MCPServiceContractError(

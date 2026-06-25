@@ -86,12 +86,30 @@ Refs:
 **Opt-in:** set `allow_external_artifacts=true` on the analysis tool call when
 shared monorepo artifacts live outside the scan root (privileged input).
 
+The opt-in is **least-privilege, not unrestricted**. An external artifact must:
+
+- be a **regular file** (directories, devices, FIFOs, sockets are rejected);
+- carry the **extension its kind expects** — `.json` for `baseline_path`,
+  `metrics_baseline_path`, and `cache_path`; `.xml` for `coverage_xml`. The
+  extension is enforced on the **resolved real path**, so a `.json` symlink that
+  points at a disallowed target is rejected;
+- resolve **under a permitted root** — the repository root, the system temp dir
+  (CI coverage), or `~/.cache/codeclone`. Operators *extend* (never replace) the
+  permitted roots with `CODECLONE_EXTERNAL_ARTIFACT_ROOTS` (an `os.pathsep`-
+  separated list; trusted operator configuration, not part of the MCP request).
+
+Arbitrary absolute paths such as `/etc/passwd` or `~/.ssh/id_rsa` are rejected
+even with the opt-in set.
+
 Parameter details: [25-mcp-interface/index.md](25-mcp-interface/index.md). Tool copy:
 `help(topic="trust_boundaries")`.
 
 Refs:
 
-- `codeclone/surfaces/mcp/_session_helpers.py:_resolve_optional_path`
+- `codeclone/surfaces/mcp/_session_runtime.py:resolve_artifact_path` — single
+  artifact-path resolver shared by every optional-path call site
+- `codeclone/utils/repo_paths.py:resolve_under_repo_root` — `external_suffixes`,
+  `external_roots`, and `reject_special_files` policy enforcement
 
 ### Cache checksum semantics
 

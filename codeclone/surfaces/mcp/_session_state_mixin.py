@@ -306,6 +306,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                 _helpers._resolve_optional_path(
                     request.baseline_path,
                     root_path,
+                    kind="baseline",
                     allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
@@ -314,6 +315,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                 _helpers._resolve_optional_path(
                     request.metrics_baseline_path,
                     root_path,
+                    kind="metrics_baseline",
                     allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
@@ -322,6 +324,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                 _helpers._resolve_optional_path(
                     request.cache_path,
                     root_path,
+                    kind="cache",
                     allow_external_artifacts=request.allow_external_artifacts,
                 )
             )
@@ -330,6 +333,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
                 _helpers._resolve_optional_path(
                     request.coverage_xml,
                     root_path,
+                    kind="coverage_xml",
                     allow_external_artifacts=request.allow_external_artifacts,
                     allow_repo_absolute=True,
                 )
@@ -347,6 +351,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         baseline_path = _helpers._resolve_optional_path(
             str(args.baseline),
             root_path,
+            kind="baseline",
             allow_external_artifacts=allow_external_artifacts,
             allow_repo_absolute=True,
         )
@@ -355,6 +360,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         metrics_baseline_arg_path = _helpers._resolve_optional_path(
             str(args.metrics_baseline),
             root_path,
+            kind="metrics_baseline",
             allow_external_artifacts=allow_external_artifacts,
             allow_repo_absolute=True,
         )
