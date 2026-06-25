@@ -9,6 +9,7 @@ from __future__ import annotations
 from ...baseline.metrics_baseline import probe_metrics_baseline_section
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
+from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
 from ._session_baseline import (
     CloneBaselineState,
@@ -828,6 +829,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
     _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
+    _context_projection_pages: dict[str, ContextProjectionArtifact]
     _active_intents: dict[str, IntentRecord]
     _intent_sequence: int
 
@@ -1209,11 +1211,13 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             cleared_gate_results = len(self._last_gate_results)
             cleared_spread_cache_entries = len(self._spread_max_cache)
             cleared_blast_radius_entries = len(self._blast_radius_cache)
+            cleared_context_projection_pages = len(self._context_projection_pages)
             cleared_intents = len(self._active_intents)
             self._review_state.clear()
             self._last_gate_results.clear()
             self._spread_max_cache.clear()
             self._blast_radius_cache.clear()
+            self._context_projection_pages.clear()
             self._active_intents.clear()
             self._intent_sequence = 0
         workspace_cleared = True
@@ -1236,6 +1240,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             "cleared_gate_results": cleared_gate_results,
             "cleared_spread_cache_entries": cleared_spread_cache_entries,
             "cleared_blast_radius_entries": cleared_blast_radius_entries,
+            "cleared_context_projection_pages": cleared_context_projection_pages,
             "cleared_intents": cleared_intents,
             "workspace_cleared": workspace_cleared,
         }
@@ -1328,6 +1333,13 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             ]
             for cache_key in stale_blast_radius_keys:
                 self._blast_radius_cache.pop(cache_key, None)
+            stale_context_projection_digests = [
+                digest
+                for digest, artifact in self._context_projection_pages.items()
+                if artifact.run_id not in active_run_ids
+            ]
+            for digest in stale_context_projection_digests:
+                self._context_projection_pages.pop(digest, None)
             stale_intent_ids = [
                 intent_id
                 for intent_id, intent in self._active_intents.items()

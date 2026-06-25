@@ -1780,6 +1780,63 @@
     }
   },
   {
+    "name": "get_implementation_context_page",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "context_projection_digest": {
+          "description": "Exact analysis.context_projection_digest returned by get_implementation_context.",
+          "title": "Context Projection Digest",
+          "type": "string"
+        },
+        "facet": {
+          "description": "Implementation-context facet page key, for example public_surface, callers, memory, trajectories, or definition_sites.",
+          "title": "Facet",
+          "type": "string"
+        },
+        "offset": {
+          "default": 0,
+          "description": "Zero-based offset into the saved facet page lane.",
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "page_size": {
+          "default": 20,
+          "description": "Facet page size (1-50).",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Page Size",
+          "type": "integer"
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "8-char or full run id; latest run when omitted.",
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "root",
+        "context_projection_digest",
+        "facet"
+      ],
+      "title": "get_implementation_context_pageArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "get_memory_projection_page",
     "input_schema": {
       "properties": {

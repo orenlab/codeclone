@@ -148,6 +148,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_blast_radius",
         "get_blast_artifact",
         "get_implementation_context",
+        "get_implementation_context_page",
         "get_relevant_memory",
         "get_memory_projection_page",
         "query_engineering_memory",
@@ -193,6 +194,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_blast_radius",
                 "get_blast_artifact",
                 "get_implementation_context",
+                "get_implementation_context_page",
                 "get_relevant_memory",
                 "get_memory_projection_page",
                 "query_engineering_memory",
@@ -247,6 +249,10 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["get_implementation_context"].description
     )
     assert "without re-analysis" in str(tools["get_implementation_context"].description)
+    assert "session-local" in str(tools["get_implementation_context_page"].description)
+    assert "never recomputes" in str(
+        tools["get_implementation_context_page"].description
+    )
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
     assert "optional claims" in str(tools["finish_controlled_change"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
@@ -490,6 +496,24 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         "dict[str, object]",
         implementation_context["analysis"],
     )
+    context_analysis = cast("dict[str, object]", implementation_context["analysis"])
+    context_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_implementation_context_page",
+                {
+                    "root": abs_root,
+                    "run_id": run_id,
+                    "context_projection_digest": str(
+                        context_analysis["context_projection_digest"]
+                    ),
+                    "facet": "module_role",
+                },
+            )
+        )
+    )
+    assert context_page["status"] == "ok"
+    assert context_page["facet"] == "module_role"
 
     change_intent = _structured_tool_result(
         asyncio.run(

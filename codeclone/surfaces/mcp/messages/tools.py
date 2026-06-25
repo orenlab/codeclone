@@ -63,6 +63,16 @@ GET_IMPLEMENTATION_CONTEXT: Final = (
     "re-analysis or edit authorization."
 )
 
+GET_IMPLEMENTATION_CONTEXT_PAGE: Final = (
+    "Fetch an exact implementation-context facet page from the session-local "
+    "projection artifact created by get_implementation_context. Requires the "
+    "analysis.context_projection_digest returned by that response and a facet "
+    "page key such as public_surface, callers, memory, trajectories, or "
+    "definition_sites. Returns not_found when the projection is no longer in "
+    "MCP run history; never recomputes fresh context while claiming exactness. "
+    "Read-only; does not mutate repository state."
+)
+
 GET_RELEVANT_MEMORY: Final = (
     "Return ranked, evidence-linked engineering memory for the declared "
     "edit scope. Requires absolute root (same as analyze_repository). "
@@ -342,6 +352,7 @@ TITLE_GET_PRODUCTION_TRIAGE: Final = "Get Production Triage"
 TITLE_GET_BLAST_RADIUS: Final = "Get Blast Radius"
 TITLE_GET_BLAST_ARTIFACT: Final = "Get Blast Artifact"
 TITLE_GET_IMPLEMENTATION_CONTEXT: Final = "Get Implementation Context"
+TITLE_GET_IMPLEMENTATION_CONTEXT_PAGE: Final = "Get Implementation Context Page"
 TITLE_GET_RELEVANT_MEMORY: Final = "Get Relevant Memory"
 TITLE_GET_MEMORY_PROJECTION_PAGE: Final = "Get Memory Projection Page"
 TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"

@@ -63,8 +63,8 @@ metadata for the response-governance contract. Clients should be able to detect:
 - context-governance contract version;
 - passive `observe` mode vs enforced response budgets;
 - whether `finish_controlled_change` still includes the typed receipt alias;
-- whether durable receipt, Patch Trail, blast-radius, and omitted-evidence
-  drill-down resources are available.
+- whether durable receipt, Patch Trail, blast-radius, implementation-context
+  page, and omitted-evidence drill-down resources are available.
 
 Payload slimming without that metadata is a contract break, even during alpha.
 
@@ -128,7 +128,13 @@ For `get_implementation_context`, `context_governance.response` describes the
 whole implementation-context response with `tool="get_implementation_context"`
 and an `implementation_context_projection_v1` digest. The existing
 `budget_summary` remains an item-count budget for emitted context entries; it is
-not the serialized response context budget.
+not the serialized response context budget. The response also carries
+`analysis.context_page_retrieval` when exact session-local facet pages are
+available. Use `get_implementation_context_page(root, context_projection_digest,
+facet)` with `analysis.context_projection_digest` to retrieve a saved facet
+lane. This is exact only for the MCP session run-history artifact; if the
+projection is gone, the tool returns `status="not_found"` instead of
+recomputing fresh context.
 
 Current drill-down reachability is intentionally conservative:
 
@@ -139,7 +145,7 @@ Current drill-down reachability is intentionally conservative:
   continuation through `get_memory_projection_page`;
 - structured receipts, Patch Trail, and blast artifacts have durable exact
   retrieval routes;
-- implementation-context facet pages remain blocked until exact artifact pages
-  are introduced.
+- implementation-context facet pages have exact session-local retrieval through
+  `get_implementation_context_page`.
 
 ---

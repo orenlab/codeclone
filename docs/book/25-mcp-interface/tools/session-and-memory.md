@@ -4,6 +4,7 @@
 |--------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------|
 | `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Session-local review marker (in-memory)                                                               |
 | `list_reviewed_findings` | `run_id`                       | List reviewed markers for a run                                                                       |
+| `get_implementation_context_page` | `root`, `context_projection_digest`, `facet`, `offset`, `page_size` | Exact page from a `get_implementation_context` session-local projection artifact. Returns `not_found` after the projection leaves MCP run history; never recomputes fresh context as exact evidence |
 | `clear_session_runs`     | —                              | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process |
 
 ### Platform observability
@@ -37,3 +38,11 @@ Known identities still use object lookups:
 - memory records: `query_engineering_memory(mode="get", record_id=...)`;
 - trajectories: `query_engineering_memory(mode="trajectory_get", record_id=...)`;
 - Experiences: `query_engineering_memory(mode="experience_get", record_id=...)`.
+
+`get_implementation_context` responses may include
+`analysis.context_page_retrieval`. Use
+`analysis.context_projection_digest` plus a facet key such as `public_surface`,
+`callers`, `memory`, `trajectories`, or `definition_sites` with
+`get_implementation_context_page` to retrieve the exact saved facet lane for
+the current MCP session. This is not a fresh analysis and it is not durable
+beyond MCP run-history retention.

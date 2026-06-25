@@ -33,6 +33,9 @@ BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = (
 IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND: Final = (
     "implementation_context_projection_v1"
 )
+IMPLEMENTATION_CONTEXT_PAGE_RESPONSE_PROJECTION_KIND: Final = (
+    "implementation_context_page_projection_v1"
+)
 MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = "memory_retrieval_projection_v1"
 MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND: Final = (
     "memory_continuation_projection_v1"
@@ -59,6 +62,7 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "durable_patch_trail_lookup": True,
     "immutable_blast_artifact": True,
     "memory_tail_continuation": True,
+    "implementation_context_artifact_pages": True,
     "omitted_evidence_continuation": False,
 }
 
@@ -109,23 +113,28 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
         "snapshot_identity": "blast_artifact_id + run_id + projection_digest",
     },
     "implementation_context_facet": {
-        "object_lookup": "blocked",
-        "continuation": "blocked",
-        "snapshot_identity": "blocked",
+        "object_lookup": "available",
+        "route": (
+            "get_implementation_context_page(context_projection_digest=..., facet=...)"
+        ),
+        "continuation": "available",
+        "snapshot_identity": (
+            "context_artifact_digest + context_projection_digest "
+            "+ facet_identity_digest"
+        ),
     },
 }
 
 _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
     # durable_receipt_lookup cleared in Phase 34.4 (get_review_receipt);
     # durable_patch_trail_lookup cleared by get_patch_trail; immutable
-    # blast-artifact lookup cleared by get_blast_artifact. Response-budget and
-    # omission stay blocked on omitted-tail continuation until that slice ships.
+    # blast-artifact lookup cleared by get_blast_artifact. Memory tails and
+    # implementation-context pages have exact page tools, but global response
+    # budget and omission still wait for the adopted omission-policy slice.
     "response_budget": [
         "omitted_evidence_continuation",
     ],
-    "nested_budget": [
-        "implementation_context_artifact_pages",
-    ],
+    "nested_budget": [],
     "omission": [
         "exact_continuation_for_omitted_tails",
     ],

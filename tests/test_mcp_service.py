@@ -1119,6 +1119,9 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
     assert analysis["run_id"] == service._runs.get(str(summary["run_id"])).run_id
     assert len(str(analysis["context_artifact_digest"])) == 64
     assert len(str(analysis["context_projection_digest"])) == 64
+    page_retrieval = cast("dict[str, object]", analysis["context_page_retrieval"])
+    assert page_retrieval["retrieval_tool"] == "get_implementation_context_page"
+    assert "public_surface" in cast("list[str]", page_retrieval["available_facets"])
     assert analysis["context_contract_version"] == "1"
     assert analysis["call_graph_status"] == "complete"
     assert analysis["failed_files"] == []
@@ -1162,6 +1165,23 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
         structural["public_surface"],
     )
     assert public_surface[0]["qualname"] == "pkg.target:public_api"
+    page = service.get_implementation_context_page(
+        root=str(tmp_path),
+        run_id=str(summary["run_id"]),
+        context_projection_digest=str(analysis["context_projection_digest"]),
+        facet="public_surface",
+        page_size=1,
+    )
+    assert page["status"] == "ok"
+    assert page["context_projection_digest"] == analysis["context_projection_digest"]
+    page_items = cast("list[dict[str, object]]", page["items"])
+    assert page_items == public_surface
+    missing_page = service.get_implementation_context_page(
+        root=str(tmp_path),
+        context_projection_digest="0" * 64,
+        facet="public_surface",
+    )
+    assert missing_page["status"] == "not_found"
     assert cast("dict[str, object]", structural["blast_radius"])["radius_level"] in {
         "low",
         "medium",
@@ -8510,6 +8530,12 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
     )
     service.evaluate_gates(MCPGateRequest(run_id=run_id, fail_threshold=0))
     service.get_blast_radius(files=("pkg/dup.py",), run_id=run_id)
+    service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/dup.py"],
+        include=["module_role"],
+        run_id=run_id,
+    )
     service.manage_change_intent(
         action="declare",
         run_id=run_id,
@@ -8526,6 +8552,7 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
             "cleared_review_entries",
             "cleared_gate_results",
             "cleared_blast_radius_entries",
+            "cleared_context_projection_pages",
             "cleared_intents",
             "workspace_cleared",
         )
@@ -8534,6 +8561,7 @@ def test_mcp_service_clear_session_runs_clears_in_memory_state(tmp_path: Path) -
         "cleared_review_entries": 1,
         "cleared_gate_results": 1,
         "cleared_blast_radius_entries": 1,
+        "cleared_context_projection_pages": 1,
         "cleared_intents": 1,
         "workspace_cleared": True,
     }

@@ -107,6 +107,32 @@ ContextBudgetParam = Annotated[
         description="Global maximum emitted context entries (1-200).",
     ),
 ]
+ContextProjectionDigestParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Exact analysis.context_projection_digest returned by "
+            "get_implementation_context."
+        ),
+    ),
+]
+ContextFacetPageKeyParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Implementation-context facet page key, for example public_surface, "
+            "callers, memory, trajectories, or definition_sites."
+        ),
+    ),
+]
+ContextPageOffsetParam = Annotated[
+    int,
+    Field(ge=0, description="Zero-based offset into the saved facet page lane."),
+]
+ContextPageSizeParam = Annotated[
+    int,
+    Field(ge=1, le=50, description="Facet page size (1-50)."),
+]
 AnalysisModeParam = Annotated[
     str,
     Field(description="full: clones+metrics. clones_only: clones without metrics."),

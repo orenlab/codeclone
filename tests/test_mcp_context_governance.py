@@ -101,7 +101,7 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
         "omission": "exact_continuation_for_omitted_tails" in blocked["omission"],
     } == {
         "response": False,
-        "nested": True,
+        "nested": False,
         "omission": True,
     }
     # Phase 34.4: durable receipt retrieval exists, so its blockers are cleared.
@@ -112,12 +112,14 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     assert "durable_patch_trail_lookup" not in blocked["response_budget"]
     assert "immutable_blast_artifact" not in blocked["response_budget"]
     assert "memory_tail_continuation" not in blocked["nested_budget"]
+    assert "implementation_context_artifact_pages" not in blocked["nested_budget"]
     capabilities = cast("dict[str, object]", envelope["capabilities"])
     assert capabilities["typed_receipt_alias"] is True
     assert capabilities["durable_receipt_lookup"] is True
     assert capabilities["durable_patch_trail_lookup"] is True
     assert capabilities["immutable_blast_artifact"] is True
     assert capabilities["memory_tail_continuation"] is True
+    assert capabilities["implementation_context_artifact_pages"] is True
     assert capabilities["omitted_evidence_continuation"] is False
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
@@ -198,6 +200,13 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "experience_lookup": drill_down["experience"]["object_lookup"],
         "experience_route": drill_down["experience"]["route"],
         "experience_tail_continuation": drill_down["experience"]["continuation"],
+        "context_facet_lookup": drill_down["implementation_context_facet"][
+            "object_lookup"
+        ],
+        "context_facet_route": drill_down["implementation_context_facet"]["route"],
+        "context_facet_continuation": drill_down["implementation_context_facet"][
+            "continuation"
+        ],
     } == {
         "memory_record_lookup": "available",
         "memory_record_route": "query_engineering_memory(mode='get', record_id=...)",
@@ -216,6 +225,11 @@ def test_context_governance_declares_drill_down_reachability() -> None:
             "query_engineering_memory(mode='experience_get', record_id=...)"
         ),
         "experience_tail_continuation": "available",
+        "context_facet_lookup": "available",
+        "context_facet_route": (
+            "get_implementation_context_page(context_projection_digest=..., facet=...)"
+        ),
+        "context_facet_continuation": "available",
     }
 
 

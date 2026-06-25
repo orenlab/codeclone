@@ -22,6 +22,7 @@ from ...report.meta import current_report_timestamp_utc as _current_report_times
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
 from ._implementation_context import build_unit_location_inventory
+from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
 from ._session_audit_artifact_mixin import _MCPSessionAuditArtifactMixin
 from ._session_baseline import (
@@ -132,6 +133,7 @@ class MCPSession(
             tuple[str, tuple[str, ...], str],
             BlastRadiusResult,
         ] = {}
+        self._context_projection_pages: dict[str, ContextProjectionArtifact] = {}
         self._active_intents: dict[str, IntentRecord] = {}
         self._start_replay_cache: dict[str, dict[str, object]] = {}
         self._intent_sequence = 0

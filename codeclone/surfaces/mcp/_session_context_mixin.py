@@ -17,6 +17,7 @@ from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
 from ._context_governance import (
+    IMPLEMENTATION_CONTEXT_PAGE_RESPONSE_PROJECTION_KIND,
     IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
     IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
     attach_passive_context_governance,
@@ -31,7 +32,13 @@ from ._implementation_context import (
     build_implementation_context,
     resolve_context_symbols,
 )
+from ._implementation_context_pages import (
+    DEFAULT_IMPLEMENTATION_CONTEXT_PAGE_SIZE,
+    ContextProjectionArtifact,
+    context_projection_page,
+)
 from ._intent import IntentRecord, IntentStatus
+from ._session_finding_mixin import _StateLock
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -68,6 +75,21 @@ def _implementation_context_response(
     )
 
 
+def _implementation_context_page_response(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    return attach_passive_context_governance(
+        payload,
+        limit=IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+        projection_kind=IMPLEMENTATION_CONTEXT_PAGE_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_implementation_context_page",
+            "budget_scope": "page_response",
+            "evidence_policy": "exact_session_projection_page",
+        },
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class _ContextSubject:
     paths: tuple[str, ...]
@@ -97,6 +119,8 @@ class _ContextSessionDependencies(Protocol):
 class _MCPSessionContextMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _context_projection_pages: dict[str, ContextProjectionArtifact]
+    _state_lock: _StateLock
 
     def get_implementation_context(
         self,
@@ -213,27 +237,116 @@ class _MCPSessionContextMixin:
                 include_drafts=True,
                 detail_level=detail_level,
             )
-        return _implementation_context_response(
-            build_implementation_context(
-                record=record,
-                paths=subject.paths,
-                symbols=subject.symbols,
-                subject_resolved_from=subject.resolved_from,
-                subject_source_summary=subject.source_summary,
-                resolved_symbols=subject.resolved_symbols,
-                unresolved_symbols=subject.unresolved_symbols,
-                mode=mode,
-                include=normalized_include,
-                depth=depth,
-                detail_level=detail_level,
-                budget=budget,
-                blast_radius=blast_payload,
-                memory_result=memory_result,
-                change_control=(
-                    self._context_change_control(intent, blast_payload)
-                    if intent is not None
-                    else None
-                ),
+        artifact: ContextProjectionArtifact | None = None
+
+        def capture_projection(value: ContextProjectionArtifact) -> None:
+            nonlocal artifact
+            artifact = value
+
+        payload = build_implementation_context(
+            record=record,
+            paths=subject.paths,
+            symbols=subject.symbols,
+            subject_resolved_from=subject.resolved_from,
+            subject_source_summary=subject.source_summary,
+            resolved_symbols=subject.resolved_symbols,
+            unresolved_symbols=subject.unresolved_symbols,
+            mode=mode,
+            include=normalized_include,
+            depth=depth,
+            detail_level=detail_level,
+            budget=budget,
+            blast_radius=blast_payload,
+            memory_result=memory_result,
+            change_control=(
+                self._context_change_control(intent, blast_payload)
+                if intent is not None
+                else None
+            ),
+            projection_sink=capture_projection,
+        )
+        if artifact is not None:
+            with self._state_lock:
+                self._context_projection_pages[artifact.context_projection_digest] = (
+                    artifact
+                )
+        return _implementation_context_response(payload)
+
+    def get_implementation_context_page(
+        self,
+        *,
+        root: str,
+        context_projection_digest: str,
+        facet: str,
+        offset: int = 0,
+        page_size: int = DEFAULT_IMPLEMENTATION_CONTEXT_PAGE_SIZE,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        root_path = _helpers._resolve_root(root)
+        if not context_projection_digest.strip():
+            raise MCPServiceContractError(
+                "get_implementation_context_page requires context_projection_digest."
+            )
+        if not facet.strip():
+            raise MCPServiceContractError(
+                "get_implementation_context_page requires facet."
+            )
+        with self._state_lock:
+            artifact = self._context_projection_pages.get(context_projection_digest)
+        if artifact is None:
+            return _implementation_context_page_response(
+                {
+                    "status": "not_found",
+                    "context_projection_digest": context_projection_digest,
+                    "facet": facet,
+                    "source": "mcp_session_context_projection",
+                    "retention": "mcp_session_run_history",
+                }
+            )
+        if artifact.root != root_path.resolve():
+            return _implementation_context_page_response(
+                {
+                    "status": "root_mismatch",
+                    "context_projection_digest": context_projection_digest,
+                    "facet": facet,
+                    "source": "mcp_session_context_projection",
+                    "retention": "mcp_session_run_history",
+                }
+            )
+        if run_id is not None:
+            try:
+                requested_run_id = self._runs.get(run_id).run_id
+            except MCPRunNotFoundError:
+                return _implementation_context_page_response(
+                    {
+                        "status": "run_not_found",
+                        "run_id": run_id,
+                        "context_projection_digest": context_projection_digest,
+                        "facet": facet,
+                        "source": "mcp_session_context_projection",
+                        "retention": "mcp_session_run_history",
+                    }
+                )
+        else:
+            requested_run_id = None
+        if requested_run_id is not None and artifact.run_id != requested_run_id:
+            return _implementation_context_page_response(
+                {
+                    "status": "run_mismatch",
+                    "run_id": run_id,
+                    "artifact_run_id": artifact.run_id,
+                    "context_projection_digest": context_projection_digest,
+                    "facet": facet,
+                    "source": "mcp_session_context_projection",
+                    "retention": "mcp_session_run_history",
+                }
+            )
+        return _implementation_context_page_response(
+            context_projection_page(
+                artifact=artifact,
+                facet=facet,
+                offset=offset,
+                page_size=page_size,
             )
         )
 

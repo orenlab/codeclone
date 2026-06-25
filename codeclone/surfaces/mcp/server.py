@@ -67,8 +67,12 @@ from .messages.params import (
     ContextBudgetParam,
     ContextDepthParam,
     ContextDetailLevelParam,
+    ContextFacetPageKeyParam,
     ContextModeParam,
+    ContextPageOffsetParam,
+    ContextPageSizeParam,
     ContextPathsParam,
+    ContextProjectionDigestParam,
     ContextQueryParam,
     ContextSymbolsParam,
     CoverageMinParam,
@@ -621,6 +625,29 @@ def build_mcp_server(
             budget=budget,
             run_id=run_id,
             query=query,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_IMPLEMENTATION_CONTEXT_PAGE,
+        description=mcp_tools.GET_IMPLEMENTATION_CONTEXT_PAGE,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_implementation_context_page(
+        root: RootParam,
+        context_projection_digest: ContextProjectionDigestParam,
+        facet: ContextFacetPageKeyParam,
+        offset: ContextPageOffsetParam = 0,
+        page_size: ContextPageSizeParam = 20,
+        run_id: RunIdParam = None,
+    ) -> dict[str, object]:
+        return service.get_implementation_context_page(
+            root=root,
+            context_projection_digest=context_projection_digest,
+            facet=facet,
+            offset=offset,
+            page_size=page_size,
+            run_id=run_id,
         )
 
     @tool(
