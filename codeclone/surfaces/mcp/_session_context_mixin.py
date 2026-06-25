@@ -9,9 +9,10 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Final, Protocol, cast
 
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
@@ -20,7 +21,9 @@ from ._context_governance import (
     IMPLEMENTATION_CONTEXT_PAGE_RESPONSE_PROJECTION_KIND,
     IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
     IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+    attach_implementation_context_governance,
     attach_passive_context_governance,
+    estimate_response_context_units,
 )
 from ._graph_search import search_graph
 from ._implementation_context import (
@@ -57,6 +60,36 @@ _DEFAULT_FACETS_BY_MODE: dict[str, tuple[Facet, ...]] = {
     "impact": DEFAULT_IMPACT_FACETS,
     "contract": DEFAULT_CONTRACT_FACETS,
 }
+_ContextLaneRef = tuple[tuple[str, ...], str]
+_IMPLEMENTATION_CONTEXT_LANES: Final[tuple[_ContextLaneRef, ...]] = (
+    (("implementation_evidence",), "experiences"),
+    (("implementation_evidence",), "trajectories"),
+    (("implementation_evidence",), "memory"),
+    (("implementation_evidence",), "doc_anchors"),
+    (("implementation_evidence",), "test_anchors"),
+    (("structural_context",), "review_context"),
+    (("structural_context",), "baseline_sensitive_findings"),
+    (("structural_context",), "related_modules"),
+    (("structural_context",), "public_surface"),
+    (("call_context",), "callers"),
+    (("call_context",), "test_callers"),
+    (("call_context",), "callees"),
+    (("call_context",), "references"),
+    (("call_context",), "unresolved"),
+    (("contracts",), "memory_conflicts"),
+    (("contracts",), "contract_tests"),
+    (("contracts",), "definition_sites"),
+    (("contracts",), "version_constants"),
+    (("contracts",), "persistence_path_callers"),
+    (("contracts",), "serialization_path_callers"),
+    (("contracts",), "deserialization_path_callers"),
+    (("contracts",), "store_api_consumers"),
+    (("structural_context", "blast_radius"), "dependency_cycles"),
+    (("structural_context", "blast_radius"), "clone_cohorts"),
+    (("structural_context", "blast_radius"), "transitive"),
+    (("structural_context", "blast_radius"), "direct"),
+    (("structural_context",), "module_role"),
+)
 
 
 def _implementation_context_response(
@@ -73,6 +106,235 @@ def _implementation_context_response(
             "item_budget": "budget_summary",
         },
     )
+
+
+def _budgeted_implementation_context_response(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    budget: int,
+) -> dict[str, object]:
+    if detail_level == "full" or not _context_page_retrieval_available(payload):
+        return _implementation_context_response(payload)
+    packed = deepcopy(dict(payload))
+    response_budget_lanes: set[_ContextLaneRef] = set()
+    omitted = _implementation_context_omitted(
+        packed,
+        response_budget_lanes=response_budget_lanes,
+    )
+    governed = _attach_implementation_context_response(
+        packed,
+        detail_level=detail_level,
+        budget=budget,
+        evidence_omitted=omitted,
+    )
+    while (
+        estimate_response_context_units(governed)
+        > IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT
+    ):
+        lane = _next_reducible_context_lane(packed)
+        if lane is None:
+            break
+        _shrink_context_lane(packed, lane)
+        response_budget_lanes.add(lane)
+        omitted = _implementation_context_omitted(
+            packed,
+            response_budget_lanes=response_budget_lanes,
+        )
+        governed = _attach_implementation_context_response(
+            packed,
+            detail_level=detail_level,
+            budget=budget,
+            evidence_omitted=omitted,
+        )
+    return governed
+
+
+def _attach_implementation_context_response(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    budget: int,
+    evidence_omitted: Mapping[str, object] | None,
+) -> dict[str, object]:
+    return attach_implementation_context_governance(
+        payload,
+        detail_level=detail_level,
+        budget=budget,
+        evidence_omitted=evidence_omitted,
+        limit=IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    )
+
+
+def _context_page_retrieval_available(payload: Mapping[str, object]) -> bool:
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, Mapping):
+        return False
+    retrieval = analysis.get("context_page_retrieval")
+    if not isinstance(retrieval, Mapping):
+        return False
+    return (
+        retrieval.get("retrieval_tool") == "get_implementation_context_page"
+        and bool(str(analysis.get("context_projection_digest", "")).strip())
+        and bool(str(analysis.get("context_artifact_digest", "")).strip())
+    )
+
+
+def _implementation_context_omitted(
+    payload: Mapping[str, object],
+    *,
+    response_budget_lanes: set[_ContextLaneRef],
+) -> dict[str, object] | None:
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, Mapping):
+        return None
+    context_projection_digest = str(
+        analysis.get("context_projection_digest", "")
+    ).strip()
+    context_artifact_digest = str(analysis.get("context_artifact_digest", "")).strip()
+    if not context_projection_digest or not context_artifact_digest:
+        return None
+    omitted: dict[str, object] = {}
+    for lane in _IMPLEMENTATION_CONTEXT_LANES:
+        lane_omission = _context_lane_omission(
+            payload,
+            lane=lane,
+            context_artifact_digest=context_artifact_digest,
+            context_projection_digest=context_projection_digest,
+            response_budget_lanes=response_budget_lanes,
+        )
+        if lane_omission is not None:
+            omitted[_context_omitted_key(lane)] = lane_omission
+    return omitted or None
+
+
+def _context_lane_omission(
+    payload: Mapping[str, object],
+    *,
+    lane: _ContextLaneRef,
+    context_artifact_digest: str,
+    context_projection_digest: str,
+    response_budget_lanes: set[_ContextLaneRef],
+) -> dict[str, object] | None:
+    lane_name = lane[1]
+    container = _context_lane_container(payload, lane)
+    summary = container.get(f"{lane_name}_summary") if container is not None else None
+    omission: dict[str, object] | None = None
+    if isinstance(summary, Mapping):
+        items = container.get(lane_name) if container is not None else None
+        shown = (
+            len(items)
+            if isinstance(items, list)
+            else _non_negative_int(summary.get("shown"))
+        )
+        total = max(_non_negative_int(summary.get("total")), shown)
+        if shown < total:
+            omission = {
+                "evaluation": "complete",
+                "facet": lane_name,
+                "container": ".".join(lane[0]),
+                "total": total,
+                "shown": shown,
+                "omitted": total - shown,
+                "reason": (
+                    "response_budget"
+                    if lane in response_budget_lanes
+                    else "item_budget"
+                ),
+                "retrieval": {
+                    "tool": "get_implementation_context_page",
+                    "route": (
+                        "get_implementation_context_page(root=..., "
+                        "context_projection_digest=..., "
+                        f"facet={lane_name!r}, offset={shown})"
+                    ),
+                    "context_artifact_digest": context_artifact_digest,
+                    "context_projection_digest": context_projection_digest,
+                    "facet": lane_name,
+                    "offset": shown,
+                    "page_size": DEFAULT_IMPLEMENTATION_CONTEXT_PAGE_SIZE,
+                    "retention": "mcp_session_run_history",
+                    "snapshot_identity": (
+                        "context_artifact_digest + context_projection_digest "
+                        "+ facet_identity_digest"
+                    ),
+                },
+            }
+    return omission
+
+
+def _next_reducible_context_lane(
+    payload: Mapping[str, object],
+) -> _ContextLaneRef | None:
+    for minimum in (1, 0):
+        for lane in _IMPLEMENTATION_CONTEXT_LANES:
+            items = _context_lane_items(payload, lane)
+            if items is not None and len(items) > minimum:
+                return lane
+    return None
+
+
+def _shrink_context_lane(payload: dict[str, object], lane: _ContextLaneRef) -> None:
+    items = _context_lane_items(payload, lane)
+    if not items:
+        return
+    items.pop()
+    container = _context_lane_container(payload, lane)
+    if container is None:
+        return
+    lane_name = lane[1]
+    raw_summary = container.get(f"{lane_name}_summary")
+    total = len(items)
+    if isinstance(raw_summary, Mapping):
+        total = max(total + 1, _non_negative_int(raw_summary.get("total")))
+    container[f"{lane_name}_summary"] = {
+        "total": total,
+        "shown": len(items),
+        "truncated": len(items) < total,
+        "omitted": max(0, total - len(items)),
+    }
+
+
+def _context_lane_container(
+    payload: Mapping[str, object],
+    lane: _ContextLaneRef,
+) -> dict[str, object] | None:
+    current: object = payload
+    for key in lane[0]:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, dict) else None
+
+
+def _context_lane_items(
+    payload: Mapping[str, object],
+    lane: _ContextLaneRef,
+) -> list[object] | None:
+    container = _context_lane_container(payload, lane)
+    if container is None:
+        return None
+    items = container.get(lane[1])
+    return items if isinstance(items, list) else None
+
+
+def _context_omitted_key(lane: _ContextLaneRef) -> str:
+    return ".".join((*lane[0], lane[1]))
+
+
+def _non_negative_int(value: object) -> int:
+    try:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int):
+            number = value
+        elif isinstance(value, str):
+            number = int(value)
+        else:
+            return 0
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
 
 
 def _implementation_context_page_response(
@@ -270,7 +532,11 @@ class _MCPSessionContextMixin:
                 self._context_projection_pages[artifact.context_projection_digest] = (
                     artifact
                 )
-        return _implementation_context_response(payload)
+        return _budgeted_implementation_context_response(
+            payload,
+            detail_level=detail_level,
+            budget=budget,
+        )
 
     def get_implementation_context_page(
         self,

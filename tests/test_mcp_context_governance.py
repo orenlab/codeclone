@@ -21,6 +21,7 @@ from codeclone.surfaces.mcp._context_governance import (
     FINISH_RESPONSE_PROJECTION_KIND,
     START_RESPONSE_PROJECTION_KIND,
     attach_finish_context_governance,
+    attach_implementation_context_governance,
     attach_memory_retrieval_context_governance,
     attach_passive_context_governance,
     attach_start_context_governance,
@@ -209,6 +210,51 @@ def test_memory_retrieval_context_governance_enforces_compact_budget() -> None:
         "policy": "response_budget_with_exact_continuation",
         "tool": "get_relevant_memory",
         "record_reason": "response_budget",
+    }
+
+
+def test_implementation_context_governance_enforces_compact_budget() -> None:
+    payload = attach_implementation_context_governance(
+        {"status": "ok", "analysis": {"context_projection_digest": "a" * 64}},
+        detail_level="compact",
+        budget=50,
+        evidence_omitted={
+            "structural_context.public_surface": {
+                "evaluation": "complete",
+                "total": 4,
+                "shown": 1,
+                "omitted": 3,
+                "reason": "response_budget",
+            }
+        },
+    )
+    envelope = cast("dict[str, object]", payload["context_governance"])
+    response = cast("dict[str, object]", envelope["response"])
+    omitted = cast("dict[str, object]", envelope["omitted"])
+
+    assert {
+        "mode": envelope["mode"],
+        "response_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "response_budget"
+        ],
+        "nested_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "nested_budget"
+        ],
+        "omission": cast("dict[str, bool]", envelope["enforcement"])["omission"],
+        "policy": response["evidence_policy"],
+        "tool": response["tool"],
+        "reason": cast(
+            "dict[str, object]",
+            omitted["structural_context.public_surface"],
+        )["reason"],
+    } == {
+        "mode": "partial_enforce",
+        "response_budget": True,
+        "nested_budget": True,
+        "omission": True,
+        "policy": "response_budget_with_exact_facet_pages",
+        "tool": "get_implementation_context",
+        "reason": "response_budget",
     }
 
 

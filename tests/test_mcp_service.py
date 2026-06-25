@@ -1100,13 +1100,13 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
         "item_budget": governance_response["item_budget"],
         "digest_kind": projection_digest["kind"],
     } == {
-        "governance_mode": "observe",
+        "governance_mode": "partial_enforce",
         "limit": (
             mcp_context_governance_mod.IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT
         ),
         "tool": "get_implementation_context",
         "budget_scope": "whole_response",
-        "policy": "observe_only_no_omission",
+        "policy": "response_budget_with_exact_facet_pages",
         "item_budget": "budget_summary",
         "digest_kind": (
             mcp_context_governance_mod.IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND
@@ -1187,6 +1187,102 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
         "medium",
         "high",
     }
+
+
+def test_mcp_service_get_implementation_context_enforces_response_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_context_module(
+        tmp_path,
+        "pkg/target.py",
+        "\n\n".join(
+            f"def public_{index}(value: int) -> int:\n    return value + {index}"
+            for index in range(18)
+        )
+        + "\n",
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            api_surface=True,
+            min_loc=1,
+            min_stmt=1,
+        )
+    )
+    monkeypatch.setattr(
+        mcp_context_session_mod,
+        "IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT",
+        1800,
+    )
+
+    context = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=["pkg/target.py"],
+        include=["public_surface"],
+        detail_level="normal",
+        budget=50,
+        run_id=str(summary["run_id"]),
+    )
+
+    governance, structural, analysis = _payload_dicts(
+        context,
+        ("context_governance", "structural_context", "analysis"),
+    )
+    enforcement = cast("dict[str, bool]", governance["enforcement"])
+    response, omitted = _payload_dicts(governance, ("response", "omitted"))
+    public_omission = _mapping_child(omitted, "structural_context.public_surface")
+    retrieval = _mapping_child(public_omission, "retrieval")
+    public_surface = cast("list[dict[str, object]]", structural["public_surface"])
+    estimated = cast("int", governance["estimated"])
+    limit = cast("int", governance["limit"])
+
+    assert {
+        "mode": governance["mode"],
+        "estimated_within_budget": estimated <= limit,
+        "response_budget": enforcement["response_budget"],
+        "nested_budget": enforcement["nested_budget"],
+        "omission": enforcement["omission"],
+        "policy": response["evidence_policy"],
+        "reason": public_omission["reason"],
+        "facet": retrieval["facet"],
+        "offset": retrieval["offset"],
+        "shown": public_omission["shown"],
+        "list_len": len(public_surface),
+    } == {
+        "mode": "partial_enforce",
+        "estimated_within_budget": True,
+        "response_budget": True,
+        "nested_budget": True,
+        "omission": True,
+        "policy": "response_budget_with_exact_facet_pages",
+        "reason": "response_budget",
+        "facet": "public_surface",
+        "offset": public_omission["shown"],
+        "shown": public_omission["shown"],
+        "list_len": public_omission["shown"],
+    }
+    assert public_omission["total"] == 18
+    assert cast("int", public_omission["shown"]) < 18
+
+    page = service.get_implementation_context_page(
+        root=str(tmp_path),
+        run_id=str(summary["run_id"]),
+        context_projection_digest=str(analysis["context_projection_digest"]),
+        facet="public_surface",
+        offset=cast("int", public_omission["shown"]),
+        page_size=1,
+    )
+    page_items = cast("list[dict[str, object]]", page["items"])
+
+    assert page["status"] == "ok"
+    assert cast("dict[str, object]", page["page"])["total"] == 18
+    assert page_items[0]["qualname"] == (
+        f"pkg.target:public_{public_omission['shown']}"
+    )
 
 
 def test_mcp_service_get_implementation_context_resolves_symbols(

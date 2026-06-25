@@ -56,6 +56,11 @@ _MEMORY_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
     "nested_budget": False,
     "omission": True,
 }
+_IMPLEMENTATION_CONTEXT_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
+    "response_budget": True,
+    "nested_budget": True,
+    "omission": True,
+}
 
 _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "typed_receipt_alias": True,
@@ -234,6 +239,43 @@ def attach_memory_retrieval_context_governance(
     )
 
 
+def attach_implementation_context_governance(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    budget: int,
+    evidence_omitted: Mapping[str, object] | None = None,
+    limit: int = IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+) -> dict[str, object]:
+    """Attach response governance for ``get_implementation_context`` responses."""
+
+    enforce_budget = detail_level != "full"
+    return _attach_context_governance(
+        payload,
+        limit=limit,
+        projection_kind=IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_implementation_context",
+            "budget_scope": "whole_response",
+            "evidence_policy": (
+                "response_budget_with_exact_facet_pages"
+                if enforce_budget
+                else "observe_only_no_omission"
+            ),
+            "detail_level": detail_level,
+            "item_budget": "budget_summary",
+            "budget": budget,
+        },
+        mode="partial_enforce" if enforce_budget else "observe",
+        enforcement=(
+            _IMPLEMENTATION_CONTEXT_RESPONSE_ENFORCEMENT
+            if enforce_budget
+            else _OBSERVE_ENFORCEMENT
+        ),
+        evidence_omitted=evidence_omitted,
+    )
+
+
 def _attach_context_governance(
     payload: Mapping[str, object],
     *,
@@ -371,6 +413,7 @@ __all__ = [
     "REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND",
     "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",
+    "attach_implementation_context_governance",
     "attach_memory_retrieval_context_governance",
     "attach_passive_context_governance",
     "attach_start_context_governance",
