@@ -50,6 +50,12 @@ from ..trajectory.retrieval import (
     trajectory_subject_keys,
 )
 from .context_coverage import build_context_coverage
+from .continuation import (
+    DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE,
+    build_memory_continuation_cursor,
+    decode_memory_continuation_cursor,
+    memory_continuation_page,
+)
 from .ranking import (
     RankingContext,
     reciprocal_rank_fusion,
@@ -77,6 +83,7 @@ QueryMode = Literal[
     "trajectory_status",
     "trajectory_search",
     "trajectory_get",
+    "experience_get",
     "trajectory_anomalies",
     "trajectory_agents",
     "trajectory_dashboard",
@@ -94,6 +101,7 @@ QUERY_MODES: tuple[str, ...] = (
     "trajectory_status",
     "trajectory_search",
     "trajectory_get",
+    "experience_get",
     "trajectory_anomalies",
     "trajectory_agents",
     "trajectory_dashboard",
@@ -229,6 +237,7 @@ def _retrieval_policy(*, include_drafts: bool) -> dict[str, object]:
 
 
 DEFAULT_EXPERIENCE_PREVIEW_LIMIT = 10
+MEMORY_RETRIEVAL_PROJECTION_CANDIDATE_LIMIT = 5000
 COMPACT_MEMORY_SUBJECT_LIMIT = 6
 
 _MEMORY_SUBJECT_KIND_ORDER = {
@@ -540,17 +549,16 @@ def _apply_conflict_penalty(
     return score
 
 
-def _rank_records(
+def _rank_record_summaries(
     store: SqliteEngineeringMemoryStore,
     *,
     project_id: str,
     candidates: Sequence[MemoryRecord],
     context: RankingContext,
-    max_records: int,
     detail_level: MemoryDetailLevel,
     lexical_ranks: Mapping[str, int] | None = None,
     vector_ranks: Mapping[str, int] | None = None,
-) -> tuple[list[dict[str, object]], bool]:
+) -> list[dict[str, object]]:
     # Fusion mode (hybrid search) supplies the lexical (BM25) and/or vector
     # rankings. There the metadata relevance_score is only a deterministic
     # tie-break, so the vector signal must NOT also be folded into it via
@@ -601,8 +609,31 @@ def _rank_records(
             summary["relations"] = record_relations
         scored.append((primary, adjusted, record.id, summary))
     scored.sort(key=lambda item: (-item[0], -item[1], item[2]))
-    truncated = len(scored) > max_records
-    return [item[3] for item in scored[:max_records]], truncated
+    return [item[3] for item in scored]
+
+
+def _rank_records(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    candidates: Sequence[MemoryRecord],
+    context: RankingContext,
+    max_records: int,
+    detail_level: MemoryDetailLevel,
+    lexical_ranks: Mapping[str, int] | None = None,
+    vector_ranks: Mapping[str, int] | None = None,
+) -> tuple[list[dict[str, object]], bool]:
+    ranked = _rank_record_summaries(
+        store,
+        project_id=project_id,
+        candidates=candidates,
+        context=context,
+        detail_level=detail_level,
+        lexical_ranks=lexical_ranks,
+        vector_ranks=vector_ranks,
+    )
+    truncated = len(ranked) > max_records
+    return ranked[:max_records], truncated
 
 
 def _coverage_summary(
@@ -675,45 +706,51 @@ def get_relevant_memory(
             include_drafts=effective_include_drafts,
         )
     ]
-    records_payload, truncated = _rank_records(
+    ranked_records = _rank_record_summaries(
         store,
         project_id=project_id,
         candidates=visible,
         context=context,
-        max_records=max_records,
         detail_level=normalized_detail,
     )
+    records_payload = ranked_records[:max_records]
+    truncated = len(ranked_records) > len(records_payload)
     trajectory_candidates = store.list_trajectories_for_subjects(
         project_id=project_id,
         subjects=trajectory_subject_keys(
             scope_paths=normalized_scope,
             symbols=tuple(normalized_symbols),
         ),
-        limit=max(DEFAULT_TRAJECTORY_PREVIEW_LIMIT * 3, max_records),
+        limit=MEMORY_RETRIEVAL_PROJECTION_CANDIDATE_LIMIT,
     )
     patch_trails = _load_patch_trails_for_trajectories(
         store,
         trajectory_ids=tuple(item.id for item in trajectory_candidates),
     )
-    trajectories_payload, trajectories_truncated = rank_trajectories_for_scope(
+    ranked_trajectories, _all_trajectories_truncated = rank_trajectories_for_scope(
         trajectory_candidates,
         scope_paths=normalized_scope,
         symbols=tuple(normalized_symbols),
-        max_results=min(max_records, DEFAULT_TRAJECTORY_PREVIEW_LIMIT),
+        max_results=max(1, len(trajectory_candidates)),
         include_routine=include_routine,
         patch_trails=patch_trails,
         detail_level=normalized_detail,
     )
+    trajectory_limit = min(max_records, DEFAULT_TRAJECTORY_PREVIEW_LIMIT)
+    trajectories_payload = ranked_trajectories[:trajectory_limit]
+    trajectories_truncated = len(ranked_trajectories) > len(trajectories_payload)
     matching_experiences = _matching_experiences(
         store,
         project_id=project_id,
         families=_scope_families(normalized_scope),
     )
-    experiences_payload = _serialize_relevant_experiences(
+    ranked_experiences = _serialize_relevant_experiences(
         matching_experiences,
-        max_results=min(max_records, DEFAULT_EXPERIENCE_PREVIEW_LIMIT),
+        max_results=len(matching_experiences),
         detail_level=normalized_detail,
     )
+    experience_limit = min(max_records, DEFAULT_EXPERIENCE_PREVIEW_LIMIT)
+    experiences_payload = ranked_experiences[:experience_limit]
     coverage: dict[str, object]
     if normalized_scope:
         coverage = build_context_coverage(
@@ -755,7 +792,214 @@ def get_relevant_memory(
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
+    continuation = _memory_retrieval_continuation(
+        project_id=project_id,
+        request=_memory_projection_request(
+            scope_paths=normalized_scope,
+            symbols=tuple(sorted(normalized_symbols)),
+            blast_dependents=tuple(sorted(normalized_blast)),
+            scope_resolved_from=scope_resolved_from,
+            include_stale=include_stale,
+            include_drafts=effective_include_drafts,
+            include_routine=include_routine,
+            detail_level=normalized_detail,
+        ),
+        lanes={
+            "records": ranked_records,
+            "trajectories": ranked_trajectories,
+            "experiences": ranked_experiences,
+        },
+        shown={
+            "records": len(records_payload),
+            "trajectories": len(trajectories_payload),
+            "experiences": len(experiences_payload),
+        },
+    )
+    if continuation:
+        payload["continuation"] = continuation
     return payload
+
+
+def get_memory_projection_page(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    cursor: str,
+    page_size: int = DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE,
+) -> dict[str, object]:
+    """Return a digest-bound continuation page for a memory retrieval lane."""
+
+    cursor_payload = decode_memory_continuation_cursor(cursor)
+    if cursor_payload.get("project_id") != project_id:
+        return {
+            "status": "snapshot_mismatch",
+            "reason": "project_identity_mismatch",
+            "expected_project_id": cursor_payload.get("project_id"),
+            "actual_project_id": project_id,
+        }
+    request = cursor_payload.get("request")
+    if not isinstance(request, dict):
+        raise MemoryContractError("memory continuation request is invalid")
+    lanes = _memory_projection_lanes(
+        store,
+        project_id=project_id,
+        request=request,
+    )
+    lane = str(cursor_payload["lane"])
+    return memory_continuation_page(
+        cursor_payload=cursor_payload,
+        items=lanes[lane],
+        page_size=page_size,
+    )
+
+
+def _memory_projection_lanes(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    project_id: str,
+    request: Mapping[str, object],
+) -> dict[str, list[dict[str, object]]]:
+    normalized_scope = tuple(_string_list(request, "scope_paths"))
+    normalized_symbols = tuple(_string_list(request, "symbols"))
+    normalized_blast = tuple(_string_list(request, "blast_dependents"))
+    normalized_detail = _normalize_detail_level(str(request.get("detail_level", "")))
+    include_stale = bool(request.get("include_stale"))
+    include_drafts = bool(request.get("include_drafts"))
+    include_routine = bool(request.get("include_routine"))
+    context = RankingContext.from_scope(
+        scope_paths=normalized_scope,
+        symbols=normalized_symbols,
+        blast_dependents=normalized_blast,
+    )
+    statuses = _default_statuses(
+        include_stale=include_stale,
+        include_drafts=include_drafts,
+    )
+    records = store.query_records(
+        MemoryQuery(
+            project_id=project_id,
+            statuses=statuses,
+            limit=MEMORY_RETRIEVAL_PROJECTION_CANDIDATE_LIMIT,
+        )
+    )
+    visible = [
+        record
+        for record in records
+        if _record_visible(
+            record,
+            include_stale=include_stale,
+            include_drafts=include_drafts,
+        )
+    ]
+    ranked_records = _rank_record_summaries(
+        store,
+        project_id=project_id,
+        candidates=visible,
+        context=context,
+        detail_level=normalized_detail,
+    )
+    trajectory_candidates = store.list_trajectories_for_subjects(
+        project_id=project_id,
+        subjects=trajectory_subject_keys(
+            scope_paths=normalized_scope,
+            symbols=normalized_symbols,
+        ),
+        limit=MEMORY_RETRIEVAL_PROJECTION_CANDIDATE_LIMIT,
+    )
+    patch_trails = _load_patch_trails_for_trajectories(
+        store,
+        trajectory_ids=tuple(item.id for item in trajectory_candidates),
+    )
+    ranked_trajectories, _truncated = rank_trajectories_for_scope(
+        trajectory_candidates,
+        scope_paths=normalized_scope,
+        symbols=normalized_symbols,
+        max_results=max(1, len(trajectory_candidates)),
+        include_routine=include_routine,
+        patch_trails=patch_trails,
+        detail_level=normalized_detail,
+    )
+    ranked_experiences = _serialize_relevant_experiences(
+        _matching_experiences(
+            store,
+            project_id=project_id,
+            families=_scope_families(normalized_scope),
+        ),
+        max_results=MEMORY_RETRIEVAL_PROJECTION_CANDIDATE_LIMIT,
+        detail_level=normalized_detail,
+    )
+    return {
+        "records": ranked_records,
+        "trajectories": ranked_trajectories,
+        "experiences": ranked_experiences,
+    }
+
+
+def _memory_projection_request(
+    *,
+    scope_paths: Sequence[str],
+    symbols: Sequence[str],
+    blast_dependents: Sequence[str],
+    scope_resolved_from: str,
+    include_stale: bool,
+    include_drafts: bool,
+    include_routine: bool,
+    detail_level: MemoryDetailLevel,
+) -> dict[str, object]:
+    return {
+        "scope_paths": list(scope_paths),
+        "symbols": list(symbols),
+        "blast_dependents": list(blast_dependents),
+        "scope_resolved_from": scope_resolved_from,
+        "include_stale": include_stale,
+        "include_drafts": include_drafts,
+        "include_routine": include_routine,
+        "detail_level": detail_level,
+    }
+
+
+def _memory_retrieval_continuation(
+    *,
+    project_id: str,
+    request: Mapping[str, object],
+    lanes: Mapping[str, Sequence[dict[str, object]]],
+    shown: Mapping[str, int],
+) -> dict[str, object]:
+    lane_payloads: dict[str, object] = {}
+    for lane, items in sorted(lanes.items()):
+        shown_count = shown[lane]
+        total = len(items)
+        omitted = max(0, total - shown_count)
+        if omitted == 0:
+            continue
+        lane_payloads[lane] = {
+            "status": "available",
+            "total": total,
+            "shown": shown_count,
+            "omitted": omitted,
+            "page": build_memory_continuation_cursor(
+                project_id=project_id,
+                lane=lane,
+                request=request,
+                items=items,
+                offset=shown_count,
+            ),
+        }
+    if not lane_payloads:
+        return {}
+    return {
+        "projection_kind": "memory_retrieval_lane_projection_v1",
+        "ordering_version": "memory_retrieval_lane_order_v1",
+        "cursor_policy": "digest_bound_recompute_or_fail_closed",
+        "lanes": lane_payloads,
+    }
+
+
+def _string_list(payload: Mapping[str, object], key: str) -> list[str]:
+    value = payload.get(key)
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise MemoryContractError(f"memory continuation request {key} is invalid")
+    return list(value)
 
 
 def _load_patch_trails_for_trajectories(
@@ -982,6 +1226,38 @@ def _handle_trajectory_get_mode(
             "trajectory": serialize_trajectory_detail(
                 trajectory,
                 patch_trail_payload=patch_trail_payload,
+            )
+        },
+    }
+
+
+def _handle_experience_get_mode(
+    store: SqliteEngineeringMemoryStore,
+    *,
+    mode: str,
+    project_id: str,
+    record_id: str | None,
+) -> dict[str, object]:
+    experience_id = _require_query_field(
+        record_id,
+        mode=mode,
+        field="record_id containing experience_id",
+    )
+    experience = store.find_experience(experience_id)
+    if experience is None or experience.project_id != project_id:
+        return {
+            "mode": mode,
+            "status": "not_found",
+            "payload": {"experience_id": experience_id},
+        }
+    return {
+        "mode": mode,
+        "status": "ok",
+        "detail_level": "full",
+        "payload": {
+            "experience": _serialize_experience(
+                experience,
+                detail_level="full",
             )
         },
     }
@@ -1696,6 +1972,13 @@ def query_engineering_memory(
             project_id=project_id,
             record_id=record_id,
         )
+    if mode == "experience_get":
+        return _handle_experience_get_mode(
+            store,
+            mode=mode,
+            project_id=project_id,
+            record_id=record_id,
+        )
 
     filter_types, filter_statuses, filter_confidences, match_mode, include_routine = (
         _parse_filters(filters)
@@ -1807,6 +2090,7 @@ __all__ = [
     "QUERY_MODES",
     "MemoryDetailLevel",
     "QueryMode",
+    "get_memory_projection_page",
     "get_relevant_memory",
     "normalize_repo_path",
     "path_has_memory",

@@ -34,6 +34,9 @@ IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND: Final = (
     "implementation_context_projection_v1"
 )
 MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = "memory_retrieval_projection_v1"
+MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND: Final = (
+    "memory_continuation_projection_v1"
+)
 PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND: Final = (
     "patch_trail_retrieval_projection_v1"
 )
@@ -55,6 +58,7 @@ _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     # (get_patch_trail over the audit trail), so this prerequisite is met.
     "durable_patch_trail_lookup": True,
     "immutable_blast_artifact": True,
+    "memory_tail_continuation": True,
     "omitted_evidence_continuation": False,
 }
 
@@ -62,19 +66,29 @@ _PASSIVE_DRILL_DOWN: Final[dict[str, dict[str, object]]] = {
     "memory_record": {
         "object_lookup": "available",
         "route": "query_engineering_memory(mode='get', record_id=...)",
-        "continuation": "blocked",
-        "snapshot_identity": "blocked",
+        "continuation": "available",
+        "continuation_route": "get_memory_projection_page(cursor=...)",
+        "snapshot_identity": (
+            "memory continuation cursor + lane identity digest + request digest"
+        ),
     },
     "trajectory": {
         "object_lookup": "available",
         "route": "query_engineering_memory(mode='trajectory_get', record_id=...)",
-        "continuation": "blocked",
-        "snapshot_identity": "blocked",
+        "continuation": "available",
+        "continuation_route": "get_memory_projection_page(cursor=...)",
+        "snapshot_identity": (
+            "memory continuation cursor + lane identity digest + request digest"
+        ),
     },
     "experience": {
-        "object_lookup": "blocked",
-        "continuation": "blocked",
-        "snapshot_identity": "blocked",
+        "object_lookup": "available",
+        "route": "query_engineering_memory(mode='experience_get', record_id=...)",
+        "continuation": "available",
+        "continuation_route": "get_memory_projection_page(cursor=...)",
+        "snapshot_identity": (
+            "memory continuation cursor + lane identity digest + request digest"
+        ),
     },
     "structured_receipt": {
         "object_lookup": "available",
@@ -111,7 +125,6 @@ _PASSIVE_ENFORCEMENT_BLOCKED: Final[dict[str, list[str]]] = {
     ],
     "nested_budget": [
         "implementation_context_artifact_pages",
-        "memory_tail_continuation",
     ],
     "omission": [
         "exact_continuation_for_omitted_tails",

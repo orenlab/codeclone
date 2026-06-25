@@ -111,11 +111,14 @@ def test_passive_context_governance_envelope_is_observe_only() -> None:
     # Phase 34: durable patch-trail retrieval (get_patch_trail) clears its blocker.
     assert "durable_patch_trail_lookup" not in blocked["response_budget"]
     assert "immutable_blast_artifact" not in blocked["response_budget"]
+    assert "memory_tail_continuation" not in blocked["nested_budget"]
     capabilities = cast("dict[str, object]", envelope["capabilities"])
     assert capabilities["typed_receipt_alias"] is True
     assert capabilities["durable_receipt_lookup"] is True
     assert capabilities["durable_patch_trail_lookup"] is True
     assert capabilities["immutable_blast_artifact"] is True
+    assert capabilities["memory_tail_continuation"] is True
+    assert capabilities["omitted_evidence_continuation"] is False
     assert isinstance(envelope["estimated"], int)
     assert envelope["estimated"] == estimate_response_context_units(payload)
 
@@ -181,7 +184,9 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "memory_record_lookup": drill_down["memory_record"]["object_lookup"],
         "memory_record_route": drill_down["memory_record"]["route"],
         "memory_tail_continuation": drill_down["memory_record"]["continuation"],
+        "memory_tail_route": drill_down["memory_record"]["continuation_route"],
         "trajectory_lookup": drill_down["trajectory"]["object_lookup"],
+        "trajectory_tail_continuation": drill_down["trajectory"]["continuation"],
         "receipt_current_path": drill_down["structured_receipt"][
             "current_complete_path"
         ],
@@ -191,18 +196,26 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         "blast_lookup": drill_down["blast_artifact"]["object_lookup"],
         "blast_route": drill_down["blast_artifact"]["route"],
         "experience_lookup": drill_down["experience"]["object_lookup"],
+        "experience_route": drill_down["experience"]["route"],
+        "experience_tail_continuation": drill_down["experience"]["continuation"],
     } == {
         "memory_record_lookup": "available",
         "memory_record_route": "query_engineering_memory(mode='get', record_id=...)",
-        "memory_tail_continuation": "blocked",
+        "memory_tail_continuation": "available",
+        "memory_tail_route": "get_memory_projection_page(cursor=...)",
         "trajectory_lookup": "available",
+        "trajectory_tail_continuation": "available",
         "receipt_current_path": "receipt.receipt",
         "receipt_lookup": "available",
         "patch_trail_lookup": "available",
         "patch_trail_route": "get_patch_trail(run_id=..., patch_trail_digest=...)",
         "blast_lookup": "available",
         "blast_route": "get_blast_artifact(run_id=..., blast_artifact_id=...)",
-        "experience_lookup": "blocked",
+        "experience_lookup": "available",
+        "experience_route": (
+            "query_engineering_memory(mode='experience_get', record_id=...)"
+        ),
+        "experience_tail_continuation": "available",
     }
 
 

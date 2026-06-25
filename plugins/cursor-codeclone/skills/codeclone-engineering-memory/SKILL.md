@@ -142,6 +142,16 @@ Memory never:
 | `subjects_truncated` | More subjects exist outside the bounded response |
 | `context_governance.mode="observe"` | Response-size telemetry; not permission |
 
+When `get_relevant_memory` includes `continuation.lanes.<lane>.page`, the cursor
+is an exact continuation of that ranked lane. Use
+`get_memory_projection_page(root=<abs>, cursor=...)` to inspect omitted tail
+items. If the memory projection changed, the page returns `snapshot_mismatch`;
+do not replace that with a fresh broad search while claiming it is the same
+evidence. Known object drill-downs remain:
+`query_engineering_memory(mode="get")`,
+`query_engineering_memory(mode="trajectory_get")`, and
+`query_engineering_memory(mode="experience_get")`.
+
 Treat `draft`, `inferred`, `stale`, `historical`, `superseded`, and `rejected`
 records according to provenance and lifecycle status. Historical evidence may be
 authoritative about the past but must not be assumed current.

@@ -116,8 +116,13 @@ For `get_relevant_memory`, `context_governance.response` describes the whole
 memory retrieval response with `tool="get_relevant_memory"` and a
 `memory_retrieval_projection_v1` digest. The existing `records`,
 `trajectories`, `experiences`, coverage, and retrieval-policy fields remain
-present according to their current lane caps; `context_governance` is
-measurement only.
+present according to their current lane caps. When a lane has an omitted tail,
+`continuation.lanes.<lane>.page` carries a digest-bound cursor for
+`get_memory_projection_page`. The page route is an exact continuation only while
+the normalized request, lane ordering version, and lane identity digest still
+match; otherwise it fails closed with `snapshot_mismatch`. `context_governance`
+is still measurement only until response-budget enforcement is explicitly
+enabled.
 
 For `get_implementation_context`, `context_governance.response` describes the
 whole implementation-context response with `tool="get_implementation_context"`
@@ -128,10 +133,13 @@ not the serialized response context budget.
 Current drill-down reachability is intentionally conservative:
 
 - known memory records and known trajectories have exact object lookup through
-  `query_engineering_memory`;
-- structured receipt JSON remains available through `receipt.receipt` in the
-  response, but durable post-clear lookup is not advertised yet;
-- Patch Trail, blast artifacts, implementation-context facet pages, and omitted
-  evidence tails are marked blocked until exact read-only retrieval exists.
+  `query_engineering_memory`; known Experiences use
+  `query_engineering_memory(mode="experience_get")`;
+- omitted memory record, trajectory, and Experience tails have digest-bound
+  continuation through `get_memory_projection_page`;
+- structured receipts, Patch Trail, and blast artifacts have durable exact
+  retrieval routes;
+- implementation-context facet pages remain blocked until exact artifact pages
+  are introduced.
 
 ---

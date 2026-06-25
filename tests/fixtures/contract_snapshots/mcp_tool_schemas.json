@@ -1780,6 +1780,35 @@
     }
   },
   {
+    "name": "get_memory_projection_page",
+    "input_schema": {
+      "properties": {
+        "root": {
+          "description": "Absolute repository root path.",
+          "title": "Root",
+          "type": "string"
+        },
+        "cursor": {
+          "description": "Digest-bound cursor from get_relevant_memory continuation.lanes.*.page.",
+          "title": "Cursor",
+          "type": "string"
+        },
+        "page_size": {
+          "default": 20,
+          "description": "Continuation page size; bounded by the MCP service.",
+          "title": "Page Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "root",
+        "cursor"
+      ],
+      "title": "get_memory_projection_pageArguments",
+      "type": "object"
+    }
+  },
+  {
     "name": "get_patch_trail",
     "input_schema": {
       "properties": {
@@ -2664,7 +2693,7 @@
             }
           ],
           "default": null,
-          "description": "Record id for mode=get or IDE governance actions; trajectory id for mode=trajectory_get.",
+          "description": "Record id for mode=get or IDE governance actions; trajectory id for mode=trajectory_get; experience id for mode=experience_get.",
           "title": "Record Id"
         },
         "experience_id": {
@@ -2859,7 +2888,7 @@
           "type": "string"
         },
         "mode": {
-          "description": "search, get, for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, trajectory_search, trajectory_get, trajectory_anomalies, trajectory_agents, or trajectory_dashboard.",
+          "description": "search, get, for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, trajectory_search, trajectory_get, experience_get, trajectory_anomalies, trajectory_agents, or trajectory_dashboard.",
           "title": "Mode",
           "type": "string"
         },
@@ -2873,7 +2902,7 @@
             }
           ],
           "default": null,
-          "description": "Record id for mode=get or IDE governance actions; trajectory id for mode=trajectory_get.",
+          "description": "Record id for mode=get or IDE governance actions; trajectory id for mode=trajectory_get; experience id for mode=experience_get.",
           "title": "Record Id"
         },
         "path": {

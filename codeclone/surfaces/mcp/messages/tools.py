@@ -72,17 +72,27 @@ GET_RELEVANT_MEMORY: Final = (
     "List responses default to compact statement previews; pass detail_level=full "
     "for complete statements. Scoped responses may also include typed "
     "trajectory precedents in trajectories[]; records[] remains memory records "
-    "only. Read-only; does not mutate the memory database."
+    "only. When a lane has an omitted tail, continuation.lanes.*.page provides "
+    "a digest-bound cursor for get_memory_projection_page. Read-only; does not "
+    "mutate the memory database."
 )
 
 QUERY_ENGINEERING_MEMORY: Final = (
     "Mode-based engineering memory inspection router. Modes: search, get, "
     "for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, "
-    "trajectory_search, trajectory_get, trajectory_anomalies, trajectory_agents, "
-    "and trajectory_dashboard. List modes default to compact "
+    "trajectory_search, trajectory_get, experience_get, trajectory_anomalies, "
+    "trajectory_agents, and trajectory_dashboard. List modes default to compact "
     "previews; mode=get and detail_level=full return complete statements. "
-    "mode=trajectory_get uses record_id as the trajectory id. Project root is "
+    "mode=trajectory_get uses record_id as the trajectory id; "
+    "mode=experience_get uses record_id as the experience id. Project root is "
     "not a valid path or coverage scope. Read-only."
+)
+
+GET_MEMORY_PROJECTION_PAGE: Final = (
+    "Return an exact page for a get_relevant_memory omitted tail using the "
+    "digest-bound cursor from continuation.lanes.*.page. The page fails closed "
+    "with snapshot_mismatch if the underlying memory projection no longer "
+    "matches the cursor identity."
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (
@@ -333,6 +343,7 @@ TITLE_GET_BLAST_RADIUS: Final = "Get Blast Radius"
 TITLE_GET_BLAST_ARTIFACT: Final = "Get Blast Artifact"
 TITLE_GET_IMPLEMENTATION_CONTEXT: Final = "Get Implementation Context"
 TITLE_GET_RELEVANT_MEMORY: Final = "Get Relevant Memory"
+TITLE_GET_MEMORY_PROJECTION_PAGE: Final = "Get Memory Projection Page"
 TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"
 TITLE_MANAGE_ENGINEERING_MEMORY: Final = "Manage Engineering Memory"
 TITLE_CHECK_PATCH_CONTRACT: Final = "Check Patch Contract"

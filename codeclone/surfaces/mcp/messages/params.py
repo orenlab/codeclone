@@ -491,7 +491,8 @@ MemoryQueryModeParam = Annotated[
         description=(
             "search, get, for_path, for_symbol, stale, drafts, coverage, status, "
             "trajectory_status, trajectory_search, trajectory_get, "
-            "trajectory_anomalies, trajectory_agents, or trajectory_dashboard."
+            "experience_get, trajectory_anomalies, trajectory_agents, or "
+            "trajectory_dashboard."
         ),
     ),
 ]
@@ -504,7 +505,7 @@ MemoryRecordIdParam = Annotated[
     Field(
         description=(
             "Record id for mode=get or IDE governance actions; trajectory id for "
-            "mode=trajectory_get."
+            "mode=trajectory_get; experience id for mode=experience_get."
         ),
     ),
 ]
@@ -561,6 +562,18 @@ IncludeDraftsParam = Annotated[
 MemoryMaxRecordsParam = Annotated[
     int,
     Field(description="Maximum engineering memory records to return."),
+]
+MemoryContinuationCursorParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Digest-bound cursor from get_relevant_memory continuation.lanes.*.page."
+        ),
+    ),
+]
+MemoryContinuationPageSizeParam = Annotated[
+    int,
+    Field(description="Continuation page size; bounded by the MCP service."),
 ]
 AuditTrailLimitParam = Annotated[
     int,

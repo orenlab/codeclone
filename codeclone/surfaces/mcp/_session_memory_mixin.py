@@ -29,7 +29,11 @@ from ...memory.ingest.mcp_sync import execute_mcp_memory_sync
 from ...memory.models import MemoryProject
 from ...memory.paths import normalize_memory_scope_path
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
-from ...memory.retrieval import get_relevant_memory, query_engineering_memory
+from ...memory.retrieval import (
+    get_memory_projection_page,
+    get_relevant_memory,
+    query_engineering_memory,
+)
 from ...memory.semantic import (
     close_semantic_index,
     execute_semantic_index_rebuild,
@@ -38,6 +42,7 @@ from ...memory.semantic import (
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from . import _session_helpers as _helpers
 from ._context_governance import (
+    MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND,
     MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     attach_passive_context_governance,
 )
@@ -180,6 +185,37 @@ class _MCPSessionMemoryMixin:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
             close_semantic_index(index)
+            store.close()
+
+    def get_memory_projection_page(
+        self,
+        *,
+        root: str,
+        cursor: str,
+        page_size: int = 20,
+    ) -> dict[str, object]:
+        root_path = _helpers._resolve_root(root)
+        store, _db_path, _config, project = self._open_memory_store(root_path)
+        try:
+            result = get_memory_projection_page(
+                store,
+                project_id=project.id,
+                cursor=cursor,
+                page_size=page_size,
+            )
+            return attach_passive_context_governance(
+                result,
+                projection_kind=MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND,
+                response={
+                    "tool": "get_memory_projection_page",
+                    "budget_scope": "whole_response",
+                    "evidence_policy": "digest_bound_continuation_page",
+                    "page_size": page_size,
+                },
+            )
+        except MemoryContractError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
+        finally:
             store.close()
 
     def manage_engineering_memory(

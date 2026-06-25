@@ -116,6 +116,8 @@ from .messages.params import (
     MaxSizeMbParam,
     MaxSuggestionsParam,
     MemoryClaimsTextParam,
+    MemoryContinuationCursorParam,
+    MemoryContinuationPageSizeParam,
     MemoryDetailLevelParam,
     MemoryFiltersParam,
     MemoryMaxRecordsParam,
@@ -646,6 +648,23 @@ def build_mcp_server(
             include_stale=include_stale,
             include_drafts=include_drafts,
             detail_level=detail_level,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_MEMORY_PROJECTION_PAGE,
+        description=mcp_tools.GET_MEMORY_PROJECTION_PAGE,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_memory_projection_page(
+        root: RootParam,
+        cursor: MemoryContinuationCursorParam,
+        page_size: MemoryContinuationPageSizeParam = 20,
+    ) -> dict[str, object]:
+        return service.get_memory_projection_page(
+            root=root,
+            cursor=cursor,
+            page_size=page_size,
         )
 
     @tool(

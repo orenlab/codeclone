@@ -24,3 +24,16 @@ metadata with estimated context units for the serialized payload. In
 `mode="observe"` this is measurement only: `records`, `trajectories`,
 `experiences`, coverage, and retrieval-policy fields keep their documented lane
 semantics and are not omitted by response governance.
+
+When a memory lane has more deterministic items than the default response shows,
+`get_relevant_memory` includes `continuation.lanes.<lane>.page`. Pass that
+digest-bound cursor to `get_memory_projection_page` to enumerate the omitted
+tail exactly. The cursor binds to the normalized request, lane ordering version,
+and lane identity digest; if the underlying memory projection changed, the page
+returns `status="snapshot_mismatch"` instead of continuing against fresh data.
+
+Known identities still use object lookups:
+
+- memory records: `query_engineering_memory(mode="get", record_id=...)`;
+- trajectories: `query_engineering_memory(mode="trajectory_get", record_id=...)`;
+- Experiences: `query_engineering_memory(mode="experience_get", record_id=...)`.

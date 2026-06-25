@@ -407,6 +407,35 @@ def test_mcp_get_relevant_memory_symbols_only(tmp_path: Path) -> None:
         assert payload["project_id"] == project.id
 
 
+def test_mcp_get_memory_projection_page_continues_relevant_memory_tail(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=True) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            scope=["pkg/mod.py"],
+            max_records=1,
+        )
+        continuation = cast("dict[str, object]", payload["continuation"])
+        lanes = cast("dict[str, object]", continuation["lanes"])
+        records = cast("dict[str, object]", lanes["records"])
+        page_ref = cast("dict[str, object]", records["page"])
+        page = service.get_memory_projection_page(
+            root=str(root.resolve()),
+            cursor=str(page_ref["cursor"]),
+            page_size=10,
+        )
+
+    assert page["status"] == "ok"
+    assert page["lane"] == "records"
+    assert page["response_complete"] is True
+    assert cast("list[object]", page["items"])
+    governance = cast("dict[str, object]", page["context_governance"])
+    response = cast("dict[str, object]", governance["response"])
+    assert response["tool"] == "get_memory_projection_page"
+
+
 def test_mcp_get_relevant_memory_wraps_memory_contract_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
