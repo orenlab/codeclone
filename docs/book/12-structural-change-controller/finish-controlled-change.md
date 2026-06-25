@@ -79,18 +79,20 @@ Findings/hotspots tools still honor all three levels.
 | `patch_trail`                   | Deterministic scope/verify forensics for this finish (see below); not authorization                   |
 | `projection_rebuild`            | Optional job enqueue on accept when projection policy is not `off` (non-CI)                           |
 
-Markdown receipt payloads expose top-level `receipt_version`, `verdict`, and
-`receipt_digest` for compact identity checks. The nested `receipt.receipt`
-typed alias remains the complete machine-readable receipt until durable typed
-receipt drill-down is available after `auto_clear=true`.
+Markdown receipt payloads expose top-level `receipt_version`, `verdict`,
+`receipt_digest`, `content`, and `receipt_retrieval` for compact identity and
+human review. The duplicate nested typed receipt is not returned by default;
+fetch the complete structured receipt after `auto_clear=true` with
+`get_review_receipt(root, run_id, receipt_digest, format="structured")`.
 
 `context_governance` measures the complete finish response as one payload and
 publishes a `finish_projection_v1` digest under
 `context_governance.response`. Current finish responses stay in
-`mode="observe"` and `evidence_policy="observe_only_no_omission"`: receipt
-content, typed receipt evidence, Patch Trail, scope checks, verification, and
-workspace hygiene are not omitted while exact durable drill-down remains
-blocked.
+`mode="observe"` and `evidence_policy="observe_only_no_omission"`: response
+budgeting is measured but not enforced. Durable drill-down exists for the
+structured receipt and Patch Trail, while receipt markdown content, scope
+checks, verification, and workspace hygiene remain inline until an explicit
+packing policy omits them.
 
 ### Patch Trail on finish
 
