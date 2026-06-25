@@ -2746,18 +2746,18 @@ def test_mcp_service_get_relevant_memory_bootstraps_from_run(
         "policy": governance_response["evidence_policy"],
         "digest_kind": projection_digest["kind"],
     } == {
-        "mode": "observe",
+        "mode": "partial_enforce",
         "tool": "get_relevant_memory",
         "budget_scope": "whole_response",
-        "policy": "observe_only_no_omission",
+        "policy": "response_budget_with_exact_continuation",
         "digest_kind": (
             mcp_context_governance_mod.MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND
         ),
     }
     assert governance["enforcement"] == {
-        "response_budget": False,
+        "response_budget": True,
         "nested_budget": False,
-        "omission": False,
+        "omission": True,
     }
 
 

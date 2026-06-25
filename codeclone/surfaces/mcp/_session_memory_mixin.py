@@ -34,6 +34,7 @@ from ...memory.retrieval import (
     get_relevant_memory,
     query_engineering_memory,
 )
+from ...memory.retrieval.continuation import rebase_memory_continuation_cursor
 from ...memory.semantic import (
     close_semantic_index,
     execute_semantic_index_rebuild,
@@ -42,8 +43,9 @@ from ...memory.semantic import (
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from . import _session_helpers as _helpers
 from ._context_governance import (
+    DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
     MEMORY_CONTINUATION_RESPONSE_PROJECTION_KIND,
-    MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+    attach_memory_retrieval_context_governance,
     attach_passive_context_governance,
 )
 from ._intent import IntentRecord
@@ -52,6 +54,17 @@ from ._session_shared import (
     MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
+)
+
+_MEMORY_RESPONSE_LANES: tuple[tuple[str, str], ...] = (
+    ("records", "record_count"),
+    ("trajectories", "trajectory_count"),
+    ("experiences", "experience_count"),
+)
+_MEMORY_RESPONSE_REDUCTION_ORDER: tuple[str, ...] = (
+    "experiences",
+    "trajectories",
+    "records",
 )
 
 
@@ -108,16 +121,10 @@ class _MCPSessionMemoryMixin:
             if memory_sync is not None:
                 result = dict(result)
                 result["memory_sync"] = memory_sync
-            return attach_passive_context_governance(
+            return _attach_budgeted_memory_retrieval_context(
                 result,
-                projection_kind=MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
-                response={
-                    "tool": "get_relevant_memory",
-                    "budget_scope": "whole_response",
-                    "evidence_policy": "observe_only_no_omission",
-                    "detail_level": detail_level,
-                    "max_records": max_records,
-                },
+                detail_level=detail_level,
+                max_records=max_records,
             )
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
@@ -729,6 +736,285 @@ class _MCPSessionMemoryMixin:
         except MCPServiceContractError:
             return frozenset()
         return frozenset(result.direct_dependents)
+
+
+def _attach_budgeted_memory_retrieval_context(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    max_records: int,
+    limit: int | None = None,
+) -> dict[str, object]:
+    effective_limit = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT if limit is None else limit
+    normalized_detail = "full" if detail_level == "full" else "compact"
+    if normalized_detail == "full":
+        return attach_memory_retrieval_context_governance(
+            payload,
+            detail_level=detail_level,
+            max_records=max_records,
+            limit=effective_limit,
+        )
+    packed, omitted = _pack_compact_memory_response(
+        payload,
+        detail_level=detail_level,
+        max_records=max_records,
+        limit=effective_limit,
+    )
+    return attach_memory_retrieval_context_governance(
+        packed,
+        detail_level=detail_level,
+        max_records=max_records,
+        evidence_omitted=omitted,
+        limit=effective_limit,
+    )
+
+
+def _pack_compact_memory_response(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    max_records: int,
+    limit: int,
+) -> tuple[dict[str, object], dict[str, object] | None]:
+    lane_items = _memory_lane_items(payload)
+    totals = _memory_lane_totals(payload, lane_items)
+    original_shown = {lane: len(items) for lane, items in lane_items.items()}
+    shown = dict(original_shown)
+    original_continuation = _memory_continuation_lanes(payload)
+    packed = _memory_response_with_shown_counts(
+        payload,
+        lane_items=lane_items,
+        totals=totals,
+        shown=shown,
+        original_continuation=original_continuation,
+    )
+    omitted = _memory_governance_omitted(packed, original_shown=original_shown)
+    if (
+        _memory_governed_estimate(
+            packed,
+            detail_level=detail_level,
+            max_records=max_records,
+            omitted=omitted,
+            limit=limit,
+        )
+        <= limit
+    ):
+        return packed, omitted
+    for floor in (1, 0):
+        while True:
+            lane = _next_reducible_memory_lane(
+                shown,
+                floor=floor,
+                original_continuation=original_continuation,
+            )
+            if lane is None:
+                break
+            shown[lane] -= 1
+            packed = _memory_response_with_shown_counts(
+                payload,
+                lane_items=lane_items,
+                totals=totals,
+                shown=shown,
+                original_continuation=original_continuation,
+            )
+            omitted = _memory_governance_omitted(
+                packed,
+                original_shown=original_shown,
+            )
+            if (
+                _memory_governed_estimate(
+                    packed,
+                    detail_level=detail_level,
+                    max_records=max_records,
+                    omitted=omitted,
+                    limit=limit,
+                )
+                <= limit
+            ):
+                return packed, omitted
+    return packed, omitted
+
+
+def _memory_governed_estimate(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    max_records: int,
+    omitted: Mapping[str, object] | None,
+    limit: int,
+) -> int:
+    governed = attach_memory_retrieval_context_governance(
+        payload,
+        detail_level=detail_level,
+        max_records=max_records,
+        evidence_omitted=omitted,
+        limit=limit,
+    )
+    envelope = cast("dict[str, object]", governed["context_governance"])
+    estimated = envelope.get("estimated")
+    if not isinstance(estimated, int):
+        raise MCPServiceContractError("context governance estimate is invalid")
+    return estimated
+
+
+def _memory_lane_items(
+    payload: Mapping[str, object],
+) -> dict[str, list[dict[str, object]]]:
+    lanes: dict[str, list[dict[str, object]]] = {}
+    for lane, _count_key in _MEMORY_RESPONSE_LANES:
+        value = payload.get(lane)
+        items = value if isinstance(value, list) else []
+        lanes[lane] = [dict(item) for item in items if isinstance(item, Mapping)]
+    return lanes
+
+
+def _memory_lane_totals(
+    payload: Mapping[str, object],
+    lane_items: Mapping[str, Sequence[Mapping[str, object]]],
+) -> dict[str, int]:
+    continuation_lanes = _memory_continuation_lanes(payload)
+    totals: dict[str, int] = {}
+    for lane, items in lane_items.items():
+        lane_payload = continuation_lanes.get(lane, {})
+        total = lane_payload.get("total")
+        totals[lane] = total if isinstance(total, int) else len(items)
+    return totals
+
+
+def _memory_response_with_shown_counts(
+    payload: Mapping[str, object],
+    *,
+    lane_items: Mapping[str, Sequence[Mapping[str, object]]],
+    totals: Mapping[str, int],
+    shown: Mapping[str, int],
+    original_continuation: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    result = dict(payload)
+    for lane, count_key in _MEMORY_RESPONSE_LANES:
+        shown_count = shown[lane]
+        result[lane] = list(lane_items[lane][:shown_count])
+        result[count_key] = shown_count
+    result["truncated"] = totals["records"] > shown["records"]
+    result["trajectories_truncated"] = totals["trajectories"] > shown["trajectories"]
+    continuation = _rebuilt_memory_continuation(
+        totals=totals,
+        shown=shown,
+        original_continuation=original_continuation,
+    )
+    if continuation:
+        result["continuation"] = continuation
+    else:
+        result.pop("continuation", None)
+    return result
+
+
+def _rebuilt_memory_continuation(
+    *,
+    totals: Mapping[str, int],
+    shown: Mapping[str, int],
+    original_continuation: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    lanes: dict[str, object] = {}
+    for lane, _count_key in _MEMORY_RESPONSE_LANES:
+        shown_count = shown[lane]
+        total = totals[lane]
+        omitted = max(0, total - shown_count)
+        if omitted > 0:
+            page = _rebased_memory_lane_page(
+                lane,
+                offset=shown_count,
+                original_continuation=original_continuation,
+            )
+            if page is not None:
+                lanes[lane] = {
+                    "status": "available",
+                    "total": total,
+                    "shown": shown_count,
+                    "omitted": omitted,
+                    "page": page,
+                }
+    if not lanes:
+        return {}
+    return {
+        "projection_kind": "memory_retrieval_lane_projection_v1",
+        "ordering_version": "memory_retrieval_lane_order_v1",
+        "cursor_policy": "digest_bound_recompute_or_fail_closed",
+        "lanes": lanes,
+    }
+
+
+def _rebased_memory_lane_page(
+    lane: str,
+    *,
+    offset: int,
+    original_continuation: Mapping[str, Mapping[str, object]],
+) -> dict[str, object] | None:
+    original_lane = original_continuation.get(lane)
+    page = original_lane.get("page") if original_lane is not None else None
+    cursor = page.get("cursor") if isinstance(page, Mapping) else None
+    if not isinstance(cursor, str):
+        return None
+    return rebase_memory_continuation_cursor(cursor, offset=offset)
+
+
+def _memory_continuation_lanes(
+    payload: Mapping[str, object],
+) -> dict[str, dict[str, object]]:
+    continuation = payload.get("continuation")
+    if not isinstance(continuation, Mapping):
+        return {}
+    lanes = continuation.get("lanes")
+    if not isinstance(lanes, Mapping):
+        return {}
+    return {
+        str(lane): dict(lane_payload)
+        for lane, lane_payload in lanes.items()
+        if isinstance(lane_payload, Mapping)
+    }
+
+
+def _memory_governance_omitted(
+    payload: Mapping[str, object],
+    *,
+    original_shown: Mapping[str, int],
+) -> dict[str, object] | None:
+    omitted: dict[str, object] = {}
+    for lane, lane_payload in _memory_continuation_lanes(payload).items():
+        shown = lane_payload.get("shown")
+        total = lane_payload.get("total")
+        omitted_count = lane_payload.get("omitted")
+        if not isinstance(shown, int) or not isinstance(total, int):
+            continue
+        if not isinstance(omitted_count, int) or omitted_count <= 0:
+            continue
+        reason = (
+            "response_budget" if shown < original_shown.get(lane, 0) else "lane_cap"
+        )
+        omitted[lane] = {
+            "evaluation": "complete",
+            "total": total,
+            "shown": shown,
+            "omitted": omitted_count,
+            "truncated": True,
+            "reason": reason,
+            "drill_down": {
+                "tool": "get_memory_projection_page",
+                "cursor_path": f"continuation.lanes.{lane}.page.cursor",
+            },
+        }
+    return omitted or None
+
+
+def _next_reducible_memory_lane(
+    shown: Mapping[str, int],
+    *,
+    floor: int,
+    original_continuation: Mapping[str, Mapping[str, object]],
+) -> str | None:
+    for lane in _MEMORY_RESPONSE_REDUCTION_ORDER:
+        if shown[lane] > floor and lane in original_continuation:
+            return lane
+    return None
 
 
 __all__ = ["_MCPSessionMemoryMixin"]

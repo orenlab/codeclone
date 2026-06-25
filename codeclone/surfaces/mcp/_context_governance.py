@@ -51,6 +51,11 @@ _OBSERVE_ENFORCEMENT: Final[dict[str, bool]] = {
     "nested_budget": False,
     "omission": False,
 }
+_MEMORY_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
+    "response_budget": True,
+    "nested_budget": False,
+    "omission": True,
+}
 
 _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "typed_receipt_alias": True,
@@ -184,6 +189,61 @@ def attach_passive_context_governance(
 ) -> dict[str, object]:
     """Attach a passive ``context_governance`` envelope without omitting data."""
 
+    return _attach_context_governance(
+        payload,
+        limit=limit,
+        response=response,
+        projection_kind=projection_kind,
+        mode="observe",
+        enforcement=_OBSERVE_ENFORCEMENT,
+        evidence_omitted=None,
+    )
+
+
+def attach_memory_retrieval_context_governance(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    max_records: int,
+    evidence_omitted: Mapping[str, object] | None = None,
+    limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+) -> dict[str, object]:
+    """Attach response governance for ``get_relevant_memory`` responses."""
+
+    enforce_budget = detail_level != "full"
+    return _attach_context_governance(
+        payload,
+        limit=limit,
+        projection_kind=MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_relevant_memory",
+            "budget_scope": "whole_response",
+            "evidence_policy": (
+                "response_budget_with_exact_continuation"
+                if enforce_budget
+                else "observe_only_no_omission"
+            ),
+            "detail_level": detail_level,
+            "max_records": max_records,
+        },
+        mode="partial_enforce" if enforce_budget else "observe",
+        enforcement=(
+            _MEMORY_RESPONSE_ENFORCEMENT if enforce_budget else _OBSERVE_ENFORCEMENT
+        ),
+        evidence_omitted=evidence_omitted,
+    )
+
+
+def _attach_context_governance(
+    payload: Mapping[str, object],
+    *,
+    limit: int,
+    response: Mapping[str, object] | None,
+    projection_kind: str | None,
+    mode: str,
+    enforcement: Mapping[str, bool],
+    evidence_omitted: Mapping[str, object] | None,
+) -> dict[str, object]:
     result = dict(payload)
     response_context = _response_context_metadata(
         result, response=response, projection_kind=projection_kind
@@ -193,19 +253,23 @@ def attach_passive_context_governance(
         "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
         "limit": limit,
         "estimated": 0,
-        "truncated": False,
+        "truncated": bool(evidence_omitted),
         "mandatory_overflow": False,
-        "mode": "observe",
-        "enforcement": dict(_OBSERVE_ENFORCEMENT),
+        "mode": mode,
+        "enforcement": dict(enforcement),
         "enforcement_blocked": passive_enforcement_blockers(),
         "capabilities": passive_context_capabilities(),
         "drill_down": passive_drill_down_reachability(),
     }
+    if evidence_omitted:
+        context_governance["omitted"] = dict(evidence_omitted)
     context_governance.update(response_context)
     result["context_governance"] = context_governance
     governance = result["context_governance"]
     assert isinstance(governance, dict)
     governance["estimated"] = estimate_response_context_units(result)
+    if mode != "observe" and governance["estimated"] > limit:
+        governance["mandatory_overflow"] = True
     return result
 
 
@@ -307,6 +371,7 @@ __all__ = [
     "REVIEW_RECEIPT_RESPONSE_PROJECTION_KIND",
     "START_RESPONSE_PROJECTION_KIND",
     "attach_finish_context_governance",
+    "attach_memory_retrieval_context_governance",
     "attach_passive_context_governance",
     "attach_start_context_governance",
     "context_governance_digest",

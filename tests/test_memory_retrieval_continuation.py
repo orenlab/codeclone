@@ -16,6 +16,7 @@ from codeclone.memory.retrieval import (
     get_relevant_memory,
     query_engineering_memory,
 )
+from codeclone.memory.retrieval.continuation import rebase_memory_continuation_cursor
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
@@ -25,23 +26,7 @@ from .memory_fixtures import memory_store
 def test_memory_retrieval_continuation_pages_records_exactly(
     tmp_path: Path,
 ) -> None:
-    with memory_store(tmp_path) as (_root, project, store, _db_path):
-        _seed_scoped_records(store, project_id=project.id, count=4)
-        first = get_relevant_memory(
-            store,
-            project_id=project.id,
-            scope_paths=("pkg/service.py",),
-            scope_resolved_from="explicit",
-            max_records=2,
-        )
-        page_ref = _lane_page(first, "records")
-        page = get_memory_projection_page(
-            store,
-            project_id=project.id,
-            cursor=str(page_ref["cursor"]),
-            page_size=1,
-        )
-
+    page = _records_continuation_page(tmp_path)
     _assert_page_summary(page, lane="records", returned=1, complete=False)
     items = cast("list[dict[str, object]]", page["items"])
     assert items[0]["id"] == "mem-cont-02"
@@ -72,6 +57,17 @@ def test_memory_retrieval_continuation_fails_closed_on_projection_change(
     assert page["status"] == "snapshot_mismatch"
     assert page["reason"] == "memory_projection_changed"
     assert page["lane"] == "records"
+
+
+def test_memory_retrieval_continuation_cursor_rebases_offset_exactly(
+    tmp_path: Path,
+) -> None:
+    page = _records_continuation_page(tmp_path, cursor_offset=1)
+    _assert_page_summary(page, lane="records", returned=1, complete=False)
+    items = cast("list[dict[str, object]]", page["items"])
+    assert items[0]["id"] == "mem-cont-01"
+    next_ref = cast("dict[str, object]", page["next"])
+    assert next_ref["offset"] == 2
 
 
 def test_memory_retrieval_continuation_pages_experiences_and_exact_get(
@@ -127,6 +123,32 @@ def _lane_page(payload: dict[str, object], lane: str) -> dict[str, object]:
     lanes = cast("dict[str, object]", continuation["lanes"])
     lane_payload = cast("dict[str, object]", lanes[lane])
     return cast("dict[str, object]", lane_payload["page"])
+
+
+def _records_continuation_page(
+    tmp_path: Path,
+    *,
+    cursor_offset: int | None = None,
+) -> dict[str, object]:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        _seed_scoped_records(store, project_id=project.id, count=4)
+        first = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/service.py",),
+            scope_resolved_from="explicit",
+            max_records=2,
+        )
+        cursor = str(_lane_page(first, "records")["cursor"])
+        if cursor_offset is not None:
+            rebased = rebase_memory_continuation_cursor(cursor, offset=cursor_offset)
+            cursor = str(rebased["cursor"])
+        return get_memory_projection_page(
+            store,
+            project_id=project.id,
+            cursor=cursor,
+            page_size=1,
+        )
 
 
 def _assert_page_summary(

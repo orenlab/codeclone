@@ -103,6 +103,33 @@ def build_memory_continuation_cursor(
     }
 
 
+def rebase_memory_continuation_cursor(
+    cursor: str,
+    *,
+    offset: int,
+) -> dict[str, object]:
+    """Return the same digest-bound cursor envelope at a smaller shown offset."""
+
+    payload = decode_memory_continuation_cursor(cursor)
+    total = payload.get("total")
+    if not isinstance(total, int):
+        raise MemoryContractError("memory continuation total is invalid")
+    if offset < 0 or offset > total:
+        raise MemoryContractError("memory continuation offset is out of bounds")
+    payload = dict(payload)
+    payload["offset"] = offset
+    payload.pop("cursor_digest", None)
+    payload["cursor_digest"] = _digest(payload)
+    return {
+        "cursor": _encode_cursor(payload),
+        "cursor_digest": payload["cursor_digest"],
+        "projection_kind": MEMORY_CONTINUATION_PROJECTION_KIND,
+        "ordering_version": MEMORY_CONTINUATION_ORDERING_VERSION,
+        "offset": offset,
+        "total": total,
+    }
+
+
 def decode_memory_continuation_cursor(cursor: str) -> dict[str, object]:
     """Decode and validate a memory continuation cursor."""
 
@@ -232,4 +259,5 @@ __all__ = [
     "memory_continuation_page",
     "memory_lane_identity_digest",
     "memory_lane_item_ids",
+    "rebase_memory_continuation_cursor",
 ]

@@ -21,6 +21,7 @@ from codeclone.surfaces.mcp._context_governance import (
     FINISH_RESPONSE_PROJECTION_KIND,
     START_RESPONSE_PROJECTION_KIND,
     attach_finish_context_governance,
+    attach_memory_retrieval_context_governance,
     attach_passive_context_governance,
     attach_start_context_governance,
     context_governance_digest,
@@ -170,6 +171,44 @@ def test_start_context_governance_marks_whole_response_projection() -> None:
         "blast_radius_content": "summary_with_immutable_artifact_lookup",
         "digest_kind": START_RESPONSE_PROJECTION_KIND,
         "mode": "observe",
+    }
+
+
+def test_memory_retrieval_context_governance_enforces_compact_budget() -> None:
+    payload = attach_memory_retrieval_context_governance(
+        {"records": [], "trajectories": [], "experiences": []},
+        detail_level="compact",
+        max_records=20,
+        evidence_omitted={
+            "records": {
+                "evaluation": "complete",
+                "total": 3,
+                "shown": 1,
+                "omitted": 2,
+                "reason": "response_budget",
+            }
+        },
+    )
+    envelope = cast("dict[str, object]", payload["context_governance"])
+    response = cast("dict[str, object]", envelope["response"])
+    omitted = cast("dict[str, object]", envelope["omitted"])
+
+    assert {
+        "mode": envelope["mode"],
+        "response_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "response_budget"
+        ],
+        "omission": cast("dict[str, bool]", envelope["enforcement"])["omission"],
+        "policy": response["evidence_policy"],
+        "tool": response["tool"],
+        "record_reason": cast("dict[str, object]", omitted["records"])["reason"],
+    } == {
+        "mode": "partial_enforce",
+        "response_budget": True,
+        "omission": True,
+        "policy": "response_budget_with_exact_continuation",
+        "tool": "get_relevant_memory",
+        "record_reason": "response_budget",
     }
 
 
