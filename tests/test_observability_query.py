@@ -550,3 +550,49 @@ def test_memory_diagnostic_reports_peak_only_heavy_usage() -> None:
     assert diagnostic is not None
     assert diagnostic["kind"] == "memory"
     assert "peak 600 MB" in str(diagnostic["message"])
+
+
+def test_memory_diagnostic_returns_none_without_peak_or_delta() -> None:
+    from codeclone.observability.views import AggregatesView, SpanCostView
+
+    semantic = SpanCostView(
+        span_id="semantic",
+        name="memory.semantic.rebuild",
+        surface="memory",
+        operation_id="root",
+        operation_name="memory.job",
+        duration_ms=10.0,
+        produced=10,
+    )
+    assert (
+        query_mod._memory_diagnostic(AggregatesView(1, peak_memory_span=semantic))
+        is None
+    )
+
+
+def test_analysis_phase_cost_reports_empty_window_message() -> None:
+    from codeclone.observability.views import AggregatesView
+
+    body = query_mod._analysis_phase_body(AggregatesView(operation_count=0), cap=5)
+    assert body["rows"] == []
+    assert "no analysis phase counters" in str(body["message"])
+
+
+def test_analysis_diagnostic_reports_phase_heavy_extract_share() -> None:
+    from codeclone.observability.views import AggregatesView, AnalysisPhaseRow
+
+    agg = AggregatesView(
+        1,
+        analysis_phases=(
+            AnalysisPhaseRow(
+                phase="unit_cfg",
+                worker_elapsed_ms=2500.0,
+                share_permille=750,
+                verdict="phase_heavy",
+            ),
+        ),
+    )
+    diagnostic = query_mod._analysis_diagnostic(agg)
+    assert diagnostic is not None
+    assert diagnostic["kind"] == "analysis"
+    assert "unit_cfg consumed 75%" in str(diagnostic["message"])

@@ -248,3 +248,64 @@ def test_counting_connection_factory_is_none_when_disabled() -> None:
         assert current_operation_context() is None
     finally:
         conn.close()
+
+
+def test_counting_connection_executescript_counts_one_statement(
+    tmp_path: Path,
+) -> None:
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with (
+            operation(name="memory.projection.job", surface="memory"),
+            span(name="memory.schema.migrate"),
+        ):
+            factory = counting_connection_factory()
+            assert factory is not None
+            conn = sqlite3.connect(":memory:", factory=factory)
+            conn.executescript("CREATE TABLE t (a INTEGER); INSERT INTO t VALUES (1);")
+            conn.close()
+    finally:
+        shutdown()
+
+    obs = open_observability_store(observability_store_path(tmp_path))
+    try:
+        row = obs.execute(
+            "SELECT counters_json FROM platform_spans "
+            "WHERE name='memory.schema.migrate'"
+        ).fetchone()
+    finally:
+        obs.close()
+    counters = json.loads(row[0]) if row and row[0] else {}
+    assert counters.get("db_queries") == 1
+    assert counters.get("db_rows") == 1
+
+
+def test_counting_connection_executemany_counts_one_statement_over_many_rows(
+    tmp_path: Path,
+) -> None:
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with (
+            operation(name="memory.projection.job", surface="memory"),
+            span(name="memory.batch.write"),
+        ):
+            factory = counting_connection_factory()
+            assert factory is not None
+            conn = sqlite3.connect(":memory:", factory=factory)
+            conn.execute("CREATE TABLE t (a INTEGER)")
+            conn.executemany("INSERT INTO t VALUES (?)", [(1,), (2,), (3,)])
+            conn.close()
+    finally:
+        shutdown()
+
+    obs = open_observability_store(observability_store_path(tmp_path))
+    try:
+        row = obs.execute(
+            "SELECT counters_json FROM platform_spans WHERE name='memory.batch.write'"
+        ).fetchone()
+    finally:
+        obs.close()
+    counters = json.loads(row[0]) if row and row[0] else {}
+    assert counters.get("db_queries") == 2
+    assert counters.get("db_writes") == 1
+    assert counters.get("db_rows") == 4

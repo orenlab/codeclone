@@ -224,6 +224,19 @@ def test_parse_xml_bytes_maps_defusedxml_errors_to_parse_error(
         _parse_xml_bytes(b"<coverage/>")
 
 
+def test_parse_xml_bytes_falls_back_to_stdlib_without_defusedxml(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _import(name: str, package: str | None = None) -> ModuleType:
+        if name == "defusedxml.ElementTree":
+            raise ImportError("defusedxml not installed")
+        return importlib.import_module(name, package)
+
+    monkeypatch.setattr(importlib, "import_module", _import)
+    root_element = _parse_xml_bytes(b"<coverage><packages/></coverage>")
+    assert _local_tag_name(root_element.tag) == "coverage"
+
+
 def test_coverage_join_resolves_sources_and_filenames(tmp_path: Path) -> None:
     root_element = ElementTree.fromstring(
         """<coverage xmlns:c="urn:test">

@@ -9,6 +9,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import pytest
+
+from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.experience.models import Experience
 from codeclone.memory.models import MemoryRecord, MemorySubject, generate_memory_id
 from codeclone.memory.retrieval import (
@@ -16,7 +19,16 @@ from codeclone.memory.retrieval import (
     get_relevant_memory,
     query_engineering_memory,
 )
-from codeclone.memory.retrieval.continuation import rebase_memory_continuation_cursor
+from codeclone.memory.retrieval.continuation import (
+    _digest,
+    _encode_cursor,
+    bounded_memory_continuation_page_size,
+    build_memory_continuation_cursor,
+    decode_memory_continuation_cursor,
+    memory_continuation_page,
+    memory_lane_item_ids,
+    rebase_memory_continuation_cursor,
+)
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
@@ -116,6 +128,269 @@ def test_memory_retrieval_continuation_pages_experiences_and_exact_get(
     experience = cast("dict[str, object]", payload["experience"])
     assert experience["id"] == "exp-cont-01"
     assert experience["evidence_trajectory_ids"] == []
+
+
+def test_memory_lane_item_ids_rejects_unknown_lane() -> None:
+    with pytest.raises(MemoryContractError, match="unknown memory continuation lane"):
+        memory_lane_item_ids("bogus", [{"id": "x"}])
+
+
+def test_memory_lane_item_ids_requires_trajectory_identity() -> None:
+    with pytest.raises(MemoryContractError, match="lacks trajectory_id"):
+        memory_lane_item_ids("trajectories", [{"trajectory_id": ""}])
+
+
+def test_build_memory_continuation_cursor_rejects_unknown_lane() -> None:
+    with pytest.raises(MemoryContractError, match="unknown memory continuation lane"):
+        build_memory_continuation_cursor(
+            project_id="proj",
+            lane="bogus",
+            request={"mode": "search"},
+            items=[{"id": "mem-1"}],
+            offset=0,
+        )
+
+
+def test_build_memory_continuation_cursor_rejects_out_of_bounds_offset() -> None:
+    items = [{"id": "mem-1"}]
+    with pytest.raises(MemoryContractError, match="offset is out of bounds"):
+        build_memory_continuation_cursor(
+            project_id="proj",
+            lane="records",
+            request={"mode": "search"},
+            items=items,
+            offset=2,
+        )
+
+
+def test_decode_memory_continuation_cursor_rejects_empty_value() -> None:
+    with pytest.raises(MemoryContractError, match="cursor is required"):
+        decode_memory_continuation_cursor("   ")
+
+
+def test_decode_memory_continuation_cursor_rejects_invalid_payload() -> None:
+    with pytest.raises(MemoryContractError, match="cursor is invalid"):
+        decode_memory_continuation_cursor("not-valid-base64!!!")
+
+
+def test_decode_memory_continuation_cursor_rejects_digest_mismatch() -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    signed = dict(payload)
+    signed["cursor_digest"] = {
+        "kind": "memory_retrieval_lane_projection_v1",
+        "algorithm": "sha256",
+        "digest_version": "1",
+        "value": "0" * 64,
+    }
+    with pytest.raises(MemoryContractError, match="digest mismatch"):
+        decode_memory_continuation_cursor(_encode_cursor(signed))
+
+
+def test_decode_memory_continuation_cursor_rejects_unsupported_version() -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    tampered = dict(payload)
+    tampered["cursor_version"] = "0"
+    tampered.pop("cursor_digest", None)
+    signed = dict(tampered)
+    signed["cursor_digest"] = _digest(tampered)
+    with pytest.raises(MemoryContractError, match="version is unsupported"):
+        decode_memory_continuation_cursor(_encode_cursor(signed))
+
+
+def test_bounded_memory_continuation_page_size_rejects_zero() -> None:
+    with pytest.raises(MemoryContractError, match="page_size must be >= 1"):
+        bounded_memory_continuation_page_size(0)
+
+
+def test_memory_continuation_page_emits_next_cursor_for_remaining_items() -> None:
+    items = [{"id": f"mem-{index}"} for index in range(4)]
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=items,
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    page = memory_continuation_page(
+        cursor_payload=payload,
+        items=items,
+        page_size=2,
+    )
+    assert page["status"] == "ok"
+    assert page["returned"] == 2
+    assert page["response_complete"] is False
+    assert "next" in page
+    next_ref = page["next"]
+    assert isinstance(next_ref, dict)
+    assert next_ref["offset"] == 2
+
+
+def test_rebase_memory_continuation_cursor_rejects_invalid_total() -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    tampered = dict(payload)
+    tampered["total"] = "not-an-int"
+    with pytest.raises(MemoryContractError, match="total is invalid"):
+        rebase_memory_continuation_cursor(_tampered_cursor(tampered), offset=0)
+
+
+def test_decode_memory_continuation_cursor_rejects_non_object_payload() -> None:
+    import base64
+
+    import orjson
+
+    raw = (
+        base64.urlsafe_b64encode(orjson.dumps(["not", "a", "dict"]))
+        .decode("ascii")
+        .rstrip("=")
+    )
+    with pytest.raises(MemoryContractError, match="payload is invalid"):
+        decode_memory_continuation_cursor(raw)
+
+
+def test_decode_memory_continuation_cursor_rejects_missing_digest() -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    unsigned = dict(payload)
+    unsigned.pop("cursor_digest", None)
+    with pytest.raises(MemoryContractError, match="digest is missing"):
+        decode_memory_continuation_cursor(_encode_cursor(unsigned))
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "match"),
+    [
+        ("projection_kind", "unsupported_kind", "projection kind is unsupported"),
+        ("ordering_version", "legacy-order", "ordering version is unsupported"),
+        ("lane", "bogus", "lane is invalid"),
+        ("request", "not-a-dict", "request is invalid"),
+    ],
+)
+def test_decode_memory_continuation_cursor_rejects_tampered_fields(
+    field: str,
+    value: object,
+    match: str,
+) -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    tampered = dict(payload)
+    tampered[field] = value
+    with pytest.raises(MemoryContractError, match=match):
+        decode_memory_continuation_cursor(_tampered_cursor(tampered))
+
+
+def test_memory_continuation_page_rejects_invalid_offset() -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}, {"id": "mem-2"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    tampered = dict(payload)
+    tampered["offset"] = "bad"
+    with pytest.raises(MemoryContractError, match="offset is invalid"):
+        memory_continuation_page(
+            cursor_payload=tampered,
+            items=[{"id": "mem-1"}, {"id": "mem-2"}],
+            page_size=1,
+        )
+
+
+def test_memory_continuation_page_rejects_invalid_request_for_next_page() -> None:
+    items = [{"id": f"mem-{index}"} for index in range(4)]
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=items,
+        offset=2,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    tampered = dict(payload)
+    tampered["request"] = None
+    with pytest.raises(MemoryContractError, match="request is invalid"):
+        memory_continuation_page(
+            cursor_payload=tampered,
+            items=items,
+            page_size=1,
+        )
+
+
+def test_get_memory_projection_page_rejects_project_identity_mismatch(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        _seed_scoped_records(store, project_id=project.id, count=3)
+        first = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/service.py",),
+            scope_resolved_from="explicit",
+            max_records=2,
+        )
+        cursor = str(_lane_page(first, "records")["cursor"])
+        page = get_memory_projection_page(
+            store,
+            project_id="other-project",
+            cursor=cursor,
+        )
+    assert page["status"] == "snapshot_mismatch"
+    assert page["reason"] == "project_identity_mismatch"
+
+
+def test_rebase_memory_continuation_cursor_rejects_invalid_offset() -> None:
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request={"mode": "search"},
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    with pytest.raises(MemoryContractError, match="offset is out of bounds"):
+        rebase_memory_continuation_cursor(str(built["cursor"]), offset=5)
+
+
+def _tampered_cursor(payload: dict[str, object]) -> str:
+    unsigned = dict(payload)
+    unsigned.pop("cursor_digest", None)
+    signed = dict(unsigned)
+    signed["cursor_digest"] = _digest(unsigned)
+    return _encode_cursor(signed)
 
 
 def _lane_page(payload: dict[str, object], lane: str) -> dict[str, object]:

@@ -221,3 +221,28 @@ def test_build_profile_sample_without_peak_baseline(
     sample = build_profile_sample((1024 * 1024, 0.0, 0.0, None))
     assert sample is not None
     assert sample.peak_rss_delta_mb is None
+
+
+def test_capture_process_peak_rss_without_resource_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import builtins
+    from collections.abc import Mapping, Sequence
+
+    from codeclone.observability.profile import capture_process_peak_rss
+
+    real_import = builtins.__import__
+
+    def _import(
+        name: str,
+        globals: Mapping[str, object] | None = None,
+        locals: Mapping[str, object] | None = None,
+        fromlist: Sequence[str] = (),
+        level: int = 0,
+    ) -> object:
+        if name == "resource":
+            raise ImportError("resource unavailable in test")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _import)
+    assert capture_process_peak_rss() is None

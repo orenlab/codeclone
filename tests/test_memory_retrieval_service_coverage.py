@@ -22,6 +22,8 @@ from codeclone.memory.semantic.models import SemanticHit
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
+from .memory_fixtures import memory_store
+
 
 def _record(*, status: str = "active", confidence: str = "verified") -> MemoryRecord:
     now = current_report_timestamp_utc()
@@ -447,3 +449,213 @@ def test_retrieval_service_semantic_helpers_and_scope_family() -> None:
     assert retrieval_service._scope_family("pkg/mod.py") == "pkg"
 
     assert retrieval_service._scope_family("../escape") is None
+
+
+def test_string_list_rejects_invalid_continuation_request_field() -> None:
+    with pytest.raises(MemoryContractError, match="scope_paths is invalid"):
+        retrieval_service._string_list({"scope_paths": [1, 2]}, "scope_paths")
+
+
+def test_hydrate_trajectory_hits_includes_chunk_metadata() -> None:
+    from codeclone.memory.semantic.models import SemanticHit
+    from codeclone.memory.trajectory.models import (
+        Trajectory,
+        TrajectoryEvidence,
+        TrajectoryStep,
+        TrajectorySubject,
+    )
+
+    trajectory = Trajectory(
+        id="traj-chunk",
+        project_id="proj-traj",
+        repo_root_digest="root",
+        workflow_id="intent:intent-1",
+        intent_id="intent-1",
+        primary_run_id="run-after",
+        first_run_id="run-before",
+        last_run_id="run-after",
+        report_digest="sha256:" + "a" * 64,
+        outcome="accepted",
+        quality_tier="verified",
+        quality_score=95,
+        labels=("recovered",),
+        summary="chunked trajectory semantic hit",
+        trajectory_digest="d" * 64,
+        source_event_stream_digest="e" * 64,
+        projection_version="trajectory-v1",
+        event_count=1,
+        step_count=1,
+        incident_count=0,
+        started_at_utc="2026-01-01T00:00:00Z",
+        finished_at_utc="2026-01-01T00:00:01Z",
+        projected_at_utc="2026-01-01T00:00:02Z",
+        updated_at_utc="2026-01-01T00:00:02Z",
+        steps=(
+            TrajectoryStep(
+                step_index=0,
+                audit_sequence=1,
+                event_id="evt-1",
+                event_type="intent.declared",
+                status="active",
+                run_id="run-before",
+                report_digest=None,
+                event_core_sha256="1" * 64,
+                event_core_json="{}",
+                summary="recover stale intent",
+                created_at_utc="2026-01-01T00:00:00Z",
+            ),
+        ),
+        subjects=(
+            TrajectorySubject(
+                subject_kind="path",
+                subject_key="pkg/service.py",
+                relation="about",
+            ),
+        ),
+        evidence=(
+            TrajectoryEvidence(
+                evidence_kind="audit_event_stream",
+                ref="intent:intent-1",
+                locator="1",
+                digest="e" * 64,
+                created_at_utc="2026-01-01T00:00:02Z",
+            ),
+        ),
+    )
+    store = SimpleNamespace(
+        find_trajectory=lambda trajectory_id: (
+            trajectory if trajectory_id == trajectory.id else None
+        )
+    )
+    hits = [
+        SemanticHit(
+            source_id="traj-chunk:000",
+            source="trajectory",
+            parent_id=trajectory.id,
+            chunk_index=0,
+            chunk_count=2,
+            score=0.81,
+        )
+    ]
+    payloads = retrieval_service._hydrate_trajectory_hits(
+        cast("SqliteEngineeringMemoryStore", store),
+        project_id=trajectory.project_id,
+        hits=hits,
+        detail_level="compact",
+    )
+    assert len(payloads) == 1
+    expected_fields = {
+        "semantic_score": 0.81,
+        "matched_chunk_index": 0,
+        "matched_chunk_count": 2,
+    }
+    for field, expected in expected_fields.items():
+        assert payloads[0][field] == expected
+
+
+def test_get_memory_projection_page_rejects_invalid_request_dict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        retrieval_service,
+        "decode_memory_continuation_cursor",
+        lambda _cursor: {
+            "project_id": "proj",
+            "lane": "records",
+            "offset": 0,
+            "request": None,
+        },
+    )
+
+    class _Store:
+        def close(self) -> None:
+            return None
+
+    with pytest.raises(MemoryContractError, match="request is invalid"):
+        retrieval_service.get_memory_projection_page(
+            cast("SqliteEngineeringMemoryStore", _Store()),
+            project_id="proj",
+            cursor="ignored",
+        )
+
+
+def test_query_engineering_memory_experience_get_wrong_project_returns_not_found(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.retrieval import query_engineering_memory
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        now = current_report_timestamp_utc()
+        experience = Experience(
+            id="exp-wrong-project",
+            project_id=project.id,
+            repo_root_digest="digest",
+            subject_family="pkg",
+            signal="verified_finish",
+            outcome_class="accepted:verified",
+            support=3,
+            quality_min=80,
+            information_value=85,
+            status="active",
+            statement="experience for wrong project lookup",
+            experience_digest="digest-exp-wrong-project",
+            distillation_version="experience-v1",
+            first_observed_at_utc=now,
+            last_observed_at_utc=now,
+            distilled_at_utc=now,
+            updated_at_utc=now,
+            facets=(),
+            evidence=(),
+        )
+        store.replace_experiences(project_id=project.id, experiences=[experience])
+        payload = query_engineering_memory(
+            store,
+            project_id="other-project",
+            root_path=_root,
+            backend="sqlite",
+            db_path=_db_path,
+            mode="experience_get",
+            record_id=experience.id,
+        )
+    assert payload["status"] == "not_found"
+
+
+def test_handle_semantic_search_records_telemetry_when_observability_enabled(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, int] = {}
+
+    monkeypatch.setattr(
+        retrieval_service,
+        "is_observability_enabled",
+        lambda: True,
+    )
+    monkeypatch.setattr(
+        retrieval_service,
+        "record_counter",
+        lambda key, value=1: captured.__setitem__(key, value),
+    )
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        payload = retrieval_service._handle_semantic_search_mode(
+            store,
+            project_id=project.id,
+            query="recover checkpoint",
+            filter_types=(),
+            statuses=("active",),
+            filter_confidences=(),
+            match_mode="any",
+            max_results=5,
+            detail_level="compact",
+            include_stale=False,
+            include_drafts=False,
+            semantic_index=None,
+            embedding_provider=None,
+            provider_label=None,
+            semantic_reason=None,
+            audit_db_path=None,
+        )
+
+    assert payload["mode"] == "search"
+    assert captured["retrieval.fts_hits"] == 0

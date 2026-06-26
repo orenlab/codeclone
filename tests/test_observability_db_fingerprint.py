@@ -161,3 +161,10 @@ def test_describe_fingerprint_insert_has_no_predicate_summary() -> None:
     shape = describe_fingerprint("INSERT INTO memory_records (id) VALUES (?)")
     assert shape.kind == "insert"
     assert shape.summary == ""
+
+
+def test_describe_fingerprint_projection_only_summary() -> None:
+    shape = describe_fingerprint("SELECT count(*) FROM memory_records")
+    assert shape.kind == "select"
+    assert shape.table == "memory_records"
+    assert shape.summary == "count"

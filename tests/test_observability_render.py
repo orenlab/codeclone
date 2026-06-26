@@ -667,3 +667,66 @@ def test_render_highlights_process_peak_rss_without_span_consumer() -> None:
     html = render_trace_html(trace)
     assert "Process peak RSS" in html
     assert "high-water resident set" in html
+
+
+def test_html_bar_clips_fill_when_offset_plus_value_exceeds_span() -> None:
+    from codeclone.observability.render_html import _bar
+
+    svg = _bar(90.0, 100.0, offset_ms=20.0)
+    assert 'width="80.0"' in svg
+    assert 'x="20.0"' in svg
+
+
+def test_html_counter_formatting_covers_phase_and_sub_10ms_timings() -> None:
+    from codeclone.observability.render_html import _counters, _us_ms
+
+    assert _us_ms(2500) == "2.5ms"
+    assert _us_ms(25000) == "25ms"
+    rendered = _counters(
+        {
+            "phase_parse_us": 1500,
+            "phase_unit_cfg_us": 25000,
+            "db_queries": 4,
+            "files_analyzed": 2,
+        }
+    )
+    assert "parse 1.5ms" in rendered
+    assert "unit_cfg 25ms" in rendered
+    assert "reads 4" in rendered
+    assert "analyzed 2" in rendered
+
+
+def test_render_trace_html_explains_missing_phase_counters_after_process_ran() -> None:
+    process_span = SpanView(
+        span_id="sp",
+        name="pipeline.process",
+        duration_ms=1.0,
+        status="ok",
+        counters={"files_analyzed": 3, "failed_files": 1},
+    )
+    op = OperationView(
+        operation_id="op",
+        correlation_id="op",
+        surface="cli",
+        name="cli.analyze",
+        started_at_utc="2026-06-10T04:00:00Z",
+        duration_ms=10.0,
+        status="ok",
+        spans=(process_span,),
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=AggregatesView(operation_count=1),
+        operation_tree=(op,),
+    )
+
+    html = render_trace_html(trace)
+    _assert_html_contains(
+        html,
+        "no analysis phase counters were recorded",
+        "CODECLONE_OBSERVABILITY_ENABLED=1",
+        "files_analyzed=3",
+        "failed_files=1",
+    )

@@ -9936,6 +9936,34 @@ def _register_docs_patch_run(service: CodeCloneMCPService, root: Path) -> None:
     )
 
 
+def _paired_repo_roots(tmp_path: Path) -> tuple[Path, Path]:
+    root_a = tmp_path / "repo-a"
+    root_b = tmp_path / "repo-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    return root_a, root_b
+
+
+def _docs_start_replay_context(
+    tmp_path: Path,
+) -> tuple[CodeCloneMCPService, MCPRunRecord, str, dict[str, str], dict[str, str]]:
+    _init_git_readme(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+    first = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+    )
+    record = service._runs.get(str(first["run_id"]))
+    assert record is not None
+    request_key = next(iter(service._start_replay_cache))
+    entry = service._start_replay_cache[request_key]
+    workspace_digest = cast("dict[str, str]", entry["workspace_state_digest"])
+    registry_digest = cast("dict[str, str]", entry["registry_digest"])
+    return service, record, request_key, workspace_digest, registry_digest
+
+
 def _start_docs_workflow(service: CodeCloneMCPService, root: Path) -> str:
     _register_docs_patch_run(service, root)
     started = service.start_controlled_change(
@@ -12106,3 +12134,646 @@ def test_get_report_section_module_map_clones_only_returns_shell(
     ).get_report_section(section="module_map")
     assert cast("dict[str, object]", module_map["summary"])["available"] is False
     assert module_map["unwind_candidates"] == []
+
+
+def test_implementation_context_private_lane_helpers_shrink_and_parse() -> None:
+    lane = (("implementation_evidence",), "experiences")
+    payload: dict[str, object] = {
+        "implementation_evidence": {
+            "experiences": [{"id": "exp-1"}, {"id": "exp-2"}],
+            "experiences_summary": {"total": 4},
+        },
+        "analysis": {
+            "context_projection_digest": "proj-digest",
+            "context_artifact_digest": "artifact-digest",
+            "context_page_retrieval": {
+                "retrieval_tool": "get_implementation_context_page",
+            },
+        },
+    }
+
+    assert mcp_context_session_mod._context_page_retrieval_available(payload) is True
+    assert mcp_context_session_mod._context_page_retrieval_available({}) is False
+    omitted = mcp_context_session_mod._implementation_context_omitted(
+        payload,
+        response_budget_lanes=set(),
+    )
+    assert omitted is not None
+    assert mcp_context_session_mod._next_reducible_context_lane(payload) == lane
+
+    mcp_context_session_mod._shrink_context_lane(payload, lane)
+    experiences = mcp_context_session_mod._context_lane_items(payload, lane)
+    assert experiences is not None
+    assert len(experiences) == 1
+    summary = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", payload["implementation_evidence"])[
+            "experiences_summary"
+        ],
+    )
+    assert summary["truncated"] is True
+    assert summary["shown"] == 1
+
+    assert mcp_context_session_mod._non_negative_int(True) == 0
+    assert mcp_context_session_mod._non_negative_int("3") == 3
+    assert mcp_context_session_mod._non_negative_int("bad") == 0
+    assert mcp_context_session_mod._non_negative_int(1.5) == 0
+    assert mcp_context_session_mod._next_reducible_context_lane({}) is None
+    assert mcp_context_session_mod._context_omitted_key(lane) == (
+        "implementation_evidence.experiences"
+    )
+    assert (
+        mcp_context_session_mod._context_lane_container(
+            {"implementation_evidence": 1}, lane
+        )
+        is None
+    )
+    mcp_context_session_mod._shrink_context_lane(
+        {"implementation_evidence": {"experiences": []}},
+        lane,
+    )
+    missing_lane = (("missing_path",), "items")
+    mcp_context_session_mod._shrink_context_lane({}, missing_lane)
+
+
+def test_mcp_get_memory_projection_page_wraps_memory_contract_errors(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        with pytest.raises(MCPServiceContractError, match="cursor is invalid"):
+            service.get_memory_projection_page(
+                root=str(root.resolve()),
+                cursor="not-a-valid-cursor",
+            )
+
+
+def test_mcp_durable_artifact_tools_wrap_audit_read_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.validation import AuditReadError
+
+    service = CodeCloneMCPService(history_limit=4)
+
+    def _boom(*_args: object, **_kwargs: object) -> object:
+        raise AuditReadError("audit db broken")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._session_audit_artifact_mixin.lookup_review_receipt",
+        _boom,
+    )
+    with pytest.raises(MCPServiceContractError, match="audit db broken"):
+        service.get_review_receipt(root=str(tmp_path), run_id="deadbeef")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._session_audit_artifact_mixin.lookup_patch_trail",
+        _boom,
+    )
+    with pytest.raises(MCPServiceContractError, match="audit db broken"):
+        service.get_patch_trail(root=str(tmp_path), run_id="deadbeef")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._session_audit_artifact_mixin.lookup_blast_artifact",
+        lambda *_a, **_k: (_ for _ in ()).throw(AuditReadError("audit db broken")),
+    )
+    with pytest.raises(MCPServiceContractError, match="audit db broken"):
+        service.get_blast_artifact(root=str(tmp_path), run_id="deadbeef")
+
+
+def test_mcp_get_review_receipt_markdown_rerenders_typed_receipt_without_content(
+    tmp_path: Path,
+) -> None:
+    from codeclone.audit import EVENT_RECEIPT_CREATED
+
+    db_path = resolve_audit_path(root_path=tmp_path, value=DEFAULT_AUDIT_PATH)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    writer = SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30)
+    writer.emit(
+        AuditEvent(
+            event_type=EVENT_RECEIPT_CREATED,
+            severity="info",
+            repo_root_digest="rootdigest0000",
+            agent_pid=1,
+            agent_start_epoch=1,
+            agent_label="test",
+            run_id="30b56d21",
+            intent_id=None,
+            report_digest="reportdigest",
+            status="clean",
+            payload={
+                "run_id": "30b56d21",
+                "receipt_digest": {
+                    "kind": "receipt_v1",
+                    "algorithm": "sha256",
+                    "digest_version": "1",
+                    "value": "abc123",
+                },
+                "receipt": {
+                    "receipt_version": "1",
+                    "verdict": "clean",
+                    "provenance": {},
+                },
+            },
+        )
+    )
+    writer.close()
+
+    service = CodeCloneMCPService(history_limit=4)
+    out = service.get_review_receipt(
+        root=str(tmp_path),
+        run_id="30b56d21",
+        receipt_digest="abc123",
+        format="markdown",
+    )
+    assert out["status"] == "ok"
+    assert "CodeClone Agent Review Receipt" in str(out["content"])
+
+
+def test_mcp_get_implementation_context_page_validates_inputs_and_missing_artifact(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    with pytest.raises(MCPServiceContractError, match="context_projection_digest"):
+        service.get_implementation_context_page(
+            root=str(tmp_path),
+            context_projection_digest="   ",
+            facet="safety",
+        )
+    with pytest.raises(MCPServiceContractError, match="facet"):
+        service.get_implementation_context_page(
+            root=str(tmp_path),
+            context_projection_digest="digest",
+            facet="   ",
+        )
+    missing = service.get_implementation_context_page(
+        root=str(tmp_path),
+        context_projection_digest="missing-digest",
+        facet="safety",
+    )
+    assert missing["status"] == "not_found"
+
+
+def test_mcp_get_implementation_context_rejects_run_from_foreign_root(
+    tmp_path: Path,
+) -> None:
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    _write_clone_fixture(root_a)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root_a),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    run_id = str(summary["run_id"])
+    with pytest.raises(MCPServiceContractError, match="does not belong"):
+        service.get_implementation_context(
+            root=str(root_b),
+            run_id=run_id,
+            paths=["pkg/dup.py"],
+        )
+
+
+def test_workflow_start_replay_helpers_normalize_workspace_intents() -> None:
+    assert (
+        workflow_mod._start_stable_workspace_intents({"workspace_intents": "bad"}) == []
+    )
+    stable = workflow_mod._start_stable_workspace_intents(
+        {
+            "workspace_intents": [
+                {"intent_id": "intent-1", "lease_expires_in_seconds": 30},
+                "skip-me",
+            ]
+        }
+    )
+    assert stable == [{"intent_id": "intent-1"}]
+    assert (
+        workflow_mod._start_lease_expires_at(
+            {
+                "workspace_intents": [
+                    {"intent_id": "intent-1", "expires_at_utc": "2026-01-01T00:00:00Z"}
+                ]
+            },
+            "intent-1",
+        )
+        == "2026-01-01T00:00:00Z"
+    )
+    assert (
+        workflow_mod._start_lease_expires_at({"workspace_intents": []}, "missing")
+        is None
+    )
+
+
+def test_memory_retrieval_governance_helper_edges() -> None:
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+
+    assert mem_mod._memory_continuation_lanes({}) == {}
+    assert mem_mod._memory_continuation_lanes({"continuation": "bad"}) == {}
+    assert mem_mod._memory_continuation_lanes({"continuation": {"lanes": "bad"}}) == {}
+
+    payload = {
+        "continuation": {
+            "lanes": {
+                "records": {
+                    "shown": 1,
+                    "total": 3,
+                    "omitted": 2,
+                    "page": {"cursor": "bad-cursor"},
+                }
+            }
+        }
+    }
+    omitted = mem_mod._memory_governance_omitted(
+        payload,
+        original_shown={"records": 3},
+    )
+    assert omitted is not None
+    records_omitted = cast("dict[str, object]", omitted["records"])
+    assert records_omitted["omitted"] == 2
+
+    full = mem_mod._attach_budgeted_memory_retrieval_context(
+        {"records": [], "continuation": {"lanes": {}}},
+        detail_level="full",
+        max_records=5,
+    )
+    governance = cast("dict[str, object]", full["context_governance"])
+    response = cast("dict[str, object]", governance["response"])
+    assert response["tool"] == "get_relevant_memory"
+
+    assert (
+        mem_mod._rebased_memory_lane_page(
+            lane="records",
+            offset=1,
+            original_continuation={},
+        )
+        is None
+    )
+
+
+def test_validated_context_include_adds_scope_for_active_intent() -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    facets = service._validated_context_include(
+        None, mode="audit_prep", has_intent=True
+    )
+    assert "scope" in facets
+
+
+def test_stored_receipt_markdown_returns_empty_without_renderable_payload() -> None:
+    from codeclone.audit.reader import StoredReviewReceipt
+    from codeclone.surfaces.mcp._session_audit_artifact_mixin import (
+        _stored_receipt_markdown,
+    )
+
+    receipt = StoredReviewReceipt(
+        run_id="run",
+        receipt_digest="digest",
+        verdict="clean",
+        receipt_version="1",
+        receipt_format="markdown",
+        created_at_utc="2026-01-01T00:00:00Z",
+        payload={},
+    )
+    assert _stored_receipt_markdown(receipt) == ""
+
+
+def test_mcp_get_implementation_context_page_root_and_run_guards(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.mcp._implementation_context_pages import (
+        ContextFacetSnapshot,
+        ContextProjectionArtifact,
+    )
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    _register_docs_patch_run(service, root_a)
+    artifact = ContextProjectionArtifact(
+        root=root_a.resolve(),
+        run_id="full-run-id-8341c101",
+        context_artifact_digest="artifact-digest",
+        context_projection_digest="proj-digest",
+        request_digest="request-digest",
+        facets={
+            "safety": ContextFacetSnapshot(
+                key="safety",
+                items=({"id": "finding-1"},),
+                identity_digest="facet-digest",
+            )
+        },
+    )
+    service._context_projection_pages["proj-digest"] = artifact
+
+    root_mismatch = service.get_implementation_context_page(
+        root=str(root_b),
+        context_projection_digest="proj-digest",
+        facet="safety",
+    )
+    assert root_mismatch["status"] == "root_mismatch"
+
+    run_not_found = service.get_implementation_context_page(
+        root=str(root_a),
+        context_projection_digest="proj-digest",
+        facet="safety",
+        run_id="missing-run",
+    )
+    assert run_not_found["status"] == "run_not_found"
+
+    run_mismatch = service.get_implementation_context_page(
+        root=str(root_a),
+        context_projection_digest="proj-digest",
+        facet="safety",
+        run_id="workflow123456789",
+    )
+    assert run_mismatch["status"] == "run_mismatch"
+    assert run_mismatch["artifact_run_id"] == "full-run-id-8341c101"
+
+    ok_page = service.get_implementation_context_page(
+        root=str(root_a),
+        context_projection_digest="proj-digest",
+        facet="safety",
+    )
+    assert ok_page["status"] == "ok"
+    items = cast("list[object]", ok_page["items"])
+    assert len(items) == 1
+
+
+def test_budgeted_implementation_context_response_breaks_when_nothing_reducible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    payload: dict[str, object] = {
+        "analysis": {
+            "context_projection_digest": "proj-digest",
+            "context_artifact_digest": "artifact-digest",
+            "context_page_retrieval": {
+                "retrieval_tool": "get_implementation_context_page",
+            },
+        },
+    }
+    monkeypatch.setattr(
+        mcp_context_session_mod,
+        "estimate_response_context_units",
+        lambda _payload: 999_999,
+    )
+    monkeypatch.setattr(
+        mcp_context_session_mod,
+        "_next_reducible_context_lane",
+        lambda _payload: None,
+    )
+    governed = mcp_context_session_mod._budgeted_implementation_context_response(
+        payload,
+        detail_level="compact",
+        budget=5,
+    )
+    governance = cast("dict[str, object]", governed["context_governance"])
+    response = cast("dict[str, object]", governance["response"])
+    assert response["tool"] == "get_implementation_context"
+
+
+def test_implementation_context_omitted_requires_analysis_digests() -> None:
+    assert (
+        mcp_context_session_mod._implementation_context_omitted(
+            {"analysis": "not-a-mapping"},
+            response_budget_lanes=set(),
+        )
+        is None
+    )
+    assert (
+        mcp_context_session_mod._implementation_context_omitted(
+            {"analysis": {"context_projection_digest": "only-proj"}},
+            response_budget_lanes=set(),
+        )
+        is None
+    )
+
+
+def test_start_replay_payload_rejects_workspace_or_registry_drift(
+    tmp_path: Path,
+) -> None:
+    service, record, request_key, workspace_digest, registry_digest = (
+        _docs_start_replay_context(tmp_path)
+    )
+
+    assert (
+        service._start_replay_payload(
+            request_key=request_key,
+            record=record,
+            workspace_state_digest={"kind": "workspace_state_v1", "value": "drift"},
+            registry_digest=registry_digest,
+        )
+        is None
+    )
+    assert (
+        service._start_replay_payload(
+            request_key=request_key,
+            record=record,
+            workspace_state_digest=workspace_digest,
+            registry_digest={"kind": "registry_v1", "value": "drift"},
+        )
+        is None
+    )
+
+
+def test_start_replay_payload_rejects_cleared_intent(tmp_path: Path) -> None:
+    service, record, request_key, workspace_digest, registry_digest = (
+        _docs_start_replay_context(tmp_path)
+    )
+    intent_id = next(iter(service._active_intents))
+    service._active_intents.pop(intent_id, None)
+    assert (
+        service._start_replay_payload(
+            request_key=request_key,
+            record=record,
+            workspace_state_digest=workspace_digest,
+            registry_digest=registry_digest,
+        )
+        is None
+    )
+
+
+def test_pack_compact_memory_response_shrinks_lanes_to_fit_budget() -> None:
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+
+    statement = "memory " * 120
+    records = [{"id": f"rec-{index}", "statement": statement} for index in range(12)]
+    payload: dict[str, object] = {
+        "records": records,
+        "record_count": len(records),
+        "trajectories": [],
+        "trajectory_count": 0,
+        "continuation": {
+            "lanes": {
+                "records": {
+                    "total": len(records),
+                    "shown": len(records),
+                    "omitted": 0,
+                },
+                "trajectories": {"total": 0, "shown": 0, "omitted": 0},
+            }
+        },
+    }
+    packed, _omitted = mem_mod._pack_compact_memory_response(
+        payload,
+        detail_level="compact",
+        max_records=len(records),
+        limit=80,
+    )
+    assert cast("int", packed["record_count"]) < len(records)
+
+
+def test_memory_governed_estimate_rejects_non_integer_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+
+    monkeypatch.setattr(
+        mem_mod,
+        "attach_memory_retrieval_context_governance",
+        lambda payload, **_kwargs: {
+            **dict(payload),
+            "context_governance": {"estimated": "not-an-int"},
+        },
+    )
+    with pytest.raises(MCPServiceContractError, match="estimate is invalid"):
+        mem_mod._memory_governed_estimate(
+            {"records": []},
+            detail_level="compact",
+            max_records=5,
+            omitted=None,
+            limit=2200,
+        )
+
+
+def test_memory_governance_helpers_skip_invalid_continuation_fields() -> None:
+    import codeclone.surfaces.mcp._session_memory_mixin as mem_mod
+
+    payload = {
+        "continuation": {
+            "lanes": {
+                "records": {
+                    "shown": "bad",
+                    "total": 3,
+                    "omitted": 1,
+                },
+                "trajectories": {
+                    "shown": 1,
+                    "total": "bad",
+                    "omitted": 1,
+                },
+            }
+        }
+    }
+    assert (
+        mem_mod._memory_governance_omitted(payload, original_shown={"records": 2})
+        is None
+    )
+    budget_shrunk = {
+        "continuation": {
+            "lanes": {
+                "records": {
+                    "shown": 1,
+                    "total": 3,
+                    "omitted": 2,
+                }
+            }
+        }
+    }
+    omitted = mem_mod._memory_governance_omitted(
+        budget_shrunk,
+        original_shown={"records": 3},
+    )
+    assert omitted is not None
+    assert cast("dict[str, object]", omitted["records"])["reason"] == "response_budget"
+    shown = {"records": 0, "trajectories": 0, "experiences": 0}
+    assert (
+        mem_mod._next_reducible_memory_lane(
+            shown,
+            floor=0,
+            original_continuation={},
+        )
+        is None
+    )
+
+
+def test_include_record_in_hook_cleanup_recoverable_prefix_and_unknown_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
+    from codeclone.surfaces.mcp._workspace_intents import WorkspaceIntentRecord
+    from codeclone.workspace_intent import gate as gate_mod
+
+    now = datetime.now(tz=timezone.utc)
+    declared_at = workspace_intents.utc_now()
+    scope_payload: dict[str, object] = {
+        "allowed_files": ["pkg/a.py"],
+        "allowed_related": [],
+        "forbidden": [".codeclone/**"],
+    }
+    record = WorkspaceIntentRecord(
+        intent_id="intent-recoverable",
+        agent_pid=999_999,
+        agent_start_epoch=1,
+        agent_label="cursor-vscode/agent-1",
+        run_id="abcdef1234567890",
+        declared_at_utc=workspace_intents.format_utc(declared_at),
+        expires_at_utc=workspace_intents.format_utc(declared_at + timedelta(hours=1)),
+        ttl_seconds=3600,
+        status="active",
+        intent="recoverable hook cleanup",
+        scope=scope_payload,
+        scope_digest=workspace_intents.compute_scope_digest(scope_payload),
+        blast_radius_summary={"radius_level": "low"},
+        lease_renewed_at_utc=workspace_intents.format_utc(declared_at),
+        lease_seconds=workspace_intents.DEFAULT_LEASE_SECONDS,
+        report_digest="digest-a",
+    )
+    monkeypatch.setattr(
+        workspace_intents,
+        "classify_intent_ownership",
+        lambda *_args, **_kwargs: workspace_intents.IntentOwnership.RECOVERABLE,
+    )
+    assert (
+        gate_mod._include_record_in_hook_cleanup(
+            record,
+            own_pid=1,
+            own_start_epoch=1,
+            recoverable_agent_label_prefix="cursor-vscode/",
+            include_foreign=False,
+            now=now,
+        )
+        is True
+    )
+    assert (
+        gate_mod._include_record_in_hook_cleanup(
+            record,
+            own_pid=1,
+            own_start_epoch=1,
+            recoverable_agent_label_prefix=None,
+            include_foreign=False,
+            now=now,
+        )
+        is False
+    )
+
+    class _UnknownOwnership:
+        pass
+
+    monkeypatch.setattr(
+        workspace_intents,
+        "classify_intent_ownership",
+        lambda *_args, **_kwargs: _UnknownOwnership(),
+    )
+    assert (
+        gate_mod._include_record_in_hook_cleanup(
+            record,
+            own_pid=1,
+            own_start_epoch=1,
+            recoverable_agent_label_prefix="cursor-vscode/",
+            include_foreign=False,
+            now=now,
+        )
+        is False
+    )

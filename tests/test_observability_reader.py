@@ -491,3 +491,15 @@ def test_epoch_ms_and_empty_correlation_filter(tmp_path: Path) -> None:
         assert _by_correlations(conn, []) == []
     finally:
         conn.close()
+
+
+def test_build_trace_view_on_empty_store_returns_empty_window(tmp_path: Path) -> None:
+    open_observability_store(observability_store_path(tmp_path)).close()
+    read = open_observability_store_readonly(tmp_path)
+    assert read is not None
+    try:
+        trace = build_trace_view(read)
+    finally:
+        read.close()
+    assert trace.aggregates.operation_count == 0
+    assert trace.operation_tree == ()

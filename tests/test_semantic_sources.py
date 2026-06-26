@@ -95,6 +95,34 @@ class _FakeTrajectoryStore:
         ]
 
 
+def _audit_repo_paths(tmp_path: Path) -> tuple[Path, Path]:
+    root = tmp_path / "repo"
+    root.mkdir()
+    return root, tmp_path / "audit.sqlite3"
+
+
+def _write_intent_declared_audit_event(
+    root: Path,
+    db_path: Path,
+    *,
+    intent_description: str = "recover after MCP restart",
+) -> None:
+    writer = SqliteAuditWriter(db_path=db_path, payloads="off", retention_days=30)
+    try:
+        writer.emit(
+            AuditEvent(
+                event_type=EVENT_INTENT_DECLARED,
+                severity="info",
+                repo_root_digest=repo_root_digest(root),
+                agent_pid=1,
+                agent_label="test",
+                payload={"intent_description": intent_description},
+            )
+        )
+    finally:
+        writer.close()
+
+
 def _prose(
     project_id: str,
     *,
@@ -149,24 +177,9 @@ def test_audit_index_source_gating(tmp_path: Path) -> None:
 
 
 def test_audit_index_source_projects_summary_column(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    db_path = tmp_path / "audit.sqlite3"
+    root, db_path = _audit_repo_paths(tmp_path)
     # payloads="off" still populates the summary column (Bug B).
-    writer = SqliteAuditWriter(db_path=db_path, payloads="off", retention_days=30)
-    try:
-        writer.emit(
-            AuditEvent(
-                event_type=EVENT_INTENT_DECLARED,
-                severity="info",
-                repo_root_digest=repo_root_digest(root),
-                agent_pid=1,
-                agent_label="test",
-                payload={"intent_description": "recover after MCP restart"},
-            )
-        )
-    finally:
-        writer.close()
+    _write_intent_declared_audit_event(root, db_path)
 
     source = AuditIndexSource(enabled=True, db_path=db_path)
     assert source.available() is True
@@ -508,3 +521,152 @@ def test_audit_event_row_connect_and_query_errors(
 
     monkeypatch.setattr(sqlite3, "connect", _fail_connect)
     assert audit_event_row(audit_file, "evt-1") is None
+
+
+def test_memory_index_source_project_empty_ids_is_noop() -> None:
+    project_id = "proj-empty"
+    indexed = _prose(project_id, statement="recover keeps the checkpoint")
+    store = _FakeStore([indexed], {})
+    source = MemoryIndexSource(store, project_id=project_id)
+    assert list(source.project([])) == []
+
+
+def test_memory_index_source_scan_skips_non_indexed_records() -> None:
+    project_id = "proj-scan"
+    indexed = _prose(project_id, statement="indexed prose")
+    rejected = _prose(project_id, statement="rejected", status="rejected")
+    structural = make_module_record(project_id, "pkg/mod.py")
+    store = _FakeStore([structural, indexed, rejected], {})
+    scan = MemoryIndexSource(store, project_id=project_id).scan()
+    assert scan.status == "complete"
+    assert set(scan.revisions) == {indexed.id}
+
+
+def test_trajectory_index_source_scan_builds_revision_inventory() -> None:
+    trajectory = _trajectory("proj-traj")
+    source = TrajectoryIndexSource(
+        _FakeTrajectoryStore([trajectory]),
+        project_id="proj-traj",
+    )
+    scan = source.scan()
+    assert scan.status == "complete"
+    assert trajectory.id in scan.revisions
+    assert scan.revisions[trajectory.id]
+
+
+def test_trajectory_index_source_project_empty_ids_is_noop() -> None:
+    trajectory = _trajectory("proj-traj")
+    source = TrajectoryIndexSource(
+        _FakeTrajectoryStore([trajectory]),
+        project_id="proj-traj",
+    )
+    assert list(source.project([])) == []
+
+
+def test_audit_index_source_scan_degrades_to_failed_on_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory.semantic import sources
+
+    db_path = tmp_path / "audit.sqlite3"
+    db_path.touch()
+    source = AuditIndexSource(enabled=True, db_path=db_path)
+
+    class _BrokenConnection:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise sqlite3.OperationalError("scan failed")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        sources,
+        "open_audit_db_readonly",
+        lambda _path: _BrokenConnection(),
+    )
+    scan = source.scan()
+    assert scan.revisions == {}
+    assert scan.status == "failed"
+
+
+def test_audit_index_source_project_filters_requested_ids(tmp_path: Path) -> None:
+    root, db_path = _audit_repo_paths(tmp_path)
+    writer = SqliteAuditWriter(db_path=db_path, payloads="off", retention_days=30)
+    try:
+        for _index, summary in enumerate(("first intent", "second intent")):
+            writer.emit(
+                AuditEvent(
+                    event_type=EVENT_INTENT_DECLARED,
+                    severity="info",
+                    repo_root_digest=repo_root_digest(root),
+                    agent_pid=1,
+                    agent_label="test",
+                    payload={"intent_description": summary},
+                )
+            )
+    finally:
+        writer.close()
+
+    source = AuditIndexSource(enabled=True, db_path=db_path)
+    event_ids = [projection.source_id for projection in source.iter_projections()]
+    assert len(event_ids) == 2
+
+    selected = list(source.project([event_ids[1]]))
+    assert len(selected) == 1
+    assert selected[0].source_id == event_ids[1]
+    assert "second intent" in selected[0].text
+
+
+def test_audit_index_source_project_empty_or_unavailable_is_noop(
+    tmp_path: Path,
+) -> None:
+    disabled = AuditIndexSource(enabled=False, db_path=tmp_path / "audit.sqlite3")
+    assert list(disabled.project(["evt-1"])) == []
+
+    enabled = AuditIndexSource(enabled=True, db_path=tmp_path / "missing.sqlite3")
+    assert list(enabled.project(["evt-1"])) == []
+
+
+def test_audit_index_source_scan_indexes_forensic_summaries(tmp_path: Path) -> None:
+    root, db_path = _audit_repo_paths(tmp_path)
+    _write_intent_declared_audit_event(root, db_path)
+
+    source = AuditIndexSource(enabled=True, db_path=db_path)
+    scan = source.scan()
+    assert scan.status == "complete"
+    assert len(scan.revisions) == 1
+    revision = next(iter(scan.revisions.values()))
+    assert revision
+
+
+def test_audit_index_source_scan_skips_blank_summaries(tmp_path: Path) -> None:
+    from codeclone.audit.schema import ensure_schema
+
+    db_path = tmp_path / "audit.sqlite3"
+    conn = sqlite3.connect(str(db_path))
+    try:
+        ensure_schema(conn)
+        conn.execute(
+            "INSERT INTO controller_events "
+            "(event_id, event_type, severity, created_at_utc, "
+            "repo_root_digest, agent_label, agent_pid, status, summary) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                "evt-blank",
+                EVENT_INTENT_DECLARED,
+                "info",
+                "2026-06-02T10:00:00Z",
+                "digest",
+                "agent",
+                1,
+                "active",
+                "   ",
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    scan = AuditIndexSource(enabled=True, db_path=db_path).scan()
+    assert scan.revisions == {}
