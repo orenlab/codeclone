@@ -61,6 +61,11 @@ _IMPLEMENTATION_CONTEXT_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
     "nested_budget": True,
     "omission": True,
 }
+_FINISH_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
+    "response_budget": True,
+    "nested_budget": False,
+    "omission": True,
+}
 
 _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "typed_receipt_alias": True,
@@ -318,24 +323,25 @@ def _attach_context_governance(
 def attach_finish_context_governance(
     payload: Mapping[str, object],
     *,
+    evidence_omitted: Mapping[str, object] | None = None,
     limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
 ) -> dict[str, object]:
     """Attach whole-response governance metadata for finish responses."""
 
-    return attach_passive_context_governance(
+    return _attach_context_governance(
         payload,
         limit=limit,
         projection_kind=FINISH_RESPONSE_PROJECTION_KIND,
         response={
             "tool": "finish_controlled_change",
             "budget_scope": "whole_response",
-            "evidence_policy": "observe_only_no_omission",
-            # Finish inlines only the human-complete markdown content plus
-            # identity; the duplicate typed receipt is reachable via durable
-            # get_review_receipt. Full response-budget enforcement waits until
-            # a packing policy actually omits evidence.
-            "receipt_content": "markdown_inlined_typed_via_lookup",
+            "evidence_policy": "response_budget_with_durable_artifact_lookup",
+            "receipt_content": "compact_identity_inline_content_via_lookup",
+            "patch_trail_content": "summary_or_compact_identity_inline_full_via_lookup",
         },
+        mode="partial_enforce",
+        enforcement=_FINISH_RESPONSE_ENFORCEMENT,
+        evidence_omitted=evidence_omitted,
     )
 
 

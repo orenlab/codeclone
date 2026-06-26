@@ -133,20 +133,34 @@ def test_finish_context_governance_marks_whole_response_projection() -> None:
     blocked = cast("dict[str, list[str]]", envelope["enforcement_blocked"])
 
     assert {
+        "mode": envelope["mode"],
         "tool": response["tool"],
         "budget_scope": response["budget_scope"],
         "policy": response["evidence_policy"],
         "receipt_content": response["receipt_content"],
+        "patch_trail_content": response["patch_trail_content"],
         "digest_kind": digest["kind"],
         "receipt_retrieval_blocked": "receipt_retrieval_unavailable"
         in blocked["response_budget"],
+        "response_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "response_budget"
+        ],
+        "nested_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "nested_budget"
+        ],
+        "omission": cast("dict[str, bool]", envelope["enforcement"])["omission"],
     } == {
+        "mode": "partial_enforce",
         "tool": "finish_controlled_change",
         "budget_scope": "whole_response",
-        "policy": "observe_only_no_omission",
-        "receipt_content": "markdown_inlined_typed_via_lookup",
+        "policy": "response_budget_with_durable_artifact_lookup",
+        "receipt_content": "compact_identity_inline_content_via_lookup",
+        "patch_trail_content": "summary_or_compact_identity_inline_full_via_lookup",
         "digest_kind": FINISH_RESPONSE_PROJECTION_KIND,
         "receipt_retrieval_blocked": False,
+        "response_budget": True,
+        "nested_budget": False,
+        "omission": True,
     }
 
 

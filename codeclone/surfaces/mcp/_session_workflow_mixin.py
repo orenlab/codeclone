@@ -10,7 +10,7 @@
 atomic change-control steps into two workflow calls.  They call existing
 internal methods only — no new engine logic.
 
-Design invariants (phase-16 spec):
+Design invariants:
 - No implicit ``analyze_repository``.
 - No hidden boundary decisions.
 - ``check`` before ``verify`` is mandatory (check writes state).
@@ -21,7 +21,8 @@ Design invariants (phase-16 spec):
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Final
 
@@ -36,9 +37,11 @@ from ._blast_radius import (
     blast_radius_to_payload,
 )
 from ._context_governance import (
+    DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
     attach_finish_context_governance,
     attach_start_context_governance,
     context_governance_digest,
+    estimate_response_context_units,
 )
 from ._intent import (
     IntentRecord,
@@ -70,6 +73,8 @@ _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
         PatchContractStatus.ACCEPTED_EXTERNAL.value,
     }
 )
+
+_FINISH_REDUCIBLE_LANES: Final[tuple[str, ...]] = ("receipt_content", "patch_trail")
 
 
 class _MCPSessionWorkflowMixin:
@@ -449,7 +454,7 @@ class _MCPSessionWorkflowMixin:
 
         # Queued intents cannot be verified
         if active_intent.status == IntentStatus.QUEUED:
-            return attach_finish_context_governance(
+            return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
                     "status": "unverified",
@@ -508,7 +513,7 @@ class _MCPSessionWorkflowMixin:
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
-            return attach_finish_context_governance(
+            return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
                     "status": "unverified",
@@ -543,7 +548,7 @@ class _MCPSessionWorkflowMixin:
 
         # Expired intent
         if check_status == IntentStatus.EXPIRED.value:
-            return attach_finish_context_governance(
+            return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
                     "status": "expired",
@@ -561,7 +566,7 @@ class _MCPSessionWorkflowMixin:
 
         # 4. Scope violation — early exit
         if check_status == IntentStatus.VIOLATED.value:
-            return attach_finish_context_governance(
+            return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
                     "status": "violated",
@@ -611,7 +616,7 @@ class _MCPSessionWorkflowMixin:
 
         # 6. Non-accepted verification — return without receipt/clear
         if verify_status not in _ACCEPTED_STATUSES:
-            return attach_finish_context_governance(
+            return _budgeted_finish_response(
                 {
                     "intent_id": intent_id,
                     "status": verify_status,
@@ -729,7 +734,7 @@ class _MCPSessionWorkflowMixin:
             )
             if projection_hook is not None:
                 result["projection_rebuild"] = projection_hook
-        return attach_finish_context_governance(result)
+        return _budgeted_finish_response(result)
 
     def _finish_patch_trail(
         self,
@@ -1095,6 +1100,269 @@ def _finish_receipt_status(
     if receipt_payload is None:
         return "skipped"
     return "created"
+
+
+def _budgeted_finish_response(payload: Mapping[str, object]) -> dict[str, object]:
+    """Attach finish governance after deterministic, recoverable packing."""
+
+    packed = deepcopy(dict(payload))
+    response_budget_lanes: set[str] = set()
+    omitted = _finish_governance_omitted(
+        packed,
+        response_budget_lanes=response_budget_lanes,
+    )
+    governed = attach_finish_context_governance(
+        packed,
+        evidence_omitted=omitted,
+    )
+    while (
+        estimate_response_context_units(governed) > DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT
+    ):
+        lane = _next_reducible_finish_lane(packed)
+        if lane is None:
+            break
+        _shrink_finish_lane(packed, lane)
+        response_budget_lanes.add(lane)
+        omitted = _finish_governance_omitted(
+            packed,
+            response_budget_lanes=response_budget_lanes,
+        )
+        governed = attach_finish_context_governance(
+            packed,
+            evidence_omitted=omitted,
+        )
+    return governed
+
+
+def _next_reducible_finish_lane(payload: Mapping[str, object]) -> str | None:
+    for lane in _FINISH_REDUCIBLE_LANES:
+        if lane == "receipt_content" and _receipt_content_retrievable(payload):
+            return lane
+        if lane == "patch_trail" and _patch_trail_retrievable(payload):
+            return lane
+    return None
+
+
+def _shrink_finish_lane(payload: dict[str, object], lane: str) -> None:
+    if lane == "receipt_content":
+        receipt = payload.get("receipt")
+        if isinstance(receipt, dict):
+            receipt.pop("content", None)
+        return
+    if lane == "patch_trail":
+        patch_trail = payload.get("patch_trail")
+        if isinstance(patch_trail, Mapping):
+            payload["patch_trail"] = _compact_patch_trail_reference(patch_trail)
+
+
+def _finish_governance_omitted(
+    payload: Mapping[str, object],
+    *,
+    response_budget_lanes: set[str],
+) -> dict[str, object] | None:
+    omitted: dict[str, object] = {}
+    lane_builders: tuple[
+        tuple[str, str, Callable[[Mapping[str, object]], dict[str, object] | None]],
+        ...,
+    ] = (
+        ("receipt_content", "receipt.content", _receipt_content_omission),
+        ("patch_trail", "patch_trail", _patch_trail_omission),
+    )
+    for lane, omitted_key, builder in lane_builders:
+        if lane not in response_budget_lanes:
+            continue
+        lane_omission = builder(payload)
+        if lane_omission is not None:
+            omitted[omitted_key] = lane_omission
+    return omitted or None
+
+
+def _receipt_content_retrievable(payload: Mapping[str, object]) -> bool:
+    receipt = payload.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return False
+    content = receipt.get("content")
+    if not isinstance(content, str) or not content:
+        return False
+    retrieval = receipt.get("receipt_retrieval")
+    if not isinstance(retrieval, Mapping):
+        return False
+    return retrieval.get("tool") == "get_review_receipt" and bool(
+        _receipt_digest_value(receipt)
+    )
+
+
+def _patch_trail_retrievable(payload: Mapping[str, object]) -> bool:
+    patch_trail = payload.get("patch_trail")
+    if not isinstance(patch_trail, Mapping):
+        return False
+    if _is_compact_patch_trail_reference(patch_trail):
+        return False
+    digest = str(patch_trail.get("patch_trail_digest", "")).strip()
+    if not digest:
+        return False
+    evidence = patch_trail.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    return evidence.get("patch_trail_audit_sequence") is not None
+
+
+def _receipt_content_omission(
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    receipt = payload.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return None
+    digest = _receipt_digest_value(receipt)
+    if not digest:
+        return None
+    retrieval = receipt.get("receipt_retrieval")
+    run_id = (
+        str(receipt.get("run_id", "")).strip()
+        or (
+            str(retrieval.get("run_id", "")).strip()
+            if isinstance(retrieval, Mapping)
+            else ""
+        )
+        or None
+    )
+    return {
+        "evaluation": "complete",
+        "total": 1,
+        "shown": 0,
+        "omitted": 1,
+        "reason": "response_budget",
+        "field": "receipt.content",
+        "retrieval": _finish_receipt_retrieval(
+            receipt_digest=digest,
+            run_id=run_id,
+            format="markdown",
+        ),
+    }
+
+
+def _patch_trail_omission(
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    patch_trail = payload.get("patch_trail")
+    if not isinstance(patch_trail, Mapping):
+        return None
+    digest = str(patch_trail.get("patch_trail_digest", "")).strip()
+    if not digest:
+        return None
+    return {
+        "evaluation": "complete",
+        "total": 1,
+        "shown": 0,
+        "omitted": 1,
+        "reason": "response_budget",
+        "field": "patch_trail",
+        "retrieval": _finish_patch_trail_retrieval(
+            patch_trail_digest=digest,
+            source=patch_trail.get("retrieval"),
+        ),
+    }
+
+
+def _compact_patch_trail_reference(
+    patch_trail: Mapping[str, object],
+) -> dict[str, object]:
+    digest = str(patch_trail.get("patch_trail_digest", "")).strip()
+    retrieval = _finish_patch_trail_retrieval(
+        patch_trail_digest=digest,
+        source=None,
+    )
+    evidence = patch_trail.get("evidence")
+    if isinstance(evidence, Mapping):
+        audit_sequence = evidence.get("patch_trail_audit_sequence")
+        if audit_sequence is not None:
+            retrieval["patch_trail_audit_sequence"] = audit_sequence
+    compact: dict[str, object] = {
+        "patch_trail_digest": digest,
+        "retrieval": retrieval,
+        "retrieval_policy": {
+            "patch_trail_does_not_authorize_edits": True,
+            "patch_trail_does_not_override_findings": True,
+        },
+    }
+    for key in (
+        "schema_version",
+        "intent_id",
+        "scope_check_status",
+        "verification_status",
+        "counts",
+        "truncation",
+    ):
+        if key in patch_trail:
+            compact[key] = deepcopy(patch_trail[key])
+    return compact
+
+
+def _receipt_digest_value(receipt: Mapping[str, object]) -> str:
+    digest = receipt.get("receipt_digest")
+    candidates: list[object] = []
+    if isinstance(digest, Mapping):
+        candidates.append(digest.get("value"))
+    retrieval = receipt.get("receipt_retrieval")
+    if isinstance(retrieval, Mapping):
+        candidates.append(retrieval.get("receipt_digest"))
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _finish_receipt_retrieval(
+    *,
+    receipt_digest: str,
+    run_id: str | None,
+    format: str,
+) -> dict[str, object]:
+    retrieval: dict[str, object] = {
+        "tool": "get_review_receipt",
+        "route": (
+            f"get_review_receipt(root=..., receipt_digest=..., format={format!r})"
+        ),
+        "receipt_digest": receipt_digest,
+        "format": format,
+        "retention": "audit_event",
+        "snapshot_identity": "receipt_digest + optional run_id",
+    }
+    if run_id:
+        retrieval["run_id"] = run_id
+    return retrieval
+
+
+def _finish_patch_trail_retrieval(
+    *,
+    patch_trail_digest: str,
+    source: object,
+) -> dict[str, object]:
+    retrieval: dict[str, object] = {
+        "tool": "get_patch_trail",
+        "route": (
+            "get_patch_trail(root=..., patch_trail_digest=..., format='structured')"
+        ),
+        "patch_trail_digest": patch_trail_digest,
+        "format": "structured",
+        "retention": "audit_event",
+        "snapshot_identity": "patch_trail_digest + optional run_id",
+    }
+    if isinstance(source, Mapping):
+        run_id = str(source.get("run_id", "")).strip()
+        if run_id:
+            retrieval["run_id"] = run_id
+    return retrieval
+
+
+def _is_compact_patch_trail_reference(patch_trail: Mapping[str, object]) -> bool:
+    retrieval = patch_trail.get("retrieval")
+    return (
+        isinstance(retrieval, Mapping)
+        and retrieval.get("tool") == "get_patch_trail"
+        and "evidence" not in patch_trail
+    )
 
 
 def _validated_dirty_scope_policy(value: str) -> str:

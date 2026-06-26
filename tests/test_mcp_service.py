@@ -10366,7 +10366,7 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "verdict": receipt_payload["verdict"],
         "digest_kind": receipt_digest["kind"],
         "has_content": isinstance(receipt_payload["content"], str),
-        # 34.3 dedup: the duplicate nested typed receipt is omitted by default.
+        # The duplicate nested typed receipt is omitted by default.
         "has_nested_typed": "receipt" in receipt_payload,
         "retrieval_tool": retrieval["tool"],
     } == {
@@ -10391,14 +10391,14 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     } == {
         "contract_version": "1.0",
         "estimator": "utf8_bytes_div_4_v1",
-        "mode": "observe",
+        "mode": "partial_enforce",
         "truncated": False,
         "mandatory_overflow": False,
     }
     assert context_governance["enforcement"] == {
-        "response_budget": False,
+        "response_budget": True,
         "nested_budget": False,
-        "omission": False,
+        "omission": True,
     }
     governance_response = cast("dict[str, object]", context_governance["response"])
     response_digest = cast(
@@ -10417,7 +10417,7 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     } == {
         "tool": "finish_controlled_change",
         "budget_scope": "whole_response",
-        "evidence_policy": "observe_only_no_omission",
+        "evidence_policy": "response_budget_with_durable_artifact_lookup",
         "digest_kind": "finish_projection_v1",
         "receipt_retrieval_blocked": False,
     }
@@ -10665,6 +10665,104 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         claims_text_present=True,
     )
     assert summary["claims"] == "skipped_not_recommended"
+
+
+def test_mcp_finish_response_budget_omits_retrievable_advisory_lanes() -> None:
+    payload: dict[str, object] = {
+        "intent_id": "intent-1",
+        "status": "accepted",
+        "reason": None,
+        "scope_check": {"status": "clean"},
+        "verification": {"status": "accepted"},
+        "claims": None,
+        "receipt": {
+            "run_id": "run12345",
+            "format": "markdown",
+            "receipt_version": "1",
+            "verdict": "clean",
+            "receipt_digest": {
+                "kind": "receipt_v1",
+                "algorithm": "sha256",
+                "digest_version": "1",
+                "value": "r" * 64,
+            },
+            "content": "review receipt\n" + ("detail\n" * 900),
+            "receipt_retrieval": {
+                "tool": "get_review_receipt",
+                "run_id": "run12345",
+                "receipt_digest": "r" * 64,
+                "format": "structured",
+            },
+        },
+        "patch_trail": {
+            "schema_version": "1",
+            "intent_id": "intent-1",
+            "scope_check_status": "clean",
+            "verification_status": "accepted",
+            "counts": {"declared": 1, "changed": 1},
+            "truncation": {},
+            "patch_trail_digest": "p" * 64,
+            "declared_files": [f"pkg/deep/module_{idx}.py" for idx in range(300)],
+            "changed_files": ["pkg/deep/module_1.py"],
+            "evidence": {"patch_trail_audit_sequence": 77},
+            "retrieval_policy": {
+                "patch_trail_does_not_authorize_edits": True,
+                "patch_trail_does_not_override_findings": True,
+            },
+        },
+        "intent_cleared": True,
+        "workspace_hygiene_after": {"workspace_dirty_summary": {}},
+        "summary": {"status": "accepted", "receipt": "created"},
+        "user_action_required": False,
+        "message": "accepted",
+    }
+
+    governed = workflow_mod._budgeted_finish_response(payload)
+    receipt = cast("dict[str, object]", governed["receipt"])
+    patch_trail = cast("dict[str, object]", governed["patch_trail"])
+    governance_raw = governed["context_governance"]
+    assert isinstance(governance_raw, dict)
+    governance = governance_raw
+    omitted_raw = governance["omitted"]
+    assert isinstance(omitted_raw, dict)
+    omitted = omitted_raw
+    receipt_omitted_raw, trail_omitted_raw = (
+        omitted["receipt.content"],
+        omitted["patch_trail"],
+    )
+    for lane_omission in (receipt_omitted_raw, trail_omitted_raw):
+        assert isinstance(lane_omission, dict)
+    receipt_omitted = cast("dict[str, object]", receipt_omitted_raw)
+    trail_omitted = cast("dict[str, object]", trail_omitted_raw)
+    trail_retrieval = cast("dict[str, object]", patch_trail["retrieval"])
+
+    assert {
+        "content_present": "content" in receipt,
+        "trail_compact": "declared_files" in patch_trail,
+        "trail_tool": trail_retrieval["tool"],
+        "receipt_reason": receipt_omitted["reason"],
+        "trail_reason": trail_omitted["reason"],
+        "mode": governance["mode"],
+        "truncated": governance["truncated"],
+        "mandatory_overflow": governance["mandatory_overflow"],
+    } == {
+        "content_present": False,
+        "trail_compact": False,
+        "trail_tool": "get_patch_trail",
+        "receipt_reason": "response_budget",
+        "trail_reason": "response_budget",
+        "mode": "partial_enforce",
+        "truncated": True,
+        "mandatory_overflow": False,
+    }
+    assert (
+        cast("dict[str, object]", receipt_omitted["retrieval"])["tool"]
+        == "get_review_receipt"
+    )
+    assert (
+        cast("dict[str, object]", trail_omitted["retrieval"])["patch_trail_digest"]
+        == "p" * 64
+    )
 
 
 def test_mcp_finish_controlled_change_external_health_and_memory_hook(
