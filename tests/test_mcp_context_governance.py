@@ -189,6 +189,49 @@ def test_start_context_governance_marks_whole_response_projection() -> None:
     }
 
 
+def test_start_context_governance_enforces_omitted_blast_artifact() -> None:
+    payload = attach_start_context_governance(
+        {"intent_id": "intent-1", "status": "active"},
+        evidence_omitted={
+            "blast_radius.direct_dependents": {
+                "evaluation": "complete",
+                "total": 4,
+                "shown": 0,
+                "omitted": 4,
+                "reason": "response_budget",
+            }
+        },
+    )
+    envelope = cast("dict[str, object]", payload["context_governance"])
+    response = cast("dict[str, object]", envelope["response"])
+    omitted = cast("dict[str, object]", envelope["omitted"])
+
+    assert {
+        "mode": envelope["mode"],
+        "response_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "response_budget"
+        ],
+        "nested_budget": cast("dict[str, bool]", envelope["enforcement"])[
+            "nested_budget"
+        ],
+        "omission": cast("dict[str, bool]", envelope["enforcement"])["omission"],
+        "policy": response["evidence_policy"],
+        "tool": response["tool"],
+        "reason": cast(
+            "dict[str, object]",
+            omitted["blast_radius.direct_dependents"],
+        )["reason"],
+    } == {
+        "mode": "partial_enforce",
+        "response_budget": True,
+        "nested_budget": False,
+        "omission": True,
+        "policy": "response_budget_with_immutable_blast_artifact",
+        "tool": "start_controlled_change",
+        "reason": "response_budget",
+    }
+
+
 def test_memory_retrieval_context_governance_enforces_compact_budget() -> None:
     payload = attach_memory_retrieval_context_governance(
         {"records": [], "trajectories": [], "experiences": []},

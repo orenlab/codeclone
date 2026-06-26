@@ -126,7 +126,7 @@ class _MCPSessionWorkflowMixin:
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
         if record is None:
-            return attach_start_context_governance(
+            return _start_governed_response(
                 _helpers.attach_workspace_hygiene_tips(
                     {
                         "status": "needs_analysis",
@@ -184,7 +184,7 @@ class _MCPSessionWorkflowMixin:
             dirty_snapshot = declare_payload.get("dirty_snapshot")
             if isinstance(dirty_snapshot, dict):
                 queued_payload["dirty_snapshot"] = dirty_snapshot
-            return attach_start_context_governance(
+            return _start_governed_response(
                 _helpers.attach_workspace_hygiene_tips(
                     queued_payload,
                     root=root_path,
@@ -346,7 +346,7 @@ class _MCPSessionWorkflowMixin:
                 "budget_projection_v1", _budget_summary(budget_payload)
             ),
         )
-        return attach_start_context_governance(
+        return _start_governed_response(
             _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
         )
 
@@ -394,7 +394,7 @@ class _MCPSessionWorkflowMixin:
             "next_tool": "get_relevant_memory",
             "message": "Repeated start unchanged; reusing the active intent.",
         }
-        return attach_start_context_governance(payload)
+        return _start_governed_response(payload)
 
     def _store_start_replay(
         self,
@@ -976,6 +976,112 @@ def _start_blast_projection(
         blast_payload,
         artifact=blast_artifact,
     )
+
+
+def _start_governed_response(payload: Mapping[str, object]) -> dict[str, object]:
+    return attach_start_context_governance(
+        payload,
+        evidence_omitted=_start_governance_omitted(payload),
+        enforce_budget=_start_immutable_blast_available(payload),
+    )
+
+
+def _start_governance_omitted(
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    blast_radius = payload.get("blast_radius")
+    if isinstance(blast_radius, Mapping):
+        omitted = _start_blast_omitted_evidence(blast_radius.get("omitted_evidence"))
+        if omitted:
+            return omitted
+    blast_artifact = payload.get("blast_artifact")
+    if isinstance(blast_artifact, Mapping):
+        return {
+            "blast_radius": _start_blast_radius_omission_from_artifact(blast_artifact)
+        }
+    return None
+
+
+def _start_immutable_blast_available(payload: Mapping[str, object]) -> bool:
+    blast_radius = payload.get("blast_radius")
+    if isinstance(blast_radius, Mapping) and _start_valid_blast_artifact_ref(
+        blast_radius.get("blast_artifact")
+    ):
+        return True
+    return _start_valid_blast_artifact_ref(payload.get("blast_artifact"))
+
+
+def _start_valid_blast_artifact_ref(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    return value.get("retrieval_tool") == "get_blast_artifact" and bool(
+        str(value.get("blast_artifact_id", "")).strip()
+    )
+
+
+def _start_blast_omitted_evidence(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    omitted: dict[str, object] = {}
+    for lane, summary in sorted(value.items(), key=lambda item: str(item[0])):
+        omission = _start_blast_omission_row(str(lane), summary)
+        if omission is None:
+            continue
+        field, row = omission
+        omitted[field] = row
+    return omitted
+
+
+def _start_blast_omission_row(
+    lane: str,
+    summary: object,
+) -> tuple[str, dict[str, object]] | None:
+    if isinstance(summary, Mapping):
+        lane_total = _start_non_negative_int(summary.get("total"))
+        lane_shown = _start_non_negative_int(summary.get("shown"))
+        lane_omitted = max(lane_total - lane_shown, 0)
+        truncated = bool(summary.get("truncated"))
+        if lane_omitted > 0 or truncated:
+            retrieval = summary.get("retrieval")
+            field = f"blast_radius.{lane}"
+            return field, {
+                "evaluation": "complete",
+                "total": lane_total,
+                "shown": lane_shown,
+                "omitted": lane_omitted,
+                "truncated": truncated,
+                "reason": "response_budget",
+                "field": field,
+                "retrieval": dict(retrieval) if isinstance(retrieval, Mapping) else {},
+            }
+    return None
+
+
+def _start_blast_radius_omission_from_artifact(
+    artifact: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "evaluation": "complete",
+        "total": 1,
+        "shown": 0,
+        "omitted": 1,
+        "truncated": True,
+        "reason": "response_budget",
+        "field": "blast_radius",
+        "retrieval": dict(artifact),
+    }
+
+
+def _start_non_negative_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdecimal():
+            return int(text)
+    return 0
 
 
 def _workspace_summary_from_declare(

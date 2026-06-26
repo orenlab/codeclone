@@ -66,6 +66,11 @@ _FINISH_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
     "nested_budget": False,
     "omission": True,
 }
+_START_RESPONSE_ENFORCEMENT: Final[dict[str, bool]] = {
+    "response_budget": True,
+    "nested_budget": False,
+    "omission": True,
+}
 
 _PASSIVE_CAPABILITIES: Final[dict[str, object]] = {
     "typed_receipt_alias": True,
@@ -348,20 +353,34 @@ def attach_finish_context_governance(
 def attach_start_context_governance(
     payload: Mapping[str, object],
     *,
+    evidence_omitted: Mapping[str, object] | None = None,
+    enforce_budget: bool = False,
     limit: int = DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
 ) -> dict[str, object]:
     """Attach whole-response governance metadata for start responses."""
 
-    return attach_passive_context_governance(
+    effective_enforcement = enforce_budget or bool(evidence_omitted)
+    return _attach_context_governance(
         payload,
         limit=limit,
         projection_kind=START_RESPONSE_PROJECTION_KIND,
         response={
             "tool": "start_controlled_change",
             "budget_scope": "whole_response",
-            "evidence_policy": "observe_only_no_omission",
+            "evidence_policy": (
+                "response_budget_with_immutable_blast_artifact"
+                if effective_enforcement
+                else "observe_only_no_omission"
+            ),
             "blast_radius_content": "summary_with_immutable_artifact_lookup",
         },
+        mode="partial_enforce" if effective_enforcement else "observe",
+        enforcement=(
+            _START_RESPONSE_ENFORCEMENT
+            if effective_enforcement
+            else _OBSERVE_ENFORCEMENT
+        ),
+        evidence_omitted=evidence_omitted,
     )
 
 

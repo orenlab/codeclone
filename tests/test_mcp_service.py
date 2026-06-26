@@ -9998,13 +9998,22 @@ def _init_git_readme(root: Path, content: str = "stable\n") -> None:
     )
 
 
-def _assert_start_context_governance(payload: Mapping[str, object]) -> None:
+def _assert_start_context_governance(
+    payload: Mapping[str, object],
+    *,
+    enforced: bool,
+) -> None:
     governance = cast("dict[str, object]", payload["context_governance"])
     governance_response = cast("dict[str, object]", governance["response"])
     projection_digest = cast(
         "dict[str, object]",
         governance_response["projection_digest"],
     )
+    expected_mode = {False: "observe", True: "partial_enforce"}[enforced]
+    expected_policy = {
+        False: "observe_only_no_omission",
+        True: "response_budget_with_immutable_blast_artifact",
+    }[enforced]
     assert {
         "mode": governance["mode"],
         "tool": governance_response["tool"],
@@ -10013,18 +10022,19 @@ def _assert_start_context_governance(payload: Mapping[str, object]) -> None:
         "blast_radius_content": governance_response["blast_radius_content"],
         "digest_kind": projection_digest["kind"],
     } == {
-        "mode": "observe",
+        "mode": expected_mode,
         "tool": "start_controlled_change",
         "budget_scope": "whole_response",
-        "policy": "observe_only_no_omission",
+        "policy": expected_policy,
         "blast_radius_content": "summary_with_immutable_artifact_lookup",
         "digest_kind": mcp_context_governance_mod.START_RESPONSE_PROJECTION_KIND,
     }
     assert governance["enforcement"] == {
-        "response_budget": False,
+        "response_budget": enforced,
         "nested_budget": False,
-        "omission": False,
+        "omission": enforced,
     }
+    assert ("omitted" in governance, enforced) != (True, False)
 
 
 def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
@@ -10036,7 +10046,7 @@ def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     )
     assert needs["status"] == "needs_analysis"
     assert needs["edit_allowed"] is False
-    _assert_start_context_governance(needs)
+    _assert_start_context_governance(needs, enforced=False)
 
     _register_docs_patch_run(service, tmp_path)
     started = service.start_controlled_change(
@@ -10048,7 +10058,7 @@ def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     assert started["status"] == "active"
     blast = cast("dict[str, object]", started["blast_radius"])
     assert "transitive_summary" in blast
-    _assert_start_context_governance(started)
+    _assert_start_context_governance(started, enforced=False)
 
     with pytest.raises(MCPServiceContractError, match="blast_radius_depth"):
         service.start_controlled_change(
@@ -10096,6 +10106,9 @@ def test_mcp_workflow_start_summary_uses_durable_blast_artifact(
         assert blast["direct_dependents"] == []
         assert blast["transitive_dependents"] == []
         assert artifact["retrieval_tool"] == "get_blast_artifact"
+        _assert_start_context_governance(started, enforced=True)
+        governance = cast("dict[str, object]", started["context_governance"])
+        assert governance["truncated"] is False
 
         retrieved = CodeCloneMCPService(history_limit=4).get_blast_artifact(
             root=str(tmp_path),
@@ -10171,7 +10184,7 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
     governance = cast("dict[str, object]", replay["context_governance"])
     assert governance["mode"] == "observe"
     assert isinstance(governance["estimated"], int)
-    _assert_start_context_governance(replay)
+    _assert_start_context_governance(replay, enforced=False)
 
 
 def test_mcp_workflow_start_replay_rejects_workspace_drift(tmp_path: Path) -> None:
@@ -10208,7 +10221,7 @@ def test_mcp_workflow_start_queued_and_latest_run(
     )
     assert queued["status"] == "queued"
     assert "blast_radius" not in queued
-    _assert_start_context_governance(queued)
+    _assert_start_context_governance(queued, enforced=False)
     workspace = cast("dict[str, object]", queued["workspace"])
     blocked_by = cast("list[object]", queued["blocked_by"])
     concurrent = cast("list[object]", workspace["concurrent_intents"])
