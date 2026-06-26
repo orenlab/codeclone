@@ -12343,12 +12343,41 @@ def test_workflow_start_replay_helpers_normalize_workspace_intents() -> None:
     stable = workflow_mod._start_stable_workspace_intents(
         {
             "workspace_intents": [
-                {"intent_id": "intent-1", "lease_expires_in_seconds": 30},
+                {
+                    "intent_id": "intent-1",
+                    "status": "active",
+                    "scope_digest": "scope-digest",
+                    "lease_expires_in_seconds": 30,
+                    "ownership": "own_active",
+                },
                 "skip-me",
             ]
         }
     )
-    assert stable == [{"intent_id": "intent-1"}]
+    assert stable == [
+        {
+            "intent_id": "intent-1",
+            "scope_digest": "scope-digest",
+            "status": "active",
+        }
+    ]
+    assert workflow_mod._start_registry_digest(
+        {
+            "workspace_intents": stable,
+            "stale_count": 0,
+            "recovery_available": [],
+            "own_pid": 1,
+            "own_start_epoch": 2,
+        }
+    ) == workflow_mod._start_registry_digest(
+        {
+            "workspace_intents": stable,
+            "stale_count": 3,
+            "recovery_available": [{"intent_id": "foreign"}],
+            "own_pid": 1,
+            "own_start_epoch": 2,
+        }
+    )
     assert (
         workflow_mod._start_lease_expires_at(
             {
@@ -12364,6 +12393,39 @@ def test_workflow_start_replay_helpers_normalize_workspace_intents() -> None:
         workflow_mod._start_lease_expires_at({"workspace_intents": []}, "missing")
         is None
     )
+
+
+def test_start_registry_digest_detects_foreign_workspace_intent() -> None:
+    own_intents = [
+        {
+            "intent_id": "intent-own",
+            "status": "active",
+            "scope_digest": "scope-own",
+            "agent_pid": 100,
+            "agent_start_epoch": 200,
+        }
+    ]
+    own_registry = {
+        "workspace_intents": own_intents,
+        "own_pid": 100,
+        "own_start_epoch": 200,
+    }
+    foreign_registry = {
+        **own_registry,
+        "workspace_intents": [
+            *own_intents,
+            {
+                "intent_id": "intent-foreign",
+                "status": "active",
+                "scope_digest": "scope-foreign",
+                "agent_pid": 999,
+                "agent_start_epoch": 1,
+            },
+        ],
+    }
+    assert workflow_mod._start_registry_digest(
+        own_registry
+    ) != workflow_mod._start_registry_digest(foreign_registry)
 
 
 def test_memory_retrieval_governance_helper_edges() -> None:

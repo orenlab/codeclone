@@ -1259,15 +1259,25 @@ def _start_workspace_state_digest(root_path: Path) -> dict[str, str]:
     )
 
 
+_START_REPLAY_INTENT_IDENTITY_KEYS = frozenset(
+    {
+        "agent_pid",
+        "agent_start_epoch",
+        "expires_at_utc",
+        "intent_id",
+        "report_digest",
+        "run_id",
+        "scope_digest",
+        "status",
+    }
+)
+
+
 def _start_registry_digest(workspace_payload: Mapping[str, object]) -> dict[str, str]:
     return context_governance_digest(
         "workspace_registry_v1",
         {
             "workspace_intents": _start_stable_workspace_intents(workspace_payload),
-            "recovery_available": workspace_payload.get("recovery_available", []),
-            "stale_count": workspace_payload.get("stale_count"),
-            "orphaned_count": workspace_payload.get("orphaned_count"),
-            "total_agents": workspace_payload.get("total_agents"),
             "own_pid": workspace_payload.get("own_pid"),
             "own_start_epoch": workspace_payload.get("own_start_epoch"),
             "registry_backend": workspace_payload.get("registry_backend"),
@@ -1288,8 +1298,13 @@ def _start_stable_workspace_intents(
         if not isinstance(item, Mapping):
             continue
         item_payload = dict(item)
-        item_payload.pop("lease_expires_in_seconds", None)
-        stable.append(item_payload)
+        stable.append(
+            {
+                key: item_payload[key]
+                for key in sorted(_START_REPLAY_INTENT_IDENTITY_KEYS)
+                if key in item_payload
+            }
+        )
     return stable
 
 
