@@ -436,6 +436,7 @@ def _db_costs(flat: list[OperationView]) -> tuple[DbCostRow, ...]:
             span_count=len(spans),
             total_queries=sum(s.counters.get("db_queries", 0) for s in spans),
             total_writes=sum(s.counters.get("db_writes", 0) for s in spans),
+            total_rows=sum(s.counters.get("db_rows", 0) for s in spans),
             max_queries=max(s.counters.get("db_queries", 0) for s in spans),
         )
         for name, spans in grouped.items()

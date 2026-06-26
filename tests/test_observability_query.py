@@ -427,6 +427,7 @@ def test_projection_helpers_and_diagnostic_edges(
                 span_count=2,
                 total_queries=500,
                 total_writes=1,
+                total_rows=500,
                 max_queries=300,
             ),
         ),

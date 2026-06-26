@@ -20,8 +20,8 @@ import codeclone.memory.jobs.worker as worker
 from codeclone.config.observability import ObservabilityConfig
 from codeclone.observability import (
     bootstrap,
+    counting_connection_factory,
     current_operation_context,
-    instrument_db_connection,
     operation,
     shutdown,
     span,
@@ -176,8 +176,9 @@ def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
             operation(name="memory.projection.job", surface="memory"),
             span(name="memory.semantic.rebuild"),
         ):
-            conn = sqlite3.connect(":memory:")
-            instrument_db_connection(conn)
+            factory = counting_connection_factory()
+            assert factory is not None
+            conn = sqlite3.connect(":memory:", factory=factory)
             conn.execute("CREATE TABLE t (a INTEGER)")
             conn.execute("INSERT INTO t VALUES (1)")
             conn.execute("INSERT INTO t VALUES (2)")
@@ -195,10 +196,12 @@ def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:
     finally:
         obs.close()
     counters = json.loads(row[0]) if row and row[0] else {}
-    # create + 2 inserts + select all land on the active span; only the inserts
-    # are writes.
-    assert counters.get("db_queries", 0) >= 4
+    # v2 semantics: one count per logical statement (not per trace fire).
+    # create + 2 inserts + select = 4 statements; only the inserts are writes;
+    # each statement touches one row.
+    assert counters.get("db_queries", 0) == 4
     assert counters.get("db_writes", 0) == 2
+    assert counters.get("db_rows", 0) == 4
 
 
 def test_db_fingerprints_capture_query_shapes_per_span(tmp_path: Path) -> None:
@@ -208,8 +211,9 @@ def test_db_fingerprints_capture_query_shapes_per_span(tmp_path: Path) -> None:
             operation(name="memory.projection.job", surface="memory"),
             span(name="memory.experience.distill"),
         ):
-            conn = sqlite3.connect(":memory:")
-            instrument_db_connection(conn)
+            factory = counting_connection_factory()
+            assert factory is not None
+            conn = sqlite3.connect(":memory:", factory=factory)
             conn.execute("CREATE TABLE memory_evidence (memory_id INTEGER)")
             # The N+1 the fingerprints are meant to name: the same SELECT shape,
             # different literals, run repeatedly.
@@ -234,11 +238,12 @@ def test_db_fingerprints_capture_query_shapes_per_span(tmp_path: Path) -> None:
     assert shapes.get("select * from memory_evidence where memory_id = ?") == 3
 
 
-def test_instrument_db_connection_is_inert_when_disabled() -> None:
-    # Disabled process: no trace callback, no counting, no error, zero overhead.
+def test_counting_connection_factory_is_none_when_disabled() -> None:
+    # Disabled process: no counting connection class, so callers open a plain
+    # connection with no per-statement overhead.
+    assert counting_connection_factory() is None
     conn = sqlite3.connect(":memory:")
     try:
-        instrument_db_connection(conn)
         conn.execute("CREATE TABLE t (a)")
         assert current_operation_context() is None
     finally:

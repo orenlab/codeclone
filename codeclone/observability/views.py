@@ -102,15 +102,17 @@ class McpToolAggregate:
 class DbCostRow:
     """SQLite work attributed to a span class (performance-truth, not audit).
 
-    Aggregated from span db_queries/db_writes counters; ``max_queries`` is the
-    worst single instance and ``queries`` ÷ a per-row productive count exposes
-    N+1-shaped access (many reads, little produced)."""
+    Aggregated from span db_queries/db_writes/db_rows counters (v2 semantics:
+    logical statements, not per-row trace fires). ``max_queries`` is the worst
+    single instance; ``total_rows`` exposes executemany amplification, and a
+    high statement count with little produced is the N+1 shape."""
 
     span_name: str
     surface: str
     span_count: int
     total_queries: int
     total_writes: int
+    total_rows: int
     max_queries: int
 
 

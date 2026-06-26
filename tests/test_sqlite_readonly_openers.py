@@ -202,19 +202,20 @@ def test_schema_module_import_does_not_load_observability(module_name: str) -> N
 )
 def test_domain_openers_attach_observability(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
     opener: object,
 ) -> None:
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.observability import (
+        bootstrap,
+        counting_connection_factory,
+        shutdown,
+    )
+
     audit_path = tmp_path / "audit.sqlite3"
     intent_path = tmp_path / "intents.sqlite3"
     memory_path = tmp_path / "memory.sqlite3"
     open_audit_db(audit_path).close()
     open_memory_db(memory_path).close()
-    calls: list[sqlite3.Connection] = []
-    monkeypatch.setattr(
-        "codeclone.observability.runtime.instrument_db_connection",
-        calls.append,
-    )
 
     selected = opener
     assert callable(selected)
@@ -224,27 +225,43 @@ def test_domain_openers_attach_observability(
         path = memory_path
     else:
         path = audit_path
-    conn = selected(path)
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     try:
-        assert calls == [conn]
+        factory = counting_connection_factory()
+        assert factory is not None
+        conn = selected(path)
+        try:
+            # Enabled observability => the opener builds the counting-connection
+            # subclass, so every statement is attributed to the active span.
+            assert type(conn) is factory
+        finally:
+            conn.close()
     finally:
-        conn.close()
+        shutdown()
 
 
 def test_intent_readonly_opener_attaches_observability(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "intents.sqlite3"
-    open_intent_registry_db(db_path).close()
-    calls: list[sqlite3.Connection] = []
-    monkeypatch.setattr(
-        "codeclone.observability.runtime.instrument_db_connection",
-        calls.append,
+    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.observability import (
+        bootstrap,
+        counting_connection_factory,
+        shutdown,
     )
 
-    conn = open_intent_registry_db_readonly(db_path)
+    db_path = tmp_path / "intents.sqlite3"
+    open_intent_registry_db(db_path).close()
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     try:
-        assert calls == [conn]
+        factory = counting_connection_factory()
+        assert factory is not None
+        conn = open_intent_registry_db_readonly(db_path)
+        try:
+            assert type(conn) is factory
+        finally:
+            conn.close()
     finally:
-        conn.close()
+        shutdown()

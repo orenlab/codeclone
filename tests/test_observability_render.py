@@ -463,6 +463,7 @@ def test_render_db_cost() -> None:
                     span_count=2,
                     total_queries=1306,
                     total_writes=0,
+                    total_rows=1306,
                     max_queries=1000,
                 ),
             ),

@@ -15,12 +15,13 @@ wrap work in ``operation`` / ``span``.
 from __future__ import annotations
 
 from .runtime import (
+    DB_COUNTER_VERSION,
     OperationHandle,
     SpanHandle,
     bind_root,
     bootstrap,
+    counting_connection_factory,
     current_operation_context,
-    instrument_db_connection,
     is_observability_enabled,
     operation,
     payload_capture_enabled,
@@ -32,12 +33,13 @@ from .runtime import (
 )
 
 __all__ = [
+    "DB_COUNTER_VERSION",
     "OperationHandle",
     "SpanHandle",
     "bind_root",
     "bootstrap",
+    "counting_connection_factory",
     "current_operation_context",
-    "instrument_db_connection",
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",

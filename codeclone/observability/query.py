@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..config.observability import resolve_observability_config
+from .runtime import DB_COUNTER_VERSION
 from .store.reader import build_trace_view, open_observability_store_readonly
 from .views import AggregatesView, OperationView, TraceView
 
@@ -158,6 +159,7 @@ def _db_cost(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
                 "calls": r.span_count,
                 "queries": r.total_queries,
                 "writes": r.total_writes,
+                "rows": r.total_rows,
                 "queries_per_call": per_call,
                 "verdict": "query_chatty" if per_call >= _DB_CHATTY_QPC else "ok",
             }
@@ -394,6 +396,7 @@ def _summary_body(trace: TraceView) -> dict[str, object]:
     agg = trace.aggregates
     body: dict[str, object] = {
         "operations": agg.operation_count,
+        "db_counter_version": DB_COUNTER_VERSION,
         "peak_rss_delta_mb": _round1(agg.max_rss_delta_mb),
         "peak_rss_mb": _round1(agg.max_peak_rss_mb),
         "context_pressure_tokens": agg.agent.response_tokens if agg.agent else 0,
