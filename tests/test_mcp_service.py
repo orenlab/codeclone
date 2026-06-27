@@ -2725,10 +2725,16 @@ def test_help_observability_topic_surfaces_query_tool() -> None:
     service = CodeCloneMCPService(history_limit=4)
     payload = service.get_help(topic="observability", detail="normal")
     assert payload["topic"] == "observability"
+    assert "Phase" not in str(payload["summary"])
     assert "query_platform_observability" in str(payload["recommended_tools"])
     text = str(payload["key_points"]).lower()
     assert "anti-inference" in text and "dev-only" in text
     assert "analysis_phase_cost" in text
+
+
+def _assert_text_mentions_all(text: str, expected: tuple[str, ...]) -> None:
+    missing = [snippet for snippet in expected if snippet not in text]
+    assert not missing
 
 
 def test_mcp_service_help_validates_topic_and_detail() -> None:
@@ -2740,8 +2746,17 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
         for point in cast("list[str]", baseline_help["key_points"])
     )
     change_control = service.get_help(topic="change_control", detail="normal")
-    assert "start_controlled_change" in str(change_control["key_points"])
-    assert "get_relevant_memory" in str(change_control["key_points"])
+    change_points = str(change_control["key_points"])
+    _assert_text_mentions_all(
+        change_points,
+        (
+            "start_controlled_change",
+            "get_relevant_memory",
+            "partial_enforce",
+            "context_governance.omitted",
+            "get_blast_artifact",
+        ),
+    )
     assert "start_controlled_change" in cast(
         "list[str]",
         change_control["recommended_tools"],
@@ -2755,6 +2770,24 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
     assert "after_run_required" in str(verification_profiles["key_points"])
     assert "CODECLONE_STRICT_FINISH" in str(
         service.get_help(topic="change_control")["key_points"]
+    )
+
+    implementation_help = service.get_help(
+        topic="implementation_context",
+        detail="normal",
+    )
+    implementation_points = str(implementation_help["key_points"])
+    _assert_text_mentions_all(
+        implementation_points,
+        (
+            "partial_enforce",
+            "context_governance.omitted",
+            "get_implementation_context_page",
+        ),
+    )
+    assert "get_implementation_context_page" in cast(
+        "list[str]",
+        implementation_help["recommended_tools"],
     )
 
     with pytest.raises(MCPServiceContractError, match="Invalid value for topic"):
@@ -2773,10 +2806,21 @@ def test_mcp_service_help_validates_topic_and_detail() -> None:
         memory_help["recommended_tools"],
     )
     memory_points = str(memory_help["key_points"])
-    assert "subject_count+subjects_truncated" in memory_points
-    assert "dominant_agent_facet" in memory_points
-    assert "never duplicated at the payload root" in memory_points
-    assert "Scores are lane-local" in memory_points
+    _assert_text_mentions_all(
+        memory_points,
+        (
+            "subject_count+subjects_truncated",
+            "dominant_agent_facet",
+            "never duplicated at the payload root",
+            "Scores are lane-local",
+            "partial_enforce",
+            "get_memory_projection_page",
+        ),
+    )
+    assert "get_memory_projection_page" in cast(
+        "list[str]",
+        memory_help["recommended_tools"],
+    )
 
 
 def _memory_sync_service_with_run(

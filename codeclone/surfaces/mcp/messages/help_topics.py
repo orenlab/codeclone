@@ -455,6 +455,17 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "patch_trail_detail summary|full on patch_trail (forensics only)."
             ),
             (
+                "Budgeted start responses use context_governance.mode="
+                "partial_enforce: control facts, scope, do_not_touch, and "
+                "edit_allowed stay inline; omitted blast lanes are listed in "
+                "context_governance.omitted."
+            ),
+            (
+                "When start emits a slim blast summary, fetch exact omitted "
+                "blast evidence with get_blast_artifact using the returned "
+                "blast_artifact_id and run_id."
+            ),
+            (
                 "Blocks finish: missing_evidence, foreign_dirty_overlap. "
                 "Out-of-scope dirt is advisory — may yield "
                 "accepted_with_external_changes."
@@ -577,6 +588,12 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "request and response projection."
             ),
             (
+                "compact and normal responses use context_governance.mode="
+                "partial_enforce: omitted facet lanes are disclosed in "
+                "context_governance.omitted and fetched exactly with "
+                "get_implementation_context_page."
+            ),
+            (
                 "Import, importer, and test-importer roles collapse into "
                 "related_modules entries with explicit relations. One global "
                 "budget bounds evidence and reports every omission."
@@ -599,6 +616,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         recommended_tools=(
             "analyze_repository",
             "get_implementation_context",
+            "get_implementation_context_page",
             "start_controlled_change",
         ),
         doc_links=(MCP_INTERFACE_DOC_LINK, MCP_GUIDE_DOC_LINK),
@@ -617,8 +635,8 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
     "observability": MCPHelpTopicSpec(
         summary=(
             "query_platform_observability: read-only, dev-only diagnostics over "
-            "CodeClone's OWN runtime telemetry (Phase 29). A sectioned slicer, "
-            "not a trace export API — for building CodeClone itself, never a "
+            "CodeClone's OWN runtime telemetry. A sectioned slicer, not a "
+            "trace export API — for building CodeClone itself, never a "
             "user-facing repository signal."
         ),
         key_points=(
@@ -698,6 +716,12 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
                 "duplicated at the payload root. Use full/get for drill-down."
             ),
             (
+                "Compact scoped get_relevant_memory uses "
+                "context_governance.mode=partial_enforce; omitted records, "
+                "trajectories, and experiences point to digest-bound "
+                "get_memory_projection_page cursors."
+            ),
+            (
                 "Semantic (off by default): enable sidecar, rebuild_semantic_index, "
                 "then search with semantic=true."
             ),
@@ -717,6 +741,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
         ),
         recommended_tools=(
             "get_relevant_memory",
+            "get_memory_projection_page",
             "query_engineering_memory",
             "manage_engineering_memory",
             "start_controlled_change",
