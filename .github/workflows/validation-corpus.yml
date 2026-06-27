@@ -1,0 +1,92 @@
+name: validation-corpus
+run-name: validation corpus • ${{ github.event_name }} • ${{ github.ref_name }}
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: Corpus tier
+        required: true
+        default: all
+        type: choice
+        options:
+          - smoke
+          - gates
+          - full
+          - all
+      corpus-ref:
+        description: codeclone-validation-corpus ref
+        required: true
+        default: main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validation-corpus-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validation-corpus:
+    name: corpus
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout CodeClone
+        uses: actions/checkout@v6.0.2
+
+      - name: Checkout validation corpus
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: orenlab/codeclone-validation-corpus
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.corpus-ref || 'main' }}
+          path: validation-corpus
+
+      - name: Set up Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install CodeClone from this checkout
+        run: uv sync --all-extras
+
+      - name: Install validation corpus dependencies
+        run: uv sync --project validation-corpus
+
+      - name: Resolve corpus tier
+        shell: bash
+        run: |
+          tier="all"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tier="${{ inputs.tier }}"
+          fi
+          echo "CORPUS_TIER=$tier" >> "$GITHUB_ENV"
+
+      - name: Run validation corpus
+        run: |
+          uv run --project validation-corpus python -m corpus_tools.cli \
+            --tier "$CORPUS_TIER" \
+            --codeclone-command "$GITHUB_WORKSPACE/.venv/bin/python -m codeclone.main" \
+            --work-root "$RUNNER_TEMP/codeclone-validation-corpus-work"
+
+      - name: Write summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## CodeClone validation corpus"
+            echo
+            echo "- Tier: \`${CORPUS_TIER:-unknown}\`"
+            echo "- Corpus: \`orenlab/codeclone-validation-corpus\`"
+            echo "- CodeClone source: current checkout"
+          } >> "$GITHUB_STEP_SUMMARY"

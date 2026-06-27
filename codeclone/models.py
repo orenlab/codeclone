@@ -152,6 +152,7 @@ RuntimeReachabilityFramework = Literal[
     "django",
     "fastapi",
     "flask",
+    "pydantic",
     "sqlalchemy",
     "starlette",
     "typer",

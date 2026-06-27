@@ -36,13 +36,16 @@ from ..primitives.escape import _escape_html
 __all__ = [
     "CHECK_CIRCLE_SVG",
     "INFO_CIRCLE_SVG",
+    "_chips_html",
     "_inline_empty",
     "_micro_badges",
     "_quality_badge_html",
     "_render_chain_flow",
+    "_score_bar_html",
     "_short_label",
     "_source_kind_badge_html",
     "_stat_card",
+    "_status_pill_html",
     "_tab_empty",
     "_tab_empty_info",
 ]
@@ -109,6 +112,81 @@ def _source_kind_badge_html(source_kind: str) -> str:
         f'<span class="source-kind-badge source-kind-{_escape_html(normalized)}">'
         f"{_escape_html(source_kind_label(normalized))}</span>"
     )
+
+
+_STATUS_PILL_CLASSES: dict[str, str] = {
+    "candidate": "status-pill--candidate",
+    "ranked_only": "status-pill--ranked",
+    "non_candidate": "status-pill--neutral",
+}
+
+
+def _status_pill_html(status: str) -> str:
+    """Render a candidate-status value as a coloured pill."""
+    key = status.strip().lower()
+    if not key:
+        return ""
+    cls = _STATUS_PILL_CLASSES.get(key, "status-pill--neutral")
+    return (
+        f'<span class="status-pill {cls}">{_escape_html(key.replace("_", " "))}</span>'
+    )
+
+
+def _score_bar_html(value: str) -> str:
+    """Render a 0..1 score as an indigo progress bar plus its rounded value."""
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return _escape_html(str(value))
+    pct = max(0, min(100, round(score * 100)))
+    strong = " score-bar--strong" if score >= 0.8 else ""
+    return (
+        f'<span class="score-bar{strong}">'
+        f'<span class="score-bar-track">'
+        f'<span class="score-bar-fill" style="width:{pct}%"></span></span>'
+        f'<span class="score-bar-val">{score:.2f}</span></span>'
+    )
+
+
+def _metric_meter_html(value: str, *, fraction: float) -> str:
+    """Render a numeric metric as its value plus a magnitude bar.
+
+    *fraction* (0..1) is the value's share of the column maximum; the bar fills
+    to that share and tints by band (low/mid/high) so table magnitudes read at a
+    glance without altering the underlying number.
+    """
+    text = str(value).strip()
+    try:
+        float(text)
+    except (TypeError, ValueError):
+        return _escape_html(text)
+    pct = max(0, min(100, round(fraction * 100)))
+    if fraction >= 0.66:
+        band = " metric-meter--high"
+    elif fraction >= 0.33:
+        band = " metric-meter--mid"
+    else:
+        band = ""
+    return (
+        f'<span class="metric-meter{band}">'
+        f'<span class="metric-meter-track">'
+        f'<span class="metric-meter-fill" style="width:{pct}%"></span></span>'
+        f'<span class="metric-meter-val">{_escape_html(text)}</span></span>'
+    )
+
+
+def _chips_html(text: str) -> str:
+    """Render a comma-separated string as a row of compact chips."""
+    parts = [part.strip() for part in str(text).split(",") if part.strip()]
+    return "".join(f'<span class="chip">{_escape_html(part)}</span>' for part in parts)
+
+
+def _code_chip_html(text: str) -> str:
+    """Render an identifier / glob value as a compact monospace code chip."""
+    value = str(text).strip()
+    if not value or value == "-":
+        return _escape_html(value)
+    return f'<code class="code-chip">{_escape_html(value)}</code>'
 
 
 _INLINE_EMPTY_ICONS: dict[str, str] = {
@@ -227,6 +305,8 @@ def _stat_card(
     label: str,
     value: object,
     *,
+    secondary: str = "",
+    subtext: str = "",
     detail: str = "",
     tip: str = "",
     value_tone: str = "",
@@ -239,6 +319,12 @@ def _stat_card(
     Always emits the same HTML structure using ``.meta-item`` /
     ``.meta-label`` / ``.meta-value`` so every stat card shares the
     exact same design code.
+
+    *secondary* — a muted suffix rendered inline after the main value
+    (for example ``"/ 28"`` to read as ``6 / 28``).
+
+    *subtext* — a small muted line under the value for plain context
+    (for example ``"full graph, not sampled"``).
 
     *value_tone* — semantic color for the main value:
       ``"good"`` → green (metric is clean), ``"bad"`` → red (metric has issues),
@@ -254,6 +340,14 @@ def _stat_card(
     elif tip:
         tip_html = f'<span class="kpi-help" data-tip="{_escape_html(tip)}">?</span>'
 
+    secondary_html = (
+        f'<span class="meta-value-sec">{_escape_html(secondary)}</span>'
+        if secondary
+        else ""
+    )
+    subtext_html = (
+        f'<div class="meta-subtext">{_escape_html(subtext)}</div>' if subtext else ""
+    )
     detail_html = ""
     if detail:
         detail_html = f'<div class="kpi-detail">{detail}</div>'
@@ -267,7 +361,8 @@ def _stat_card(
     return (
         f'<div class="{_escape_html(css_class)}">'
         f'<div class="meta-label">{_escape_html(label)}{tip_html}{delta_html}</div>'
-        f'<div class="meta-value{value_cls}">{_escape_html(str(value))}</div>'
-        f"{detail_html}"
+        f'<div class="meta-value{value_cls}">'
+        f"{_escape_html(str(value))}{secondary_html}</div>"
+        f"{subtext_html}{detail_html}"
         "</div>"
     )

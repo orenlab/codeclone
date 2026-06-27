@@ -96,6 +96,7 @@ def test_architecture_layer_violations() -> None:
                 "codeclone.report",
                 "codeclone.surfaces",
                 "codeclone.config",
+                "codeclone.observability",
             ),
         ),
         (

@@ -91,6 +91,14 @@ _TABS = """\
 
   tabs.forEach(t=>t.addEventListener('click',()=>activate(t.dataset.tab)));
 
+  // Cross-tab jump buttons (e.g. Overview launchpad -> Review)
+  $$('[data-goto-tab]').forEach(el=>{
+    el.addEventListener('click',()=>{
+      const id=el.dataset.gotoTab;
+      if(tabs.some(t=>t.dataset.tab===id)){activate(id);window.scrollTo(0,0)}
+    });
+  });
+
   // Keyboard: arrow left/right
   const tabList=$('[role="tablist"].main-tabs');
   if(tabList){
@@ -463,33 +471,51 @@ _SUGGESTIONS = """\
 
 _DEP_GRAPH = """\
 (function initDepGraph(){
-  const svg=$('.dep-graph-svg');
-  if(!svg)return;
-  const nodes=$$('.dep-node');
-  const labels=$$('.dep-label');
-  const edges=$$('.dep-edge');
+  $$('.dep-graph-svg').forEach(svg=>{
+    const q=s=>[...svg.querySelectorAll(s)];
+    const nodes=q('.block-node');
+    const labels=q('.block-node-label');
+    const rings=q('.block-node-ring');
+    const edges=q('.dep-edge');
+    if(!nodes.length)return;
 
-  function highlight(name){
-    nodes.forEach(n=>{n.style.fillOpacity=n.dataset.node===name?'1':'0.15'});
-    labels.forEach(l=>{l.style.fill=l.dataset.node===name?'var(--text-primary)':'var(--text-muted)';
-      l.style.fillOpacity=l.dataset.node===name?'1':'0.3'});
+    const adj={};
     edges.forEach(e=>{
-      const connected=e.dataset.source===name||e.dataset.target===name;
-      e.style.strokeOpacity=connected?'0.8':'0.05';
-      e.style.strokeWidth=connected?'2':'1';
+      const s=e.dataset.source,t=e.dataset.target;
+      e.dataset.baseWidth=e.getAttribute('stroke-width')||'1';
+      e.dataset.baseMarker=e.getAttribute('marker-end')||'';
+      (adj[s]=adj[s]||new Set()).add(t);
+      (adj[t]=adj[t]||new Set()).add(s);
     });
-  }
 
-  function reset(){
-    nodes.forEach(n=>{n.style.fillOpacity=''});
-    labels.forEach(l=>{l.style.fill='';l.style.fillOpacity=''});
-    edges.forEach(e=>{e.style.strokeOpacity='';e.style.strokeWidth=''});
-  }
+    function highlight(name){
+      const near=adj[name]||new Set();
+      const on=n=>n===name||near.has(n);
+      [...nodes,...labels,...rings].forEach(el=>{
+        el.style.opacity=on(el.dataset.node)?'1':'0.16';
+      });
+      edges.forEach(e=>{
+        const connected=e.dataset.source===name||e.dataset.target===name;
+        e.style.strokeOpacity=connected?'0.9':'0.06';
+        e.style.strokeWidth=connected?String(Number(e.dataset.baseWidth||1)+0.7):e.dataset.baseWidth;
+        e.setAttribute('marker-end',connected?e.dataset.baseMarker:'none');
+      });
+    }
 
-  [...nodes,...labels].forEach(el=>{
-    el.addEventListener('mouseenter',()=>highlight(el.dataset.node));
-    el.addEventListener('mouseleave',reset);
-    el.style.cursor='pointer';
+    function reset(){
+      [...nodes,...labels,...rings].forEach(el=>{el.style.opacity=''});
+      edges.forEach(e=>{
+        e.style.strokeOpacity='';
+        e.style.strokeWidth=e.dataset.baseWidth||'';
+        e.setAttribute('marker-end',e.dataset.baseMarker||'');
+      });
+    }
+
+    [...nodes,...labels].forEach(el=>{
+      el.addEventListener('mouseenter',()=>highlight(el.dataset.node));
+      el.addEventListener('mouseleave',reset);
+      el.style.cursor='pointer';
+    });
   });
 })();
 """
@@ -851,6 +877,78 @@ _TOOLTIPS = """\
 """
 
 # ---------------------------------------------------------------------------
+# Review hub: per-finding reviewed state (localStorage) + progress + filters
+# ---------------------------------------------------------------------------
+
+_REVIEW = """\
+(function initReview(){
+  const panel=$('[data-review-panel]');
+  if(!panel)return;
+  const KEY='codeclone-reviewed';
+  function load(){try{return new Set(JSON.parse(localStorage.getItem(KEY)||'[]'))}catch(e){return new Set()}}
+  function save(s){try{localStorage.setItem(KEY,JSON.stringify([...s]))}catch(e){}}
+  const reviewed=load();
+  const cards=$$('[data-review-card]');
+  const total=cards.length;
+  const bar=$('[data-review-progress-bar]');
+  const label=$('[data-review-progress-label]');
+  function refresh(){
+    let done=0;
+    cards.forEach(c=>{
+      const on=reviewed.has(c.dataset.findingId);
+      c.classList.toggle('is-reviewed',on);
+      const btn=c.querySelector('[data-review-toggle]');
+      if(btn)btn.setAttribute('aria-pressed',on?'true':'false');
+      if(on)done++;
+    });
+    if(bar)bar.style.width=(total?Math.round(done/total*100):0)+'%';
+    if(label)label.textContent=done+' / '+total;
+  }
+  panel.addEventListener('click',function(e){
+    const btn=e.target.closest('[data-review-toggle]');
+    if(!btn)return;
+    const card=btn.closest('[data-review-card]');
+    if(!card)return;
+    const id=card.dataset.findingId;
+    if(reviewed.has(id))reviewed.delete(id);else reviewed.add(id);
+    save(reviewed);refresh();
+  });
+  const chips=$$('[data-filter-dim]');
+  const countLabel=$('[data-review-count]');
+  const resetBtn=$('[data-filter-reset]');
+  function applyFilters(){
+    const active={};
+    chips.forEach(ch=>{
+      if(ch.getAttribute('aria-pressed')==='true'){
+        (active[ch.dataset.filterDim]=active[ch.dataset.filterDim]||new Set())
+          .add(ch.dataset.filterValue);
+      }
+    });
+    const dims=Object.keys(active);
+    let shown=0;
+    cards.forEach(c=>{
+      const hide=dims.some(dim=>!active[dim].has(c.dataset[dim]));
+      c.setAttribute('data-filter-hidden',hide?'true':'false');
+      if(!hide)shown++;
+    });
+    if(countLabel)countLabel.textContent=shown+' shown';
+    if(resetBtn)resetBtn.hidden=dims.length===0;
+  }
+  chips.forEach(ch=>ch.addEventListener('click',function(){
+    ch.setAttribute('aria-pressed',
+      ch.getAttribute('aria-pressed')==='true'?'false':'true');
+    applyFilters();
+  }));
+  if(resetBtn)resetBtn.addEventListener('click',function(){
+    chips.forEach(ch=>ch.setAttribute('aria-pressed','false'));
+    applyFilters();
+  });
+  applyFilters();
+  refresh();
+})();
+"""
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -865,6 +963,7 @@ _ALL_MODULES = (
     _MODALS,
     _SUGGESTIONS,
     _DEP_GRAPH,
+    _REVIEW,
     _META_PANEL,
     _EXPORT,
     _CMD_PALETTE,

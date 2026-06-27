@@ -393,6 +393,7 @@ def _as_runtime_reachability_framework(value: object) -> str | None:
             | "dependency_injector"
             | "django"
             | "fastapi"
+            | "pydantic"
             | "sqlalchemy"
             | "starlette"
             | "typer"

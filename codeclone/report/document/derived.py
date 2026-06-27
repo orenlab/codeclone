@@ -7,8 +7,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping, Sequence
+from typing import TYPE_CHECKING, Final
 
 from ...domain.findings import (
     CATEGORY_COHESION,
@@ -45,6 +45,8 @@ from ...findings.ids import (
     design_group_id,
     structural_group_id,
 )
+from ...metrics.dependencies import select_dependency_graph_nodes
+from ...metrics.overloaded_modules import _score_quantile
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -396,11 +398,12 @@ def _suggestion_finding_id(suggestion: Suggestion) -> str:
     )
 
 
-def _build_derived_suggestions(
+def _sorted_suggestions(
     suggestions: Sequence[Suggestion] | None,
-) -> list[dict[str, object]]:
-    suggestion_rows = list(suggestions or ())
-    suggestion_rows.sort(
+) -> list[Suggestion]:
+    """Deterministic priority order shared by every suggestion-derived view."""
+    rows = list(suggestions or ())
+    rows.sort(
         key=lambda suggestion: (
             -suggestion.priority,
             SEVERITY_ORDER.get(suggestion.severity, 9),
@@ -408,6 +411,12 @@ def _build_derived_suggestions(
             _suggestion_finding_id(suggestion),
         )
     )
+    return rows
+
+
+def _build_derived_suggestions(
+    suggestions: Sequence[Suggestion] | None,
+) -> list[dict[str, object]]:
     return [
         {
             "id": f"suggestion:{_suggestion_finding_id(suggestion)}",
@@ -421,5 +430,687 @@ def _build_derived_suggestions(
                 "steps": list(suggestion.steps),
             },
         }
-        for suggestion in suggestion_rows
+        for suggestion in _sorted_suggestions(suggestions)
     ]
+
+
+_REVIEW_QUEUE_SCHEMA_VERSION: Final = "2"
+_REVIEW_SEVERITIES: Final = ("critical", "warning", "info")
+_REVIEW_FAMILIES: Final = ("clones", "structural", "dead_code", "design")
+_REVIEW_FAMILY_BY_FINDING: Final = {
+    FAMILY_CLONE: "clones",
+    FAMILY_STRUCTURAL: "structural",
+    FAMILY_DEAD_CODE: "dead_code",
+    FAMILY_DESIGN: "design",
+}
+_REVIEW_FAMILY_BY_SUGGESTION: Final = {
+    FAMILY_CLONES: "clones",
+    FAMILY_STRUCTURAL: "structural",
+}
+_CLONE_REVIEW_TITLES: Final = {
+    CLONE_KIND_FUNCTION: "Function clone group",
+    CLONE_KIND_BLOCK: "Block clone group",
+    CLONE_KIND_SEGMENT: "Segment clone group",
+}
+
+
+def _humanize(value: str) -> str:
+    text = value.replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else text
+
+
+def _flatten_finding_groups(
+    findings: Mapping[str, object],
+) -> list[Mapping[str, object]]:
+    """Canonical findings across families, flattened (mirrors overview)."""
+    groups = _as_mapping(findings.get("groups"))
+    clones = _as_mapping(groups.get(FAMILY_CLONES))
+    flat: list[Mapping[str, object]] = [
+        _as_mapping(group)
+        for key in ("functions", "blocks", "segments")
+        for group in _as_sequence(clones.get(key))
+    ]
+    for family_key in (FAMILY_STRUCTURAL, FAMILY_DEAD_CODE, "design"):
+        flat.extend(
+            _as_mapping(group)
+            for group in _as_sequence(_as_mapping(groups.get(family_key)).get("groups"))
+        )
+    return flat
+
+
+def _finding_first_item(group: Mapping[str, object]) -> Mapping[str, object]:
+    items = _as_sequence(group.get("items"))
+    return _as_mapping(items[0]) if items else {}
+
+
+def _finding_review_title(group: Mapping[str, object]) -> str:
+    family = str(group.get("family"))
+    category = str(group.get("category"))
+    qualname = str(_finding_first_item(group).get("qualname", "")).strip()
+    if family == FAMILY_CLONE:
+        base = _CLONE_REVIEW_TITLES.get(category, "Clone group")
+        return f"{base} ({_as_int(group.get('count'))} occurrences)"
+    if family == FAMILY_DEAD_CODE:
+        return f"Unused {category}: {qualname}" if qualname else f"Unused {category}"
+    if family == FAMILY_DESIGN:
+        return f"{_humanize(category)}: {qualname}" if qualname else _humanize(category)
+    return _humanize(category)
+
+
+def _finding_review_location(group: Mapping[str, object]) -> str:
+    first = _finding_first_item(group)
+    # `path` is "" for absolute paths, so we never surface an absolute path —
+    # we fall back to the qualified name instead.
+    path = _safe_relative_path(first)
+    qualname = str(first.get("qualname", "")).strip()
+    line = _as_int(first.get("start_line"))
+    base = (f"{path}:{line}" if line else path) if path else qualname
+    extra = _as_int(group.get("count")) - 1
+    if extra > 0:
+        return f"{base} +{extra} more" if base else f"{extra + 1} locations"
+    return base
+
+
+def _finding_review_summary(group: Mapping[str, object]) -> str:
+    count = _as_int(group.get("count"))
+    spread = _as_mapping(group.get("spread"))
+    files = _as_int(spread.get("files"))
+    functions = _as_int(spread.get("functions"))
+    scope = str(_as_mapping(group.get("source_scope")).get("dominant_kind", "")).strip()
+    parts = [f"{count} occurrence{'s' if count != 1 else ''}"]
+    if functions or files:
+        parts.append(
+            f"{functions} function{'s' if functions != 1 else ''}"
+            f" / {files} file{'s' if files != 1 else ''}"
+        )
+    if scope:
+        parts.append(scope)
+    return " · ".join(parts)
+
+
+def _safe_relative_path(item: Mapping[str, object]) -> str:
+    """Relative path only — never surface an absolute path in the payload."""
+    path = str(item.get("relative_path", "")).strip()
+    return path if path and not _is_absolute_path(path) else ""
+
+
+def _finding_representative_rows(
+    group: Mapping[str, object],
+) -> list[dict[str, object]]:
+    rows = [
+        {
+            "relative_path": _safe_relative_path(item),
+            "start_line": _as_int(item.get("start_line")),
+            "end_line": _as_int(item.get("end_line")),
+            "qualname": str(item.get("qualname", "")),
+            "source_kind": str(item.get("source_kind", "")),
+        }
+        for item in (_as_mapping(row) for row in _as_sequence(group.get("items")))
+    ]
+    rows.sort(
+        key=lambda row: (
+            str(row["relative_path"]),
+            _as_int(row["start_line"]),
+            str(row["qualname"]),
+        )
+    )
+    return rows[:3]
+
+
+def _suggestion_review_fields(suggestion: Suggestion) -> dict[str, object]:
+    """Remediation fields shared by every suggestion-backed review item."""
+    return {
+        "source_kind": suggestion.source_kind,
+        "title": suggestion.title,
+        "summary": suggestion.fact_summary,
+        "location": suggestion.location_label or suggestion.location,
+        "representative_locations": _representative_location_rows(suggestion),
+        "effort": suggestion.effort,
+        "steps": list(suggestion.steps),
+        "has_action": True,
+    }
+
+
+def _finding_identity(group: Mapping[str, object]) -> dict[str, object]:
+    finding_id = str(group.get("id"))
+    return {
+        "id": finding_id,
+        "finding_id": finding_id,
+        "family": _REVIEW_FAMILY_BY_FINDING.get(str(group.get("family")), "design"),
+        "category": str(group.get("category", "")),
+        "severity": str(group.get("severity", SEVERITY_INFO)),
+        "priority": _as_float(group.get("priority")),
+        "novelty": str(group.get("novelty") or "known"),
+    }
+
+
+def _finding_review_item(
+    group: Mapping[str, object],
+    suggestion: Suggestion | None,
+) -> dict[str, object]:
+    item = _finding_identity(group)
+    if suggestion is not None:
+        item.update(_suggestion_review_fields(suggestion))
+    else:
+        item.update(
+            {
+                "source_kind": str(
+                    _as_mapping(group.get("source_scope")).get("dominant_kind", "")
+                ),
+                "title": _finding_review_title(group),
+                "summary": _finding_review_summary(group),
+                "location": _finding_review_location(group),
+                "representative_locations": _finding_representative_rows(group),
+                "effort": "",
+                "steps": [],
+                "has_action": False,
+            }
+        )
+    return item
+
+
+def _suggestion_review_item(suggestion: Suggestion) -> dict[str, object]:
+    finding_id = _suggestion_finding_id(suggestion)
+    family = _REVIEW_FAMILY_BY_SUGGESTION.get(suggestion.finding_family) or (
+        "dead_code" if suggestion.category == CATEGORY_DEAD_CODE else "design"
+    )
+    return {
+        "id": finding_id,
+        "finding_id": finding_id,
+        "family": family,
+        "category": suggestion.category,
+        "severity": suggestion.severity,
+        "priority": suggestion.priority,
+        "novelty": "known",
+        **_suggestion_review_fields(suggestion),
+    }
+
+
+def _review_sort_key(item: Mapping[str, object]) -> tuple[float, int, str, str]:
+    return (
+        -_as_float(item.get("priority")),
+        SEVERITY_ORDER.get(str(item.get("severity")), 9),
+        str(item.get("title")),
+        str(item.get("finding_id")),
+    )
+
+
+def _dedup_append(
+    items: list[dict[str, object]],
+    seen: set[str],
+    finding_id: str,
+    item: dict[str, object],
+) -> None:
+    """Append a review item once per finding id (first writer wins)."""
+    if finding_id in seen:
+        return
+    seen.add(finding_id)
+    items.append(item)
+
+
+def _review_summary(items: Sequence[Mapping[str, object]]) -> dict[str, object]:
+    by_severity = dict.fromkeys(_REVIEW_SEVERITIES, 0)
+    by_family = dict.fromkeys(_REVIEW_FAMILIES, 0)
+    by_novelty = {"new": 0, "known": 0}
+    actionable = 0
+    for item in items:
+        severity = str(item.get("severity"))
+        if severity in by_severity:
+            by_severity[severity] += 1
+        family = str(item.get("family"))
+        by_family[family] = by_family.get(family, 0) + 1
+        by_novelty["new" if str(item.get("novelty")) == "new" else "known"] += 1
+        if item.get("has_action"):
+            actionable += 1
+    return {
+        "total": len(items),
+        "reviewed": 0,
+        "actionable": actionable,
+        "by_severity": by_severity,
+        "by_family": {key: count for key, count in sorted(by_family.items()) if count},
+        "by_novelty": by_novelty,
+        "top_priority": max(
+            (_as_float(item.get("priority")) for item in items), default=0.0
+        ),
+    }
+
+
+def _build_derived_review_queue(
+    findings: Mapping[str, object],
+    suggestions: Sequence[Suggestion] | None,
+) -> dict[str, object]:
+    """Prioritised cross-family review queue projected over canonical findings.
+
+    Every finding in ``findings.groups`` (clones, structural, dead-code, design)
+    becomes one review item, enriched with the matching suggestion's remediation
+    steps when one exists (the suggestion wins on title/summary/location).
+    Findings without a suggestion carry ``has_action=False``. The summary carries
+    the severity/family/novelty counts the review hub needs; ``reviewed`` starts
+    at 0 — the HTML tracks per-finding review state client-side.
+    """
+    suggestion_by_id: dict[str, Suggestion] = {}
+    for suggestion in suggestions or ():
+        suggestion_by_id.setdefault(_suggestion_finding_id(suggestion), suggestion)
+
+    items: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for group in _flatten_finding_groups(findings):
+        finding_id = str(group.get("id"))
+        _dedup_append(
+            items,
+            seen,
+            finding_id,
+            _finding_review_item(group, suggestion_by_id.get(finding_id)),
+        )
+    for finding_id, suggestion in suggestion_by_id.items():
+        _dedup_append(items, seen, finding_id, _suggestion_review_item(suggestion))
+
+    items.sort(key=_review_sort_key)
+    return {
+        "schema_version": _REVIEW_QUEUE_SCHEMA_VERSION,
+        "scope": "report_only",
+        "summary": _review_summary(items),
+        "items": items,
+    }
+
+
+_MODULE_MAP_SCHEMA_VERSION: Final = "1"
+_MODULE_MAP_MAX_PACKAGE_NODES: Final = 28
+_MODULE_MAP_MAX_MODULE_NODES: Final = 40
+_MODULE_MAP_MAX_EDGES: Final = 120
+_MODULE_MAP_UNWIND_CANDIDATE_CAP: Final = 25
+_MODULE_MAP_OVERMERGE_MODULE_FLOOR: Final = 80
+_MODULE_MAP_MONOLITH_PACKAGE_CEILING: Final = 2
+_MODULE_MAP_OVERMERGE_PACKAGE_CEILING: Final = 3
+_MODULE_MAP_CANDIDATE: Final = "candidate"
+_MODULE_MAP_RANKED_ONLY: Final = "ranked_only"
+_MODULE_MAP_NON_CANDIDATE: Final = "non_candidate"
+_MODULE_MAP_SEED_POLICY: Final = "cycles_then_chains_then_degree"
+
+
+def _module_prefix(module: str, depth: int) -> str:
+    parts = module.split(".")
+    if len(parts) <= depth:
+        return module
+    return ".".join(parts[:depth])
+
+
+def _package_node_id(depth: int) -> Callable[[str], str]:
+    def _to_package(module: str) -> str:
+        return _module_prefix(module, depth)
+
+    return _to_package
+
+
+def _module_edges_from_items(edge_items: Sequence[object]) -> list[tuple[str, str]]:
+    edges: list[tuple[str, str]] = []
+    for item in edge_items:
+        mapping = _as_mapping(item)
+        source = str(mapping.get("source", "")).strip()
+        target = str(mapping.get("target", "")).strip()
+        if source and target:
+            edges.append((source, target))
+    return edges
+
+
+def _string_paths(raw: Sequence[object]) -> list[list[str]]:
+    return [[str(node) for node in _as_sequence(path)] for path in raw]
+
+
+def _module_map_unavailable_shell(reason: str) -> dict[str, object]:
+    def _empty_truncation() -> dict[str, object]:
+        return {
+            "truncated": False,
+            "node_universe_count": 0,
+            "node_shown_count": 0,
+            "edge_universe_count": 0,
+            "edge_shown_count": 0,
+            "seed_policy": _MODULE_MAP_SEED_POLICY,
+        }
+
+    return {
+        "schema_version": _MODULE_MAP_SCHEMA_VERSION,
+        "scope": "report_only",
+        "default_zoom": "packages",
+        "summary": {
+            "available": False,
+            "reason": reason,
+            "module_count": 0,
+            "package_count_depth2": 0,
+            "edge_count": 0,
+            "unwind_candidate_count": 0,
+            "overloaded_candidate_count": 0,
+            "overloaded_population_status": "limited",
+        },
+        "graph_packages": {
+            "zoom": "packages",
+            "package_depth": None,
+            "truncation": _empty_truncation(),
+            "nodes": [],
+            "edges": [],
+        },
+        "graph_modules": {
+            "zoom": "modules",
+            "package_depth": None,
+            "truncation": _empty_truncation(),
+            "nodes": [],
+            "edges": [],
+        },
+        "unwind_candidates": [],
+    }
+
+
+def _module_map_zoom_decision(
+    modules: Sequence[str], module_count: int
+) -> tuple[str, int]:
+    if module_count <= _MODULE_MAP_MAX_MODULE_NODES:
+        return "modules", 2
+    p1 = len({_module_prefix(module, 1) for module in modules})
+    p2 = len({_module_prefix(module, 2) for module in modules})
+    if p1 <= _MODULE_MAP_MONOLITH_PACKAGE_CEILING:
+        return "packages", 2
+    if (
+        p2 <= _MODULE_MAP_OVERMERGE_PACKAGE_CEILING
+        and module_count > _MODULE_MAP_OVERMERGE_MODULE_FLOOR
+    ):
+        return "packages", 3
+    if p2 <= _MODULE_MAP_MAX_PACKAGE_NODES:
+        return "packages", 2
+    if p1 <= _MODULE_MAP_MAX_PACKAGE_NODES:
+        return "packages", 1
+    return "packages", 2
+
+
+def _aggregate_node_overlay(
+    members: Sequence[str],
+    *,
+    overloaded_by_module: Mapping[str, Mapping[str, object]],
+    cycle_modules: frozenset[str],
+) -> dict[str, object]:
+    scores: list[float] = []
+    statuses: set[str] = set()
+    reasons: set[str] = set()
+    source_kinds: set[str] = set()
+    fan_in = 0
+    fan_out = 0
+    in_cycle = False
+    for module in members:
+        item = overloaded_by_module.get(module, {})
+        scores.append(_as_float(item.get("score")))
+        statuses.add(str(item.get("candidate_status", _MODULE_MAP_NON_CANDIDATE)))
+        reasons.update(
+            str(reason) for reason in _as_sequence(item.get("candidate_reasons"))
+        )
+        source_kinds.add(str(item.get("source_kind", "")))
+        fan_in += _as_int(item.get("fan_in"))
+        fan_out += _as_int(item.get("fan_out"))
+        in_cycle = in_cycle or module in cycle_modules
+    if _MODULE_MAP_CANDIDATE in statuses:
+        candidate_status = _MODULE_MAP_CANDIDATE
+    elif _MODULE_MAP_RANKED_ONLY in statuses:
+        candidate_status = _MODULE_MAP_RANKED_ONLY
+    else:
+        candidate_status = _MODULE_MAP_NON_CANDIDATE
+    return {
+        "fan_in": fan_in,
+        "fan_out": fan_out,
+        "source_kinds": sorted(source_kinds),
+        "in_cycle": in_cycle,
+        "overloaded": {
+            "score": max(scores) if scores else 0.0,
+            "candidate_status": candidate_status,
+            "candidate_reasons": sorted(reasons),
+        },
+    }
+
+
+def _module_map_node(
+    node_id: str,
+    *,
+    package_depth: int | None,
+    overloaded_by_module: Mapping[str, Mapping[str, object]],
+    cycle_modules: frozenset[str],
+) -> dict[str, object]:
+    if package_depth is not None:
+        members = sorted(
+            module
+            for module in overloaded_by_module
+            if _module_prefix(module, package_depth) == node_id
+        )
+        overlay = _aggregate_node_overlay(
+            members,
+            overloaded_by_module=overloaded_by_module,
+            cycle_modules=cycle_modules,
+        )
+        fan_in = _as_int(overlay["fan_in"])
+        fan_out = _as_int(overlay["fan_out"])
+        source_kinds: object = overlay["source_kinds"]
+        in_cycle = bool(overlay["in_cycle"])
+        overloaded: object = overlay["overloaded"]
+    else:
+        item = overloaded_by_module.get(node_id, {})
+        fan_in = _as_int(item.get("fan_in"))
+        fan_out = _as_int(item.get("fan_out"))
+        source_kinds = sorted({str(item.get("source_kind", ""))}) if item else []
+        in_cycle = node_id in cycle_modules
+        overloaded = {
+            "score": _as_float(item.get("score")),
+            "candidate_status": str(
+                item.get("candidate_status", _MODULE_MAP_NON_CANDIDATE)
+            ),
+            "candidate_reasons": sorted(
+                str(reason) for reason in _as_sequence(item.get("candidate_reasons"))
+            ),
+        }
+    return {
+        "id": node_id,
+        "label": node_id,
+        "fan_in": fan_in,
+        "fan_out": fan_out,
+        "total_degree": fan_in + fan_out,
+        "source_kinds": source_kinds,
+        "in_cycle": in_cycle,
+        "overloaded": overloaded,
+    }
+
+
+def _build_module_graph_view(
+    module_edges: Sequence[tuple[str, str]],
+    *,
+    zoom: str,
+    package_depth: int | None,
+    dep_cycles: Sequence[Sequence[str]],
+    longest_chains: Sequence[Sequence[str]],
+    max_nodes: int,
+    overloaded_by_module: Mapping[str, Mapping[str, object]],
+    cycle_modules: frozenset[str],
+) -> dict[str, object]:
+    weights: Counter[tuple[str, str]] = Counter()
+    node_id_fn: Callable[[str], str] | None
+    if package_depth is not None:
+        node_id_fn = _package_node_id(package_depth)
+        for source, target in module_edges:
+            edge = (
+                _module_prefix(source, package_depth),
+                _module_prefix(target, package_depth),
+            )
+            if edge[0] != edge[1]:
+                weights[edge] += 1
+    else:
+        node_id_fn = None
+        for source, target in module_edges:
+            if source != target:
+                weights[(source, target)] += 1
+    nodes, sampled_edges, truncation = select_dependency_graph_nodes(
+        sorted(weights),
+        dep_cycles=dep_cycles,
+        longest_chains=longest_chains,
+        max_nodes=max_nodes,
+        max_edges=_MODULE_MAP_MAX_EDGES,
+        node_id_fn=node_id_fn,
+    )
+    return {
+        "zoom": zoom,
+        "package_depth": package_depth,
+        "truncation": truncation,
+        "nodes": [
+            _module_map_node(
+                node_id,
+                package_depth=package_depth,
+                overloaded_by_module=overloaded_by_module,
+                cycle_modules=cycle_modules,
+            )
+            for node_id in nodes
+        ],
+        "edges": [
+            {"source": source, "target": target, "weight": weights[(source, target)]}
+            for source, target in sampled_edges
+        ],
+    }
+
+
+def _unwind_signals(
+    item: Mapping[str, object],
+    *,
+    chain_modules: frozenset[str],
+    p90_fan_in: float,
+) -> list[str]:
+    reasons = {str(reason) for reason in _as_sequence(item.get("candidate_reasons"))}
+    fan_in = _as_int(item.get("fan_in"))
+    fan_out = _as_int(item.get("fan_out"))
+    instability = _as_float(item.get("instability"))
+    signals: list[str] = []
+    if "dependency_pressure" in reasons:
+        signals.append("dependency_pressure")
+    if "hub_like_shape" in reasons:
+        signals.append("hub_like_shape")
+    if "repeated_import_pressure" in reasons:
+        signals.append("repeated_import_pressure")
+    if str(item.get("module")) in chain_modules:
+        signals.append("chain_bottleneck")
+    if instability >= 0.75 and fan_out >= 3:
+        signals.append("high_instability")
+    if fan_in >= p90_fan_in and fan_in > 2 * fan_out + 1:
+        signals.append("central_sink")
+    return signals
+
+
+def _module_map_unwind_candidates(
+    overloaded_items: Sequence[Mapping[str, object]],
+    *,
+    longest_chains: Sequence[Sequence[str]],
+) -> list[dict[str, object]]:
+    chain_modules = frozenset(str(node) for chain in longest_chains for node in chain)
+    fan_in_sorted = sorted(_as_int(item.get("fan_in")) for item in overloaded_items)
+    p90_fan_in = (
+        _score_quantile([float(value) for value in fan_in_sorted], 0.9)
+        if fan_in_sorted
+        else 0.0
+    )
+    rows: list[dict[str, object]] = []
+    for item in overloaded_items:
+        signals = _unwind_signals(
+            item, chain_modules=chain_modules, p90_fan_in=p90_fan_in
+        )
+        candidate_status = str(item.get("candidate_status", _MODULE_MAP_NON_CANDIDATE))
+        emit = bool(signals) and (
+            candidate_status == _MODULE_MAP_CANDIDATE
+            or "chain_bottleneck" in signals
+            or "high_instability" in signals
+            or "central_sink" in signals
+        )
+        if not emit:
+            continue
+        rows.append(
+            {
+                "module": str(item.get("module")),
+                "filepath": str(item.get("filepath", "")),
+                "source_kind": str(item.get("source_kind", "")),
+                "fan_in": _as_int(item.get("fan_in")),
+                "fan_out": _as_int(item.get("fan_out")),
+                "score": _as_float(item.get("score")),
+                "dependency_score": _as_float(item.get("dependency_score")),
+                "candidate_status": candidate_status,
+                "signals": signals,
+            }
+        )
+    rows.sort(
+        key=lambda row: (
+            -len(_as_sequence(row["signals"])),
+            -_as_float(row["dependency_score"]),
+            -_as_int(row["fan_in"]),
+            -_as_int(row["fan_out"]),
+            str(row["module"]),
+        )
+    )
+    return rows[:_MODULE_MAP_UNWIND_CANDIDATE_CAP]
+
+
+def _build_derived_module_map(
+    metrics_payload: Mapping[str, object],
+) -> dict[str, object]:
+    families = _as_mapping(metrics_payload.get("families"))
+    dependencies = _as_mapping(families.get("dependencies"))
+    module_edges = _module_edges_from_items(_as_sequence(dependencies.get("items")))
+    if not dependencies or not module_edges:
+        return _module_map_unavailable_shell("dependencies_skipped")
+    modules = sorted({node for edge in module_edges for node in edge})
+    module_count = len(modules)
+    dep_cycles = _string_paths(_as_sequence(dependencies.get("cycles")))
+    longest_chains = _string_paths(_as_sequence(dependencies.get("longest_chains")))
+    cycle_modules = frozenset(node for cycle in dep_cycles for node in cycle)
+    overloaded = _as_mapping(families.get("overloaded_modules"))
+    overloaded_items = [
+        _as_mapping(item) for item in _as_sequence(overloaded.get("items"))
+    ]
+    overloaded_summary = _as_mapping(overloaded.get("summary"))
+    population_status = str(overloaded_summary.get("population_status") or "ok")
+    overloaded_by_module: dict[str, Mapping[str, object]] = {
+        str(item.get("module")): item for item in overloaded_items
+    }
+    zoom, package_depth = _module_map_zoom_decision(modules, module_count)
+    unwind = _module_map_unwind_candidates(
+        overloaded_items, longest_chains=longest_chains
+    )
+    overloaded_candidate_count = sum(
+        1
+        for item in overloaded_items
+        if str(item.get("candidate_status")) == _MODULE_MAP_CANDIDATE
+    )
+    return {
+        "schema_version": _MODULE_MAP_SCHEMA_VERSION,
+        "scope": "report_only",
+        "default_zoom": zoom,
+        "summary": {
+            "available": True,
+            "module_count": module_count,
+            "package_count_depth2": len(
+                {_module_prefix(module, 2) for module in modules}
+            ),
+            "edge_count": len(set(module_edges)),
+            "unwind_candidate_count": len(unwind),
+            "overloaded_candidate_count": overloaded_candidate_count,
+            "overloaded_population_status": population_status,
+        },
+        "graph_packages": _build_module_graph_view(
+            module_edges,
+            zoom="packages",
+            package_depth=package_depth,
+            dep_cycles=dep_cycles,
+            longest_chains=longest_chains,
+            max_nodes=_MODULE_MAP_MAX_PACKAGE_NODES,
+            overloaded_by_module=overloaded_by_module,
+            cycle_modules=cycle_modules,
+        ),
+        "graph_modules": _build_module_graph_view(
+            module_edges,
+            zoom="modules",
+            package_depth=None,
+            dep_cycles=dep_cycles,
+            longest_chains=longest_chains,
+            max_nodes=_MODULE_MAP_MAX_MODULE_NODES,
+            overloaded_by_module=overloaded_by_module,
+            cycle_modules=cycle_modules,
+        ),
+        "unwind_candidates": unwind,
+    }

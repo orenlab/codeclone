@@ -146,12 +146,17 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         "get_run_summary",
         "get_production_triage",
         "get_blast_radius",
+        "get_blast_artifact",
         "get_implementation_context",
+        "get_implementation_context_page",
         "get_relevant_memory",
+        "get_memory_projection_page",
         "query_engineering_memory",
         "manage_engineering_memory",
         "check_patch_contract",
         "create_review_receipt",
+        "get_review_receipt",
+        "get_patch_trail",
         "validate_review_claims",
         "evaluate_gates",
         "get_report_section",
@@ -187,11 +192,16 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
                 "get_run_summary",
                 "get_production_triage",
                 "get_blast_radius",
+                "get_blast_artifact",
                 "get_implementation_context",
+                "get_implementation_context_page",
                 "get_relevant_memory",
+                "get_memory_projection_page",
                 "query_engineering_memory",
                 "check_patch_contract",
                 "create_review_receipt",
+                "get_review_receipt",
+                "get_patch_trail",
                 "validate_review_claims",
                 "evaluate_gates",
                 "help",
@@ -231,10 +241,18 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
     )
     assert "structural risk boundary" in str(tools["get_blast_radius"].description)
     assert "review-only context" in str(tools["get_blast_radius"].description)
+    assert "durably stored start-time blast artifact" in str(
+        tools["get_blast_artifact"].description
+    )
+    assert "never re-derived" in str(tools["get_blast_artifact"].description)
     assert "bounded implementation context" in str(
         tools["get_implementation_context"].description
     )
     assert "without re-analysis" in str(tools["get_implementation_context"].description)
+    assert "session-local" in str(tools["get_implementation_context_page"].description)
+    assert "never recomputes" in str(
+        tools["get_implementation_context_page"].description
+    )
     assert "mode='budget'" in str(tools["check_patch_contract"].description)
     assert "optional claims" in str(tools["finish_controlled_change"].description)
     assert "auditable review receipt" in str(tools["create_review_receipt"].description)
@@ -262,7 +280,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["list_hotspots"].description
     )
     assert "Prefer format='markdown'" in str(tools["generate_pr_summary"].description)
-    assert "over all unless necessary" in str(tools["get_report_section"].description)
+    assert "section=all" in str(tools["get_report_section"].description)
     analyze_repository_schema = cast(
         "dict[str, object]",
         tools["analyze_repository"].inputSchema,
@@ -478,6 +496,24 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
         "dict[str, object]",
         implementation_context["analysis"],
     )
+    context_analysis = cast("dict[str, object]", implementation_context["analysis"])
+    context_page = _structured_tool_result(
+        asyncio.run(
+            server.call_tool(
+                "get_implementation_context_page",
+                {
+                    "root": abs_root,
+                    "run_id": run_id,
+                    "context_projection_digest": str(
+                        context_analysis["context_projection_digest"]
+                    ),
+                    "facet": "module_role",
+                },
+            )
+        )
+    )
+    assert context_page["status"] == "ok"
+    assert context_page["facet"] == "module_role"
 
     change_intent = _structured_tool_result(
         asyncio.run(
@@ -775,15 +811,14 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert claim_guard["valid"] is True
     assert claim_guard["citations_found"] == 1
     assert "## CodeClone Agent Review Receipt" in str(receipt["content"])
-    receipt_payload = cast("dict[str, object]", receipt["receipt"])
-    assert cast("dict[str, object]", receipt_payload["scope"])["intent_id"] == (
-        intent_id
-    )
+    # 34.3 dedup: the duplicate nested typed receipt is omitted by default and is
+    # reachable via the get_review_receipt drill-down pointer.
+    assert "receipt" not in receipt
+    retrieval = cast("dict[str, object]", receipt["receipt_retrieval"])
+    assert retrieval["tool"] == "get_review_receipt"
     assert (
-        cast("dict[str, object]", receipt_payload["reviewed_evidence"])[
-            "reviewed_count"
-        ]
-        == 1
+        retrieval["receipt_digest"]
+        == cast("dict[str, object]", receipt["receipt_digest"])["value"]
     )
 
     run_summary_resource = list(

@@ -27,13 +27,12 @@ from ...domain.source_scope import (
     SOURCE_KIND_OTHER,
 )
 from ...models import MetricsDiff
+from ...utils import coerce as _coerce
 from ...utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
-    RepoPathPolicy,
-    resolve_under_repo_root,
 )
-from ._session_runtime import resolve_cache_path
+from ._session_runtime import resolve_artifact_path, resolve_cache_path
 from ._session_shared import (
     _COMPACT_ITEM_EMPTY_VALUES,
     _COMPACT_ITEM_PATH_KEYS,
@@ -87,9 +86,20 @@ def _cap_mcp_process_count(processes: int | None) -> int | None:
     return min(processes, host_limit, _MCP_MAX_PROCESS_COUNT)
 
 
+def _metrics_skipped_for_summary(summary: Mapping[str, object]) -> bool:
+    return str(summary.get("analysis_mode", "")) == "clones_only"
+
+
+def _metrics_skipped_payload(*, scope: str | None = None) -> dict[str, object]:
+    payload: dict[str, object] = {"available": False, "reason": "metrics_skipped"}
+    if scope:
+        payload["scope"] = scope
+    return payload
+
+
 def _summary_health_payload(summary: Mapping[str, object]) -> dict[str, object]:
-    if str(summary.get("analysis_mode", "")) == "clones_only":
-        return {"available": False, "reason": "metrics_skipped"}
+    if _metrics_skipped_for_summary(summary):
+        return _metrics_skipped_payload()
     health = dict(_as_mapping(summary.get("health")))
     if health:
         return health
@@ -185,13 +195,11 @@ def _dict_list(value: object) -> list[dict[str, object]]:
 
 
 def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
+    return _coerce.as_mapping(value)
 
 
 def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
+    return _coerce.as_sequence(value)
 
 
 def _short_run_id(run_id: str) -> str:
@@ -273,19 +281,19 @@ def _resolve_optional_path(
     value: str,
     root_path: Path,
     *,
+    kind: str | None = None,
     allow_external_artifacts: bool = False,
     allow_repo_absolute: bool = False,
 ) -> Path:
     from .messages import errors as err_msgs
 
     try:
-        return resolve_under_repo_root(
-            root_path,
+        return resolve_artifact_path(
             value,
-            policy=RepoPathPolicy(
-                allow_absolute=allow_external_artifacts or allow_repo_absolute,
-                allow_external=allow_external_artifacts,
-            ),
+            root_path,
+            kind=kind,
+            allow_external_artifacts=allow_external_artifacts,
+            allow_repo_absolute=allow_repo_absolute,
         )
     except (PathOutsideRepoError, RepoPathError) as exc:
         raise MCPServiceContractError(
@@ -722,6 +730,11 @@ def _effective_freshness(summary: Mapping[str, object]) -> FreshnessKind:
     return "fresh"
 
 
+def _inventory_entity_counts_unavailable(inventory: Mapping[str, object]) -> bool:
+    code = _as_mapping(inventory.get("code"))
+    return str(code.get("scope", "")).strip() != "analysis_root"
+
+
 def _summary_inventory_payload(inventory: Mapping[str, object]) -> dict[str, object]:
     if not inventory:
         return {}
@@ -741,16 +754,21 @@ def _summary_inventory_payload(inventory: Mapping[str, object]) -> dict[str, obj
         ),
         0,
     )
+    payload: dict[str, object] = {
+        "files": total_files,
+        "lines": _as_int(code.get("parsed_lines", 0), 0),
+    }
+    if _inventory_entity_counts_unavailable(inventory):
+        scope = str(code.get("scope", "")).strip() or None
+        payload["entity_counts"] = _metrics_skipped_payload(scope=scope)
+        return payload
     functions = _as_int(code.get("functions", 0), 0) + _as_int(
         code.get("methods", 0),
         0,
     )
-    return {
-        "files": total_files,
-        "lines": _as_int(code.get("parsed_lines", 0), 0),
-        "functions": functions,
-        "classes": _as_int(code.get("classes", 0), 0),
-    }
+    payload["functions"] = functions
+    payload["classes"] = _as_int(code.get("classes", 0), 0)
+    return payload
 
 
 def _summary_diff_payload(summary: Mapping[str, object]) -> dict[str, object]:
@@ -814,6 +832,8 @@ def _summary_coverage_join_payload(record: MCPRunRecord) -> dict[str, object]:
 
 
 def _summary_security_surfaces_payload(record: MCPRunRecord) -> dict[str, object]:
+    if _metrics_skipped_for_summary(record.summary):
+        return _metrics_skipped_payload()
     metrics = _as_mapping(record.report_document.get("metrics"))
     families = _as_mapping(metrics.get("families"))
     security_surfaces = _as_mapping(families.get("security_surfaces"))

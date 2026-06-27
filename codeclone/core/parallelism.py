@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
+from ..analysis.phase_ledger import PhaseLedger, PhaseSnapshot
 from ..cache.entries import SourceStatsDict
 from ..cache.store import Cache
 from ..models import (
@@ -161,8 +162,16 @@ def process(
     block_min_stmt = int(boot.args.block_min_stmt)
     segment_min_loc = int(boot.args.segment_min_loc)
     segment_min_stmt = int(boot.args.segment_min_stmt)
+    from codeclone.observability.runtime import is_observability_enabled
+
+    collect_phases = is_observability_enabled()
+    batch_snapshot = PhaseSnapshot.empty()
+
+    def _phase_ledger_for_file() -> PhaseLedger | None:
+        return PhaseLedger(active=True) if collect_phases else None
 
     def _accept_result(result: FileProcessResult) -> None:
+        nonlocal batch_snapshot
         nonlocal files_analyzed
         nonlocal files_skipped
         nonlocal analyzed_lines
@@ -171,6 +180,8 @@ def process(
         nonlocal analyzed_classes
 
         if result.success and result.stat is not None:
+            if result.phase_snapshot is not None:
+                batch_snapshot = batch_snapshot.merge(result.phase_snapshot)
             source_stats_payload = SourceStatsDict(
                 lines=result.lines,
                 functions=result.functions,
@@ -271,6 +282,7 @@ def process(
                     block_min_stmt=block_min_stmt,
                     segment_min_loc=segment_min_loc,
                     segment_min_stmt=segment_min_stmt,
+                    phase_ledger=_phase_ledger_for_file(),
                 )
             )
             if on_advance is not None:
@@ -296,6 +308,7 @@ def process(
                             block_min_stmt=block_min_stmt,
                             segment_min_loc=segment_min_loc,
                             segment_min_stmt=segment_min_stmt,
+                            phase_ledger=_phase_ledger_for_file(),
                         )
                         for filepath in batch
                     ]
@@ -320,6 +333,9 @@ def process(
             _run_sequential(files_to_process)
     else:
         _run_sequential(files_to_process)
+
+    volumes = batch_snapshot.volume_map()
+    phase_snapshot = batch_snapshot if volumes.get("files_timed", 0) > 0 else None
 
     return ProcessingResult(
         units=tuple(sorted(all_units, key=_group_item_sort_key)),
@@ -388,4 +404,5 @@ def process(
             (filepath, *stats)
             for filepath, stats in sorted(source_stats_by_file.items())
         ),
+        phase_snapshot=phase_snapshot,
     )

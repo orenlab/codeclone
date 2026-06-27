@@ -6,7 +6,7 @@
 
 """CodeClone — structural code quality analysis for Python.
 
-Structural findings extraction layer (Phase 1: duplicated_branches).
+Structural findings extraction layer for duplicated branch facts.
 
 This module is report-only: findings do not affect clone detection,
 fingerprints, baseline semantics, exit codes, or health scores.

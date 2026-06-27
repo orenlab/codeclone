@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -162,6 +163,67 @@ def test_list_for_subject_family_filters(conn: sqlite3.Connection) -> None:
         subject_family="codeclone/surfaces/mcp",
     )
     assert [item.id for item in scoped] == ["exp-b"]
+
+
+def test_replace_refreshes_when_digest_matches_but_content_differs(
+    conn: sqlite3.Connection,
+) -> None:
+    original = _experience(suffix="a", signal="scope_expanded")
+    replace_experiences(conn, project_id=_PROJECT_ID, experiences=[original])
+    updated = replace(
+        original,
+        statement="override statement",
+        updated_at_utc="2026-06-09T00:00:00Z",
+    )
+    replace_experiences(conn, project_id=_PROJECT_ID, experiences=[updated])
+    loaded = list_experiences(conn, project_id=_PROJECT_ID)[0]
+    assert loaded.statement == "override statement"
+
+
+def test_replace_noop_compare_uses_bounded_selects(conn: sqlite3.Connection) -> None:
+    experiences = [
+        _experience(suffix="a", signal="scope_expanded"),
+        _experience(suffix="b", signal="recovered"),
+    ]
+    replace_experiences(conn, project_id=_PROJECT_ID, experiences=experiences)
+    query_count = 0
+
+    def _trace(sql: str) -> None:
+        nonlocal query_count
+        stripped = sql.lstrip()
+        if stripped and stripped.split(None, 1)[0].upper() in {
+            "SELECT",
+            "INSERT",
+            "DELETE",
+            "UPDATE",
+        }:
+            query_count += 1
+
+    conn.set_trace_callback(_trace)
+    try:
+        replace_experiences(conn, project_id=_PROJECT_ID, experiences=experiences)
+    finally:
+        conn.set_trace_callback(None)
+    # Parent row + batched facets + batched evidence; no mutation statements.
+    assert query_count == 3
+
+
+def test_replace_skips_write_when_digests_unchanged(conn: sqlite3.Connection) -> None:
+    experiences = [
+        _experience(suffix="a", signal="scope_expanded"),
+        _experience(suffix="b", signal="recovered"),
+    ]
+    replace_experiences(conn, project_id=_PROJECT_ID, experiences=experiences)
+    before = conn.execute(
+        "SELECT updated_at_utc FROM memory_experiences WHERE id=?",
+        ("exp-a",),
+    ).fetchone()[0]
+    replace_experiences(conn, project_id=_PROJECT_ID, experiences=experiences)
+    after = conn.execute(
+        "SELECT updated_at_utc FROM memory_experiences WHERE id=?",
+        ("exp-a",),
+    ).fetchone()[0]
+    assert before == after
 
 
 def test_empty_replace_clears_project(conn: sqlite3.Connection) -> None:

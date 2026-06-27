@@ -28,6 +28,16 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 and memory evidence from one stored run. It is read-only and never authorizes
 edits.
 
+Compact and normal responses include `context_governance` with
+`mode="partial_enforce"` and
+`evidence_policy="response_budget_with_exact_facet_pages"`. Mandatory subject
+and freshness facts remain inline; large facet lanes may be omitted with exact
+`get_implementation_context_page` drill-down metadata under
+`context_governance.omitted`. The existing `budget_summary` remains an
+item-count budget for context entries; `context_governance.limit` is the
+serialized response budget. `detail_level="full"` and facet page retrieval stay
+in `mode="observe"`.
+
 Key parameters:
 
 - `changed_scope` — when `true`, use the bounded live git-dirty set as the

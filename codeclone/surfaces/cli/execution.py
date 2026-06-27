@@ -31,6 +31,7 @@ from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.reporting import GatingResult
 from ...models import MetricsDiff
 from ...observability import SpanHandle, is_observability_enabled, span
+from ...observability.analysis_phases import apply_pipeline_process_phase_counters
 from . import state as cli_state
 from .attrs import bool_attr
 from .console import PlainConsole
@@ -87,6 +88,10 @@ def _discover_counters(stage_span: SpanHandle, result: DiscoveryResult) -> None:
 def _process_counters(stage_span: SpanHandle, result: PipelineProcessingResult) -> None:
     stage_span.set_counter("files_analyzed", result.files_analyzed)
     stage_span.set_counter("failed_files", len(result.failed_files))
+    apply_pipeline_process_phase_counters(
+        stage_span,
+        phase_snapshot=result.phase_snapshot,
+    )
 
 
 def run_analysis_stages(

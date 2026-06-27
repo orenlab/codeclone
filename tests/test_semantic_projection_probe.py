@@ -15,7 +15,7 @@ from codeclone.memory.embedding.length import (
 from codeclone.memory.semantic.models import SemanticProjection
 from codeclone.memory.semantic.projection import text_hash
 from codeclone.memory.semantic.projection_probe import probe_semantic_projections
-from codeclone.memory.semantic.sources import IndexSource
+from codeclone.memory.semantic.sources import IndexSource, SourceScan
 
 
 class _FakeSource(IndexSource):
@@ -31,6 +31,15 @@ class _FakeSource(IndexSource):
 
     def iter_projections(self) -> Iterator[SemanticProjection]:
         yield from self._projections
+
+    def scan(self) -> SourceScan:
+        return SourceScan(
+            revisions={p.source_id: p.source_revision for p in self._projections}
+        )
+
+    def project(self, source_ids: Sequence[str]) -> Iterator[SemanticProjection]:
+        wanted = set(source_ids)
+        yield from (p for p in self._projections if p.source_id in wanted)
 
 
 def _projection(source: str, source_id: str, text: str) -> SemanticProjection:

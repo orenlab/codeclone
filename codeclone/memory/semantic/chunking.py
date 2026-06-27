@@ -32,6 +32,9 @@ class IndexedSemanticUnit:
     status: str | None
     text: str
     text_hash: str
+    # Per-source revision (Stage 2); identical across every chunk of one source,
+    # so the row's stored revision groups unambiguously back to its source.
+    source_revision: str = ""
 
 
 @runtime_checkable
@@ -84,6 +87,7 @@ def expand_projection(
             status=projection.status,
             text=chunk,
             text_hash=text_hash(chunk),
+            source_revision=projection.source_revision,
         )
         for index, chunk in enumerate(chunks)
     )
@@ -126,6 +130,7 @@ def _single_unit(
         status=projection.status,
         text=text,
         text_hash=text_hash(text),
+        source_revision=projection.source_revision,
     )
 
 

@@ -9,8 +9,8 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final
 
@@ -18,7 +18,14 @@ import orjson
 
 from ...models import RelationshipRecord
 from ...paths import classify_source_kind
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 from ._blast_radius import _path_to_module
+from ._implementation_context_pages import (
+    ContextProjectionArtifact,
+    build_context_projection_artifact,
+    context_page_inventory,
+)
 from ._session_shared import MCPRunRecord, MCPUnitLocation
 from ._workspace_drift import WorkspaceDrift, compute_drift
 from .messages.params import Facet
@@ -97,6 +104,9 @@ class _EntryBudget:
     limit: int
     remaining: int
     emitted: int = 0
+    facet_items: dict[str, tuple[dict[str, object], ...]] = field(
+        default_factory=dict,
+    )
 
     def take(
         self,
@@ -136,6 +146,14 @@ class _EntryBudget:
 
     def reserve(self, count: int) -> None:
         self.remaining = max(0, self.remaining - max(0, count))
+
+    def record_facet(
+        self,
+        key: str,
+        items: Sequence[Mapping[str, object]],
+    ) -> None:
+        if key not in self.facet_items:
+            self.facet_items[key] = tuple(dict(item) for item in items)
 
 
 # (facet, output_key, reverse_index, keyed_on_source, relation_kind, status, lane)
@@ -351,7 +369,7 @@ def _contract_path_role(records: Sequence[Mapping[str, object]]) -> str | None:
 
     Priority is a typed contract registry, then a known protocol/interface
     symbol, then an Engineering Memory module_role/contract_note — never a name
-    or directory heuristic. Phase 30 wires only the memory anchor: a module_role
+    or directory heuristic. The memory anchor is a module_role
     record whose role_kind is a contract role (not the inventory_module default).
     """
     for row in records:
@@ -441,6 +459,7 @@ def build_implementation_context(
     blast_radius: Mapping[str, object],
     memory_result: Mapping[str, object] | None,
     change_control: Mapping[str, object] | None,
+    projection_sink: Callable[[ContextProjectionArtifact], None] | None = None,
 ) -> dict[str, object]:
     """Build the path-owned implementation-context response."""
     normalized_paths = tuple(sorted(set(paths)))
@@ -696,6 +715,17 @@ def build_implementation_context(
         context_artifact_digest=context_artifact_digest,
         request=request_projection,
     )
+    if projection_sink is not None:
+        artifact = build_context_projection_artifact(
+            root=record.root,
+            run_id=record.run_id,
+            context_artifact_digest=context_artifact_digest,
+            context_projection_digest=str(analysis["context_projection_digest"]),
+            request=request_projection,
+            facets=entry_budget.facet_items,
+        )
+        analysis["context_page_retrieval"] = context_page_inventory(artifact)
+        projection_sink(artifact)
     return payload
 
 
@@ -1408,6 +1438,7 @@ def _attach_bounded(
     items: Sequence[Mapping[str, object]],
     budget: _EntryBudget,
 ) -> None:
+    budget.record_facet(key, items)
     projected, summary = budget.take(items)
     payload[key] = projected
     payload[f"{key}_summary"] = summary
@@ -1568,16 +1599,6 @@ def _digest(payload: Mapping[str, object]) -> str:
     return hashlib.sha256(
         orjson.dumps(payload, option=orjson.OPT_SORT_KEYS),
     ).hexdigest()
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def _as_int(value: object) -> int:

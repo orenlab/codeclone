@@ -24,7 +24,7 @@ from .sqlite_store import SqliteEngineeringMemoryStore
 IDE_GOVERNANCE_TICKET_TTL_SECONDS = 120
 IDE_GOVERNANCE_MIN_KEY_BYTES = 32
 IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS = 100
-IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset({"CodeClone VS Code"})
+IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset({"CodeClone VS Code", "CodeClone JetBrains"})
 
 GovernanceDecision = Literal["approve", "reject", "archive"]
 GovernanceAction = Literal[
@@ -34,11 +34,12 @@ GovernanceAction = Literal[
 ]
 
 GOVERNANCE_MODE_UNAVAILABLE_MESSAGE = (
-    "This action is only available through the CodeClone VS Code IDE governance "
-    "channel."
+    "This action is only available through a CodeClone IDE governance channel "
+    "(VS Code or JetBrains plugin)."
 )
 GOVERNANCE_MODE_UNAVAILABLE_NEXT_STEP = (
-    "Use the Memory view in the CodeClone extension to approve or reject draft records."
+    "Use the CodeClone Memory view in VS Code or the JetBrains plugin Memory tab "
+    "to approve or reject draft records."
 )
 
 
@@ -267,7 +268,7 @@ def _require_governance_channel(
             reason="governance_key_missing",
             message=(
                 "IDE governance channel is active but no session key is registered. "
-                "Reconnect the CodeClone VS Code extension."
+                "Reconnect the CodeClone IDE plugin (VS Code or JetBrains)."
             ),
         )
     if (

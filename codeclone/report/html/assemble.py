@@ -40,8 +40,10 @@ from ..messages.chrome import (
     TAB_DEAD_CODE,
     TAB_DEPENDENCIES,
     TAB_FINDINGS,
+    TAB_MODULE_MAP,
     TAB_OVERVIEW,
     TAB_QUALITY,
+    TAB_REVIEW,
     TAB_SUGGESTIONS,
     TABLIST_ARIA_LABEL,
     THEME_BUTTON_TEXT,
@@ -56,7 +58,9 @@ from .sections._coupling import render_quality_panel
 from .sections._dead_code import render_dead_code_panel
 from .sections._dependencies import render_dependencies_panel
 from .sections._meta import build_topbar_provenance_summary, render_meta_panel
+from .sections._module_map import render_module_map_panel
 from .sections._overview import render_overview_panel
+from .sections._review import render_review_panel
 from .sections._structural import render_structural_panel
 from .sections._suggestions import render_suggestions_panel
 from .template import FONT_CSS_URL, REPORT_TEMPLATE
@@ -111,8 +115,10 @@ def build_html_report(
 
     # -- Render sections --
     overview_html = render_overview_panel(ctx)
+    review_html = render_review_panel(ctx)
     clones_html, _novelty_enabled, _total_new, _total_known = render_clones_panel(ctx)
     quality_html = render_quality_panel(ctx)
+    module_map_html = render_module_map_panel(ctx)
     dependencies_html = render_dependencies_panel(ctx)
     dead_code_html = render_dead_code_panel(ctx)
     suggestions_html = render_suggestions_panel(ctx)
@@ -136,6 +142,15 @@ def build_html_report(
             == CONFIDENCE_HIGH
         )
     dep_cycles = len(_as_sequence(ctx.dependencies_map.get("cycles")))
+    module_map_summary = _as_mapping(
+        _as_mapping(ctx.derived_map.get("module_map")).get("summary")
+    )
+    module_map_unwind = _as_int(module_map_summary.get("unwind_candidate_count"))
+    review_total = _as_int(
+        _as_mapping(
+            _as_mapping(ctx.derived_map.get("review_queue")).get("summary")
+        ).get("total")
+    )
     structural_count = len(
         tuple(normalize_structural_findings(ctx.structural_findings))
     )
@@ -152,23 +167,23 @@ def build_html_report(
         _as_int(_as_mapping(ctx.complexity_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.coupling_map.get("summary")).get("high_risk"))
         + _as_int(_as_mapping(ctx.cohesion_map.get("summary")).get("low_cohesion"))
-        + _as_int(
-            _as_mapping(ctx.overloaded_modules_map.get("summary")).get("candidates")
-        )
         + coverage_review_items
         + _as_int(_as_mapping(ctx.security_surfaces_map.get("summary")).get("items"))
     )
 
-    def _tab_badge(count: int) -> str:
+    def _tab_badge(count: int, unit: str) -> str:
         if count == 0:
             return ""
-        return f'<span class="tab-count">{count}</span>'
+        title = f"{count} {unit}"
+        return f'<span class="tab-count" title="{_escape_html(title)}">{count}</span>'
 
     # -- Main tab navigation --
     tab_icon_keys: dict[str, str] = {
         "overview": "overview",
+        "review": "review",
         "clones": "clones",
         "quality": "quality",
+        "module-map": "module-map",
         "dependencies": "dependencies",
         "dead-code": "dead-code",
         "suggestions": "suggestions",
@@ -176,21 +191,48 @@ def build_html_report(
     }
     tab_defs = [
         ("overview", TAB_OVERVIEW, overview_html, ""),
-        ("clones", TAB_CLONES, clones_html, _tab_badge(ctx.clone_groups_total)),
-        ("quality", TAB_QUALITY, quality_html, _tab_badge(quality_issues)),
-        ("dependencies", TAB_DEPENDENCIES, dependencies_html, _tab_badge(dep_cycles)),
-        ("dead-code", TAB_DEAD_CODE, dead_code_html, _tab_badge(dead_high_conf)),
+        (
+            "review",
+            TAB_REVIEW,
+            review_html,
+            _tab_badge(review_total, "findings to review"),
+        ),
+        (
+            "clones",
+            TAB_CLONES,
+            clones_html,
+            _tab_badge(ctx.clone_groups_total, "clone groups"),
+        ),
+        ("quality", TAB_QUALITY, quality_html, _tab_badge(quality_issues, "issues")),
+        (
+            "module-map",
+            TAB_MODULE_MAP,
+            module_map_html,
+            _tab_badge(module_map_unwind, "unwind candidates"),
+        ),
+        (
+            "dependencies",
+            TAB_DEPENDENCIES,
+            dependencies_html,
+            _tab_badge(dep_cycles, "dependency cycles"),
+        ),
+        (
+            "dead-code",
+            TAB_DEAD_CODE,
+            dead_code_html,
+            _tab_badge(dead_high_conf, "high-confidence dead-code items"),
+        ),
         (
             "suggestions",
             TAB_SUGGESTIONS,
             suggestions_html,
-            _tab_badge(len(ctx.suggestions)),
+            _tab_badge(len(ctx.suggestions), "suggestions"),
         ),
         (
             "structural-findings",
             TAB_FINDINGS,
             structural_html,
-            _tab_badge(structural_count),
+            _tab_badge(structural_count, "structural findings"),
         ),
     ]
 

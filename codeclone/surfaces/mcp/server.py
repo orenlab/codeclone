@@ -50,8 +50,11 @@ from .messages.params import (
     AuditTrailLimitParam,
     AutoClearParam,
     BeforeRunIdParam,
+    BlastArtifactDigestParam,
+    BlastArtifactIdParam,
     BlastDepthParam,
     BlastRadiusDepthParam,
+    BlastRadiusDetailParam,
     CachePolicyParam,
     CategoryParam,
     ChangedFilesParam,
@@ -64,8 +67,12 @@ from .messages.params import (
     ContextBudgetParam,
     ContextDepthParam,
     ContextDetailLevelParam,
+    ContextFacetPageKeyParam,
     ContextModeParam,
+    ContextPageOffsetParam,
+    ContextPageSizeParam,
     ContextPathsParam,
+    ContextProjectionDigestParam,
     ContextQueryParam,
     ContextSymbolsParam,
     CoverageMinParam,
@@ -113,6 +120,8 @@ from .messages.params import (
     MaxSizeMbParam,
     MaxSuggestionsParam,
     MemoryClaimsTextParam,
+    MemoryContinuationCursorParam,
+    MemoryContinuationPageSizeParam,
     MemoryDetailLevelParam,
     MemoryFiltersParam,
     MemoryMaxRecordsParam,
@@ -144,11 +153,14 @@ from .messages.params import (
     PatchHealthDeltaParam,
     PatchModeParam,
     PatchTrailDetailParam,
+    PatchTrailDigestParam,
     PathFilterParam,
     PrFormatParam,
     ProcessesParam,
     ProposeMemoryParam,
+    ReceiptDigestParam,
     ReceiptFormatParam,
+    ReceiptRetrievalFormatParam,
     ReportSectionParam,
     RequireCitationsParam,
     RespectPyprojectParam,
@@ -205,7 +217,7 @@ def _observability_session_id() -> str:
 
 def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
     """Wrap a registered MCP tool so each call records an observability operation
-    with request/response payload sizes (bytes + tokens).
+    with request/response payload sizes (bytes + context-unit estimates).
 
     Inert direct passthrough when observability is disabled. Signature-preserving
     (``functools.wraps`` + explicit ``__signature__``) so FastMCP schema
@@ -222,9 +234,10 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
             bind_root(Path(root))
         with operation(name=f"mcp.{tool_name}", surface="mcp") as op:
             if payload_capture_enabled():
-                request_bytes, request_tokens = measure_payload(kwargs)
+                request_bytes, request_context_units = measure_payload(kwargs)
                 op.set_request(
-                    request_bytes=request_bytes, request_tokens=request_tokens
+                    request_bytes=request_bytes,
+                    request_tokens=request_context_units,
                 )
             # Open a root span around the handler: record_db_query attributes
             # SQL to the active span, not the operation. Without this span every
@@ -233,9 +246,10 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
             with span(name=f"mcp.{tool_name}"):
                 result = func(*args, **kwargs)
             if payload_capture_enabled() and isinstance(result, Mapping):
-                response_bytes, response_tokens = measure_payload(result)
+                response_bytes, response_context_units = measure_payload(result)
                 op.set_response(
-                    response_bytes=response_bytes, response_tokens=response_tokens
+                    response_bytes=response_bytes,
+                    response_tokens=response_context_units,
                 )
             return result
 
@@ -560,6 +574,25 @@ def build_mcp_server(
         )
 
     @tool(
+        title=mcp_tools.TITLE_GET_BLAST_ARTIFACT,
+        description=mcp_tools.GET_BLAST_ARTIFACT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_blast_artifact(
+        root: RootParam,
+        run_id: RunIdParam = None,
+        blast_artifact_id: BlastArtifactIdParam = None,
+        projection_digest: BlastArtifactDigestParam = None,
+    ) -> dict[str, object]:
+        return service.get_blast_artifact(
+            root=root,
+            run_id=run_id,
+            blast_artifact_id=blast_artifact_id,
+            projection_digest=projection_digest,
+        )
+
+    @tool(
         title=mcp_tools.TITLE_GET_IMPLEMENTATION_CONTEXT,
         description=mcp_tools.GET_IMPLEMENTATION_CONTEXT,
         annotations=read_only_tool,
@@ -595,6 +628,29 @@ def build_mcp_server(
         )
 
     @tool(
+        title=mcp_tools.TITLE_GET_IMPLEMENTATION_CONTEXT_PAGE,
+        description=mcp_tools.GET_IMPLEMENTATION_CONTEXT_PAGE,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_implementation_context_page(
+        root: RootParam,
+        context_projection_digest: ContextProjectionDigestParam,
+        facet: ContextFacetPageKeyParam,
+        offset: ContextPageOffsetParam = 0,
+        page_size: ContextPageSizeParam = 20,
+        run_id: RunIdParam = None,
+    ) -> dict[str, object]:
+        return service.get_implementation_context_page(
+            root=root,
+            context_projection_digest=context_projection_digest,
+            facet=facet,
+            offset=offset,
+            page_size=page_size,
+            run_id=run_id,
+        )
+
+    @tool(
         title=mcp_tools.TITLE_GET_RELEVANT_MEMORY,
         description=mcp_tools.GET_RELEVANT_MEMORY,
         annotations=read_only_tool,
@@ -619,6 +675,23 @@ def build_mcp_server(
             include_stale=include_stale,
             include_drafts=include_drafts,
             detail_level=detail_level,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_MEMORY_PROJECTION_PAGE,
+        description=mcp_tools.GET_MEMORY_PROJECTION_PAGE,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_memory_projection_page(
+        root: RootParam,
+        cursor: MemoryContinuationCursorParam,
+        page_size: MemoryContinuationPageSizeParam = 20,
+    ) -> dict[str, object]:
+        return service.get_memory_projection_page(
+            root=root,
+            cursor=cursor,
+            page_size=page_size,
         )
 
     @tool(
@@ -753,6 +826,42 @@ def build_mcp_server(
             format=format,
             include_blast_radius=include_blast_radius,
             include_patch_contract=include_patch_contract,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_REVIEW_RECEIPT,
+        description=mcp_tools.GET_REVIEW_RECEIPT,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_review_receipt(
+        root: RootParam,
+        run_id: RunIdParam = None,
+        receipt_digest: ReceiptDigestParam = None,
+        format: ReceiptRetrievalFormatParam = "structured",
+    ) -> dict[str, object]:
+        return service.get_review_receipt(
+            root=root,
+            run_id=run_id,
+            receipt_digest=receipt_digest,
+            format=format,
+        )
+
+    @tool(
+        title=mcp_tools.TITLE_GET_PATCH_TRAIL,
+        description=mcp_tools.GET_PATCH_TRAIL,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def get_patch_trail(
+        root: RootParam,
+        run_id: RunIdParam = None,
+        patch_trail_digest: PatchTrailDigestParam = None,
+    ) -> dict[str, object]:
+        return service.get_patch_trail(
+            root=root,
+            run_id=run_id,
+            patch_trail_digest=patch_trail_digest,
         )
 
     @tool(
@@ -1174,6 +1283,7 @@ def build_mcp_server(
         strictness: StrictnessParam = "ci",
         ttl_seconds: TtlSecondsParam = None,
         blast_radius_depth: BlastRadiusDepthParam = "auto",
+        blast_radius_detail: BlastRadiusDetailParam = "summary",
         dirty_scope_policy: DirtyScopePolicyParam = "block",
     ) -> dict[str, object]:
         return service.start_controlled_change(
@@ -1185,6 +1295,7 @@ def build_mcp_server(
             strictness=strictness,
             ttl_seconds=ttl_seconds,
             blast_radius_depth=blast_radius_depth,
+            blast_radius_detail=blast_radius_detail,
             dirty_scope_policy=dirty_scope_policy,
         )
 

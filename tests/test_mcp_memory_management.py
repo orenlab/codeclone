@@ -15,6 +15,7 @@ import pytest
 
 import codeclone.surfaces.mcp._session_memory_mixin as mcp_memory_mixin_mod
 from codeclone.memory.exceptions import MemoryCapacityError, MemoryContractError
+from codeclone.memory.governance import record_candidate
 from codeclone.memory.ide_governance import (
     IDE_GOVERNANCE_PROTOCOL_VERSION,
     compute_governance_proof,
@@ -405,6 +406,103 @@ def test_mcp_get_relevant_memory_symbols_only(tmp_path: Path) -> None:
         )
         assert payload["scope_resolved_from"] == "symbols"
         assert payload["project_id"] == project.id
+
+
+def test_mcp_get_memory_projection_page_continues_relevant_memory_tail(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=True) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            scope=["pkg/mod.py"],
+            max_records=1,
+        )
+        continuation = cast("dict[str, object]", payload["continuation"])
+        lanes = cast("dict[str, object]", continuation["lanes"])
+        records = cast("dict[str, object]", lanes["records"])
+        page_ref = cast("dict[str, object]", records["page"])
+        page = service.get_memory_projection_page(
+            root=str(root.resolve()),
+            cursor=str(page_ref["cursor"]),
+            page_size=10,
+        )
+
+    assert page["status"] == "ok"
+    assert page["lane"] == "records"
+    assert page["response_complete"] is True
+    assert cast("list[object]", page["items"])
+    governance = cast("dict[str, object]", page["context_governance"])
+    response = cast("dict[str, object]", governance["response"])
+    assert {
+        "tool": response["tool"],
+        "policy": response["evidence_policy"],
+        "mode": governance["mode"],
+        "enforcement": governance["enforcement"],
+        "truncated": governance["truncated"],
+    } == {
+        "tool": "get_memory_projection_page",
+        "policy": "digest_bound_continuation_page",
+        "mode": "observe",
+        "enforcement": {
+            "response_budget": False,
+            "nested_budget": False,
+            "omission": False,
+        },
+        "truncated": False,
+    }
+
+
+def test_mcp_get_relevant_memory_compact_enforces_response_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        mcp_memory_mixin_mod,
+        "DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT",
+        1700,
+    )
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, project, store):
+        for index in range(8):
+            record_candidate(
+                store,
+                project=project,
+                record_type="change_rationale",
+                subject_path="pkg/mod.py",
+                max_candidates=20,
+                statement=f"budgeted memory record {index}",
+            )
+        service = CodeCloneMCPService(history_limit=2)
+        payload = service.get_relevant_memory(
+            root=str(root.resolve()),
+            scope=["pkg/mod.py"],
+            max_records=6,
+        )
+
+    governance = _nested_dict(payload, "context_governance")
+    records_omitted = _nested_dict(governance, "omitted", "records")
+    page = _nested_dict(payload, "continuation", "lanes", "records", "page")
+    estimated = governance["estimated"]
+    limit = governance["limit"]
+    record_count = payload["record_count"]
+
+    assert governance["mode"] == "partial_enforce"
+    assert cast("dict[str, bool]", governance["enforcement"])["response_budget"]
+    assert isinstance(estimated, int)
+    assert isinstance(limit, int)
+    assert estimated <= limit
+    assert isinstance(record_count, int)
+    assert record_count < 6
+    assert records_omitted["reason"] == "response_budget"
+    assert page["offset"] == record_count
+
+
+def _nested_dict(payload: dict[str, object], *keys: str) -> dict[str, object]:
+    current: object = payload
+    for key in keys:
+        assert isinstance(current, dict)
+        current = current[key]
+    return cast("dict[str, object]", current)
 
 
 def test_mcp_get_relevant_memory_wraps_memory_contract_errors(

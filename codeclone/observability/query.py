@@ -5,7 +5,7 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """``query_platform_observability`` — a sectioned, read-only diagnostics slicer
-over the Phase 29 runtime telemetry (RFC specs/rfc-29-observability-query-tool).
+over runtime telemetry.
 
 A **slicer, not a trace export API**: each call returns one bounded *section*
 projected from the already-computed ``AggregatesView``; no response embeds the
@@ -21,6 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..config.observability import resolve_observability_config
+from .runtime import DB_COUNTER_VERSION
 from .store.reader import build_trace_view, open_observability_store_readonly
 from .views import AggregatesView, OperationView, TraceView
 
@@ -36,7 +37,8 @@ _MAX_DIAGNOSTICS = 3
 _DB_CHATTY_QPC = 200
 _CONTEXT_HEAVY_PCT = 25
 _MEMORY_HEAVY_MB = 200.0
-_CONTEXT_PRESSURE_TOKENS = 8000
+_CONTEXT_PRESSURE_UNITS = 8000
+_ANALYSIS_HEAVY_WORKER_MS = 2000.0
 
 _AGGREGATE_SECTIONS = (
     "summary",
@@ -48,6 +50,7 @@ _AGGREGATE_SECTIONS = (
     "correlated_chains",
     "costly_noops",
     "pipeline",
+    "analysis_phase_cost",
 )
 
 
@@ -156,6 +159,7 @@ def _db_cost(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
                 "calls": r.span_count,
                 "queries": r.total_queries,
                 "writes": r.total_writes,
+                "rows": r.total_rows,
                 "queries_per_call": per_call,
                 "verdict": "query_chatty" if per_call >= _DB_CHATTY_QPC else "ok",
             }
@@ -206,13 +210,18 @@ def _pipeline(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
 def _agent_context_body(agg: AggregatesView, cap: int) -> dict[str, object]:
     agent = agg.agent
     if agent is None:
-        return {"total_response_tokens": 0, "rows": []}
+        return {
+            "total_response_tokens": 0,
+            "total_response_context_units": 0,
+            "rows": [],
+        }
     total = agent.response_tokens
     rows = [
         {
             "tool": c.name,
             "calls": c.calls,
             "response_tokens": c.response_tokens,
+            "response_context_units": c.response_tokens,
             "context_percent": round(100 * c.response_tokens / total) if total else 0,
             "verdict": (
                 "context_heavy"
@@ -222,7 +231,37 @@ def _agent_context_body(agg: AggregatesView, cap: int) -> dict[str, object]:
         }
         for c in agent.consumers[:cap]
     ]
-    return {"total_response_tokens": total, "rows": rows}
+    return {
+        "total_response_tokens": total,
+        "total_response_context_units": total,
+        "rows": rows,
+    }
+
+
+def _analysis_phase_body(agg: AggregatesView, cap: int) -> dict[str, object]:
+    rows = [
+        {
+            "phase": row.phase,
+            "worker_elapsed_ms": row.worker_elapsed_ms,
+            "share_permille": row.share_permille,
+            "verdict": row.verdict,
+        }
+        for row in agg.analysis_phases[:cap]
+    ]
+    body: dict[str, object] = {
+        "phase_worker_elapsed_total_ms": (agg.analysis_phase_worker_elapsed_total_ms),
+        "pipeline_process_wall_ms": agg.analysis_phase_pipeline_wall_ms,
+        "source_spans": agg.analysis_phase_source_spans,
+        "files_timed": agg.analysis_phase_files_timed,
+        "units_eligible": agg.analysis_phase_units_eligible,
+        "rows": rows,
+    }
+    if not rows:
+        body["message"] = (
+            "no analysis phase counters in window; run with "
+            "CODECLONE_OBSERVABILITY_ENABLED=1 and a full analyze."
+        )
+    return body
 
 
 def _chain_descendant_names(op: OperationView) -> list[str]:
@@ -324,7 +363,22 @@ def _context_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
         return None
     return {
         "kind": "context",
-        "message": f"{lead.name} consumed {pct}% of returned tokens.",
+        "message": f"{lead.name} consumed {pct}% of returned context units.",
+    }
+
+
+def _analysis_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
+    if not agg.analysis_phases:
+        return None
+    top = agg.analysis_phases[0]
+    if top.verdict != "phase_heavy":
+        return None
+    return {
+        "kind": "analysis",
+        "message": (
+            f"{top.phase} consumed {top.share_permille / 10:.0f}% of measured "
+            f"extract time ({top.worker_elapsed_ms:.0f} ms)."
+        ),
     }
 
 
@@ -333,20 +387,35 @@ def _top_diagnostics(agg: AggregatesView) -> list[dict[str, object]]:
         _memory_diagnostic(agg),
         _db_diagnostic(agg),
         _context_diagnostic(agg),
+        _analysis_diagnostic(agg),
     )
     return [d for d in candidates if d is not None][:_MAX_DIAGNOSTICS]
 
 
 def _summary_body(trace: TraceView) -> dict[str, object]:
     agg = trace.aggregates
-    return {
+    body: dict[str, object] = {
         "operations": agg.operation_count,
+        "db_counter_version": DB_COUNTER_VERSION,
         "peak_rss_delta_mb": _round1(agg.max_rss_delta_mb),
         "peak_rss_mb": _round1(agg.max_peak_rss_mb),
         "context_pressure_tokens": agg.agent.response_tokens if agg.agent else 0,
+        "context_pressure_units": agg.agent.response_tokens if agg.agent else 0,
         "costly_noops": sum(1 for s in agg.semantic_costs if s.no_op),
         "top_diagnostics": _top_diagnostics(agg),
     }
+    if agg.analysis_phases:
+        body["analysis_phase_worker_elapsed_total_ms"] = (
+            agg.analysis_phase_worker_elapsed_total_ms
+        )
+        body["top_analysis_phases"] = [
+            {
+                "phase": row.phase,
+                "share_permille": row.share_permille,
+            }
+            for row in agg.analysis_phases[:_MAX_DIAGNOSTICS]
+        ]
+    return body
 
 
 def _recommended_next_sections(
@@ -364,13 +433,23 @@ def _recommended_next_sections(
                     "reason": f"high query count in {top.span_name}.",
                 }
             )
-    if agg.agent and agg.agent.response_tokens >= _CONTEXT_PRESSURE_TOKENS:
+    if agg.agent and agg.agent.response_tokens >= _CONTEXT_PRESSURE_UNITS:
         recs.append(
-            {"section": "agent_context", "reason": "high context-token pressure."}
+            {"section": "agent_context", "reason": "high context-unit pressure."}
         )
     if any(s.no_op for s in agg.semantic_costs):
         recs.append(
             {"section": "costly_noops", "reason": "a span ran but produced nothing."}
+        )
+    if (
+        agg.analysis_phase_worker_elapsed_total_ms is not None
+        and agg.analysis_phase_worker_elapsed_total_ms >= _ANALYSIS_HEAVY_WORKER_MS
+    ) or any(row.verdict == "phase_heavy" for row in agg.analysis_phases):
+        recs.append(
+            {
+                "section": "analysis_phase_cost",
+                "reason": "pipeline.process phase breakdown available.",
+            }
         )
     return recs
 
@@ -432,6 +511,8 @@ def query_platform_observability(
         response.update(_summary_body(trace))
     elif section == "agent_context":
         response.update(_agent_context_body(agg, row_cap))
+    elif section == "analysis_phase_cost":
+        response.update(_analysis_phase_body(agg, row_cap))
     elif section == "correlated_chains":
         response["rows"] = _correlated_chains(trace, row_cap)
     else:

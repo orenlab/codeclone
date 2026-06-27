@@ -266,3 +266,104 @@ def test_store_empty_inputs_invalid_patch_trails_and_stale_projection_cleanup(
         )
         assert result.run.workflows_seen == 1
         assert result.trajectories == ()
+
+
+def test_find_trajectory_patch_trails_for_lookup_run_filter_and_malformed(
+    tmp_path: Path,
+) -> None:
+    import orjson
+
+    from codeclone.memory.trajectory import store as trajectory_store
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        _write_workflow_events(root, audit_db)
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory_item = store.list_trajectories(project_id=project.id)[0]
+        trajectory = store.find_trajectory(trajectory_item.id)
+        assert trajectory is not None
+        conn = store._conn
+        valid_payload = {
+            "schema_version": "1",
+            "intent_id": "intent-test-001",
+            "scope_check_status": "clean",
+            "verification_status": "accepted",
+        }
+        trajectory_store.upsert_trajectory_patch_trail(
+            conn,
+            trajectory_id=trajectory.id,
+            patch_trail_json=orjson.dumps(valid_payload).decode(),
+            patch_trail_digest="a" * 64,
+            schema_version="1",
+            projected_at_utc=trajectory.projected_at_utc,
+        )
+
+        by_digest, malformed = trajectory_store.find_trajectory_patch_trails_for_lookup(
+            conn,
+            project_id=project.id,
+            patch_trail_digest="a" * 64,
+        )
+        assert malformed == 0
+        assert len(by_digest) == 1
+        assert by_digest[0]["run_id"] == "def67890"
+
+        by_run_prefix, _ = trajectory_store.find_trajectory_patch_trails_for_lookup(
+            conn,
+            project_id=project.id,
+            patch_trail_digest="a" * 64,
+            run_id="def6",
+        )
+        assert len(by_run_prefix) == 1
+
+        filtered_out, _ = trajectory_store.find_trajectory_patch_trails_for_lookup(
+            conn,
+            project_id=project.id,
+            patch_trail_digest="a" * 64,
+            run_id="missing-run",
+        )
+        assert filtered_out == []
+
+        trajectory_store.upsert_trajectory_patch_trail(
+            conn,
+            trajectory_id=trajectory.id,
+            patch_trail_json="{not-json",
+            patch_trail_digest="b" * 64,
+            schema_version="1",
+            projected_at_utc=trajectory.projected_at_utc,
+        )
+        _, malformed_json = trajectory_store.find_trajectory_patch_trails_for_lookup(
+            conn,
+            project_id=project.id,
+            patch_trail_digest="b" * 64,
+        )
+        assert malformed_json == 1
+
+        trajectory_store.upsert_trajectory_patch_trail(
+            conn,
+            trajectory_id=trajectory.id,
+            patch_trail_json="[]",
+            patch_trail_digest="c" * 64,
+            schema_version="1",
+            projected_at_utc=trajectory.projected_at_utc,
+        )
+        non_dict_rows, malformed_list = (
+            trajectory_store.find_trajectory_patch_trails_for_lookup(
+                conn,
+                project_id=project.id,
+                patch_trail_digest="c" * 64,
+            )
+        )
+        assert non_dict_rows == []
+        assert malformed_list == 1
+
+        by_intent = trajectory_store.list_trajectories_for_intent_id(
+            conn,
+            project_id=project.id,
+            intent_id="intent-test-001",
+        )
+        assert len(by_intent) == 1
+        assert by_intent[0].workflow_id == "intent:intent-test-001"

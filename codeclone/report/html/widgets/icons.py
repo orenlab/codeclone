@@ -115,6 +115,11 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/>'
         '<rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/>',
     ),
+    "review": (
+        "2",
+        '<path d="M4 5h10"/><path d="M4 12h10"/><path d="M4 19h7"/>'
+        '<path d="M17.5 16.5l2 2 3-3.5"/>',
+    ),
     "clones": (
         "2",
         '<rect x="9" y="9" width="11" height="11" rx="2"/>'
@@ -131,6 +136,13 @@ _SECTION_ICON_BODIES: dict[str, tuple[str, str]] = {
         '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/>'
         '<circle cx="12" cy="18" r="2.5"/><path d="M8 7.8l2.7 6.4"/>'
         '<path d="M16 7.8l-2.7 6.4"/>',
+    ),
+    "module-map": (
+        "2",
+        '<rect x="9" y="2" width="6" height="6" rx="1"/>'
+        '<rect x="2" y="16" width="6" height="6" rx="1"/>'
+        '<rect x="16" y="16" width="6" height="6" rx="1"/>'
+        '<path d="M12 8v4"/><path d="M5 16v-2a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v2"/>',
     ),
     "dead-code": (
         "2",

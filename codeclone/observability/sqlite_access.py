@@ -22,16 +22,15 @@ def open_instrumented_sqlite_db(
     foreign_keys: bool = False,
     synchronous: str | None = None,
 ) -> sqlite3.Connection:
-    conn = open_sqlite_db(
+    from codeclone.observability.runtime import counting_connection_factory
+
+    return open_sqlite_db(
         path,
         ensure_schema=ensure_schema,
         foreign_keys=foreign_keys,
         synchronous=synchronous,
+        factory=counting_connection_factory(),
     )
-    from codeclone.observability.runtime import instrument_db_connection
-
-    instrument_db_connection(conn)
-    return conn
 
 
 def open_instrumented_sqlite_db_readonly(
@@ -39,11 +38,13 @@ def open_instrumented_sqlite_db_readonly(
     *,
     validate_schema: Callable[[sqlite3.Connection], None],
 ) -> sqlite3.Connection:
-    conn = open_sqlite_db_readonly(path, validate_schema=validate_schema)
-    from codeclone.observability.runtime import instrument_db_connection
+    from codeclone.observability.runtime import counting_connection_factory
 
-    instrument_db_connection(conn)
-    return conn
+    return open_sqlite_db_readonly(
+        path,
+        validate_schema=validate_schema,
+        factory=counting_connection_factory(),
+    )
 
 
 __all__ = [

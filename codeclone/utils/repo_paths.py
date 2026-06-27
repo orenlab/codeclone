@@ -32,6 +32,14 @@ class RepoPathPolicy:
     must_exist: bool = False
     must_be_file: bool = False
     must_be_dir: bool = False
+    # Allowlists that only constrain paths resolving *outside* ``root`` (i.e.
+    # when ``allow_external`` is set). Empty defaults preserve the historical
+    # "any external path" behaviour, so existing callers are unaffected.
+    external_suffixes: frozenset[str] = frozenset()
+    external_roots: tuple[Path, ...] = ()
+    # Reject an *existing* path that is not a regular file (directory, device,
+    # FIFO, socket). Does not require the path to exist.
+    reject_special_files: bool = False
 
 
 def resolve_under_repo_root(
@@ -51,8 +59,10 @@ def resolve_under_repo_root(
         resolved = candidate.expanduser().resolve(strict=policy.must_exist)
     except OSError as exc:
         raise RepoPathError(f"cannot resolve path {raw_path}: {exc}") from exc
-    if not policy.allow_external and not _is_relative_to(resolved, root_path):
-        raise PathOutsideRepoError(f"path escapes repository root: {raw_path}")
+    if not _is_relative_to(resolved, root_path):
+        if not policy.allow_external:
+            raise PathOutsideRepoError(f"path escapes repository root: {raw_path}")
+        _enforce_external_allowlist(resolved, raw_path=raw_path, policy=policy)
     _enforce_type_policy(resolved, policy=policy)
     return resolved
 
@@ -101,11 +111,36 @@ def _is_relative_to(path: Path, root: Path) -> bool:
     return True
 
 
+def _enforce_external_allowlist(
+    path: Path, *, raw_path: Path, policy: RepoPathPolicy
+) -> None:
+    """Constrain a path that has escaped ``root`` under ``allow_external``.
+
+    The extension check runs against the *resolved* real path, so a symlink
+    whose target carries a disallowed suffix is rejected even when the link
+    name looks allowed.
+    """
+
+    if policy.external_suffixes and path.suffix.lower() not in policy.external_suffixes:
+        allowed = ", ".join(sorted(policy.external_suffixes))
+        raise PathOutsideRepoError(
+            f"external artifact must use one of [{allowed}]: {path.name}"
+        )
+    if policy.external_roots and not any(
+        _is_relative_to(path, allowed_root) for allowed_root in policy.external_roots
+    ):
+        raise PathOutsideRepoError(
+            f"external artifact escapes permitted roots: {raw_path}"
+        )
+
+
 def _enforce_type_policy(path: Path, *, policy: RepoPathPolicy) -> None:
     if policy.must_be_file and not path.is_file():
         raise RepoPathError(f"path must be a file: {path}")
     if policy.must_be_dir and not path.is_dir():
         raise RepoPathError(f"path must be a directory: {path}")
+    if policy.reject_special_files and path.exists() and not path.is_file():
+        raise RepoPathError(f"path must be a regular file: {path}")
 
 
 __all__ = [

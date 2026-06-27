@@ -57,7 +57,7 @@ observability table.
 | `CODECLONE_OBSERVABILITY_FORCE=1`                 | Permit observation in CI; it does not enable instrumentation by itself. |
 | `CODECLONE_OBSERVABILITY_PROFILE=1`               | Capture optional process metrics; requires `codeclone[perf]`.           |
 | `CODECLONE_OBSERVABILITY_PERSIST=0`               | Instrument without persisting completed operations.                     |
-| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES=0` | Disable request/response size and token estimates.                      |
+| `CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES=0` | Disable request/response size and context-unit estimates.               |
 | `CODECLONE_OBSERVABILITY_PAYLOAD_SNAPSHOT=1`      | Reserved and rejected: raw payload snapshots are not supported.         |
 
 An explicit `CODECLONE_OBSERVABILITY_ENABLED=1` is sufficient in CI.
@@ -74,10 +74,16 @@ written in one transaction.
 
 An operation records stable identifiers, parent/correlation IDs, surface,
 operation name, timestamps, duration, status, bounded error classification,
-session and root digests, request/response sizes, token estimates, and optional
+session and root digests, request/response sizes, context-unit estimates, and optional
 process metrics (`rss_mb`, `rss_delta_mb`, `peak_rss_mb`, `peak_rss_delta_mb`,
 CPU time, thread count, open file descriptors when `codeclone[perf]` is
 installed).
+
+MCP response context pressure is an estimated context-unit signal, not an exact
+model tokenizer count. When a response includes `context_governance`, the
+observer uses that envelope's `estimated` value. Older storage and projection
+fields may still be named `response_tokens`; interpret those values as
+deterministic context units.
 
 A span records its parent, duration, reason kind, deduplication state, numeric
 counters, the same optional process metrics, and at most eight normalized SQL
@@ -132,8 +138,14 @@ store is an informational empty state and exits successfully.
 
 The HTML cockpit is self-contained and includes operation chains, a span
 waterfall, pipeline and Engineering Memory costs, MCP tool aggregates, database
-costs, normalized SQL fingerprints, agent context, and costly no-op signals.
-It has no external assets or JavaScript dependency.
+costs, normalized SQL fingerprints, agent context, analysis extract phases, and
+costly no-op signals. It has no external assets or JavaScript dependency.
+
+When analysis phase counters are present, the cockpit shows **Analysis extract
+phases** after the pipeline section. These values are summed per-file worker
+elapsed time from `pipeline.process` counters. Under parallel execution the sum
+can exceed the parent `pipeline.process` wall time; this is expected and is not
+CPU time.
 
 ## MCP projection
 
@@ -148,11 +160,17 @@ It has no external assets or JavaScript dependency.
 - `correlated_chains`
 - `costly_noops`
 - `pipeline`
+- `analysis_phase_cost`
 
 `detail_level=compact` returns at most five rows. `normal` honors `limit`,
 clamped to `1..50`; `full` currently downgrades to `normal`. `window` accepts
 `latest` or a correlation ID. `operation_id` and `span_id` are reserved and
 reported as ignored parameters.
+
+`analysis_phase_cost` projects the same phase rows shown in HTML: parse,
+qualname indexing, module walks, CFG build, normalization, block/segment
+extraction, and module-level metric passes. It is a CodeClone runtime diagnostic,
+not repository quality evidence.
 
 The response explicitly declares a CodeClone-development audience and states
 that it is not user-facing quality evidence. See

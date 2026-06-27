@@ -2,7 +2,7 @@
 
 # Drill down & focused checks
 
-### Phase 3: Drill down
+### Step 3: Drill Down
 
 | Tool                  | Purpose                                                     |
 |-----------------------|-------------------------------------------------------------|
@@ -13,7 +13,7 @@
 | `evaluate_gates`      | Preview CI gating decisions without mutating state          |
 | `generate_pr_summary` | PR-friendly markdown or JSON summary                        |
 
-### Phase 4: Focused checks
+### Step 4: Focused Checks
 
 Narrow queries over a single quality dimension. Cheaper than `list_findings`
 when you know which dimension to inspect.

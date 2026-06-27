@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Branded HTML renderer for the observability ``TraceView`` (Phase 29 output).
+"""Branded HTML renderer for the observability ``TraceView``.
 
 A single self-contained page rendered as a *runtime-diagnosis cockpit*, not a
 data dump. It is laid out for a top-down reading trajectory that answers the
@@ -20,12 +20,14 @@ dark-light), inline SVG bars, no JS, no external assets, no ``report`` import.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
+from datetime import datetime
 from html import escape
 
 from .views import (
     AgentTokenRow,
     AggregatesView,
+    AnalysisPhaseRow,
     DbCostRow,
     DbFingerprintRow,
     McpToolAggregate,
@@ -42,6 +44,22 @@ from .views import (
 # A no-op span only deserves a "costly" warning once it has actually spent time.
 _NOOP_COSTLY_MS = 50.0
 _KNOWN_SURFACES = frozenset({"mcp", "cli", "memory"})
+_ANALYSIS_PHASE_LABELS = {
+    "parse": "Parse (ast.parse)",
+    "qualname": "Qualname index",
+    "module_walk": "Module walk",
+    "relationship": "Relationship facts",
+    "suppressions": "Suppressions",
+    "unit_cfg": "CFG build",
+    "unit_normalize_cfg": "Normalize (CFG blocks)",
+    "unit_structural": "Structural scan",
+    "unit_normalize_stmt": "Normalize (statements)",
+    "unit_blocks": "Block extract",
+    "unit_segments": "Segment extract",
+    "class_metrics": "Class metrics",
+    "dead_code": "Dead-code collect",
+    "module_passes": "Module passes",
+}
 
 # Reuse of the CodeClone brand mark (report/html/widgets/icons.py:BRAND_LOGO).
 _LOGO = (
@@ -68,6 +86,7 @@ _CSS = """
 --font:"Inter","Inter Variable",-apple-system,BlinkMacSystemFont,"Segoe UI",
 Roboto,sans-serif;
 --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+--radius-sm:4px;--radius-md:6px;--radius-lg:8px;--radius-xl:12px;
 }
 @media (prefers-color-scheme:light){:root{
 --bg:oklch(98.5% 0.006 275);--surface:#fff;--surface-2:oklch(97.3% 0.006 275);
@@ -93,14 +112,14 @@ h2{font-size:11px;text-transform:uppercase;letter-spacing:0.09em;
 color:var(--mute);font-weight:600;margin:0 0 4px 2px}
 .shint{color:var(--mute);font-size:12px;margin:0 0 11px 2px}
 .panel{background:var(--surface);border:1px solid var(--border);
-border-radius:11px;overflow:hidden}
+border-radius:var(--radius-xl);overflow:hidden}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));
 gap:10px;margin-bottom:12px}
 .stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;
 margin-bottom:12px}
 @media (max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .card{background:var(--surface);border:1px solid var(--border);
-border-radius:11px;padding:14px 16px}
+border-radius:var(--radius-xl);padding:14px 16px}
 .card .v{font-size:24px;font-weight:600;letter-spacing:-0.02em;
 font-family:var(--mono)}
 .card .l{color:var(--mute);font-size:10.5px;text-transform:uppercase;
@@ -133,16 +152,17 @@ text-overflow:ellipsis;white-space:nowrap}
 .lin{color:var(--mute);font-size:11.5px;font-family:var(--mono)}
 .lmetric{font-family:var(--mono);font-size:14px;font-weight:600;white-space:nowrap}
 .badge{font-size:10px;font-weight:600;font-family:var(--mono);padding:2px 7px;
-border-radius:5px;text-transform:uppercase;letter-spacing:0.03em;flex-shrink:0;
+border-radius:var(--radius-sm);text-transform:uppercase;letter-spacing:0.03em;flex-shrink:0;
 background:color-mix(in oklch,var(--c,var(--accent)) 16%,transparent);
 color:var(--c,var(--accent))}
 .surf-mcp{--c:var(--mcp)}.surf-cli{--c:var(--cli)}.surf-memory{--c:var(--memory)}
-.chip{font-size:10.5px;font-family:var(--mono);padding:1px 8px;border-radius:20px;
+.chip{font-size:10.5px;font-family:var(--mono);padding:1px 8px;
+border-radius:var(--radius-sm);
 background:var(--surface-2);color:var(--dim);border:1px solid var(--border);
 white-space:nowrap}
 .chip.warn{color:var(--warn);border-color:transparent;background:var(--warn-soft);
 font-weight:600}
-.bar{display:block;width:100%;height:7px}
+.bar{display:block;width:100%;height:6px}
 .dur{font-family:var(--mono);font-size:12.5px;text-align:right;white-space:nowrap;
 color:var(--dim)}
 .mem{font-family:var(--mono);font-size:11.5px;color:var(--warn);font-weight:550;
@@ -158,7 +178,7 @@ min-width:0;overflow:hidden}
 .crumb .cname{font-family:var(--mono);font-size:12px;color:var(--text)}
 .crumb .arrow{color:var(--mute);font-size:13px}
 .oprow,.spanrow{display:grid;
-grid-template-columns:minmax(0,1fr) 140px 56px 70px 120px;
+grid-template-columns:minmax(0,1fr) 104px 56px 70px 120px;
 align-items:center;column-gap:13px;row-gap:2px;padding:5px 0}
 .lead-cell{display:flex;align-items:center;gap:9px;min-width:0}
 .opname{font-family:var(--mono);font-size:13px;font-weight:550;overflow:hidden;
@@ -167,8 +187,11 @@ text-overflow:ellipsis;white-space:nowrap}
 text-overflow:ellipsis;white-space:nowrap}
 .tick{color:var(--accent);opacity:0.6;font-size:11px;flex-shrink:0}
 .spanrow .counters{grid-column:2/-1;font-family:var(--mono);font-size:10.5px;
-color:var(--mute);display:flex;flex-wrap:wrap;gap:0 15px}
-.counters b{color:var(--dim);font-weight:550;margin-right:4px}
+color:var(--mute);display:flex;flex-direction:column;gap:2px;margin-top:4px;
+padding-left:17px}
+.cgroup{display:block;line-height:1.55}
+.cgroup>b{display:inline-block;min-width:54px;margin-right:8px;color:var(--mute);
+font-weight:700;text-transform:uppercase;letter-spacing:0.04em;font-size:9px}
 .spans{padding-left:17px}
 .kids{margin-left:13px;padding-left:17px;border-left:2px solid var(--accent-soft)}
 .wf{padding:8px 16px 12px}
@@ -177,16 +200,16 @@ color:var(--mute);display:flex;flex-wrap:wrap;gap:0 15px}
 .wf-cap{display:flex;align-items:center;gap:8px;margin-bottom:9px;
 font-family:var(--mono);font-size:11px;color:var(--mute)}
 .wf-cap b{color:var(--dim);font-weight:600}
-.wf-row{display:grid;grid-template-columns:minmax(150px,238px) minmax(0,1fr) 58px;
+.wf-row{display:grid;grid-template-columns:minmax(150px,220px) minmax(0,520px) 58px;
 align-items:center;column-gap:12px;padding:2px 0}
 .wf-label{font-family:var(--mono);font-size:11.5px;overflow:hidden;
 text-overflow:ellipsis;white-space:nowrap}
 .wf-label.op{color:var(--text);font-weight:550}
 .wf-label.span{color:var(--dim)}
-.wf-track{position:relative;height:14px;background:var(--track);border-radius:4px}
-.wf-bar{position:absolute;top:2px;height:10px;border-radius:3px;
-background:var(--c,var(--accent))}
-.wf-bar.span{top:3px;height:8px;opacity:0.8}
+.wf-track{position:relative;height:6px;background:var(--track);border-radius:2px}
+.wf-bar{position:absolute;top:0;height:6px;border-radius:2px;
+background:var(--accent)}
+.wf-bar.span{opacity:0.6}
 .wf-dur{font-family:var(--mono);font-size:11px;color:var(--mute);text-align:right;
 white-space:nowrap}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
@@ -197,19 +220,79 @@ td{padding:9px 16px;border-top:1px solid var(--border);font-family:var(--mono);
 white-space:nowrap}
 td.t{font-family:var(--font)}
 th.r,td.r{text-align:right}
+/* "Most expensive" — one delicate idiom: accent left rule + faint tint */
+tr.lead td{background:color-mix(in oklch,var(--accent) 7%,transparent)}
+tr.lead td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .shape{font-family:var(--font);font-size:12.5px}
 .sqlraw{font-family:var(--mono);font-size:11px;color:var(--mute);max-width:440px;
 overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:3px}
 tr.flag td{background:var(--warn-soft)}
 .muted{color:var(--mute)}
+/* Analysis micro-phases — ranked share bars (core's most important timings) */
+.ph{padding:6px 16px 14px}
+.ph-row{display:grid;
+grid-template-columns:minmax(150px,210px) minmax(0,360px) 66px 50px auto;
+align-items:center;column-gap:14px;padding:8px 0 8px 12px;
+border-top:1px solid var(--border);border-left:2px solid transparent}
+.ph-row:first-child{border-top:none}
+.ph-namecell{display:flex;flex-direction:column;min-width:0}
+.ph-name{font-family:var(--font);font-size:13px;color:var(--text);overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
+.ph-row.lead{border-left-color:var(--accent)}
+.ph-row.lead .ph-name{font-weight:600}
+.ph-raw{font-family:var(--mono);font-size:10.5px;color:var(--mute);overflow:hidden;
+text-overflow:ellipsis;white-space:nowrap}
+.ph-dur{font-family:var(--mono);font-size:12.5px;color:var(--dim);text-align:right;
+white-space:nowrap}
+.ph-share{font-family:var(--mono);font-size:13px;font-weight:600;text-align:right;
+white-space:nowrap}
+.ph-row.lead .ph-share{color:var(--accent)}
+.ph-sig{display:flex;justify-content:flex-end}
 .empty{padding:30px;text-align:center;color:var(--mute);font-size:13px}
 .foot{margin-top:38px;color:var(--mute);font-size:11px;text-align:center;
 font-family:var(--mono)}
+/* Tabbed information architecture — CSS-only, radio-driven (no JS) */
+.obs-tab-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.obs-tabs{display:flex;flex-wrap:wrap;gap:2px;margin:0 0 24px;
+border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5;
+background:var(--bg);padding-top:6px}
+.obs-tab{padding:9px 15px;font-size:12.5px;font-weight:550;color:var(--mute);
+cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;
+border-radius:var(--radius-sm) var(--radius-sm) 0 0;user-select:none;
+transition:color 0.15s,border-color 0.15s}
+.obs-tab:hover{color:var(--text)}
+.obs-tab-input:focus-visible+.obs-tab{outline:2px solid var(--accent);
+outline-offset:-2px}
+.obs-panel{display:none}
+.obs-panel>section:first-child{margin-top:0}
+.obs-lead{font-size:13px;color:var(--dim);line-height:1.55;
+margin:2px 0 22px;max-width:74ch}
+#t-overview:checked~.obs-tabs .obs-tab[for="t-overview"],
+#t-timeline:checked~.obs-tabs .obs-tab[for="t-timeline"],
+#t-operations:checked~.obs-tabs .obs-tab[for="t-operations"],
+#t-cost:checked~.obs-tabs .obs-tab[for="t-cost"],
+#t-phases:checked~.obs-tabs .obs-tab[for="t-phases"]{
+color:var(--accent);border-bottom-color:var(--accent)}
+#t-overview:checked~.obs-panels #p-overview,
+#t-timeline:checked~.obs-panels #p-timeline,
+#t-operations:checked~.obs-panels #p-operations,
+#t-cost:checked~.obs-panels #p-cost,
+#t-phases:checked~.obs-panels #p-phases{display:block}
 """
 
 
 def _esc(value: object) -> str:
     return escape(str(value))
+
+
+def _epoch_ms(value: str) -> float | None:
+    """Parse an ISO-8601 UTC timestamp to epoch milliseconds, or None."""
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value).timestamp() * 1000.0
+    except ValueError:
+        return None
 
 
 def _ms(value: float) -> str:
@@ -232,20 +315,33 @@ def _bytes(value: int | None) -> str:
     return f"{value} B"
 
 
-def _tokens(value: int | None) -> str:
+def _context_units(value: int | None) -> str:
     if not value:
         return "—"
-    return f"{value / 1000:.1f}k" if value >= 1000 else str(value)
+    amount = f"{value / 1000:.1f}k" if value >= 1000 else str(value)
+    return f"{amount} cu"
 
 
-def _bar(value: float, maximum: float, *, color: str = "var(--accent)") -> str:
-    frac = value / maximum if maximum > 0 else 0.0
-    fill = max(1.5, round(frac * 100, 1))
+def _bar(
+    value: float,
+    maximum: float,
+    *,
+    color: str = "var(--accent)",
+    offset_ms: float = 0.0,
+) -> str:
+    """A thin meter bar. ``offset_ms`` shifts the fill rightward (as a fraction
+    of *maximum*) so sequential items cascade into a start-offset staircase;
+    the default 0 keeps the fill left-aligned (pure magnitude)."""
+    span = maximum if maximum > 0 else 1.0
+    start = round(min(offset_ms / span * 100, 99.0), 1) if offset_ms > 0 else 0.0
+    fill = max(1.5, round(value / span * 100, 1))
+    if start + fill > 100:
+        fill = max(1.5, round(100 - start, 1))
     return (
-        '<svg class="bar" viewBox="0 0 100 7" preserveAspectRatio="none" '
+        '<svg class="bar" viewBox="0 0 100 6" preserveAspectRatio="none" '
         'aria-hidden="true">'
-        '<rect width="100" height="7" rx="3.5" fill="var(--track)"/>'
-        f'<rect width="{fill}" height="7" rx="3.5" fill="{color}"/></svg>'
+        '<rect width="100" height="6" rx="2" fill="var(--track)"/>'
+        f'<rect x="{start}" width="{fill}" height="6" rx="2" fill="{color}"/></svg>'
     )
 
 
@@ -261,14 +357,79 @@ def _reason_chip(reason_kind: str | None) -> str:
     return f'<span class="chip{extra}">{_esc(reason_kind)}</span>'
 
 
+# Operations shows the FULL span counter set, grouped + formatted (never an
+# alphabetical raw dump, never silently dropped). Each group: (label, ((key,
+# short-label), …)). phase_* microsecond timings are converted to ms and ranked;
+# any key not mapped below still appears under "other" so nothing is lost.
+_COUNTER_GROUPS: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "files",
+        (
+            ("files_analyzed", "analyzed"),
+            ("files_timed", "timed"),
+            ("failed_files", "failed"),
+        ),
+    ),
+    (
+        "units",
+        (
+            ("units_seen", "seen"),
+            ("units_eligible", "eligible"),
+            ("units_fingerprinted", "fingerprinted"),
+        ),
+    ),
+    ("output", (("blocks_emitted", "blocks"), ("segments_emitted", "segments"))),
+    ("db", (("db_queries", "reads"), ("db_writes", "writes"))),
+)
+
+
+def _us_ms(micros: int) -> str:
+    ms = micros / 1000
+    return f"{ms:.0f}ms" if ms >= 10 else f"{ms:.1f}ms"
+
+
+def _counter_group(label: str, pairs: list[str]) -> str:
+    if not pairs:
+        return ""
+    return f'<span class="cgroup"><b>{_esc(label)}</b>{" · ".join(pairs)}</span>'
+
+
 def _counters(counters: Mapping[str, int]) -> str:
     if not counters:
         return ""
-    items = "".join(
-        f"<span><b>{_esc(key)}</b>{value}</span>"
-        for key, value in sorted(counters.items())
+    seen: set[str] = set()
+    groups: list[str] = []
+    for label, keys in _COUNTER_GROUPS:
+        pairs: list[str] = []
+        for key, short in keys:
+            if key in counters:
+                seen.add(key)
+                pairs.append(f"{short} {counters[key]:,}")
+        groups.append(_counter_group(label, pairs))
+    phases = sorted(
+        ((key, value) for key, value in counters.items() if key.startswith("phase_")),
+        key=lambda kv: kv[1],
+        reverse=True,
     )
-    return f'<span class="counters">{items}</span>'
+    if phases:
+        seen.update(key for key, _ in phases)
+        groups.append(
+            _counter_group(
+                "phases",
+                [
+                    f"{_esc(key.removeprefix('phase_').removesuffix('_us'))} "
+                    f"{_us_ms(value)}"
+                    for key, value in phases
+                ],
+            )
+        )
+    other = sorted((key, value) for key, value in counters.items() if key not in seen)
+    if other:
+        groups.append(
+            _counter_group("other", [f"{_esc(key)} {value:,}" for key, value in other])
+        )
+    body = "".join(group for group in groups if group)
+    return f'<span class="counters">{body}</span>' if body else ""
 
 
 def _rss_text(
@@ -317,7 +478,7 @@ def _header(trace: TraceView) -> str:
     )
     digest = f" · repo {_esc(trace.repo_root_digest)}" if trace.repo_root_digest else ""
     return (
-        f'<div class="head">{_LOGO}<h1>Platform Observability</h1></div>'
+        f'<div class="head">{_LOGO}<h1>CodeClone Platform Observability</h1></div>'
         f'<p class="sub"><b>{agg.operation_count}</b> operations · '
         f"{window}{digest}</p>"
     )
@@ -451,6 +612,20 @@ def _highlights(agg: AggregatesView) -> str:
                 metric_html=f"{_esc(_ms(cpu_ms))} · {ratio:.1f}x wall",
             )
         )
+    if agg.analysis_phases:
+        top = agg.analysis_phases[0]
+        rows.append(
+            _highlight_row(
+                "Hottest extract phase",
+                badge_html="",
+                primary=top.phase,
+                context=_ANALYSIS_PHASE_LABELS.get(top.phase, top.phase),
+                metric_html=(
+                    f"{_esc(_ms(top.worker_elapsed_ms))} · "
+                    f"{top.share_permille / 10:.1f}%"
+                ),
+            )
+        )
     return f'<div class="panel hipanel">{"".join(rows)}</div>' if rows else ""
 
 
@@ -534,13 +709,23 @@ def _op_row(op: OperationView, group_max: float) -> str:
     )
 
 
-def _span_row(span: SpanView, op_duration: float) -> str:
+def _span_offset_ms(op_start_ms: float | None, span: SpanView) -> float:
+    """Span start relative to its operation's start (ms), for the staircase."""
+    if op_start_ms is None:
+        return 0.0
+    span_start = _epoch_ms(span.started_at_utc)
+    if span_start is None:
+        return 0.0
+    return max(0.0, span_start - op_start_ms)
+
+
+def _span_row(span: SpanView, op_duration: float, *, offset_ms: float = 0.0) -> str:
     color = "var(--warn)" if span.reason_kind == "unknown" else "var(--accent)"
     return (
         '<div class="spanrow"><span class="lead-cell">'
         f'<span class="tick">▸</span>'
         f'<span class="spanname">{_esc(span.name)}</span></span>'
-        f"{_bar(span.duration_ms, op_duration, color=color)}"
+        f"{_bar(span.duration_ms, op_duration, color=color, offset_ms=offset_ms)}"
         f'<span class="dur">{_ms(span.duration_ms)}</span>'
         f'<span class="mem">{_view_rss_text(span)}</span>'
         f'<span class="extra">{_reason_chip(span.reason_kind)}</span>'
@@ -550,7 +735,11 @@ def _span_row(span: SpanView, op_duration: float) -> str:
 
 def _op_block(op: OperationView, group_max: float) -> str:
     op_duration = op.duration_ms or 1.0
-    spans = "".join(_span_row(span, op_duration) for span in op.spans)
+    op_start = _epoch_ms(op.started_at_utc)
+    spans = "".join(
+        _span_row(span, op_duration, offset_ms=_span_offset_ms(op_start, span))
+        for span in op.spans
+    )
     spans_block = f'<div class="spans">{spans}</div>' if spans else ""
     kids = "".join(_op_block(child, group_max) for child in op.children)
     kids_block = f'<div class="kids">{kids}</div>' if kids else ""
@@ -578,11 +767,13 @@ def _chain(trace: TraceView) -> str:
     return _section(
         "Correlated event chains",
         f'<div class="panel chain">{groups}</div>',
-        subtitle="What triggered what, across processes — finish → spawned worker.",
+        subtitle="What triggered what, across processes — finish → spawned worker. "
+        "Span bars cascade by start offset within their operation (the staircase is "
+        "the real order); width is duration.",
     )
 
 
-def _semantic_row(span: SpanCostView) -> str:
+def _semantic_row(span: SpanCostView, *, lead: bool) -> str:
     costly = span.no_op and span.duration_ms >= _NOOP_COSTLY_MS
     if costly:
         verdict = '<span class="chip warn">no-op · costly</span>'
@@ -593,8 +784,9 @@ def _semantic_row(span: SpanCostView) -> str:
     reason = (
         _esc(span.reason_kind) if span.reason_kind else '<span class="muted">—</span>'
     )
+    cls = " ".join(name for name, on in (("flag", costly), ("lead", lead)) if on)
     return (
-        f'<tr class="{"flag" if costly else ""}">'
+        f'<tr class="{cls}">'
         f'<td class="t">{_esc(span.name)}</td>'
         f'<td class="t muted">{_esc(span.operation_name)}</td>'
         f"<td>{reason}</td>"
@@ -609,7 +801,15 @@ def _semantic_row(span: SpanCostView) -> str:
 def _semantic(agg: AggregatesView) -> str:
     if not agg.semantic_costs:
         return ""
-    rows = "".join(_semantic_row(span) for span in agg.semantic_costs)
+    lead = max(
+        range(len(agg.semantic_costs)),
+        key=lambda i: agg.semantic_costs[i].duration_ms,
+        default=-1,
+    )
+    rows = "".join(
+        _semantic_row(span, lead=(i == lead))
+        for i, span in enumerate(agg.semantic_costs)
+    )
     headers = (
         ("Span", False),
         ("Operation", False),
@@ -628,22 +828,27 @@ def _semantic(agg: AggregatesView) -> str:
     )
 
 
-def _mcp_row(tool: McpToolAggregate) -> str:
+def _mcp_row(tool: McpToolAggregate, *, lead: bool) -> str:
     return (
-        f'<tr><td class="t">{_esc(tool.name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(tool.name)}</td>'
         f'<td class="r">{tool.count}</td>'
         f'<td class="r">{_ms(tool.p50_duration_ms)}</td>'
         f'<td class="r">{_ms(tool.p95_duration_ms)}</td>'
         f'<td class="r">{_bytes(tool.p95_request_bytes)}</td>'
         f'<td class="r">{_bytes(tool.p95_response_bytes)}</td>'
-        f'<td class="r">{_tokens(tool.p95_response_tokens)}</td></tr>'
+        f'<td class="r">{_context_units(tool.p95_response_tokens)}</td></tr>'
     )
 
 
 def _mcp(tools: tuple[McpToolAggregate, ...]) -> str:
     if not tools:
         return ""
-    rows = "".join(_mcp_row(tool) for tool in tools)
+    lead = max(
+        range(len(tools)),
+        key=lambda i: tools[i].p95_response_bytes or 0,
+        default=-1,
+    )
+    rows = "".join(_mcp_row(tool, lead=(i == lead)) for i, tool in enumerate(tools))
     headers = (
         ("Tool", False),
         ("Calls", True),
@@ -651,13 +856,13 @@ def _mcp(tools: tuple[McpToolAggregate, ...]) -> str:
         ("p95", True),
         ("↑ req p95", True),
         ("↓ resp p95", True),
-        ("resp tok p95", True),
+        ("resp ctx p95", True),
     )
     return _section(
         "MCP tool matrix",
         _table(headers, rows),
         subtitle="Per-tool latency and payload — spot tools that flood request "
-        "or response bytes.",
+        "or response context units.",
     )
 
 
@@ -666,13 +871,12 @@ def _wf_bar(row: WaterfallRow, total_ms: float) -> str:
     left = round(min(row.offset_ms / span * 100, 99.0), 2)
     width = max(0.6, round(row.duration_ms / span * 100, 2))
     kind = "op" if row.kind == "operation" else "span"
-    surf = f"surf-{row.surface}" if row.surface in _KNOWN_SURFACES else ""
     tick = '<span class="tick">▸</span>' if kind == "span" else ""
     return (
         '<div class="wf-row">'
         f'<span class="wf-label {kind}" style="padding-left:{row.depth * 13}px">'
         f"{tick}{_esc(row.label)}</span>"
-        f'<div class="wf-track"><div class="wf-bar {kind} {surf}" '
+        f'<div class="wf-track"><div class="wf-bar {kind}" '
         f'style="left:{left}%;width:{width}%"></div></div>'
         f'<span class="wf-dur">{_ms(row.duration_ms)}</span></div>'
     )
@@ -700,13 +904,13 @@ def _waterfall(trace: TraceView) -> str:
     )
 
 
-def _agent_row(row: AgentTokenRow, total_response: int) -> str:
+def _agent_row(row: AgentTokenRow, total_response: int, *, lead: bool) -> str:
     share = round(row.response_tokens / total_response * 100) if total_response else 0
     return (
-        f'<tr><td class="t">{_esc(row.name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.name)}</td>'
         f'<td class="r">{row.calls}</td>'
-        f'<td class="r">{_tokens(row.request_tokens)}</td>'
-        f'<td class="r">{_tokens(row.response_tokens)}</td>'
+        f'<td class="r">{_context_units(row.request_tokens)}</td>'
+        f'<td class="r">{_context_units(row.response_tokens)}</td>'
         f'<td class="r">{share}%</td></tr>'
     )
 
@@ -717,32 +921,40 @@ def _agent(agg: AggregatesView) -> str:
         return ""
     cards = (
         '<div class="stats">'
-        + _stat(_tokens(view.response_tokens), "context pressure (tok)", "accent")
-        + _stat(_tokens(view.request_tokens), "sent (tok)")
+        + _stat(_context_units(view.response_tokens), "context pressure", "accent")
+        + _stat(_context_units(view.request_tokens), "sent context")
         + _stat(str(view.mcp_calls), "mcp calls")
         + _stat(str(len(view.consumers)), "tools")
         + "</div>"
     )
-    rows = "".join(_agent_row(row, view.response_tokens) for row in view.consumers)
+    lead = max(
+        range(len(view.consumers)),
+        key=lambda i: view.consumers[i].response_tokens,
+        default=-1,
+    )
+    rows = "".join(
+        _agent_row(row, view.response_tokens, lead=(i == lead))
+        for i, row in enumerate(view.consumers)
+    )
     headers = (
         ("Tool", False),
         ("Calls", True),
-        ("↑ tok", True),
-        ("↓ tok", True),
+        ("↑ ctx", True),
+        ("↓ ctx", True),
         ("Context %", True),
     )
     return _section(
         "Agent context",
         cards + _table(headers, rows),
-        subtitle="Tokens MCP tools push back into the agent's context — the real "
-        "per-call cost for an LLM. The top row is your biggest context consumer.",
+        subtitle="Estimated context units MCP tools push back into the agent's "
+        "context. The top row is your biggest context consumer.",
     )
 
 
-def _db_row(row: DbCostRow) -> str:
+def _db_row(row: DbCostRow, *, lead: bool) -> str:
     per_call = round(row.total_queries / row.span_count) if row.span_count else 0
     return (
-        f'<tr><td class="t">{_esc(row.span_name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.span_name)}</td>'
         f'<td class="r">{row.span_count}</td>'
         f'<td class="r">{row.total_queries}</td>'
         f'<td class="r">{row.total_writes}</td>'
@@ -754,7 +966,12 @@ def _db_row(row: DbCostRow) -> str:
 def _db_cost(agg: AggregatesView) -> str:
     if not agg.db_costs:
         return ""
-    rows = "".join(_db_row(row) for row in agg.db_costs)
+    lead = max(
+        range(len(agg.db_costs)),
+        key=lambda i: agg.db_costs[i].total_queries,
+        default=-1,
+    )
+    rows = "".join(_db_row(row, lead=(i == lead)) for i, row in enumerate(agg.db_costs))
     headers = (
         ("Span", False),
         ("Spans", True),
@@ -771,12 +988,12 @@ def _db_cost(agg: AggregatesView) -> str:
     )
 
 
-def _db_fingerprint_row(row: DbFingerprintRow) -> str:
+def _db_fingerprint_row(row: DbFingerprintRow, *, lead: bool) -> str:
     table = _esc(row.table_hint) if row.table_hint else "—"
     shape = _esc(row.summary) if row.summary else "—"
     raw = _esc(row.fingerprint)
     return (
-        f'<tr><td class="t">{_esc(row.span_name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(row.span_name)}</td>'
         f"<td>{table}</td>"
         f'<td class="muted">{_esc(row.kind.upper())}</td>'
         f'<td class="r">{row.count}</td>'
@@ -788,7 +1005,15 @@ def _db_fingerprint_row(row: DbFingerprintRow) -> str:
 def _db_fingerprints(agg: AggregatesView) -> str:
     if not agg.db_fingerprints:
         return ""
-    rows = "".join(_db_fingerprint_row(row) for row in agg.db_fingerprints)
+    lead = max(
+        range(len(agg.db_fingerprints)),
+        key=lambda i: agg.db_fingerprints[i].count,
+        default=-1,
+    )
+    rows = "".join(
+        _db_fingerprint_row(row, lead=(i == lead))
+        for i, row in enumerate(agg.db_fingerprints)
+    )
     headers = (
         ("Span", False),
         ("Table", False),
@@ -804,9 +1029,9 @@ def _db_fingerprints(agg: AggregatesView) -> str:
     )
 
 
-def _pipeline_row(group: PipelineGroup) -> str:
+def _pipeline_row(group: PipelineGroup, *, lead: bool) -> str:
     return (
-        f'<tr><td class="t">{_esc(group.name)}</td>'
+        f'<tr class="{"lead" if lead else ""}"><td class="t">{_esc(group.name)}</td>'
         f'<td class="r">{group.op_count}</td>'
         f'<td class="r">{_ms(group.duration_ms)}</td>'
         f'<td class="r">{_ms(group.cpu_ms)}</td></tr>'
@@ -816,7 +1041,14 @@ def _pipeline_row(group: PipelineGroup) -> str:
 def _pipeline_section(agg: AggregatesView) -> str:
     if not agg.pipeline:
         return ""
-    rows = "".join(_pipeline_row(group) for group in agg.pipeline)
+    lead = max(
+        range(len(agg.pipeline)),
+        key=lambda i: agg.pipeline[i].duration_ms,
+        default=-1,
+    )
+    rows = "".join(
+        _pipeline_row(group, lead=(i == lead)) for i, group in enumerate(agg.pipeline)
+    )
     headers = (("Subsystem", False), ("Ops", True), ("Wall", True), ("CPU", True))
     return _section(
         "Pipeline",
@@ -825,25 +1057,194 @@ def _pipeline_section(agg: AggregatesView) -> str:
     )
 
 
+def _analysis_phase_row(row: AnalysisPhaseRow, max_permille: int, *, lead: bool) -> str:
+    label = _ANALYSIS_PHASE_LABELS.get(row.phase, row.phase)
+    sig = '<span class="chip">peak</span>' if lead else ""
+    return (
+        f'<div class="ph-row{" lead" if lead else ""}">'
+        f'<span class="ph-namecell"><span class="ph-name">{_esc(label)}</span>'
+        f'<span class="ph-raw">{_esc(row.phase)}</span></span>'
+        f"{_bar(row.share_permille, max_permille)}"
+        f'<span class="ph-dur">{_esc(_ms(row.worker_elapsed_ms))}</span>'
+        f'<span class="ph-share">{row.share_permille / 10:.1f}%</span>'
+        f'<span class="ph-sig">{sig}</span></div>'
+    )
+
+
+def _iter_operation_tree(ops: tuple[OperationView, ...]) -> Iterable[OperationView]:
+    for op in ops:
+        yield op
+        yield from _iter_operation_tree(op.children)
+
+
+def _pipeline_process_spans(trace: TraceView) -> tuple[SpanView, ...]:
+    roots = trace.operation_tree or trace.correlated_operations
+    spans: list[SpanView] = []
+    seen: set[str] = set()
+    for op in _iter_operation_tree(roots):
+        for span in op.spans:
+            if span.name == "pipeline.process" and span.span_id not in seen:
+                spans.append(span)
+                seen.add(span.span_id)
+    return tuple(spans)
+
+
+def _empty_analysis_phase_section(trace: TraceView) -> str:
+    process_spans = _pipeline_process_spans(trace)
+    if not process_spans:
+        return ""
+    files_analyzed = sum(
+        span.counters.get("files_analyzed", 0) for span in process_spans
+    )
+    failed_files = sum(span.counters.get("failed_files", 0) for span in process_spans)
+    if files_analyzed == 0:
+        reason = (
+            "No uncached files were processed in this window; the analysis was "
+            "served from cache, so file extraction micro-stages did not run. "
+            "Use a cold cache or changed files to capture phase timings."
+        )
+    else:
+        reason = (
+            "pipeline.process ran, but no analysis phase counters were recorded. "
+            "Restart the producing process with CODECLONE_OBSERVABILITY_ENABLED=1 "
+            "and analysis phase instrumentation."
+        )
+    counters = (
+        f"pipeline.process files_analyzed={files_analyzed} · "
+        f"failed_files={failed_files}"
+    )
+    body = (
+        '<div class="panel"><div class="empty">'
+        f"{_esc(reason)}"
+        f'<div class="sqlraw">{_esc(counters)}</div>'
+        "</div></div>"
+    )
+    return _section(
+        "Analysis extract phases",
+        body,
+        subtitle=(
+            "Summed per-file worker elapsed time inside pipeline.process "
+            "(parse, walk, CFG, normalize). Dev-only; not repository quality."
+        ),
+    )
+
+
+def _analysis_phases_section(trace: TraceView) -> str:
+    agg = trace.aggregates
+    if not agg.analysis_phases:
+        return _empty_analysis_phase_section(trace)
+    max_permille = max((row.share_permille for row in agg.analysis_phases), default=1)
+    max_permille = max_permille or 1
+    lead_idx = max(
+        range(len(agg.analysis_phases)),
+        key=lambda i: agg.analysis_phases[i].share_permille,
+        default=-1,
+    )
+    rows = "".join(
+        _analysis_phase_row(row, max_permille, lead=(i == lead_idx))
+        for i, row in enumerate(agg.analysis_phases)
+    )
+    footer = (
+        f"Worker elapsed (summed): "
+        f"{_ms(agg.analysis_phase_worker_elapsed_total_ms or 0.0)} · "
+        f"pipeline.process wall: {_ms(agg.analysis_phase_pipeline_wall_ms or 0.0)} · "
+        f"files timed: {agg.analysis_phase_files_timed} · "
+        f"units eligible: {agg.analysis_phase_units_eligible}"
+    )
+    body = f'<div class="panel ph">{rows}</div><p class="shint">{_esc(footer)}</p>'
+    return _section(
+        "Analysis extract phases",
+        body,
+        subtitle=(
+            "Where the core spends its per-file extract time, ranked by share — "
+            "bars are scaled to the heaviest phase. Summed worker elapsed inside "
+            "pipeline.process; dev-only, not repository quality, and may exceed "
+            "parent pipeline wall under parallel execution."
+        ),
+    )
+
+
+_TABS: tuple[tuple[str, str], ...] = (
+    ("overview", "Overview"),
+    ("timeline", "Timeline"),
+    ("operations", "Operations"),
+    ("cost", "Cost"),
+    ("phases", "Phases"),
+)
+
+# One plain-language lead per tab: what the view answers, what to look at first.
+_TAB_LEADS: Mapping[str, str] = {
+    "overview": "Start here — what this run did, and where its time and memory "
+    "actually went.",
+    "timeline": "When everything happened — operations and their spans on one "
+    "shared time axis.",
+    "operations": "What ran — the finish→worker causality chains, nested by call "
+    "depth.",
+    "cost": "What it cost — context units, MCP payloads, and database work.",
+    "phases": "Inside analysis — pipeline stages and per-phase extract cost.",
+}
+
+
+def _tab_shell(panels: Mapping[str, str]) -> str:
+    """Wrap the section panels in CSS-only radio tabs.
+
+    The radio inputs are emitted first so the ``:checked ~`` sibling selectors
+    can light the active tab label and reveal the matching panel without any
+    script. An empty panel falls back to a placeholder so a view is never blank.
+    """
+    inputs = "".join(
+        f'<input type="radio" name="obs-tab" class="obs-tab-input" '
+        f'id="t-{tid}"{" checked" if idx == 0 else ""}>'
+        for idx, (tid, _) in enumerate(_TABS)
+    )
+    nav = (
+        '<nav class="obs-tabs" aria-label="Observability views">'
+        + "".join(
+            f'<label class="obs-tab" for="t-{tid}">{_esc(label)}</label>'
+            for tid, label in _TABS
+        )
+        + "</nav>"
+    )
+    sections: list[str] = []
+    for tid, label in _TABS:
+        inner = panels.get(tid, "")
+        if not inner.strip():
+            inner = (
+                f'<div class="panel empty">No {_esc(label.lower())} data '
+                f"recorded for this window.</div>"
+            )
+        lead = _TAB_LEADS.get(tid, "")
+        lead_html = f'<p class="obs-lead">{_esc(lead)}</p>' if lead else ""
+        sections.append(
+            f'<section class="obs-panel" id="p-{tid}">{lead_html}{inner}</section>'
+        )
+    return f'{inputs}{nav}<div class="obs-panels">{"".join(sections)}</div>'
+
+
 def render_trace_html(trace: TraceView) -> str:
     """Render a ``TraceView`` as a self-contained, branded diagnosis cockpit."""
+    agg = trace.aggregates
     foot = f"CodeClone · platform observability · schema {_esc(trace.schema_version)}"
+    panels = {
+        "overview": _summary(trace) + _waste_section(agg),
+        "timeline": _waterfall(trace),
+        "operations": _chain(trace),
+        "cost": (
+            _semantic(agg)
+            + _db_cost(agg)
+            + _db_fingerprints(agg)
+            + _agent(agg)
+            + _mcp(agg.mcp_tools)
+        ),
+        "phases": _pipeline_section(agg) + _analysis_phases_section(trace),
+    }
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8">'
         '<meta name="viewport" content="width=device-width,initial-scale=1">'
         "<title>CodeClone · Platform Observability</title>"
         f'<style>{_CSS}</style></head><body><div class="wrap">'
         + _header(trace)
-        + _summary(trace)
-        + _waste_section(trace.aggregates)
-        + _waterfall(trace)
-        + _chain(trace)
-        + _semantic(trace.aggregates)
-        + _db_cost(trace.aggregates)
-        + _db_fingerprints(trace.aggregates)
-        + _agent(trace.aggregates)
-        + _mcp(trace.aggregates.mcp_tools)
-        + _pipeline_section(trace.aggregates)
+        + _tab_shell(panels)
         + f'<p class="foot">{foot}</p>'
         + "</div></body></html>"
     )

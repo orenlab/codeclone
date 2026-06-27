@@ -1,66 +1,106 @@
 ---
 name: codeclone-implementation-context
-description: get_implementation_context — bounded structural, call-graph, contract, memory-lane, and change-control evidence from ONE stored MCP run. Read-only; never grants edit permission.
+description: Before broad rg/grep, non-trivial planning, unclear scope, contract/schema work, or resuming another agent — call get_implementation_context once to bound the implementation frontier. Then use targeted source reads. Read-only; never grants edit permission.
 ---
 
 # CodeClone Implementation Context
 
-Projects bounded, deterministic evidence from ONE stored
-`analyze_repository` / `analyze_changed_paths` run (canonical report + off-report
-symbol index, relationship facts, freshness). Does NOT re-analyze, mutate state, or
-grant edit permission.
+Bounded orientation from one stored `analyze_repository` run. Not edit permission.
 
-## When to use
+## Mandatory triggers
 
-| Situation                            | Call                                                                  |
-|--------------------------------------|-----------------------------------------------------------------------|
-| Orient before declaring intent       | `paths=[...]`, `mode="implementation"`                                |
-| Inside an edit cycle (after `start`) | `paths=[...]` + `intent_id` → adds `change_control`                   |
-| Transitive / baseline-aware planning | `mode="impact"` (callers, baseline-sensitive findings)                |
-| Contract / schema work               | `mode="contract"` (definition sites, version constants)               |
-| Function call graph                  | `symbols=["pkg.mod:func"]` + `include=["callers","callees"]`          |
-| Name / usage search                  | `query="name"` — defs + call targets + imports, incl. external/stdlib |
-| Current WIP without listing paths    | `changed_scope=true` (never with `paths`/`symbols`)                   |
+Call once before:
 
-## Subject resolution (in order)
+- repo-wide or recursive `rg`, `grep`, `find`, or custom search scripts;
+- cross-module planning, contract/schema/version work, or hub edits;
+- resuming another agent/session;
+- declaring a non-obvious edit scope.
 
-1. explicit `paths` and/or `symbols`; 2. active intent `allowed_files` (with
-   `intent_id`, no explicit subject); 3. live git-dirty set (`changed_scope=true`);
-4. else `status:"no_current_work"` — whole-repo context is NEVER inferred.
+Skip only for obvious local work with a complete known file boundary.
 
-Symbols use a COLON: `module:symbol` (`pkg.mod:func`). Dot notation does not resolve →
-`unresolved_symbols`. A symbol-only query resolving nothing → `subject_not_found`.
+Do not search broadly first and call this afterward merely to satisfy the workflow.
 
-## Hard rules — MUST / MUST NOT
+## Pattern
 
-- MUST NOT treat `edit_allowed` here as authorization. It MIRRORS `start_controlled_change`. Only `start` grants edits;
-  this tool never changes permission.
-- MUST NOT skip `get_relevant_memory` (change-control step 3) because a memory lane appeared here — that lane is
-  orientation, not governance.
-- MUST NOT treat unresolved call edges (`target_qualname: null`) as resolved facts.
-- MUST NOT treat a `*_summary.truncated: true` collection as complete, or `not_available` as "none exist".
-- MUST NOT use context output to widen declared scope or override `do_not_touch`.
-- `do_not_touch` = hard boundary; `review_context` = advisory; `clone_cohort_members` = comparison, not edit targets.
-- `freshness.status="drifted"` in a shared worktree → verify conclusions against source; do NOT re-analyze in a loop.
-  Re-analyze once, at verification boundaries.
+`get_implementation_context` → targeted reads / narrow `rg` → `codeclone-change-control`
 
-## Reading the response
+Do not loop this tool to avoid reading source.
 
-> Key / easily-misread fields; the real response carries more.
+## Subject
 
-| Field                                                   | Meaning                                                                             |
-|---------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `status`                                                | ok / subject_not_found / no_current_work / needs_analysis / safety_context_overflow |
-| `analysis.freshness.status`                             | fresh / drifted (re-analyze before relying)                                         |
-| `analysis.call_graph_status`                            | complete / partial / unavailable — if partial, read `uncertainties`                 |
-| `subject.resolved_symbols` / `unresolved_symbols`       | exact file:line / unknown qualnames (never guessed)                                 |
-| `change_control.edit_allowed`                           | MIRROR of start — not a grant                                                       |
-| `*_summary.{truncated,omitted}`                         | collection is bounded — not full coverage                                           |
-| `context_artifact_digest` / `context_projection_digest` | run+artifact binding / request+response binding                                     |
+Choose one subject strategy:
 
-## Non-goals
+| Input                      | Use for                                                                                                               |
+|----------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| `query="name"`             | Structural name search: definitions, call targets, imports in the stored run. Not file-text or regex. `mode` ignored. |
+| `paths=[...]`              | Known files or modules                                                                                                |
+| `symbols=["pkg.mod:func"]` | Exact qualnames (`:` not `.`)                                                                                         |
+| `intent_id=...`            | Alone: active intent `allowed_files`. With explicit `paths`/`symbols`: keeps that subject and adds `change_control`.  |
+| `changed_scope=true`       | Live git-dirty paths (not intent scope as subject)                                                                    |
 
-- Do not declare intent or finish verification (use `codeclone-change-control`).
-- Do not replace `get_relevant_memory` in the edit pipeline.
-- Do not auto-fix from context results. Do not force a freshness race in shared worktrees.
-- Do not fall back to CLI or local report files.
+`paths` and `symbols` may be combined when both are known.
+
+Rules:
+
+- whole-repository context is never inferred;
+- never mix `changed_scope` with `paths` or `symbols`;
+- never mix `query` with any other subject input;
+- never guess unresolved symbols;
+- weaker `match_tier` hits require source verification.
+
+## Mode
+
+For paths, symbols, intent scope, or changed scope (not `query`):
+
+- `implementation` — sites, nearby relations, likely tests;
+- `impact` — callers, dependents, baseline-sensitive findings;
+- `contract` — schemas, version constants, persistence and public surfaces.
+
+## Examples
+
+```text
+get_implementation_context(root=<abs>, query="as_sequence")
+
+get_implementation_context(
+    root=<abs>,
+    paths=["codeclone/contracts/__init__.py"],
+    mode="impact",
+)
+
+get_implementation_context(
+    root=<abs>,
+    paths=["pkg/mod.py"],
+    intent_id="<id>",
+    mode="implementation",
+)
+```
+
+Use `rg`/`grep` afterward for text patterns, comments, and non-symbol strings.
+
+Engineering Memory keyword search → `codeclone-engineering-memory`.
+
+## Read results
+
+- `needs_analysis` → analyze once, retry.
+- `no_matches` (query) → refine query; do not jump to repo-wide search.
+- `subject_not_found` / `no_current_work` → fix subject; do not widen to repo root.
+- `freshness.status:"drifted"` → verify live source; no re-analyze loop.
+- truncated/omitted summaries, unresolved call edges → incomplete evidence, not absence.
+- For compact/normal detail, `context_governance.mode="partial_enforce"` means
+  large facet lanes may be omitted with exact drill-down in
+  `context_governance.omitted`; mandatory subject/freshness facts remain inline.
+- When `analysis.context_page_retrieval` is present, use
+  `get_implementation_context_page(root=<abs>, context_projection_digest=analysis.context_projection_digest, facet=...)`
+  for exact facet continuation. This is session-local to MCP run history and
+  returns `not_found` rather than recomputing fresh context. Facet pages
+  themselves are `mode="observe"` retrieval responses.
+
+## Hard limits
+
+- MCP tools only. Do not fall back to CLI or local report files.
+- Never authorizes edits (`start_controlled_change` + `edit_allowed:true` only).
+- Do not widen scope, touch `do_not_touch`, or edit `review_context`/clone cohorts from this output.
+- Memory lane here ≠ `get_relevant_memory`.
+
+Done when you can name: implementation files, review/dependent files, contracts, uncertainties, proposed
+`allowed_files`, and what to read next.

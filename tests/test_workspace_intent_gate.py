@@ -435,6 +435,26 @@ def test_workspace_ownership_honors_foreign_active_authorization(
     )
 
 
+def test_workspace_ownership_requires_live_pid_for_own_active() -> None:
+    from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
+    from codeclone.workspace_intent import gate as gate_mod
+
+    assert (
+        gate_mod._ownership_authorizes_hook(
+            workspace_intents.IntentOwnership.OWN_ACTIVE,
+            liveness=workspace_intents.PidLiveness.ALIVE,
+        )
+        is True
+    )
+    assert (
+        gate_mod._ownership_authorizes_hook(
+            workspace_intents.IntentOwnership.OWN_ACTIVE,
+            liveness=workspace_intents.PidLiveness.DEAD,
+        )
+        is False
+    )
+
+
 def test_agent_pid_liveness_honors_boolean_probe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

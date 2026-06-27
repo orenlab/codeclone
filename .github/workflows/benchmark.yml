@@ -112,6 +112,8 @@ jobs:
         env:
           RUNS: ${{ matrix.runs }}
           WARMUPS: ${{ matrix.warmups }}
+          SCENARIO_PROFILE: ${{ matrix.profile }}
+          STARTUP_RUNS: "3"
           CPUS: ${{ matrix.cpus }}
           MEMORY: ${{ matrix.memory }}
         run: |
@@ -125,6 +127,8 @@ jobs:
             --target . \
             --runs "${{ matrix.runs }}" \
             --warmups "${{ matrix.warmups }}" \
+            --scenario-profile "${{ matrix.profile }}" \
+            --startup-runs 3 \
             --tmp-dir "/tmp/codeclone-bench-${{ matrix.label }}" \
             --output "$BENCH_JSON"
 
@@ -143,21 +147,39 @@ jobs:
               raise SystemExit(1)
 
           payload = json.loads(report_path.read_text(encoding="utf-8"))
+          startup_probes = payload.get("startup_probes", [])
           scenarios = payload.get("scenarios", [])
           comparisons = payload.get("comparisons", {})
 
           print("CodeClone benchmark summary")
           print(f"label={os.environ.get('RUNNER_OS','unknown').lower()} / {os.environ.get('GITHUB_JOB','benchmark')}")
+          if startup_probes:
+              print("startup probes:")
+              for probe in startup_probes:
+                  name = str(probe.get("name", "unknown"))
+                  stats = probe.get("stats_seconds", {})
+                  cpu_stats = probe.get("child_cpu_stats_seconds", {})
+                  print(
+                      f"- {name:22s} median={float(stats.get('median', 0.0)):.4f}s "
+                      f"first={float(probe.get('first_seconds', 0.0)):.4f}s "
+                      f"cpu={float(cpu_stats.get('median', 0.0)):.4f}s"
+                  )
           for scenario in scenarios:
               name = str(scenario.get("name", "unknown"))
               stats = scenario.get("stats_seconds", {})
+              cpu_stats = scenario.get("child_cpu_stats_seconds", {})
+              inventory = scenario.get("inventory_sample", {})
               median = float(stats.get("median", 0.0))
               p95 = float(stats.get("p95", 0.0))
               stdev = float(stats.get("stdev", 0.0))
               digest = str(scenario.get("digest", ""))
               print(
                   f"- {name:16s} median={median:.4f}s "
-                  f"p95={p95:.4f}s stdev={stdev:.4f}s digest={digest}"
+                  f"p95={p95:.4f}s stdev={stdev:.4f}s "
+                  f"cpu={float(cpu_stats.get('median', 0.0)):.4f}s "
+                  f"files={inventory.get('analyzed', 0)}/{inventory.get('cached', 0)} "
+                  f"artifacts={float(scenario.get('artifact_total_kib_sample', 0.0)):.1f}KiB "
+                  f"exit={scenario.get('exit_code_counts', {})} digest={digest}"
               )
 
           if comparisons:
@@ -174,24 +196,57 @@ jobs:
               "",
               f"- Tool: `{payload['tool']['name']} {payload['tool']['version']}`",
               f"- Target: `{payload['config']['target']}`",
+              f"- Scenario profile: `{payload['config'].get('scenario_profile', 'smoke')}`",
               f"- Runs: `{payload['config']['runs']}`",
               f"- Warmups: `{payload['config']['warmups']}`",
+              f"- Startup runs: `{payload['config'].get('startup_runs', 0)}`",
               f"- Generated: `{payload['generated_at_utc']}`",
               "",
-              "### Scenarios",
-              "",
-              "| Scenario | Median (s) | p95 (s) | Stdev (s) | Deterministic | Digest |",
-              "|---|---:|---:|---:|:---:|---|",
           ]
+
+          if startup_probes:
+              lines.extend(
+                  [
+                      "### Startup / Import Probes",
+                      "",
+                      "| Probe | Median (s) | First (s) | CPU Median (s) |",
+                      "|---|---:|---:|---:|",
+                  ]
+              )
+              for probe in startup_probes:
+                  stats = probe.get("stats_seconds", {})
+                  cpu_stats = probe.get("child_cpu_stats_seconds", {})
+                  lines.append(
+                      "| "
+                      f"{probe.get('name', '')} | "
+                      f"{float(stats.get('median', 0.0)):.4f} | "
+                      f"{float(probe.get('first_seconds', 0.0)):.4f} | "
+                      f"{float(cpu_stats.get('median', 0.0)):.4f} |"
+                  )
+              lines.append("")
+
+          lines.extend(
+              [
+                  "### Scenarios",
+                  "",
+                  "| Scenario | Median (s) | p95 (s) | CPU Median (s) | Files A/C | Artifacts KiB | Exit | Deterministic | Digest |",
+                  "|---|---:|---:|---:|---:|---:|---|:---:|---|",
+              ]
+          )
 
           for scenario in scenarios:
               stats = scenario.get("stats_seconds", {})
+              cpu_stats = scenario.get("child_cpu_stats_seconds", {})
+              inventory = scenario.get("inventory_sample", {})
               lines.append(
                   "| "
                   f"{scenario.get('name', '')} | "
                   f"{float(stats.get('median', 0.0)):.4f} | "
                   f"{float(stats.get('p95', 0.0)):.4f} | "
-                  f"{float(stats.get('stdev', 0.0)):.4f} | "
+                  f"{float(cpu_stats.get('median', 0.0)):.4f} | "
+                  f"{inventory.get('analyzed', 0)}/{inventory.get('cached', 0)} | "
+                  f"{float(scenario.get('artifact_total_kib_sample', 0.0)):.1f} | "
+                  f"{scenario.get('exit_code_counts', {})} | "
                   f"{'yes' if bool(scenario.get('deterministic')) else 'no'} | "
                   f"{scenario.get('digest', '')} |"
               )

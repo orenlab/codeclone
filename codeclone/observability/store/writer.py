@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Bounded, batched observability writer (Phase 29 §4.5).
+"""Bounded, batched observability writer.
 
 A whole operation — its row plus every span — is persisted in a single sqlite
 transaction. We do NOT copy the audit per-emit commit-per-row pattern.

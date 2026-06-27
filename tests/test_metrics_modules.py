@@ -36,6 +36,7 @@ from codeclone.metrics.dependencies import (
     find_cycles,
     longest_chains,
     max_depth,
+    select_dependency_graph_nodes,
 )
 from codeclone.metrics.health import HealthInputs, compute_health
 from codeclone.models import DeadCandidate, DeadItem, ModuleDep
@@ -747,3 +748,83 @@ def test_health_dependency_tail_pressure_is_adaptive() -> None:
 
     assert safe.dimensions["dependencies"] == 100
     assert warn.dimensions["dependencies"] == 96
+
+
+def test_select_dependency_graph_nodes_small_graph_keeps_all() -> None:
+    nodes, filtered, truncation = select_dependency_graph_nodes(
+        [("a", "b"), ("b", "c")],
+        dep_cycles=[],
+        longest_chains=[],
+        max_nodes=20,
+        max_edges=100,
+    )
+    assert nodes == ["a", "b", "c"]
+    assert filtered == [("a", "b"), ("b", "c")]
+    assert truncation == {
+        "truncated": False,
+        "node_universe_count": 3,
+        "node_shown_count": 3,
+        "edge_universe_count": 2,
+        "edge_shown_count": 2,
+        "seed_policy": "cycles_then_chains_then_degree",
+    }
+
+
+def test_select_dependency_graph_nodes_seeds_cycles_chains_then_degree() -> None:
+    edges = [
+        ("h", "a"),
+        ("h", "b"),
+        ("h", "c"),
+        ("h", "d"),
+        ("x", "y"),
+        ("y", "x"),
+    ]
+    nodes, filtered, truncation = select_dependency_graph_nodes(
+        edges,
+        dep_cycles=[["x", "y"]],
+        longest_chains=[["d"]],
+        max_nodes=4,
+        max_edges=100,
+    )
+    # Cycle members and the chain member survive downsampling even though they
+    # are lower-degree than the hub; the hub fills the last slot by degree.
+    assert nodes == ["d", "h", "x", "y"]
+    assert truncation["truncated"] is True
+    assert truncation["node_universe_count"] == 7
+    assert truncation["node_shown_count"] == 4
+    assert ("h", "d") in filtered
+    assert ("x", "y") in filtered and ("y", "x") in filtered
+
+
+def test_select_dependency_graph_nodes_node_id_fn_seeds_by_zoom_id() -> None:
+    def to_package(module: str) -> str:
+        return module.split(":", 1)[0]
+
+    nodes, _filtered, truncation = select_dependency_graph_nodes(
+        [("p0", "p1"), ("p0", "p2"), ("p0", "p3"), ("p4", "p5")],
+        dep_cycles=[["p5:m1", "p5:m2"]],
+        longest_chains=[],
+        max_nodes=2,
+        max_edges=100,
+        node_id_fn=to_package,
+    )
+    # The module-level cycle node "p5:m1" maps to package id "p5" before the
+    # membership check, so the package survives the seed pass.
+    assert nodes == ["p0", "p5"]
+    assert truncation["truncated"] is True
+
+
+def test_select_dependency_graph_nodes_caps_edges_without_node_truncation() -> None:
+    nodes, filtered, truncation = select_dependency_graph_nodes(
+        [("a", "b"), ("b", "c"), ("c", "a"), ("a", "c")],
+        dep_cycles=[],
+        longest_chains=[],
+        max_nodes=20,
+        max_edges=2,
+    )
+    assert nodes == ["a", "b", "c"]
+    assert filtered == [("a", "b"), ("b", "c")]
+    assert truncation["truncated"] is True
+    assert truncation["node_shown_count"] == 3
+    assert truncation["edge_universe_count"] == 4
+    assert truncation["edge_shown_count"] == 2

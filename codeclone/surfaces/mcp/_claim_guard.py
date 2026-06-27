@@ -11,6 +11,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final, Literal
 
+from ...utils import coerce as _coerce
 from .messages import claims as claim_msgs
 
 MAX_REVIEW_CLAIM_TEXT_CHARS: Final = 50_000
@@ -18,6 +19,11 @@ TEXT_WINDOW_RADIUS: Final = 80
 SECURITY_SURFACES_FAMILY: Final = "security_surfaces"
 
 CitationKind = Literal["finding", "metric_family"]
+
+
+def _as_sequence(value: object) -> Sequence[object]:
+    return _coerce.as_sequence(value)
+
 
 SECURITY_OVERCLAIM_KEYWORDS: Final = (
     "vulnerab",
@@ -82,6 +88,11 @@ _STRUCTURAL_PROFILES: Final[frozenset[str]] = frozenset({"python_structural"})
 _UNKNOWN_SHORT_FINDING_RE: Final = re.compile(r"\bF-\d+\b", re.IGNORECASE)
 _LITERAL_BOUNDARY_CHARS: Final = r"A-Za-z0-9_:"
 _SENTENCE_BOUNDARIES: Final = ".!?\n"
+_NEGATION_WINDOW: Final = re.compile(
+    r"(?:cannot|can't|can not|does not|doesn't|do not|don't|never|not)\s+"
+    r"(?:\w+\s+){0,4}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -507,9 +518,24 @@ def _find_literal_matches(text: str, literal: str) -> tuple[re.Match[str], ...]:
     return tuple(pattern.finditer(text))
 
 
+def _match_is_negated(text: str, *, start: int) -> bool:
+    window = text[max(0, start - 48) : start]
+    return _NEGATION_WINDOW.search(window) is not None
+
+
 def _contains_keyword(text: str, keywords: Sequence[str]) -> bool:
     lowered = text.casefold()
-    return any(keyword.casefold() in lowered for keyword in keywords)
+    for keyword in keywords:
+        needle = keyword.casefold()
+        start = 0
+        while True:
+            index = lowered.find(needle, start)
+            if index < 0:
+                break
+            if not _match_is_negated(text, start=index):
+                return True
+            start = index + len(needle)
+    return False
 
 
 def _dedupe_citations(citations: Sequence[Citation]) -> tuple[Citation, ...]:
@@ -597,7 +623,3 @@ def _collect_qualname_fields(
         value = str(payload.get(field_name, "")).strip()
         if value:
             qualnames.add(value)
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    return value if isinstance(value, Sequence) and not isinstance(value, str) else ()

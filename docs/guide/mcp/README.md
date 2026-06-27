@@ -27,7 +27,7 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 
 ## Workflows (recommended order)
 
-| Phase                    | Recipe                                                                     |
+| Step                     | Recipe                                                                     |
 |--------------------------|----------------------------------------------------------------------------|
 | 1. Baseline-aware triage | [Analyze & triage](workflows/analyze-and-triage.md)                        |
 | 2. Focused inspection    | [Drill down & checks](workflows/drill-down-and-checks.md)                  |
@@ -38,7 +38,7 @@ Install: [Getting started — MCP extra](../../getting-started.md#install).
 
 **Maintainers only** (developing CodeClone itself — not user repo review):
 
-| Phase                         | Recipe                                                                      |
+| Maintainer surface            | Recipe                                                                      |
 |-------------------------------|-----------------------------------------------------------------------------|
 | M. Observer setup & MCP drill | [Platform Observability recipes](workflows/observability-recipes.md)        |
 | M. Maintainer playbook        | [Developing CodeClone with observer](../observability/maintainer-workflow.md) |

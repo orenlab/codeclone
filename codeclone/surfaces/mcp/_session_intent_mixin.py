@@ -28,6 +28,8 @@ from ...audit import (
     EVENT_WORKSPACE_CONFLICT,
     EVENT_WORKSPACE_GC,
 )
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
 from ._blast_radius import blast_radius_to_payload
 from ._intent import (
@@ -1527,16 +1529,6 @@ def _apply_blast_context(
         "review_context_summary",
     ):
         payload[key] = blast_payload[key]
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def _as_str_sequence(value: object) -> tuple[str, ...]:

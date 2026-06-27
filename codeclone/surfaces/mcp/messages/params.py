@@ -107,9 +107,43 @@ ContextBudgetParam = Annotated[
         description="Global maximum emitted context entries (1-200).",
     ),
 ]
+ContextProjectionDigestParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Exact analysis.context_projection_digest returned by "
+            "get_implementation_context."
+        ),
+    ),
+]
+ContextFacetPageKeyParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Implementation-context facet page key, for example public_surface, "
+            "callers, memory, trajectories, or definition_sites."
+        ),
+    ),
+]
+ContextPageOffsetParam = Annotated[
+    int,
+    Field(ge=0, description="Zero-based offset into the saved facet page lane."),
+]
+ContextPageSizeParam = Annotated[
+    int,
+    Field(ge=1, le=50, description="Facet page size (1-50)."),
+]
 AnalysisModeParam = Annotated[
     str,
-    Field(description="full: clones+metrics. clones_only: clones without metrics."),
+    Field(
+        description=(
+            "full: clones+metrics. clones_only: clones without metrics; "
+            "run summary marks health and security_surfaces unavailable "
+            "(metrics_skipped) and omits comparable entity_counts unless "
+            "canonical inventory.code.scope is analysis_root. Use "
+            "get_report_section(inventory) for full canonical inventory facts."
+        )
+    ),
 ]
 RespectPyprojectParam = Annotated[
     bool,
@@ -184,7 +218,14 @@ BlastDepthParam = Annotated[
 ]
 IncludeParam = Annotated[
     list[str] | None,
-    Field(description="Optional blast-radius include filters."),
+    Field(
+        description=(
+            "Optional blast-radius include filters. Valid: imports, "
+            "clone_cohorts, coverage, risk_signals, do_not_touch, "
+            "review_context, cycles. Use imports for dependents; "
+            "dependents/risk alone are rejected."
+        ),
+    ),
 ]
 PatchModeParam = Annotated[
     str,
@@ -210,6 +251,32 @@ OptionalIntentIdParam = Annotated[
 ReceiptFormatParam = Annotated[
     str,
     Field(description="markdown or json receipt output."),
+]
+ReceiptRetrievalFormatParam = Annotated[
+    str,
+    Field(
+        description="Stored receipt output: structured (typed, default) or markdown.",
+    ),
+]
+ReceiptDigestParam = Annotated[
+    str | None,
+    Field(
+        description="Exact receipt digest (sha256 hex value) for durable lookup.",
+    ),
+]
+PatchTrailDigestParam = Annotated[
+    str | None,
+    Field(
+        description="Exact patch-trail digest (sha256 hex) for durable lookup.",
+    ),
+]
+BlastArtifactIdParam = Annotated[
+    str | None,
+    Field(description="Exact immutable blast artifact id returned by start."),
+]
+BlastArtifactDigestParam = Annotated[
+    str | None,
+    Field(description="Exact blast artifact projection digest (sha256 hex)."),
 ]
 ReviewTextParam = Annotated[
     str,
@@ -266,20 +333,43 @@ ReportSectionParam = Annotated[
     Field(
         description=(
             "meta, inventory, findings, metrics, metrics_detail, changed, "
-            "derived, integrity, or all."
+            "derived, module_map, integrity, or all."
         )
     ),
 ]
 FamilyParam = Annotated[
     str | None,
-    Field(description="Metrics or finding family filter."),
+    Field(
+        description=(
+            "metrics_detail: complexity, coupling, cohesion, dependencies, "
+            "dead_code, api_surface, security_surfaces, overloaded_modules, "
+            "health, coverage_adoption, coverage_join. "
+            "findings: clone, structural, dead_code, or design."
+        )
+    ),
 ]
 PathFilterParam = Annotated[
     str | None,
     Field(description="Repo-relative module or file path filter."),
 ]
-OffsetParam = Annotated[int, Field(description="Pagination offset.")]
-LimitParam = Annotated[int, Field(description="Pagination limit.")]
+OffsetParam = Annotated[
+    int,
+    Field(
+        description=(
+            "Pagination offset for inventory file_registry, findings groups, "
+            "or metrics_detail items."
+        )
+    ),
+]
+LimitParam = Annotated[
+    int,
+    Field(
+        description=(
+            "Pagination limit for inventory file_registry, findings groups, "
+            "or metrics_detail items (max 200)."
+        )
+    ),
+]
 FindingFamilyParam = Annotated[
     str,
     Field(description="all, clone, structural, dead_code, or design."),
@@ -379,6 +469,15 @@ BlastRadiusDepthParam = Annotated[
     str,
     Field(description="auto, direct, or transitive pre-edit blast radius."),
 ]
+BlastRadiusDetailParam = Annotated[
+    str,
+    Field(
+        description=(
+            "summary (default) returns safety-complete slim blast with artifact "
+            "lookup; full returns the compatibility blast projection inline."
+        ),
+    ),
+]
 DirtyScopePolicyParam = Annotated[
     str,
     Field(
@@ -444,7 +543,12 @@ MemoryDetailLevelParam = Annotated[
 ]
 MemoryScopeListParam = Annotated[
     list[str] | None,
-    Field(description="Repo-relative scope paths for engineering memory retrieval."),
+    Field(
+        description=(
+            "Repo-relative scope paths for engineering memory retrieval. "
+            "Required for query_engineering_memory mode=coverage."
+        ),
+    ),
 ]
 MemorySymbolsParam = Annotated[
     list[str] | None,
@@ -456,7 +560,9 @@ MemoryQueryModeParam = Annotated[
         description=(
             "search, get, for_path, for_symbol, stale, drafts, coverage, status, "
             "trajectory_status, trajectory_search, trajectory_get, "
-            "trajectory_anomalies, trajectory_agents, or trajectory_dashboard."
+            "experience_get, trajectory_anomalies, trajectory_agents, or "
+            "trajectory_dashboard. mode=coverage requires scope= (path= is a "
+            "single-path alias when scope is omitted)."
         ),
     ),
 ]
@@ -469,7 +575,7 @@ MemoryRecordIdParam = Annotated[
     Field(
         description=(
             "Record id for mode=get or IDE governance actions; trajectory id for "
-            "mode=trajectory_get."
+            "mode=trajectory_get; experience id for mode=experience_get."
         ),
     ),
 ]
@@ -477,8 +583,10 @@ MemoryPathParam = Annotated[
     str | None,
     Field(
         description=(
-            "Repo-relative subject path for manage_engineering_memory "
-            "action=record_candidate (required for record_candidate)."
+            "Repo-relative path. Required for manage_engineering_memory "
+            "action=record_candidate. For query_engineering_memory: required "
+            "for mode=for_path; mode=coverage accepts path as a single-path "
+            "alias when scope is omitted."
         ),
     ),
 ]
@@ -526,6 +634,18 @@ IncludeDraftsParam = Annotated[
 MemoryMaxRecordsParam = Annotated[
     int,
     Field(description="Maximum engineering memory records to return."),
+]
+MemoryContinuationCursorParam = Annotated[
+    str,
+    Field(
+        description=(
+            "Digest-bound cursor from get_relevant_memory continuation.lanes.*.page."
+        ),
+    ),
+]
+MemoryContinuationPageSizeParam = Annotated[
+    int,
+    Field(description="Continuation page size; bounded by the MCP service."),
 ]
 AuditTrailLimitParam = Annotated[
     int,
@@ -637,7 +757,7 @@ ObservabilitySectionParam = Annotated[
         description=(
             "Telemetry section to project: summary | slow_operations | "
             "memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | "
-            "correlated_chains | costly_noops | pipeline."
+            "correlated_chains | costly_noops | pipeline | analysis_phase_cost."
         ),
     ),
 ]

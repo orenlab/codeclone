@@ -79,6 +79,21 @@ Findings/hotspots tools still honor all three levels.
 | `patch_trail`                   | Deterministic scope/verify forensics for this finish (see below); not authorization                   |
 | `projection_rebuild`            | Optional job enqueue on accept when projection policy is not `off` (non-CI)                           |
 
+Markdown receipt payloads expose top-level `receipt_version`, `verdict`,
+`receipt_digest`, `content`, and `receipt_retrieval` for compact identity and
+human review. The duplicate nested typed receipt is not returned by default;
+fetch the complete structured receipt after `auto_clear=true` with
+`get_review_receipt(root, run_id, receipt_digest, format="structured")`.
+
+`context_governance` measures the complete finish response as one payload and
+publishes a `finish_projection_v1` digest under
+`context_governance.response`. Finish responses use `mode="partial_enforce"` and
+`evidence_policy="response_budget_with_durable_artifact_lookup"`: mandatory
+control, scope, verification, hygiene, and action fields stay inline, while
+recoverable advisory lanes may be compacted. When receipt markdown content or
+Patch Trail detail is omitted, `context_governance.omitted` carries exact
+drill-down metadata for `get_review_receipt` or `get_patch_trail`.
+
 ### Patch Trail on finish
 
 Patch Trail is computed when scope `check` reaches `violated` (**before**

@@ -68,6 +68,10 @@
       "signature": "(self, *, run_id: 'str | None' = None, changed_paths: 'Sequence[str]' = (), git_diff_ref: 'str | None' = None, format: 'PRSummaryFormat' = 'markdown') -> 'dict[str, object]'"
     },
     {
+      "name": "get_blast_artifact",
+      "signature": "(self, *, root: 'str', run_id: 'str | None' = None, blast_artifact_id: 'str | None' = None, projection_digest: 'str | None' = None, format: 'str' = 'structured') -> 'dict[str, object]'"
+    },
+    {
       "name": "get_blast_radius",
       "signature": "(self, *, files: 'Sequence[str]', run_id: 'str | None' = None, depth: 'str' = 'direct', include: 'Sequence[str] | None' = None) -> 'dict[str, object]'"
     },
@@ -88,6 +92,18 @@
       "signature": "(self, *, root: 'str', paths: 'Sequence[str] | None' = None, symbols: 'Sequence[str] | None' = None, intent_id: 'str | None' = None, changed_scope: 'bool' = False, mode: 'str' = 'implementation', include: 'Sequence[str] | None' = None, depth: 'int' = 1, detail_level: 'str' = 'compact', budget: 'int' = 50, run_id: 'str | None' = None, query: 'str | None' = None) -> 'dict[str, object]'"
     },
     {
+      "name": "get_implementation_context_page",
+      "signature": "(self, *, root: 'str', context_projection_digest: 'str', facet: 'str', offset: 'int' = 0, page_size: 'int' = 20, run_id: 'str | None' = None) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_memory_projection_page",
+      "signature": "(self, *, root: 'str', cursor: 'str', page_size: 'int' = 20) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_patch_trail",
+      "signature": "(self, *, root: 'str', run_id: 'str | None' = None, patch_trail_digest: 'str | None' = None, format: 'str' = 'structured') -> 'dict[str, object]'"
+    },
+    {
       "name": "get_production_triage",
       "signature": "(self, *, run_id: 'str | None' = None, max_hotspots: 'int' = 3, max_suggestions: 'int' = 3) -> 'dict[str, object]'"
     },
@@ -102,6 +118,10 @@
     {
       "name": "get_report_section",
       "signature": "(self, *, run_id: 'str | None' = None, section: 'ReportSection' = 'all', family: 'MetricsDetailFamily | None' = None, path: 'str | None' = None, offset: 'int' = 0, limit: 'int' = 50) -> 'dict[str, object]'"
+    },
+    {
+      "name": "get_review_receipt",
+      "signature": "(self, *, root: 'str', run_id: 'str | None' = None, receipt_digest: 'str | None' = None, format: 'str' = 'structured') -> 'dict[str, object]'"
     },
     {
       "name": "get_run_summary",

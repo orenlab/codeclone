@@ -11,6 +11,7 @@ regressions, next action — without a full review loop.
 ## When to use
 
 - "State of this repo?" / "Production regressions vs baseline?" / "What to review first?" / before starting a task.
+- For one metric or "worst hotspot?" without baseline snapshot framing, use `codeclone-hotspots` instead.
 - Baseline-relative `new`/`known` is NOT patch-local proof; patch-local regressions need the change-control before→after
   verify.
 
@@ -44,7 +45,8 @@ Two calls. Stop unless asked for more.
 
 - MCP tools only (CodeClone plugin). Absolute `root`. No latest run → `analyze_repository` first.
 - Default profile — triage, not a deep dive. Production hotspots first, tests/fixtures separately.
-- Clean? Say so — do not invent concerns. Regressions? Suggest `codeclone-review`. CodeClone is the source of truth.
+- Clean? Say so — do not invent concerns. Regressions? Suggest `codeclone-review`.
+- Do not fall back to CLI / local report files. CodeClone is the source of truth.
 
 ## Output
 

@@ -31,6 +31,7 @@ from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html
 from ..primitives.filters import SPREAD_OPTIONS, _render_select
 from ..widgets.badges import _micro_badges, _stat_card, _tab_empty
+from ..widgets.cards import finding_card, meta_badge_html
 from ..widgets.components import insight_block
 from ..widgets.glossary import glossary_tip
 
@@ -136,13 +137,17 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         else ""
     )
 
-    # Effort badge — color-coded
-    effort_cls = f" suggestion-effort--{_escape_html(s.effort)}"
+    # Meta badges — effort is colour-coded by the shared meta-badge tone.
     effort_label = s.effort.title()
     priority_label = _priority_badge_label(s.priority)
     spread_label = _spread_label(
         spread_functions=s.spread_functions,
         spread_files=s.spread_files,
+    )
+    meta_badges = (
+        meta_badge_html(effort_label, tone=s.effort),
+        meta_badge_html(priority_label),
+        meta_badge_html(spread_label),
     )
 
     # Locations inside details
@@ -178,26 +183,8 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         f"{_escape_html(s.severity)}</span>"
     )
 
-    return (
-        f'<article class="suggestion-card"'
-        f"{_build_data_attrs({'data-suggestion-card': 'true', 'data-severity': s.severity, 'data-category': s.category, 'data-family': s.finding_family, 'data-source-kind': s.source_kind, 'data-clone-type': s.clone_type, 'data-actionable': actionable, 'data-spread-bucket': spread_bucket, 'data-count': str(s.fact_count)})}"
-        ">"
-        # -- header row --
-        '<div class="suggestion-head">'
-        f'<span class="suggestion-sev suggestion-sev--{_escape_html(s.severity)}">{_escape_html(s.severity)}</span>'
-        f'<span class="suggestion-title">{_escape_html(s.title)}</span>'
-        '<span class="suggestion-meta">'
-        f'<span class="suggestion-meta-badge{effort_cls}">{_escape_html(effort_label)}</span>'
-        f'<span class="suggestion-meta-badge">{_escape_html(priority_label)}</span>'
-        f'<span class="suggestion-meta-badge">{_escape_html(spread_label)}</span>'
-        "</span></div>"
-        # -- body --
-        '<div class="suggestion-body">'
-        f"{ctx_html}"
-        f"{_render_fact_summary(s.fact_summary)}"
-        f"{next_step_html}"
-        "</div>"
-        # -- expandable details --
+    body_html = f"{ctx_html}{_render_fact_summary(s.fact_summary)}{next_step_html}"
+    details_html = (
         '<details class="suggestion-details">'
         "<summary>Details</summary>"
         '<div class="suggestion-details-body">'
@@ -222,7 +209,28 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
         f"{locs_html}"
         f"{steps_html}"
         "</div></details>"
-        "</article>"
+    )
+    data_attrs = _build_data_attrs(
+        {
+            "data-suggestion-card": "true",
+            "data-severity": s.severity,
+            "data-category": s.category,
+            "data-family": s.finding_family,
+            "data-source-kind": s.source_kind,
+            "data-clone-type": s.clone_type,
+            "data-actionable": actionable,
+            "data-spread-bucket": spread_bucket,
+            "data-count": str(s.fact_count),
+        }
+    )
+    return finding_card(
+        severity=s.severity,
+        title=s.title,
+        meta_badges=meta_badges,
+        body_html=body_html,
+        details_html=details_html,
+        card_class="suggestion-card",
+        data_attrs=data_attrs,
     )
 
 

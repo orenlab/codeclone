@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib
+from collections import defaultdict
 from collections.abc import Sequence
 from pathlib import Path
 from types import ModuleType
@@ -14,6 +15,7 @@ from typing import Protocol, cast
 
 from ...utils.iterutils import chunked
 from .models import (
+    ExistingSourceRevision,
     SemanticHit,
     SemanticIndexStatus,
     SemanticRow,
@@ -102,6 +104,7 @@ def _schema(pa: ModuleType, dimension: int) -> object:
             pa.field("status", pa.string()),
             pa.field("text_hash", pa.string()),
             pa.field("embedding_model", pa.string()),
+            pa.field("source_revision", pa.string()),
             pa.field("vector", pa.list_(pa.float32(), dimension)),
         ]
     )
@@ -113,6 +116,9 @@ def _schema_matches(table: _LanceTable, *, dimension: int) -> bool:
         parent_field = table.schema.field("parent_id")
         chunk_index_field = table.schema.field("chunk_index")
         chunk_count_field = table.schema.field("chunk_count")
+        # source_revision (format v3): a pre-Stage-2 table lacks it, so the
+        # mismatch drives the deliberate one-time drop + full rebuild.
+        source_revision_field = table.schema.field("source_revision")
     except (AttributeError, KeyError, ValueError):
         return False
     return (
@@ -120,6 +126,7 @@ def _schema_matches(table: _LanceTable, *, dimension: int) -> bool:
         and parent_field is not None
         and chunk_index_field is not None
         and chunk_count_field is not None
+        and source_revision_field is not None
     )
 
 
@@ -136,6 +143,7 @@ def _to_record(row: SemanticRow) -> dict[str, object]:
         "status": row.status,
         "text_hash": row.text_hash,
         "embedding_model": row.embedding_model,
+        "source_revision": row.source_revision,
         "vector": list(row.vector),
     }
 
@@ -290,6 +298,49 @@ class LanceDbSemanticIndex:
         arrow = self._table.search().select(["id"]).limit(total).to_arrow()
         return {str(value) for value in arrow.column("id").to_pylist()}
 
+    def existing_revisions(self) -> dict[str, ExistingSourceRevision]:
+        if self._table is None:
+            return {}
+        total = self._table.count_rows()
+        if total == 0:
+            return {}
+        # One metadata scan (no vectors), grouping every row back to its source
+        # object: a chunked trajectory's rows share one parent_id and one
+        # source_revision, so the grouped value is the source's stored revision
+        # plus all of its row ids (needed to keep unchanged rows during reconcile).
+        arrow = (
+            self._table.search()
+            .select(["id", "parent_id", "source", "source_revision", "embedding_model"])
+            .limit(total)
+            .to_arrow()
+        )
+        ids = arrow.column("id").to_pylist()
+        parents = arrow.column("parent_id").to_pylist()
+        sources = arrow.column("source").to_pylist()
+        revisions = arrow.column("source_revision").to_pylist()
+        models = arrow.column("embedding_model").to_pylist()
+        row_ids_by_source: dict[str, set[str]] = defaultdict(set)
+        revision_by_source: dict[str, str] = {}
+        lane_by_source: dict[str, str] = {}
+        model_by_source: dict[str, str] = {}
+        for row_id, parent_id, source, revision, model in zip(
+            ids, parents, sources, revisions, models, strict=True
+        ):
+            source_id = str(parent_id) if parent_id is not None else str(row_id)
+            row_ids_by_source[source_id].add(str(row_id))
+            revision_by_source[source_id] = "" if revision is None else str(revision)
+            lane_by_source[source_id] = str(source)
+            model_by_source[source_id] = "" if model is None else str(model)
+        return {
+            source_id: ExistingSourceRevision(
+                source=cast(SemanticSource, lane_by_source[source_id]),
+                source_revision=revision_by_source[source_id],
+                embedding_model=model_by_source[source_id],
+                row_ids=frozenset(row_ids),
+            )
+            for source_id, row_ids in row_ids_by_source.items()
+        }
+
     def row_fingerprints(self, ids: Sequence[str]) -> dict[str, SemanticRowFingerprint]:
         if self._table is None or not ids:
             return {}
@@ -298,7 +349,7 @@ class LanceDbSemanticIndex:
             clause = ", ".join(_sql_quote(value) for value in chunk)
             arrow = (
                 self._table.search()
-                .select(["id", "text_hash", "embedding_model"])
+                .select(["id", "text_hash", "embedding_model", "source_revision"])
                 .where(f"id IN ({clause})")
                 .limit(len(chunk))
                 .to_arrow()
@@ -306,11 +357,15 @@ class LanceDbSemanticIndex:
             row_ids = arrow.column("id").to_pylist()
             hashes = arrow.column("text_hash").to_pylist()
             models = arrow.column("embedding_model").to_pylist()
-            for row_id, text_hash, model in zip(row_ids, hashes, models, strict=True):
+            revisions = arrow.column("source_revision").to_pylist()
+            for row_id, text_hash, model, revision in zip(
+                row_ids, hashes, models, revisions, strict=True
+            ):
                 result[str(row_id)] = SemanticRowFingerprint(
                     id=str(row_id),
                     text_hash=str(text_hash),
                     embedding_model=str(model),
+                    source_revision="" if revision is None else str(revision),
                 )
         return result
 

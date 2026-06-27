@@ -17,6 +17,8 @@ from ...audit import (
     EVENT_PATCH_VIOLATED,
 )
 from ...utils.coerce import as_int as _coerce_int
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
 from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
 from ._patch_contract import (
@@ -1207,16 +1209,6 @@ class _MCPSessionPatchContractMixin:
             violations=violations,
             health_delta=health_delta,
         )
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 __all__ = ["_MCPSessionPatchContractMixin"]

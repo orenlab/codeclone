@@ -39,8 +39,23 @@ GET_BLAST_RADIUS: Final = (
     "Return the deterministic structural risk boundary for changing "
     "the given files. Shows direct dependents, clone cohort members, "
     "coverage gaps, actionable do-not-touch paths, and review-only "
-    "context. Derived from the canonical report; no new analysis is "
-    "performed."
+    "context. Optional include selects payload lanes: imports "
+    "(direct/transitive dependents), clone_cohorts, coverage, "
+    "risk_signals, do_not_touch, review_context, cycles — not "
+    "dependents or risk alone. Derived from the canonical report; no "
+    "new analysis is performed."
+)
+
+GET_BLAST_ARTIFACT: Final = (
+    "Fetch a durably stored start-time blast artifact from the audit trail by "
+    "run id, blast artifact id, and/or projection digest, exactly as it was "
+    "persisted when start_controlled_change produced its slim summary. It is "
+    "never re-derived from current state. Returns the full omitted blast "
+    "projection for direct/transitive dependents, clone cohorts, review "
+    "context, cycles, and risk details. Durability is bounded by audit "
+    "retention. Fail-closed statuses: ok, not_found, ambiguous, "
+    "digest_mismatch, artifact_id_mismatch, malformed_stored_blast_artifact, "
+    "unsupported_format. Read-only; does not mutate repository state."
 )
 
 GET_IMPLEMENTATION_CONTEXT: Final = (
@@ -49,6 +64,16 @@ GET_IMPLEMENTATION_CONTEXT: Final = (
     "qualnames, then projects module, dependency, API-surface, call/reference, "
     "blast-radius, cache-origin, and workspace-freshness facts without "
     "re-analysis or edit authorization."
+)
+
+GET_IMPLEMENTATION_CONTEXT_PAGE: Final = (
+    "Fetch an exact implementation-context facet page from the session-local "
+    "projection artifact created by get_implementation_context. Requires the "
+    "analysis.context_projection_digest returned by that response and a facet "
+    "page key such as public_surface, callers, memory, trajectories, or "
+    "definition_sites. Returns not_found when the projection is no longer in "
+    "MCP run history; never recomputes fresh context while claiming exactness. "
+    "Read-only; does not mutate repository state."
 )
 
 GET_RELEVANT_MEMORY: Final = (
@@ -60,17 +85,28 @@ GET_RELEVANT_MEMORY: Final = (
     "List responses default to compact statement previews; pass detail_level=full "
     "for complete statements. Scoped responses may also include typed "
     "trajectory precedents in trajectories[]; records[] remains memory records "
-    "only. Read-only; does not mutate the memory database."
+    "only. When a lane has an omitted tail, continuation.lanes.*.page provides "
+    "a digest-bound cursor for get_memory_projection_page. Read-only; does not "
+    "mutate the memory database."
 )
 
 QUERY_ENGINEERING_MEMORY: Final = (
     "Mode-based engineering memory inspection router. Modes: search, get, "
     "for_path, for_symbol, stale, drafts, coverage, status, trajectory_status, "
-    "trajectory_search, trajectory_get, trajectory_anomalies, trajectory_agents, "
-    "and trajectory_dashboard. List modes default to compact "
+    "trajectory_search, trajectory_get, experience_get, trajectory_anomalies, "
+    "trajectory_agents, and trajectory_dashboard. List modes default to compact "
     "previews; mode=get and detail_level=full return complete statements. "
-    "mode=trajectory_get uses record_id as the trajectory id. Project root is "
-    "not a valid path or coverage scope. Read-only."
+    "mode=trajectory_get uses record_id as the trajectory id; "
+    "mode=experience_get uses record_id as the experience id. mode=coverage "
+    "requires scope=; path= is a single-path alias when scope is omitted. "
+    "Project root is not a valid path or coverage scope. Read-only."
+)
+
+GET_MEMORY_PROJECTION_PAGE: Final = (
+    "Return an exact page for a get_relevant_memory omitted tail using the "
+    "digest-bound cursor from continuation.lanes.*.page. The page fails closed "
+    "with snapshot_mismatch if the underlying memory projection no longer "
+    "matches the cursor identity."
 )
 
 MANAGE_ENGINEERING_MEMORY: Final = (
@@ -98,6 +134,30 @@ CREATE_REVIEW_RECEIPT: Final = (
     "repository state."
 )
 
+GET_REVIEW_RECEIPT: Final = (
+    "Fetch a durably stored review receipt from the audit trail by run id "
+    "and/or receipt digest, exactly as it was created. It survives auto_clear "
+    "and is never re-derived from current state. Returns the canonical typed "
+    "receipt (format='structured', the default) or its rendered markdown "
+    "(format='markdown'). At least one lookup key is required; if both are given "
+    "they must identify the same receipt. Durability is bounded by audit "
+    "retention. Fail-closed statuses: ok, not_found, ambiguous, digest_mismatch, "
+    "malformed_stored_receipt, unsupported_format. Read-only; does not mutate "
+    "repository state."
+)
+
+GET_PATCH_TRAIL: Final = (
+    "Fetch a durably stored patch trail from the audit trail by run id and/or "
+    "patch-trail digest, exactly as it was computed. It survives auto_clear and "
+    "is never re-derived from current state. Returns the full forensic trail "
+    "(declared/changed/untouched files, scope check, verification, workspace "
+    "hygiene, evidence) that the default response omits or summarizes. At least "
+    "one lookup key is required; if both are given they must identify the same "
+    "trail. Durability is bounded by audit retention. Fail-closed statuses: ok, "
+    "not_found, ambiguous, digest_mismatch, malformed_stored_patch_trail, "
+    "unsupported_format. Read-only; does not mutate repository state."
+)
+
 VALIDATE_REVIEW_CLAIMS: Final = (
     "Validate cited review text against canonical report semantics. "
     "Detects deterministic mischaracterizations: Security Surfaces "
@@ -120,8 +180,8 @@ HELP: Final = (
 )
 
 QUERY_PLATFORM_OBSERVABILITY: Final = (
-    "Read-only sectioned diagnostics over CodeClone's own runtime telemetry "
-    "(Phase 29). Observability is for CodeClone self-development and "
+    "Read-only sectioned diagnostics over CodeClone's own runtime telemetry. "
+    "Observability is for CodeClone self-development and "
     "diagnostics. It is NOT part of user-facing CodeClone analysis. It MUST "
     "NOT affect reports, gates, baselines, memory facts, or edit "
     "authorization. A slicer, not a trace export API: each call returns one "
@@ -131,9 +191,10 @@ QUERY_PLATFORM_OBSERVABILITY: Final = (
     "bad; high MCP payload != code quality low; hot semantic reindex != unsafe "
     "change. Sections: summary, slow_operations, memory_pipeline_cost, "
     "db_cost, agent_context, mcp_tool_matrix, correlated_chains, costly_noops, "
-    "pipeline. detail_level compact|normal (full downgrades to normal for "
-    "aggregate sections). Intended for CodeClone maintainers and development "
-    "agents; do not use it to make user-facing quality claims about a repo."
+    "pipeline, analysis_phase_cost. detail_level compact|normal (full "
+    "downgrades to normal for aggregate sections). Intended for CodeClone "
+    "maintainers and development agents; do not use it to make user-facing "
+    "quality claims about a repo."
 )
 
 EVALUATE_GATES: Final = (
@@ -142,8 +203,9 @@ EVALUATE_GATES: Final = (
 )
 
 GET_REPORT_SECTION: Final = (
-    "Return one canonical report section. Prefer metrics, metrics_detail, "
-    "changed, findings over all unless necessary."
+    "Return one canonical report section. inventory paginates file_registry; "
+    "findings requires family= for group pages; metrics_detail paginates "
+    "metric items. Prefer metrics, changed, list_findings over section=all."
 )
 
 LIST_FINDINGS: Final = (
@@ -162,8 +224,10 @@ GET_FINDING: Final = (
 
 GET_REMEDIATION: Final = (
     "Return actionable remediation guidance for a single finding. "
-    "Normal detail is the default. Use this when you need the fix packet "
-    "for one finding without pulling larger detail lists."
+    "Normal detail is the default. When the finding exists but has no "
+    "remediation packet, returns status=no_guidance instead of an error. "
+    "Use this when you need the fix packet for one finding without pulling "
+    "larger detail lists."
 )
 
 LIST_HOTSPOTS: Final = (
@@ -293,12 +357,17 @@ TITLE_ANALYZE_CHANGED_PATHS: Final = "Analyze Changed Paths"
 TITLE_GET_RUN_SUMMARY: Final = "Get Run Summary"
 TITLE_GET_PRODUCTION_TRIAGE: Final = "Get Production Triage"
 TITLE_GET_BLAST_RADIUS: Final = "Get Blast Radius"
+TITLE_GET_BLAST_ARTIFACT: Final = "Get Blast Artifact"
 TITLE_GET_IMPLEMENTATION_CONTEXT: Final = "Get Implementation Context"
+TITLE_GET_IMPLEMENTATION_CONTEXT_PAGE: Final = "Get Implementation Context Page"
 TITLE_GET_RELEVANT_MEMORY: Final = "Get Relevant Memory"
+TITLE_GET_MEMORY_PROJECTION_PAGE: Final = "Get Memory Projection Page"
 TITLE_QUERY_ENGINEERING_MEMORY: Final = "Query Engineering Memory"
 TITLE_MANAGE_ENGINEERING_MEMORY: Final = "Manage Engineering Memory"
 TITLE_CHECK_PATCH_CONTRACT: Final = "Check Patch Contract"
 TITLE_CREATE_REVIEW_RECEIPT: Final = "Create Review Receipt"
+TITLE_GET_REVIEW_RECEIPT: Final = "Get Review Receipt"
+TITLE_GET_PATCH_TRAIL: Final = "Get Patch Trail"
 TITLE_VALIDATE_REVIEW_CLAIMS: Final = "Validate Review Claims"
 TITLE_HELP: Final = "Help"
 TITLE_QUERY_PLATFORM_OBSERVABILITY: Final = "Query Platform Observability"

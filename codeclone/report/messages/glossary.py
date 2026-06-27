@@ -72,6 +72,10 @@ GLOSSARY: dict[str, str] = {
     "overloaded": (
         "Modules exceeding acceptable thresholds for size, complexity, or coupling"
     ),
+    "ranked only": (
+        "Modules ranked by overload score but not flagged as candidates "
+        "(e.g. small repo population)"
+    ),
     "critical": "Items with critical status requiring immediate attention",
     "max score": "Highest overload score among all modules",
     "avg loc": "Average lines of code per module",

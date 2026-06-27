@@ -12,27 +12,57 @@ from math import ceil
 from typing import Generic, TypeVar
 
 from ...budget.estimator import estimate_payload
+from ._context_governance import (
+    CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+    CONTEXT_GOVERNANCE_ESTIMATOR,
+)
 
 T = TypeVar("T")
 
 
 def measure_payload(payload: Mapping[str, object]) -> tuple[int, int]:
-    """Return ``(byte_size, token_estimate)`` for a payload's canonical JSON.
+    """Return ``(byte_size, context_unit_estimate)`` for canonical JSON.
 
-    ``byte_size`` is the UTF-8 length of the canonical JSON; tokens reuse the
-    shared budget estimator (chars-approx default — no ``tiktoken`` import). Never
-    raises: payload measurement must never break the tool call it wraps.
+    ``byte_size`` is the UTF-8 length of the canonical JSON; context units reuse
+    the shared deterministic estimator or a valid ``context_governance`` envelope.
+    Never raises: payload measurement must never break the tool call it wraps.
     """
-    try:
-        text = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    except (TypeError, ValueError):
+    text = _canonical_payload_text(payload)
+    if text is None:
         return 0, 0
     byte_size = len(text.encode("utf-8"))
+    return byte_size, _payload_context_units(payload, text)
+
+
+def _canonical_payload_text(payload: Mapping[str, object]) -> str | None:
     try:
-        tokens = estimate_payload(payload).tokens
+        return json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
     except (TypeError, ValueError):
-        tokens = ceil(len(text) / 4)
-    return byte_size, tokens
+        return None
+
+
+def _payload_context_units(payload: Mapping[str, object], text: str) -> int:
+    governed_estimate = _context_governance_estimate(payload)
+    if governed_estimate is not None:
+        return governed_estimate
+    try:
+        return estimate_payload(payload).tokens
+    except (TypeError, ValueError):
+        return ceil(len(text) / 4)
+
+
+def _context_governance_estimate(payload: Mapping[str, object]) -> int | None:
+    governance = payload.get("context_governance")
+    if not isinstance(governance, Mapping):
+        return None
+    if governance.get("contract_version") != CONTEXT_GOVERNANCE_CONTRACT_VERSION:
+        return None
+    if governance.get("estimator") != CONTEXT_GOVERNANCE_ESTIMATOR:
+        return None
+    estimated = governance.get("estimated")
+    if type(estimated) is not int or estimated < 0:
+        return None
+    return estimated
 
 
 @dataclass(frozen=True, slots=True)

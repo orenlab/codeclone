@@ -8,19 +8,25 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TypeVar
 
 from ..utils.utc_timestamps import age_seconds_since_utc_timestamp
 from .events import (
     ANALYSIS_SOURCE_CLI,
     ANALYSIS_SOURCE_MCP,
     EVENT_ANALYSIS_COMPLETED,
+    EVENT_BLAST_ARTIFACT_CREATED,
+    EVENT_PATCH_TRAIL_COMPUTED,
+    EVENT_RECEIPT_CREATED,
     repo_root_digest,
 )
 from .schema import get_meta, open_audit_db_readonly
 from .validation import AuditReadError, AuditSchemaError
+
+_ArtifactT = TypeVar("_ArtifactT")
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,6 +64,408 @@ class AuditRecord:
     token_encoding: str | None = None
     payload_characters: int | None = None
     payload_json: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StoredReviewReceipt:
+    """A review receipt recovered from the durable audit trail.
+
+    It is the exact payload persisted when the receipt was created
+    (``controller_events`` ``review_receipt.created``); it survives
+    ``auto_clear`` and is never re-derived from current state.
+    """
+
+    run_id: str | None
+    receipt_digest: str | None
+    verdict: str | None
+    receipt_version: str | None
+    receipt_format: str | None
+    created_at_utc: str
+    payload: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewReceiptLookup:
+    """Fail-closed result of a durable review-receipt lookup."""
+
+    status: str
+    receipt: StoredReviewReceipt | None = None
+    match_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class StoredPatchTrail:
+    """A patch trail recovered from the durable audit trail.
+
+    It is the exact full forensic payload persisted when the trail was computed
+    (``controller_events`` ``patch_trail.computed``); it survives ``auto_clear``
+    and is never re-derived from current state.
+    """
+
+    run_id: str | None
+    patch_trail_digest: str | None
+    scope_check_status: str | None
+    verification_status: str | None
+    schema_version: str | None
+    created_at_utc: str
+    payload: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class PatchTrailLookup:
+    """Fail-closed result of a durable patch-trail lookup."""
+
+    status: str
+    patch_trail: StoredPatchTrail | None = None
+    match_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class StoredBlastArtifact:
+    """A start-time blast artifact recovered from the durable audit trail.
+
+    It is the exact full blast projection persisted when start created its
+    safety-complete summary. It is never recomputed from the current run/state.
+    """
+
+    run_id: str | None
+    blast_artifact_id: str
+    projection_digest: str | None
+    detail_contract_version: str | None
+    radius_level: str | None
+    created_at_utc: str
+    payload: Mapping[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class BlastArtifactLookup:
+    """Fail-closed result of a durable blast-artifact lookup."""
+
+    status: str
+    blast_artifact: StoredBlastArtifact | None = None
+    match_count: int = 0
+
+
+def lookup_review_receipt(
+    db_path: Path,
+    *,
+    run_id: str | None = None,
+    receipt_digest: str | None = None,
+) -> ReviewReceiptLookup:
+    """Look up a durably stored review receipt by run id and/or receipt digest.
+
+    Read-only and exact: returns the receipt payload exactly as persisted in the
+    audit trail, never re-derives it from current state. ``run_id`` matches the
+    stored short id or a full id that starts with it; ``receipt_digest`` is an
+    exact (non-prefix) match. Fail-closed: ``ambiguous`` when more than one
+    receipt matches, ``digest_mismatch`` when the run has receipts but none with
+    the requested digest, ``malformed_stored_receipt`` when the only matching
+    rows cannot be parsed.
+    """
+    status, receipt, match_count = _lookup_audit_event_artifact(
+        db_path,
+        event_type=EVENT_RECEIPT_CREATED,
+        run_id=run_id,
+        digest=receipt_digest,
+        build=_build_review_receipt,
+        digest_of=_receipt_digest_value,
+        malformed_status="malformed_stored_receipt",
+    )
+    return ReviewReceiptLookup(status=status, receipt=receipt, match_count=match_count)
+
+
+def lookup_patch_trail(
+    db_path: Path,
+    *,
+    run_id: str | None = None,
+    patch_trail_digest: str | None = None,
+) -> PatchTrailLookup:
+    """Look up a durably stored patch trail by run id and/or patch-trail digest.
+
+    Read-only and exact, mirroring :func:`lookup_review_receipt`: returns the
+    full forensic patch-trail payload exactly as persisted in the audit trail
+    (``patch_trail.computed``), never re-derived. ``run_id`` matches the stored
+    short id or a full id that starts with it; ``patch_trail_digest`` is an exact
+    match. Fail-closed: ``ambiguous`` when more than one trail matches,
+    ``digest_mismatch`` when the run has trails but none with the requested
+    digest, ``malformed_stored_patch_trail`` when the only matching rows cannot
+    be parsed.
+    """
+    status, trail, match_count = _lookup_audit_event_artifact(
+        db_path,
+        event_type=EVENT_PATCH_TRAIL_COMPUTED,
+        run_id=run_id,
+        digest=patch_trail_digest,
+        build=_build_patch_trail,
+        digest_of=_patch_trail_digest_value,
+        malformed_status="malformed_stored_patch_trail",
+    )
+    return PatchTrailLookup(status=status, patch_trail=trail, match_count=match_count)
+
+
+def lookup_blast_artifact(
+    db_path: Path,
+    *,
+    run_id: str | None = None,
+    blast_artifact_id: str | None = None,
+    projection_digest: str | None = None,
+) -> BlastArtifactLookup:
+    """Look up a durably stored start blast artifact by stable identity.
+
+    Read-only and exact: returns the full blast projection exactly as persisted
+    in the audit trail (``blast_artifact.created``), never recomputed from the
+    current run. ``run_id`` matches the stored short id or a full id that starts
+    with it; ``blast_artifact_id`` and ``projection_digest`` are exact matches.
+    Fail-closed: ``ambiguous`` when the provided keys identify multiple
+    artifacts, ``digest_mismatch`` or ``artifact_id_mismatch`` when a run has
+    blast artifacts but none with the requested key, and
+    ``malformed_stored_blast_artifact`` when matching rows cannot be parsed.
+    """
+    status, artifact, match_count = _lookup_blast_artifact(
+        db_path,
+        run_id=run_id,
+        blast_artifact_id=blast_artifact_id,
+        projection_digest=projection_digest,
+    )
+    return BlastArtifactLookup(
+        status=status,
+        blast_artifact=artifact,
+        match_count=match_count,
+    )
+
+
+def _lookup_audit_event_artifact(
+    db_path: Path,
+    *,
+    event_type: str,
+    run_id: str | None,
+    digest: str | None,
+    build: Callable[[object, object, Mapping[str, object]], _ArtifactT | None],
+    digest_of: Callable[[Mapping[str, object]], str | None],
+    malformed_status: str,
+) -> tuple[str, _ArtifactT | None, int]:
+    """Fail-closed lookup of a durable audit-event artifact by run id and digest.
+
+    Shared by the typed-artifact retrieval tools (review receipt, patch trail).
+    ``build`` turns one stored ``(run_id, created_at, payload)`` row into the
+    typed artifact (or ``None`` when the row is malformed); ``digest_of`` reads
+    the artifact's exact digest from its payload. Returns
+    ``(status, artifact, match_count)`` with ``status`` one of ``ok``,
+    ``not_found``, ``ambiguous``, ``digest_mismatch`` or ``malformed_status``.
+    """
+    status, parsed, malformed = _read_filtered_artifacts(
+        db_path,
+        event_type=event_type,
+        run_id=run_id,
+        build=build,
+    )
+    if status is not None:
+        return ("not_found", None, 0)
+    if digest is not None:
+        candidates = [item for payload, item in parsed if digest_of(payload) == digest]
+    else:
+        candidates = [item for _payload, item in parsed]
+    if len(candidates) == 1:
+        return ("ok", candidates[0], 1)
+    if len(candidates) > 1:
+        return ("ambiguous", None, len(candidates))
+    if digest is not None and parsed:
+        return ("digest_mismatch", None, 0)
+    if malformed and not parsed:
+        return (malformed_status, None, 0)
+    return ("not_found", None, 0)
+
+
+def _lookup_blast_artifact(
+    db_path: Path,
+    *,
+    run_id: str | None,
+    blast_artifact_id: str | None,
+    projection_digest: str | None,
+) -> tuple[str, StoredBlastArtifact | None, int]:
+    status, parsed_rows, malformed = _read_filtered_artifacts(
+        db_path,
+        event_type=EVENT_BLAST_ARTIFACT_CREATED,
+        run_id=run_id,
+        build=_build_blast_artifact,
+    )
+    if status is not None:
+        return ("not_found", None, 0)
+    parsed = [artifact for _payload, artifact in parsed_rows]
+    candidates = parsed
+    if blast_artifact_id is not None:
+        candidates = [
+            item for item in candidates if item.blast_artifact_id == blast_artifact_id
+        ]
+    if projection_digest is not None:
+        candidates = [
+            item for item in candidates if item.projection_digest == projection_digest
+        ]
+    if len(candidates) == 1:
+        return ("ok", candidates[0], 1)
+    if len(candidates) > 1:
+        return ("ambiguous", None, len(candidates))
+    if projection_digest is not None and parsed:
+        return ("digest_mismatch", None, 0)
+    if blast_artifact_id is not None and parsed:
+        return ("artifact_id_mismatch", None, 0)
+    if malformed and not parsed:
+        return ("malformed_stored_blast_artifact", None, 0)
+    return ("not_found", None, 0)
+
+
+def _read_filtered_artifacts(
+    db_path: Path,
+    *,
+    event_type: str,
+    run_id: str | None,
+    build: Callable[[object, object, Mapping[str, object]], _ArtifactT | None],
+) -> tuple[str | None, list[tuple[Mapping[str, object], _ArtifactT]], int]:
+    if not db_path.exists():
+        return ("not_found", [], 0)
+    rows = _read_event_payload_rows(db_path, event_type)
+    filtered = [
+        row for row in rows if run_id is None or _run_id_matches(row[0], run_id)
+    ]
+    if not filtered:
+        return ("not_found", [], 0)
+    parsed, malformed = _parsed_artifacts(filtered, build)
+    return (None, parsed, malformed)
+
+
+def _parsed_artifacts(
+    rows: list[tuple[object, object, object]],
+    build: Callable[[object, object, Mapping[str, object]], _ArtifactT | None],
+) -> tuple[list[tuple[Mapping[str, object], _ArtifactT]], int]:
+    parsed: list[tuple[Mapping[str, object], _ArtifactT]] = []
+    malformed = 0
+    for stored_run_id, created_at, payload_json in rows:
+        payload = _parse_payload_mapping(payload_json)
+        artifact = (
+            None if payload is None else build(stored_run_id, created_at, payload)
+        )
+        if payload is None or artifact is None:
+            malformed += 1
+            continue
+        parsed.append((payload, artifact))
+    return parsed, malformed
+
+
+def _read_event_payload_rows(
+    db_path: Path, event_type: str
+) -> list[tuple[object, object, object]]:
+    try:
+        conn = open_audit_db_readonly(db_path)
+    except (sqlite3.Error, AuditSchemaError, OSError) as exc:
+        raise AuditReadError(f"cannot open audit database: {exc}") from exc
+    try:
+        return conn.execute(
+            "SELECT run_id, created_at_utc, payload_json FROM controller_events "
+            "WHERE event_type = ? "
+            "ORDER BY created_at_utc DESC, id DESC",
+            (event_type,),
+        ).fetchall()
+    except (sqlite3.Error, AuditSchemaError) as exc:
+        raise AuditReadError(f"cannot read audit database: {exc}") from exc
+    finally:
+        conn.close()
+
+
+def _run_id_matches(stored: object, requested: str) -> bool:
+    stored_id = _str_or_none(stored)
+    if not stored_id:
+        return False
+    return stored_id == requested or requested.startswith(stored_id)
+
+
+def _parse_payload_mapping(payload_json: object) -> Mapping[str, object] | None:
+    if not isinstance(payload_json, str) or not payload_json:
+        return None
+    try:
+        payload = json.loads(payload_json)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(payload, Mapping):
+        return None
+    return payload
+
+
+def _build_review_receipt(
+    stored_run_id: object,
+    created_at: object,
+    payload: Mapping[str, object],
+) -> StoredReviewReceipt | None:
+    typed = payload.get("receipt")
+    if not isinstance(typed, Mapping):
+        return None
+    return StoredReviewReceipt(
+        run_id=_str_or_none(payload.get("run_id")) or _str_or_none(stored_run_id),
+        receipt_digest=_receipt_digest_value(payload),
+        verdict=_str_or_none(payload.get("verdict"))
+        or _str_or_none(typed.get("verdict")),
+        receipt_version=_str_or_none(payload.get("receipt_version"))
+        or _str_or_none(typed.get("receipt_version")),
+        receipt_format=_str_or_none(payload.get("format")),
+        created_at_utc=_str_or_none(created_at) or "",
+        payload=payload,
+    )
+
+
+def _build_patch_trail(
+    stored_run_id: object,
+    created_at: object,
+    payload: Mapping[str, object],
+) -> StoredPatchTrail | None:
+    digest = _str_or_none(payload.get("patch_trail_digest"))
+    if digest is None:
+        return None
+    return StoredPatchTrail(
+        run_id=_str_or_none(stored_run_id),
+        patch_trail_digest=digest,
+        scope_check_status=_str_or_none(payload.get("scope_check_status")),
+        verification_status=_str_or_none(payload.get("verification_status")),
+        schema_version=_str_or_none(payload.get("schema_version")),
+        created_at_utc=_str_or_none(created_at) or "",
+        payload=payload,
+    )
+
+
+def _build_blast_artifact(
+    stored_run_id: object,
+    created_at: object,
+    payload: Mapping[str, object],
+) -> StoredBlastArtifact | None:
+    artifact_id = _str_or_none(payload.get("blast_artifact_id"))
+    blast = payload.get("blast_radius")
+    if artifact_id is None or not isinstance(blast, Mapping):
+        return None
+    return StoredBlastArtifact(
+        run_id=_str_or_none(payload.get("run_id")) or _str_or_none(stored_run_id),
+        blast_artifact_id=artifact_id,
+        projection_digest=_blast_artifact_digest_value(payload),
+        detail_contract_version=_str_or_none(payload.get("detail_contract_version")),
+        radius_level=_str_or_none(blast.get("radius_level")),
+        created_at_utc=_str_or_none(created_at) or "",
+        payload=payload,
+    )
+
+
+def _receipt_digest_value(payload: Mapping[str, object]) -> str | None:
+    digest = payload.get("receipt_digest")
+    if isinstance(digest, Mapping):
+        return _str_or_none(digest.get("value"))
+    return _str_or_none(digest)
+
+
+def _patch_trail_digest_value(payload: Mapping[str, object]) -> str | None:
+    return _str_or_none(payload.get("patch_trail_digest"))
+
+
+def _blast_artifact_digest_value(payload: Mapping[str, object]) -> str | None:
+    digest = payload.get("projection_digest")
+    if isinstance(digest, Mapping):
+        return _str_or_none(digest.get("value"))
+    return _str_or_none(digest)
 
 
 @dataclass(frozen=True, slots=True)
@@ -767,11 +1175,20 @@ __all__ = [
     "AnalysisRunSnapshot",
     "AuditRecord",
     "AuditSummary",
+    "BlastArtifactLookup",
+    "PatchTrailLookup",
     "PayloadFootprint",
+    "ReviewReceiptLookup",
+    "StoredBlastArtifact",
+    "StoredPatchTrail",
+    "StoredReviewReceipt",
     "TopPayload",
     "TypeTokenProfile",
     "WorkflowTokenProfile",
     "count_audit_event_core_gaps",
+    "lookup_blast_artifact",
+    "lookup_patch_trail",
+    "lookup_review_receipt",
     "payload_footprint_to_dict",
     "read_audit_event_core_records",
     "read_audit_summary",

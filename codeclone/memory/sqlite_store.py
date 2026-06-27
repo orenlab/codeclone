@@ -225,6 +225,22 @@ class SqliteEngineeringMemoryStore:
             trajectory_ids=trajectory_ids,
         )
 
+    def find_trajectory_patch_trails_for_lookup(
+        self,
+        *,
+        project_id: str,
+        patch_trail_digest: str | None = None,
+        run_id: str | None = None,
+    ) -> tuple[list[dict[str, object]], int]:
+        from .trajectory.store import find_trajectory_patch_trails_for_lookup
+
+        return find_trajectory_patch_trails_for_lookup(
+            self._conn,
+            project_id=project_id,
+            patch_trail_digest=patch_trail_digest,
+            run_id=run_id,
+        )
+
     def list_canonical_trajectories_for_export(
         self,
         *,

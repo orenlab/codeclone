@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""JSON renderer for the observability ``TraceView`` (Phase 29 output).
+"""JSON renderer for the observability ``TraceView``.
 
 Deterministic: sorted keys, stable indentation. The read model is the source of
 truth; this is a faithful projection of it.

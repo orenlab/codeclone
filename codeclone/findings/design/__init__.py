@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Report-only structural design signals (Phase 21).
+"""Report-only structural design signals.
 
 Design signals are advisory review context. They never affect gates, health,
 baseline, fingerprints, patch verification acceptance, ``edit_allowed``,

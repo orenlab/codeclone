@@ -15,13 +15,16 @@ from ...audit import AuditEvent, AuditWriter, repo_root_digest
 from ...audit.runtime import open_audit_writer_for_root
 from ...cache.store import resolve_cache_status
 from ...memory.ide_governance import IdeGovernanceSessionState
-from ...observability import span
+from ...observability import is_observability_enabled, span
+from ...observability.analysis_phases import apply_pipeline_process_phase_counters
 from ...report.meta import build_report_meta as _build_report_meta
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
 from ._implementation_context import build_unit_location_inventory
+from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
+from ._session_audit_artifact_mixin import _MCPSessionAuditArtifactMixin
 from ._session_baseline import (
     resolve_clone_baseline_state,
     resolve_metrics_baseline_state,
@@ -102,6 +105,7 @@ class MCPSession(
     _MCPSessionWorkflowMixin,
     _MCPSessionClaimGuardMixin,
     _MCPSessionReviewReceiptMixin,
+    _MCPSessionAuditArtifactMixin,
     _MCPSessionPatchContractMixin,
     _MCPSessionIntentMixin,
     _MCPSessionMemoryMixin,
@@ -129,7 +133,10 @@ class MCPSession(
             tuple[str, tuple[str, ...], str],
             BlastRadiusResult,
         ] = {}
+        self._context_projection_pages: dict[str, ContextProjectionArtifact] = {}
+        self._memory_continuation_requests: dict[str, dict[str, object]] = {}
         self._active_intents: dict[str, IntentRecord] = {}
+        self._start_replay_cache: dict[str, dict[str, object]] = {}
         self._intent_sequence = 0
         self._agent_pid = os.getpid()
         self._agent_start_epoch = int(time.time())
@@ -275,10 +282,23 @@ class MCPSession(
             root=root_path,
             filepaths=discovery_result.all_file_paths,
         )
-        with span(name="pipeline.process"):
+        with span(name="pipeline.process") as process_span:
             processing_result = process(
                 boot=boot, discovery=discovery_result, cache=cache
             )
+            if is_observability_enabled():
+                process_span.set_counter(
+                    "files_analyzed",
+                    processing_result.files_analyzed,
+                )
+                process_span.set_counter(
+                    "failed_files",
+                    len(processing_result.failed_files),
+                )
+                apply_pipeline_process_phase_counters(
+                    process_span,
+                    phase_snapshot=processing_result.phase_snapshot,
+                )
         unit_inventory = build_unit_location_inventory(
             root=root_path,
             units=processing_result.units,

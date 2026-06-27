@@ -89,3 +89,20 @@ def test_disabled_resolution_does_not_import_psutil() -> None:
     sys.modules.pop("psutil", None)
     resolve_observability_config(environ={})
     assert "psutil" not in sys.modules
+
+
+def test_observability_persist_can_be_disabled_explicitly() -> None:
+    cfg = _resolve(
+        CODECLONE_OBSERVABILITY_ENABLED="1",
+        CODECLONE_OBSERVABILITY_PERSIST="0",
+    )
+    assert cfg.enabled is True
+    assert cfg.persist is False
+
+
+def test_env_flag_false_values_are_honored() -> None:
+    cfg = _resolve(
+        CODECLONE_OBSERVABILITY_ENABLED="1",
+        CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES="false",
+    )
+    assert cfg.capture_payload_sizes is False

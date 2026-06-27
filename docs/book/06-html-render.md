@@ -36,17 +36,48 @@ Output:
 
 - HTML must not recompute detection semantics; it renders facts from report/core layers.
 - Provenance panels mirror canonical report/meta facts.
-- Overview, Quality, Suggestions, Dead Code, and Clones tabs are projections over canonical report sections.
-- Quality may include report-only subtabs such as `Coverage Join` and
-  `Security Surfaces`; these remain factual projections over canonical metrics
-  families rather than HTML-only analysis.
+- Overview, Review, Quality, Module map, Suggestions, Dead Code, Dependencies,
+  and Clones tabs are projections over canonical report sections.
+- The `Review` tab (between Overview and Clones) is render-only and is the guided
+  entry point for triaging findings. It draws the precomputed
+  `derived.review_queue` — a prioritized, cross-family actionable queue — as a list
+  of shared finding cards. The reviewed state (per finding id, persisted in
+  `localStorage`), the progress bar, and the severity/family filters are
+  client-side UX over those rendered facts; it recomputes nothing. The `Overview`
+  launchpad surfaces the queue total plus severity counts and jumps into this tab
+  via `data-goto-tab`; the queue is empty (and the launchpad hidden) when there are
+  no suggestions, mirroring `derived.suggestions` exactly.
+- `codeclone/report/html/widgets/cards.py:finding_card` is the single card chrome
+  shared by the Suggestions, Review, and Structural Findings surfaces — one
+  severity stripe + badge + meta/body/details/actions shell, so per-surface markup
+  is not duplicated.
+- Quality covers per-function/class metrics (Complexity, Coupling, Cohesion) plus
+  report-only subtabs such as `Coverage Join` and `Security Surfaces`; these
+  remain factual projections over canonical metrics families rather than
+  HTML-only analysis. Quality does not host the overloaded-modules profile — that
+  module-level view lives in the `Module map` tab.
+- The `Module map` tab (between Quality and Dependencies) is render-only and is
+  the single home for module-level responsibility. It draws the precomputed
+  `derived.module_map` graph views and unwind-candidate triage, plus the full
+  `overloaded_modules` profile (stat cards + table) read directly from
+  `metrics.families.overloaded_modules`. It re-samples nothing and adds no health
+  dimension — the SVG may show a deterministic sample on large repositories while
+  the unwind and overloaded tables stay full-size. The `Packages`/`Modules`
+  toggle swaps the two precomputed graphs without recomputation. The graph block
+  shows "Dependency graph is not available." when the dependencies family is
+  skipped; the overloaded-modules section renders whenever that metrics family is
+  present, independent of graph availability.
 - IDE deep links are HTML-only UX over canonical path/line facts.
 - Missing snippets or optional meta fields render safe factual fallbacks rather than invented data.
 
 Refs:
 
 - `codeclone/report/html/assemble.py:build_html_report`
+- `codeclone/report/html/sections/_review.py:render_review_panel`
+- `codeclone/report/html/widgets/cards.py:finding_card`
 - `codeclone/report/html/sections/_clones.py:_render_group_explanation`
+- `codeclone/report/html/sections/_module_map.py:render_module_map_panel`
+- `codeclone/report/html/widgets/dep_graph_layout.py`
 - `codeclone/report/html/sections/_meta.py:render_meta_panel`
 - `codeclone/report/html/assets/js.py:_IDE_LINKS`
 - `codeclone/report/overview.py:materialize_report_overview`

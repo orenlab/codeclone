@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Read-model views (Phase 29 §4.6).
+"""Read-model views.
 
 ``TraceView`` is the primary artifact; JSON/text/HTML renderers are projections
 over it and must not drive the schema. Pure data, built by ``store/reader.py``.
@@ -102,15 +102,17 @@ class McpToolAggregate:
 class DbCostRow:
     """SQLite work attributed to a span class (performance-truth, not audit).
 
-    Aggregated from span db_queries/db_writes counters; ``max_queries`` is the
-    worst single instance and ``queries`` ÷ a per-row productive count exposes
-    N+1-shaped access (many reads, little produced)."""
+    Aggregated from span db_queries/db_writes/db_rows counters (v2 semantics:
+    logical statements, not per-row trace fires). ``max_queries`` is the worst
+    single instance; ``total_rows`` exposes executemany amplification, and a
+    high statement count with little produced is the N+1 shape."""
 
     span_name: str
     surface: str
     span_count: int
     total_queries: int
     total_writes: int
+    total_rows: int
     max_queries: int
 
 
@@ -132,8 +134,20 @@ class DbFingerprintRow:
 
 
 @dataclass(frozen=True, slots=True)
+class AnalysisPhaseRow:
+    phase: str
+    worker_elapsed_ms: float
+    share_permille: int
+    verdict: str
+
+
+@dataclass(frozen=True, slots=True)
 class AgentTokenRow:
-    """One MCP tool's cumulative token economics across the window."""
+    """One MCP tool's cumulative context-unit economics across the window.
+
+    Field names keep the historical ``*_tokens`` spelling for storage/query
+    compatibility; values are deterministic context-unit estimates.
+    """
 
     name: str
     calls: int
@@ -143,9 +157,9 @@ class AgentTokenRow:
 
 @dataclass(frozen=True, slots=True)
 class AgentView:
-    """Agentic context economics: how many tokens MCP tools pushed back into
-    the agent's context (``response_tokens`` = context pressure), ranked by the
-    biggest consumer. Built only when MCP operations are present."""
+    """Agentic context economics: context units MCP tools pushed back into the
+    agent context (``response_tokens`` = legacy field for context pressure),
+    ranked by the biggest consumer. Built only when MCP operations are present."""
 
     mcp_calls: int = 0
     request_tokens: int = 0
@@ -197,6 +211,12 @@ class AggregatesView:
     heaviest_cpu: OperationView | None = None
     pipeline: tuple[PipelineGroup, ...] = ()
     db_fingerprints: tuple[DbFingerprintRow, ...] = ()
+    analysis_phases: tuple[AnalysisPhaseRow, ...] = ()
+    analysis_phase_worker_elapsed_total_ms: float | None = None
+    analysis_phase_pipeline_wall_ms: float | None = None
+    analysis_phase_source_spans: int = 0
+    analysis_phase_files_timed: int = 0
+    analysis_phase_units_eligible: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -244,6 +264,7 @@ __all__ = [
     "AgentTokenRow",
     "AgentView",
     "AggregatesView",
+    "AnalysisPhaseRow",
     "DbCostRow",
     "DbFingerprintRow",
     "McpToolAggregate",

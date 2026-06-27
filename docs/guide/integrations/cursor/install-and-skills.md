@@ -6,7 +6,7 @@
 |------------------------------------|---------------------------------|----------------------------------------------------------------------------------------------|
 | `.cursor-plugin/plugin.json`       | Manifest                        | `skills/`, `rules/`, `agents/`, `hooks/hooks.json`, `mcp.json`                               |
 | `mcp.json`                         | MCP                             | `python3` + `./scripts/launch_mcp.py` — resolves `codeclone-mcp` (`.venv` → Poetry → `PATH`) |
-| Skills (8)                         | `skills/*/`                     | See table below                                                                              |
+| Skills (9)                         | `skills/*/`                     | See table below                                                                              |
 | Agent                              | `agents/structural-reviewer.md` | Invoke id: **`codeclone-structural-reviewer`**                                               |
 | Rules (3)                          | `rules/*.mdc`                   | See **Rules**                                                                                |
 | Hooks                              | `hooks/hooks.json`              | Dispatches via `hooks/run_hook.py` (plugin manifest; optional project install)               |
@@ -23,15 +23,14 @@ name on disk):
 | `production-triage/`                | `/codeclone-production-triage`      | `analyze_repository` → `get_production_triage`                             |
 | `codeclone-hotspots/`               | `/codeclone-hotspots`               | `analyze_repository` → hotspots / `check_*`                                |
 | `blast-radius/`                     | `/codeclone-blast-radius`           | `analyze_repository` → `get_blast_radius` (read-only)                      |
+| `architecture-triage/`              | `/codeclone-architecture-triage`    | Reuse run → `module_map` + impact context → ranked problems (read-only)    |
 | `codeclone-review/`                 | `/codeclone-review`                 | Full review loop (conservative first)                                      |
 | `codeclone-change-control/`         | `/codeclone-change-control`         | `start_controlled_change` → edit → `finish_controlled_change`              |
 | `codeclone-engineering-memory/`     | `/codeclone-engineering-memory`     | `get_relevant_memory`, `query_engineering_memory`, drafts                  |
 | `codeclone-implementation-context/` | `/codeclone-implementation-context` | `get_implementation_context` after `start`                                 |
 | `codeclone-platform-observability/` | `/codeclone-platform-observability` | Maintainer-only: `query_platform_observability` (observer enable required) |
 
-Codex and Claude Code plugins ship six shared skills (includes
-platform-observability) but **not** standalone production-triage or blast-radius
-skills.
+Codex and Claude Code plugins ship the same nine skills from `plugins/codeclone/skills/`.
 
 ## Install
 
@@ -110,6 +109,12 @@ Coverage Join semantics matter.
 Read-only: `get_blast_radius` after analysis. Does **not** call
 `start_controlled_change`. Use `codeclone-change-control` for edits.
 
+### codeclone-architecture-triage
+
+Read-only ranked architectural problems from one stored run: module_map, metrics,
+policy + structural shortlists, per-subject impact context, defect validation.
+Response-local priorities only — not CodeClone findings.
+
 ### codeclone-review
 
 Conservative-first full review; optional deeper pass with explicit user request.
@@ -170,11 +175,9 @@ Playbook: [Maintainer workflow](../../../guide/observability/maintainer-workflow
 
 ### codeclone-structural-reviewer
 
-Defined in `agents/structural-reviewer.md` with frontmatter `name:
-codeclone-structural-reviewer`. Read-only review protocol; does not declare
-intent or modify files. The structural reviewer agent uses CodeClone MCP tools
-exclusively for evidence, does not modify files or declare change intent, and
-does not treat report-only signals as CI failures or vulnerability claims.
+Defined in `agents/structural-reviewer.md` (`name: codeclone-structural-reviewer`).
+Read-only MCP evidence only; no edits or intent; report-only signals are not CI
+failures or vulnerability claims.
 
 ## Distribution
 
@@ -185,7 +188,7 @@ does not treat report-only signals as CI failures or vulnerability claims.
 
 ## Runtime model
 
-Additive: local MCP via `launch_mcp.py`, eight skills, three rules (two
+Additive: local MCP via `launch_mcp.py`, nine skills, three rules (two
 `alwaysApply` + one Python glob), optional hooks. The full default agent MCP
 surface is passed through — the launcher does **not**
 pass `--ide-governance-channel` (VS Code adds +2 IDE-only tools and Memory

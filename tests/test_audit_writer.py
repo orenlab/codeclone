@@ -892,22 +892,22 @@ def test_compact_payload_claim_completed() -> None:
 
 
 def test_compact_payload_receipt_created() -> None:
-    """Exercise receipt created branch (lines 142-144)."""
+    """Review receipts are exempt from compaction (forensic-retention policy):
+    the complete payload is preserved so it stays exactly retrievable post-clear."""
     from codeclone.audit.events import EVENT_RECEIPT_CREATED, compact_payload_for_event
 
+    payload = {
+        "format": "v2",
+        "receipt": {
+            "verdict": "approved",
+            "human_decision_points": ["a", "b"],
+        },
+    }
     result = compact_payload_for_event(
         event_type=EVENT_RECEIPT_CREATED,
-        payload={
-            "format": "v2",
-            "receipt": {
-                "verdict": "approved",
-                "human_decision_points": ["a", "b"],
-            },
-        },
+        payload=payload,
     )
-    assert result["format"] == "v2"
-    assert result["verdict"] == "approved"
-    assert result["human_decisions"] == 2
+    assert result == payload
 
 
 def test_compact_payload_budget() -> None:

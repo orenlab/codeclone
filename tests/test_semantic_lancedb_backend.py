@@ -239,3 +239,118 @@ def test_lancedb_backend_open_table_propagates_unexpected_value_error(
     monkeypatch.setattr(index._db, "open_table", _boom)
     with pytest.raises(ValueError, match="unexpected lancedb failure"):
         index._open_table(create=False)
+
+
+def _chunk_row(
+    parent_id: str,
+    *,
+    chunk_index: int,
+    vector: list[float],
+    source_revision: str | None = "rev-1",
+) -> SemanticRow:
+    return SemanticRow(
+        id=f"trajectory:{parent_id}:chunk:{chunk_index:03d}",
+        source="trajectory",
+        parent_id=parent_id,
+        chunk_index=chunk_index,
+        chunk_count=2,
+        kind="trajectory",
+        text_hash=f"h-{parent_id}-{chunk_index}",
+        embedding_model="diagnostic-hash-v1",
+        source_revision=source_revision or "",
+        vector=tuple(vector),
+    )
+
+
+def test_lancedb_backend_existing_revisions_groups_chunked_rows(
+    tmp_path: Path,
+) -> None:
+    writer, vec, _config = _writer_and_vector(tmp_path, dimension=4, text="chunked")
+    parent_id = "traj-parent"
+    writer.upsert(
+        [
+            _chunk_row(parent_id, chunk_index=0, vector=vec, source_revision="rev-a"),
+            _chunk_row(parent_id, chunk_index=1, vector=vec, source_revision="rev-a"),
+            _row("solo", vec),
+        ]
+    )
+
+    revisions = writer.existing_revisions()
+    assert set(revisions) == {parent_id, "solo"}
+    grouped = revisions[parent_id]
+    assert grouped.source == "trajectory"
+    assert grouped.source_revision == "rev-a"
+    assert grouped.embedding_model == "diagnostic-hash-v1"
+    assert len(grouped.row_ids) == 2
+    assert revisions["solo"].source == "memory"
+    assert revisions["solo"].row_ids == frozenset({"solo"})
+
+
+def test_lancedb_backend_existing_revisions_treats_null_metadata_as_empty_strings(
+    tmp_path: Path,
+) -> None:
+    writer, vec, _config = _writer_and_vector(tmp_path, dimension=4, text="legacy")
+    writer.upsert(
+        [
+            _chunk_row(
+                "legacy-parent",
+                chunk_index=0,
+                vector=vec,
+                source_revision=None,
+            )
+        ]
+    )
+
+    revisions = writer.existing_revisions()
+    legacy = revisions["legacy-parent"]
+    assert legacy.source_revision == ""
+    assert legacy.embedding_model == "diagnostic-hash-v1"
+
+
+def test_lancedb_backend_search_filters_by_source_lane(tmp_path: Path) -> None:
+    writer, vec_a, config = _writer_and_vector(
+        tmp_path, dimension=4, text="memory lane"
+    )
+    provider = resolve_embedding_provider(config)
+    (vec_b,) = provider.embed(["trajectory lane"])
+    writer.upsert(
+        [
+            _row("mem-hit", vec_a),
+            SemanticRow(
+                id="traj-hit",
+                source="trajectory",
+                kind="trajectory",
+                text_hash="h-traj",
+                embedding_model="diagnostic-hash-v1",
+                vector=tuple(vec_b),
+            ),
+        ]
+    )
+
+    hits = writer.search(vec_a, k=5, source="memory")
+    assert [hit.source_id for hit in hits] == ["mem-hit"]
+    assert all(hit.source == "memory" for hit in hits)
+
+
+def test_lancedb_backend_optional_metadata_coercions() -> None:
+    from codeclone.memory.semantic.lancedb_backend import _optional_int, _optional_str
+
+    assert _optional_int(None) is None
+    assert _optional_int(3) == 3
+    assert _optional_int("4") == 4
+    assert _optional_str(None) is None
+    assert _optional_str("trajectory") == "trajectory"
+
+
+def test_lancedb_backend_existing_revisions_on_empty_table_returns_empty_mapping(
+    tmp_path: Path,
+) -> None:
+    config = _config(tmp_path, dimension=4)
+    writer = LanceDbSemanticIndex(
+        path=Path(config.index_path), dimension=config.dimension, create=False
+    )
+    provider = resolve_embedding_provider(config)
+    (vec,) = provider.embed(["seed"])
+    writer.upsert([_row("only", vec)])
+    writer.delete(["only"])
+    assert writer.existing_revisions() == {}

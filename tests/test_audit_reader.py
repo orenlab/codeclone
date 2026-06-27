@@ -7,16 +7,19 @@ from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
 
+from codeclone.audit import EVENT_RECEIPT_CREATED, AuditEvent
 from codeclone.audit.analysis_completed import ANALYSIS_SOURCE_CLI
 from codeclone.audit.reader import (
+    AnalysisRunSnapshot,
     _analysis_payload_from_json,
     _analysis_run_source_label,
     _short_run_id,
+    lookup_review_receipt,
     read_audit_summary,
     read_latest_analysis_run,
 )
@@ -28,6 +31,7 @@ from codeclone.audit.validation import (
     resolve_audit_path,
     validate_event_row,
 )
+from codeclone.audit.writer import SqliteAuditWriter
 
 from .audit_fixtures import write_compact_analysis_completed_event
 
@@ -49,6 +53,27 @@ def _write_cli_analysis_event(tmp_path: Path) -> Path:
         agent_start_epoch=999,
         agent_label="codeclone-cli/test",
     )
+
+
+def _read_latest_analysis_run_with_payload(
+    tmp_path: Path,
+    payload: dict[str, object],
+) -> AnalysisRunSnapshot | None:
+    import json
+
+    from codeclone.audit import EVENT_ANALYSIS_COMPLETED
+
+    db_path = _write_cli_analysis_event(tmp_path)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            "UPDATE controller_events SET payload_json = ? WHERE event_type = ?",
+            (json.dumps(payload), EVENT_ANALYSIS_COMPLETED),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return read_latest_analysis_run(db_path=db_path, repo_root=tmp_path)
 
 
 def test_read_latest_analysis_run_missing_db(tmp_path: Path) -> None:
@@ -158,6 +183,20 @@ def test_read_latest_analysis_run_compact_payload_fallbacks(tmp_path: Path) -> N
     assert snapshot.files == 10
 
 
+def test_read_latest_analysis_run_top_level_metric_fallbacks(tmp_path: Path) -> None:
+    legacy_payload = {
+        "source": "cli",
+        "health_score": 72,
+        "findings_total": 11,
+        "files": 42,
+    }
+    snapshot = _read_latest_analysis_run_with_payload(tmp_path, legacy_payload)
+    assert snapshot is not None
+    assert snapshot.health == 72
+    assert snapshot.findings == 11
+    assert snapshot.files == 42
+
+
 def test_read_audit_summary_without_token_columns_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -230,3 +269,241 @@ def test_validate_event_row_rejects_invalid_agent_start_epoch() -> None:
         match="agent_start_epoch must be non-negative",
     ):
         validate_event_row(row_negative)
+
+
+def _receipt_payload(
+    *, verdict: str = "clean", digest: str = "abc123"
+) -> dict[str, object]:
+    return {
+        "run_id": "30b56d21",
+        "format": "markdown",
+        "receipt_version": "1",
+        "verdict": verdict,
+        "receipt_digest": {
+            "kind": "receipt_v1",
+            "algorithm": "sha256",
+            "digest_version": "1",
+            "value": digest,
+        },
+        "content": "## CodeClone Agent Review Receipt\n...",
+        "receipt": {"receipt_version": "1", "verdict": verdict, "provenance": {}},
+    }
+
+
+def _write_receipt_event(
+    db_path: Path,
+    *,
+    run_id: str,
+    payload: dict[str, object],
+    payloads: str = "compact",
+) -> None:
+    writer = SqliteAuditWriter(
+        db_path=db_path,
+        payloads=cast("Any", payloads),
+        retention_days=30,
+    )
+    writer.emit(
+        AuditEvent(
+            event_type=EVENT_RECEIPT_CREATED,
+            severity="info",
+            repo_root_digest="rootdigest0000",
+            agent_pid=1,
+            agent_start_epoch=1,
+            agent_label="test",
+            run_id=run_id,
+            intent_id=None,
+            report_digest="reportdigest",
+            status=str(payload.get("verdict", "")),
+            payload=payload,
+        )
+    )
+    writer.close()
+
+
+def test_lookup_review_receipt_by_run_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(db_path, run_id="30b56d21", payload=_receipt_payload())
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21")
+
+    assert result.status == "ok"
+    assert result.receipt is not None
+    assert result.receipt.receipt_digest == "abc123"
+    assert result.receipt.verdict == "clean"
+    # Returns the stored typed receipt, not a recomputed one.
+    assert result.receipt.payload["receipt"] == {
+        "receipt_version": "1",
+        "verdict": "clean",
+        "provenance": {},
+    }
+
+
+def test_lookup_review_receipt_compact_mode_preserves_full_receipt(
+    tmp_path: Path,
+) -> None:
+    # The whole point of the forensic-retention policy: even the default compact
+    # audit mode keeps the complete typed receipt durably retrievable.
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(), payloads="compact"
+    )
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21", receipt_digest="abc123")
+
+    assert result.status == "ok"
+    assert result.receipt is not None
+    typed = cast("dict[str, object]", result.receipt.payload["receipt"])
+    assert typed["verdict"] == "clean"
+
+
+def test_lookup_review_receipt_not_found(tmp_path: Path) -> None:
+    missing = tmp_path / "absent.sqlite3"
+    assert lookup_review_receipt(missing, run_id="30b56d21").status == "not_found"
+
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(db_path, run_id="30b56d21", payload=_receipt_payload())
+    assert lookup_review_receipt(db_path, run_id="ffffffff").status == "not_found"
+
+
+def test_lookup_review_receipt_ambiguous(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(digest="aaa")
+    )
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(digest="bbb")
+    )
+
+    # run id alone cannot pick between two receipts.
+    assert lookup_review_receipt(db_path, run_id="30b56d21").status == "ambiguous"
+    # the digest disambiguates exactly.
+    exact = lookup_review_receipt(db_path, run_id="30b56d21", receipt_digest="bbb")
+    assert exact.status == "ok"
+    assert exact.receipt is not None
+    assert exact.receipt.receipt_digest == "bbb"
+
+
+def test_lookup_review_receipt_digest_mismatch(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(
+        db_path, run_id="30b56d21", payload=_receipt_payload(digest="aaa")
+    )
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21", receipt_digest="zzz")
+    assert result.status == "digest_mismatch"
+    assert result.receipt is None
+
+
+def test_lookup_review_receipt_malformed(tmp_path: Path) -> None:
+    db_path = tmp_path / "audit.sqlite3"
+    _write_receipt_event(db_path, run_id="30b56d21", payload=_receipt_payload())
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "UPDATE controller_events SET payload_json='{not valid json' "
+        "WHERE event_type=?",
+        (EVENT_RECEIPT_CREATED,),
+    )
+    conn.commit()
+    conn.close()
+
+    result = lookup_review_receipt(db_path, run_id="30b56d21")
+    assert result.status == "malformed_stored_receipt"
+
+
+def test_audit_reader_payload_parsers_and_builder_guards() -> None:
+    from codeclone.audit.reader import (
+        _blast_artifact_digest_value,
+        _build_blast_artifact,
+        _build_patch_trail,
+        _build_review_receipt,
+        _parse_payload_mapping,
+        _receipt_digest_value,
+        _run_id_matches,
+    )
+
+    assert _parse_payload_mapping(None) is None
+    assert _parse_payload_mapping("") is None
+    assert _parse_payload_mapping("{not-json") is None
+    assert _parse_payload_mapping("[]") is None
+    assert _run_id_matches(None, "run") is False
+    assert _run_id_matches("", "run") is False
+    assert _run_id_matches("run", "run-full") is True
+
+    assert _build_review_receipt("run", "now", {}) is None
+    assert _build_review_receipt("run", "now", {"receipt": "bad"}) is None
+    assert _build_patch_trail("run", "now", {}) is None
+    assert _build_blast_artifact("run", "now", {}) is None
+    assert _build_blast_artifact("run", "now", {"blast_artifact_id": "x"}) is None
+
+    assert _receipt_digest_value({"receipt_digest": "flat"}) == "flat"
+    assert _receipt_digest_value({"receipt_digest": {"value": "nested"}}) == "nested"
+    assert _blast_artifact_digest_value({"projection_digest": "flat"}) == "flat"
+    assert (
+        _blast_artifact_digest_value({"projection_digest": {"value": "nested"}})
+        == "nested"
+    )
+
+
+def test_read_latest_analysis_run_prefers_nested_metrics_before_flat_fallbacks(
+    tmp_path: Path,
+) -> None:
+    nested_payload = {
+        "source": "cli",
+        "health": {"score": 91},
+        "findings": {"total": 4},
+        "inventory": {"files": 7},
+        "health_score": 72,
+        "findings_total": 11,
+        "files": 42,
+    }
+    snapshot = _read_latest_analysis_run_with_payload(tmp_path, nested_payload)
+    assert snapshot is not None
+    assert snapshot.health == 91
+    assert snapshot.findings == 4
+    assert snapshot.files == 7
+
+
+def test_lookup_blast_artifact_read_errors_surface_as_audit_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.reader import lookup_blast_artifact
+    from codeclone.audit.validation import AuditReadError
+
+    db_path = tmp_path / "audit.sqlite3"
+    db_path.write_text("not sqlite", encoding="utf-8")
+
+    class _BrokenConnection:
+        def execute(self, *_args: object, **_kwargs: object) -> object:
+            raise sqlite3.OperationalError("read failed")
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        lambda _path: _BrokenConnection(),
+    )
+    with pytest.raises(AuditReadError, match="cannot read audit database"):
+        lookup_blast_artifact(db_path, run_id="run123")
+
+
+def test_read_event_payload_rows_open_failure_raises_audit_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.audit.reader import _read_event_payload_rows
+    from codeclone.audit.validation import AuditReadError
+
+    db_path = tmp_path / "audit.sqlite3"
+    db_path.write_text("not sqlite", encoding="utf-8")
+
+    def _raise_open(_path: Path) -> object:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(
+        "codeclone.audit.reader.open_audit_db_readonly",
+        _raise_open,
+    )
+    with pytest.raises(AuditReadError, match="cannot open audit database"):
+        _read_event_payload_rows(db_path, "analysis.completed")

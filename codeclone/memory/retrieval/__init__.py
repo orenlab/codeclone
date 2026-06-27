@@ -6,6 +6,7 @@
 
 from .service import (
     QUERY_MODES,
+    get_memory_projection_page,
     get_relevant_memory,
     path_has_memory,
     query_engineering_memory,
@@ -14,6 +15,7 @@ from .service import (
 
 __all__ = [
     "QUERY_MODES",
+    "get_memory_projection_page",
     "get_relevant_memory",
     "path_has_memory",
     "query_engineering_memory",

@@ -28,7 +28,7 @@ from .dto import (
     PatchTrailInputs,
     VerifySnapshot,
 )
-from .patch_trail import PatchTrail, compute_patch_trail
+from .patch_trail import PatchTrail, compute_patch_trail, patch_trail_from_mapping
 from .projector import TrajectoryProjectionError
 
 
@@ -69,6 +69,9 @@ def project_patch_trail_from_audit(
     if not workflow_id.startswith("intent:"):
         return None
     ordered = tuple(sorted(records, key=_record_order_key))
+    stored = _patch_trail_from_computed_event(ordered)
+    if stored is not None:
+        return stored
     state = _WorkflowAuditState()
     for record in ordered:
         _apply_audit_record(state, record)
@@ -113,6 +116,31 @@ def project_patch_trail_from_audit(
         ),
     )
     return compute_patch_trail(inputs)
+
+
+def _patch_trail_from_computed_event(
+    records: Sequence[AuditRecord],
+) -> PatchTrail | None:
+    for record in reversed(records):
+        if record.event_type != EVENT_PATCH_TRAIL_COMPUTED:
+            continue
+        payload = _audit_payload_mapping(record.payload_json)
+        if payload is None:
+            continue
+        trail = patch_trail_from_mapping(payload)
+        if trail is not None:
+            return trail
+    return None
+
+
+def _audit_payload_mapping(payload_json: str | None) -> Mapping[str, object] | None:
+    if not payload_json or payload_json == "{}":
+        return None
+    try:
+        loaded = orjson.loads(payload_json)
+    except orjson.JSONDecodeError:
+        return None
+    return loaded if isinstance(loaded, dict) else None
 
 
 def _apply_audit_record(state: _WorkflowAuditState, record: AuditRecord) -> None:

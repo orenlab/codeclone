@@ -8,14 +8,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Final, Protocol, cast
 
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
+from ._context_governance import (
+    IMPLEMENTATION_CONTEXT_PAGE_RESPONSE_PROJECTION_KIND,
+    IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+    attach_implementation_context_governance,
+    attach_passive_context_governance,
+    estimate_response_context_units,
+)
 from ._graph_search import search_graph
 from ._implementation_context import (
     DEFAULT_CONTRACT_FACETS,
@@ -26,7 +35,13 @@ from ._implementation_context import (
     build_implementation_context,
     resolve_context_symbols,
 )
+from ._implementation_context_pages import (
+    DEFAULT_IMPLEMENTATION_CONTEXT_PAGE_SIZE,
+    ContextProjectionArtifact,
+    context_projection_page,
+)
 from ._intent import IntentRecord, IntentStatus
+from ._session_finding_mixin import _StateLock
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -45,6 +60,296 @@ _DEFAULT_FACETS_BY_MODE: dict[str, tuple[Facet, ...]] = {
     "impact": DEFAULT_IMPACT_FACETS,
     "contract": DEFAULT_CONTRACT_FACETS,
 }
+_ContextLaneRef = tuple[tuple[str, ...], str]
+_IMPLEMENTATION_CONTEXT_LANES: Final[tuple[_ContextLaneRef, ...]] = (
+    (("implementation_evidence",), "experiences"),
+    (("implementation_evidence",), "trajectories"),
+    (("implementation_evidence",), "memory"),
+    (("implementation_evidence",), "doc_anchors"),
+    (("implementation_evidence",), "test_anchors"),
+    (("structural_context",), "review_context"),
+    (("structural_context",), "baseline_sensitive_findings"),
+    (("structural_context",), "related_modules"),
+    (("structural_context",), "public_surface"),
+    (("call_context",), "callers"),
+    (("call_context",), "test_callers"),
+    (("call_context",), "callees"),
+    (("call_context",), "references"),
+    (("call_context",), "unresolved"),
+    (("contracts",), "memory_conflicts"),
+    (("contracts",), "contract_tests"),
+    (("contracts",), "definition_sites"),
+    (("contracts",), "version_constants"),
+    (("contracts",), "persistence_path_callers"),
+    (("contracts",), "serialization_path_callers"),
+    (("contracts",), "deserialization_path_callers"),
+    (("contracts",), "store_api_consumers"),
+    (("structural_context", "blast_radius"), "dependency_cycles"),
+    (("structural_context", "blast_radius"), "clone_cohorts"),
+    (("structural_context", "blast_radius"), "transitive"),
+    (("structural_context", "blast_radius"), "direct"),
+    (("structural_context",), "module_role"),
+)
+
+
+def _implementation_context_response(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    return attach_passive_context_governance(
+        payload,
+        limit=IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+        projection_kind=IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_implementation_context",
+            "budget_scope": "whole_response",
+            "evidence_policy": "observe_only_no_omission",
+            "item_budget": "budget_summary",
+        },
+    )
+
+
+def _budgeted_implementation_context_response(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    budget: int,
+) -> dict[str, object]:
+    if detail_level == "full" or not _context_page_retrieval_available(payload):
+        return _implementation_context_response(payload)
+    packed = deepcopy(dict(payload))
+    response_budget_lanes: set[_ContextLaneRef] = set()
+    omitted = _implementation_context_omitted(
+        packed,
+        response_budget_lanes=response_budget_lanes,
+    )
+    governed = _attach_implementation_context_response(
+        packed,
+        detail_level=detail_level,
+        budget=budget,
+        evidence_omitted=omitted,
+    )
+    while (
+        estimate_response_context_units(governed)
+        > IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT
+    ):
+        lane = _next_reducible_context_lane(packed)
+        if lane is None:
+            break
+        _shrink_context_lane(packed, lane)
+        response_budget_lanes.add(lane)
+        omitted = _implementation_context_omitted(
+            packed,
+            response_budget_lanes=response_budget_lanes,
+        )
+        governed = _attach_implementation_context_response(
+            packed,
+            detail_level=detail_level,
+            budget=budget,
+            evidence_omitted=omitted,
+        )
+    return governed
+
+
+def _attach_implementation_context_response(
+    payload: Mapping[str, object],
+    *,
+    detail_level: str,
+    budget: int,
+    evidence_omitted: Mapping[str, object] | None,
+) -> dict[str, object]:
+    return attach_implementation_context_governance(
+        payload,
+        detail_level=detail_level,
+        budget=budget,
+        evidence_omitted=evidence_omitted,
+        limit=IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    )
+
+
+def _context_page_retrieval_available(payload: Mapping[str, object]) -> bool:
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, Mapping):
+        return False
+    retrieval = analysis.get("context_page_retrieval")
+    if not isinstance(retrieval, Mapping):
+        return False
+    return (
+        retrieval.get("retrieval_tool") == "get_implementation_context_page"
+        and bool(str(analysis.get("context_projection_digest", "")).strip())
+        and bool(str(analysis.get("context_artifact_digest", "")).strip())
+    )
+
+
+def _implementation_context_omitted(
+    payload: Mapping[str, object],
+    *,
+    response_budget_lanes: set[_ContextLaneRef],
+) -> dict[str, object] | None:
+    analysis = payload.get("analysis")
+    if not isinstance(analysis, Mapping):
+        return None
+    context_projection_digest = str(
+        analysis.get("context_projection_digest", "")
+    ).strip()
+    context_artifact_digest = str(analysis.get("context_artifact_digest", "")).strip()
+    if not context_projection_digest or not context_artifact_digest:
+        return None
+    omitted: dict[str, object] = {}
+    for lane in _IMPLEMENTATION_CONTEXT_LANES:
+        lane_omission = _context_lane_omission(
+            payload,
+            lane=lane,
+            context_artifact_digest=context_artifact_digest,
+            context_projection_digest=context_projection_digest,
+            response_budget_lanes=response_budget_lanes,
+        )
+        if lane_omission is not None:
+            omitted[_context_omitted_key(lane)] = lane_omission
+    return omitted or None
+
+
+def _context_lane_omission(
+    payload: Mapping[str, object],
+    *,
+    lane: _ContextLaneRef,
+    context_artifact_digest: str,
+    context_projection_digest: str,
+    response_budget_lanes: set[_ContextLaneRef],
+) -> dict[str, object] | None:
+    lane_name = lane[1]
+    container = _context_lane_container(payload, lane)
+    summary = container.get(f"{lane_name}_summary") if container is not None else None
+    omission: dict[str, object] | None = None
+    if isinstance(summary, Mapping):
+        items = container.get(lane_name) if container is not None else None
+        shown = (
+            len(items)
+            if isinstance(items, list)
+            else _non_negative_int(summary.get("shown"))
+        )
+        total = max(_non_negative_int(summary.get("total")), shown)
+        if shown < total:
+            omission = {
+                "evaluation": "complete",
+                "facet": lane_name,
+                "container": ".".join(lane[0]),
+                "total": total,
+                "shown": shown,
+                "omitted": total - shown,
+                "reason": (
+                    "response_budget"
+                    if lane in response_budget_lanes
+                    else "item_budget"
+                ),
+                "retrieval": {
+                    "tool": "get_implementation_context_page",
+                    "route": (
+                        "get_implementation_context_page(root=..., "
+                        "context_projection_digest=..., "
+                        f"facet={lane_name!r}, offset={shown})"
+                    ),
+                    "context_artifact_digest": context_artifact_digest,
+                    "context_projection_digest": context_projection_digest,
+                    "facet": lane_name,
+                    "offset": shown,
+                    "page_size": DEFAULT_IMPLEMENTATION_CONTEXT_PAGE_SIZE,
+                    "retention": "mcp_session_run_history",
+                    "snapshot_identity": (
+                        "context_artifact_digest + context_projection_digest "
+                        "+ facet_identity_digest"
+                    ),
+                },
+            }
+    return omission
+
+
+def _next_reducible_context_lane(
+    payload: Mapping[str, object],
+) -> _ContextLaneRef | None:
+    for minimum in (1, 0):
+        for lane in _IMPLEMENTATION_CONTEXT_LANES:
+            items = _context_lane_items(payload, lane)
+            if items is not None and len(items) > minimum:
+                return lane
+    return None
+
+
+def _shrink_context_lane(payload: dict[str, object], lane: _ContextLaneRef) -> None:
+    items = _context_lane_items(payload, lane)
+    if not items:
+        return
+    items.pop()
+    container = _context_lane_container(payload, lane)
+    if container is None:
+        return
+    lane_name = lane[1]
+    raw_summary = container.get(f"{lane_name}_summary")
+    total = len(items)
+    if isinstance(raw_summary, Mapping):
+        total = max(total + 1, _non_negative_int(raw_summary.get("total")))
+    container[f"{lane_name}_summary"] = {
+        "total": total,
+        "shown": len(items),
+        "truncated": len(items) < total,
+        "omitted": max(0, total - len(items)),
+    }
+
+
+def _context_lane_container(
+    payload: Mapping[str, object],
+    lane: _ContextLaneRef,
+) -> dict[str, object] | None:
+    current: object = payload
+    for key in lane[0]:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, dict) else None
+
+
+def _context_lane_items(
+    payload: Mapping[str, object],
+    lane: _ContextLaneRef,
+) -> list[object] | None:
+    container = _context_lane_container(payload, lane)
+    if container is None:
+        return None
+    items = container.get(lane[1])
+    return items if isinstance(items, list) else None
+
+
+def _context_omitted_key(lane: _ContextLaneRef) -> str:
+    return ".".join((*lane[0], lane[1]))
+
+
+def _non_negative_int(value: object) -> int:
+    try:
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int):
+            number = value
+        elif isinstance(value, str):
+            number = int(value)
+        else:
+            return 0
+    except (TypeError, ValueError):
+        return 0
+    return max(0, number)
+
+
+def _implementation_context_page_response(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    return attach_passive_context_governance(
+        payload,
+        limit=IMPLEMENTATION_CONTEXT_RESPONSE_CONTEXT_UNIT_LIMIT,
+        projection_kind=IMPLEMENTATION_CONTEXT_PAGE_RESPONSE_PROJECTION_KIND,
+        response={
+            "tool": "get_implementation_context_page",
+            "budget_scope": "page_response",
+            "evidence_policy": "exact_session_projection_page",
+        },
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -76,6 +381,8 @@ class _ContextSessionDependencies(Protocol):
 class _MCPSessionContextMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _context_projection_pages: dict[str, ContextProjectionArtifact]
+    _state_lock: _StateLock
 
     def get_implementation_context(
         self,
@@ -101,26 +408,30 @@ class _MCPSessionContextMixin:
             intent=intent,
         )
         if record is None:
-            return {
-                "status": "needs_analysis",
-                "root": str(root_path),
-                "message": (
-                    "No MCP analysis run exists for this repository root. "
-                    "Run analyze_repository first."
-                ),
-                "next_tool": "analyze_repository",
-            }
+            return _implementation_context_response(
+                {
+                    "status": "needs_analysis",
+                    "root": str(root_path),
+                    "message": (
+                        "No MCP analysis run exists for this repository root. "
+                        "Run analyze_repository first."
+                    ),
+                    "next_tool": "analyze_repository",
+                }
+            )
         if query is not None:
             if paths or symbols or changed_scope:
                 raise MCPServiceContractError(
                     "query is mutually exclusive with paths, symbols, and "
                     "changed_scope."
                 )
-            return search_graph(
-                record=record,
-                root=root_path,
-                query=query,
-                budget=budget,
+            return _implementation_context_response(
+                search_graph(
+                    record=record,
+                    root=root_path,
+                    query=query,
+                    budget=budget,
+                )
             )
         self._validate_context_request(
             paths=paths,
@@ -142,18 +453,20 @@ class _MCPSessionContextMixin:
             changed_scope=changed_scope,
         )
         if subject is None:
-            return {
-                "status": "no_current_work",
-                "root": str(root_path),
-                "analysis": {
-                    "run_id": record.run_id,
-                    "report_digest": record.run_id,
-                },
-                "message": (
-                    "No explicit subject, active intent scope, or live git-dirty "
-                    "path is available. Whole-repository context is never inferred."
-                ),
-            }
+            return _implementation_context_response(
+                {
+                    "status": "no_current_work",
+                    "root": str(root_path),
+                    "analysis": {
+                        "run_id": record.run_id,
+                        "report_digest": record.run_id,
+                    },
+                    "message": (
+                        "No explicit subject, active intent scope, or live git-dirty "
+                        "path is available. Whole-repository context is never inferred."
+                    ),
+                }
+            )
         normalized_include = self._validated_context_include(
             include,
             mode=mode,
@@ -186,7 +499,13 @@ class _MCPSessionContextMixin:
                 include_drafts=True,
                 detail_level=detail_level,
             )
-        return build_implementation_context(
+        artifact: ContextProjectionArtifact | None = None
+
+        def capture_projection(value: ContextProjectionArtifact) -> None:
+            nonlocal artifact
+            artifact = value
+
+        payload = build_implementation_context(
             record=record,
             paths=subject.paths,
             symbols=subject.symbols,
@@ -206,6 +525,95 @@ class _MCPSessionContextMixin:
                 if intent is not None
                 else None
             ),
+            projection_sink=capture_projection,
+        )
+        if artifact is not None:
+            with self._state_lock:
+                self._context_projection_pages[artifact.context_projection_digest] = (
+                    artifact
+                )
+        return _budgeted_implementation_context_response(
+            payload,
+            detail_level=detail_level,
+            budget=budget,
+        )
+
+    def get_implementation_context_page(
+        self,
+        *,
+        root: str,
+        context_projection_digest: str,
+        facet: str,
+        offset: int = 0,
+        page_size: int = DEFAULT_IMPLEMENTATION_CONTEXT_PAGE_SIZE,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        root_path = _helpers._resolve_root(root)
+        if not context_projection_digest.strip():
+            raise MCPServiceContractError(
+                "get_implementation_context_page requires context_projection_digest."
+            )
+        if not facet.strip():
+            raise MCPServiceContractError(
+                "get_implementation_context_page requires facet."
+            )
+        with self._state_lock:
+            artifact = self._context_projection_pages.get(context_projection_digest)
+        if artifact is None:
+            return _implementation_context_page_response(
+                {
+                    "status": "not_found",
+                    "context_projection_digest": context_projection_digest,
+                    "facet": facet,
+                    "source": "mcp_session_context_projection",
+                    "retention": "mcp_session_run_history",
+                }
+            )
+        if artifact.root != root_path.resolve():
+            return _implementation_context_page_response(
+                {
+                    "status": "root_mismatch",
+                    "context_projection_digest": context_projection_digest,
+                    "facet": facet,
+                    "source": "mcp_session_context_projection",
+                    "retention": "mcp_session_run_history",
+                }
+            )
+        if run_id is not None:
+            try:
+                requested_run_id = self._runs.get(run_id).run_id
+            except MCPRunNotFoundError:
+                return _implementation_context_page_response(
+                    {
+                        "status": "run_not_found",
+                        "run_id": run_id,
+                        "context_projection_digest": context_projection_digest,
+                        "facet": facet,
+                        "source": "mcp_session_context_projection",
+                        "retention": "mcp_session_run_history",
+                    }
+                )
+        else:
+            requested_run_id = None
+        if requested_run_id is not None and artifact.run_id != requested_run_id:
+            return _implementation_context_page_response(
+                {
+                    "status": "run_mismatch",
+                    "run_id": run_id,
+                    "artifact_run_id": artifact.run_id,
+                    "context_projection_digest": context_projection_digest,
+                    "facet": facet,
+                    "source": "mcp_session_context_projection",
+                    "retention": "mcp_session_run_history",
+                }
+            )
+        return _implementation_context_page_response(
+            context_projection_page(
+                artifact=artifact,
+                facet=facet,
+                offset=offset,
+                page_size=page_size,
+            )
         )
 
     def _context_record(

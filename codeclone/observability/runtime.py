@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Observability write API (Phase 29 §4.3).
+"""Observability write API.
 
 ``bootstrap`` freezes the enabled decision once per process. When disabled,
 ``operation``/``span`` yield a cheap inert handle and return immediately — no
@@ -18,7 +18,7 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -458,6 +458,15 @@ def record_elapsed_span(
 
 _DB_WRITE_KINDS = frozenset({"insert", "update", "delete", "replace"})
 
+# Counter-semantics version. v1 counted db_queries/db_writes per *row*:
+# sqlite3.set_trace_callback fires once per executemany row, so a single batched
+# executemany was indistinguishable from an N+1 loop and tripped false
+# query_chatty verdicts. v2 (the _CountingConnection below) counts logical
+# *statements* — db_queries/db_writes are execute/executemany calls and db_rows
+# is the row volume. Bump on any counter-meaning change; old observer DBs carry
+# the previous semantics and are disposable (delete to avoid mixed history).
+DB_COUNTER_VERSION = 2
+
 
 def _classify_sql(sql: str) -> str:
     stripped = sql.lstrip()
@@ -466,20 +475,32 @@ def _classify_sql(sql: str) -> str:
     return stripped.split(None, 1)[0].lower()
 
 
-def record_db_query(sql: str) -> None:
-    """Trace-callback sink: attribute one SQL statement to the active span as a
-    ``db_queries`` counter (plus ``db_writes`` for mutations). No-op outside a
-    span. Performance telemetry only — never audit or contract truth.
+def _record_db_statement(sql: str, *, rows: int) -> None:
+    """Attribute one logical SQL statement to the active span: ``db_queries`` +1
+    (``db_writes`` +1 for mutations) and ``db_rows`` += ``rows`` (1 for
+    ``execute``, len(params) for ``executemany``). No-op outside a span.
+    Performance telemetry only — never audit or contract truth.
     """
     span_handle = _CURRENT_SPAN.get()
     if span_handle is None:
         return
     span_handle.add_counter("db_queries", 1)
+    span_handle.add_counter("db_rows", rows)
     if _classify_sql(sql) in _DB_WRITE_KINDS:
         span_handle.add_counter("db_writes", 1)
     fingerprint = fingerprint_sql(sql).fingerprint
     if fingerprint:
         span_handle.add_db_fingerprint(fingerprint)
+
+
+def record_db_query(sql: str) -> None:
+    """Record one logical query (1 statement, 1 row) on the active span.
+
+    Retained as the manual entry point for code that does DB work the counting
+    connection does not see (and used by tests). Equivalent to a single
+    ``execute`` for counting purposes.
+    """
+    _record_db_statement(sql, rows=1)
 
 
 def record_counter(key: str, value: int = 1) -> None:
@@ -494,21 +515,53 @@ def record_counter(key: str, value: int = 1) -> None:
     span_handle.add_counter(key, value)
 
 
-def instrument_db_connection(conn: sqlite3.Connection) -> None:
-    """Attach the per-span DB-query counter to ``conn``. No-op (and no per-query
-    trace overhead) when observability is disabled for this process.
+_SqlParams = Sequence[object] | Mapping[str, object]
+
+
+class _CountingConnection(sqlite3.Connection):
+    """``sqlite3.Connection`` that counts logical statements on the active span.
+
+    Overriding ``execute``/``executemany`` — instead of ``set_trace_callback``,
+    which fires once per executemany *row* — is what makes ``db_queries`` a true
+    statement count: one batched ``executemany`` is one query over many rows,
+    distinguishable from an N+1 loop. All store access goes through these entry
+    points (no bare cursors), so nothing escapes the count. Counting no-ops
+    outside a span, so connection open (pragmas, schema) is not attributed.
     """
-    if _ENABLED:
-        conn.set_trace_callback(record_db_query)
+
+    def execute(  # type: ignore[override]
+        self, sql: str, parameters: _SqlParams = ()
+    ) -> sqlite3.Cursor:
+        _record_db_statement(sql, rows=1)
+        return super().execute(sql, parameters)
+
+    def executemany(  # type: ignore[override]
+        self, sql: str, parameters: Iterable[_SqlParams]
+    ) -> sqlite3.Cursor:
+        materialized = list(parameters)
+        _record_db_statement(sql, rows=len(materialized))
+        return super().executemany(sql, materialized)
+
+    def executescript(self, sql_script: str) -> sqlite3.Cursor:
+        _record_db_statement(sql_script, rows=1)
+        return super().executescript(sql_script)
+
+
+def counting_connection_factory() -> type[sqlite3.Connection] | None:
+    """Return the per-span counting connection class when observability is
+    enabled, else ``None`` so callers open a plain connection with no overhead.
+    """
+    return _CountingConnection if _ENABLED else None
 
 
 __all__ = [
+    "DB_COUNTER_VERSION",
     "OperationHandle",
     "SpanHandle",
     "bind_root",
     "bootstrap",
+    "counting_connection_factory",
     "current_operation_context",
-    "instrument_db_connection",
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",

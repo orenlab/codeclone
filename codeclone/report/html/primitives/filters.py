@@ -57,3 +57,26 @@ def _render_select(
         )
     parts.append("</select>")
     return "".join(parts)
+
+
+def _render_filter_chips(
+    *,
+    dim: str,
+    options: Sequence[tuple[str, str, int]],
+) -> str:
+    """Render the inline density of the shared filter system.
+
+    One toggle chip per value of dimension *dim*. Each option is
+    ``(value, label, count)``. Chips carry ``data-filter-dim``/``data-filter-value``
+    and ``aria-pressed`` so the shared filter JS can toggle them; the value also
+    gets a ``filter-chip--<value>`` modifier for severity coloring.
+    """
+    chips = "".join(
+        f'<button type="button" class="filter-chip filter-chip--{_escape_html(value)}" '
+        f'data-filter-dim="{_escape_html(dim)}" '
+        f'data-filter-value="{_escape_html(value)}" aria-pressed="false">'
+        f"{_escape_html(label)}"
+        f'<span class="filter-chip-count">{count}</span></button>'
+        for value, label, count in options
+    )
+    return f'<div class="filter-chips" role="group">{chips}</div>'

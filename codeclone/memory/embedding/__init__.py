@@ -153,7 +153,7 @@ def resolve_embedding_provider(config: SemanticConfig) -> EmbeddingProvider:
             "embedding_provider='fastembed' for community local semantic search"
         )
     raise MemorySemanticUnavailableError(
-        "api embedding provider is not available yet (Phase 20.6); "
+        "api embedding provider is not available yet; "
         "use embedding_provider='diagnostic'"
     )
 

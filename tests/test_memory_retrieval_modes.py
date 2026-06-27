@@ -96,6 +96,24 @@ def test_query_engineering_memory_get_stale_drafts_coverage(
     assert coverage.get("scope_paths_total") == 2
 
 
+def test_query_engineering_memory_coverage_accepts_path_alias(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        coverage_payload = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="coverage",
+            path="pkg/active.py",
+        )
+    coverage = coverage_payload["payload"]
+    assert isinstance(coverage, dict)
+    assert coverage.get("scope_paths_total") == 1
+
+
 def test_query_engineering_memory_get_missing_record(tmp_path: Path) -> None:
     with memory_store(tmp_path) as (root, project, store, db_path):
         result = query_engineering_memory(

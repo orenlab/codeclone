@@ -40,6 +40,7 @@ from codeclone.report.html.primitives.location import (
     location_file_target,
     relative_location_path,
 )
+from codeclone.report.html.sections._module_map import render_module_map_panel
 from codeclone.report.html.sections._security_surfaces import (
     _coverage_join_review_text,
     _coverage_review_cues,
@@ -905,10 +906,7 @@ def test_html_report_table_css_matches_rendered_column_classes() -> None:
             ".table .col-file,.table .col-path{color:var(--text-muted);"
             "max-width:240px;overflow:hidden;"
         ),
-        (
-            ".table .col-number,.table .col-num{font-variant-numeric:"
-            "tabular-nums;text-align:right;white-space:nowrap}"
-        ),
+        ".table .col-number,.table .col-num{font-family:var(--font-numeric);",
         ".table .col-risk,.table .col-badge,.table .col-cat{white-space:nowrap}",
     )
 
@@ -1743,11 +1741,12 @@ def test_html_report_metrics_risk_branches() -> None:
         "5 candidates total; 2 high-confidence items; 0 suppressed.",
         '<button class="main-tab" role="tab" data-tab="dead-code"',
         '<svg class="main-tab-icon"',
-        '<span class="main-tab-label">Dead Code</span><span class="tab-count">2</span>',
+        '<span class="main-tab-label">Dead Code</span>'
+        '<span class="tab-count" title="2 high-confidence dead-code items">2</span>',
     )
 
 
-def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> None:
+def test_html_report_renders_overloaded_modules_in_module_map_and_overview() -> None:
     payload = _metrics_payload(
         health_score=72,
         health_grade="B",
@@ -1800,7 +1799,33 @@ def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> Non
                 "dependency_pressure",
                 "hub_like_shape",
             ],
-        }
+        },
+        {
+            "module": "pkg.util",
+            "relative_path": "pkg/util.py",
+            "source_kind": "production",
+            "loc": 120,
+            "functions": 2,
+            "methods": 0,
+            "classes": 0,
+            "callable_count": 2,
+            "complexity_total": 8,
+            "complexity_max": 5,
+            "fan_in": 1,
+            "fan_out": 2,
+            "total_deps": 3,
+            "import_edges": 3,
+            "reimport_edges": 0,
+            "reimport_ratio": 0.0,
+            "instability": 0.6667,
+            "hub_balance": 0.5,
+            "size_score": 0.4,
+            "dependency_score": 0.35,
+            "shape_score": 0.3,
+            "score": 0.75,
+            "candidate_status": "ranked_only",
+            "candidate_reasons": [],
+        },
     ]
 
     html = build_html_report(
@@ -1817,11 +1842,23 @@ def test_html_report_renders_overloaded_modules_in_quality_and_overview() -> Non
         "pkg.hub",
         "Top candidates",
         "0.93",
-        "overloaded-modules",
+        "Ranked only",
     )
     assert "hub-like shape" not in html
     assert "Candidate cutoff" not in html
     assert "Ranked modules" not in html
+    # Overloaded profile now lives in the Module map tab, not Quality.
+    module_map_panel = html.split('id="panel-module-map"', 1)[1].split(
+        'id="panel-dependencies"', 1
+    )[0]
+    assert "Overloaded Modules" in module_map_panel
+    assert "0.88" in module_map_panel  # candidate score cutoff
+    assert "Critical" not in module_map_panel
+    quality_panel = html.split('id="panel-quality"', 1)[1].split(
+        'id="panel-module-map"', 1
+    )[0]
+    assert "Overloaded Modules" not in quality_panel
+    assert "overloaded-modules" not in quality_panel
 
 
 def test_html_report_overloaded_modules_fallback_module_path_in_overview() -> None:
@@ -2207,8 +2244,8 @@ def test_html_report_quality_includes_coverage_join_subtab() -> None:
         "Coverage hotspots: 1; scope gaps: 0.",
     )
     assert (
-        '<span class="main-tab-label">Quality</span><span class="tab-count">1</span>'
-        in html
+        '<span class="main-tab-label">Quality</span>'
+        '<span class="tab-count" title="1 issues">1</span>' in html
     )
 
 
@@ -2285,7 +2322,8 @@ def test_html_report_quality_includes_security_surfaces_subtab() -> None:
         html,
         'data-subtab-group="quality"',
         'data-clone-tab="security-surfaces"',
-        '<span class="main-tab-label">Quality</span><span class="tab-count">2</span>',
+        '<span class="main-tab-label">Quality</span>'
+        '<span class="tab-count" title="2 issues">2</span>',
         "Security Surfaces",
         "How to read",
         "Review order",
@@ -2705,7 +2743,7 @@ def test_html_report_quality_coverage_join_empty_and_invalid_states() -> None:
     )
     invalid_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
     invalid_panel = invalid_panel.split(
-        '<div class="tab-panel" id="panel-dependencies"',
+        '<div class="tab-panel" id="panel-module-map"',
         1,
     )[0]
     assert "Nothing to report - keep up the good work." not in invalid_panel
@@ -2766,7 +2804,7 @@ def test_html_report_quality_coverage_join_edge_states() -> None:
     invalid_html = _render_metrics_html(metrics)
     coverage_join_panel = invalid_html.split('data-clone-panel="coverage-join"', 1)[1]
     coverage_join_panel = coverage_join_panel.split(
-        '<div class="tab-panel" id="panel-dependencies"',
+        '<div class="tab-panel" id="panel-module-map"',
         1,
     )[0]
     assert "Source:" not in coverage_join_panel
@@ -3098,8 +3136,12 @@ def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
         "Hotspots by Directory",
         'title="tests/fixtures">tests/fixtures</code>',
     )
-    assert "golden_project" not in html
-    assert "clone_metrics_cycle" not in html
+    # Directory hotspots (in the Overview panel) collapse to scope roots and must
+    # not leak raw fixture paths. The Review queue legitimately surfaces the
+    # finding itself, so scope the negative assertion to the Overview panel.
+    overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
+    assert "golden_project" not in overview
+    assert "clone_metrics_cycle" not in overview
 
 
 def test_html_report_metrics_bad_health_score_and_dead_code_ok_tone() -> None:
@@ -3400,16 +3442,14 @@ def test_html_report_dependency_graph_keeps_chain_and_cycle_nodes_when_truncated
     )
     assert view_box is not None
     assert int(view_box.group(1)) < 0
-    assert int(view_box.group(3)) > int(view_box.group(4))
+    assert int(view_box.group(3)) > 0
+    assert int(view_box.group(4)) > 0
+    # Block-diagram nodes are boxes with the label inside (no rotated scatter text)
+    assert re.search(r'<rect class="block-node" data-node="z\.chain\.three"', html)
     assert re.search(
-        r'<text class="dep-label" data-node="z\.chain\.three".*?rotate\(-45\)">',
-        html,
+        r'<text class="block-node-label" data-node="z\.chain\.three"', html
     )
-    assert re.search(
-        r'<text class="dep-label" data-node="z\.chain\.three".*?font-size="8"'
-        r'.*?rotate\(-45\)">',
-        html,
-    )
+    assert "rotate(-45)" not in html
 
 
 def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() -> None:
@@ -3538,8 +3578,8 @@ def test_html_report_uses_jetbrains_mono_for_stat_card_content() -> None:
         ".meta-item{padding:var(--sp-3) var(--sp-4);",
         "font-family:var(--font-mono)}",
         ".kpi-micro{display:inline-flex;align-items:center;gap:3px;",
-        "font-family:inherit}",
-        ".kpi-micro-val{font-family:inherit;font-weight:500;",
+        "font-family:var(--font-sans)}",
+        ".kpi-micro-val{font-family:var(--count-font);font-weight:var(--count-weight);",
         ".overview-summary-item{background:var(--bg-surface);",
         "border:1px solid color-mix(in srgb,var(--border) 78%,transparent);",
         "padding:var(--sp-4)}",
@@ -3964,8 +4004,551 @@ def test_html_report_overview_uses_canonical_report_overview_hotlists() -> None:
         "source-kind-badge source-kind-fixtures",
         "source-kind-badge source-kind-production",
         'breakdown-count">1</span>',
+        # Structural findings use the shared finding_card chrome (Stage 4)
+        "finding-card finding-card--info sf-card",
+        'data-sf-group="true"',
+        "data-finding-why-btn",
     ):
         assert needle in html
+    # Bespoke sf-card chrome was fully replaced by the shared component
+    assert '<article class="sf-card"' not in html
     assert '<div class="overview-summary-value">n/a</div>' not in html
     # Issue breakdown replaces old hotspot sections
     assert "Issue breakdown" in html
+
+
+# ---------------------------------------------------------------------------
+# Module map panel (Phase 32)
+# ---------------------------------------------------------------------------
+
+
+def _mm_node(
+    node_id: str,
+    fan_in: int,
+    fan_out: int,
+    *,
+    in_cycle: bool = False,
+    status: str = "non_candidate",
+    reasons: tuple[str, ...] = (),
+    kinds: tuple[str, ...] = ("production",),
+) -> dict[str, object]:
+    return {
+        "id": node_id,
+        "label": node_id,
+        "fan_in": fan_in,
+        "fan_out": fan_out,
+        "total_degree": fan_in + fan_out,
+        "source_kinds": list(kinds),
+        "in_cycle": in_cycle,
+        "overloaded": {
+            "score": 0.9,
+            "candidate_status": status,
+            "candidate_reasons": list(reasons),
+        },
+    }
+
+
+def _mm_graph(
+    *,
+    zoom: str,
+    package_depth: object,
+    nodes: list[dict[str, object]],
+    edges: list[dict[str, object]],
+    truncated: bool,
+) -> dict[str, object]:
+    return {
+        "zoom": zoom,
+        "package_depth": package_depth,
+        "truncation": {
+            "truncated": truncated,
+            "node_universe_count": 40 if truncated else len(nodes),
+            "node_shown_count": len(nodes),
+            "edge_universe_count": 30 if truncated else len(edges),
+            "edge_shown_count": len(edges),
+            "seed_policy": "cycles_then_chains_then_degree",
+        },
+        "nodes": nodes,
+        "edges": edges,
+    }
+
+
+def _module_map_payload(
+    *,
+    truncated: bool = False,
+    default_zoom: str = "packages",
+    population_status: str = "ok",
+    with_unwind: bool = True,
+    packages_nodes: bool = True,
+) -> dict[str, object]:
+    nodes = [
+        _mm_node(
+            "pkg.core", 12, 8, status="candidate", reasons=("dependency_pressure",)
+        ),
+        _mm_node("pkg.api", 6, 2, in_cycle=True),
+        _mm_node("pkg.svc", 2, 2),
+        _mm_node("pkg.util", 2, 1, kinds=("tests",)),
+        _mm_node("pkg.leaf", 0, 1),
+    ]
+    edges = [
+        {"source": "pkg.api", "target": "pkg.core", "weight": 5},
+        {"source": "pkg.core", "target": "pkg.util", "weight": 1},
+        {"source": "pkg.leaf", "target": "pkg.core", "weight": 2},
+        {"source": "pkg.svc", "target": "pkg.core", "weight": 3},
+    ]
+    unwind = (
+        [
+            {
+                "module": "pkg.core",
+                "filepath": "pkg/core.py",
+                "source_kind": "production",
+                "fan_in": 12,
+                "fan_out": 8,
+                "score": 0.9,
+                "dependency_score": 0.95,
+                "candidate_status": "candidate",
+                "signals": ["dependency_pressure", "chain_bottleneck"],
+            }
+        ]
+        if with_unwind
+        else []
+    )
+    return {
+        "schema_version": "1",
+        "scope": "report_only",
+        "default_zoom": default_zoom,
+        "summary": {
+            "available": True,
+            "module_count": 5,
+            "package_count_depth2": 5,
+            "edge_count": 4,
+            "unwind_candidate_count": len(unwind),
+            "overloaded_candidate_count": 1,
+            "overloaded_population_status": population_status,
+        },
+        "graph_packages": _mm_graph(
+            zoom="packages",
+            package_depth=2,
+            nodes=nodes if packages_nodes else [],
+            edges=edges if packages_nodes else [],
+            truncated=truncated,
+        ),
+        "graph_modules": _mm_graph(
+            zoom="modules",
+            package_depth=None,
+            nodes=nodes,
+            edges=edges,
+            truncated=False,
+        ),
+        "unwind_candidates": unwind,
+    }
+
+
+def _module_map_unavailable_payload() -> dict[str, object]:
+    empty = {
+        "truncated": False,
+        "node_universe_count": 0,
+        "node_shown_count": 0,
+        "edge_universe_count": 0,
+        "edge_shown_count": 0,
+        "seed_policy": "cycles_then_chains_then_degree",
+    }
+    graph: dict[str, object] = {
+        "zoom": "packages",
+        "package_depth": None,
+        "truncation": empty,
+        "nodes": [],
+        "edges": [],
+    }
+    return {
+        "schema_version": "1",
+        "scope": "report_only",
+        "default_zoom": "packages",
+        "summary": {
+            "available": False,
+            "reason": "dependencies_skipped",
+            "module_count": 0,
+            "package_count_depth2": 0,
+            "edge_count": 0,
+            "unwind_candidate_count": 0,
+            "overloaded_candidate_count": 0,
+            "overloaded_population_status": "limited",
+        },
+        "graph_packages": graph,
+        "graph_modules": {**graph, "zoom": "modules"},
+        "unwind_candidates": [],
+    }
+
+
+def _module_map_base_metrics() -> dict[str, object]:
+    return _metrics_payload(
+        health_score=80,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+
+
+def _module_map_metrics() -> dict[str, object]:
+    metrics = _module_map_base_metrics()
+    metrics["overloaded_modules"] = {
+        "summary": {"candidates": 1, "population_status": "ok"},
+        "items": [
+            {
+                "module": "pkg.core",
+                "score": 0.9,
+                "fan_in": 12,
+                "fan_out": 8,
+                "candidate_status": "candidate",
+            },
+            {
+                "module": "pkg.api",
+                "score": 0.4,
+                "fan_in": 6,
+                "fan_out": 2,
+                "candidate_status": "ranked_only",
+            },
+        ],
+    }
+    return metrics
+
+
+def _render_module_map_report(
+    module_map: dict[str, object],
+    *,
+    metrics: dict[str, object] | None = None,
+) -> str:
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=metrics if metrics is not None else _module_map_metrics(),
+        report_document={"derived": {"module_map": module_map}},
+    )
+
+
+def _module_map_panel_slice(html: str) -> str:
+    panel = html.split('id="panel-module-map"', 1)[1]
+    return panel.split('id="panel-dependencies"', 1)[0]
+
+
+def test_html_report_renders_module_map_panel() -> None:
+    html = _render_module_map_report(_module_map_payload())
+    _assert_html_contains(
+        html,
+        "Module map",
+        'id="panel-module-map"',
+        "dep-graph-svg",
+        'class="block-node"',
+        "block-node-ring",
+        'data-subtab-group="module-map-zoom"',
+        "Report-only import-graph signals for refactor triage.",
+        "Unwind candidates",
+        "Overloaded Modules",
+        "Complexity total",
+        "dependency_pressure",
+    )
+    panel = _module_map_panel_slice(html)
+    assert "pkg.core" in panel
+    assert 'stroke-width="3"' in panel  # weight=5 edge -> 1+floor(log2 5)=3
+    assert 'stroke-dasharray="4,3"' in panel  # tests / in-cycle dashed box border
+    assert 'stroke="var(--danger)"' in panel  # in-cycle node danger border
+    # overloaded table rows in items order: pkg.core before pkg.api
+    overloaded = panel.split("Overloaded Modules", 1)[1]
+    assert overloaded.index("pkg.core") < overloaded.index("pkg.api")
+
+
+def test_module_map_truncation_notice_when_sampled() -> None:
+    html = _render_module_map_report(_module_map_payload(truncated=True))
+    panel = _module_map_panel_slice(html)
+    _assert_html_contains(
+        panel, "mm-truncation-notice", "Showing", "deterministic sample"
+    )
+
+
+def test_module_map_panel_unavailable_when_skipped() -> None:
+    # Real skip-dependencies runs drop both the graph and the overloaded family.
+    metrics = _module_map_base_metrics()
+    metrics.pop("overloaded_modules", None)
+    html = _render_module_map_report(_module_map_unavailable_payload(), metrics=metrics)
+    panel = _module_map_panel_slice(html)
+    assert "Dependency graph is not available." in panel
+    assert "dep-graph-svg" not in panel
+    assert 'data-subtab-group="module-map-zoom"' not in panel
+    assert "Overloaded Modules" not in panel
+
+
+def test_module_map_panel_metrics_skipped_insight() -> None:
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            derived_map={},
+            overloaded_modules_map={},
+            metrics_available=False,
+        ),
+    )
+    html = render_module_map_panel(ctx)
+    assert "Metrics are skipped for this run." in html
+    assert "Dependency graph is not available." in html
+
+
+def test_module_map_panel_modules_zoom_and_limited_population() -> None:
+    payload = _module_map_payload(
+        default_zoom="modules",
+        population_status="limited",
+        with_unwind=False,
+        packages_nodes=False,
+    )
+    html = _render_module_map_report(payload, metrics=_module_map_base_metrics())
+    panel = _module_map_panel_slice(html)
+    # overloaded family present but empty -> section heading + empty-profile message
+    assert "Overloaded Modules" in panel
+    assert "Overloaded-module profiling is not available." in panel
+    assert "No unwind candidates detected." in panel
+    # modules graph (active) renders an SVG; empty packages graph shows the message
+    assert "dep-graph-svg" in panel
+    assert "Dependency graph is not available." in panel
+
+
+def _review_queue_payload(*, with_items: bool = True) -> dict[str, object]:
+    items: list[dict[str, object]] = []
+    if with_items:
+        items = [
+            {
+                "id": "clone:a",
+                "finding_id": "clone:a",
+                "family": "clones",
+                "category": "function",
+                "severity": "critical",
+                "priority": 0.91,
+                "novelty": "new",
+                "source_kind": "production",
+                "has_action": True,
+                "title": "Duplicated branch logic",
+                "summary": "3 near-identical branches",
+                "location": "pkg/a.py:12",
+                "representative_locations": [],
+                "effort": "hard",
+                "steps": ["extract a handler"],
+            },
+            {
+                "id": "struct:b",
+                "finding_id": "struct:b",
+                "family": "structural",
+                "category": "duplicated_branches",
+                "severity": "warning",
+                "priority": 0.6,
+                "novelty": "known",
+                "source_kind": "tests",
+                "has_action": True,
+                "title": "Repeated assertions",
+                "summary": "repeated assert template",
+                "location": "tests/test_b.py:30",
+                "representative_locations": [],
+                "effort": "easy",
+                "steps": ["collapse"],
+            },
+            {
+                "id": "dead:c",
+                "finding_id": "dead:c",
+                "family": "dead_code",
+                "category": "function",
+                "severity": "info",
+                "priority": 0.3,
+                "novelty": "known",
+                "source_kind": "production",
+                "has_action": False,
+                "title": "Unused function: pkg.mod:helper",
+                "summary": "1 occurrence · production",
+                "location": "pkg/mod.py:40",
+                "representative_locations": [],
+                "effort": "",
+                "steps": [],
+            },
+        ]
+    return {
+        "schema_version": "2",
+        "scope": "report_only",
+        "summary": {
+            "total": len(items),
+            "reviewed": 0,
+            "actionable": 2 if with_items else 0,
+            "by_severity": {
+                "critical": 1 if with_items else 0,
+                "warning": 1 if with_items else 0,
+                "info": 1 if with_items else 0,
+            },
+            "by_family": (
+                {"clones": 1, "dead_code": 1, "structural": 1} if with_items else {}
+            ),
+            "by_novelty": {"new": 1, "known": 2}
+            if with_items
+            else {"new": 0, "known": 0},
+            "top_priority": 0.91 if with_items else 0.0,
+        },
+        "items": items,
+    }
+
+
+def _render_review_report(review_queue: dict[str, object]) -> str:
+    metrics = _metrics_payload(
+        health_score=80,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=2,
+        dead_total=0,
+        dead_critical=0,
+    )
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/outside/project"},
+        metrics=metrics,
+        report_document={"derived": {"review_queue": review_queue}},
+    )
+
+
+def test_html_report_renders_review_panel() -> None:
+    html = _render_review_report(_review_queue_payload())
+    _assert_html_contains(
+        html,
+        '<span class="main-tab-label">Review</span>',
+        'id="panel-review"',
+        "data-review-panel",
+        "data-review-progress-bar",
+        "What needs review, and in what order?",
+    )
+    panel = html.split('id="panel-review"', 1)[1].split('id="panel-clones"', 1)[0]
+    _assert_html_contains(
+        panel,
+        'data-review-card="true"',
+        'data-finding-id="clone:a"',
+        'data-severity="critical"',
+        'data-family="clones"',
+        "finding-card--critical",
+        "data-review-toggle",
+        "Duplicated branch logic",
+        # shared filter system (Filters popover + selects), not bespoke chips
+        # shared filter system, inline density: one-click toggle chips
+        'class="filter-chip',
+        'data-filter-dim="severity"',
+        'data-filter-value="critical"',
+        'data-filter-dim="family"',
+        "data-filter-reset",
+        "data-review-count",
+        "data-review-body",
+        # novelty marker on the new finding
+        'data-novelty="new"',
+        "finding-meta-badge--new",
+        # cross-family findings (incl. a no-action dead-code item) are reviewable
+        'data-family="dead_code"',
+        'data-finding-id="dead:c"',
+        "Unused function: pkg.mod:helper",
+    )
+    # priority order preserved (input order): critical clone before warning struct
+    assert panel.index("Duplicated branch logic") < panel.index("Repeated assertions")
+
+
+def test_review_panel_empty_when_no_items() -> None:
+    html = _render_review_report(_review_queue_payload(with_items=False))
+    panel = html.split('id="panel-review"', 1)[1].split('id="panel-clones"', 1)[0]
+    assert "No findings to review." in panel
+    assert "data-review-card" not in panel
+    # tab badge hidden when zero
+    assert (
+        '<span class="main-tab-label">Review</span><span class="tab-count"' not in html
+    )
+
+
+def test_overview_launchpad_links_to_review() -> None:
+    html = _render_review_report(_review_queue_payload())
+    overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
+    _assert_html_contains(
+        overview,
+        "review-launchpad",
+        'data-goto-tab="review"',
+        "3 findings ready to review",
+        "Start review",
+        "launchpad-sev--critical",
+    )
+    # JS cross-tab jump handler shipped
+    assert "gotoTab" in html
+
+
+def test_overview_launchpad_absent_when_queue_empty() -> None:
+    html = _render_review_report(_review_queue_payload(with_items=False))
+    overview = html.split('id="panel-overview"', 1)[1].split('id="panel-review"', 1)[0]
+    assert "review-launchpad" not in overview
+    assert "data-goto-tab" not in overview
+
+
+def test_render_rows_table_meter_column_self_scales() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "CC"),
+        rows=[("alpha", "20"), ("beta", "10"), ("gamma", "5")],
+        empty_message="none",
+        column_types={"CC": "meter"},
+    )
+    assert "metric-meter" in html
+    # column max (20) fills 100% and reads as the high band
+    assert 'style="width:100%"' in html
+    assert "metric-meter--high" in html
+    # half the max (10) fills 50% and reads as the mid band
+    assert 'style="width:50%"' in html
+    assert "metric-meter--mid" in html
+    # the underlying numbers are preserved verbatim
+    assert ">20</span>" in html and ">5</span>" in html
+
+
+def test_render_rows_table_meter_handles_non_numeric() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "CC"),
+        rows=[("alpha", "n/a")],
+        empty_message="none",
+        column_types={"CC": "meter"},
+    )
+    assert "n/a" in html
+    assert "metric-meter-fill" not in html
+
+
+def test_render_rows_table_source_kind_column_renders_badge() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "Source"),
+        rows=[("x", "production"), ("y", "tests")],
+        empty_message="none",
+        column_types={"Source": "source_kind"},
+    )
+    assert "source-kind-badge" in html
+    assert "source-kind-production" in html
+    assert "source-kind-tests" in html
+
+
+def test_render_rows_table_code_column_renders_code_chip() -> None:
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    html = render_rows_table(
+        headers=("Name", "Rule"),
+        rows=[("x", "golden_fixture@project_config"), ("y", "-")],
+        empty_message="none",
+        column_types={"Rule": "code"},
+    )
+    assert '<code class="code-chip">golden_fixture@project_config</code>' in html
+    # the placeholder dash stays plain, not chipped
+    assert '<code class="code-chip">-</code>' not in html

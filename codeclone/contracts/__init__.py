@@ -16,11 +16,23 @@ CACHE_VERSION: Final = "2.10"
 REPORT_SCHEMA_VERSION: Final = "2.11"
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.2"
 ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.7"
-# Semantic retrieval index (Phase 20). Derived, rebuildable sidecar — NOT
+# Semantic retrieval index. Derived, rebuildable sidecar — NOT
 # covered by ENGINEERING_MEMORY_SCHEMA_VERSION. Bump to invalidate the index
 # on an incompatible projection/row-format change (forces a rebuild, not a
-# SQLite migration).
-SEMANTIC_INDEX_FORMAT_VERSION: Final = "2"
+# SQLite migration). v3 (Stage 2) adds the ``source_revision`` row column; the
+# one-time full rebuild is actually forced by the backend schema check, not by
+# this constant — it stays in sync so the reported ``index_version`` is honest.
+SEMANTIC_INDEX_FORMAT_VERSION: Final = "3"
+# Global escape hatch for the cheap per-row ``source_revision`` key (Stage 2
+# incremental sourcing). Bump to invalidate EVERY semantic lane at once on a
+# cross-cutting projection/row-format change. Per-source projection versions are
+# folded into each source's content token instead, so a single-lane projector
+# change re-embeds only that lane (see ``memory.semantic.projection``).
+SEMANTIC_PROJECTION_REVISION_VERSION: Final = "1"
+# Per-source projection versions folded into each source's ``source_revision``
+# content token. Trajectory reuses TRAJECTORY_PROJECTION_VERSION below.
+MEMORY_PROJECTION_VERSION: Final = "memory-v1"
+AUDIT_PROJECTION_VERSION: Final = "audit-v1"
 PATCH_TRAIL_SCHEMA_VERSION: Final = "1"
 # Platform observability sqlite store (.codeclone/db/platform_observability.sqlite3):
 # a runtime-profiling plane separate from audit/memory. Bump on an incompatible
@@ -129,6 +141,7 @@ def cli_help_epilog() -> str:
 
 
 __all__ = [
+    "AUDIT_PROJECTION_VERSION",
     "BASELINE_FINGERPRINT_VERSION",
     "BASELINE_SCHEMA_VERSION",
     "CACHE_VERSION",
@@ -180,11 +193,13 @@ __all__ = [
     "HEALTH_WEIGHTS",
     "IDE_GOVERNANCE_PROTOCOL_VERSION",
     "ISSUES_URL",
+    "MEMORY_PROJECTION_VERSION",
     "METRICS_BASELINE_SCHEMA_VERSION",
     "PATCH_TRAIL_SCHEMA_VERSION",
     "REPORT_SCHEMA_VERSION",
     "REPOSITORY_URL",
     "SEMANTIC_INDEX_FORMAT_VERSION",
+    "SEMANTIC_PROJECTION_REVISION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",

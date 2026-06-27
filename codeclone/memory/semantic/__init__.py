@@ -18,6 +18,7 @@ from .chunking import (
     trajectory_chunk_row_id,
 )
 from .models import (
+    ExistingSourceRevision,
     SemanticHit,
     SemanticIndexStatus,
     SemanticProjection,
@@ -85,8 +86,15 @@ class SemanticIndexWriter(SemanticIndex, Protocol):
     def known_ids(self) -> set[str]: ...
 
     def row_fingerprints(self, ids: Sequence[str]) -> dict[str, SemanticRowFingerprint]:
-        """Stored (text_hash, embedding_model) for the given ids, vectors not
-        loaded. Missing ids are omitted; empty ``ids`` returns ``{}``."""
+        """Stored (text_hash, embedding_model, source_revision) for the given ids,
+        vectors not loaded. Missing ids are omitted; empty ``ids`` returns ``{}``."""
+        ...
+
+    def existing_revisions(self) -> dict[str, ExistingSourceRevision]:
+        """Every stored row grouped by source id -> (lane, source_revision,
+        row_ids), from one metadata scan. The rebuild diffs this against each
+        source's cheap ``scan`` to project only changed sources; vectors are
+        never loaded."""
         ...
 
 
@@ -140,10 +148,11 @@ def close_semantic_index(index: object | None) -> None:
 def resolve_semantic_index(config: SemanticConfig) -> SemanticIndex:
     """Resolve the semantic index for the given config.
 
-    Null when disabled; otherwise the backend. The LanceDB backend is wired in
-    Phase 20.2 via a lazy import inside this function (so absence never crashes
-    the import of the memory package). Until then an enabled index degrades to
-    Unavailable — read paths stay empty and explicit commands fail clear.
+    Null when disabled; otherwise the backend. The LanceDB backend is loaded
+    lazily inside this function, so absence never crashes the import of the
+    memory package. When the optional backend is unavailable, an enabled index
+    degrades to Unavailable — read paths stay empty and explicit commands fail
+    clear.
     """
     if not config.enabled:
         return NullSemanticIndex()
@@ -188,6 +197,7 @@ __all__ = [
     "INDEXED_MEMORY_TYPES",
     "SEMANTIC_CHUNK_STRATEGY_VERSION",
     "AuditIndexSource",
+    "ExistingSourceRevision",
     "IndexSource",
     "MemoryIndexSource",
     "NullSemanticIndex",

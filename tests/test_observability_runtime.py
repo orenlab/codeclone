@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import importlib
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -50,6 +51,9 @@ def test_disabled_is_inert_and_imports_no_store() -> None:
             sp.add_counter("embedded", 3)
             sp.set_counter("skipped", 0)
             sp.set_reason_kind("model_changed")
+
+    importlib.import_module("codeclone.analysis.units")
+    importlib.import_module("codeclone.core.parallelism")
 
     assert not any(m.startswith("codeclone.observability.store") for m in sys.modules)
     assert "psutil" not in sys.modules

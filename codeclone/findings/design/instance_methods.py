@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Instance-independent method detection (Phase 21, report-only design signal).
+"""Instance-independent method detection for report-only design signals.
 
 A method is *instance-independent* when it declares ``self`` but its executable
 body never reads the instance receiver. This is a deterministic AST signal:

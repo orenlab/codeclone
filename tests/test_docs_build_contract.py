@@ -34,7 +34,7 @@ def test_docs_build_strict() -> None:
             "uv",
             "run",
             "--with",
-            "zensical==0.0.43",
+            "zensical==0.0.46",
             "zensical",
             "build",
             "--clean",

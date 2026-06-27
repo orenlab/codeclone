@@ -18,20 +18,25 @@ def render_split_tabs(
     group_id: str,
     tabs: Sequence[tuple[str, str, int, str]],
     emit_clone_counters: bool = False,
+    active_id: str | None = None,
 ) -> str:
     """Render sub-tab navigation + panels.
 
-    Each tab tuple: ``(tab_id, label, count, panel_html)``.
+    Each tab tuple: ``(tab_id, label, count, panel_html)``. ``active_id`` selects
+    which tab starts active; when omitted the first tab is active.
     """
     if not tabs:
         return ""
+
+    def _is_active(idx: int, tab_id: str) -> bool:
+        return tab_id == active_id if active_id is not None else idx == 0
 
     nav: list[str] = [
         '<nav class="clone-nav" role="tablist" '
         f'data-subtab-group="{_escape_html(group_id)}">'
     ]
     for idx, (tab_id, label, count, _) in enumerate(tabs):
-        active = " active" if idx == 0 else ""
+        active = " active" if _is_active(idx, tab_id) else ""
         if emit_clone_counters:
             badge = (
                 f'<span class="tab-count" data-clone-tab-count="{tab_id}" '
@@ -49,7 +54,7 @@ def render_split_tabs(
 
     panels: list[str] = []
     for idx, (tab_id, _, _, panel_html) in enumerate(tabs):
-        active = " active" if idx == 0 else ""
+        active = " active" if _is_active(idx, tab_id) else ""
         panels.append(
             f'<div class="clone-panel{active}" '
             f'data-clone-panel="{tab_id}" '

@@ -9,10 +9,15 @@ from __future__ import annotations
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 
-from ...audit import EVENT_RECEIPT_CREATED
+from ...audit import (
+    EVENT_RECEIPT_CREATED,
+)
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_int as _coerce_int
 from . import _session_helpers as _helpers
+from ._context_governance import (
+    context_governance_digest,
+)
 from ._intent import IntentRecord
 from ._review_receipt import (
     RECEIPT_VERSION,
@@ -115,26 +120,57 @@ class _MCPSessionReviewReceiptMixin:
                 intent_id=intent.intent_id if intent is not None else None,
                 report_digest=self._receipt_digest(record),
                 status=str(receipt.get("verdict", "")),
-                payload={"receipt": receipt, "format": output_format},
+                payload={
+                    "receipt": receipt,
+                    "format": output_format,
+                    # Persist the canonical digest so durable lookup by digest is
+                    # uniform across markdown and json receipt events.
+                    "receipt_digest": context_governance_digest("receipt_v1", receipt),
+                },
             )
             return receipt
-        payload: dict[str, object] = {
-            "run_id": _helpers._short_run_id(record.run_id),
+        digest = context_governance_digest("receipt_v1", receipt)
+        short_run_id = _helpers._short_run_id(record.run_id)
+        verdict = str(receipt.get("verdict", ""))
+        content = render_receipt_markdown(receipt)
+        # The audit event preserves the complete typed receipt (forensic-retention
+        # policy) so it stays durably retrievable post-clear.
+        audit_payload: dict[str, object] = {
+            "run_id": short_run_id,
             "format": output_format,
-            "content": render_receipt_markdown(receipt),
+            "receipt_version": RECEIPT_VERSION,
+            "verdict": verdict,
+            "receipt_digest": digest,
+            "content": content,
             "receipt": receipt,
         }
         self._audit_emit(
             root=record.root,
             event_type=EVENT_RECEIPT_CREATED,
             severity="info",
-            run_id=_helpers._short_run_id(record.run_id),
+            run_id=short_run_id,
             intent_id=intent.intent_id if intent is not None else None,
             report_digest=self._receipt_digest(record),
-            status=str(receipt.get("verdict", "")),
-            payload=payload,
+            status=verdict,
+            payload=audit_payload,
         )
-        return payload
+        # Default response dedup: keep the human-complete markdown receipt
+        # content plus identity and omits the duplicate nested typed receipt — now
+        # durably retrievable post-clear via get_review_receipt.
+        return {
+            "run_id": short_run_id,
+            "format": output_format,
+            "receipt_version": RECEIPT_VERSION,
+            "verdict": verdict,
+            "receipt_digest": digest,
+            "content": content,
+            "receipt_retrieval": {
+                "tool": "get_review_receipt",
+                "run_id": short_run_id,
+                "receipt_digest": digest["value"],
+                "format": "structured",
+            },
+        }
 
     def _validated_receipt_format(self, value: str) -> str:
         if value not in VALID_RECEIPT_FORMATS:
@@ -386,6 +422,7 @@ class _MCPSessionReviewReceiptMixin:
                 intent_check_status=intent_check_status,
                 regressions=regressions,
                 has_structural_delta=bool(structural_delta.get("available")),
+                patch_context_declared=intent is not None,
             ),
             "regressions": regressions,
             "improvements": _coerce_int(structural_delta.get("improvements")),

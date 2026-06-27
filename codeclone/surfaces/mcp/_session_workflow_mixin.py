@@ -10,7 +10,7 @@
 atomic change-control steps into two workflow calls.  They call existing
 internal methods only — no new engine logic.
 
-Design invariants (phase-16 spec):
+Design invariants:
 - No implicit ``analyze_repository``.
 - No hidden boundary decisions.
 - ``check`` before ``verify`` is mandatory (check writes state).
@@ -21,15 +21,34 @@ Design invariants (phase-16 spec):
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from copy import deepcopy
 from pathlib import Path
 from typing import Final
 
-from ...audit.events import EVENT_PATCH_TRAIL_COMPUTED
+from ...audit.events import EVENT_BLAST_ARTIFACT_CREATED, EVENT_PATCH_TRAIL_COMPUTED
 from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
-from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
-from ._intent import IntentRecord, IntentStatus
+from ._blast_radius import (
+    BlastRadiusResult,
+    blast_artifact_reference,
+    blast_radius_artifact_payload,
+    blast_radius_summary_payload,
+    blast_radius_to_payload,
+)
+from ._context_governance import (
+    DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
+    attach_finish_context_governance,
+    attach_start_context_governance,
+    context_governance_digest,
+    estimate_response_context_units,
+)
+from ._intent import (
+    IntentRecord,
+    IntentStatus,
+    normalize_expected_effects,
+    normalize_intent_scope,
+)
 from ._patch_contract import PatchContractStatus
 from ._patch_trail_bridge import build_patch_trail_inputs
 from ._session_shared import (
@@ -46,6 +65,7 @@ TRANSITIVE_SUMMARY_LIMIT: Final[int] = 10
 VALID_BLAST_RADIUS_DEPTHS: Final[frozenset[str]] = frozenset(
     {"direct", "transitive", "auto"}
 )
+VALID_BLAST_RADIUS_DETAIL: Final[frozenset[str]] = frozenset({"summary", "full"})
 
 _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     {
@@ -54,12 +74,15 @@ _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
     }
 )
 
+_FINISH_REDUCIBLE_LANES: Final[tuple[str, ...]] = ("receipt_content", "patch_trail")
+
 
 class _MCPSessionWorkflowMixin:
     """Workflow orchestration over atomic change-control primitives."""
 
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _start_replay_cache: dict[str, dict[str, object]]
 
     # ------------------------------------------------------------------
     # start_controlled_change
@@ -76,29 +99,57 @@ class _MCPSessionWorkflowMixin:
         strictness: str = "ci",
         ttl_seconds: int | None = None,
         blast_radius_depth: str = "auto",
+        blast_radius_detail: str = "summary",
         dirty_scope_policy: str = "block",
     ) -> dict[str, object]:
         validated_depth = _validated_blast_radius_depth(blast_radius_depth)
+        validated_blast_detail = _validated_blast_radius_detail(blast_radius_detail)
         validated_dirty_scope_policy = _validated_dirty_scope_policy(dirty_scope_policy)
         root_path = _helpers._resolve_root(root)
+        request_key = _start_replay_request_key(
+            root_path=root_path,
+            scope=scope,
+            intent=intent,
+            expected_effects=expected_effects,
+            on_conflict=on_conflict,
+            strictness=strictness,
+            blast_radius_depth=validated_depth,
+            blast_radius_detail=validated_blast_detail,
+            dirty_scope_policy=validated_dirty_scope_policy,
+            actor_pid=self._agent_pid,
+            actor_start_epoch=self._agent_start_epoch,
+        )
 
         # 1. Workspace check (lazy close inside list_workspace)
-        self._list_workspace_intents(root=root)
+        workspace_before = self._list_workspace_intents(root=root)
 
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
         if record is None:
-            return _helpers.attach_workspace_hygiene_tips(
-                {
-                    "status": "needs_analysis",
-                    "intent_id": None,
-                    "edit_allowed": False,
-                    "root": str(root_path),
-                    "message": workflow_msgs.START_NEEDS_ANALYSIS,
-                    "workspace": _workspace_summary_from_declare({}, {}),
-                },
-                root=root_path,
+            return _start_governed_response(
+                _helpers.attach_workspace_hygiene_tips(
+                    {
+                        "status": "needs_analysis",
+                        "intent_id": None,
+                        "edit_allowed": False,
+                        "root": str(root_path),
+                        "message": workflow_msgs.START_NEEDS_ANALYSIS,
+                        "workspace": _workspace_summary_from_declare({}, {}),
+                    },
+                    root=root_path,
+                )
             )
+
+        current_workspace_state_digest = _start_workspace_state_digest(root_path)
+        registry_digest = _start_registry_digest(workspace_before)
+        replay_payload = self._start_replay_payload(
+            request_key=request_key,
+            record=record,
+            workspace_state_digest=current_workspace_state_digest,
+            registry_digest=registry_digest,
+        )
+        if replay_payload is not None:
+            return replay_payload
 
         # 3. Declare intent
         declare_payload = self._declare_change_intent(
@@ -133,9 +184,11 @@ class _MCPSessionWorkflowMixin:
             dirty_snapshot = declare_payload.get("dirty_snapshot")
             if isinstance(dirty_snapshot, dict):
                 queued_payload["dirty_snapshot"] = dirty_snapshot
-            return _helpers.attach_workspace_hygiene_tips(
-                queued_payload,
-                root=root_path,
+            return _start_governed_response(
+                _helpers.attach_workspace_hygiene_tips(
+                    queued_payload,
+                    root=root_path,
+                )
             )
 
         # 4. Fresh workspace snapshot after declare
@@ -179,6 +232,30 @@ class _MCPSessionWorkflowMixin:
         )
         if transitive_summary is not None:
             blast_payload["transitive_summary"] = transitive_summary
+        blast_artifact = blast_radius_artifact_payload(
+            blast_payload,
+            source_tool="start_controlled_change",
+        )
+        blast_artifact_ref = blast_artifact_reference(blast_artifact)
+        blast_artifact_audit_sequence = self._audit_emit(
+            root=record.root,
+            event_type=EVENT_BLAST_ARTIFACT_CREATED,
+            severity="info",
+            run_id=_helpers._short_run_id(record.run_id),
+            intent_id=intent_id,
+            report_digest=self._report_digest_value(record),
+            status=str(blast_payload.get("radius_level", "")),
+            payload=blast_artifact,
+        )
+        artifact_available = blast_artifact_audit_sequence is not None
+        effective_blast_detail = (
+            validated_blast_detail if artifact_available else "full"
+        )
+        response_blast_payload = _start_blast_projection(
+            blast_payload=blast_payload,
+            blast_artifact=blast_artifact if artifact_available else None,
+            detail=effective_blast_detail,
+        )
 
         # 7. Budget
         budget_payload = self._patch_contract_budget(
@@ -221,7 +298,9 @@ class _MCPSessionWorkflowMixin:
                 workspace_after,
                 declare_payload,
             ),
-            "blast_radius": blast_payload,
+            "blast_radius_detail": effective_blast_detail,
+            "requested_blast_radius_detail": validated_blast_detail,
+            "blast_radius": response_blast_payload,
             "budget": _budget_summary(budget_payload),
             "scope": active_intent.scope.to_payload(),
             "edit_allowed": edit_allowed,
@@ -249,7 +328,103 @@ class _MCPSessionWorkflowMixin:
                 hygiene=hygiene,
                 dirty_scope_policy=validated_dirty_scope_policy,
             )
-        return _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
+        self._store_start_replay(
+            request_key=request_key,
+            record=record,
+            intent=active_intent,
+            payload=payload,
+            workspace_after=workspace_after,
+            workspace_state_digest=_start_workspace_state_digest(root_path),
+            scope_digest=context_governance_digest(
+                "boundary_v1", active_intent.scope.to_payload()
+            ),
+            blast_radius_digest=context_governance_digest(
+                "blast_projection_v1", blast_payload
+            ),
+            blast_artifact=blast_artifact_ref if artifact_available else None,
+            budget_digest=context_governance_digest(
+                "budget_projection_v1", _budget_summary(budget_payload)
+            ),
+        )
+        return _start_governed_response(
+            _helpers.attach_workspace_hygiene_tips(payload, root=root_path)
+        )
+
+    def _start_replay_payload(
+        self,
+        *,
+        request_key: str,
+        record: MCPRunRecord,
+        workspace_state_digest: dict[str, str],
+        registry_digest: dict[str, str],
+    ) -> dict[str, object] | None:
+        entry = self._start_replay_cache.get(request_key)
+        if entry is None or entry.get("run_id") != record.run_id:
+            return None
+        if entry.get("workspace_state_digest") != workspace_state_digest:
+            return None
+        if entry.get("registry_digest") != registry_digest:
+            return None
+        intent_id = str(entry.get("intent_id", ""))
+        with self._state_lock:
+            active_intent = self._active_intents.get(intent_id)
+        if active_intent is None or active_intent.status != IntentStatus.ACTIVE:
+            return None
+        payload: dict[str, object] = {
+            "intent_id": intent_id,
+            "status": active_intent.status.value,
+            "run_id": _helpers._short_run_id(record.run_id),
+            "edit_allowed": bool(entry.get("edit_allowed")),
+            "idempotent_replay": True,
+            "scope_unchanged": True,
+            "analysis_run_unchanged": True,
+            "workspace_unchanged": True,
+            "lease_expires_at_utc": entry.get("lease_expires_at_utc"),
+            "renew_required": False,
+            "scope_digest": entry["scope_digest"],
+            "workspace_state_digest": workspace_state_digest,
+            "blast_radius_digest": entry["blast_radius_digest"],
+            "blast_artifact": entry.get("blast_artifact"),
+            "budget_digest": entry["budget_digest"],
+            "boundary_drill_down": {
+                "allowed_files": None,
+                "forbidden": None,
+                "do_not_touch": None,
+            },
+            "next_tool": "get_relevant_memory",
+            "message": "Repeated start unchanged; reusing the active intent.",
+        }
+        return _start_governed_response(payload)
+
+    def _store_start_replay(
+        self,
+        *,
+        request_key: str,
+        record: MCPRunRecord,
+        intent: IntentRecord,
+        payload: Mapping[str, object],
+        workspace_after: Mapping[str, object],
+        workspace_state_digest: dict[str, str],
+        scope_digest: dict[str, str],
+        blast_radius_digest: dict[str, str],
+        blast_artifact: Mapping[str, object] | None,
+        budget_digest: dict[str, str],
+    ) -> None:
+        self._start_replay_cache[request_key] = {
+            "intent_id": intent.intent_id,
+            "run_id": record.run_id,
+            "status": intent.status.value,
+            "edit_allowed": bool(payload.get("edit_allowed")),
+            "lease_expires_at_utc": _start_lease_expires_at(
+                workspace_after, intent.intent_id
+            ),
+            "scope_digest": scope_digest,
+            "workspace_state_digest": workspace_state_digest,
+            "registry_digest": _start_registry_digest(workspace_after),
+            "blast_radius_digest": blast_radius_digest,
+            "blast_artifact": None if blast_artifact is None else dict(blast_artifact),
+            "budget_digest": budget_digest,
+        }
 
     # ------------------------------------------------------------------
     # finish_controlled_change
@@ -279,19 +454,21 @@ class _MCPSessionWorkflowMixin:
 
         # Queued intents cannot be verified
         if active_intent.status == IntentStatus.QUEUED:
-            return {
-                "intent_id": intent_id,
-                "status": "unverified",
-                "reason": "intent_not_active",
-                "scope_check": None,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "intent_cleared": False,
-                "user_action_required": False,
-                "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
-                "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
-            }
+            return _budgeted_finish_response(
+                {
+                    "intent_id": intent_id,
+                    "status": "unverified",
+                    "reason": "intent_not_active",
+                    "scope_check": None,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "intent_cleared": False,
+                    "user_action_required": False,
+                    "next_step": workflow_msgs.FINISH_PROMOTE_BEFORE_VERIFY,
+                    "message": workflow_msgs.FINISH_QUEUED_NOT_ACTIVE,
+                }
+            )
 
         # 2. Resolve changed files — exactly one source
         resolved_files = self._resolve_changed_files_once(
@@ -336,20 +513,22 @@ class _MCPSessionWorkflowMixin:
                 "missing_evidence": workflow_msgs.FINISH_HYGIENE_MISSING_EVIDENCE,
                 "foreign_dirty_overlap": workflow_msgs.FINISH_HYGIENE_FOREIGN_DIRTY,
             }.get(block_reason, workflow_msgs.FINISH_HYGIENE_BLOCKED)
-            return {
-                "intent_id": intent_id,
-                "status": "unverified",
-                "reason": "workspace_hygiene",
-                "scope_check": None,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "intent_cleared": False,
-                "user_action_required": True,
-                "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
-                "workspace_hygiene_after": workspace_hygiene_after,
-                "message": detail_message,
-            }
+            return _budgeted_finish_response(
+                {
+                    "intent_id": intent_id,
+                    "status": "unverified",
+                    "reason": "workspace_hygiene",
+                    "scope_check": None,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "intent_cleared": False,
+                    "user_action_required": True,
+                    "next_step": workflow_msgs.FINISH_HYGIENE_NEXT,
+                    "workspace_hygiene_after": workspace_hygiene_after,
+                    "message": detail_message,
+                }
+            )
 
         scope_files = (
             finish_hygiene.files_for_scope_check
@@ -369,46 +548,49 @@ class _MCPSessionWorkflowMixin:
 
         # Expired intent
         if check_status == IntentStatus.EXPIRED.value:
-            return {
-                "intent_id": intent_id,
-                "status": "expired",
-                "reason": "report_digest_mismatch",
-                "scope_check": check_payload,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "intent_cleared": False,
-                "user_action_required": True,
-                "next_step": workflow_msgs.FINISH_DIGEST_MISMATCH_NEXT,
-                "message": workflow_msgs.FINISH_DIGEST_MISMATCH,
-            }
+            return _budgeted_finish_response(
+                {
+                    "intent_id": intent_id,
+                    "status": "expired",
+                    "reason": "report_digest_mismatch",
+                    "scope_check": check_payload,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "intent_cleared": False,
+                    "user_action_required": True,
+                    "next_step": workflow_msgs.FINISH_DIGEST_MISMATCH_NEXT,
+                    "message": workflow_msgs.FINISH_DIGEST_MISMATCH,
+                }
+            )
 
         # 4. Scope violation — early exit
         if check_status == IntentStatus.VIOLATED.value:
-            patch_trail_payload = self._finish_patch_trail(
-                record=record,
-                intent=active_intent,
-                check_payload=check_payload,
-                verify_payload=_NOT_REACHED_VERIFY_PAYLOAD,
-                finish_hygiene=finish_hygiene,
-                scope_check_audit_sequence=scope_check_audit_sequence,
-                patch_verify_audit_sequence=None,
-                patch_trail_detail=patch_trail_detail,
+            return _budgeted_finish_response(
+                {
+                    "intent_id": intent_id,
+                    "status": "violated",
+                    "reason": "scope_violation",
+                    "scope_check": check_payload,
+                    "verification": None,
+                    "claims": None,
+                    "receipt": None,
+                    "patch_trail": self._finish_patch_trail(
+                        record=record,
+                        intent=active_intent,
+                        check_payload=check_payload,
+                        verify_payload=_NOT_REACHED_VERIFY_PAYLOAD,
+                        finish_hygiene=finish_hygiene,
+                        scope_check_audit_sequence=scope_check_audit_sequence,
+                        patch_verify_audit_sequence=None,
+                        patch_trail_detail=patch_trail_detail,
+                    ),
+                    "intent_cleared": False,
+                    "user_action_required": True,
+                    "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
+                    "message": workflow_msgs.FINISH_SCOPE_VIOLATION,
+                }
             )
-            return {
-                "intent_id": intent_id,
-                "status": "violated",
-                "reason": "scope_violation",
-                "scope_check": check_payload,
-                "verification": None,
-                "claims": None,
-                "receipt": None,
-                "patch_trail": patch_trail_payload,
-                "intent_cleared": False,
-                "user_action_required": True,
-                "next_step": workflow_msgs.FINISH_SCOPE_VIOLATION_NEXT,
-                "message": workflow_msgs.FINISH_SCOPE_VIOLATION,
-            }
 
         # 5. Verify (before_run_id auto-resolves from intent)
         verify_payload = self._patch_contract_verify(
@@ -434,35 +616,36 @@ class _MCPSessionWorkflowMixin:
 
         # 6. Non-accepted verification — return without receipt/clear
         if verify_status not in _ACCEPTED_STATUSES:
-            verify_reason = str(verify_payload.get("reason", ""))
-            return {
-                "intent_id": intent_id,
-                "status": verify_status,
-                "reason": verify_reason,
-                "scope_check": check_payload,
-                "verification": verify_payload,
-                "claims": None,
-                "receipt": None,
-                "patch_trail": patch_trail_payload,
-                "intent_cleared": False,
-                "workspace_hygiene_after": workspace_hygiene_after,
-                "summary": _finish_summary(
-                    verify_status=verify_status,
-                    intent_cleared=False,
-                    check_payload=check_payload,
-                    verify_payload=verify_payload,
-                    claims_payload=None,
-                    receipt_payload=None,
-                    receipt_error=None,
-                    workspace_hygiene_after=workspace_hygiene_after,
-                    review_text_present=bool(review_text),
-                    claims_text_present=bool(claims_text),
-                ),
-                "user_action_required": verify_status
-                == PatchContractStatus.VIOLATED.value,
-                "next_step": verify_payload.get("next_step"),
-                "message": str(verify_payload.get("message", "")),
-            }
+            return _budgeted_finish_response(
+                {
+                    "intent_id": intent_id,
+                    "status": verify_status,
+                    "reason": str(verify_payload.get("reason", "")),
+                    "scope_check": check_payload,
+                    "verification": verify_payload,
+                    "claims": None,
+                    "receipt": None,
+                    "patch_trail": patch_trail_payload,
+                    "intent_cleared": False,
+                    "workspace_hygiene_after": workspace_hygiene_after,
+                    "summary": _finish_summary(
+                        verify_status=verify_status,
+                        intent_cleared=False,
+                        check_payload=check_payload,
+                        verify_payload=verify_payload,
+                        claims_payload=None,
+                        receipt_payload=None,
+                        receipt_error=None,
+                        workspace_hygiene_after=workspace_hygiene_after,
+                        review_text_present=bool(review_text),
+                        claims_text_present=bool(claims_text),
+                    ),
+                    "user_action_required": verify_status
+                    == PatchContractStatus.VIOLATED.value,
+                    "next_step": verify_payload.get("next_step"),
+                    "message": str(verify_payload.get("message", "")),
+                }
+            )
 
         health_regression_advisory = verify_payload.get("health_regression_advisory")
         claims_payload = self._conditional_claim_validation(
@@ -551,7 +734,7 @@ class _MCPSessionWorkflowMixin:
             )
             if projection_hook is not None:
                 result["projection_rebuild"] = projection_hook
-        return result
+        return _budgeted_finish_response(result)
 
     def _finish_patch_trail(
         self,
@@ -757,6 +940,150 @@ def _validated_blast_radius_depth(value: str) -> str:
     return value
 
 
+def _validated_blast_radius_detail(value: str) -> str:
+    if value not in VALID_BLAST_RADIUS_DETAIL:
+        raise MCPServiceContractError(
+            err_msgs.invalid_choice(
+                "blast_radius_detail",
+                value,
+                VALID_BLAST_RADIUS_DETAIL,
+            )
+        )
+    return value
+
+
+def _start_blast_projection(
+    *,
+    blast_payload: Mapping[str, object],
+    blast_artifact: Mapping[str, object] | None,
+    detail: str,
+) -> dict[str, object]:
+    if detail == "full":
+        full_payload = dict(blast_payload)
+        if blast_artifact is None:
+            full_payload["blast_artifact"] = {
+                "object_lookup": "unavailable",
+                "reason": "audit_artifact_write_failed_or_disabled",
+            }
+        else:
+            full_payload["blast_artifact"] = blast_artifact_reference(blast_artifact)
+        return full_payload
+    if blast_artifact is None:
+        raise MCPServiceContractError(
+            "start summary blast requires a stored blast artifact."
+        )
+    return blast_radius_summary_payload(
+        blast_payload,
+        artifact=blast_artifact,
+    )
+
+
+def _start_governed_response(payload: Mapping[str, object]) -> dict[str, object]:
+    return attach_start_context_governance(
+        payload,
+        evidence_omitted=_start_governance_omitted(payload),
+        enforce_budget=_start_immutable_blast_available(payload),
+    )
+
+
+def _start_governance_omitted(
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    blast_radius = payload.get("blast_radius")
+    if isinstance(blast_radius, Mapping):
+        omitted = _start_blast_omitted_evidence(blast_radius.get("omitted_evidence"))
+        if omitted:
+            return omitted
+    blast_artifact = payload.get("blast_artifact")
+    if isinstance(blast_artifact, Mapping):
+        return {
+            "blast_radius": _start_blast_radius_omission_from_artifact(blast_artifact)
+        }
+    return None
+
+
+def _start_immutable_blast_available(payload: Mapping[str, object]) -> bool:
+    blast_radius = payload.get("blast_radius")
+    if isinstance(blast_radius, Mapping) and _start_valid_blast_artifact_ref(
+        blast_radius.get("blast_artifact")
+    ):
+        return True
+    return _start_valid_blast_artifact_ref(payload.get("blast_artifact"))
+
+
+def _start_valid_blast_artifact_ref(value: object) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    return value.get("retrieval_tool") == "get_blast_artifact" and bool(
+        str(value.get("blast_artifact_id", "")).strip()
+    )
+
+
+def _start_blast_omitted_evidence(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    omitted: dict[str, object] = {}
+    for lane, summary in sorted(value.items(), key=lambda item: str(item[0])):
+        omission = _start_blast_omission_row(str(lane), summary)
+        if omission is None:
+            continue
+        field, row = omission
+        omitted[field] = row
+    return omitted
+
+
+def _start_blast_omission_row(
+    lane: str,
+    summary: object,
+) -> tuple[str, dict[str, object]] | None:
+    if isinstance(summary, Mapping):
+        lane_total = _start_non_negative_int(summary.get("total"))
+        lane_shown = _start_non_negative_int(summary.get("shown"))
+        lane_omitted = max(lane_total - lane_shown, 0)
+        truncated = bool(summary.get("truncated"))
+        if lane_omitted > 0 or truncated:
+            retrieval = summary.get("retrieval")
+            field = f"blast_radius.{lane}"
+            return field, {
+                "evaluation": "complete",
+                "total": lane_total,
+                "shown": lane_shown,
+                "omitted": lane_omitted,
+                "truncated": truncated,
+                "reason": "response_budget",
+                "field": field,
+                "retrieval": dict(retrieval) if isinstance(retrieval, Mapping) else {},
+            }
+    return None
+
+
+def _start_blast_radius_omission_from_artifact(
+    artifact: Mapping[str, object],
+) -> dict[str, object]:
+    return {
+        "evaluation": "complete",
+        "total": 1,
+        "shown": 0,
+        "omitted": 1,
+        "truncated": True,
+        "reason": "response_budget",
+        "field": "blast_radius",
+        "retrieval": dict(artifact),
+    }
+
+
+def _start_non_negative_int(value: object) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return max(value, 0)
+    if isinstance(value, str):
+        text = value.strip()
+        if text.isdecimal():
+            return int(text)
+    return 0
+
+
 def _workspace_summary_from_declare(
     workspace: dict[str, object],
     declare_payload: dict[str, object],
@@ -881,6 +1208,269 @@ def _finish_receipt_status(
     return "created"
 
 
+def _budgeted_finish_response(payload: Mapping[str, object]) -> dict[str, object]:
+    """Attach finish governance after deterministic, recoverable packing."""
+
+    packed = deepcopy(dict(payload))
+    response_budget_lanes: set[str] = set()
+    omitted = _finish_governance_omitted(
+        packed,
+        response_budget_lanes=response_budget_lanes,
+    )
+    governed = attach_finish_context_governance(
+        packed,
+        evidence_omitted=omitted,
+    )
+    while (
+        estimate_response_context_units(governed) > DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT
+    ):
+        lane = _next_reducible_finish_lane(packed)
+        if lane is None:
+            break
+        _shrink_finish_lane(packed, lane)
+        response_budget_lanes.add(lane)
+        omitted = _finish_governance_omitted(
+            packed,
+            response_budget_lanes=response_budget_lanes,
+        )
+        governed = attach_finish_context_governance(
+            packed,
+            evidence_omitted=omitted,
+        )
+    return governed
+
+
+def _next_reducible_finish_lane(payload: Mapping[str, object]) -> str | None:
+    for lane in _FINISH_REDUCIBLE_LANES:
+        if lane == "receipt_content" and _receipt_content_retrievable(payload):
+            return lane
+        if lane == "patch_trail" and _patch_trail_retrievable(payload):
+            return lane
+    return None
+
+
+def _shrink_finish_lane(payload: dict[str, object], lane: str) -> None:
+    if lane == "receipt_content":
+        receipt = payload.get("receipt")
+        if isinstance(receipt, dict):
+            receipt.pop("content", None)
+        return
+    if lane == "patch_trail":
+        patch_trail = payload.get("patch_trail")
+        if isinstance(patch_trail, Mapping):
+            payload["patch_trail"] = _compact_patch_trail_reference(patch_trail)
+
+
+def _finish_governance_omitted(
+    payload: Mapping[str, object],
+    *,
+    response_budget_lanes: set[str],
+) -> dict[str, object] | None:
+    omitted: dict[str, object] = {}
+    lane_builders: tuple[
+        tuple[str, str, Callable[[Mapping[str, object]], dict[str, object] | None]],
+        ...,
+    ] = (
+        ("receipt_content", "receipt.content", _receipt_content_omission),
+        ("patch_trail", "patch_trail", _patch_trail_omission),
+    )
+    for lane, omitted_key, builder in lane_builders:
+        if lane not in response_budget_lanes:
+            continue
+        lane_omission = builder(payload)
+        if lane_omission is not None:
+            omitted[omitted_key] = lane_omission
+    return omitted or None
+
+
+def _receipt_content_retrievable(payload: Mapping[str, object]) -> bool:
+    receipt = payload.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return False
+    content = receipt.get("content")
+    if not isinstance(content, str) or not content:
+        return False
+    retrieval = receipt.get("receipt_retrieval")
+    if not isinstance(retrieval, Mapping):
+        return False
+    return retrieval.get("tool") == "get_review_receipt" and bool(
+        _receipt_digest_value(receipt)
+    )
+
+
+def _patch_trail_retrievable(payload: Mapping[str, object]) -> bool:
+    patch_trail = payload.get("patch_trail")
+    if not isinstance(patch_trail, Mapping):
+        return False
+    if _is_compact_patch_trail_reference(patch_trail):
+        return False
+    digest = str(patch_trail.get("patch_trail_digest", "")).strip()
+    if not digest:
+        return False
+    evidence = patch_trail.get("evidence")
+    if not isinstance(evidence, Mapping):
+        return False
+    return evidence.get("patch_trail_audit_sequence") is not None
+
+
+def _receipt_content_omission(
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    receipt = payload.get("receipt")
+    if not isinstance(receipt, Mapping):
+        return None
+    digest = _receipt_digest_value(receipt)
+    if not digest:
+        return None
+    retrieval = receipt.get("receipt_retrieval")
+    run_id = (
+        str(receipt.get("run_id", "")).strip()
+        or (
+            str(retrieval.get("run_id", "")).strip()
+            if isinstance(retrieval, Mapping)
+            else ""
+        )
+        or None
+    )
+    return {
+        "evaluation": "complete",
+        "total": 1,
+        "shown": 0,
+        "omitted": 1,
+        "reason": "response_budget",
+        "field": "receipt.content",
+        "retrieval": _finish_receipt_retrieval(
+            receipt_digest=digest,
+            run_id=run_id,
+            format="markdown",
+        ),
+    }
+
+
+def _patch_trail_omission(
+    payload: Mapping[str, object],
+) -> dict[str, object] | None:
+    patch_trail = payload.get("patch_trail")
+    if not isinstance(patch_trail, Mapping):
+        return None
+    digest = str(patch_trail.get("patch_trail_digest", "")).strip()
+    if not digest:
+        return None
+    return {
+        "evaluation": "complete",
+        "total": 1,
+        "shown": 0,
+        "omitted": 1,
+        "reason": "response_budget",
+        "field": "patch_trail",
+        "retrieval": _finish_patch_trail_retrieval(
+            patch_trail_digest=digest,
+            source=patch_trail.get("retrieval"),
+        ),
+    }
+
+
+def _compact_patch_trail_reference(
+    patch_trail: Mapping[str, object],
+) -> dict[str, object]:
+    digest = str(patch_trail.get("patch_trail_digest", "")).strip()
+    retrieval = _finish_patch_trail_retrieval(
+        patch_trail_digest=digest,
+        source=None,
+    )
+    evidence = patch_trail.get("evidence")
+    if isinstance(evidence, Mapping):
+        audit_sequence = evidence.get("patch_trail_audit_sequence")
+        if audit_sequence is not None:
+            retrieval["patch_trail_audit_sequence"] = audit_sequence
+    compact: dict[str, object] = {
+        "patch_trail_digest": digest,
+        "retrieval": retrieval,
+        "retrieval_policy": {
+            "patch_trail_does_not_authorize_edits": True,
+            "patch_trail_does_not_override_findings": True,
+        },
+    }
+    for key in (
+        "schema_version",
+        "intent_id",
+        "scope_check_status",
+        "verification_status",
+        "counts",
+        "truncation",
+    ):
+        if key in patch_trail:
+            compact[key] = deepcopy(patch_trail[key])
+    return compact
+
+
+def _receipt_digest_value(receipt: Mapping[str, object]) -> str:
+    digest = receipt.get("receipt_digest")
+    candidates: list[object] = []
+    if isinstance(digest, Mapping):
+        candidates.append(digest.get("value"))
+    retrieval = receipt.get("receipt_retrieval")
+    if isinstance(retrieval, Mapping):
+        candidates.append(retrieval.get("receipt_digest"))
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _finish_receipt_retrieval(
+    *,
+    receipt_digest: str,
+    run_id: str | None,
+    format: str,
+) -> dict[str, object]:
+    retrieval: dict[str, object] = {
+        "tool": "get_review_receipt",
+        "route": (
+            f"get_review_receipt(root=..., receipt_digest=..., format={format!r})"
+        ),
+        "receipt_digest": receipt_digest,
+        "format": format,
+        "retention": "audit_event",
+        "snapshot_identity": "receipt_digest + optional run_id",
+    }
+    if run_id:
+        retrieval["run_id"] = run_id
+    return retrieval
+
+
+def _finish_patch_trail_retrieval(
+    *,
+    patch_trail_digest: str,
+    source: object,
+) -> dict[str, object]:
+    retrieval: dict[str, object] = {
+        "tool": "get_patch_trail",
+        "route": (
+            "get_patch_trail(root=..., patch_trail_digest=..., format='structured')"
+        ),
+        "patch_trail_digest": patch_trail_digest,
+        "format": "structured",
+        "retention": "audit_event",
+        "snapshot_identity": "patch_trail_digest + optional run_id",
+    }
+    if isinstance(source, Mapping):
+        run_id = str(source.get("run_id", "")).strip()
+        if run_id:
+            retrieval["run_id"] = run_id
+    return retrieval
+
+
+def _is_compact_patch_trail_reference(patch_trail: Mapping[str, object]) -> bool:
+    retrieval = patch_trail.get("retrieval")
+    return (
+        isinstance(retrieval, Mapping)
+        and retrieval.get("tool") == "get_patch_trail"
+        and "evidence" not in patch_trail
+    )
+
+
 def _validated_dirty_scope_policy(value: str) -> str:
     from ._workspace_hygiene import VALID_DIRTY_SCOPE_POLICIES
 
@@ -994,6 +1584,116 @@ def _budget_summary(budget_payload: dict[str, object]) -> dict[str, object]:
         "gate_preview": budget_payload.get("gate_preview"),
         "message": budget_payload.get("message"),
     }
+
+
+def _start_replay_request_key(
+    *,
+    root_path: Path,
+    scope: dict[str, object],
+    intent: str,
+    expected_effects: Sequence[str] | None,
+    on_conflict: str | None,
+    strictness: str,
+    blast_radius_depth: str,
+    blast_radius_detail: str,
+    dirty_scope_policy: str,
+    actor_pid: int,
+    actor_start_epoch: int,
+) -> str:
+    payload = {
+        "root": str(root_path),
+        "scope": normalize_intent_scope(scope).to_payload(),
+        "intent": intent.strip(),
+        "expected_effects": list(normalize_expected_effects(expected_effects)),
+        "on_conflict": on_conflict,
+        "strictness": strictness,
+        "blast_radius_depth": blast_radius_depth,
+        "blast_radius_detail": blast_radius_detail,
+        "dirty_scope_policy": dirty_scope_policy,
+        "actor": {
+            "kind": "session_local",
+            "pid": actor_pid,
+            "start_epoch": actor_start_epoch,
+        },
+        "config_digest": "session-defaults-v1",
+    }
+    return context_governance_digest("start_request_v1", payload)["value"]
+
+
+def _start_workspace_state_digest(root_path: Path) -> dict[str, str]:
+    from ._workspace_hygiene import collect_dirty_snapshot
+
+    snapshot = collect_dirty_snapshot(root_path).to_payload()
+    return context_governance_digest(
+        "workspace_state_v1",
+        {
+            "git_available": snapshot.get("git_available"),
+            "entries": snapshot.get("entries", {}),
+        },
+    )
+
+
+_START_REPLAY_INTENT_IDENTITY_KEYS = frozenset(
+    {
+        "agent_pid",
+        "agent_start_epoch",
+        "expires_at_utc",
+        "intent_id",
+        "report_digest",
+        "run_id",
+        "scope_digest",
+        "status",
+    }
+)
+
+
+def _start_registry_digest(workspace_payload: Mapping[str, object]) -> dict[str, str]:
+    return context_governance_digest(
+        "workspace_registry_v1",
+        {
+            "workspace_intents": _start_stable_workspace_intents(workspace_payload),
+            "own_pid": workspace_payload.get("own_pid"),
+            "own_start_epoch": workspace_payload.get("own_start_epoch"),
+            "registry_backend": workspace_payload.get("registry_backend"),
+            "registry_storage": workspace_payload.get("registry_storage"),
+            "registry_retention_days": workspace_payload.get("registry_retention_days"),
+        },
+    )
+
+
+def _start_stable_workspace_intents(
+    workspace_payload: Mapping[str, object],
+) -> list[dict[str, object]]:
+    intents = workspace_payload.get("workspace_intents", [])
+    if not isinstance(intents, Sequence) or isinstance(intents, (str, bytes)):
+        return []
+    stable: list[dict[str, object]] = []
+    for item in intents:
+        if not isinstance(item, Mapping):
+            continue
+        item_payload = dict(item)
+        stable.append(
+            {
+                key: item_payload[key]
+                for key in sorted(_START_REPLAY_INTENT_IDENTITY_KEYS)
+                if key in item_payload
+            }
+        )
+    return stable
+
+
+def _start_lease_expires_at(
+    workspace_payload: Mapping[str, object], intent_id: str
+) -> object:
+    intents = workspace_payload.get("workspace_intents", [])
+    if not isinstance(intents, Sequence) or isinstance(intents, (str, bytes)):
+        return None
+    for item in intents:
+        if not isinstance(item, Mapping):
+            continue
+        if item.get("intent_id") == intent_id:
+            return item.get("expires_at_utc")
+    return None
 
 
 __all__ = ["_MCPSessionWorkflowMixin"]

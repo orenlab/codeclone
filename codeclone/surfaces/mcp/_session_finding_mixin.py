@@ -61,6 +61,15 @@ from ._session_shared import (
     resolve_finding_id,
 )
 
+_NON_CLONE_FINDING_FAMILIES = (
+    FAMILY_STRUCTURAL,
+    FAMILY_DEAD_CODE,
+    FAMILY_DESIGN,
+)
+_EXTRA_FINDING_FAMILIES_BY_MODE = {
+    "clones_only": (),
+}
+
 
 class _StateLock(Protocol):
     def __enter__(self) -> object: ...
@@ -331,19 +340,23 @@ class _MCPSessionFindingMixin:
         findings = _helpers._as_mapping(report_document.get("findings"))
         groups = _helpers._as_mapping(findings.get("groups"))
         clone_groups = _helpers._as_mapping(groups.get(FAMILY_CLONES))
-        return [
+        clone_findings = [
             *_helpers._dict_list(clone_groups.get("functions")),
             *_helpers._dict_list(clone_groups.get("blocks")),
             *_helpers._dict_list(clone_groups.get("segments")),
-            *_helpers._dict_list(
-                _helpers._as_mapping(groups.get(FAMILY_STRUCTURAL)).get("groups")
-            ),
-            *_helpers._dict_list(
-                _helpers._as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")
-            ),
-            *_helpers._dict_list(
-                _helpers._as_mapping(groups.get(FAMILY_DESIGN)).get("groups")
-            ),
+        ]
+        return [
+            *clone_findings,
+            *[
+                item
+                for family in _EXTRA_FINDING_FAMILIES_BY_MODE.get(
+                    record.request.analysis_mode,
+                    _NON_CLONE_FINDING_FAMILIES,
+                )
+                for item in _helpers._dict_list(
+                    _helpers._as_mapping(groups.get(family)).get("groups")
+                )
+            ],
         ]
 
     def _query_findings(
@@ -1229,13 +1242,18 @@ class _MCPSessionFindingMixin:
         )
         remediation = _helpers._as_mapping(finding.get("remediation"))
         if not remediation:
-            raise MCPFindingNotFoundError(
-                f"Finding id '{finding_id}' does not expose remediation guidance."
-            )
+            return {
+                "run_id": _helpers._short_run_id(record.run_id),
+                "finding_id": self._short_finding_id(record, canonical_id),
+                "detail_level": validated_detail,
+                "status": "no_guidance",
+                "remediation": None,
+            }
         return {
             "run_id": _helpers._short_run_id(record.run_id),
             "finding_id": self._short_finding_id(record, canonical_id),
             "detail_level": validated_detail,
+            "status": "ok",
             "remediation": _helpers._project_remediation(
                 remediation,
                 detail_level=validated_detail,

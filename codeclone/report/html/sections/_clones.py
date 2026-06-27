@@ -247,6 +247,12 @@ def _render_suppressed_clone_panel(
         headers=("Kind", "Group", "File", "Type", "Occurrences", "Rule", "Pattern"),
         rows=rows,
         empty_message="No suppressed clone groups.",
+        column_types={
+            "Kind": "chips",
+            "Type": "chips",
+            "Rule": "code",
+            "Pattern": "code",
+        },
         ctx=ctx,
     )
 

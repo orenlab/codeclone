@@ -52,3 +52,5 @@ extensions/vscode-codeclone/node_modules
 /coverage.json
 /benchmarks/memory_semantic_eval.md
 /scripts/commit_memory_phases.sh
+/extensions/jetbrains-codeclone/
+/issues/

@@ -25,20 +25,35 @@ def open_sqlite_db(
     ensure_schema: Callable[[sqlite3.Connection], None],
     foreign_keys: bool = False,
     synchronous: str | None = None,
+    factory: type[sqlite3.Connection] | None = None,
 ) -> sqlite3.Connection:
     """Open a SQLite database with standard pragmas.
 
     *synchronous* overrides the default ``NORMAL`` level.  Pass ``"FULL"``
     for stores where every commit must survive an unclean process exit
-    (e.g. engineering memory).
+    (e.g. engineering memory).  *factory* overrides the connection class
+    (e.g. an observability-instrumented subclass); ``None`` keeps the stdlib
+    default so this base helper stays decoupled from optional instrumentation.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(
-        str(path),
-        isolation_level="DEFERRED",
-        timeout=5.0,
-        check_same_thread=False,
-    )
+    # Only pass ``factory`` when supplied so the default path stays byte-identical
+    # to a bare ``sqlite3.connect`` (some callers and test doubles replace
+    # ``connect`` without a ``factory`` parameter).
+    if factory is None:
+        conn = sqlite3.connect(
+            str(path),
+            isolation_level="DEFERRED",
+            timeout=5.0,
+            check_same_thread=False,
+        )
+    else:
+        conn = sqlite3.connect(
+            str(path),
+            isolation_level="DEFERRED",
+            timeout=5.0,
+            check_same_thread=False,
+            factory=factory,
+        )
     try:
         pragmas: tuple[str, ...] = _SQLITE_PRAGMAS
         if foreign_keys:
@@ -71,15 +86,16 @@ def open_sqlite_db_readonly(
     path: Path,
     *,
     validate_schema: Callable[[sqlite3.Connection], None],
+    factory: type[sqlite3.Connection] | None = None,
 ) -> sqlite3.Connection:
     """Open an existing SQLite database without allowing writes or creation."""
 
     resolved = path.resolve(strict=True)
     uri = f"file:{quote(str(resolved), safe='/')}?mode=ro"
-    conn = sqlite3.connect(
-        uri,
-        uri=True,
-    )
+    if factory is None:
+        conn = sqlite3.connect(uri, uri=True)
+    else:
+        conn = sqlite3.connect(uri, uri=True, factory=factory)
     try:
         conn.execute("PRAGMA query_only=ON")
         conn.execute("PRAGMA busy_timeout=5000")

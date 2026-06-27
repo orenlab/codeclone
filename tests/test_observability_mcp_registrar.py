@@ -19,6 +19,10 @@ from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
 )
+from codeclone.surfaces.mcp._context_governance import (
+    CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+    CONTEXT_GOVERNANCE_ESTIMATOR,
+)
 from codeclone.surfaces.mcp.server import _instrument_tool
 
 
@@ -30,6 +34,19 @@ def _reset_runtime() -> Iterator[None]:
 
 def _sample_tool(root: str, limit: int = 5) -> dict[str, object]:
     return {"root": root, "limit": limit, "items": list(range(limit))}
+
+
+def _governed_tool(root: str) -> dict[str, object]:
+    return {
+        "root": root,
+        "items": list(range(100)),
+        "context_governance": {
+            "contract_version": CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+            "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
+            "estimated": 17,
+            "mode": "observe",
+        },
+    }
 
 
 def test_registrar_records_operation_with_payload_sizes(tmp_path: Path) -> None:
@@ -52,13 +69,35 @@ def test_registrar_records_operation_with_payload_sizes(tmp_path: Path) -> None:
     assert row[0] == "mcp"
     assert row[1] == "mcp._sample_tool"
     assert row[2] == "mcp-test"
-    # Payload sizes captured on both directions (bytes + tokens, all positive).
+    # Payload sizes captured on both directions (bytes + context units).
     assert row[3] > 0
     assert row[4] > 0
     assert row[5] > 0
     assert row[6] > 0
     # Response is the larger payload (it carries the items list).
     assert row[4] > row[3]
+
+
+def test_registrar_uses_context_governance_estimate_for_response_tokens(
+    tmp_path: Path,
+) -> None:
+    bootstrap(ObservabilityConfig(enabled=True), session_id="mcp-test")
+    wrapped = _instrument_tool(_governed_tool)
+    try:
+        wrapped(root=str(tmp_path))
+    finally:
+        shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        row = conn.execute(
+            "SELECT response_bytes, response_tokens FROM platform_operations "
+            "WHERE name = 'mcp._governed_tool'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row[0] > 0
+    assert row[1] == 17
 
 
 def test_registrar_attributes_db_queries_to_a_span(tmp_path: Path) -> None:

@@ -20,6 +20,7 @@ from codeclone.memory.exceptions import MemorySemanticUnavailableError
 from codeclone.memory.models import MemorySubject, generate_memory_id
 from codeclone.memory.project import resolve_memory_db_path, resolve_project_identity
 from codeclone.memory.semantic.models import (
+    ExistingSourceRevision,
     SemanticHit,
     SemanticIndexStatus,
     SemanticRow,
@@ -77,9 +78,27 @@ class _FakeSemanticIndex:
                 id=row_id,
                 text_hash=by_id[row_id].text_hash,
                 embedding_model=by_id[row_id].embedding_model,
+                source_revision=by_id[row_id].source_revision,
             )
             for row_id in ids
             if row_id in by_id
+        }
+
+    def existing_revisions(self) -> dict[str, ExistingSourceRevision]:
+        heads: dict[str, SemanticRow] = {}
+        members: dict[str, set[str]] = {}
+        for row in self.rows:
+            key = row.parent_id or row.id
+            heads.setdefault(key, row)
+            members.setdefault(key, set()).add(row.id)
+        return {
+            key: ExistingSourceRevision(
+                source=head.source,
+                source_revision=head.source_revision,
+                embedding_model=head.embedding_model,
+                row_ids=frozenset(members[key]),
+            )
+            for key, head in heads.items()
         }
 
 

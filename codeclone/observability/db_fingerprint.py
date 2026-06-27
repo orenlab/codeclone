@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""SQL statement fingerprinting for DB observability (Phase 29.DB, Track B).
+"""SQL statement fingerprinting for DB observability.
 
 Performance-truth only: reduce a SQL statement to its normalized *shape* so the
 cockpit can turn "1892 queries" into "1200x SELECT evidence by trajectory_id".

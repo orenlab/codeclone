@@ -12,6 +12,11 @@ from collections.abc import Callable
 from functools import lru_cache
 
 from ..analysis.normalizer import NormalizationConfig
+from ..analysis.phase_ledger import (
+    INERT_PHASE_LEDGER,
+    AnalysisVolumeKey,
+    PhaseLedger,
+)
 from ..analysis.units import extract_units_and_stats_from_source
 from ..cache.entries import FileStat
 from ..contracts import (
@@ -37,6 +42,7 @@ def process_file(
     block_min_stmt: int = DEFAULT_BLOCK_MIN_STMT,
     segment_min_loc: int = DEFAULT_SEGMENT_MIN_LOC,
     segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
+    phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
 ) -> FileProcessResult:
     try:
         resolved = resolved_path_under_root(filepath, root)
@@ -102,8 +108,13 @@ def process_file(
                 collect_structural_findings=collect_structural_findings,
                 collect_api_surface=collect_api_surface,
                 api_include_private_modules=api_include_private_modules,
+                phase_ledger=phase_ledger,
             )
         )
+        phase_snapshot = None
+        if phase_ledger.active:
+            phase_ledger.add_volume(AnalysisVolumeKey.FILES_TIMED)
+            phase_snapshot = phase_ledger.snapshot()
         return FileProcessResult(
             filepath=filepath,
             success=True,
@@ -117,6 +128,7 @@ def process_file(
             stat=stat,
             file_metrics=file_metrics,
             structural_findings=structural_findings,
+            phase_snapshot=phase_snapshot,
         )
     except Exception as exc:  # pragma: no cover - defensive shell around workers
         return FileProcessResult(
@@ -141,6 +153,7 @@ def _invoke_process_file(
     block_min_stmt: int,
     segment_min_loc: int,
     segment_min_stmt: int,
+    phase_ledger: PhaseLedger | None = None,
 ) -> FileProcessResult:
     optional_kwargs: dict[str, object] = {
         "collect_structural_findings": collect_structural_findings,
@@ -151,6 +164,8 @@ def _invoke_process_file(
         "segment_min_loc": segment_min_loc,
         "segment_min_stmt": segment_min_stmt,
     }
+    if phase_ledger is not None:
+        optional_kwargs["phase_ledger"] = phase_ledger
     process_callable: Callable[..., FileProcessResult] = process_file
     supported_names = _supported_process_file_kwarg_names(process_callable)
     if supported_names is None:

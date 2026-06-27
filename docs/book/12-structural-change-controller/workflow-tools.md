@@ -98,6 +98,34 @@ methods as the atomic tools and emit the same semantic audit events.
 `analyze_repository` remains a separate explicit call — workflow tools
 never run analysis implicitly.
 
+`start_controlled_change` responses include `context_governance` metadata with a
+`start_projection_v1` digest and estimated context units for the serialized
+response. When a stored blast artifact is available, start uses
+`mode="partial_enforce"` and
+`evidence_policy="response_budget_with_immutable_blast_artifact"`: control
+facts remain inline, while omitted blast lanes are disclosed in
+`context_governance.omitted` with `get_blast_artifact` drill-down. Queued,
+needs-analysis, and no-artifact fallback responses stay in `mode="observe"`.
+`edit_allowed` and explicit status fields remain the permission contract.
+
+Start blast-radius evidence is summary-first when CodeClone can persist an
+immutable audit-backed artifact for the full projection. The summary keeps
+control facts, `do_not_touch`, `do_not_touch_summary`, workspace blocking facts,
+and artifact identity inline; full omitted evidence is retrieved through the
+read-only `get_blast_artifact` tool by `run_id` and `blast_artifact_id`. This
+retrieval returns the exact stored start-time projection. `get_blast_radius`
+remains available for current recomputation, and
+`blast_radius_detail="full"` keeps the compatibility projection inline. If the
+artifact cannot be stored, start fails closed by returning full blast evidence.
+
+Repeated identical `start_controlled_change` calls in the same MCP session may
+return an explicit compact replay instead of re-emitting blast-radius and budget
+payloads. A replay sets `idempotent_replay=true`, keeps the same
+`intent_id`, includes scope/workspace/blast/budget digests, and points the agent
+to `get_relevant_memory`. Replay is session-local, does not renew the lease, and
+is disabled when the analysis run, workspace content, registry state, scope,
+request parameters, or owner session changes.
+
 `finish_controlled_change` keeps human notes and validated claims separate:
 `review_text` is a note, while `claims_text` is the only finish parameter passed
 to Claim Guard. The response includes a compact `summary` for humans while

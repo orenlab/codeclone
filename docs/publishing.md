@@ -81,13 +81,13 @@ git. `site/` remains ignored.
 === "Build the site"
 
     ```bash title="Validate the Zensical site"
-    uv run --with zensical==0.0.43 zensical build --clean --strict
+    uv run --with zensical==0.0.46 zensical build --clean --strict
     ```
 
 === "Build the site and sample report"
 
     ```bash title="Generate the live sample report into site/"
-    uv run --with zensical==0.0.43 zensical build --clean --strict
+    uv run --with zensical==0.0.46 zensical build --clean --strict
     uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
     ```
 

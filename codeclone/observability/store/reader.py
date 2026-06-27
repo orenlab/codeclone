@@ -14,18 +14,24 @@ from __future__ import annotations
 
 import sqlite3
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import cast
 
 import orjson
 
+from ...analysis.phase_ledger import (
+    PHASE_US_COUNTER_SUFFIXES,
+    PHASE_VOLUME_COUNTER_SUFFIXES,
+)
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
 from ..db_fingerprint import describe_fingerprint
 from ..views import (
     AgentTokenRow,
     AgentView,
     AggregatesView,
+    AnalysisPhaseRow,
     DbCostRow,
     DbFingerprintRow,
     McpToolAggregate,
@@ -48,12 +54,14 @@ _PRODUCTIVE_COUNTER_KEYS = ("embedded", "workflows_seen", "experiences_distilled
 _MEMORY_PIPELINE_PREFIX = "memory."
 _SEMANTIC_COST_LIMIT = 8
 _DB_FINGERPRINT_ROW_LIMIT = 15
+_PIPELINE_PROCESS_SPAN = "pipeline.process"
+_PHASE_HEAVY_PERMILLE = 250
 
 # Waste thresholds: a no-op span is only worth flagging once it has spent time;
 # an MCP response is "heavy" past these payload sizes.
 _WASTE_NOOP_MS = 50.0
 _HIGH_PAYLOAD_BYTES = 16 * 1024
-_HIGH_PAYLOAD_TOKENS = 4000
+_HIGH_PAYLOAD_CONTEXT_UNITS = 4000
 
 
 def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
@@ -332,13 +340,13 @@ def _waste(
             surface="mcp",
             detail=(
                 f"p95 {tool.p95_response_bytes / 1024:.0f} KB resp · "
-                f"{tool.p95_response_tokens} tok"
+                f"{tool.p95_response_tokens} cu"
             ),
             severity=float(tool.p95_response_bytes),
         )
         for tool in mcp_tools
         if tool.p95_response_bytes >= _HIGH_PAYLOAD_BYTES
-        or tool.p95_response_tokens >= _HIGH_PAYLOAD_TOKENS
+        or tool.p95_response_tokens >= _HIGH_PAYLOAD_CONTEXT_UNITS
     )
     items.sort(key=lambda w: (-w.severity, w.kind, w.subject))
     return tuple(items)
@@ -428,6 +436,7 @@ def _db_costs(flat: list[OperationView]) -> tuple[DbCostRow, ...]:
             span_count=len(spans),
             total_queries=sum(s.counters.get("db_queries", 0) for s in spans),
             total_writes=sum(s.counters.get("db_writes", 0) for s in spans),
+            total_rows=sum(s.counters.get("db_rows", 0) for s in spans),
             max_queries=max(s.counters.get("db_queries", 0) for s in spans),
         )
         for name, spans in grouped.items()
@@ -464,6 +473,73 @@ def _db_fingerprints(flat: list[OperationView]) -> tuple[DbFingerprintRow, ...]:
     ]
     rows.sort(key=lambda r: (-r.count, r.span_name, r.fingerprint))
     return tuple(rows[:_DB_FINGERPRINT_ROW_LIMIT])
+
+
+@dataclass(frozen=True, slots=True)
+class _AnalysisPhaseBundle:
+    rows: tuple[AnalysisPhaseRow, ...]
+    worker_elapsed_total_ms: float | None
+    pipeline_wall_ms: float | None
+    source_spans: int
+    files_timed: int
+    units_eligible: int
+
+
+def _phase_name_from_counter(counter: str) -> str:
+    return counter[len("phase_") : -len("_us")]
+
+
+def _analysis_phase_bundle(flat: list[OperationView]) -> _AnalysisPhaseBundle:
+    pipeline_spans = [
+        span for op in flat for span in op.spans if span.name == _PIPELINE_PROCESS_SPAN
+    ]
+    contributing_spans = [
+        span
+        for span in pipeline_spans
+        if any(key in span.counters for key in PHASE_US_COUNTER_SUFFIXES)
+    ]
+    if not contributing_spans:
+        return _AnalysisPhaseBundle(
+            rows=(),
+            worker_elapsed_total_ms=None,
+            pipeline_wall_ms=None,
+            source_spans=0,
+            files_timed=0,
+            units_eligible=0,
+        )
+
+    phase_us = {
+        key: sum(span.counters.get(key, 0) for span in contributing_spans)
+        for key in PHASE_US_COUNTER_SUFFIXES
+    }
+    volume_totals = {
+        key: sum(span.counters.get(key, 0) for span in contributing_spans)
+        for key in PHASE_VOLUME_COUNTER_SUFFIXES
+    }
+    total_us = sum(phase_us.values())
+    rows = [
+        AnalysisPhaseRow(
+            phase=_phase_name_from_counter(key),
+            worker_elapsed_ms=round(value / 1000, 1),
+            share_permille=round(1000 * value / total_us) if total_us else 0,
+            verdict=(
+                "phase_heavy"
+                if total_us and round(1000 * value / total_us) >= _PHASE_HEAVY_PERMILLE
+                else "ok"
+            ),
+        )
+        for key, value in phase_us.items()
+        if value
+    ]
+    rows.sort(key=lambda row: (-row.worker_elapsed_ms, row.phase))
+    return _AnalysisPhaseBundle(
+        rows=tuple(rows),
+        worker_elapsed_total_ms=round(total_us / 1000, 1),
+        pipeline_wall_ms=round(sum(span.duration_ms for span in contributing_spans), 1),
+        source_spans=len(contributing_spans),
+        files_timed=volume_totals.get("files_timed", 0),
+        units_eligible=volume_totals.get("units_eligible", 0),
+    )
 
 
 def _aggregates(
@@ -532,6 +608,7 @@ def _aggregates(
     mcp_tools = _mcp_tool_aggregates(flat)
     cpu_ranked = sorted(flat, key=lambda v: (-_cpu_ms(v), v.operation_id))
     heaviest_cpu = cpu_ranked[0] if cpu_ranked and _cpu_ms(cpu_ranked[0]) > 0 else None
+    analysis_phase_bundle = _analysis_phase_bundle(flat)
     return AggregatesView(
         operation_count=len(flat),
         slowest=slowest,
@@ -551,6 +628,14 @@ def _aggregates(
         heaviest_cpu=heaviest_cpu,
         pipeline=_pipeline(flat),
         db_fingerprints=_db_fingerprints(flat),
+        analysis_phases=analysis_phase_bundle.rows,
+        analysis_phase_worker_elapsed_total_ms=(
+            analysis_phase_bundle.worker_elapsed_total_ms
+        ),
+        analysis_phase_pipeline_wall_ms=analysis_phase_bundle.pipeline_wall_ms,
+        analysis_phase_source_spans=analysis_phase_bundle.source_spans,
+        analysis_phase_files_timed=analysis_phase_bundle.files_timed,
+        analysis_phase_units_eligible=analysis_phase_bundle.units_eligible,
     )
 
 

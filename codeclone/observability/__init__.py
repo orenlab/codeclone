@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Platform observability (Phase 29).
+"""Platform observability.
 
 A runtime-profiling plane separate from audit truth, the analysis report, and
 the memory store: operations and stage spans for CLI / MCP / projection workers.
@@ -15,12 +15,13 @@ wrap work in ``operation`` / ``span``.
 from __future__ import annotations
 
 from .runtime import (
+    DB_COUNTER_VERSION,
     OperationHandle,
     SpanHandle,
     bind_root,
     bootstrap,
+    counting_connection_factory,
     current_operation_context,
-    instrument_db_connection,
     is_observability_enabled,
     operation,
     payload_capture_enabled,
@@ -32,12 +33,13 @@ from .runtime import (
 )
 
 __all__ = [
+    "DB_COUNTER_VERSION",
     "OperationHandle",
     "SpanHandle",
     "bind_root",
     "bootstrap",
+    "counting_connection_factory",
     "current_operation_context",
-    "instrument_db_connection",
     "is_observability_enabled",
     "operation",
     "payload_capture_enabled",

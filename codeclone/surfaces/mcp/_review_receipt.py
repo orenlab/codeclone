@@ -11,6 +11,8 @@ from enum import Enum
 from typing import Final, Literal
 
 from ...contracts import REPORT_SCHEMA_VERSION
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 from ._verification_profile import (
     check_matrix,
     classify_patch,
@@ -69,7 +71,10 @@ def derive_patch_status(
     intent_check_status: str | None,
     regressions: int,
     has_structural_delta: bool,
+    patch_context_declared: bool = True,
 ) -> str:
+    if not patch_context_declared:
+        return ReceiptPatchStatus.NOT_CHECKED.value
     if intent_check_status == "violated":
         return ReceiptPatchStatus.VIOLATED.value
     if gate_result is not None and bool(gate_result.get("would_fail")):
@@ -392,16 +397,6 @@ def _signed_delta(value: object) -> str:
 
 def _optional_mapping(value: object) -> Mapping[str, object] | None:
     return value if isinstance(value, Mapping) else None
-
-
-def _as_mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
-
-
-def _as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return value
-    return ()
 
 
 def _mapping_rows(value: object) -> list[Mapping[str, object]]:

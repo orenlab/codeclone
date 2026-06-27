@@ -39,7 +39,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Build docs site
-        run: uv run --with zensical==0.0.43 zensical build --clean --strict
+        run: uv run --with zensical==0.0.46 zensical build --clean --strict
 
       - name: Generate sample report artifacts
         run: uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live

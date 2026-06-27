@@ -12,21 +12,21 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Final
 
-CODEX_CURSOR_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = (
-    "codeclone-review",
-    "codeclone-hotspots",
-    "codeclone-change-control",
-    "codeclone-implementation-context",
-)
-
-CODEX_CLAUDE_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = (
-    "codeclone-review",
-    "codeclone-hotspots",
+CODEX_PLUGIN_SKILL_NAMES: Final[tuple[str, ...]] = (
+    "codeclone-architecture-triage",
+    "codeclone-blast-radius",
     "codeclone-change-control",
     "codeclone-engineering-memory",
+    "codeclone-hotspots",
     "codeclone-implementation-context",
     "codeclone-platform-observability",
+    "codeclone-production-triage",
+    "codeclone-review",
 )
+
+CODEX_CURSOR_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = CODEX_PLUGIN_SKILL_NAMES
+
+CODEX_CLAUDE_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = CODEX_PLUGIN_SKILL_NAMES
 
 
 def load_json(path: Path) -> object:
@@ -150,7 +150,12 @@ def assert_codex_plugin_readme_contract(readme_text: str) -> None:
         "without relying on `sh -lc`",
         'uv tool install "codeclone[mcp]"',
         "codeclone-change-control",
+        "codeclone-architecture-triage",
         "codeclone-implementation-context",
+        "codeclone-production-triage",
+        "codeclone-architecture-triage",
+        "codeclone-blast-radius",
+        "Nine skills ship in the plugin",
         "Structural Change Controller for AI-assisted Python",
     )
 

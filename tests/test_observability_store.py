@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ from codeclone.observability.models import (
     ProfileSample,
     SpanRecord,
 )
+from codeclone.observability.store.reader import build_trace_view
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
@@ -175,6 +177,75 @@ def test_observability_span_error_and_sql_classification(tmp_path: Path) -> None
     assert span_row is not None
     assert str(span_row[0]) == "error"
     assert elapsed_row is not None
+
+
+def test_reader_derives_analysis_phase_bundle_from_contributing_spans(
+    tmp_path: Path,
+) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            _op(
+                "A",
+                correlation_id="A",
+                spans=(
+                    _span(
+                        "legacy",
+                        operation_id="A",
+                        name="pipeline.process",
+                        duration_ms=10.0,
+                        counters={"files_analyzed": 2, "failed_files": 0},
+                    ),
+                ),
+            ),
+        )
+        write_operation(
+            conn,
+            _op(
+                "B",
+                correlation_id="B",
+                spans=(
+                    _span(
+                        "phase",
+                        operation_id="B",
+                        name="pipeline.process",
+                        duration_ms=20.0,
+                        counters={
+                            "files_analyzed": 2,
+                            "failed_files": 0,
+                            "phase_parse_us": 1000,
+                            "phase_unit_cfg_us": 3000,
+                            "files_timed": 2,
+                            "units_eligible": 3,
+                        },
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+    conn = open_observability_store(observability_store_path(tmp_path))
+    conn.row_factory = sqlite3.Row
+    try:
+        trace = build_trace_view(conn)
+    finally:
+        conn.close()
+
+    agg = trace.aggregates
+    expected_scalars = {
+        "analysis_phase_source_spans": 1,
+        "analysis_phase_pipeline_wall_ms": 20.0,
+        "analysis_phase_worker_elapsed_total_ms": 4.0,
+        "analysis_phase_files_timed": 2,
+        "analysis_phase_units_eligible": 3,
+    }
+    actual_scalars = {key: getattr(agg, key) for key in expected_scalars}
+    assert actual_scalars == expected_scalars
+    assert [(row.phase, row.share_permille) for row in agg.analysis_phases] == [
+        ("unit_cfg", 750),
+        ("parse", 250),
+    ]
 
 
 def test_observability_schema_migrates_legacy_span_columns(tmp_path: Path) -> None:

@@ -366,6 +366,7 @@ def test_query_engineering_memory_trajectory_modes(tmp_path: Path) -> None:
             db_path=db_path,
             mode="trajectory_get",
             record_id=trajectory_id,
+            detail_level="full",
         )
 
     assert status["status"] == "ok"

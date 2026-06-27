@@ -117,6 +117,43 @@ def _seed(tmp_path: Path) -> None:
         conn.close()
 
 
+def _seed_analysis_phases(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="P",
+                correlation_id="P",
+                surface="cli",
+                name="cli.analyze",
+                started_at_utc="2026-06-12T00:00:00Z",
+                duration_ms=200.0,
+                status="ok",
+                spans=(
+                    SpanRecord(
+                        span_id="process",
+                        operation_id="P",
+                        name="pipeline.process",
+                        started_at_utc="2026-06-12T00:00:00Z",
+                        duration_ms=180.0,
+                        status="ok",
+                        counters={
+                            "files_analyzed": 2,
+                            "failed_files": 0,
+                            "phase_parse_us": 500,
+                            "phase_unit_cfg_us": 2500,
+                            "files_timed": 2,
+                            "units_eligible": 3,
+                        },
+                    ),
+                ),
+            ),
+        )
+    finally:
+        conn.close()
+
+
 def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(root=tmp_path, section="summary")
@@ -124,10 +161,54 @@ def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> Non
     assert out["user_facing"] is False
     assert out["operations"] == 4
     assert out["costly_noops"] == 1
+    assert out["context_pressure_units"] == out["context_pressure_tokens"]
     kinds = {d["kind"] for d in _rows(out["top_diagnostics"])}
     assert {"memory", "db", "context"} <= kinds
+    context_messages = [
+        cast("str", d["message"])
+        for d in _rows(out["top_diagnostics"])
+        if d["kind"] == "context"
+    ]
+    assert context_messages
+    assert "returned context units" in context_messages[0]
     routed = {r["section"] for r in _rows(out["recommended_next_sections"])}
     assert {"db_cost", "agent_context", "costly_noops"} <= routed
+
+
+def test_analysis_phase_cost_section_and_summary_routing(tmp_path: Path) -> None:
+    _seed_analysis_phases(tmp_path)
+
+    out = query_platform_observability(
+        root=tmp_path,
+        section="analysis_phase_cost",
+        detail_level="normal",
+    )
+
+    expected_scalars = {
+        "phase_worker_elapsed_total_ms": 3.0,
+        "pipeline_process_wall_ms": 180.0,
+        "source_spans": 1,
+        "files_timed": 2,
+        "units_eligible": 3,
+    }
+    assert {key: out[key] for key in expected_scalars} == expected_scalars
+    assert _rows(out["rows"])[0] == {
+        "phase": "unit_cfg",
+        "worker_elapsed_ms": 2.5,
+        "share_permille": 833,
+        "verdict": "phase_heavy",
+    }
+
+    summary = query_platform_observability(root=tmp_path, section="summary")
+    assert summary["analysis_phase_worker_elapsed_total_ms"] == 3.0
+    assert _rows(summary["top_analysis_phases"])[0] == {
+        "phase": "unit_cfg",
+        "share_permille": 833,
+    }
+    routed = {r["section"] for r in _rows(summary["recommended_next_sections"])}
+    assert "analysis_phase_cost" in routed
+    diagnostics = {d["kind"] for d in _rows(summary["top_diagnostics"])}
+    assert "analysis" in diagnostics
 
 
 def test_summary_does_not_embed_raw_trace(tmp_path: Path) -> None:
@@ -220,6 +301,7 @@ def test_unknown_section_returns_validation_envelope(tmp_path: Path) -> None:
     assert out["status"] == "invalid_section"
     assert out["section"] == "bogus"
     assert "summary" in _texts(out["available_sections"])
+    assert "analysis_phase_cost" in _texts(out["available_sections"])
     assert out["rows"] == []
 
 
@@ -234,14 +316,16 @@ def test_correlated_chains_flattens_root_and_children(tmp_path: Path) -> None:
     assert chain["peak_rss_delta_mb"] == 440.0
 
 
-def test_agent_context_ranks_token_consumers(tmp_path: Path) -> None:
+def test_agent_context_ranks_context_unit_consumers(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(
         root=tmp_path, section="agent_context", detail_level="normal"
     )
     assert out["total_response_tokens"] == 11100
+    assert out["total_response_context_units"] == 11100
     top = _rows(out["rows"])[0]
     assert top["tool"] == "mcp.get_relevant_memory"
+    assert top["response_context_units"] == top["response_tokens"]
     assert top["verdict"] == "context_heavy"
 
 
@@ -343,6 +427,7 @@ def test_projection_helpers_and_diagnostic_edges(
                 span_count=2,
                 total_queries=500,
                 total_writes=1,
+                total_rows=500,
                 max_queries=300,
             ),
         ),
@@ -376,6 +461,7 @@ def test_projection_helpers_and_diagnostic_edges(
     assert query_mod._correlated_chains(trace, 1)[0]["peak_rss_delta_mb"] == 4.0
     assert query_mod._agent_context_body(AggregatesView(0), 1) == {
         "total_response_tokens": 0,
+        "total_response_context_units": 0,
         "rows": [],
     }
     assert query_mod._memory_diagnostic(AggregatesView(0)) is None
@@ -464,3 +550,49 @@ def test_memory_diagnostic_reports_peak_only_heavy_usage() -> None:
     assert diagnostic is not None
     assert diagnostic["kind"] == "memory"
     assert "peak 600 MB" in str(diagnostic["message"])
+
+
+def test_memory_diagnostic_returns_none_without_peak_or_delta() -> None:
+    from codeclone.observability.views import AggregatesView, SpanCostView
+
+    semantic = SpanCostView(
+        span_id="semantic",
+        name="memory.semantic.rebuild",
+        surface="memory",
+        operation_id="root",
+        operation_name="memory.job",
+        duration_ms=10.0,
+        produced=10,
+    )
+    assert (
+        query_mod._memory_diagnostic(AggregatesView(1, peak_memory_span=semantic))
+        is None
+    )
+
+
+def test_analysis_phase_cost_reports_empty_window_message() -> None:
+    from codeclone.observability.views import AggregatesView
+
+    body = query_mod._analysis_phase_body(AggregatesView(operation_count=0), cap=5)
+    assert body["rows"] == []
+    assert "no analysis phase counters" in str(body["message"])
+
+
+def test_analysis_diagnostic_reports_phase_heavy_extract_share() -> None:
+    from codeclone.observability.views import AggregatesView, AnalysisPhaseRow
+
+    agg = AggregatesView(
+        1,
+        analysis_phases=(
+            AnalysisPhaseRow(
+                phase="unit_cfg",
+                worker_elapsed_ms=2500.0,
+                share_permille=750,
+                verdict="phase_heavy",
+            ),
+        ),
+    )
+    diagnostic = query_mod._analysis_diagnostic(agg)
+    assert diagnostic is not None
+    assert diagnostic["kind"] == "analysis"
+    assert "unit_cfg consumed 75%" in str(diagnostic["message"])

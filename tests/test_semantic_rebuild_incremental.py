@@ -10,6 +10,7 @@ from collections.abc import Iterator, Sequence
 
 from codeclone.memory.embedding.batching import EmbedBatchLimits
 from codeclone.memory.semantic.models import (
+    ExistingSourceRevision,
     SemanticHit,
     SemanticIndexStatus,
     SemanticProjection,
@@ -18,6 +19,7 @@ from codeclone.memory.semantic.models import (
 )
 from codeclone.memory.semantic.projection import text_hash
 from codeclone.memory.semantic.rebuild import rebuild_semantic_index
+from codeclone.memory.semantic.sources import SourceScan
 
 
 class _InMemoryWriter:
@@ -56,8 +58,25 @@ class _InMemoryWriter:
                     id=row_id,
                     text_hash=row.text_hash,
                     embedding_model=row.embedding_model,
+                    source_revision=row.source_revision,
                 )
         return out
+
+    def existing_revisions(self) -> dict[str, ExistingSourceRevision]:
+        # Single-pass accumulation: every row of a source shares its revision and
+        # model, so each row just folds its id into the (immutably rebuilt) entry.
+        revisions: dict[str, ExistingSourceRevision] = {}
+        for row in self.rows.values():
+            key = row.parent_id or row.id
+            seen = revisions.get(key)
+            row_ids = seen.row_ids | {row.id} if seen else frozenset({row.id})
+            revisions[key] = ExistingSourceRevision(
+                source=row.source,
+                source_revision=row.source_revision,
+                embedding_model=row.embedding_model,
+                row_ids=row_ids,
+            )
+        return revisions
 
 
 class _CountingProvider:
@@ -101,6 +120,15 @@ class _FakeSource:
     def iter_projections(self) -> Iterator[SemanticProjection]:
         yield from self._projections
 
+    def scan(self) -> SourceScan:
+        return SourceScan(
+            revisions={p.source_id: p.source_revision for p in self._projections}
+        )
+
+    def project(self, source_ids: Sequence[str]) -> Iterator[SemanticProjection]:
+        wanted = set(source_ids)
+        return iter([p for p in self._projections if p.source_id in wanted])
+
 
 def _projection(source_id: str, text: str) -> SemanticProjection:
     return SemanticProjection(
@@ -109,6 +137,9 @@ def _projection(source_id: str, text: str) -> SemanticProjection:
         kind="memory",
         text=text,
         text_hash=text_hash(text),
+        # Simulate a content-derived revision: changed text -> changed revision,
+        # so the partition skips re-projecting unchanged ids on the second run.
+        source_revision=f"rev::{text_hash(text)}",
     )
 
 

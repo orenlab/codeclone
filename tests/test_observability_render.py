@@ -23,6 +23,7 @@ from codeclone.observability.views import (
     AgentTokenRow,
     AgentView,
     AggregatesView,
+    AnalysisPhaseRow,
     DbCostRow,
     DbFingerprintRow,
     McpToolAggregate,
@@ -136,6 +137,93 @@ def test_render_trace_html_shows_db_query_shapes() -> None:
         assert needle in html
 
 
+def test_render_trace_html_shows_analysis_phase_section() -> None:
+    agg = AggregatesView(
+        operation_count=1,
+        analysis_phases=(
+            AnalysisPhaseRow(
+                phase="unit_cfg",
+                worker_elapsed_ms=2.5,
+                share_permille=833,
+                verdict="phase_heavy",
+            ),
+            AnalysisPhaseRow(
+                phase="parse",
+                worker_elapsed_ms=0.5,
+                share_permille=167,
+                verdict="ok",
+            ),
+        ),
+        analysis_phase_worker_elapsed_total_ms=3.0,
+        analysis_phase_pipeline_wall_ms=2.0,
+        analysis_phase_source_spans=1,
+        analysis_phase_files_timed=2,
+        analysis_phase_units_eligible=3,
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=agg,
+    )
+
+    html = render_trace_html(trace)
+    _assert_html_contains(
+        html,
+        "Hottest extract phase",
+        "Analysis extract phases",
+        "CFG build",
+        "Parse (ast.parse)",
+        # phase rows are ranked bars; the heaviest is the accent "lead" (peak)
+        'class="ph-row',
+        "ph-row lead",
+        ">peak<",
+        "Worker elapsed (summed): 3ms",
+        "pipeline.process wall: 2ms",
+        "files timed: 2",
+        "units eligible: 3",
+    )
+    payload = json.loads(render_trace_json(trace))
+    assert payload["aggregates"]["analysis_phases"][0]["phase"] == "unit_cfg"
+
+
+def test_render_trace_html_explains_cache_only_analysis_phase_window() -> None:
+    process_span = SpanView(
+        span_id="sp",
+        name="pipeline.process",
+        duration_ms=1.0,
+        status="ok",
+        counters={"files_analyzed": 0, "failed_files": 0},
+    )
+    op = OperationView(
+        operation_id="op",
+        correlation_id="op",
+        surface="cli",
+        name="cli.analyze",
+        started_at_utc="2026-06-10T04:00:00Z",
+        duration_ms=10.0,
+        status="ok",
+        spans=(process_span,),
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=AggregatesView(operation_count=1),
+        operation_tree=(op,),
+    )
+
+    html = render_trace_html(trace)
+    _assert_html_contains(
+        html,
+        "Analysis extract phases",
+        "No uncached files were processed",
+        "served from cache",
+        "files_analyzed=0",
+        "failed_files=0",
+    )
+
+
 def _cockpit_trace() -> TraceView:
     reindex = SpanView(
         span_id="sx",
@@ -227,7 +315,8 @@ def test_render_cockpit_sections() -> None:
         "no-op",
         "Hottest span",
         "51 B",
-        "469",
+        "resp ctx p95",
+        "469 cu",
     )
 
 
@@ -322,6 +411,7 @@ def test_render_agent_context() -> None:
     html = render_trace_html(trace)
     assert "Agent context" in html
     assert "context pressure" in html
+    assert "1.0k cu" in html
     assert "get_relevant_memory" in html
     assert "80%" in html  # 800 / 1000 context share for the top consumer
 
@@ -338,7 +428,7 @@ def test_render_waste_section() -> None:
                     kind="high payload",
                     subject="get_relevant_memory",
                     surface="mcp",
-                    detail="p95 20 KB resp · 11000 tok",
+                    detail="p95 20 KB resp · 11000 cu",
                     severity=20480.0,
                 ),
                 WasteItem(
@@ -373,6 +463,7 @@ def test_render_db_cost() -> None:
                     span_count=2,
                     total_queries=1306,
                     total_writes=0,
+                    total_rows=1306,
                     max_queries=1000,
                 ),
             ),
@@ -509,7 +600,12 @@ def test_observability_main_no_store(
 def test_html_format_helpers_and_semantic_cost_rows() -> None:
     from dataclasses import replace
 
-    from codeclone.observability.render_html import _bytes, _mb, _semantic_row, _tokens
+    from codeclone.observability.render_html import (
+        _bytes,
+        _context_units,
+        _mb,
+        _semantic_row,
+    )
 
     assert _mb(None) == "—"
     assert "GB" in _mb(2048.0)
@@ -518,9 +614,9 @@ def test_html_format_helpers_and_semantic_cost_rows() -> None:
     assert "MB" in _bytes(1024 * 1024)
     assert "KB" in _bytes(2048)
     assert _bytes(12).endswith(" B")
-    assert _tokens(None) == "—"
-    assert _tokens(0) == "—"
-    assert _tokens(1500).endswith("k")
+    assert _context_units(None) == "—"
+    assert _context_units(0) == "—"
+    assert _context_units(1500) == "1.5k cu"
 
     costly = SpanCostView(
         span_id="s1",
@@ -532,16 +628,16 @@ def test_html_format_helpers_and_semantic_cost_rows() -> None:
         no_op=True,
         reason_kind="schema_version_changed",
     )
-    costly_html = _semantic_row(costly)
+    costly_html = _semantic_row(costly, lead=False)
     assert "no-op · costly" in costly_html
     assert "schema_version_changed" in costly_html
 
     noop = replace(costly, duration_ms=10.0)
-    assert "no-op" in _semantic_row(noop)
-    assert "costly" not in _semantic_row(noop)
+    assert "no-op" in _semantic_row(noop, lead=False)
+    assert "costly" not in _semantic_row(noop, lead=False)
 
     productive = replace(noop, no_op=False, reason_kind=None)
-    assert "productive" in _semantic_row(productive)
+    assert "productive" in _semantic_row(productive, lead=False)
 
 
 def test_rss_text_includes_end_peak_and_peak_delta() -> None:
@@ -571,3 +667,66 @@ def test_render_highlights_process_peak_rss_without_span_consumer() -> None:
     html = render_trace_html(trace)
     assert "Process peak RSS" in html
     assert "high-water resident set" in html
+
+
+def test_html_bar_clips_fill_when_offset_plus_value_exceeds_span() -> None:
+    from codeclone.observability.render_html import _bar
+
+    svg = _bar(90.0, 100.0, offset_ms=20.0)
+    assert 'width="80.0"' in svg
+    assert 'x="20.0"' in svg
+
+
+def test_html_counter_formatting_covers_phase_and_sub_10ms_timings() -> None:
+    from codeclone.observability.render_html import _counters, _us_ms
+
+    assert _us_ms(2500) == "2.5ms"
+    assert _us_ms(25000) == "25ms"
+    rendered = _counters(
+        {
+            "phase_parse_us": 1500,
+            "phase_unit_cfg_us": 25000,
+            "db_queries": 4,
+            "files_analyzed": 2,
+        }
+    )
+    assert "parse 1.5ms" in rendered
+    assert "unit_cfg 25ms" in rendered
+    assert "reads 4" in rendered
+    assert "analyzed 2" in rendered
+
+
+def test_render_trace_html_explains_missing_phase_counters_after_process_ran() -> None:
+    process_span = SpanView(
+        span_id="sp",
+        name="pipeline.process",
+        duration_ms=1.0,
+        status="ok",
+        counters={"files_analyzed": 3, "failed_files": 1},
+    )
+    op = OperationView(
+        operation_id="op",
+        correlation_id="op",
+        surface="cli",
+        name="cli.analyze",
+        started_at_utc="2026-06-10T04:00:00Z",
+        duration_ms=10.0,
+        status="ok",
+        spans=(process_span,),
+    )
+    trace = TraceView(
+        schema_version="1.0",
+        window_started_at_utc="2026-06-10T04:00:00Z",
+        window_ended_at_utc="2026-06-10T04:00:01Z",
+        aggregates=AggregatesView(operation_count=1),
+        operation_tree=(op,),
+    )
+
+    html = render_trace_html(trace)
+    _assert_html_contains(
+        html,
+        "no analysis phase counters were recorded",
+        "CODECLONE_OBSERVABILITY_ENABLED=1",
+        "files_analyzed=3",
+        "failed_files=1",
+    )

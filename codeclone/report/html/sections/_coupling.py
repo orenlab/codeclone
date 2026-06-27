@@ -212,72 +212,15 @@ def _cohesion_cards(summary: Mapping[str, object]) -> str:
     return f'<div class="stat-cards">{"".join(cards)}</div>'
 
 
-def _overloaded_cards(
-    summary: Mapping[str, object],
-    rows_data: Sequence[object],
-) -> str:
-    candidates = _as_int(summary.get("candidates"))
-    total_modules = _as_int(summary.get("total"))
-    critical = sum(
-        1
-        for r in rows_data
-        if str(_as_mapping(r).get("candidate_status", "")).strip().lower() == "critical"
-    )
-    scores = [
-        _as_int(_as_mapping(r).get("score"))
-        for r in rows_data
-        if _as_int(_as_mapping(r).get("score")) > 0
-    ]
-    max_score = max(scores) if scores else 0
-    locs = [
-        _as_int(_as_mapping(r).get("loc"))
-        for r in rows_data
-        if _as_int(_as_mapping(r).get("loc")) > 0
-    ]
-    avg_loc = int(sum(locs) / len(locs)) if locs else 0
-    cards = [
-        _stat_card(
-            "Overloaded",
-            candidates,
-            detail=_micro_badges(("total analyzed", total_modules)),
-            value_tone="bad" if candidates > 0 else "good",
-            glossary_tip_fn=glossary_tip,
-        ),
-        _stat_card(
-            "Critical",
-            critical,
-            value_tone="bad" if critical > 0 else "good",
-            glossary_tip_fn=glossary_tip,
-        ),
-        _stat_card(
-            "Max score",
-            max_score,
-            detail=_micro_badges(("threshold", summary.get("threshold", "n/a"))),
-            value_tone="warn" if max_score > 0 else "muted",
-            glossary_tip_fn=glossary_tip,
-        ),
-        _stat_card(
-            "Avg LOC",
-            avg_loc,
-            detail=_micro_badges(("modules", len(locs))),
-            value_tone="muted",
-            glossary_tip_fn=glossary_tip,
-        ),
-    ]
-    return f'<div class="stat-cards">{"".join(cards)}</div>'
-
-
 def render_quality_panel(ctx: ReportContext) -> str:
     """Build the unified Quality tab (Complexity + Coupling + Cohesion sub-tabs)."""
     coupling_summary = _as_mapping(ctx.coupling_map.get("summary"))
     cohesion_summary = _as_mapping(ctx.cohesion_map.get("summary"))
     complexity_summary = _as_mapping(ctx.complexity_map.get("summary"))
-    overloaded_modules_summary = _as_mapping(ctx.overloaded_modules_map.get("summary"))
     coverage_join_summary = coverage_join_quality_summary(ctx)
     coupling_high_risk = _as_int(coupling_summary.get("high_risk"))
     cohesion_low = _as_int(cohesion_summary.get("low_cohesion"))
     complexity_high_risk = _as_int(complexity_summary.get("high_risk"))
-    overloaded_module_candidates = _as_int(overloaded_modules_summary.get("candidates"))
     coverage_review_items = coverage_join_quality_count(ctx)
     security_surface_items = security_surfaces_quality_count(ctx)
     coverage_hotspots = _as_int(coverage_join_summary.get("coverage_hotspots"))
@@ -296,7 +239,6 @@ def render_quality_panel(ctx: ReportContext) -> str:
             f"High-complexity: {complexity_high_risk}; "
             f"high-coupling: {coupling_high_risk}; "
             f"low-cohesion: {cohesion_low}; "
-            f"overloaded modules: {overloaded_module_candidates}; "
             f"security surfaces: {security_surface_items}; "
             f"max CC {cc_max}; "
             f"max CBO {coupling_summary.get('max', 'n/a')}; "
@@ -310,9 +252,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
                 )
             else:
                 answer += " Coverage join unavailable."
-        if overloaded_module_candidates > 0 or (
-            coupling_high_risk > 0 and cohesion_low > 0
-        ):
+        if coupling_high_risk > 0 and cohesion_low > 0:
             tone = "risk"
         elif (
             coupling_high_risk > 0
@@ -343,6 +283,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         headers=("Function", "File", "CC", "Nesting", "Risk"),
         rows=cx_rows,
         empty_message="Complexity metrics are not available.",
+        column_types={"CC": "meter", "Nesting": "meter"},
         ctx=ctx,
     )
 
@@ -366,6 +307,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         rows=cp_rows,
         empty_message="Coupling metrics are not available.",
         raw_html_headers=("Coupled classes",),
+        column_types={"CBO": "meter"},
         ctx=ctx,
     )
 
@@ -389,40 +331,7 @@ def render_quality_panel(ctx: ReportContext) -> str:
         headers=("Class", "File", "LCOM4", "Risk", "Methods", "Fields"),
         rows=ch_rows,
         empty_message="Cohesion metrics are not available.",
-        ctx=ctx,
-    )
-
-    gm_rows_data = _as_sequence(ctx.overloaded_modules_map.get("items"))
-    gm_rows = [
-        (
-            str(_as_mapping(r).get("module", "")),
-            str(
-                _as_mapping(r).get("relative_path")
-                or _as_mapping(r).get("filepath")
-                or ""
-            ),
-            str(_as_mapping(r).get("score", "")),
-            str(_as_mapping(r).get("candidate_status", "")),
-            str(_as_mapping(r).get("loc", "")),
-            f"{_as_mapping(r).get('fan_in', '')}/{_as_mapping(r).get('fan_out', '')}",
-            str(_as_mapping(r).get("complexity_total", "")),
-        )
-        for r in gm_rows_data[:50]
-    ]
-    gm_panel = _overloaded_cards(
-        overloaded_modules_summary, gm_rows_data
-    ) + render_rows_table(
-        headers=(
-            "Module",
-            "File",
-            "Score",
-            "Status",
-            "LOC",
-            "Fan-in/out",
-            "Complexity total",
-        ),
-        rows=gm_rows,
-        empty_message="Overloaded-module profiling is not available.",
+        column_types={"LCOM4": "meter", "Methods": "meter", "Fields": "meter"},
         ctx=ctx,
     )
 
@@ -430,12 +339,6 @@ def render_quality_panel(ctx: ReportContext) -> str:
         ("complexity", "Complexity", complexity_high_risk, cx_panel),
         ("coupling", "Coupling (CBO)", coupling_high_risk, cp_panel),
         ("cohesion", "Cohesion (LCOM4)", cohesion_low, ch_panel),
-        (
-            "overloaded-modules",
-            "Overloaded Modules",
-            overloaded_module_candidates,
-            gm_panel,
-        ),
     ]
     coverage_join_panel = render_coverage_join_panel(ctx)
     if coverage_join_panel:

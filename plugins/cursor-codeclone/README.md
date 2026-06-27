@@ -56,6 +56,7 @@ codeclone-mcp --help
 | **Production Triage**      | `/codeclone-production-triage`      | Quick health snapshot: score, hotspots, regressions, next action                   |
 | **Hotspots**               | `/codeclone-hotspots`               | Fast metric check: complexity, coupling, cohesion, clones                          |
 | **Implementation Context** | `/codeclone-implementation-context` | Bounded structural, call-graph, contract, and change-control evidence from one run |
+| **Architecture Triage**    | `/codeclone-architecture-triage`    | Ranked architecture problems from module_map + impact context (read-only)          |
 | **Blast Radius**           | `/codeclone-blast-radius`           | Blast-only impact inspection (use implementation context for the full bundle)      |
 | **Review**                 | `/codeclone-review`                 | Full structural review session with baseline-aware triage                          |
 | **Change Control**         | `/codeclone-change-control`         | Intent-first edit workflow: declare, context, edit, verify, clear                  |

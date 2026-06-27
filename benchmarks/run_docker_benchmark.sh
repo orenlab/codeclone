@@ -10,6 +10,8 @@ CPUS="${CPUS:-1.0}"
 MEMORY="${MEMORY:-2g}"
 RUNS="${RUNS:-12}"
 WARMUPS="${WARMUPS:-3}"
+SCENARIO_PROFILE="${SCENARIO_PROFILE:-smoke}"
+STARTUP_RUNS="${STARTUP_RUNS:-3}"
 HOST_UID="$(id -u)"
 HOST_GID="$(id -g)"
 CONTAINER_USER="${CONTAINER_USER:-${HOST_UID}:${HOST_GID}}"
@@ -41,6 +43,8 @@ docker run \
   --output "/bench-out/$OUTPUT_BASENAME" \
   --runs "$RUNS" \
   --warmups "$WARMUPS" \
+  --scenario-profile "$SCENARIO_PROFILE" \
+  --startup-runs "$STARTUP_RUNS" \
   "$@"
 
 echo "[bench] results: $OUT_DIR/$OUTPUT_BASENAME"

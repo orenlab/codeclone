@@ -43,22 +43,22 @@ Skills are invocable via `/name` in Cursor chat (see each `SKILL.md`).
 
 ## Skills
 
-Eight skills ship under `plugins/cursor-codeclone/skills/`:
+Nine skills ship under `plugins/cursor-codeclone/skills/`:
 
 | Skill                              | Role                                     |
 |------------------------------------|------------------------------------------|
 | `codeclone-change-control`         | Intent-first edit workflow               |
 | `codeclone-engineering-memory`     | Memory retrieval and draft writes        |
 | `codeclone-implementation-context` | Bounded structural context from MCP runs |
+| `codeclone-architecture-triage`    | Ranked architecture problems (not tasks) |
 | `codeclone-hotspots`               | Quick hotspot / health snapshot          |
 | `codeclone-review`                 | Conservative-first full review           |
 | `codeclone-platform-observability` | **Maintainer-only** — CodeClone runtime diagnostics (requires observer enable) |
-| `blast-radius`                     | Read-only blast-radius inspection        |
-| `production-triage`                | Baseline-relative production triage      |
+| `codeclone-blast-radius`           | Read-only blast-radius inspection        |
+| `codeclone-production-triage`      | Baseline-relative production triage      |
 
-Codex and Claude Code plugins ship six shared skills (includes
-`codeclone-platform-observability`; no standalone `blast-radius` or
-`production-triage`).
+Codex and Claude Code plugins ship the same nine skills (byte-synced from
+`plugins/codeclone/skills/`).
 
 ## Hooks
 

@@ -65,7 +65,7 @@ Documentation = "https://orenlab.github.io/codeclone/"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.28.0,<2",
+    "mcp>=1.28.1,<2",
     "httpx>=0.27.1,<1",
 ]
 token-bench = [
@@ -89,7 +89,13 @@ analytics = [
     "scikit-learn>=1.5.0",
     "lancedb>=0.33.0",
     "fastembed>=0.8.0,<0.9",
-    "umap-learn>=0.5.0; python_version < '3.14'",
+    "umap-learn>=0.5.6; python_version < '3.14'",
+    # umap-learn → pynndescent → numba/llvmlite.
+    # pynndescent 0.5.x allows llvmlite>=0.30 → uv may pick 0.36 (Python <3.10 only).
+    # Floors keep the JIT stack on 3.10–3.13 wheels; numba pins llvmlite in its band.
+    "pynndescent>=0.6.0; python_version < '3.14'",
+    "numba>=0.61.0,<0.66; python_version < '3.14'",
+    "llvmlite>=0.44.0,<0.48; python_version < '3.14'",
 ]
 perf = [
     "psutil>=7,<8",
@@ -100,7 +106,7 @@ dev = [
     "build>=1.4.3",
     "twine>=6.2.0",
     "mypy>=1.20.1",
-    "ruff>=0.15.17",
+    "ruff>=0.15.20",
     "pre-commit>=4.5.1",
 ]
 
@@ -207,7 +213,7 @@ golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
 intent_registry_backend = "sqlite"
 intent_registry_path = ".codeclone/db/intents.sqlite3"
-intent_registry_retention_days=30
+intent_registry_retention_days = 30
 audit_enabled = true
 audit_path = ".codeclone/db/audit.sqlite3"
 audit_payloads = "full"    # "off" | "compact" | "full"
@@ -276,6 +282,16 @@ disable_error_code = ["attr-defined", "misc"]
 # psutil is an optional dependency (codeclone[perf]); allow mypy to pass whether
 # or not it is installed in the checking environment.
 module = ["psutil"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# numpy arrives only as a transitive dependency (we never import it directly).
+# Its installed stubs use PEP 695 `type` statements that mypy refuses to parse
+# under python_version = "3.10" (which we keep, since we support 3.10+). Skip
+# following mypy into numpy's stubs so the hook does not choke on .venv.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
 ignore_missing_imports = true
 
 [tool.ruff]

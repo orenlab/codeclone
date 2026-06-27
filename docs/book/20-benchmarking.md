@@ -16,18 +16,39 @@ Define a reproducible, deterministic benchmark workflow for CodeClone in Docker.
 
 ## Data model
 
-Benchmark output (`benchmark_schema_version=1.0`) contains:
+Benchmark output (`benchmark_schema_version=1.1`) contains:
 
 - tool metadata (`name`, `version`, `python_tag`)
-- benchmark config (`target`, `runs`, `warmups`)
+- benchmark config (`target`, `runs`, `warmups`, `scenario_profile`,
+  `startup_runs`)
 - execution environment (platform, cpu limits/affinity, cgroup limits)
+- startup/import probes that isolate new-process cost from analysis cost:
+    - `python_empty`
+    - `import_codeclone`
+    - `import_codeclone_main`
+    - `cli_version`
 - scenario results:
     - `cold_full` (cold cache each run)
     - `warm_full` (shared warm cache)
     - `warm_clones_only` (shared warm cache with `--skip-metrics`)
-- latency stats per scenario (`min`, `max`, `mean`, `median`, `p95`, `stdev`)
+    - extended profile only: `cold_html`, `warm_html`, `cold_all_reports`,
+      `warm_all_reports`
+    - diagnostic profile only: `ci_cold_diagnostic`
+- latency stats per scenario and probe (`min`, `max`, `mean`, `median`, `p95`, `stdev`)
+- child process CPU stats per scenario/probe (`child_user_stats_seconds`,
+  `child_system_stats_seconds`, `child_cpu_stats_seconds`)
+- per-scenario inventory and artifact samples (`inventory_sample`,
+  `artifact_bytes_sample`, `cache_bytes_sample`, `exit_code_counts`)
 - deterministic digest check (`integrity.digest.value` must be stable within scenario)
 - cross-scenario comparisons (speedup ratios)
+
+Scenario profiles:
+
+| Profile      | Purpose                                                                 | Default in CI |
+|--------------|-------------------------------------------------------------------------|---------------|
+| `smoke`      | Historical core scenarios only; bounded push/PR signal.                 | yes           |
+| `extended`   | Adds HTML/all-report scenarios with per-scenario run caps.              | manual only   |
+| `diagnostic` | Adds `ci_cold_diagnostic`, where exit `0`, `2`, or `3` is recorded.     | no            |
 
 ## Contracts
 
@@ -37,13 +58,21 @@ Benchmark output (`benchmark_schema_version=1.0`) contains:
 - Runtime environment is normalized:
   `PYTHONHASHSEED=0`, `TZ=UTC`, `LC_ALL/LANG=C.UTF-8`.
 - Each measured run must exit successfully (`exit=0`); any failure aborts the benchmark.
+  The `diagnostic` profile is the only exception: `ci_cold_diagnostic` records
+  `0`, `2`, or `3` so gate-failure timing can be measured without treating the
+  benchmark sample as a product failure.
 - Determinism guard: if scenario digest diverges across measured runs, benchmark fails.
+- Extended report scenarios are intentionally capped below global `runs`/`warmups`
+  so GitHub-hosted workers do not pay unbounded cold-report CPU.
 
 ## Invariants (MUST)
 
 - Cold scenario uses a fixed cache path and removes cache file before each run
   (cold cache with stable canonical metadata path).
 - Warm scenarios seed one shared cache file before warmups/measured runs.
+- Startup/import probes run as fresh Python subprocesses and do not read report
+  output; they are for process/bootstrap/import cost only.
+- Core smoke scenarios remain gate-neutral by passing explicit no-fail flags.
 - Benchmark JSON write is atomic (`.tmp` + replace).
 - Benchmark scenario ordering is stable and fixed.
 
@@ -82,6 +111,24 @@ CPUSET=0 CPUS=1.0 MEMORY=2g RUNS=16 WARMUPS=4 \
   ./benchmarks/run_docker_benchmark.sh
 ```
 
+Extended report-profile run:
+
+```bash
+SCENARIO_PROFILE=extended RUNS=16 WARMUPS=4 STARTUP_RUNS=3 \
+  ./benchmarks/run_docker_benchmark.sh
+```
+
+Local diagnostic run that also measures the CI-gate timing path:
+
+```bash
+uv run python benchmarks/run_benchmark.py \
+  --target . \
+  --scenario-profile diagnostic \
+  --runs 3 \
+  --warmups 1 \
+  --output /tmp/codeclone-benchmark-diagnostic.json
+```
+
 Permissions note:
 
 - The host wrapper runs the container as host `uid:gid` by default
@@ -99,7 +146,8 @@ Permissions note:
 - Job behavior:
     - runs Docker benchmark with pinned runner limits
     - uploads `.cache/benchmarks/codeclone-benchmark.json` as artifact
-    - emits scenario table and ratio table into `GITHUB_STEP_SUMMARY`
+    - emits startup/import probe, scenario, and ratio tables into
+      `GITHUB_STEP_SUMMARY`
     - prints ratios in job logs (important for quick trend checks)
 
 ## Non-guarantees

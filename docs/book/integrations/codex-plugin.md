@@ -11,19 +11,23 @@
 | `scripts/launch_mcp`                       | Shell-free launcher wrapper for Codex   |
 | `skills/codeclone-review/`                 | Conservative-first full review skill    |
 | `skills/codeclone-hotspots/`               | Quick hotspot discovery skill           |
+| `skills/codeclone-production-triage/`      | Production-first baseline triage skill  |
+| `skills/codeclone-architecture-triage/`    | Ranked architecture problem triage skill |
+| `skills/codeclone-blast-radius/`           | Read-only blast-radius inspection skill |
 | `skills/codeclone-change-control/`         | Intent-first change workflow skill      |
 | `skills/codeclone-engineering-memory/`     | Engineering memory read/write skill     |
 | `skills/codeclone-implementation-context/` | Bounded pre-edit context skill          |
 | `skills/codeclone-platform-observability/` | Maintainer-only observer diagnostics  |
 | `assets/`                                  | Plugin branding                         |
 
-Six skills ship in the plugin (review, hotspots, change-control,
-engineering-memory, implementation-context, platform-observability). The last is
+Nine skills ship in the plugin (review, hotspots, production-triage,
+architecture-triage, blast-radius, change-control, engineering-memory,
+implementation-context, platform-observability). The last is
 **only** for developing CodeClone itself — not for end-user repository review.
 
 ## Runtime model
 
-Additive — the marketplace install provides a local MCP definition and **six**
+Additive — the marketplace install provides a local MCP definition and **nine**
 skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
 through directly, including Coverage Join facts and the optional `coverage`
 help topic when supported. The plugin does not mutate `~/.codex/config.toml` or

@@ -435,6 +435,9 @@ def test_rebuild_semantic_index_records_observability_counters(
         def row_fingerprints(self, row_ids: list[str]) -> dict[str, object]:
             return {}
 
+        def existing_revisions(self) -> dict[str, object]:
+            return {}
+
         def upsert(self, rows: list[object]) -> None:
             return None
 

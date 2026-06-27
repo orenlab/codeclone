@@ -1,6 +1,6 @@
 <!-- doc-scope: Semantic retrieval contract. class: contract max-lines: 150 -->
 
-# Optional semantic retrieval (Phase 20)
+# Optional Semantic Retrieval
 
 Semantic search is **opt-in** and **off by default** (`enabled = false` in
 `codeclone/config/memory_defaults.py`). It does not replace FTS: keyword search
