@@ -144,7 +144,10 @@ def serialize_trajectory_preview(
     }
     if relevance_score is not None:
         payload["relevance_score"] = round(relevance_score, 3)
-    summary = serialize_patch_trail_summary(patch_trail_payload)
+    summary = serialize_patch_trail_summary(
+        patch_trail_payload,
+        run_id=trajectory.primary_run_id,
+    )
     if summary is not None:
         payload["patch_trail_summary"] = summary
     _add_quality_fields(
@@ -218,6 +221,8 @@ def _add_quality_fields(
 
 def serialize_patch_trail_summary(
     payload: Mapping[str, object] | None,
+    *,
+    run_id: str | None = None,
 ) -> dict[str, object] | None:
     if payload is None:
         return None
@@ -225,13 +230,30 @@ def serialize_patch_trail_summary(
     if trail is None:
         return None
     summary_payload = trail.to_payload(detail_level="summary")
-    return {
+    summary: dict[str, object] = {
         "summary_line": patch_trail_summary_line(trail),
         "patch_trail_digest": trail.patch_trail_digest,
         "counts": summary_payload.get("counts", {}),
         "scope_check_status": trail.scope_check_status,
         "verification_status": trail.verification_status,
     }
+    effective_run_id = _clean_run_id(run_id)
+    if effective_run_id and trail.patch_trail_digest:
+        summary["patch_trail_retrieval"] = {
+            "tool": "get_patch_trail",
+            "route": ("get_patch_trail(root=..., run_id=..., patch_trail_digest=...)"),
+            "run_id": effective_run_id,
+            "patch_trail_digest": trail.patch_trail_digest,
+            "snapshot_identity": "patch_trail_digest + optional run_id",
+        }
+    return summary
+
+
+def _clean_run_id(value: str | None) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    return stripped or None
 
 
 def serialize_trajectory_detail(

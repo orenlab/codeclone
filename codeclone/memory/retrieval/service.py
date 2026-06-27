@@ -1217,6 +1217,7 @@ def _handle_trajectory_get_mode(
     mode: str,
     project_id: str,
     record_id: str | None,
+    detail_level: MemoryDetailLevel = "compact",
 ) -> dict[str, object]:
     trajectory_id = _require_query_field(
         record_id,
@@ -1231,16 +1232,22 @@ def _handle_trajectory_get_mode(
             "payload": {"trajectory_id": trajectory_id},
         }
     patch_trail_payload = store.load_trajectory_patch_trail(trajectory_id)
+    if detail_level == "full":
+        trajectory_payload = serialize_trajectory_detail(
+            trajectory,
+            patch_trail_payload=patch_trail_payload,
+        )
+    else:
+        trajectory_payload = serialize_trajectory_preview(
+            trajectory,
+            patch_trail_payload=patch_trail_payload,
+            detail_level="compact",
+        )
     return {
         "mode": mode,
         "status": "ok",
-        "detail_level": "full",
-        "payload": {
-            "trajectory": serialize_trajectory_detail(
-                trajectory,
-                patch_trail_payload=patch_trail_payload,
-            )
-        },
+        "detail_level": detail_level,
+        "payload": {"trajectory": trajectory_payload},
     }
 
 
@@ -1984,6 +1991,7 @@ def query_engineering_memory(
             mode=mode,
             project_id=project_id,
             record_id=record_id,
+            detail_level=normalized_detail,
         )
     if mode == "experience_get":
         return _handle_experience_get_mode(

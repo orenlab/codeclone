@@ -20,12 +20,14 @@ from codeclone.audit.events import (
 )
 from codeclone.audit.reader import AuditRecord
 from codeclone.audit.writer import SqliteAuditWriter
+from codeclone.memory.trajectory.patch_trail import compute_patch_trail
 from codeclone.memory.trajectory.patch_trail_projector import (
     project_patch_trail_from_audit,
 )
 from codeclone.memory.trajectory.store import load_trajectory_patch_trail
 
 from .memory_fixtures import memory_store
+from .test_memory_trajectory_coverage import _patch_trail_inputs
 
 
 def _core(event_type: str, *, status: str = "", **facts: object) -> tuple[str, str]:
@@ -47,6 +49,7 @@ def _record(
     *,
     status: str | None = None,
     summary: str | None = None,
+    payload_json: str | None = None,
     **facts: object,
 ) -> AuditRecord:
     core_json, core_sha = _core(event_type, status=status or "", **facts)
@@ -68,7 +71,53 @@ def _record(
         status=status,
         agent_label="agent",
         summary=summary,
+        payload_json=payload_json,
     )
+
+
+def test_project_patch_trail_prefers_stored_audit_payload() -> None:
+    root_digest = "root-digest"
+    stored = compute_patch_trail(_patch_trail_inputs())
+    stored_payload = stored.audit_payload()
+    recomputed_records = (
+        _record(
+            1,
+            EVENT_INTENT_DECLARED,
+            status="active",
+            summary="different recompute path",
+            scope_paths=["other.py"],
+        ),
+        _record(
+            2,
+            EVENT_INTENT_CHECKED,
+            status="clean",
+            declared_scope_paths=["other.py"],
+            changed_files=["other.py"],
+            unexpected_files_list=[],
+            forbidden_touched_list=[],
+        ),
+        _record(
+            3,
+            EVENT_PATCH_VERIFIED,
+            status="accepted",
+        ),
+        _record(
+            4,
+            EVENT_PATCH_TRAIL_COMPUTED,
+            status="clean",
+            payload_json=json.dumps(stored_payload, sort_keys=True),
+        ),
+    )
+
+    trail = project_patch_trail_from_audit(
+        records=recomputed_records,
+        repo_root_digest=root_digest,
+    )
+
+    assert trail is not None
+    assert trail.patch_trail_digest == stored.patch_trail_digest
+    assert trail.declared_files == stored.declared_files
+    assert trail.verification_profile == stored.verification_profile
 
 
 def test_project_patch_trail_from_audit_uses_check_core_paths() -> None:
