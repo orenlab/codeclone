@@ -39,7 +39,7 @@
         },
         "analysis_mode": {
           "default": "full",
-          "description": "full: clones+metrics. clones_only: clones without metrics.",
+          "description": "full: clones+metrics. clones_only: clones without metrics; run summary marks health and security_surfaces unavailable (metrics_skipped) and omits comparable entity_counts unless canonical inventory.code.scope is analysis_root. Use get_report_section(inventory) for full canonical inventory facts.",
           "title": "Analysis Mode",
           "type": "string"
         },
@@ -314,7 +314,7 @@
         },
         "analysis_mode": {
           "default": "full",
-          "description": "full: clones+metrics. clones_only: clones without metrics.",
+          "description": "full: clones+metrics. clones_only: clones without metrics; run summary marks health and security_surfaces unavailable (metrics_skipped) and omits comparable entity_counts unless canonical inventory.code.scope is analysis_root. Use get_report_section(inventory) for full canonical inventory facts.",
           "title": "Analysis Mode",
           "type": "string"
         },

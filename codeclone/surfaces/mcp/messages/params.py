@@ -135,7 +135,15 @@ ContextPageSizeParam = Annotated[
 ]
 AnalysisModeParam = Annotated[
     str,
-    Field(description="full: clones+metrics. clones_only: clones without metrics."),
+    Field(
+        description=(
+            "full: clones+metrics. clones_only: clones without metrics; "
+            "run summary marks health and security_surfaces unavailable "
+            "(metrics_skipped) and omits comparable entity_counts unless "
+            "canonical inventory.code.scope is analysis_root. Use "
+            "get_report_section(inventory) for full canonical inventory facts."
+        )
+    ),
 ]
 RespectPyprojectParam = Annotated[
     bool,

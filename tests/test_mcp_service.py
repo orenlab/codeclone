@@ -3532,6 +3532,20 @@ def test_mcp_service_clones_only_health_is_marked_unavailable(
     assert summary["health"] == expected
     assert stored_summary["health"] == expected
     assert triage["health"] == expected
+    assert summary["security_surfaces"] == expected
+    assert stored_summary["security_surfaces"] == expected
+    inventory = cast("dict[str, object]", summary["inventory"])
+    assert set(inventory) == {"files", "lines", "entity_counts"}
+    assert inventory["entity_counts"] == {
+        "available": False,
+        "reason": "metrics_skipped",
+        "scope": "current_run",
+    }
+    report_inventory = service.get_report_section(
+        run_id=str(summary["run_id"]),
+        section="inventory",
+    )
+    assert cast("dict[str, object]", report_inventory["code"])["scope"] == "current_run"
     assert cast("dict[str, int]", stored_summary["analysis_profile"]) == {
         "min_loc": 10,
         "min_stmt": 6,
@@ -9649,6 +9663,43 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         "available": False,
         "reason": "metrics_skipped",
     }
+    assert mcp_helpers_mod._summary_inventory_payload(
+        {
+            "files": {"total_found": 3},
+            "code": {
+                "scope": "mixed",
+                "parsed_lines": 100,
+                "functions": 10,
+                "methods": 5,
+                "classes": 2,
+            },
+        }
+    ) == {
+        "files": 3,
+        "lines": 100,
+        "entity_counts": {
+            "available": False,
+            "reason": "metrics_skipped",
+            "scope": "mixed",
+        },
+    }
+    assert mcp_helpers_mod._summary_inventory_payload(
+        {
+            "files": {"total_found": 3},
+            "code": {
+                "scope": "analysis_root",
+                "parsed_lines": 100,
+                "functions": 10,
+                "methods": 5,
+                "classes": 2,
+            },
+        }
+    ) == {
+        "files": 3,
+        "lines": 100,
+        "functions": 15,
+        "classes": 2,
+    }
     assert (
         mcp_helpers_mod._summary_health_score({"analysis_mode": "clones_only"}) is None
     )
@@ -9661,9 +9712,11 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         )
         is None
     )
-    assert mcp_helpers_mod._summary_health_payload({}) == {
+    clones_only_record = _dummy_run_record(tmp_path, "clones-only-security")
+    clones_only_record.summary["analysis_mode"] = "clones_only"
+    assert mcp_helpers_mod._summary_security_surfaces_payload(clones_only_record) == {
         "available": False,
-        "reason": "unavailable",
+        "reason": "metrics_skipped",
     }
     assert mcp_helpers_mod._summary_cache_payload({}) == {}
     assert service._summary_findings_payload(
