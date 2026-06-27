@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import re
@@ -18,9 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import cast
 from urllib.parse import urlparse
-
-import tomllib
 
 from codeclone import __version__
 
@@ -117,9 +117,27 @@ def _copy_artifacts(source: ReportArtifacts, destination: ReportArtifacts) -> No
     shutil.copy2(source.manifest, destination.manifest)
 
 
+def _load_toml_text(text: str) -> dict[str, object]:
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        payload = tomllib.loads(text)
+    else:
+        tomli_module = importlib.import_module("tomli")
+        loads_fn = getattr(tomli_module, "loads", None)
+        if not callable(loads_fn):
+            msg = "Invalid 'tomli' module: missing callable 'loads'."
+            raise RuntimeError(msg)
+        payload = loads_fn(text)
+    if not isinstance(payload, dict):
+        msg = "TOML root must be a table."
+        raise ValueError(msg)
+    return cast(dict[str, object], payload)
+
+
 def _read_site_url(repo_root: Path) -> str:
     config_path = repo_root / "zensical.toml"
-    payload = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    payload = _load_toml_text(config_path.read_text(encoding="utf-8"))
     project = payload.get("project")
     if not isinstance(project, dict):
         raise ValueError(f"{config_path} is missing a [project] table.")
