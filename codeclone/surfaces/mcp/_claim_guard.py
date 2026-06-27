@@ -88,6 +88,11 @@ _STRUCTURAL_PROFILES: Final[frozenset[str]] = frozenset({"python_structural"})
 _UNKNOWN_SHORT_FINDING_RE: Final = re.compile(r"\bF-\d+\b", re.IGNORECASE)
 _LITERAL_BOUNDARY_CHARS: Final = r"A-Za-z0-9_:"
 _SENTENCE_BOUNDARIES: Final = ".!?\n"
+_NEGATION_WINDOW: Final = re.compile(
+    r"(?:cannot|can't|can not|does not|doesn't|do not|don't|never|not)\s+"
+    r"(?:\w+\s+){0,4}$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -513,9 +518,24 @@ def _find_literal_matches(text: str, literal: str) -> tuple[re.Match[str], ...]:
     return tuple(pattern.finditer(text))
 
 
+def _match_is_negated(text: str, *, start: int) -> bool:
+    window = text[max(0, start - 48) : start]
+    return _NEGATION_WINDOW.search(window) is not None
+
+
 def _contains_keyword(text: str, keywords: Sequence[str]) -> bool:
     lowered = text.casefold()
-    return any(keyword.casefold() in lowered for keyword in keywords)
+    for keyword in keywords:
+        needle = keyword.casefold()
+        start = 0
+        while True:
+            index = lowered.find(needle, start)
+            if index < 0:
+                break
+            if not _match_is_negated(text, start=index):
+                return True
+            start = index + len(needle)
+    return False
 
 
 def _dedupe_citations(citations: Sequence[Citation]) -> tuple[Citation, ...]:
