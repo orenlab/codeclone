@@ -21,8 +21,11 @@ from codeclone.memory.retrieval import (
     query_engineering_memory,
 )
 from codeclone.memory.retrieval.continuation import (
+    MEMORY_CONTINUATION_CURSOR_VERSION,
+    MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY,
     _digest,
     _encode_cursor,
+    _validate_cursor_request_binding,
     bounded_memory_continuation_page_size,
     build_memory_continuation_cursor,
     decode_memory_continuation_cursor,
@@ -30,11 +33,93 @@ from codeclone.memory.retrieval.continuation import (
     memory_lane_item_ids,
     memory_projection_request_digest,
     rebase_memory_continuation_cursor,
+    resolve_memory_continuation_request,
 )
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import memory_store
+
+
+def test_resolve_memory_continuation_request_legacy_and_digest_paths() -> None:
+    legacy = resolve_memory_continuation_request(
+        {
+            "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY,
+            "request": {"mode": "search", "query": "risk"},
+        }
+    )
+    assert legacy == {"mode": "search", "query": "risk"}
+    assert (
+        resolve_memory_continuation_request(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY,
+                "request": "bad",
+            }
+        )
+        is None
+    )
+    resolved = resolve_memory_continuation_request(
+        {
+            "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION,
+            "request_digest": {"value": "abc123"},
+        },
+        resolve_request=lambda digest: {"mode": "for_path", "digest": digest},
+    )
+    assert resolved == {"mode": "for_path", "digest": "abc123"}
+    assert (
+        resolve_memory_continuation_request(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION,
+                "request_digest": {"value": "abc123"},
+            }
+        )
+        is None
+    )
+    assert (
+        resolve_memory_continuation_request(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION,
+                "request_digest": "bad",
+            }
+        )
+        is None
+    )
+    assert (
+        resolve_memory_continuation_request(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION,
+                "request_digest": {"value": "   "},
+            }
+        )
+        is None
+    )
+
+
+def test_validate_cursor_request_binding_rejects_invalid_shapes() -> None:
+    with pytest.raises(MemoryContractError, match="request is invalid"):
+        _validate_cursor_request_binding(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY,
+                "request": "bad",
+            }
+        )
+    with pytest.raises(MemoryContractError, match="request_digest is invalid"):
+        _validate_cursor_request_binding(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION,
+                "request_digest": "bad",
+            }
+        )
+    with pytest.raises(MemoryContractError, match="must not embed request"):
+        _validate_cursor_request_binding(
+            {
+                "cursor_version": MEMORY_CONTINUATION_CURSOR_VERSION,
+                "request_digest": {"value": "abc"},
+                "request": {"mode": "search"},
+            }
+        )
+    with pytest.raises(MemoryContractError, match="version is unsupported"):
+        _validate_cursor_request_binding({"cursor_version": "unsupported"})
 
 
 def test_memory_retrieval_continuation_pages_records_exactly(

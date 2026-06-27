@@ -10431,6 +10431,40 @@ def test_mcp_workflow_start_summary_uses_durable_blast_artifact(
         service.shutdown_cleanup()
 
 
+def test_mcp_workflow_start_full_blast_detail_projects_inline_blast(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    audit_path = resolve_audit_path(root_path=tmp_path, value=DEFAULT_AUDIT_PATH)
+    writer = SqliteAuditWriter(
+        db_path=audit_path,
+        payloads="compact",
+        retention_days=30,
+    )
+    service._audit_writer_override = writer
+    _register_docs_patch_run(service, tmp_path)
+
+    try:
+        started = service.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["README.md"]},
+            intent="update readme",
+            blast_radius_detail="full",
+        )
+        writer.close()
+        service._audit_writer_override = None
+
+        assert started["blast_radius_detail"] == "full"
+        assert started["requested_blast_radius_detail"] == "full"
+        blast = cast("dict[str, object]", started["blast_radius"])
+        artifact = cast("dict[str, object]", blast["blast_artifact"])
+        assert artifact["retrieval_tool"] == "get_blast_artifact"
+        assert blast["origin"] == ["README.md"]
+        _assert_start_context_governance(started, enforced=True)
+    finally:
+        service.shutdown_cleanup()
+
+
 def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
     _init_git_readme(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
@@ -12886,6 +12920,420 @@ def test_start_registry_digest_detects_foreign_workspace_intent() -> None:
     assert workflow_mod._start_registry_digest(
         own_registry
     ) != workflow_mod._start_registry_digest(foreign_registry)
+
+
+def test_workflow_start_blast_and_finish_governance_helper_branches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.surfaces.mcp._session_audit_artifact_mixin as audit_mod
+
+    blast_payload = {
+        "run_id": "run12345",
+        "origin": ["pkg/a.py"],
+        "depth": "direct",
+        "radius_level": "low",
+    }
+    artifact = {
+        "blast_artifact_id": "blast-abc",
+        "run_id": "run12345",
+        "retrieval_tool": "get_blast_artifact",
+        "projection_digest": {"value": "digest"},
+    }
+
+    full_without_artifact = workflow_mod._start_blast_projection(
+        blast_payload=blast_payload,
+        blast_artifact=None,
+        detail="full",
+    )
+    ref = cast("dict[str, object]", full_without_artifact["blast_artifact"])
+    assert ref["object_lookup"] == "unavailable"
+
+    full_with_artifact = workflow_mod._start_blast_projection(
+        blast_payload=blast_payload,
+        blast_artifact=artifact,
+        detail="full",
+    )
+    assert (
+        cast("dict[str, object]", full_with_artifact["blast_artifact"])[
+            "blast_artifact_id"
+        ]
+        == "blast-abc"
+    )
+
+    with pytest.raises(MCPServiceContractError, match="stored blast artifact"):
+        workflow_mod._start_blast_projection(
+            blast_payload=blast_payload,
+            blast_artifact=None,
+            detail="summary",
+        )
+
+    omitted_lane = workflow_mod._start_blast_omitted_evidence(
+        {
+            "direct_dependents": {
+                "total": 3,
+                "shown": 1,
+                "truncated": True,
+                "retrieval": {"retrieval_tool": "get_blast_artifact"},
+            },
+            "ignored": "skip",
+        }
+    )
+    direct_omitted = cast(
+        "dict[str, object]", omitted_lane["blast_radius.direct_dependents"]
+    )
+    assert direct_omitted["omitted"] == 2
+    assert workflow_mod._start_blast_omission_row("lane", "not-a-mapping") is None
+
+    assert workflow_mod._start_non_negative_int(True) == 0
+    assert workflow_mod._start_non_negative_int("12") == 12
+    assert workflow_mod._start_non_negative_int("bad") == 0
+
+    governed_payload = {
+        "blast_radius": {
+            "omitted_evidence": {
+                "structural_risk": {
+                    "total": 2,
+                    "shown": 0,
+                    "truncated": True,
+                    "retrieval": artifact,
+                }
+            }
+        }
+    }
+    omitted_from_radius = workflow_mod._start_governance_omitted(governed_payload)
+    assert omitted_from_radius is not None
+    assert "blast_radius.structural_risk" in omitted_from_radius
+
+    omitted_from_artifact = workflow_mod._start_governance_omitted(
+        {"blast_artifact": artifact}
+    )
+    assert omitted_from_artifact is not None
+    assert "blast_radius" in omitted_from_artifact
+
+    governed = workflow_mod._start_governed_response(
+        {
+            "blast_radius": blast_payload,
+            "blast_artifact": artifact,
+        }
+    )
+    assert "context_governance" in governed
+
+    assert workflow_mod._receipt_content_retrievable({}) is False
+    assert workflow_mod._patch_trail_retrievable({}) is False
+    assert workflow_mod._receipt_content_omission({}) is None
+    assert workflow_mod._patch_trail_omission({}) is None
+    assert workflow_mod._next_reducible_finish_lane({}) is None
+
+    receipt_digest_only = {
+        "receipt_retrieval": {"receipt_digest": "deadbeef" * 8},
+    }
+    assert workflow_mod._receipt_digest_value(receipt_digest_only) == "deadbeef" * 8
+
+    trail_retrieval = workflow_mod._finish_patch_trail_retrieval(
+        patch_trail_digest="trail" * 16,
+        source={"run_id": "run12345"},
+    )
+    assert trail_retrieval["run_id"] == "run12345"
+
+    compact = workflow_mod._compact_patch_trail_reference(
+        {
+            "patch_trail_digest": "trail" * 16,
+            "schema_version": "1",
+            "evidence": {"patch_trail_audit_sequence": 9},
+        }
+    )
+    compact_retrieval = cast("dict[str, object]", compact["retrieval"])
+    assert compact_retrieval["patch_trail_audit_sequence"] == 9
+
+    assert (
+        workflow_mod._start_lease_expires_at(
+            {"workspace_intents": ["bad", {"intent_id": "x"}]},
+            "x",
+        )
+        is None
+    )
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._session_workflow_mixin.estimate_response_context_units",
+        lambda _: 99999,
+    )
+    oversized = workflow_mod._budgeted_finish_response(
+        {"status": "accepted", "summary": {"blob": "x" * 50000}}
+    )
+    assert "context_governance" in oversized
+
+    assert audit_mod._stored_patch_trail_from_memory({"payload": "bad"}) is None
+    assert (
+        audit_mod._stored_patch_trail_from_memory(
+            {"payload": {}, "patch_trail_digest": ""}
+        )
+        is None
+    )
+    assert audit_mod._str_or_none(None) is None
+    assert audit_mod._str_or_none("   ") is None
+
+    assert (
+        workflow_mod._receipt_content_retrievable(
+            {
+                "content": "body",
+                "receipt_retrieval": {"tool": "other"},
+            }
+        )
+        is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {
+                "patch_trail_digest": "trail" * 16,
+                "retrieval": {"tool": "get_patch_trail"},
+            }
+        )
+        is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {"patch_trail_digest": "   ", "evidence": {}}
+        )
+        is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {
+                "patch_trail_digest": "trail" * 16,
+                "evidence": "bad",
+            }
+        )
+        is False
+    )
+    assert workflow_mod._receipt_content_omission({"receipt": {"content": "x"}}) is None
+    assert workflow_mod._patch_trail_omission({"patch_trail": {}}) is None
+    assert workflow_mod._receipt_digest_value({}) == ""
+
+    receipt_omission = workflow_mod._receipt_content_omission(
+        {
+            "receipt": {
+                "run_id": "run12345",
+                "content": "markdown body",
+                "receipt_digest": {"value": "r" * 64},
+                "receipt_retrieval": {
+                    "tool": "get_review_receipt",
+                    "run_id": "run12345",
+                },
+            }
+        }
+    )
+    assert receipt_omission is not None
+    assert receipt_omission["field"] == "receipt.content"
+
+    trail_omission = workflow_mod._patch_trail_omission(
+        {
+            "patch_trail": {
+                "patch_trail_digest": "p" * 64,
+                "evidence": {"patch_trail_audit_sequence": 1},
+            }
+        }
+    )
+    assert trail_omission is not None
+    assert trail_omission["field"] == "patch_trail"
+
+    finish_payload = {
+        "receipt": {
+            "content": "x" * 100,
+            "receipt_digest": {"value": "r" * 64},
+            "receipt_retrieval": {"tool": "get_review_receipt"},
+        },
+        "patch_trail": {
+            "patch_trail_digest": "p" * 64,
+            "evidence": {"patch_trail_audit_sequence": 1},
+        },
+    }
+    assert workflow_mod._next_reducible_finish_lane(finish_payload) == "receipt_content"
+    assert (
+        workflow_mod._start_lease_expires_at({"workspace_intents": b"bytes"}, "x")
+        is None
+    )
+    assert (
+        workflow_mod._start_lease_expires_at(
+            {"workspace_intents": [{"intent_id": "i1", "expires_at_utc": "T"}]},
+            "i1",
+        )
+        == "T"
+    )
+
+
+def test_memory_patch_trail_lookup_branches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    import codeclone.surfaces.mcp._session_audit_artifact_mixin as audit_mod
+
+    db_path = tmp_path / "memory.sqlite3"
+    db_path.write_text("stub", encoding="utf-8")
+    monkeypatch.setattr(audit_mod, "resolve_memory_config", lambda _root: object())
+    monkeypatch.setattr(
+        audit_mod,
+        "resolve_memory_db_path",
+        lambda _root, _config: db_path,
+    )
+    monkeypatch.setattr(
+        audit_mod,
+        "resolve_project_identity",
+        lambda _root: SimpleNamespace(id="project-1"),
+    )
+
+    class _LookupStore:
+        def __init__(
+            self, *, responses: list[tuple[list[dict[str, object]], int]]
+        ) -> None:
+            self._responses = list(responses)
+            self.closed = False
+
+        def find_trajectory_patch_trails_for_lookup(
+            self, **_kwargs: object
+        ) -> tuple[list[dict[str, object]], int]:
+            if not self._responses:
+                return [], 0
+            return self._responses.pop(0)
+
+        def close(self) -> None:
+            self.closed = True
+
+    ok_row: dict[str, object] = {
+        "payload": {
+            "schema_version": "1",
+            "scope_check_status": "clean",
+            "verification_status": "accepted",
+        },
+        "patch_trail_digest": "d" * 64,
+        "run_id": "run12345",
+        "created_at_utc": "2026-01-01T00:00:00Z",
+    }
+    monkeypatch.setattr(
+        audit_mod,
+        "SqliteEngineeringMemoryStore",
+        lambda _db: _LookupStore(responses=[([ok_row], 0)]),
+    )
+    status, count, artifact = audit_mod._memory_patch_trail_lookup(
+        root_path=tmp_path,
+        run_id="run12345",
+        patch_trail_digest="d" * 64,
+    )
+    assert status == "ok"
+    assert count == 1
+    assert artifact is not None
+
+    monkeypatch.setattr(
+        audit_mod,
+        "SqliteEngineeringMemoryStore",
+        lambda _db: _LookupStore(responses=[([ok_row, ok_row], 0)]),
+    )
+    ambiguous = audit_mod._memory_patch_trail_lookup(
+        root_path=tmp_path,
+        run_id="run12345",
+        patch_trail_digest="d" * 64,
+    )
+    assert ambiguous[:2] == ("ambiguous", 2)
+
+    monkeypatch.setattr(
+        audit_mod,
+        "SqliteEngineeringMemoryStore",
+        lambda _db: _LookupStore(
+            responses=[
+                ([], 0),
+                ([{"payload": {}, "patch_trail_digest": "e" * 64}], 0),
+            ]
+        ),
+    )
+    mismatch = audit_mod._memory_patch_trail_lookup(
+        root_path=tmp_path,
+        run_id="run12345",
+        patch_trail_digest="d" * 64,
+    )
+    assert mismatch[0] == "digest_mismatch"
+
+    monkeypatch.setattr(
+        audit_mod,
+        "SqliteEngineeringMemoryStore",
+        lambda _db: _LookupStore(responses=[([], 2)]),
+    )
+    malformed = audit_mod._memory_patch_trail_lookup(
+        root_path=tmp_path,
+        run_id=None,
+        patch_trail_digest="d" * 64,
+    )
+    assert malformed == ("malformed_stored_patch_trail", 0, None)
+
+    monkeypatch.setattr(
+        audit_mod,
+        "SqliteEngineeringMemoryStore",
+        lambda _db: _LookupStore(responses=[([], 0)]),
+    )
+    empty_root = tmp_path / "no-memory-root"
+    empty_root.mkdir()
+    assert audit_mod._memory_patch_trail_lookup(
+        root_path=empty_root,
+        run_id=None,
+        patch_trail_digest=None,
+    ) == ("not_found", 0, None)
+
+
+def test_get_report_section_findings_clone_alias_and_invalid_family() -> None:
+    from codeclone.surfaces.mcp._report_section import (
+        findings_section_payload,
+        normalize_findings_section_family,
+        validate_findings_section_family,
+    )
+
+    assert normalize_findings_section_family("clone") == "clones"
+    with pytest.raises(MCPServiceContractError, match="Invalid family"):
+        validate_findings_section_family("bogus")
+
+    page = findings_section_payload(
+        {
+            "summary": {"total": 3},
+            "groups": {
+                "clones": {
+                    "functions": [{"id": "fn-1"}],
+                    "blocks": [{"id": "blk-1"}],
+                    "segments": [{"id": "seg-1"}],
+                }
+            },
+        },
+        family="clone",
+        offset=0,
+        limit=10,
+    )
+    assert page["family"] == "clones"
+    assert len(cast("list[object]", page["items"])) == 3
+
+
+def test_mcp_get_patch_trail_memory_fallback_surfaces_non_not_found_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.surfaces.mcp._session_audit_artifact_mixin as audit_mod
+
+    monkeypatch.setattr(
+        audit_mod,
+        "_patch_trail_lookup",
+        lambda *_a, **_k: ("not_found", 0, None),
+    )
+    monkeypatch.setattr(
+        audit_mod,
+        "_memory_patch_trail_lookup",
+        lambda **_k: ("ambiguous", 2, None),
+    )
+    service = CodeCloneMCPService(history_limit=2)
+    out = service.get_patch_trail(
+        root=str(tmp_path),
+        run_id="run12345",
+        patch_trail_digest="d" * 64,
+    )
+    assert out["status"] == "ambiguous"
+    assert out["match_count"] == 2
+    assert out["fallback_source"] == "memory_trajectory_patch_trail"
 
 
 def test_memory_retrieval_governance_helper_edges() -> None:
