@@ -71,7 +71,10 @@ def derive_patch_status(
     intent_check_status: str | None,
     regressions: int,
     has_structural_delta: bool,
+    patch_context_declared: bool = True,
 ) -> str:
+    if not patch_context_declared:
+        return ReceiptPatchStatus.NOT_CHECKED.value
     if intent_check_status == "violated":
         return ReceiptPatchStatus.VIOLATED.value
     if gate_result is not None and bool(gate_result.get("would_fail")):

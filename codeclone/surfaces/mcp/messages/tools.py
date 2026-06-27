@@ -39,8 +39,11 @@ GET_BLAST_RADIUS: Final = (
     "Return the deterministic structural risk boundary for changing "
     "the given files. Shows direct dependents, clone cohort members, "
     "coverage gaps, actionable do-not-touch paths, and review-only "
-    "context. Derived from the canonical report; no new analysis is "
-    "performed."
+    "context. Optional include selects payload lanes: imports "
+    "(direct/transitive dependents), clone_cohorts, coverage, "
+    "risk_signals, do_not_touch, review_context, cycles — not "
+    "dependents or risk alone. Derived from the canonical report; no "
+    "new analysis is performed."
 )
 
 GET_BLAST_ARTIFACT: Final = (
@@ -94,8 +97,9 @@ QUERY_ENGINEERING_MEMORY: Final = (
     "trajectory_agents, and trajectory_dashboard. List modes default to compact "
     "previews; mode=get and detail_level=full return complete statements. "
     "mode=trajectory_get uses record_id as the trajectory id; "
-    "mode=experience_get uses record_id as the experience id. Project root is "
-    "not a valid path or coverage scope. Read-only."
+    "mode=experience_get uses record_id as the experience id. mode=coverage "
+    "requires scope=; path= is a single-path alias when scope is omitted. "
+    "Project root is not a valid path or coverage scope. Read-only."
 )
 
 GET_MEMORY_PROJECTION_PAGE: Final = (
@@ -176,8 +180,8 @@ HELP: Final = (
 )
 
 QUERY_PLATFORM_OBSERVABILITY: Final = (
-    "Read-only sectioned diagnostics over CodeClone's own runtime telemetry "
-    "(Phase 29). Observability is for CodeClone self-development and "
+    "Read-only sectioned diagnostics over CodeClone's own runtime telemetry. "
+    "Observability is for CodeClone self-development and "
     "diagnostics. It is NOT part of user-facing CodeClone analysis. It MUST "
     "NOT affect reports, gates, baselines, memory facts, or edit "
     "authorization. A slicer, not a trace export API: each call returns one "
@@ -220,8 +224,10 @@ GET_FINDING: Final = (
 
 GET_REMEDIATION: Final = (
     "Return actionable remediation guidance for a single finding. "
-    "Normal detail is the default. Use this when you need the fix packet "
-    "for one finding without pulling larger detail lists."
+    "Normal detail is the default. When the finding exists but has no "
+    "remediation packet, returns status=no_guidance instead of an error. "
+    "Use this when you need the fix packet for one finding without pulling "
+    "larger detail lists."
 )
 
 LIST_HOTSPOTS: Final = (

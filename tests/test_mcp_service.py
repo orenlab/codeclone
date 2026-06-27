@@ -7394,6 +7394,16 @@ def test_mcp_review_receipt_helpers_are_bounded_and_contract_aware() -> None:
         )
         == "not_checked"
     )
+    assert (
+        mcp_review_receipt_mod.derive_patch_status(
+            gate_result={"would_fail": False},
+            intent_check_status="clean",
+            regressions=0,
+            has_structural_delta=True,
+            patch_context_declared=False,
+        )
+        == "not_checked"
+    )
 
     decisions = mcp_review_receipt_mod.derive_human_decision_points(
         changed_findings=[
@@ -7453,6 +7463,26 @@ def test_mcp_review_receipt_helpers_are_bounded_and_contract_aware() -> None:
         )
         == "needs_attention"
     )
+
+
+def test_mcp_service_create_review_receipt_without_intent_stays_incomplete(
+    tmp_path: Path,
+) -> None:
+    service = _service_with_patch_contract_run_pair(
+        tmp_path,
+        before_run_id="before1234567890",
+        after_run_id="after1234567890",
+        before_digest="before-digest",
+        after_digest="after-digest",
+    )
+    receipt = service.create_review_receipt(
+        run_id="after1234567890",
+        format="json",
+    )
+    assert receipt["scope"] is None
+    patch_contract = cast("dict[str, object]", receipt["patch_contract"])
+    assert patch_contract["status"] == "not_checked"
+    assert receipt["verdict"] == "incomplete"
 
 
 def test_mcp_service_create_review_receipt_minimal_and_deterministic(
@@ -8222,15 +8252,28 @@ def test_mcp_service_additional_projection_and_error_branches(
 
     original_session_get = service.session.get_finding
     original_runs_get = service._runs.get
+    original_resolve = service.session._resolve_canonical_finding_id
+    monkeypatch.setattr(
+        service.session,
+        "_resolve_canonical_finding_id",
+        lambda _record, finding_id: finding_id,
+    )
     monkeypatch.setattr(
         service.session,
         "get_finding",
         lambda **kwargs: {"id": "no-remediation"},
     )
     monkeypatch.setattr(service._runs, "get", lambda run_id=None: record)
-    with pytest.raises(MCPFindingNotFoundError):
-        service.get_remediation(finding_id="no-remediation", run_id=run_id)
+    no_guidance = service.get_remediation(
+        finding_id="no-remediation",
+        run_id=run_id,
+    )
+    assert no_guidance["status"] == "no_guidance"
+    assert no_guidance["remediation"] is None
     monkeypatch.setattr(service.session, "get_finding", original_session_get)
+    monkeypatch.setattr(
+        service.session, "_resolve_canonical_finding_id", original_resolve
+    )
     monkeypatch.setattr(service._runs, "get", original_runs_get)
 
     original_get_finding = service.session.get_finding
@@ -9523,11 +9566,12 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         "get_finding",
         lambda **_kwargs: {"id": "design:cohesion:pkg.mod:Runner"},
     )
-    with pytest.raises(MCPFindingNotFoundError, match="remediation guidance"):
-        service.get_remediation(
-            run_id="missing-finding",
-            finding_id="design:cohesion:Runner",
-        )
+    no_guidance = service.get_remediation(
+        run_id="missing-finding",
+        finding_id="design:cohesion:Runner",
+    )
+    assert no_guidance["status"] == "no_guidance"
+    assert no_guidance["remediation"] is None
 
     with pytest.raises(MCPServiceContractError, match="absolute repository root"):
         mcp_helpers_mod._resolve_root(None)

@@ -422,6 +422,7 @@ class _MCPSessionReviewReceiptMixin:
                 intent_check_status=intent_check_status,
                 regressions=regressions,
                 has_structural_delta=bool(structural_delta.get("available")),
+                patch_context_declared=intent is not None,
             ),
             "regressions": regressions,
             "improvements": _coerce_int(structural_delta.get("improvements")),

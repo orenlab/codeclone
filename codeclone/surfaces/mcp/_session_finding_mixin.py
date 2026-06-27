@@ -1229,13 +1229,18 @@ class _MCPSessionFindingMixin:
         )
         remediation = _helpers._as_mapping(finding.get("remediation"))
         if not remediation:
-            raise MCPFindingNotFoundError(
-                f"Finding id '{finding_id}' does not expose remediation guidance."
-            )
+            return {
+                "run_id": _helpers._short_run_id(record.run_id),
+                "finding_id": self._short_finding_id(record, canonical_id),
+                "detail_level": validated_detail,
+                "status": "no_guidance",
+                "remediation": None,
+            }
         return {
             "run_id": _helpers._short_run_id(record.run_id),
             "finding_id": self._short_finding_id(record, canonical_id),
             "detail_level": validated_detail,
+            "status": "ok",
             "remediation": _helpers._project_remediation(
                 remediation,
                 detail_level=validated_detail,

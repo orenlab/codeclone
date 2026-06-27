@@ -218,7 +218,14 @@ BlastDepthParam = Annotated[
 ]
 IncludeParam = Annotated[
     list[str] | None,
-    Field(description="Optional blast-radius include filters."),
+    Field(
+        description=(
+            "Optional blast-radius include filters. Valid: imports, "
+            "clone_cohorts, coverage, risk_signals, do_not_touch, "
+            "review_context, cycles. Use imports for dependents; "
+            "dependents/risk alone are rejected."
+        ),
+    ),
 ]
 PatchModeParam = Annotated[
     str,
@@ -536,7 +543,12 @@ MemoryDetailLevelParam = Annotated[
 ]
 MemoryScopeListParam = Annotated[
     list[str] | None,
-    Field(description="Repo-relative scope paths for engineering memory retrieval."),
+    Field(
+        description=(
+            "Repo-relative scope paths for engineering memory retrieval. "
+            "Required for query_engineering_memory mode=coverage."
+        ),
+    ),
 ]
 MemorySymbolsParam = Annotated[
     list[str] | None,
@@ -549,7 +561,8 @@ MemoryQueryModeParam = Annotated[
             "search, get, for_path, for_symbol, stale, drafts, coverage, status, "
             "trajectory_status, trajectory_search, trajectory_get, "
             "experience_get, trajectory_anomalies, trajectory_agents, or "
-            "trajectory_dashboard."
+            "trajectory_dashboard. mode=coverage requires scope= (path= is a "
+            "single-path alias when scope is omitted)."
         ),
     ),
 ]
@@ -570,8 +583,10 @@ MemoryPathParam = Annotated[
     str | None,
     Field(
         description=(
-            "Repo-relative subject path for manage_engineering_memory "
-            "action=record_candidate (required for record_candidate)."
+            "Repo-relative path. Required for manage_engineering_memory "
+            "action=record_candidate. For query_engineering_memory: required "
+            "for mode=for_path; mode=coverage accepts path as a single-path "
+            "alias when scope is omitted."
         ),
     ),
 ]

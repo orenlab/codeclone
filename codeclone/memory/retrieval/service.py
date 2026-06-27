@@ -1924,6 +1924,10 @@ def query_engineering_memory(
             f"Unknown query mode {mode!r}. Allowed: {', '.join(QUERY_MODES)}."
         )
 
+    resolved_scope = scope
+    if mode == "coverage" and not resolved_scope and path is not None:
+        resolved_scope = (path,)
+
     normalized_detail = _normalize_detail_level(detail_level)
     effective_include_drafts = include_drafts or mode in {"for_path", "for_symbol"}
 
@@ -1977,7 +1981,7 @@ def query_engineering_memory(
             store,
             mode=mode,
             project_id=project_id,
-            scope=scope,
+            scope=resolved_scope,
         )
     if mode == "trajectory_status":
         return _handle_trajectory_status_mode(
