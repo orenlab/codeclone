@@ -53,6 +53,10 @@
       "description": "Structural risk boundary: dependents, clone cohorts, do-not-touch paths, review context."
     },
     {
+      "name": "get_blast_artifact",
+      "description": "Fetch a durably stored start-time blast artifact from the audit trail; never re-derived from current state. Read-only."
+    },
+    {
       "name": "get_relevant_memory",
       "description": "Ranked, evidence-linked records, experiences, and trajectories for the declared edit scope. Read-only."
     },
@@ -109,12 +113,28 @@
       "description": "Return deterministic, bounded implementation context from one existing analysis run. Resolves explicit repo-relative paths and module:symbol qualnames, then projects module, dependency, API-surface, call/reference, blast-radius, cache-origin, and workspace-freshness facts without re-analysis or edit authorization."
     },
     {
+      "name": "get_implementation_context_page",
+      "description": "Fetch an exact implementation-context facet page from the get_implementation_context projection artifact. Read-only."
+    },
+    {
+      "name": "get_memory_projection_page",
+      "description": "Return an exact page for a get_relevant_memory omitted tail using its digest-bound continuation cursor. Read-only."
+    },
+    {
+      "name": "get_patch_trail",
+      "description": "Fetch a durably stored patch trail from the audit trail by run id and/or patch-trail digest; never re-derived. Read-only."
+    },
+    {
       "name": "get_remediation",
       "description": "Return actionable remediation guidance for a single finding."
     },
     {
       "name": "get_report_section",
       "description": "Return a canonical report section for the latest or specified run."
+    },
+    {
+      "name": "get_review_receipt",
+      "description": "Fetch a durably stored review receipt from the audit trail by run id and/or receipt digest; never re-derived. Read-only."
     },
     {
       "name": "check_clones",
