@@ -270,7 +270,7 @@ facts.
 
 - Structural findings and gates come from deterministic analysis, not LLM judgment.
 - `edit_allowed` is an explicit controller result; status or advisory ownership does not grant permission.
-- Analysis tools are read-only with respect to source code and project governance state.
+- Read-only analysis commands do not modify source code or project governance state.
 - Baseline updates are explicit user-approved governance actions.
 - Controller and memory operations write only to their explicit local state stores.
 - Memory and trajectory evidence remain advisory.
