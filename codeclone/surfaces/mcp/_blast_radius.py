@@ -221,17 +221,17 @@ def blast_radius_summary_payload(
         ),
         "guardrails": list(_object_sequence(blast_payload.get("guardrails"))),
         "blast_artifact": blast_artifact_reference(artifact),
-        "omitted_evidence": {
-            "direct_dependents": _omitted_summary(direct, artifact),
-            "transitive_dependents": _omitted_summary(transitive, artifact),
-            "clone_cohort_members": _omitted_summary(cohorts, artifact),
-            "review_context": _omitted_summary(review, artifact),
-            "in_dependency_cycle": _omitted_summary(cycles, artifact),
-            "structural_risk": _omitted_summary(
-                _flatten_structural_risk(blast_payload),
-                artifact,
-            ),
-        },
+        "omitted_evidence": _build_omitted_evidence(
+            artifact=artifact,
+            lanes={
+                "direct_dependents": direct,
+                "transitive_dependents": transitive,
+                "clone_cohort_members": cohorts,
+                "review_context": review,
+                "in_dependency_cycle": cycles,
+                "structural_risk": _flatten_structural_risk(blast_payload),
+            },
+        ),
     }
 
 
@@ -264,13 +264,37 @@ def _list_summary(items: Sequence[object]) -> dict[str, object]:
     }
 
 
-def _omitted_summary(
-    items: Sequence[object],
+def _build_omitted_evidence(
+    *,
+    lanes: Mapping[str, Sequence[object]],
     artifact: Mapping[str, object],
 ) -> dict[str, object]:
+    omitted: dict[str, object] = {}
+    for lane, items in sorted(lanes.items(), key=lambda item: str(item[0])):
+        summary = _omitted_lane_summary(items, artifact)
+        if summary is not None:
+            omitted[lane] = summary
+    return omitted
+
+
+def _omitted_lane_summary(
+    items: Sequence[object],
+    artifact: Mapping[str, object],
+) -> dict[str, object] | None:
     summary = _list_summary(items)
-    summary["retrieval"] = blast_artifact_reference(artifact)
+    if not summary["truncated"]:
+        return None
+    summary["retrieval"] = _compact_artifact_retrieval(artifact)
     return summary
+
+
+def _compact_artifact_retrieval(artifact: Mapping[str, object]) -> dict[str, object]:
+    return {
+        "blast_artifact_id": artifact.get("blast_artifact_id"),
+        "run_id": artifact.get("run_id"),
+        "retrieval_tool": "get_blast_artifact",
+        "route": "get_blast_artifact(root=..., run_id=..., blast_artifact_id=...)",
+    }
 
 
 def _structural_risk_summary(

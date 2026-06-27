@@ -29,6 +29,7 @@ from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.surfaces.mcp._blast_radius import (
     BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION,
     blast_radius_artifact_payload,
+    blast_radius_summary_payload,
 )
 from codeclone.surfaces.mcp._session_shared import MCPServiceContractError
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -105,6 +106,59 @@ def _ok_artifact(lookup: BlastArtifactLookup) -> StoredBlastArtifact:
     assert lookup.status == "ok"
     assert lookup.blast_artifact is not None
     return lookup.blast_artifact
+
+
+def test_blast_radius_summary_omits_zero_lanes_from_omitted_evidence() -> None:
+    empty_payload = {
+        "run_id": "30b56d21",
+        "origin": ["pkg/a.py"],
+        "depth": "direct",
+        "radius_level": "low",
+        "direct_dependents": [],
+        "transitive_dependents": [],
+        "clone_cohort_members": [],
+        "in_dependency_cycle": [],
+        "structural_risk": {},
+        "do_not_touch": [],
+        "do_not_touch_summary": {"total": 0, "shown": 0, "truncated": False},
+        "review_context": [],
+        "review_context_summary": {"total": 0, "shown": 0, "truncated": False},
+        "guardrails": [],
+    }
+    artifact = blast_radius_artifact_payload(
+        empty_payload,
+        source_tool="start_controlled_change",
+    )
+    summary = blast_radius_summary_payload(empty_payload, artifact=artifact)
+
+    assert summary["omitted_evidence"] == {}
+    assert "blast_artifact" in summary
+
+
+def test_blast_radius_summary_omitted_evidence_uses_compact_retrieval() -> None:
+    blast_payload = _blast_payload()
+    artifact = blast_radius_artifact_payload(
+        blast_payload,
+        source_tool="start_controlled_change",
+    )
+    summary = blast_radius_summary_payload(blast_payload, artifact=artifact)
+    omitted = cast("dict[str, object]", summary["omitted_evidence"])
+
+    assert set(omitted) == {
+        "direct_dependents",
+        "clone_cohort_members",
+        "review_context",
+        "structural_risk",
+    }
+    direct = cast("dict[str, object]", omitted["direct_dependents"])
+    retrieval = cast("dict[str, object]", direct["retrieval"])
+    assert retrieval == {
+        "blast_artifact_id": artifact["blast_artifact_id"],
+        "run_id": artifact["run_id"],
+        "retrieval_tool": "get_blast_artifact",
+        "route": "get_blast_artifact(root=..., run_id=..., blast_artifact_id=...)",
+    }
+    assert "projection_digest" not in retrieval
 
 
 def test_lookup_blast_artifact_compact_mode_preserves_full_projection(
