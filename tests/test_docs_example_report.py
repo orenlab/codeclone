@@ -19,6 +19,54 @@ def _load_docs_report_namespace() -> dict[str, object]:
     return runpy.run_path(str(script_path))
 
 
+def test_published_artifact_href_uses_site_url_path_prefix() -> None:
+    module = _load_docs_report_namespace()
+    published_artifact_href = module["_published_artifact_href"]
+    assert callable(published_artifact_href)
+    href = published_artifact_href(
+        "https://orenlab.github.io/codeclone/",
+        "index.html",
+    )
+    assert href == "https://orenlab.github.io/codeclone/examples/report/live/index.html"
+
+
+def test_patch_sample_report_links_rewrites_relative_live_hrefs(
+    tmp_path: Path,
+) -> None:
+    module = _load_docs_report_namespace()
+    patch_sample_report_links = module["_patch_sample_report_links"]
+    assert callable(patch_sample_report_links)
+
+    output_dir = tmp_path / "examples" / "report" / "live"
+    output_dir.mkdir(parents=True)
+    report_page = tmp_path / "examples" / "report" / "index.html"
+    report_page.write_text(
+        "\n".join(
+            [
+                '<a href="live/index.html">HTML</a>',
+                '<a href="live/report.json">JSON</a>',
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    patch_sample_report_links(
+        output_dir=output_dir,
+        site_url="https://orenlab.github.io/codeclone/",
+    )
+
+    patched = report_page.read_text(encoding="utf-8")
+    assert 'href="live/index.html"' not in patched
+    assert (
+        'href="https://orenlab.github.io/codeclone/examples/report/live/index.html"'
+        in patched
+    )
+    assert (
+        'href="https://orenlab.github.io/codeclone/examples/report/live/report.json"'
+        in patched
+    )
+
+
 def test_docs_example_report_uses_main_entrypoint(
     tmp_path: Path,
 ) -> None:
