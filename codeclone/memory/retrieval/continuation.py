@@ -17,7 +17,8 @@ import orjson
 
 from ..exceptions import MemoryContractError
 
-MEMORY_CONTINUATION_CURSOR_VERSION: Final = "1"
+MEMORY_CONTINUATION_CURSOR_VERSION: Final = "2"
+MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY: Final = "1"
 MEMORY_CONTINUATION_PROJECTION_KIND: Final = "memory_retrieval_lane_projection_v1"
 MEMORY_CONTINUATION_ORDERING_VERSION: Final = "memory_retrieval_lane_order_v1"
 DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE: Final = 20
@@ -66,6 +67,14 @@ def memory_lane_identity_digest(
     )
 
 
+def memory_projection_request_digest(
+    request: Mapping[str, object],
+) -> dict[str, str]:
+    """Return the canonical digest for a memory retrieval projection request."""
+
+    return _digest({"request": dict(request)})
+
+
 def build_memory_continuation_cursor(
     *,
     project_id: str,
@@ -89,7 +98,7 @@ def build_memory_continuation_cursor(
         "lane": lane,
         "offset": offset,
         "total": total,
-        "request": dict(request),
+        "request_digest": memory_projection_request_digest(request),
         "lane_identity_digest": memory_lane_identity_digest(lane, items),
     }
     payload["cursor_digest"] = _digest(payload)
@@ -149,7 +158,10 @@ def decode_memory_continuation_cursor(cursor: str) -> dict[str, object]:
     without_digest.pop("cursor_digest", None)
     if _digest(without_digest) != expected_digest:
         raise MemoryContractError("memory continuation cursor digest mismatch")
-    if payload.get("cursor_version") != MEMORY_CONTINUATION_CURSOR_VERSION:
+    if payload.get("cursor_version") not in {
+        MEMORY_CONTINUATION_CURSOR_VERSION,
+        MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY,
+    }:
         raise MemoryContractError("memory continuation cursor version is unsupported")
     if payload.get("projection_kind") != MEMORY_CONTINUATION_PROJECTION_KIND:
         raise MemoryContractError("memory continuation projection kind is unsupported")
@@ -158,10 +170,52 @@ def decode_memory_continuation_cursor(cursor: str) -> dict[str, object]:
     lane = payload.get("lane")
     if not isinstance(lane, str) or lane not in MEMORY_CONTINUATION_LANES:
         raise MemoryContractError("memory continuation lane is invalid")
-    request = payload.get("request")
-    if not isinstance(request, dict):
-        raise MemoryContractError("memory continuation request is invalid")
+    _validate_cursor_request_binding(payload)
     return payload
+
+
+def resolve_memory_continuation_request(
+    cursor_payload: Mapping[str, object],
+    *,
+    resolve_request: object | None = None,
+) -> dict[str, object] | None:
+    """Resolve the full projection request from a decoded cursor payload."""
+
+    version = str(cursor_payload.get("cursor_version", ""))
+    if version == MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY:
+        request = cursor_payload.get("request")
+        return dict(request) if isinstance(request, Mapping) else None
+    request_digest = cursor_payload.get("request_digest")
+    if not isinstance(request_digest, Mapping):
+        return None
+    digest_value = request_digest.get("value")
+    if not isinstance(digest_value, str) or not digest_value.strip():
+        return None
+    if not callable(resolve_request):
+        return None
+    resolved = resolve_request(digest_value)
+    return dict(resolved) if isinstance(resolved, Mapping) else None
+
+
+def _validate_cursor_request_binding(payload: Mapping[str, object]) -> None:
+    version = str(payload.get("cursor_version", ""))
+    if version == MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY:
+        request = payload.get("request")
+        if not isinstance(request, dict):
+            raise MemoryContractError("memory continuation request is invalid")
+        return
+    if version == MEMORY_CONTINUATION_CURSOR_VERSION:
+        request_digest = payload.get("request_digest")
+        if not isinstance(request_digest, Mapping):
+            raise MemoryContractError("memory continuation request_digest is invalid")
+        if not isinstance(request_digest.get("value"), str):
+            raise MemoryContractError("memory continuation request_digest is invalid")
+        if payload.get("request") is not None:
+            raise MemoryContractError(
+                "memory continuation cursor must not embed request"
+            )
+        return
+    raise MemoryContractError("memory continuation cursor version is unsupported")
 
 
 def memory_continuation_page(
@@ -169,6 +223,7 @@ def memory_continuation_page(
     cursor_payload: Mapping[str, object],
     items: Sequence[Mapping[str, object]],
     page_size: int,
+    request: Mapping[str, object],
 ) -> dict[str, object]:
     """Return an exact continuation page or a fail-closed mismatch payload."""
 
@@ -205,9 +260,6 @@ def memory_continuation_page(
         "lane_identity_digest": actual,
     }
     if next_offset < total:
-        request = cursor_payload.get("request")
-        if not isinstance(request, dict):
-            raise MemoryContractError("memory continuation request is invalid")
         payload["next"] = build_memory_continuation_cursor(
             project_id=str(cursor_payload["project_id"]),
             lane=lane,
@@ -250,6 +302,7 @@ __all__ = [
     "DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE",
     "MAX_MEMORY_CONTINUATION_PAGE_SIZE",
     "MEMORY_CONTINUATION_CURSOR_VERSION",
+    "MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY",
     "MEMORY_CONTINUATION_LANES",
     "MEMORY_CONTINUATION_ORDERING_VERSION",
     "MEMORY_CONTINUATION_PROJECTION_KIND",
@@ -259,5 +312,7 @@ __all__ = [
     "memory_continuation_page",
     "memory_lane_identity_digest",
     "memory_lane_item_ids",
+    "memory_projection_request_digest",
     "rebase_memory_continuation_cursor",
+    "resolve_memory_continuation_request",
 ]

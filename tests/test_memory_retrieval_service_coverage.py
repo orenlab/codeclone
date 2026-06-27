@@ -571,12 +571,13 @@ def test_get_memory_projection_page_rejects_invalid_request_dict(
         def close(self) -> None:
             return None
 
-    with pytest.raises(MemoryContractError, match="request is invalid"):
-        retrieval_service.get_memory_projection_page(
-            cast("SqliteEngineeringMemoryStore", _Store()),
-            project_id="proj",
-            cursor="ignored",
-        )
+    page = retrieval_service.get_memory_projection_page(
+        cast("SqliteEngineeringMemoryStore", _Store()),
+        project_id="proj",
+        cursor="ignored",
+    )
+    assert page["status"] == "snapshot_mismatch"
+    assert page["reason"] == "memory_continuation_request_unavailable"
 
 
 def test_query_engineering_memory_experience_get_wrong_project_returns_not_found(

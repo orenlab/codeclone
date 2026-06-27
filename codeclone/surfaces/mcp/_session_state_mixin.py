@@ -842,6 +842,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _spread_max_cache: dict[str, int]
     _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
     _context_projection_pages: dict[str, ContextProjectionArtifact]
+    _memory_continuation_requests: dict[str, dict[str, object]]
     _active_intents: dict[str, IntentRecord]
     _intent_sequence: int
 
@@ -1245,12 +1246,16 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             cleared_spread_cache_entries = len(self._spread_max_cache)
             cleared_blast_radius_entries = len(self._blast_radius_cache)
             cleared_context_projection_pages = len(self._context_projection_pages)
+            cleared_memory_continuation_requests = len(
+                self._memory_continuation_requests
+            )
             cleared_intents = len(self._active_intents)
             self._review_state.clear()
             self._last_gate_results.clear()
             self._spread_max_cache.clear()
             self._blast_radius_cache.clear()
             self._context_projection_pages.clear()
+            self._memory_continuation_requests.clear()
             self._active_intents.clear()
             self._intent_sequence = 0
         workspace_cleared = True
@@ -1274,6 +1279,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             "cleared_spread_cache_entries": cleared_spread_cache_entries,
             "cleared_blast_radius_entries": cleared_blast_radius_entries,
             "cleared_context_projection_pages": cleared_context_projection_pages,
+            "cleared_memory_continuation_requests": (
+                cleared_memory_continuation_requests
+            ),
             "cleared_intents": cleared_intents,
             "workspace_cleared": workspace_cleared,
         }

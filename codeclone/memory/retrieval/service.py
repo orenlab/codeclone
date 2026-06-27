@@ -55,6 +55,7 @@ from .continuation import (
     build_memory_continuation_cursor,
     decode_memory_continuation_cursor,
     memory_continuation_page,
+    resolve_memory_continuation_request,
 )
 from .ranking import (
     RankingContext,
@@ -792,18 +793,19 @@ def get_relevant_memory(
         "detail_level": normalized_detail,
         "retrieval_policy": _retrieval_policy(include_drafts=effective_include_drafts),
     }
+    projection_request = _memory_projection_request(
+        scope_paths=normalized_scope,
+        symbols=tuple(sorted(normalized_symbols)),
+        blast_dependents=tuple(sorted(normalized_blast)),
+        scope_resolved_from=scope_resolved_from,
+        include_stale=include_stale,
+        include_drafts=effective_include_drafts,
+        include_routine=include_routine,
+        detail_level=normalized_detail,
+    )
     continuation = _memory_retrieval_continuation(
         project_id=project_id,
-        request=_memory_projection_request(
-            scope_paths=normalized_scope,
-            symbols=tuple(sorted(normalized_symbols)),
-            blast_dependents=tuple(sorted(normalized_blast)),
-            scope_resolved_from=scope_resolved_from,
-            include_stale=include_stale,
-            include_drafts=effective_include_drafts,
-            include_routine=include_routine,
-            detail_level=normalized_detail,
-        ),
+        request=projection_request,
         lanes={
             "records": ranked_records,
             "trajectories": ranked_trajectories,
@@ -817,6 +819,7 @@ def get_relevant_memory(
     )
     if continuation:
         payload["continuation"] = continuation
+        payload["_memory_projection_request"] = projection_request
     return payload
 
 
@@ -826,6 +829,7 @@ def get_memory_projection_page(
     project_id: str,
     cursor: str,
     page_size: int = DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE,
+    resolve_request: object | None = None,
 ) -> dict[str, object]:
     """Return a digest-bound continuation page for a memory retrieval lane."""
 
@@ -837,9 +841,17 @@ def get_memory_projection_page(
             "expected_project_id": cursor_payload.get("project_id"),
             "actual_project_id": project_id,
         }
-    request = cursor_payload.get("request")
-    if not isinstance(request, dict):
-        raise MemoryContractError("memory continuation request is invalid")
+    request = resolve_memory_continuation_request(
+        cursor_payload,
+        resolve_request=resolve_request,
+    )
+    if request is None:
+        return {
+            "status": "snapshot_mismatch",
+            "reason": "memory_continuation_request_unavailable",
+            "lane": cursor_payload.get("lane"),
+            "request_digest": cursor_payload.get("request_digest"),
+        }
     lanes = _memory_projection_lanes(
         store,
         project_id=project_id,
@@ -850,6 +862,7 @@ def get_memory_projection_page(
         cursor_payload=cursor_payload,
         items=lanes[lane],
         page_size=page_size,
+        request=request,
     )
 
 

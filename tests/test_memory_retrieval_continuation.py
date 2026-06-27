@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
@@ -27,6 +28,7 @@ from codeclone.memory.retrieval.continuation import (
     decode_memory_continuation_cursor,
     memory_continuation_page,
     memory_lane_item_ids,
+    memory_projection_request_digest,
     rebase_memory_continuation_cursor,
 )
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
@@ -64,6 +66,7 @@ def test_memory_retrieval_continuation_fails_closed_on_projection_change(
             store,
             project_id=project.id,
             cursor=cursor,
+            resolve_request=_continuation_request_resolver(first),
         )
 
     assert page["status"] == "snapshot_mismatch"
@@ -108,6 +111,7 @@ def test_memory_retrieval_continuation_pages_experiences_and_exact_get(
             project_id=project.id,
             cursor=cursor,
             page_size=2,
+            resolve_request=_continuation_request_resolver(first),
         )
         fetched = query_engineering_memory(
             store,
@@ -230,6 +234,7 @@ def test_memory_continuation_page_emits_next_cursor_for_remaining_items() -> Non
         cursor_payload=payload,
         items=items,
         page_size=2,
+        request={"mode": "search"},
     )
     assert page["status"] == "ok"
     assert page["returned"] == 2
@@ -290,7 +295,7 @@ def test_decode_memory_continuation_cursor_rejects_missing_digest() -> None:
         ("projection_kind", "unsupported_kind", "projection kind is unsupported"),
         ("ordering_version", "legacy-order", "ordering version is unsupported"),
         ("lane", "bogus", "lane is invalid"),
-        ("request", "not-a-dict", "request is invalid"),
+        ("request_digest", "not-a-dict", "request_digest is invalid"),
     ],
 )
 def test_decode_memory_continuation_cursor_rejects_tampered_fields(
@@ -328,27 +333,69 @@ def test_memory_continuation_page_rejects_invalid_offset() -> None:
             cursor_payload=tampered,
             items=[{"id": "mem-1"}, {"id": "mem-2"}],
             page_size=1,
+            request={"mode": "search"},
         )
 
 
-def test_memory_continuation_page_rejects_invalid_request_for_next_page() -> None:
-    items = [{"id": f"mem-{index}"} for index in range(4)]
+def test_build_memory_continuation_cursor_omits_embedded_request() -> None:
+    request = {
+        "scope_paths": ["pkg/service.py"],
+        "symbols": [],
+        "blast_dependents": ["pkg/other.py"],
+        "scope_resolved_from": "explicit",
+        "include_stale": False,
+        "include_drafts": True,
+        "include_routine": False,
+        "detail_level": "compact",
+    }
+    built = build_memory_continuation_cursor(
+        project_id="proj",
+        lane="records",
+        request=request,
+        items=[{"id": "mem-1"}],
+        offset=0,
+    )
+    payload = decode_memory_continuation_cursor(str(built["cursor"]))
+    assert payload["cursor_version"] == "2"
+    assert "request" not in payload
+    assert payload["request_digest"] == memory_projection_request_digest(request)
+
+
+def test_decode_memory_continuation_cursor_rejects_embedded_request_in_v2() -> None:
     built = build_memory_continuation_cursor(
         project_id="proj",
         lane="records",
         request={"mode": "search"},
-        items=items,
-        offset=2,
+        items=[{"id": "mem-1"}],
+        offset=0,
     )
     payload = decode_memory_continuation_cursor(str(built["cursor"]))
     tampered = dict(payload)
-    tampered["request"] = None
-    with pytest.raises(MemoryContractError, match="request is invalid"):
-        memory_continuation_page(
-            cursor_payload=tampered,
-            items=items,
-            page_size=1,
+    tampered["request"] = {"mode": "search"}
+    with pytest.raises(MemoryContractError, match="must not embed request"):
+        decode_memory_continuation_cursor(_tampered_cursor(tampered))
+
+
+def test_get_memory_projection_page_requires_session_request_resolver(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        _seed_scoped_records(store, project_id=project.id, count=3)
+        first = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/service.py",),
+            scope_resolved_from="explicit",
+            max_records=1,
         )
+        cursor = str(_lane_page(first, "records")["cursor"])
+        page = get_memory_projection_page(
+            store,
+            project_id=project.id,
+            cursor=cursor,
+        )
+    assert page["status"] == "snapshot_mismatch"
+    assert page["reason"] == "memory_continuation_request_unavailable"
 
 
 def test_get_memory_projection_page_rejects_project_identity_mismatch(
@@ -393,6 +440,20 @@ def _tampered_cursor(payload: dict[str, object]) -> str:
     return _encode_cursor(signed)
 
 
+def _continuation_request_resolver(payload: Mapping[str, object]) -> object:
+    internal = payload.get("_memory_projection_request")
+    if not isinstance(internal, Mapping):
+        raise AssertionError("expected _memory_projection_request in payload")
+    digest = memory_projection_request_digest(internal)
+    digest_value = str(digest["value"])
+    stored = dict(internal)
+
+    def _resolve(value: str) -> dict[str, object] | None:
+        return stored if value == digest_value else None
+
+    return _resolve
+
+
 def _lane_page(payload: dict[str, object], lane: str) -> dict[str, object]:
     continuation = cast("dict[str, object]", payload["continuation"])
     lanes = cast("dict[str, object]", continuation["lanes"])
@@ -423,6 +484,7 @@ def _records_continuation_page(
             project_id=project.id,
             cursor=cursor,
             page_size=1,
+            resolve_request=_continuation_request_resolver(first),
         )
 
 

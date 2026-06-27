@@ -34,7 +34,10 @@ from ...memory.retrieval import (
     get_relevant_memory,
     query_engineering_memory,
 )
-from ...memory.retrieval.continuation import rebase_memory_continuation_cursor
+from ...memory.retrieval.continuation import (
+    memory_projection_request_digest,
+    rebase_memory_continuation_cursor,
+)
 from ...memory.semantic import (
     close_semantic_index,
     execute_semantic_index_rebuild,
@@ -72,6 +75,7 @@ class _MCPSessionMemoryMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
     _ide_governance: IdeGovernanceSessionState
+    _memory_continuation_requests: dict[str, dict[str, object]]
 
     def get_relevant_memory(
         self,
@@ -121,6 +125,7 @@ class _MCPSessionMemoryMixin:
             if memory_sync is not None:
                 result = dict(result)
                 result["memory_sync"] = memory_sync
+            result = self._publish_memory_continuation_request(result)
             return _attach_budgeted_memory_retrieval_context(
                 result,
                 detail_level=detail_level,
@@ -209,6 +214,12 @@ class _MCPSessionMemoryMixin:
                 project_id=project.id,
                 cursor=cursor,
                 page_size=page_size,
+                resolve_request=lambda digest_value: (
+                    self._resolve_memory_continuation_request(
+                        project.id,
+                        digest_value,
+                    )
+                ),
             )
             return attach_passive_context_governance(
                 result,
@@ -736,6 +747,35 @@ class _MCPSessionMemoryMixin:
         except MCPServiceContractError:
             return frozenset()
         return frozenset(result.direct_dependents)
+
+    def _publish_memory_continuation_request(
+        self,
+        payload: Mapping[str, object],
+    ) -> dict[str, object]:
+        published = dict(payload)
+        internal = published.pop("_memory_projection_request", None)
+        project_id = published.get("project_id")
+        if isinstance(project_id, str) and isinstance(internal, Mapping):
+            digest = memory_projection_request_digest(internal)
+            digest_value = digest.get("value")
+            if isinstance(digest_value, str):
+                self._memory_continuation_requests[
+                    self._memory_continuation_request_key(project_id, digest_value)
+                ] = dict(internal)
+        return published
+
+    def _resolve_memory_continuation_request(
+        self,
+        project_id: str,
+        digest_value: str,
+    ) -> dict[str, object] | None:
+        return self._memory_continuation_requests.get(
+            self._memory_continuation_request_key(project_id, digest_value)
+        )
+
+    @staticmethod
+    def _memory_continuation_request_key(project_id: str, digest_value: str) -> str:
+        return f"{project_id}:{digest_value}"
 
 
 def _attach_budgeted_memory_retrieval_context(
