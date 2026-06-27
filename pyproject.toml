@@ -89,7 +89,13 @@ analytics = [
     "scikit-learn>=1.5.0",
     "lancedb>=0.33.0",
     "fastembed>=0.8.0,<0.9",
-    "umap-learn>=0.5.0; python_version < '3.14'",
+    "umap-learn>=0.5.6; python_version < '3.14'",
+    # umap-learn → pynndescent → numba/llvmlite.
+    # pynndescent 0.5.x allows llvmlite>=0.30 → uv may pick 0.36 (Python <3.10 only).
+    # Floors keep the JIT stack on 3.10–3.13 wheels; numba pins llvmlite in its band.
+    "pynndescent>=0.6.0; python_version < '3.14'",
+    "numba>=0.61.0,<0.66; python_version < '3.14'",
+    "llvmlite>=0.44.0,<0.48; python_version < '3.14'",
 ]
 perf = [
     "psutil>=7,<8",
@@ -207,7 +213,7 @@ golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
 intent_registry_backend = "sqlite"
 intent_registry_path = ".codeclone/db/intents.sqlite3"
-intent_registry_retention_days=30
+intent_registry_retention_days = 30
 audit_enabled = true
 audit_path = ".codeclone/db/audit.sqlite3"
 audit_payloads = "full"    # "off" | "compact" | "full"

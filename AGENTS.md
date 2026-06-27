@@ -156,7 +156,7 @@ If you touched baseline/cache/report contracts or CLI/MCP audit surfaces, also e
 If you touched `docs/`, `zensical.toml`, docs publishing workflow, or sample-report generation, also run:
 
 ```bash
-uv run --with zensical==0.0.43 zensical build --clean --strict
+uv run --with zensical==0.0.46 zensical build --clean --strict
 ```
 
 If you touched the MCP surface, also run:

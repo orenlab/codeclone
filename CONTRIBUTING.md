@@ -377,7 +377,7 @@ When changing the live sample report or its publication path:
 ```bash
 uv run python scripts/build_docs_example_report.py \
   --output-dir site/examples/report/live
-uv run --with zensical==0.0.43 zensical build --clean --strict
+uv run --with zensical==0.0.46 zensical build --clean --strict
 ```
 
 The generator runs CodeClone against the repository, stages its output in a
@@ -526,7 +526,7 @@ uv run pytest -q tests/test_observability_*.py
 For documentation, navigation, publishing, or sample-report changes:
 
 ```bash
-uv run --with zensical==0.0.43 zensical build --clean --strict
+uv run --with zensical==0.0.46 zensical build --clean --strict
 ```
 
 For VS Code extension changes:
