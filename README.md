@@ -25,7 +25,7 @@
     </em>
   </p>
 
-[![][pypi-shield]][pypi-link] [![][downloads-shield]][pypi-link] [![][python-shield]][pypi-link] [![][license-shield]][license-link]
+[![][pypi-shield]][pypi-link] [![][downloads-shield]][pypi-link] [![][python-shield]][pypi-link] [![][license-shield]][license-link] [![][discord-shield]][discord-link]
 
 [![][tests-shield]][tests-link] [![][benchmark-shield]][benchmark-link]
 
@@ -310,6 +310,7 @@ See [LICENSES.md](https://github.com/orenlab/codeclone/blob/main/LICENSES.md) fo
 ## Links
 
 - **PyPI:** <https://pypi.org/project/codeclone/>
+- **Discord:** <https://discord.com/invite/U72KmRvpUx>
 - **Issues:** <https://github.com/orenlab/codeclone/issues>
 - **Discussions:** <https://github.com/orenlab/codeclone/discussions>
 
@@ -320,8 +321,11 @@ See [LICENSES.md](https://github.com/orenlab/codeclone/blob/main/LICENSES.md) fo
 [license-shield]: https://img.shields.io/badge/license-MPL--2.0-6366f1?style=flat-square
 [tests-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests
 [benchmark-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?branch=main&style=flat-square&label=benchmark
+[discord-shield]: https://img.shields.io/badge/Discord-Join%20community-5865F2?style=flat-square&logo=discord&logoColor=white
+
 <!-- Links -->
 [pypi-link]: https://pypi.org/project/codeclone/
 [license-link]: #license
 [tests-link]: https://github.com/orenlab/codeclone/actions/workflows/tests.yml
 [benchmark-link]: https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml
+[discord-link]: https://discord.com/invite/U72KmRvpUx
