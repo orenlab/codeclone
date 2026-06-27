@@ -140,14 +140,14 @@ Memory never:
 | `relations` | Linked conflicts: `contradicted_by`, `superseded_by`, `supersedes` |
 | `coverage` | Visibility metadata, not correctness or approval |
 | `subjects_truncated` | More subjects exist outside the bounded response |
-| `context_governance.mode="observe"` | Response-size telemetry; not permission |
+| `context_governance.mode` | `partial_enforce` for compact scoped retrieval; `observe` for full/detail pages |
 
 When `get_relevant_memory` includes `continuation.lanes.<lane>.page`, the cursor
 is an exact continuation of that ranked lane. Use
 `get_memory_projection_page(root=<abs>, cursor=...)` to inspect omitted tail
-items. If the memory projection changed, the page returns `snapshot_mismatch`;
-do not replace that with a fresh broad search while claiming it is the same
-evidence. Known object drill-downs remain:
+items disclosed by `context_governance.omitted`. If the memory projection
+changed, the page returns `snapshot_mismatch`; do not replace that with a fresh
+broad search while claiming it is the same evidence. Known object drill-downs remain:
 `query_engineering_memory(mode="get")`,
 `query_engineering_memory(mode="trajectory_get")`, and
 `query_engineering_memory(mode="experience_get")`.

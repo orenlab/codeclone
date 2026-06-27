@@ -33,6 +33,13 @@ modes with `filters.include_routine=true` to include them. Scoped retrieval
 defaults to `detail_level=compact`; use `full` or
 `query_engineering_memory(mode=get)` for complete payloads.
 
+**Context governance** — `context_governance.mode="partial_enforce"` means the
+tool applied response-budget packing and any omitted evidence is listed under
+`context_governance.omitted` with an exact drill-down route. `mode="observe"`
+means measurement only; this is expected for exact retrieval/page tools such as
+`get_blast_artifact`, `get_review_receipt`, `get_patch_trail`,
+`get_memory_projection_page`, and `get_implementation_context_page`.
+
 …
 
 [Full reference →](../../book/25-mcp-interface/payload-conventions.md)

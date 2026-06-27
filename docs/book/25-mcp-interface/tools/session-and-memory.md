@@ -20,11 +20,14 @@ facts, or edit authorization, and it does not expose raw SQL or payload bodies.
 See the dedicated
 [Platform Observability tool contract](platform-observability.md).
 
-`get_relevant_memory` responses may include passive `context_governance`
-metadata with estimated context units for the serialized payload. In
-`mode="observe"` this is measurement only: `records`, `trajectories`,
-`experiences`, coverage, and retrieval-policy fields keep their documented lane
-semantics and are not omitted by response governance.
+Compact `get_relevant_memory` responses include `context_governance` metadata
+with `mode="partial_enforce"` and
+`evidence_policy="response_budget_with_exact_continuation"`. `records`,
+`trajectories`, `experiences`, coverage, and retrieval-policy fields keep their
+documented lane semantics; if a lane is omitted or reduced by the response
+budget, `context_governance.omitted` names the lane and points to its exact
+continuation cursor. Full-detail memory retrieval and continuation pages stay in
+`mode="observe"`.
 
 When a memory lane has more deterministic items than the default response shows,
 `get_relevant_memory` includes `continuation.lanes.<lane>.page`. Pass that

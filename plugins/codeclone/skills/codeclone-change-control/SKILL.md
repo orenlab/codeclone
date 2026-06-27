@@ -58,8 +58,10 @@ analyze_repository(root=<abs>)
   context; fetch omitted full blast evidence with
   `get_blast_artifact(root, run_id, blast_artifact_id)`. Use
   `blast_radius_detail="full"` only when you truly need the compatibility
-  projection inline. If artifact storage is unavailable, start returns full
-  blast evidence inline.
+  projection inline. In this path `context_governance.mode` is
+  `partial_enforce`; fallback, queued, and needs-analysis starts stay
+  `observe`. If artifact storage is unavailable, start returns full blast
+  evidence inline.
 - Repeated identical `start_controlled_change` calls may return
   `idempotent_replay:true` instead of re-emitting rich blast evidence. If the
   replay is `status:"active"` with `edit_allowed:true`, continue with the same

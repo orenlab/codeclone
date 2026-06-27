@@ -98,10 +98,15 @@ methods as the atomic tools and emit the same semantic audit events.
 `analyze_repository` remains a separate explicit call — workflow tools
 never run analysis implicitly.
 
-`start_controlled_change` responses include passive `context_governance`
-metadata with a `start_projection_v1` digest and estimated context units for the
-serialized response. In `mode="observe"` this is measurement only: `edit_allowed`
-and explicit status fields remain the permission contract.
+`start_controlled_change` responses include `context_governance` metadata with a
+`start_projection_v1` digest and estimated context units for the serialized
+response. When a stored blast artifact is available, start uses
+`mode="partial_enforce"` and
+`evidence_policy="response_budget_with_immutable_blast_artifact"`: control
+facts remain inline, while omitted blast lanes are disclosed in
+`context_governance.omitted` with `get_blast_artifact` drill-down. Queued,
+needs-analysis, and no-artifact fallback responses stay in `mode="observe"`.
+`edit_allowed` and explicit status fields remain the permission contract.
 
 Start blast-radius evidence is summary-first when CodeClone can persist an
 immutable audit-backed artifact for the full projection. The summary keeps

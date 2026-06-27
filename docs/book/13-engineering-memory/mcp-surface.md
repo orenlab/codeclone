@@ -75,6 +75,16 @@ they do not downgrade or discard the record. Each compact trajectory retains
 its own `patch_trail_summary`. The duplicate top-level `patch_trail_summary` is
 full-only.
 
+Scoped compact `get_relevant_memory` responses use
+`context_governance.mode="partial_enforce"` with
+`evidence_policy="response_budget_with_exact_continuation"`. When a records,
+trajectories, or experiences lane is omitted or compacted by the response
+budget, `context_governance.omitted` points to the digest-bound
+`continuation.lanes.<lane>.page.cursor`. Fetch that exact tail with
+`get_memory_projection_page(root, cursor)`. Full-detail retrieval and
+continuation pages stay in `mode="observe"` because they return the requested
+complete object/page rather than applying a new packing policy.
+
 **Filters** (`filters` object):
 
 | Key           | Values                   | Notes                                 |

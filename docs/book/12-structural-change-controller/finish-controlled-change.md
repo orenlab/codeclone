@@ -87,12 +87,12 @@ fetch the complete structured receipt after `auto_clear=true` with
 
 `context_governance` measures the complete finish response as one payload and
 publishes a `finish_projection_v1` digest under
-`context_governance.response`. Current finish responses stay in
-`mode="observe"` and `evidence_policy="observe_only_no_omission"`: response
-budgeting is measured but not enforced. Durable drill-down exists for the
-structured receipt and Patch Trail, while receipt markdown content, scope
-checks, verification, and workspace hygiene remain inline until an explicit
-packing policy omits them.
+`context_governance.response`. Finish responses use `mode="partial_enforce"` and
+`evidence_policy="response_budget_with_durable_artifact_lookup"`: mandatory
+control, scope, verification, hygiene, and action fields stay inline, while
+recoverable advisory lanes may be compacted. When receipt markdown content or
+Patch Trail detail is omitted, `context_governance.omitted` carries exact
+drill-down metadata for `get_review_receipt` or `get_patch_trail`.
 
 ### Patch Trail on finish
 

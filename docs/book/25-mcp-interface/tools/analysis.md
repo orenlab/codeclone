@@ -28,11 +28,15 @@ non-TTY contexts). Tips are advisory only; MCP and CLI never edit
 and memory evidence from one stored run. It is read-only and never authorizes
 edits.
 
-Responses include passive `context_governance` metadata with estimated context
-units for the serialized payload. In `mode="observe"` this is telemetry and
-compatibility metadata only: no evidence is omitted. The existing
-`budget_summary` remains an item-count budget for context entries, not a
-serialized response budget.
+Compact and normal responses include `context_governance` with
+`mode="partial_enforce"` and
+`evidence_policy="response_budget_with_exact_facet_pages"`. Mandatory subject
+and freshness facts remain inline; large facet lanes may be omitted with exact
+`get_implementation_context_page` drill-down metadata under
+`context_governance.omitted`. The existing `budget_summary` remains an
+item-count budget for context entries; `context_governance.limit` is the
+serialized response budget. `detail_level="full"` and facet page retrieval stay
+in `mode="observe"`.
 
 Key parameters:
 

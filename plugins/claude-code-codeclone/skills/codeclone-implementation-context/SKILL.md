@@ -86,10 +86,14 @@ Engineering Memory keyword search → `codeclone-engineering-memory`.
 - `subject_not_found` / `no_current_work` → fix subject; do not widen to repo root.
 - `freshness.status:"drifted"` → verify live source; no re-analyze loop.
 - truncated/omitted summaries, unresolved call edges → incomplete evidence, not absence.
+- For compact/normal detail, `context_governance.mode="partial_enforce"` means
+  large facet lanes may be omitted with exact drill-down in
+  `context_governance.omitted`; mandatory subject/freshness facts remain inline.
 - When `analysis.context_page_retrieval` is present, use
   `get_implementation_context_page(root=<abs>, context_projection_digest=analysis.context_projection_digest, facet=...)`
   for exact facet continuation. This is session-local to MCP run history and
-  returns `not_found` rather than recomputing fresh context.
+  returns `not_found` rather than recomputing fresh context. Facet pages
+  themselves are `mode="observe"` retrieval responses.
 
 ## Hard limits
 
