@@ -9,8 +9,14 @@ from __future__ import annotations
 from ...baseline.metrics_baseline import probe_metrics_baseline_section
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
+from ._context_governance import attach_passive_context_governance
 from ._implementation_context_pages import ContextProjectionArtifact
 from ._intent import IntentRecord
+from ._report_section import (
+    findings_section_payload,
+    inventory_section_payload,
+    require_mapping_section,
+)
 from ._session_baseline import (
     CloneBaselineState,
     MetricsBaselineState,
@@ -937,7 +943,15 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         record = self._runs.get(run_id)
         report_document = record.report_document
         if validated_section == "all":
-            return dict(report_document)
+            return attach_passive_context_governance(
+                dict(report_document),
+                response={
+                    "tool": "get_report_section",
+                    "budget_scope": "whole_response",
+                    "evidence_policy": "observe_only_unpaginated",
+                    "section": "all",
+                },
+            )
         if validated_section == "changed":
             if record.changed_projection is None:
                 raise MCPServiceContractError(
@@ -947,6 +961,19 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if validated_section == "metrics":
             metrics = _helpers._as_mapping(report_document.get("metrics"))
             return {"summary": dict(_helpers._as_mapping(metrics.get("summary")))}
+        if validated_section == "inventory":
+            return inventory_section_payload(
+                require_mapping_section(report_document, section="inventory"),
+                offset=offset,
+                limit=limit,
+            )
+        if validated_section == "findings":
+            return findings_section_payload(
+                require_mapping_section(report_document, section="findings"),
+                family=str(family) if family is not None else None,
+                offset=offset,
+                limit=limit,
+            )
         if validated_section == "metrics_detail":
             metrics = _helpers._as_mapping(report_document.get("metrics"))
             if not metrics:

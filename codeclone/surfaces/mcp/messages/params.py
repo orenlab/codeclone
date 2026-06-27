@@ -324,14 +324,37 @@ ReportSectionParam = Annotated[
 ]
 FamilyParam = Annotated[
     str | None,
-    Field(description="Metrics or finding family filter."),
+    Field(
+        description=(
+            "metrics_detail: complexity, coupling, cohesion, dependencies, "
+            "dead_code, api_surface, security_surfaces, overloaded_modules, "
+            "health, coverage_adoption, coverage_join. "
+            "findings: clone, structural, dead_code, or design."
+        )
+    ),
 ]
 PathFilterParam = Annotated[
     str | None,
     Field(description="Repo-relative module or file path filter."),
 ]
-OffsetParam = Annotated[int, Field(description="Pagination offset.")]
-LimitParam = Annotated[int, Field(description="Pagination limit.")]
+OffsetParam = Annotated[
+    int,
+    Field(
+        description=(
+            "Pagination offset for inventory file_registry, findings groups, "
+            "or metrics_detail items."
+        )
+    ),
+]
+LimitParam = Annotated[
+    int,
+    Field(
+        description=(
+            "Pagination limit for inventory file_registry, findings groups, "
+            "or metrics_detail items (max 200)."
+        )
+    ),
+]
 FindingFamilyParam = Annotated[
     str,
     Field(description="all, clone, structural, dead_code, or design."),

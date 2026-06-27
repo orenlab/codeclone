@@ -3687,6 +3687,58 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
     )
 
 
+def test_get_report_section_inventory_and_findings_are_paginated(
+    tmp_path: Path,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+
+    inventory_page = service.get_report_section(
+        run_id=run_id,
+        section="inventory",
+        limit=2,
+        offset=0,
+    )
+    registry = cast("dict[str, object]", inventory_page["file_registry"])
+    assert cast(int, registry["limit"]) == 2
+    assert len(cast("list[str]", registry["items"])) == 2
+    total = cast(int, registry["total"])
+    assert total >= 2
+    if total > 2:
+        assert registry["has_more"] is True
+
+    findings_summary = service.get_report_section(
+        run_id=run_id,
+        section="findings",
+    )
+    assert "_hint" in findings_summary
+    assert "groups" not in findings_summary
+
+    structural_page = service.get_report_section(
+        run_id=run_id,
+        section="findings",
+        family="structural",
+        limit=1,
+    )
+    assert structural_page["family"] == "structural"
+    assert len(cast("list[object]", structural_page["items"])) <= 1
+    assert "groups" not in structural_page
+    assert "clones" not in structural_page
+
+
+def test_get_report_section_all_includes_passive_context_governance(
+    tmp_path: Path,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    payload = service.get_report_section(
+        run_id=str(summary["run_id"]),
+        section="all",
+    )
+    governance = cast("dict[str, object]", payload["context_governance"])
+    assert governance["mode"] == "observe"
+    assert payload["report_schema_version"] == REPORT_SCHEMA_VERSION
+
+
 def test_mcp_service_evaluate_gates_on_existing_run(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)

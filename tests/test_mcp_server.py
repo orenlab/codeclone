@@ -280,7 +280,7 @@ def test_mcp_server_exposes_expected_read_only_tools() -> None:
         tools["list_hotspots"].description
     )
     assert "Prefer format='markdown'" in str(tools["generate_pr_summary"].description)
-    assert "over all unless necessary" in str(tools["get_report_section"].description)
+    assert "section=all" in str(tools["get_report_section"].description)
     analyze_repository_schema = cast(
         "dict[str, object]",
         tools["analyze_repository"].inputSchema,

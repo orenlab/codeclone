@@ -199,8 +199,9 @@ EVALUATE_GATES: Final = (
 )
 
 GET_REPORT_SECTION: Final = (
-    "Return one canonical report section. Prefer metrics, metrics_detail, "
-    "changed, findings over all unless necessary."
+    "Return one canonical report section. inventory paginates file_registry; "
+    "findings requires family= for group pages; metrics_detail paginates "
+    "metric items. Prefer metrics, changed, list_findings over section=all."
 )
 
 LIST_FINDINGS: Final = (

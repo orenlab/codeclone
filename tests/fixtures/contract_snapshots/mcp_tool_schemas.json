@@ -678,7 +678,7 @@
         },
         "max_results": {
           "default": 10,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Max Results",
           "type": "integer"
         },
@@ -738,7 +738,7 @@
         },
         "max_results": {
           "default": 10,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Max Results",
           "type": "integer"
         },
@@ -811,7 +811,7 @@
         },
         "max_results": {
           "default": 10,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Max Results",
           "type": "integer"
         },
@@ -871,7 +871,7 @@
         },
         "max_results": {
           "default": 10,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Max Results",
           "type": "integer"
         },
@@ -944,7 +944,7 @@
         },
         "max_results": {
           "default": 10,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Max Results",
           "type": "integer"
         },
@@ -2097,7 +2097,7 @@
             }
           ],
           "default": null,
-          "description": "Metrics or finding family filter.",
+          "description": "metrics_detail: complexity, coupling, cohesion, dependencies, dead_code, api_surface, security_surfaces, overloaded_modules, health, coverage_adoption, coverage_join. findings: clone, structural, dead_code, or design.",
           "title": "Family"
         },
         "path": {
@@ -2115,13 +2115,13 @@
         },
         "offset": {
           "default": 0,
-          "description": "Pagination offset.",
+          "description": "Pagination offset for inventory file_registry, findings groups, or metrics_detail items.",
           "title": "Offset",
           "type": "integer"
         },
         "limit": {
           "default": 50,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Limit",
           "type": "integer"
         }
@@ -2341,13 +2341,13 @@
         },
         "offset": {
           "default": 0,
-          "description": "Pagination offset.",
+          "description": "Pagination offset for inventory file_registry, findings groups, or metrics_detail items.",
           "title": "Offset",
           "type": "integer"
         },
         "limit": {
           "default": 50,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Limit",
           "type": "integer"
         },
@@ -2434,7 +2434,7 @@
         },
         "limit": {
           "default": 10,
-          "description": "Pagination limit.",
+          "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Limit",
           "type": "integer"
         },
