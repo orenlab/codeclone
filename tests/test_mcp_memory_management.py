@@ -434,7 +434,23 @@ def test_mcp_get_memory_projection_page_continues_relevant_memory_tail(
     assert cast("list[object]", page["items"])
     governance = cast("dict[str, object]", page["context_governance"])
     response = cast("dict[str, object]", governance["response"])
-    assert response["tool"] == "get_memory_projection_page"
+    assert {
+        "tool": response["tool"],
+        "policy": response["evidence_policy"],
+        "mode": governance["mode"],
+        "enforcement": governance["enforcement"],
+        "truncated": governance["truncated"],
+    } == {
+        "tool": "get_memory_projection_page",
+        "policy": "digest_bound_continuation_page",
+        "mode": "observe",
+        "enforcement": {
+            "response_budget": False,
+            "nested_budget": False,
+            "omission": False,
+        },
+        "truncated": False,
+    }
 
 
 def test_mcp_get_relevant_memory_compact_enforces_response_budget(

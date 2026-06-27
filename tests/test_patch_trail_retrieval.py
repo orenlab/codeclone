@@ -182,7 +182,23 @@ def test_get_patch_trail_structured_post_clear(tmp_path: Path) -> None:
     assert trail["verification_status"] == "accepted"
     governance = cast("dict[str, object]", out["context_governance"])
     response = cast("dict[str, object]", governance["response"])
-    assert response["tool"] == "get_patch_trail"
+    assert {
+        "tool": response["tool"],
+        "policy": response["evidence_policy"],
+        "mode": governance["mode"],
+        "enforcement": governance["enforcement"],
+        "truncated": governance["truncated"],
+    } == {
+        "tool": "get_patch_trail",
+        "policy": "observe_only_no_omission",
+        "mode": "observe",
+        "enforcement": {
+            "response_budget": False,
+            "nested_budget": False,
+            "omission": False,
+        },
+        "truncated": False,
+    }
 
 
 def test_get_patch_trail_fail_closed_paths(tmp_path: Path) -> None:

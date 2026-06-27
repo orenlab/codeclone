@@ -10037,6 +10037,33 @@ def _assert_start_context_governance(
     assert ("omitted" in governance, enforced) != (True, False)
 
 
+def _assert_retrieval_only_context_governance(
+    payload: Mapping[str, object],
+    *,
+    tool: str,
+    evidence_policy: str,
+) -> None:
+    governance = cast("dict[str, object]", payload["context_governance"])
+    response = cast("dict[str, object]", governance["response"])
+    assert {
+        "tool": response["tool"],
+        "policy": response["evidence_policy"],
+        "mode": governance["mode"],
+        "enforcement": governance["enforcement"],
+        "truncated": governance["truncated"],
+    } == {
+        "tool": tool,
+        "policy": evidence_policy,
+        "mode": "observe",
+        "enforcement": {
+            "response_budget": False,
+            "nested_budget": False,
+            "omission": False,
+        },
+        "truncated": False,
+    }
+
+
 def test_mcp_workflow_start_controlled_change_contract(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     needs = service.start_controlled_change(
@@ -10126,6 +10153,11 @@ def test_mcp_workflow_start_summary_uses_durable_blast_artifact(
             )["value"]
         )
         assert "transitive_summary" in full_blast
+        _assert_retrieval_only_context_governance(
+            retrieved,
+            tool="get_blast_artifact",
+            evidence_policy="observe_only_no_omission",
+        )
     finally:
         service.shutdown_cleanup()
 
@@ -12399,6 +12431,11 @@ def test_mcp_get_review_receipt_markdown_rerenders_typed_receipt_without_content
     )
     assert out["status"] == "ok"
     assert "CodeClone Agent Review Receipt" in str(out["content"])
+    _assert_retrieval_only_context_governance(
+        out,
+        tool="get_review_receipt",
+        evidence_policy="observe_only_no_omission",
+    )
 
 
 def test_mcp_get_implementation_context_page_validates_inputs_and_missing_artifact(
@@ -12670,6 +12707,11 @@ def test_mcp_get_implementation_context_page_root_and_run_guards(
     assert ok_page["status"] == "ok"
     items = cast("list[object]", ok_page["items"])
     assert len(items) == 1
+    _assert_retrieval_only_context_governance(
+        ok_page,
+        tool="get_implementation_context_page",
+        evidence_policy="exact_session_projection_page",
+    )
 
 
 def test_budgeted_implementation_context_response_breaks_when_nothing_reducible(

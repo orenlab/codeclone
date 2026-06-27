@@ -19,6 +19,8 @@ from codeclone.surfaces.mcp._context_governance import (
     CONTEXT_GOVERNANCE_ESTIMATOR,
     DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
     FINISH_RESPONSE_PROJECTION_KIND,
+    IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+    MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     START_RESPONSE_PROJECTION_KIND,
     attach_finish_context_governance,
     attach_implementation_context_governance,
@@ -369,6 +371,132 @@ def test_context_governance_declares_drill_down_reachability() -> None:
         ),
         "context_facet_continuation": "available",
     }
+
+
+def test_context_governance_enforcement_truth_table() -> None:
+    passive = attach_passive_context_governance(
+        {"status": "ok"},
+        response={
+            "tool": "get_blast_artifact",
+            "budget_scope": "whole_response",
+            "evidence_policy": "observe_only_no_omission",
+        },
+    )
+    cases = [
+        (
+            "passive retrieval",
+            passive,
+            "get_blast_artifact",
+            "observe",
+            "observe_only_no_omission",
+            {"response_budget": False, "nested_budget": False, "omission": False},
+            None,
+        ),
+        (
+            "memory compact",
+            attach_memory_retrieval_context_governance(
+                {"records": []},
+                detail_level="compact",
+                max_records=10,
+            ),
+            "get_relevant_memory",
+            "partial_enforce",
+            "response_budget_with_exact_continuation",
+            {"response_budget": True, "nested_budget": False, "omission": True},
+            MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+        ),
+        (
+            "memory full",
+            attach_memory_retrieval_context_governance(
+                {"records": []},
+                detail_level="full",
+                max_records=10,
+            ),
+            "get_relevant_memory",
+            "observe",
+            "observe_only_no_omission",
+            {"response_budget": False, "nested_budget": False, "omission": False},
+            MEMORY_RETRIEVAL_RESPONSE_PROJECTION_KIND,
+        ),
+        (
+            "implementation compact",
+            attach_implementation_context_governance(
+                {"status": "ok"},
+                detail_level="normal",
+                budget=50,
+            ),
+            "get_implementation_context",
+            "partial_enforce",
+            "response_budget_with_exact_facet_pages",
+            {"response_budget": True, "nested_budget": True, "omission": True},
+            IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+        ),
+        (
+            "implementation full",
+            attach_implementation_context_governance(
+                {"status": "ok"},
+                detail_level="full",
+                budget=50,
+            ),
+            "get_implementation_context",
+            "observe",
+            "observe_only_no_omission",
+            {"response_budget": False, "nested_budget": False, "omission": False},
+            IMPLEMENTATION_CONTEXT_RESPONSE_PROJECTION_KIND,
+        ),
+        (
+            "start enforced",
+            attach_start_context_governance(
+                {"intent_id": "intent-1"},
+                enforce_budget=True,
+            ),
+            "start_controlled_change",
+            "partial_enforce",
+            "response_budget_with_immutable_blast_artifact",
+            {"response_budget": True, "nested_budget": False, "omission": True},
+            START_RESPONSE_PROJECTION_KIND,
+        ),
+        (
+            "finish enforced",
+            attach_finish_context_governance({"intent_id": "intent-1"}),
+            "finish_controlled_change",
+            "partial_enforce",
+            "response_budget_with_durable_artifact_lookup",
+            {"response_budget": True, "nested_budget": False, "omission": True},
+            FINISH_RESPONSE_PROJECTION_KIND,
+        ),
+    ]
+
+    for (
+        label,
+        payload,
+        expected_tool,
+        expected_mode,
+        expected_policy,
+        expected_enforcement,
+        expected_digest_kind,
+    ) in cases:
+        envelope = cast("dict[str, object]", payload["context_governance"])
+        response = cast("dict[str, object]", envelope["response"])
+        digest = response.get("projection_digest")
+        digest_kind = (
+            cast("dict[str, object]", digest)["kind"]
+            if isinstance(digest, dict)
+            else None
+        )
+        assert {
+            "tool": response["tool"],
+            "mode": envelope["mode"],
+            "policy": response["evidence_policy"],
+            "enforcement": envelope["enforcement"],
+            "digest_kind": digest_kind,
+        } == {
+            "tool": expected_tool,
+            "mode": expected_mode,
+            "policy": expected_policy,
+            "enforcement": expected_enforcement,
+            "digest_kind": expected_digest_kind,
+        }, label
 
 
 def test_context_governance_has_no_tokenizer_dependency() -> None:
