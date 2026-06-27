@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Observability sqlite schema (Phase 29 §4.5).
+"""Observability sqlite schema.
 
 Two tables — operations (surface-level) and spans (stage/subsystem) — plus a
 meta row carrying the schema version. Profile columns are nullable

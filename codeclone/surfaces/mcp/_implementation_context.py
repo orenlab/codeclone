@@ -369,7 +369,7 @@ def _contract_path_role(records: Sequence[Mapping[str, object]]) -> str | None:
 
     Priority is a typed contract registry, then a known protocol/interface
     symbol, then an Engineering Memory module_role/contract_note — never a name
-    or directory heuristic. Phase 30 wires only the memory anchor: a module_role
+    or directory heuristic. The memory anchor is a module_role
     record whose role_kind is a contract role (not the inventory_module default).
     """
     for row in records:

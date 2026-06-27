@@ -34,6 +34,9 @@ from ...audit.reader import (
     lookup_patch_trail,
     lookup_review_receipt,
 )
+from ...config.memory import resolve_memory_config
+from ...memory.project import resolve_memory_db_path, resolve_project_identity
+from ...memory.sqlite_store import SqliteEngineeringMemoryStore
 from ._context_governance import (
     BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND,
@@ -134,19 +137,11 @@ class _MCPSessionAuditArtifactMixin:
         ambiguous, digest_mismatch, malformed_stored_patch_trail,
         unsupported_format.
         """
-        return _durable_artifact_response(
+        return _patch_trail_response(
             root=root,
             run_id=run_id,
-            artifact_digest=patch_trail_digest,
-            digest_key="patch_trail_digest",
+            patch_trail_digest=patch_trail_digest,
             output_format=format,
-            supported_formats=_PATCH_TRAIL_RETRIEVAL_FORMATS,
-            require_message="get_patch_trail requires run_id or patch_trail_digest.",
-            lookup=_patch_trail_lookup,
-            render=lambda artifact, fmt: _render_stored_patch_trail(
-                cast("StoredPatchTrail", artifact), output_format=fmt
-            ),
-            envelope=_patch_trail_envelope,
         )
 
 
@@ -196,6 +191,69 @@ def _durable_artifact_response(
             }
         )
     return envelope(render(artifact, output_format))
+
+
+def _patch_trail_response(
+    *,
+    root: str,
+    run_id: str | None,
+    patch_trail_digest: str | None,
+    output_format: str,
+) -> dict[str, object]:
+    if output_format not in _PATCH_TRAIL_RETRIEVAL_FORMATS:
+        return _patch_trail_envelope(
+            {
+                "status": "unsupported_format",
+                "requested_format": output_format,
+                "supported_formats": sorted(_PATCH_TRAIL_RETRIEVAL_FORMATS),
+            }
+        )
+    if not run_id and not patch_trail_digest:
+        raise MCPServiceContractError(
+            "get_patch_trail requires run_id or patch_trail_digest."
+        )
+    root_path = Path(root)
+    audit_path = resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
+    try:
+        status, match_count, artifact = _patch_trail_lookup(
+            audit_path,
+            run_id,
+            patch_trail_digest,
+        )
+    except AuditReadError as exc:
+        raise MCPServiceContractError(str(exc)) from exc
+    if status == "ok" and artifact is not None:
+        return _patch_trail_envelope(
+            _render_stored_patch_trail(artifact, output_format=output_format)
+        )
+
+    fallback_status, fallback_count, fallback = _memory_patch_trail_lookup(
+        root_path=root_path,
+        run_id=run_id,
+        patch_trail_digest=patch_trail_digest,
+    )
+    if fallback_status == "ok" and fallback is not None:
+        return _patch_trail_envelope(
+            _render_stored_patch_trail(
+                fallback,
+                output_format=output_format,
+                source="memory_trajectory_patch_trail",
+            )
+        )
+    if fallback_status != "not_found":
+        status = fallback_status
+        match_count = fallback_count
+    return _patch_trail_envelope(
+        {
+            "status": status,
+            "run_id": run_id,
+            "patch_trail_digest": patch_trail_digest,
+            "match_count": match_count,
+            "source": "audit_event",
+            "fallback_source": "memory_trajectory_patch_trail",
+            "durable": True,
+        }
+    )
 
 
 def _blast_artifact_response(
@@ -299,6 +357,7 @@ def _render_stored_patch_trail(
     patch_trail: StoredPatchTrail,
     *,
     output_format: str,
+    source: str = "audit_event",
 ) -> dict[str, object]:
     return {
         "status": "ok",
@@ -309,11 +368,78 @@ def _render_stored_patch_trail(
         "schema_version": patch_trail.schema_version,
         "created_at_utc": patch_trail.created_at_utc,
         "format": output_format,
-        "source": "audit_event",
+        "source": source,
         "durable": True,
         "retention_bounded": True,
         "patch_trail": patch_trail.payload,
     }
+
+
+def _memory_patch_trail_lookup(
+    *,
+    root_path: Path,
+    run_id: str | None,
+    patch_trail_digest: str | None,
+) -> tuple[str, int, StoredPatchTrail | None]:
+    config = resolve_memory_config(root_path)
+    db_path = resolve_memory_db_path(root_path, config)
+    if not db_path.exists():
+        return "not_found", 0, None
+    project = resolve_project_identity(root_path)
+    store = SqliteEngineeringMemoryStore(db_path)
+    try:
+        payloads, malformed = store.find_trajectory_patch_trails_for_lookup(
+            project_id=project.id,
+            patch_trail_digest=patch_trail_digest,
+            run_id=run_id,
+        )
+        if len(payloads) == 1:
+            artifact = _stored_patch_trail_from_memory(payloads[0])
+            if artifact is None:
+                return "malformed_stored_patch_trail", 0, None
+            return "ok", 1, artifact
+        if len(payloads) > 1:
+            return "ambiguous", len(payloads), None
+        if patch_trail_digest is not None and run_id is not None:
+            run_payloads, run_malformed = store.find_trajectory_patch_trails_for_lookup(
+                project_id=project.id,
+                run_id=run_id,
+            )
+            if run_payloads:
+                return "digest_mismatch", 0, None
+            malformed += run_malformed
+        if malformed:
+            return "malformed_stored_patch_trail", 0, None
+        return "not_found", 0, None
+    finally:
+        store.close()
+
+
+def _stored_patch_trail_from_memory(
+    row: Mapping[str, object],
+) -> StoredPatchTrail | None:
+    payload = row.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    digest = str(row.get("patch_trail_digest", "")).strip()
+    if not digest:
+        return None
+    return StoredPatchTrail(
+        run_id=str(row.get("run_id", "")).strip() or None,
+        patch_trail_digest=digest,
+        scope_check_status=_str_or_none(payload.get("scope_check_status")),
+        verification_status=_str_or_none(payload.get("verification_status")),
+        schema_version=_str_or_none(payload.get("schema_version")),
+        created_at_utc=str(row.get("created_at_utc", "")).strip(),
+        payload=dict(payload),
+    )
+
+
+def _str_or_none(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
 
 
 def _review_receipt_envelope(payload: dict[str, object]) -> dict[str, object]:
@@ -350,7 +476,7 @@ def _patch_trail_envelope(payload: dict[str, object]) -> dict[str, object]:
             "tool": "get_patch_trail",
             "budget_scope": "whole_response",
             "evidence_policy": "observe_only_no_omission",
-            "retrieval": "durable_audit_event",
+            "retrieval": "durable_audit_event_or_memory_projection",
         },
     )
 

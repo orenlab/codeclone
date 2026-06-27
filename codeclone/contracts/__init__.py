@@ -16,7 +16,7 @@ CACHE_VERSION: Final = "2.10"
 REPORT_SCHEMA_VERSION: Final = "2.11"
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.2"
 ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.7"
-# Semantic retrieval index (Phase 20). Derived, rebuildable sidecar — NOT
+# Semantic retrieval index. Derived, rebuildable sidecar — NOT
 # covered by ENGINEERING_MEMORY_SCHEMA_VERSION. Bump to invalidate the index
 # on an incompatible projection/row-format change (forces a rebuild, not a
 # SQLite migration). v3 (Stage 2) adds the ``source_revision`` row column; the

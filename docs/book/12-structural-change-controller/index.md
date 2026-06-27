@@ -10,7 +10,7 @@ The v2.1 alpha currently includes intent, blast-radius, patch-contract checks,
 review receipts, workspace intent visibility, claim guard, and CLI controller
 queries:
 
-| Phase                     | Status            | Surface                                                                            |
+| Capability                | Status            | Surface                                                                            |
 |---------------------------|-------------------|------------------------------------------------------------------------------------|
 | Declarative workflow      | Live in `2.1.0a1` | MCP `start_controlled_change`, `finish_controlled_change`                          |
 | Intent declaration        | Live in `2.1.0a1` | MCP `manage_change_intent`                                                         |

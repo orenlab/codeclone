@@ -836,7 +836,7 @@ Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection
 | `memory_trajectory_steps`           | Ordered audit steps with frozen `event_core_json`                              |
 | `memory_trajectory_subjects`        | Path/module subjects linked to a trajectory                                    |
 | `memory_trajectory_evidence`        | Report/run/audit evidence refs                                                 |
-| `memory_trajectory_patch_trails`    | Patch Trail JSON + digest per trajectory (schema **`1.4`**, Phase 26)          |
+| `memory_trajectory_patch_trails`    | Patch Trail JSON + digest per trajectory (schema **`1.4`**)                    |
 | `memory_trajectory_projection_runs` | Rebuild run manifest                                                           |
 
 Experience tables (schema **`1.6`**, derived from trajectory evidence):

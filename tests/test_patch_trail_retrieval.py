@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Phase 34 — durable post-clear patch-trail retrieval (get_patch_trail).
+"""Durable post-clear patch-trail retrieval (get_patch_trail).
 
 These tests write a patch_trail.computed event to the audit trail and read it
 back through a FRESH service with no session knowledge of the run, proving the
@@ -15,6 +15,7 @@ as persisted (forensic-retention), never re-derives or summarizes it.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 
@@ -33,8 +34,14 @@ from codeclone.audit.reader import (
 )
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.contracts import PATCH_TRAIL_SCHEMA_VERSION
+from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+from codeclone.memory.trajectory import store as trajectory_store
+from codeclone.memory.trajectory.models import Trajectory
 from codeclone.surfaces.mcp._session_shared import MCPServiceContractError
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
+from codeclone.utils.json_io import json_text
+
+from .memory_fixtures import memory_project_db_paths
 
 
 def _patch_trail_payload(
@@ -95,6 +102,35 @@ def _ok_trail(lookup: PatchTrailLookup) -> StoredPatchTrail:
     assert lookup.status == "ok"
     assert lookup.patch_trail is not None
     return lookup.patch_trail
+
+
+def _assert_structured_patch_trail_response(
+    out: Mapping[str, object],
+    *,
+    source: str,
+) -> dict[str, object]:
+    assert out["status"] == "ok"
+    assert out["format"] == "structured"
+    assert out["source"] == source
+    assert out["durable"] is True
+    assert out["patch_trail_digest"] == "abc123"
+    trail = cast("dict[str, object]", out["patch_trail"])
+    assert trail["declared_files"] == ["a.py"]
+    return trail
+
+
+def _assert_patch_trail_retrieval_governance(out: Mapping[str, object]) -> None:
+    governance = cast("dict[str, object]", out["context_governance"])
+    response = cast("dict[str, object]", governance["response"])
+    assert response["tool"] == "get_patch_trail"
+    assert response["evidence_policy"] == "observe_only_no_omission"
+    assert governance["mode"] == "observe"
+    assert governance["enforcement"] == {
+        "response_budget": False,
+        "nested_budget": False,
+        "omission": False,
+    }
+    assert governance["truncated"] is False
 
 
 def test_lookup_patch_trail_compact_mode_preserves_full_forensic_trail(
@@ -172,33 +208,78 @@ def test_get_patch_trail_structured_post_clear(tmp_path: Path) -> None:
         root=str(tmp_path), run_id="30b56d21", patch_trail_digest="abc123"
     )
 
-    assert out["status"] == "ok"
-    assert out["format"] == "structured"
-    assert out["source"] == "audit_event"
-    assert out["durable"] is True
-    assert out["patch_trail_digest"] == "abc123"
-    trail = cast("dict[str, object]", out["patch_trail"])
-    assert trail["declared_files"] == ["a.py"]
+    trail = _assert_structured_patch_trail_response(out, source="audit_event")
     assert trail["verification_status"] == "accepted"
+    _assert_patch_trail_retrieval_governance(out)
+
+
+def test_get_patch_trail_falls_back_to_memory_trajectory_store(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project, db_path = memory_project_db_paths(root)
+    store = SqliteEngineeringMemoryStore(db_path)
+    now = "2026-01-01T00:00:00Z"
+    trajectory = Trajectory(
+        id="traj-patch-trail",
+        project_id=project.id,
+        repo_root_digest="rootdigest0000",
+        workflow_id="intent:intent-30b56d21-001",
+        intent_id="intent-30b56d21-001",
+        primary_run_id="30b56d21",
+        first_run_id="30b56d21",
+        last_run_id="30b56d21",
+        report_digest="reportdigest",
+        outcome="accepted",
+        quality_tier="verified",
+        quality_score=95,
+        labels=("patch_trail_recorded",),
+        summary="accepted change with durable patch trail",
+        trajectory_digest="t" * 64,
+        source_event_stream_digest="s" * 64,
+        projection_version="trajectory-v3",
+        event_count=2,
+        step_count=0,
+        incident_count=0,
+        started_at_utc=now,
+        finished_at_utc=now,
+        projected_at_utc=now,
+        updated_at_utc=now,
+        steps=(),
+        subjects=(),
+        evidence=(),
+    )
+    try:
+        store.initialize(project)
+        trajectory_store.upsert_trajectory(store.connection, trajectory)
+        trajectory_store.upsert_trajectory_patch_trail(
+            store.connection,
+            trajectory_id=trajectory.id,
+            patch_trail_json=json_text(_patch_trail_payload(), sort_keys=True),
+            patch_trail_digest="abc123",
+            schema_version=PATCH_TRAIL_SCHEMA_VERSION,
+            projected_at_utc=now,
+        )
+        store.commit()
+    finally:
+        store.close()
+
+    service = CodeCloneMCPService(history_limit=4)
+    out = service.get_patch_trail(
+        root=str(root),
+        run_id="30b56d21",
+        patch_trail_digest="abc123",
+    )
+
+    _assert_structured_patch_trail_response(
+        out,
+        source="memory_trajectory_patch_trail",
+    )
+    _assert_patch_trail_retrieval_governance(out)
     governance = cast("dict[str, object]", out["context_governance"])
     response = cast("dict[str, object]", governance["response"])
-    assert {
-        "tool": response["tool"],
-        "policy": response["evidence_policy"],
-        "mode": governance["mode"],
-        "enforcement": governance["enforcement"],
-        "truncated": governance["truncated"],
-    } == {
-        "tool": "get_patch_trail",
-        "policy": "observe_only_no_omission",
-        "mode": "observe",
-        "enforcement": {
-            "response_budget": False,
-            "nested_budget": False,
-            "omission": False,
-        },
-        "truncated": False,
-    }
+    assert response["retrieval"] == "durable_audit_event_or_memory_projection"
 
 
 def test_get_patch_trail_fail_closed_paths(tmp_path: Path) -> None:

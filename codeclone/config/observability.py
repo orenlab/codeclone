@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Platform observability configuration (Phase 29, Track A).
+"""Platform observability configuration.
 
 Env-first resolution. Default OFF — when disabled, this does the minimal env
 check and never imports psutil, never opens a store, never parses a pyproject

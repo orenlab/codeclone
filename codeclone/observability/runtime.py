@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Observability write API (Phase 29 §4.3).
+"""Observability write API.
 
 ``bootstrap`` freezes the enabled decision once per process. When disabled,
 ``operation``/``span`` yield a cheap inert handle and return immediately — no

@@ -86,6 +86,87 @@ from ._workspace_drift import compute_drift
 from ._workspace_intents import remove_workspace_intent
 
 
+def _module_map_graph_payload(
+    graph: Mapping[str, object],
+    *,
+    offset: int,
+    limit: int,
+) -> dict[str, object]:
+    payload = {
+        key: value for key, value in graph.items() if key not in {"nodes", "edges"}
+    }
+    payload["nodes"] = _module_map_page_payload(
+        [
+            dict(_helpers._as_mapping(item))
+            for item in _helpers._as_sequence(graph.get("nodes"))
+        ],
+        offset=offset,
+        limit=limit,
+    )
+    payload["edges"] = _module_map_page_payload(
+        [
+            dict(_helpers._as_mapping(item))
+            for item in _helpers._as_sequence(graph.get("edges"))
+        ],
+        offset=offset,
+        limit=limit,
+    )
+    return payload
+
+
+def _module_map_page_payload(
+    items: Sequence[dict[str, object]],
+    *,
+    offset: int,
+    limit: int,
+) -> dict[str, object]:
+    page = paginate(items, offset=offset, limit=limit, max_limit=200)
+    return {
+        "offset": page.offset,
+        "limit": page.limit,
+        "total": page.total,
+        "returned": len(page.items),
+        "has_more": page.next_offset is not None,
+        "next_offset": page.next_offset,
+        "items": page.items,
+    }
+
+
+def _module_map_section_payload(
+    module_map: Mapping[str, object],
+    *,
+    offset: int,
+    limit: int,
+) -> dict[str, object]:
+    payload = dict(module_map)
+    summary = _helpers._as_mapping(payload.get("summary"))
+    if summary.get("available") is False:
+        return payload
+    for graph_key in ("graph_packages", "graph_modules"):
+        graph = _helpers._as_mapping(module_map.get(graph_key))
+        if graph:
+            payload[graph_key] = _module_map_graph_payload(
+                graph,
+                offset=offset,
+                limit=limit,
+            )
+    candidates = [
+        dict(_helpers._as_mapping(item))
+        for item in _helpers._as_sequence(module_map.get("unwind_candidates"))
+    ]
+    payload["unwind_candidates"] = _module_map_page_payload(
+        candidates,
+        offset=offset,
+        limit=limit,
+    )
+    payload["_hint"] = (
+        "Use offset/limit to page graph node, edge, and unwind-candidate "
+        "lanes. The full report remains available through generated report "
+        "artifacts; MCP returns bounded lanes for agent context."
+    )
+    return payload
+
+
 class _MCPSessionChangedProjectionMixin(_MCPSessionFindingMixin):
     _runs: CodeCloneMCPRunStore
     _state_lock: _StateLock
@@ -1010,7 +1091,11 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 raise MCPServiceContractError(
                     "Report section 'module_map' is not available in this run."
                 )
-            return dict(_helpers._as_mapping(derived.get("module_map")))
+            return _module_map_section_payload(
+                _helpers._as_mapping(derived.get("module_map")),
+                offset=offset,
+                limit=limit,
+            )
         payload = report_document.get(validated_section)
         if not isinstance(payload, Mapping):
             raise MCPServiceContractError(

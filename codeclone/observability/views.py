@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Read-model views (Phase 29 §4.6).
+"""Read-model views.
 
 ``TraceView`` is the primary artifact; JSON/text/HTML renderers are projections
 over it and must not drive the schema. Pure data, built by ``store/reader.py``.

@@ -148,10 +148,11 @@ def close_semantic_index(index: object | None) -> None:
 def resolve_semantic_index(config: SemanticConfig) -> SemanticIndex:
     """Resolve the semantic index for the given config.
 
-    Null when disabled; otherwise the backend. The LanceDB backend is wired in
-    Phase 20.2 via a lazy import inside this function (so absence never crashes
-    the import of the memory package). Until then an enabled index degrades to
-    Unavailable — read paths stay empty and explicit commands fail clear.
+    Null when disabled; otherwise the backend. The LanceDB backend is loaded
+    lazily inside this function, so absence never crashes the import of the
+    memory package. When the optional backend is unavailable, an enabled index
+    degrades to Unavailable — read paths stay empty and explicit commands fail
+    clear.
     """
     if not config.enabled:
         return NullSemanticIndex()

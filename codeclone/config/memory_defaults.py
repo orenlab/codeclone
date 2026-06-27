@@ -58,7 +58,7 @@ DEFAULT_INGEST_DOCUMENT_LINK_PATHS: Final[tuple[str, ...]] = ()
 DEFAULT_INGEST_MCP_TOOL_SCHEMA_SNAPSHOT_PATH: Final[str | None] = None
 DEFAULT_INGEST_MCP_TOOL_COUNT_DOC_PATHS: Final[tuple[str, ...]] = ()
 
-# Semantic retrieval index (Phase 20). Default OFF + "diagnostic" keep the
+# Semantic retrieval index. Default OFF + "diagnostic" keep the
 # community default zero-extra-dependency and offline; a real recall model is
 # opt-in (fastembed/community local, api/paid later).
 DEFAULT_SEMANTIC_ENABLED: Final = False

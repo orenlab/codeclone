@@ -86,7 +86,7 @@ PAYLOAD_MODES = frozenset({"off", "compact", "full"})
 # Compact mode keeps the intent description as a bounded forensic field.
 _COMPACT_TEXT_LIMIT = 500
 
-# Forensic-retention policy (Phase 34): payload compaction never strips these
+# Forensic-retention policy: payload compaction never strips these
 # event types. They are durable evidence that must survive auto_clear and stay
 # exactly retrievable after the run/intent is cleared (review-receipt drill-down
 # via get_review_receipt; full forensic patch trail via get_patch_trail; start

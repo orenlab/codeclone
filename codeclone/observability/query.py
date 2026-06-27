@@ -5,7 +5,7 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 
 """``query_platform_observability`` — a sectioned, read-only diagnostics slicer
-over the Phase 29 runtime telemetry (RFC specs/rfc-29-observability-query-tool).
+over runtime telemetry.
 
 A **slicer, not a trace export API**: each call returns one bounded *section*
 projected from the already-computed ``AggregatesView``; no response embeds the

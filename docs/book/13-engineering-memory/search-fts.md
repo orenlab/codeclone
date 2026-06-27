@@ -17,4 +17,4 @@ Refs:
 - `codeclone/memory/search_index.py`
 - `codeclone/memory/display.py`
 
-Semantic retrieval (Phase 20): [search-semantic.md](search-semantic.md).
+Semantic retrieval: [search-semantic.md](search-semantic.md).

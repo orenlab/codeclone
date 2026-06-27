@@ -48,7 +48,7 @@ FINDING_KIND_COVERAGE_SCOPE_GAP: Final = "coverage_scope_gap"
 
 DESIGN_KIND_INSTANCE_INDEPENDENT_METHOD: Final = "instance_independent_method"
 
-# Classifications for instance-independent method occurrences (Phase 21).
+# Classifications for instance-independent method occurrences.
 # Only ``candidate`` is a default-surfaced signal; the rest are context or
 # suppressed so default payloads avoid noisy contract methods.
 IIM_CLASSIFICATION_CANDIDATE: Final = "candidate"

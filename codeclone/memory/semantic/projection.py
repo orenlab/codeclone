@@ -27,7 +27,7 @@ _REVISION_FIELD_SEP = "\x1f"
 
 # Prose/decision subset only. Structural records (module_role, test_anchor,
 # document_link, public_surface, stale_marker) are served by exact subject
-# match and are NOT semantically indexed (Phase 20 spec §6.1).
+# match and are NOT semantically indexed.
 INDEXED_MEMORY_TYPES: frozenset[str] = frozenset(
     {
         "contract_note",
@@ -40,7 +40,7 @@ INDEXED_MEMORY_TYPES: frozenset[str] = frozenset(
     }
 )
 
-# Forensically useful audit incidents (Phase 20 spec §6.2). Projected from the
+# Forensically useful audit incidents. Projected from the
 # bounded controller_events.summary column only — never payload_json.
 INDEXED_AUDIT_EVENTS: frozenset[str] = frozenset(
     {

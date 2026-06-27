@@ -9781,6 +9781,82 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
         },
     }
 
+    clones_only = replace(
+        _dummy_run_record(tmp_path, "clones-only-mixed"),
+        request=MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            analysis_mode="clones_only",
+        ),
+        report_document={
+            "findings": {
+                "groups": {
+                    "clones": {
+                        "functions": [
+                            {
+                                "id": "clone:function:g1",
+                                "family": "clone",
+                                "novelty": "new",
+                                "source_scope": {"dominant_kind": "production"},
+                            }
+                        ],
+                        "blocks": [],
+                        "segments": [],
+                    },
+                    "structural": {
+                        "groups": [
+                            {
+                                "id": "structural:duplicated-branches",
+                                "family": "structural",
+                                "novelty": "new",
+                                "source_scope": {"dominant_kind": "production"},
+                            }
+                        ]
+                    },
+                    "dead_code": {
+                        "groups": [
+                            {
+                                "id": "dead_code:pkg:unused",
+                                "family": "dead_code",
+                                "novelty": "new",
+                                "source_scope": {"dominant_kind": "production"},
+                            }
+                        ]
+                    },
+                    "design": {
+                        "groups": [
+                            {
+                                "id": "design:pkg:cohesion",
+                                "family": "design",
+                                "novelty": "new",
+                                "source_scope": {"dominant_kind": "production"},
+                            }
+                        ]
+                    },
+                }
+            }
+        },
+    )
+    service._runs.register(clones_only)
+    listed = service.list_findings(run_id="clones-only-mixed")
+    base_findings = service._base_findings(clones_only)
+    assert listed["total"] == 1
+    assert [finding["family"] for finding in base_findings] == ["clone"]
+    assert service._summary_findings_payload({}, record=clones_only) == {
+        "total": 1,
+        "new": 1,
+        "known": 0,
+        "by_family": {"clones": 1},
+        "production": 1,
+        "new_by_source_kind": {
+            "production": 1,
+            "tests": 0,
+            "fixtures": 0,
+            "mixed": 0,
+            "other": 0,
+        },
+    }
+
     record = _dummy_run_record(tmp_path, "summary-helper")
     monkeypatch.setattr(
         service.session,
@@ -12443,13 +12519,37 @@ def _module_map_service(
     return service
 
 
-def test_get_report_section_module_map_matches_derived(tmp_path: Path) -> None:
-    service = _module_map_service(tmp_path)
-    module_map = service.get_report_section(section="module_map")
-    derived = cast(
-        "dict[str, object]", service.get_report_section(section="all")["derived"]
+def test_get_report_section_module_map_paginates_graph_lanes(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    canonical = {
+        "schema_version": "1",
+        "scope": "analysis_root",
+        "default_zoom": "modules",
+        "summary": {"available": True},
+        "graph_packages": {
+            "nodes": [{"id": "pkg"}, {"id": "tests"}],
+            "edges": [{"source": "tests", "target": "pkg"}],
+        },
+        "graph_modules": {
+            "nodes": [{"id": "pkg.a"}, {"id": "pkg.b"}],
+            "edges": [
+                {"source": "pkg.a", "target": "pkg.b"},
+                {"source": "tests.test_a", "target": "pkg.a"},
+            ],
+        },
+        "unwind_candidates": [{"module": "pkg.a"}, {"module": "pkg.b"}],
+    }
+    service._runs.register(
+        replace(
+            _dummy_run_record(tmp_path, "module-map-run"),
+            report_document={"derived": {"module_map": canonical}},
+        )
     )
-    assert module_map == derived["module_map"]
+    module_map = service.get_report_section(
+        run_id="module-map-run",
+        section="module_map",
+        limit=1,
+    )
     assert set(module_map) >= {
         "schema_version",
         "scope",
@@ -12460,6 +12560,25 @@ def test_get_report_section_module_map_matches_derived(tmp_path: Path) -> None:
         "unwind_candidates",
     }
     assert module_map["schema_version"] == "1"
+    assert module_map["scope"] == canonical["scope"]
+    for graph_key in ("graph_packages", "graph_modules"):
+        graph = cast("dict[str, object]", module_map[graph_key])
+        canonical_graph = cast("dict[str, object]", canonical[graph_key])
+        nodes = cast("dict[str, object]", graph["nodes"])
+        edges = cast("dict[str, object]", graph["edges"])
+        assert nodes["limit"] == 1
+        assert edges["limit"] == 1
+        assert cast("int", nodes["returned"]) <= 1
+        assert cast("int", edges["returned"]) <= 1
+        assert nodes["total"] == len(cast("list[object]", canonical_graph["nodes"]))
+        assert edges["total"] == len(cast("list[object]", canonical_graph["edges"]))
+        assert "items" in nodes
+        assert "items" in edges
+    candidates = cast("dict[str, object]", module_map["unwind_candidates"])
+    assert candidates["limit"] == 1
+    assert candidates["total"] == len(
+        cast("list[object]", canonical["unwind_candidates"])
+    )
 
 
 def test_get_report_section_module_map_clones_only_returns_shell(

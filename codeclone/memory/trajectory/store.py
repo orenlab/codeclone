@@ -1013,10 +1013,103 @@ def load_trajectory_patch_trails(
     return loaded_by_id
 
 
+def find_trajectory_patch_trails_for_lookup(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    patch_trail_digest: str | None = None,
+    run_id: str | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    """Return stored trajectory patch trails for exact drill-down lookup.
+
+    The memory projection store keeps immutable patch-trail payloads keyed by
+    trajectory, while MCP drill-down addresses them by digest and optional run.
+    This helper bridges those contracts without rebuilding current state.
+    """
+    clauses = ["t.project_id=?"]
+    params: list[object] = [project_id]
+    digest = _optional_text(patch_trail_digest)
+    if digest is not None:
+        clauses.append("pt.patch_trail_digest=?")
+        params.append(digest)
+    rows = conn.execute(
+        f"""
+        SELECT
+            t.primary_run_id,
+            t.first_run_id,
+            t.last_run_id,
+            pt.trajectory_id,
+            pt.patch_trail_digest,
+            pt.patch_trail_json,
+            pt.projected_at_utc
+        FROM memory_trajectory_patch_trails AS pt
+        JOIN memory_trajectories AS t ON t.id = pt.trajectory_id
+        WHERE {" AND ".join(clauses)}
+        ORDER BY pt.projected_at_utc DESC, pt.trajectory_id ASC
+        """,
+        tuple(params),
+    ).fetchall()
+    requested_run_id = _optional_text(run_id)
+    payloads: list[dict[str, object]] = []
+    malformed = 0
+    for row in rows:
+        if requested_run_id is not None and not _trajectory_run_id_matches(
+            row,
+            requested_run_id,
+        ):
+            continue
+        try:
+            loaded = orjson.loads(str(row["patch_trail_json"]))
+        except orjson.JSONDecodeError:
+            malformed += 1
+            continue
+        if not isinstance(loaded, dict):
+            malformed += 1
+            continue
+        payloads.append(
+            {
+                "run_id": _lookup_run_id(row),
+                "patch_trail_digest": str(row["patch_trail_digest"]),
+                "created_at_utc": str(row["projected_at_utc"]),
+                "payload": loaded,
+            }
+        )
+    return payloads, malformed
+
+
+def _trajectory_run_id_matches(row: sqlite3.Row, requested: str) -> bool:
+    return any(
+        _run_id_token_matches(row[key], requested)
+        for key in ("primary_run_id", "first_run_id", "last_run_id")
+    )
+
+
+def _run_id_token_matches(stored: object, requested: str) -> bool:
+    stored_id = _optional_text(stored)
+    requested_id = _optional_text(requested)
+    if stored_id is None or requested_id is None:
+        return False
+    return (
+        stored_id == requested_id
+        or stored_id.startswith(requested_id)
+        or requested_id.startswith(stored_id)
+    )
+
+
+def _lookup_run_id(row: sqlite3.Row) -> str:
+    return (
+        _optional_text(row["primary_run_id"])
+        or _optional_text(row["last_run_id"])
+        or _optional_text(row["first_run_id"])
+        or ""
+    )
+
+
 __all__ = [
     "count_trajectories",
     "find_trajectories_by_ids",
     "find_trajectory",
+    "find_trajectory_patch_trails_for_lookup",
     "latest_projection_run",
     "list_trajectories",
     "list_trajectories_for_intent_id",

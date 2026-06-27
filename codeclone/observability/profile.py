@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""psutil resource sampling for observability profiling (Phase 29, profile=true).
+"""psutil resource sampling for observability profiling.
 
 psutil is an optional dependency (``codeclone[perf]``) imported lazily inside the
 capture functions, so a disabled or non-profiling process never loads it. Every

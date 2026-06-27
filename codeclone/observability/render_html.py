@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Branded HTML renderer for the observability ``TraceView`` (Phase 29 output).
+"""Branded HTML renderer for the observability ``TraceView``.
 
 A single self-contained page rendered as a *runtime-diagnosis cockpit*, not a
 data dump. It is laid out for a top-down reading trajectory that answers the
@@ -1107,7 +1107,7 @@ def _empty_analysis_phase_section(trace: TraceView) -> str:
         reason = (
             "pipeline.process ran, but no analysis phase counters were recorded. "
             "Restart the producing process with CODECLONE_OBSERVABILITY_ENABLED=1 "
-            "and Phase 33 instrumentation."
+            "and analysis phase instrumentation."
         )
     counters = (
         f"pipeline.process files_analyzed={files_analyzed} · "

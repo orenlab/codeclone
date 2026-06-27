@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
-"""Platform observability (Phase 29).
+"""Platform observability.
 
 A runtime-profiling plane separate from audit truth, the analysis report, and
 the memory store: operations and stage spans for CLI / MCP / projection workers.

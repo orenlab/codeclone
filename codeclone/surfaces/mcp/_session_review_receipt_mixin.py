@@ -154,7 +154,7 @@ class _MCPSessionReviewReceiptMixin:
             status=verdict,
             payload=audit_payload,
         )
-        # Phase 34.3 dedup: the default response keeps the human-complete markdown
+        # Default response dedup: keep the human-complete markdown receipt
         # content plus identity and omits the duplicate nested typed receipt — now
         # durably retrievable post-clear via get_review_receipt.
         return {

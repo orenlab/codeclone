@@ -76,7 +76,7 @@ _SEMANTIC_ENV_OVERRIDES: dict[str, str] = {
 
 
 class SemanticConfig(BaseModel):
-    """Validated semantic-retrieval config (Phase 20).
+    """Validated semantic-retrieval config.
 
     The single validation authority for ``[tool.codeclone.memory.semantic]``:
     ``frozen`` + ``extra="forbid"`` reject unknown keys, bad literals, and
@@ -125,7 +125,7 @@ class SemanticConfig(BaseModel):
 
 
 class IngestConfig(BaseModel):
-    """Validated memory ingest path config (Phase 18+).
+    """Validated memory ingest path config.
 
     Empty ``contract_constants_paths`` / ``document_link_paths`` enable
     registry-aware auto-discovery. MCP tool-count contradiction checks run

@@ -21,24 +21,24 @@ controlled edits.
 
 ## Status
 
-| Phase | Capability                                                    | Surface                                                                                  |
-|-------|---------------------------------------------------------------|------------------------------------------------------------------------------------------|
-| 18.1  | Store, init ingest, CLI `init\|status\|for-path\|search`      | CLI                                                                                      |
-| 18.2  | Scoped retrieval, ranking                                     | MCP `get_relevant_memory`, `query_engineering_memory`                                    |
-| 18.3  | Refresh staleness, scope staleness, retention                 | CLI `stale`, `vacuum`; finish hook marks scope stale                                     |
-| 18.4  | Draft governance, claim validation                            | MCP `manage_engineering_memory`; CLI `review-candidates\|approve\|reject\|archive`       |
-| 18.5  | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                          |
-| 18.6  | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                                  |
-| 18.7  | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`           |
-| 20    | Optional semantic retrieval (LanceDB sidecar)                 | `[tool.codeclone.memory.semantic]`; CLI `memory semantic *`; MCP/CLI search `--semantic` |
-| 22    | Audit event core for trajectory replay                        | `AUDIT_EVENT_CORE_VERSION`; audit `event_core_json` / `workflow_id`                      |
-| 23    | Trajectory projection + SQLite storage                        | CLI `memory trajectory status\|rebuild\|list\|show\|search`                              |
-| 24    | Scoped trajectory retrieval + memory evidence                 | MCP `get_relevant_memory.trajectories[]`; `query_engineering_memory(mode=trajectory_*)`  |
-| 25    | Disabled-by-default local JSONL export profiles               | CLI `memory trajectory export --profile ... --out ...`                                   |
-| 26    | Patch Trail persistence + scoped retrieval                    | `memory_trajectory_patch_trails`; `patch_trail_summary` on scoped retrieval              |
-| 28    | Incremental projection jobs                                   | Watermarked trajectory rebuild, semantic hash-skip, coalesced worker                     |
-| Live  | Trajectory quality and passport analytics                     | Quality/complexity contract, anomalies, agents, dashboard                                |
-| Live  | Experience Layer                                              | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
+| Status           | Capability                                                    | Surface                                                                                  |
+|------------------|---------------------------------------------------------------|------------------------------------------------------------------------------------------|
+| Live             | Store, init ingest, CLI `init\|status\|for-path\|search`      | CLI                                                                                      |
+| Live             | Scoped retrieval, ranking                                     | MCP `get_relevant_memory`, `query_engineering_memory`                                    |
+| Live             | Refresh staleness, scope staleness, retention                 | CLI `stale`, `vacuum`; finish hook marks scope stale                                     |
+| Live             | Draft governance, claim validation                            | MCP `manage_engineering_memory`; CLI `review-candidates\|approve\|reject\|archive`       |
+| Live             | Scope coverage, finish proposals                              | `finish_controlled_change(propose_memory=true)`                                          |
+| Live             | FTS search (`match_mode`), git hotspots, schema 1.1, Rich CLI | CLI `--match`; MCP `filters.match_mode`                                                  |
+| Live             | MCP sync from analysis runs                                   | `mcp_sync_policy`; auto bootstrap on `get_relevant_memory`; `refresh_from_run`           |
+| Optional sidecar | Semantic retrieval (LanceDB sidecar)                          | `[tool.codeclone.memory.semantic]`; CLI `memory semantic *`; MCP/CLI search `--semantic` |
+| Live             | Audit event core for trajectory replay                        | `AUDIT_EVENT_CORE_VERSION`; audit `event_core_json` / `workflow_id`                      |
+| Live             | Trajectory projection + SQLite storage                        | CLI `memory trajectory status\|rebuild\|list\|show\|search`                              |
+| Live             | Scoped trajectory retrieval + memory evidence                 | MCP `get_relevant_memory.trajectories[]`; `query_engineering_memory(mode=trajectory_*)`  |
+| Local opt-in     | Disabled-by-default local JSONL export profiles               | CLI `memory trajectory export --profile ... --out ...`                                   |
+| Live             | Patch Trail persistence + scoped retrieval                    | `memory_trajectory_patch_trails`; `patch_trail_summary` on scoped retrieval              |
+| Live             | Incremental projection jobs                                   | Watermarked trajectory rebuild, semantic hash-skip, coalesced worker                     |
+| Live             | Trajectory quality and passport analytics                     | Quality/complexity contract, anomalies, agents, dashboard                                |
+| Live             | Experience Layer                                              | Distillation job, scoped `experiences[]`, `promote_experience` draft bridge              |
 
 Schema version constant: `ENGINEERING_MEMORY_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.7`**).

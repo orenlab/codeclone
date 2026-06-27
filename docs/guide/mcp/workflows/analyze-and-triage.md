@@ -2,7 +2,7 @@
 
 # Analyze & triage
 
-### Phase 1: Analyze
+### Step 1: Analyze
 
 | Tool                    | Purpose                                           |
 |-------------------------|---------------------------------------------------|
@@ -12,7 +12,7 @@
 Both register the result as an in-memory run. All other tools read from
 stored runs.
 
-### Phase 2: Triage
+### Step 2: Triage
 
 | Tool                    | Purpose                                                    |
 |-------------------------|------------------------------------------------------------|

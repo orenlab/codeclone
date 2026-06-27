@@ -89,7 +89,7 @@ Ingest sources (non-exhaustive):
 | `public_surface`     | MCP / CLI public API inventory                       |
 | `contradiction_note` | Optional MCP tool-count doc vs snapshot              |
 
-Git provenance (Phase 18.6): init attaches `git_commit` evidence when git is
+Git provenance: init attaches `git_commit` evidence when git is
 available; optional git hotspot records use
 `git_hotspot_period_days` / `git_hotspot_min_changes` from config.
 

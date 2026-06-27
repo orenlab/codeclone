@@ -89,7 +89,7 @@ Module ownership:
 | `codeclone/memory/trajectory/store.py`                 | SQLite persistence, supersede, rebuild orchestration           |
 | `codeclone/memory/trajectory/retrieval.py`             | Scoped ranking + `patch_trail_summary`                         |
 | `codeclone/memory/trajectory/export_context.py`        | Export v2 context: precedents, citations, scope paths          |
-| `codeclone/memory/trajectory/export.py`                | Local JSONL export (Phase 25+)                                 |
+| `codeclone/memory/trajectory/export.py`                | Local JSONL export                                             |
 | `codeclone/memory/jobs/store.py`                       | Projection job queue + worker claim                            |
 | `codeclone/memory/retrieval/service.py`                | MCP/CLI query router                                           |
 
