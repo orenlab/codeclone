@@ -503,6 +503,10 @@ class _MCPSessionFindingMixin:
             )
         )
         payload = dict(finding)
+        canonical_id = str(finding.get("id", "")).strip()
+        short_finding_id = self._short_finding_id(record, canonical_id)
+        payload["canonical_id"] = canonical_id
+        payload["short_id"] = short_finding_id
         payload["priority_score"] = resolved_priority_payload["score"]
         payload["priority_factors"] = resolved_priority_payload["factors"]
         payload["locations"] = self._locations_for_finding(
@@ -510,7 +514,8 @@ class _MCPSessionFindingMixin:
             finding,
             include_uri=detail_level == "full",
         )
-        payload["html_anchor"] = f"finding-{finding.get('id', '')}"
+        payload["html_anchor"] = f"finding-{canonical_id}"
+        payload["novelty"] = self._finding_novelty(finding)
         if resolved_remediation is not None:
             payload["remediation"] = resolved_remediation
         return self._project_finding_detail(
@@ -526,18 +531,29 @@ class _MCPSessionFindingMixin:
         *,
         detail_level: DetailLevel,
     ) -> dict[str, object]:
+        canonical_id = str(finding.get("canonical_id") or finding.get("id", "")).strip()
+        short_finding_id = str(
+            finding.get("short_id") or self._short_finding_id(record, canonical_id)
+        )
+        html_anchor = str(
+            finding.get("html_anchor") or f"finding-{canonical_id}"
+        ).strip()
         if detail_level == "full":
             full_payload = dict(finding)
-            full_payload["id"] = self._short_finding_id(
-                record,
-                str(finding.get("id", "")),
-            )
+            full_payload["id"] = short_finding_id
+            full_payload["short_id"] = short_finding_id
+            full_payload["canonical_id"] = canonical_id
+            full_payload["html_anchor"] = html_anchor
+            full_payload["novelty"] = self._finding_novelty(finding)
             return full_payload
         payload: dict[str, object] = {
-            "id": self._short_finding_id(record, str(finding.get("id", ""))),
+            "id": short_finding_id,
+            "short_id": short_finding_id,
+            "canonical_id": canonical_id,
+            "html_anchor": html_anchor,
             "kind": _helpers._finding_kind_label(finding),
             "severity": str(finding.get("severity", "")),
-            "novelty": str(finding.get("novelty", "")),
+            "novelty": self._finding_novelty(finding),
             "scope": _helpers._finding_source_kind(finding),
             "count": _as_int(finding.get("count", 0), 0),
             "spread": dict(_helpers._as_mapping(finding.get("spread"))),
@@ -635,7 +651,7 @@ class _MCPSessionFindingMixin:
         ).strip()
         if source_kind is not None and dominant_kind != source_kind:
             return False
-        return novelty == "all" or str(finding.get("novelty", "")).strip() == novelty
+        return novelty == "all" or self._finding_novelty(finding) == novelty
 
     def _finding_touches_paths(
         self,
@@ -706,7 +722,7 @@ class _MCPSessionFindingMixin:
                 0.6,
             ),
             "novelty_weight": _NOVELTY_WEIGHT.get(
-                str(finding.get("novelty", "")),
+                self._finding_novelty(finding),
                 0.7,
             ),
             "runtime_weight": _RUNTIME_WEIGHT.get(
@@ -764,6 +780,11 @@ class _MCPSessionFindingMixin:
         functions = _as_int(spread.get("functions", 0), 0)
         count = _as_int(finding.get("count", 0), 0)
         return max(files, functions, count, 1)
+
+    @staticmethod
+    def _finding_novelty(finding: Mapping[str, object]) -> str:
+        novelty = str(finding.get("novelty", "")).strip()
+        return novelty or "known"
 
     def _locations_for_finding(
         self,
@@ -823,7 +844,7 @@ class _MCPSessionFindingMixin:
         spread_functions = _as_int(getattr(suggestion, "spread_functions", 0), 0)
         title = str(getattr(suggestion, "title", "")).strip()
         severity = str(finding.get("severity", "")).strip()
-        novelty = str(finding.get("novelty", "known")).strip()
+        novelty = self._finding_novelty(finding)
         count = _as_int(
             getattr(suggestion, "fact_count", 0) or finding.get("count", 0) or 0,
             0,
@@ -939,6 +960,52 @@ class _MCPSessionFindingMixin:
                 )
             )
         return rows
+
+    def _hotspot_empty_reason(
+        self,
+        *,
+        record: MCPRunRecord,
+        kind: HotlistKind,
+        detail_level: DetailLevel,
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+    ) -> str:
+        findings = self._base_findings(record)
+        if not findings:
+            return "no_findings_in_run"
+        if changed_paths:
+            return "changed_paths_filter_excluded_all"
+        if exclude_reviewed:
+            rows_with_reviewed = self._hotspot_rows(
+                record=record,
+                kind=kind,
+                detail_level=detail_level,
+                changed_paths=(),
+                exclude_reviewed=False,
+            )
+            if rows_with_reviewed:
+                return "all_items_reviewed"
+        if kind == "highest_priority":
+            return "no_ranked_findings"
+
+        hotlist_key = _HOTLIST_REPORT_KEYS.get(kind)
+        if hotlist_key is None:
+            return "unsupported_hotlist_kind"
+        derived = _helpers._as_mapping(record.report_document.get("derived"))
+        hotlists = _helpers._as_mapping(derived.get("hotlists"))
+        hotlist_ids = [
+            str(item)
+            for item in _helpers._as_sequence(hotlists.get(hotlist_key))
+            if str(item)
+        ]
+        if not hotlist_ids:
+            return {
+                "most_actionable": "no_items_above_actionability_threshold",
+                "highest_spread": "no_spread_hotspots",
+                "production_hotspots": "no_production_hotspots",
+                "test_fixture_hotspots": "no_test_fixture_hotspots",
+            }.get(kind, "hotlist_unpopulated")
+        return "hotlist_items_filtered_or_unavailable"
 
     def _granular_payload(
         self,
@@ -1195,17 +1262,18 @@ class _MCPSessionFindingMixin:
             detail_level,
             _VALID_DETAIL_LEVELS,
         )
-        canonical_id = self._resolve_canonical_finding_id(record, finding_id)
-        for finding in self._base_findings(record):
-            if str(finding.get("id")) == canonical_id:
-                return self._decorate_finding(
-                    record,
-                    finding,
-                    detail_level=validated_detail,
-                )
-        raise MCPFindingNotFoundError(
-            f"Finding id '{finding_id}' was not found in run "
-            f"'{_helpers._short_run_id(record.run_id)}'."
+        finding_payload, canonical_id = self._lookup_finding_detail(
+            record=record,
+            finding_id=finding_id,
+            detail_level=validated_detail,
+        )
+        if finding_payload is not None:
+            return finding_payload
+        return self._finding_not_found_payload(
+            record=record,
+            finding_id=finding_id,
+            detail_level=validated_detail,
+            canonical_id=canonical_id,
         )
 
     def _service_get_finding(
@@ -1215,11 +1283,70 @@ class _MCPSessionFindingMixin:
         run_id: str | None = None,
         detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
-        return self.get_finding(
-            finding_id=finding_id,
-            run_id=run_id,
-            detail_level=detail_level,
+        record = self._runs.get(run_id)
+        validated_detail = _helpers._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
+        finding_payload, _canonical_id = self._lookup_finding_detail(
+            record=record,
+            finding_id=finding_id,
+            detail_level=validated_detail,
+        )
+        if finding_payload is not None:
+            return finding_payload
+        raise MCPFindingNotFoundError(
+            f"Finding id '{finding_id}' was not found in run "
+            f"'{_helpers._short_run_id(record.run_id)}'."
+        )
+
+    def _lookup_finding_detail(
+        self,
+        *,
+        record: MCPRunRecord,
+        finding_id: str,
+        detail_level: DetailLevel,
+    ) -> tuple[dict[str, object] | None, str | None]:
+        try:
+            canonical_id = self._resolve_canonical_finding_id(record, finding_id)
+        except MCPFindingNotFoundError:
+            return None, None
+        for finding in self._base_findings(record):
+            if str(finding.get("id")) == canonical_id:
+                return (
+                    self._decorate_finding(
+                        record,
+                        finding,
+                        detail_level=detail_level,
+                    ),
+                    canonical_id,
+                )
+        return None, canonical_id
+
+    def _finding_not_found_payload(
+        self,
+        *,
+        record: MCPRunRecord,
+        finding_id: str,
+        detail_level: DetailLevel,
+        canonical_id: str | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "status": "not_found",
+            "run_id": _helpers._short_run_id(record.run_id),
+            "finding_id": finding_id,
+            "detail_level": detail_level,
+            "accepted_id_forms": ["short_id", "canonical_id"],
+            "next_tool": "list_hotspots",
+            "message": (
+                "Finding id was not found in this MCP run. Use list_hotspots, "
+                "list_findings, or a focused check_* tool to obtain current ids."
+            ),
+        }
+        if canonical_id:
+            payload["canonical_id"] = canonical_id
+        return payload
 
     def get_remediation(
         self,
@@ -1295,7 +1422,7 @@ class _MCPSessionFindingMixin:
             1,
             min(max_results if max_results is not None else limit, 50),
         )
-        return {
+        payload: dict[str, object] = {
             "run_id": _helpers._short_run_id(record.run_id),
             "kind": validated_kind,
             "detail_level": validated_detail,
@@ -1306,6 +1433,37 @@ class _MCPSessionFindingMixin:
                 dict(_helpers._as_mapping(item)) for item in rows[:normalized_limit]
             ],
         }
+        self._attach_hotspot_empty_reason(
+            payload,
+            record=record,
+            kind=validated_kind,
+            detail_level=validated_detail,
+            changed_paths=paths_filter,
+            exclude_reviewed=exclude_reviewed,
+            rows=rows,
+        )
+        return payload
+
+    def _attach_hotspot_empty_reason(
+        self,
+        payload: dict[str, object],
+        *,
+        record: MCPRunRecord,
+        kind: HotlistKind,
+        detail_level: DetailLevel,
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+        rows: Sequence[Mapping[str, object]],
+    ) -> None:
+        if rows:
+            return
+        payload["empty_reason"] = self._hotspot_empty_reason(
+            record=record,
+            kind=kind,
+            detail_level=detail_level,
+            changed_paths=changed_paths,
+            exclude_reviewed=exclude_reviewed,
+        )
 
     def mark_finding_reviewed(
         self,

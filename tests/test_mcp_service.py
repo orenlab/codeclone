@@ -2668,6 +2668,76 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
     ]
 
 
+def test_mcp_context_governance_adds_top_level_continuation_pointer() -> None:
+    payload = mcp_context_governance_mod.attach_memory_retrieval_context_governance(
+        {
+            "records": [{"id": "mem-1"}],
+            "continuation": {
+                "lanes": {
+                    "records": {
+                        "page": {
+                            "cursor": "cursor-records-1",
+                            "next_offset": 1,
+                        }
+                    }
+                }
+            },
+        },
+        detail_level="compact",
+        max_records=20,
+        evidence_omitted={
+            "records": {
+                "total": 3,
+                "shown": 1,
+                "omitted": 2,
+                "reason": "response_budget",
+                "drill_down": {
+                    "tool": "get_memory_projection_page",
+                    "cursor_path": "continuation.lanes.records.page.cursor",
+                    "snapshot_identity": "memory projection cursor",
+                },
+            }
+        },
+    )
+
+    continuation = cast("dict[str, object]", payload["_continuation"])
+    lanes = cast("list[dict[str, object]]", continuation["lanes"])
+
+    assert continuation["required"] is True
+    assert lanes == [
+        {
+            "lane": "records",
+            "reason": "response_budget",
+            "shown": 1,
+            "total": 3,
+            "omitted": 2,
+            "tool": "get_memory_projection_page",
+            "cursor_path": "continuation.lanes.records.page.cursor",
+            "snapshot_identity": "memory projection cursor",
+            "cursor": "cursor-records-1",
+        }
+    ]
+
+
+def test_mcp_service_help_overview_returns_topic_index() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    overview = service.get_help(topic="overview", detail="normal")
+    topics = cast("list[dict[str, object]]", overview["topics"])
+
+    assert overview["topic"] == "overview"
+    assert overview["detail"] == "normal"
+    assert "index" in str(overview["warnings"])
+    assert "get_production_triage" in cast(
+        "list[str]",
+        overview["recommended_tools"],
+    )
+    assert "overview" not in {str(item["topic"]) for item in topics}
+    assert {"workflow", "engineering_memory", "implementation_context"}.issubset(
+        {str(item["topic"]) for item in topics}
+    )
+
+
 def test_mcp_service_help_covers_analysis_profiles() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
@@ -3127,15 +3197,29 @@ def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
     assert findings_total >= 1
     first = cast("list[dict[str, object]]", findings["items"])[0]
     assert str(first["id"]).startswith("fn:")
+    assert first["id"] == first["short_id"]
+    assert str(first["canonical_id"]).startswith("clone:function:")
+    assert first["html_anchor"] == f"finding-{first['canonical_id']}"
+    assert first["novelty"] in {"new", "known"}
     assert first["kind"] == "function_clone"
 
     finding = service.get_finding(finding_id=str(first["id"]))
     assert finding["id"] == first["id"]
+    assert finding["short_id"] == first["id"]
+    assert finding["canonical_id"] == first["canonical_id"]
+    assert finding["html_anchor"] == f"finding-{finding['canonical_id']}"
     assert "remediation" in finding
 
     hotspots = service.list_hotspots(kind="highest_spread")
     assert hotspots["run_id"] == summary["run_id"]
     assert cast(int, hotspots["total"]) >= 1
+
+    filtered_hotspots = service.list_hotspots(
+        kind="highest_spread",
+        changed_paths=["does/not/exist.py"],
+    )
+    assert filtered_hotspots["total"] == 0
+    assert filtered_hotspots["empty_reason"] == "changed_paths_filter_excluded_all"
 
 
 def test_mcp_service_hotspot_resources_and_triage_are_production_first(
@@ -3935,8 +4019,19 @@ def test_mcp_service_reports_contract_errors_for_resources_and_findings(
 
     with pytest.raises(MCPServiceContractError):
         service.get_report_section(section=cast("object", "unknown"))
-    with pytest.raises(MCPFindingNotFoundError):
-        service.get_finding(run_id=run_id, finding_id="missing")
+    missing = service.get_finding(run_id=run_id, finding_id="missing")
+    assert missing == {
+        "status": "not_found",
+        "run_id": run_id,
+        "finding_id": "missing",
+        "detail_level": "normal",
+        "accepted_id_forms": ["short_id", "canonical_id"],
+        "next_tool": "list_hotspots",
+        "message": (
+            "Finding id was not found in this MCP run. Use list_hotspots, "
+            "list_findings, or a focused check_* tool to obtain current ids."
+        ),
+    }
     with pytest.raises(MCPServiceContractError):
         service.read_resource("bad://resource")
     with pytest.raises(MCPServiceContractError):
@@ -8250,7 +8345,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
     ).startswith("design:coupling:")
 
-    original_session_get = service.session.get_finding
+    original_service_get = service.session._service_get_finding
     original_runs_get = service._runs.get
     original_resolve = service.session._resolve_canonical_finding_id
     monkeypatch.setattr(
@@ -8260,7 +8355,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     )
     monkeypatch.setattr(
         service.session,
-        "get_finding",
+        "_service_get_finding",
         lambda **kwargs: {"id": "no-remediation"},
     )
     monkeypatch.setattr(service._runs, "get", lambda run_id=None: record)
@@ -8270,7 +8365,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     )
     assert no_guidance["status"] == "no_guidance"
     assert no_guidance["remediation"] is None
-    monkeypatch.setattr(service.session, "get_finding", original_session_get)
+    monkeypatch.setattr(service.session, "_service_get_finding", original_service_get)
     monkeypatch.setattr(
         service.session, "_resolve_canonical_finding_id", original_resolve
     )
@@ -9556,14 +9651,25 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         "_base_findings",
         lambda _record: [{"id": "design:cohesion:pkg.mod:Other"}],
     )
-    with pytest.raises(MCPFindingNotFoundError, match="missing-finding"[:8]):
-        service.get_finding(
-            run_id="missing-finding", finding_id="design:cohesion:Runner"
-        )
+    missing_finding = service.get_finding(
+        run_id="missing-finding",
+        finding_id="design:cohesion:Runner",
+    )
+    assert {
+        "status": missing_finding["status"],
+        "run_id": missing_finding["run_id"],
+        "finding_id": missing_finding["finding_id"],
+        "canonical_id": missing_finding["canonical_id"],
+    } == {
+        "status": "not_found",
+        "run_id": "missing-",
+        "finding_id": "design:cohesion:Runner",
+        "canonical_id": "design:cohesion:pkg.mod:Runner",
+    }
 
     monkeypatch.setattr(
         service.session,
-        "get_finding",
+        "_service_get_finding",
         lambda **_kwargs: {"id": "design:cohesion:pkg.mod:Runner"},
     )
     no_guidance = service.get_remediation(

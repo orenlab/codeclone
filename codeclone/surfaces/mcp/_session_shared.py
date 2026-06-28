@@ -131,6 +131,7 @@ DetailLevel = Literal["summary", "normal", "full"]
 ComparisonFocus = Literal["all", "clones", "structural", "metrics"]
 PRSummaryFormat = Literal["markdown", "json"]
 HelpTopic = Literal[
+    "overview",
     "workflow",
     "analysis_profile",
     "suppressions",
@@ -144,6 +145,7 @@ HelpTopic = Literal[
     "engineering_memory",
     "implementation_context",
     "verification_profiles",
+    "observability",
 ]
 HelpDetail = Literal["compact", "normal"]
 MetricsDetailFamily = Literal[
@@ -249,6 +251,7 @@ _VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
 _VALID_PR_SUMMARY_FORMATS = frozenset({"markdown", "json"})
 _VALID_HELP_TOPICS = frozenset(
     {
+        "overview",
         "workflow",
         "analysis_profile",
         "suppressions",

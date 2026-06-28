@@ -312,10 +312,10 @@ HelpTopicParam = Annotated[
     str,
     Field(
         description=(
-            "workflow, analysis_profile, suppressions, baseline, coverage, "
-            "latest_runs, review_state, changed_scope, change_control, "
-            "trust_boundaries, engineering_memory, implementation_context, "
-            "verification_profiles, observability"
+            "overview, workflow, analysis_profile, suppressions, baseline, "
+            "coverage, latest_runs, review_state, changed_scope, "
+            "change_control, trust_boundaries, engineering_memory, "
+            "implementation_context, verification_profiles, observability"
         )
     ),
 ]
@@ -402,7 +402,13 @@ MaxResultsParam = Annotated[
     Field(description="Optional hard cap on returned items."),
 ]
 FindingIdParam = Annotated[
-    str, Field(description="Short or full canonical finding id.")
+    str,
+    Field(
+        description=(
+            "Short MCP finding id or full canonical finding id; get_finding "
+            "returns status=not_found for unknown ids."
+        )
+    ),
 ]
 HotspotKindParam = Annotated[
     str,

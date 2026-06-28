@@ -64,6 +64,53 @@ ENGINEERING_MEMORY_DOC_LINK: Final[tuple[str, str]] = (
     f"{MCP_BOOK_URL}13-engineering-memory/",
 )
 HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
+    "overview": MCPHelpTopicSpec(
+        summary=(
+            "Index of CodeClone MCP workflows. Use it to choose the narrowest "
+            "tool before spending context on broad evidence."
+        ),
+        key_points=(
+            (
+                "Start with analyze_repository or analyze_changed_paths, then "
+                "open get_run_summary or get_production_triage."
+            ),
+            (
+                "Use list_hotspots or focused check_* tools before broad "
+                "list_findings calls."
+            ),
+            (
+                "Budgeted responses disclose hidden evidence through "
+                "context_governance.omitted and the top-level _continuation "
+                "pointer."
+            ),
+            (
+                "For edits, use start_controlled_change, retrieve scoped "
+                "memory/context, then finish_controlled_change."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "list_hotspots",
+            "get_implementation_context",
+            "get_relevant_memory",
+            "start_controlled_change",
+            "finish_controlled_change",
+        ),
+        doc_links=(MCP_INTERFACE_DOC_LINK, MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "The overview is an index, not a substitute for the specific "
+                "topic help that owns each contract."
+            ),
+        ),
+        anti_patterns=(
+            "Starting with broad list_findings when a hotlist or check_* tool fits.",
+            "Ignoring _continuation when context_governance.omitted is present.",
+        ),
+    ),
     "workflow": MCPHelpTopicSpec(
         summary=(
             "CodeClone MCP is triage-first and budget-aware. Start with a "

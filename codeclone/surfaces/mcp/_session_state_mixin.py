@@ -1214,7 +1214,26 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             payload["anti_patterns"] = list(spec.anti_patterns)
         if validated_detail == "normal" and spec.warnings:
             payload["warnings"] = list(spec.warnings)
+        self._attach_help_topic_index(payload, topic=validated_topic)
         return payload
+
+    def _attach_help_topic_index(
+        self,
+        payload: dict[str, object],
+        *,
+        topic: HelpTopic,
+    ) -> None:
+        if topic != "overview":
+            return
+        payload["topics"] = [
+            {
+                "topic": topic_name,
+                "summary": topic_spec.summary,
+                "recommended_tools": list(topic_spec.recommended_tools),
+            }
+            for topic_name, topic_spec in _HELP_TOPIC_SPECS.items()
+            if topic_name != "overview"
+        ]
 
     def query_platform_observability(
         self,

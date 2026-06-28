@@ -313,8 +313,7 @@ def _attach_context_governance(
         "capabilities": passive_context_capabilities(),
         "drill_down": passive_drill_down_reachability(),
     }
-    if evidence_omitted:
-        context_governance["omitted"] = dict(evidence_omitted)
+    _attach_omission_context(result, context_governance, evidence_omitted)
     context_governance.update(response_context)
     result["context_governance"] = context_governance
     governance = result["context_governance"]
@@ -323,6 +322,132 @@ def _attach_context_governance(
     if mode != "observe" and governance["estimated"] > limit:
         governance["mandatory_overflow"] = True
     return result
+
+
+def _attach_omission_context(
+    payload: dict[str, object],
+    context_governance: dict[str, object],
+    evidence_omitted: Mapping[str, object] | None,
+) -> None:
+    if not evidence_omitted:
+        return
+    context_governance["omitted"] = dict(evidence_omitted)
+    continuation = _continuation_payload(payload, evidence_omitted)
+    if continuation:
+        payload["_continuation"] = continuation
+
+
+def _continuation_payload(
+    payload: Mapping[str, object],
+    evidence_omitted: Mapping[str, object],
+) -> dict[str, object] | None:
+    lanes = [
+        lane_payload
+        for lane, omission in evidence_omitted.items()
+        for lane_payload in (
+            _continuation_lane(
+                payload,
+                lane=str(lane),
+                omission=omission,
+            ),
+        )
+        if lane_payload
+    ]
+    if not lanes:
+        return None
+    return {
+        "required": True,
+        "lanes": lanes,
+    }
+
+
+def _continuation_lane(
+    payload: Mapping[str, object],
+    *,
+    lane: str,
+    omission: object,
+) -> dict[str, object] | None:
+    if not isinstance(omission, Mapping):
+        return None
+    lane_payload: dict[str, object] = {
+        "lane": lane,
+        "reason": str(omission.get("reason", "omitted_by_response_budget")),
+    }
+    for key in ("shown", "total", "omitted", "facet", "offset", "limit"):
+        if key in omission:
+            lane_payload[key] = omission[key]
+
+    retrieval = _as_mapping_or_none(omission.get("retrieval"))
+    if retrieval is not None:
+        _merge_simple_keys(
+            lane_payload,
+            retrieval,
+            (
+                "tool",
+                "route",
+                "run_id",
+                "artifact_id",
+                "blast_artifact_id",
+                "projection_digest",
+                "context_projection_digest",
+                "patch_trail_digest",
+                "receipt_digest",
+                "facet",
+                "offset",
+                "page_size",
+            ),
+        )
+
+    drill_down = _as_mapping_or_none(omission.get("drill_down"))
+    if drill_down is not None:
+        _merge_simple_keys(
+            lane_payload,
+            drill_down,
+            (
+                "tool",
+                "route",
+                "cursor_path",
+                "snapshot_identity",
+                "facet",
+                "offset",
+                "page_size",
+            ),
+        )
+        cursor_path = str(drill_down.get("cursor_path", "")).strip()
+        if cursor_path:
+            cursor = _resolve_dotted_path(payload, cursor_path)
+            if cursor not in (None, ""):
+                lane_payload["cursor"] = cursor
+
+    return lane_payload
+
+
+def _merge_simple_keys(
+    target: dict[str, object],
+    source: Mapping[str, object],
+    keys: tuple[str, ...],
+) -> None:
+    for key in keys:
+        value = source.get(key)
+        if value not in (None, "", [], {}):
+            target[key] = value
+
+
+def _as_mapping_or_none(value: object) -> Mapping[str, object] | None:
+    return value if isinstance(value, Mapping) else None
+
+
+def _resolve_dotted_path(payload: Mapping[str, object], dotted_path: str) -> object:
+    current: object = payload
+    for raw_part in dotted_path.split("."):
+        part = raw_part.strip()
+        if not part:
+            return None
+        if isinstance(current, Mapping):
+            current = current.get(part)
+            continue
+        return None
+    return current
 
 
 def attach_finish_context_governance(
