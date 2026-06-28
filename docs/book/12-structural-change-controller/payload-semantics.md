@@ -86,12 +86,14 @@ populate `foreign_attributed_outside_scope`. **`Recoverable`** intents (dead
 owning PID) do **not** grant foreign attribution — treat their dirty paths like
 ordinary workspace dirt unless scope is widened or changes reverted.
 
-**Finish hygiene payload fields** (on `workspace_hygiene` / `workspace_hygiene_after`
-when finish is hygiene-gated):
+**Finish hygiene payload fields** (on `workspace_hygiene` /
+`workspace_hygiene_after` when finish is hygiene-gated):
 
-For hygiene, `detail_level` is effectively binary: `summary` and `normal` return
-`counts`, overlap lists, and blocking fields only; pass `detail_level="full"` for
-`dirty_attribution`, path classification arrays, and expanded `dirty_snapshot`.
+For finish hygiene, `detail_level` is effectively binary: `summary` and
+`normal` return `counts`, overlap lists, and blocking fields only; pass
+`detail_level="full"` for `dirty_attribution`, path classification arrays, and
+expanded `dirty_snapshot`. Start does not accept `detail_level`; it uses
+`blast_radius_detail` for blast payload size.
 
 | Field                                      | Meaning                                                                                                                                                                                                                           |
 |--------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

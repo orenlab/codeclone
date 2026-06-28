@@ -41,7 +41,7 @@ Current contract versions:
 - `TRAJECTORY_PROJECTION_VERSION = "trajectory-v3"` (derived trajectory rows)
 - `TRAJECTORY_QUALITY_SCORE_VERSION = "2"` (quality contract formula)
 - `EXPERIENCE_DISTILLATION_VERSION = "experience-v1"` (derived Experience rows)
-- `SEMANTIC_INDEX_FORMAT_VERSION = "2"` (LanceDB sidecar; separate from SQLite memory schema)
+- `SEMANTIC_INDEX_FORMAT_VERSION = "3"` (LanceDB sidecar; separate from SQLite memory schema; adds `source_revision`)
 - `PLATFORM_OBSERVABILITY_SCHEMA_VERSION = "1.1"` (dev-only telemetry SQLite)
 - `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION = "1.2"` (corpus analytics SQLite)
 - `CORPUS_EXPORT_SCHEMA_VERSION = "1.3"` (clustering JSON export)

@@ -18,7 +18,8 @@ it intends to change, CodeClone maps the structural blast radius, verifies the
 patch against the declared boundary, and generates an auditable review receipt.
 
 !!! note "Documentation for the in-development v2.1 line"
-    This site tracks the unreleased **v2.1** line; for the current stable release see [CodeClone v2.0.2](https://github.com/orenlab/codeclone/tree/v2.0.2).
+    This site tracks the unreleased **v2.1** line; for the current stable release
+    see [CodeClone v2.0.2](https://github.com/orenlab/codeclone/tree/v2.0.2).
 
 ## New here? Follow the path
 
@@ -75,6 +76,7 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Claude Code plugin    | [Install](guide/integrations/claude-code/setup.md)                  | [Claude Code contract](book/integrations/claude-code-plugin.md)       |
 | Codex plugin          | [Install](guide/integrations/codex/setup.md)                        | [Codex contract](book/integrations/codex-plugin.md)                   |
 | Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md)                 | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
+| GitHub Action         | [CI setup](getting-started.md#ci-setup)                             | [GitHub Action contract](book/integrations/github-action.md)          |
 | SARIF & code scanning | [Export](guide/integrations/sarif/export.md)                        | [SARIF contract](book/integrations/sarif.md)                          |
 
 ## Reports
@@ -90,4 +92,5 @@ patch against the declared boundary, and generates an auditable review receipt.
 Operating or building CodeClone itself? See [Platform Observability](guide/observability/diagnostics.md)
 and [Corpus Analytics](guide/analytics/overview.md) under the **Maintainers** tab.
 
-**Editions & plans** — CodeClone is open source and runs locally; Team and Enterprise add scaled retention, managed options, and support. Pick the level that fits your needs: [Plans and retention](plans-and-retention.md).
+**Editions & plans** — CodeClone is open source and runs locally; Team and Enterprise add scaled retention, managed
+options, and support. Pick the level that fits your needs: [Plans and retention](plans-and-retention.md).

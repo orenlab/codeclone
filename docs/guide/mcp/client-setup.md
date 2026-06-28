@@ -6,6 +6,17 @@
 
 All clients use the same server. Only the registration format differs.
 
+=== "VS Code"
+
+    Install the CodeClone VS Code extension from the VS Code marketplace, then
+    open a trusted workspace with `codeclone-mcp` available in the workspace
+    virtualenv or on `PATH`.
+
+    The extension launches the local MCP server itself and adds
+    `--ide-governance-channel` for IDE-only session/audit tools and Memory
+    governance. See the
+    [VS Code setup guide](../integrations/vscode/setup.md).
+
 === "Claude Code"
 
     ```bash

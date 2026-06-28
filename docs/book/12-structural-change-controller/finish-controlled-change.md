@@ -15,6 +15,23 @@ and call `clear` alone.
 `review_text` is a human note only. **`claims_text`** is the only finish input
 passed to Claim Guard (when `claim_validation_recommended` is true).
 
+### Inputs
+
+| Parameter            | Required                            | Purpose                                                                  |
+|----------------------|-------------------------------------|--------------------------------------------------------------------------|
+| `intent_id`          | yes                                 | Active intent id from `start_controlled_change` or atomic declare        |
+| `changed_files`      | one of `changed_files` / `diff_ref` | Repo-relative changed files used for scope and verify evidence           |
+| `diff_ref`           | one of `changed_files` / `diff_ref` | Git revision used to derive changed files                                |
+| `after_run_id`       | profile-dependent                   | Post-edit analysis run id for Python structural and governance patches   |
+| `strictness`         | no                                  | Patch-contract profile: `ci`, `relaxed`, or `strict`                     |
+| `detail_level`       | no                                  | Hygiene/detail size control: `summary`, `normal`, or `full`              |
+| `patch_trail_detail` | no                                  | `summary` or `full` Patch Trail payload on finish                        |
+| `claims_text`        | no                                  | Text passed to Claim Guard when validation is meaningful                 |
+| `review_text`        | no                                  | Human note only; not claim-validated                                     |
+| `create_receipt`     | no                                  | Generate review receipt on accepted finish (default `true`)              |
+| `auto_clear`         | no                                  | Clear accepted intent after receipt succeeds (default `true`)            |
+| `propose_memory`     | no                                  | Draft memory candidates and mark linked records stale on accepted finish |
+
 ### Execution order (do not reorder manually)
 
 ```text
@@ -58,11 +75,13 @@ unchanged repository health — read `verification.structural_delta` and
 
 ### Hygiene payload `detail_level`
 
-On `start_controlled_change` / `finish_controlled_change`, hygiene uses
+On `finish_controlled_change`, hygiene uses
 `detail_level` as binary size control: `summary` and `normal` are equivalent
 (`counts`, `foreign_dirty_overlaps`, blocking flags). `detail_level="full"` adds
 `dirty_attribution`, path classification arrays, and expanded `dirty_snapshot`.
-Findings/hotspots tools still honor all three levels.
+`start_controlled_change` does not accept `detail_level`; use
+`blast_radius_detail` to choose summary-first vs full blast evidence there.
+Findings/hotspots tools still honor all three detail levels.
 
 ### Response payloads agents should read
 

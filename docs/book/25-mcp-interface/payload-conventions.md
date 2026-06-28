@@ -1,4 +1,4 @@
-<!-- doc-scope: MCP payload conventions. class: contract max-lines: 150 -->
+<!-- doc-scope: MCP payload conventions. class: contract max-lines: 220 -->
 
 # MCP payload conventions
 
@@ -6,8 +6,26 @@
 
 Short reference for response structure patterns across the tool surface.
 
-**IDs** — Run IDs are 8-char hex handles. Finding IDs are short prefixed
-forms. Both accept the full canonical form as input.
+**IDs** — Run IDs are exposed as 8-char hex handles, with the full digest
+accepted wherever `run_id` is accepted. If a short run-id prefix is ambiguous in
+the current MCP session, pass the full digest. Finding IDs are short prefixed
+forms; the full canonical finding id is also accepted. List and detail payloads
+carry explicit identity fields: `short_id` (session disambiguated when needed),
+`canonical_id` (full report id), and `html_anchor` (`finding-{id}` for HTML
+report cross-links).
+
+**Finding lookup** — The `get_finding` tool returns `status="not_found"` for
+unknown ids in the active run, with `accepted_id_forms`, `next_tool`, and an
+actionable message. MCP resources under `findings/{id}` still raise when the id
+is absent; treat tool and resource surfaces separately.
+
+**Empty hotspots** — When `list_hotspots` returns no `items`, `empty_reason`
+names the filter or hotlist condition. Closed values are
+`no_findings_in_run`, `changed_paths_filter_excluded_all`, `all_items_reviewed`,
+`no_ranked_findings`, `unsupported_hotlist_kind`,
+`no_items_above_actionability_threshold`, `no_spread_hotspots`,
+`no_production_hotspots`, `no_test_fixture_hotspots`, `hotlist_unpopulated`,
+and `hotlist_items_filtered_or_unavailable`.
 
 **Detail levels** — `summary` (default for lists), `normal` (default for
 single finding), `full` (compatibility payload with URIs).
@@ -29,6 +47,15 @@ thresholds. Boolean policy gates use `forbid_*` names.
 
 **Long context** — `do_not_touch`, `review_context`, and similar sections
 include `total`, `shown`, and `truncated` summaries.
+
+**Durable artifact lookup statuses** — `get_blast_artifact`,
+`get_review_receipt`, and `get_patch_trail` are exact retrieval tools. They
+return fail-closed status strings rather than reconstructing missing evidence.
+Common statuses are `ok`, `not_found`, `ambiguous`, `digest_mismatch`, and
+`unsupported_format`. Blast artifacts may also return
+`artifact_id_mismatch` or `malformed_stored_blast_artifact`; receipts may return
+`malformed_stored_receipt`; Patch Trail lookup may return
+`malformed_stored_patch_trail`.
 
 ## Response governance compatibility audit
 
@@ -75,20 +102,21 @@ Selected workflow and evidence tools include a `context_governance` envelope.
 It estimates the returned response and declares whether the tool only measured
 the payload or actually applied response-budget packing:
 
-| Field                              | Meaning                                                                                                    |
-|------------------------------------|------------------------------------------------------------------------------------------------------------|
-| `contract_version`                 | response-governance contract version                                                                       |
-| `estimator`                        | deterministic estimator, currently `utf8_bytes_div_4_v1`                                                   |
-| `estimated`                        | estimated context units for the serialized response with `estimated` normalized to `0` during measurement  |
-| `limit`                            | active default response target                                                                             |
-| `mode`                             | `observe` for measurement-only responses; `partial_enforce` when recoverable lanes may be compacted        |
-| `enforcement.response_budget`      | whether the response is packed against the declared context-unit budget                                    |
-| `enforcement.nested_budget`        | whether nested evidence calls receive a propagated remaining budget                                        |
-| `enforcement.omission`             | whether omitted lanes are disclosed through `context_governance.omitted`                                   |
-| `enforcement_blocked`              | missing exact retrieval capabilities that prevent safe response-budget enforcement                         |
-| `capabilities.typed_receipt_alias` | whether the legacy typed receipt alias contract is still recognized; default finish uses retrieval instead |
-| `drill_down`                       | exact object routes and blocked continuation/snapshot routes for evidence that may be omitted              |
-| `response`                         | optional tool-specific response budget scope and projection digest                                         |
+| Field                              | Meaning                                                                                                                                                                   |
+|------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `contract_version`                 | response-governance contract version                                                                                                                                      |
+| `estimator`                        | deterministic estimator, currently `utf8_bytes_div_4_v1`                                                                                                                  |
+| `estimated`                        | estimated context units for the serialized response with `estimated` normalized to `0` during measurement                                                                 |
+| `limit`                            | active default response target, normally 2200 context units; `get_implementation_context` uses 2600                                                                       |
+| `mode`                             | `observe` for measurement-only responses; `partial_enforce` when recoverable lanes may be compacted                                                                       |
+| `enforcement.response_budget`      | whether the response is packed against the declared context-unit budget                                                                                                   |
+| `enforcement.nested_budget`        | whether nested evidence calls receive a propagated remaining budget                                                                                                       |
+| `enforcement.omission`             | whether omitted lanes are disclosed through `context_governance.omitted`                                                                                                  |
+| `_continuation` (top-level)        | when omission is active, compact pointer with `required` and per-lane drill-down routes (mirror of `context_governance.omitted`; prefer this over parsing omission alone) |
+| `enforcement_blocked`              | missing exact retrieval capabilities that prevent safe response-budget enforcement                                                                                        |
+| `capabilities.typed_receipt_alias` | whether the legacy typed receipt alias contract is still recognized; default finish uses retrieval instead                                                                |
+| `drill_down`                       | exact object routes and blocked continuation/snapshot routes for evidence that may be omitted                                                                             |
+| `response`                         | optional tool-specific response budget scope and projection digest                                                                                                        |
 
 `mode="observe"` means the response is measured but not packed. It is expected
 for drill-down retrieval tools that already return one exact object or one exact

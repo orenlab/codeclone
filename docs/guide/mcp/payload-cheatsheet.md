@@ -7,38 +7,32 @@
 
 ## Payload conventions
 
-Short reference for response structure patterns across the tool surface.
+**IDs** — Run IDs are 8-char handles; pass the full digest when a prefix is
+ambiguous. Finding lists expose `short_id`, `canonical_id`, and `html_anchor`.
+`get_finding` returns `status="not_found"` for unknown ids; resources still
+raise.
 
-**IDs** — Run IDs are 8-char hex handles. Finding IDs are short prefixed
-forms. Both accept the full canonical form as input.
+**Lists** — `list_findings` and
+`get_report_section(section="metrics_detail")` paginate with `offset`/`limit`.
+`list_hotspots` uses `limit`/`max_results` only; empty results include a closed
+`empty_reason`.
 
-**Detail levels** — `summary` (default for lists), `normal` (default for
-single finding), `full` (compatibility payload with URIs).
+**Scope filters** — `list_findings`, `list_hotspots`, and `generate_pr_summary`
+accept `changed_paths` or `git_diff_ref`.
 
-**Pagination** — `list_findings` and
-`get_report_section(section="metrics_detail")` support `offset` and `limit`.
-`list_hotspots` supports `limit` and `max_results` only (no `offset`).
+**Memory** — scoped `get_relevant_memory` defaults compact and omits routine
+`run:*` trajectories. Use `query_engineering_memory` drill-down modes for full
+records, trajectories, and Experiences.
 
-**Changed-scope filters** — `list_findings`, `list_hotspots`, and
-`generate_pr_summary` accept `changed_paths` or `git_diff_ref` for PR
-projection.
+**Context governance** — `partial_enforce` means response-budget packing was
+applied and omitted evidence has exact drill-down under
+`context_governance.omitted` / `_continuation`. `observe` means measurement
+only. Default budgets are 2200 deterministic context units, or 2600 for
+`get_implementation_context`.
 
-**Threshold context** — Empty `check_*` responses include
-`threshold_context` showing whether the run is genuinely quiet or simply
-below the active threshold.
-
-**Engineering Memory** — `get_relevant_memory` omits routine `run:*` trajectories
-from `trajectories[]` by default. Use `query_engineering_memory` trajectory
-modes with `filters.include_routine=true` to include them. Scoped retrieval
-defaults to `detail_level=compact`; use `full` or
-`query_engineering_memory(mode=get)` for complete payloads.
-
-**Context governance** — `context_governance.mode="partial_enforce"` means the
-tool applied response-budget packing and any omitted evidence is listed under
-`context_governance.omitted` with an exact drill-down route. `mode="observe"`
-means measurement only; this is expected for exact retrieval/page tools such as
-`get_blast_artifact`, `get_review_receipt`, `get_patch_trail`,
-`get_memory_projection_page`, and `get_implementation_context_page`.
+**Artifact lookups** — `get_blast_artifact`, `get_review_receipt`, and
+`get_patch_trail` return fail-closed statuses (`ok`, `not_found`, `ambiguous`,
+`digest_mismatch`, …) and never recreate missing evidence from current state.
 
 …
 

@@ -149,9 +149,9 @@ during projection. Changing profile shape requires a profile version bump.
 subjects match (declare `scope_paths`, check `changed_files`, or
 `untouched_in_declared`). When a stored Patch Trail exists for a matched
 trajectory, each preview includes **`patch_trail_summary`** (counts, digest,
-verification status). With `detail_level=full`, the top-ranked trajectory also
-surfaces **`patch_trail_summary`** at the response root. Compact retrieval omits
-that root duplicate; the summary remains on the trajectory preview.
+verification status). Retrieval does not duplicate that summary at the response
+root; use `query_engineering_memory(mode=trajectory_get)` for the full
+trajectory and persisted **`patch_trail`** payload.
 
 `query_engineering_memory(mode=trajectory_get)` returns **`patch_trail`** when
 persisted and always uses full detail, including **`quality_contract`**.

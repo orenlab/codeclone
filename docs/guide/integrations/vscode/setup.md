@@ -1,5 +1,7 @@
 # VS Code setup
 
+Contract: [VS Code extension](../../../book/integrations/vs-code-extension.md).
+
 ## What it is for
 
 The extension helps you:

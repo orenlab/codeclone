@@ -2,6 +2,8 @@
 
 # Claude Desktop setup
 
+Contract: [Claude Desktop bundle](../../../book/integrations/claude-desktop-bundle.md).
+
 Local `.mcpb` bundle that launches `codeclone-mcp` over stdio. Same canonical MCP
 surface as CLI, VS Code, Codex, and Cursor — no second analyzer or truth path.
 

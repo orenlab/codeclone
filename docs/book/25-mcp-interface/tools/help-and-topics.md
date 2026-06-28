@@ -10,7 +10,7 @@ profile semantics are unclear.
 
 | Parameter | Default      | Values                                                                                          |
 |-----------|--------------|-------------------------------------------------------------------------------------------------|
-| `topic`   | — (required) | One of the 14 topics below                                                                      |
+| `topic`   | — (required) | One of the 15 topics below                                                                      |
 | `detail`  | `compact`    | `compact` (summary, key points, recommended tools, anti-patterns) or `normal` (adds `warnings`) |
 
 `compact` always includes `anti_patterns` when the topic defines them. `normal`
@@ -23,6 +23,7 @@ and `doc_links`.
 
 | Topic                    | Summary focus                                               | Recommended first tools                                        |
 |--------------------------|-------------------------------------------------------------|----------------------------------------------------------------|
+| `overview`               | Topic index and budget-aware drill-down pointers            | `help`, `analyze_repository`, `get_production_triage`          |
 | `workflow`               | Triage-first, budget-aware MCP usage                        | `analyze_repository`, `get_production_triage`, `list_hotspots` |
 | `analysis_profile`       | Conservative default thresholds vs exploratory lower limits | `analyze_repository`, `compare_runs`                           |
 | `suppressions`           | Declaration-scoped inline ignore policy                     | `get_finding`, `get_remediation`                               |
@@ -42,17 +43,17 @@ and `doc_links`.
 
 ## When to call
 
-| Situation                             | Topic                    |
-|---------------------------------------|--------------------------|
-| First MCP session on a repository     | `workflow`               |
-| Threshold or sensitivity questions    | `analysis_profile`       |
-| Baseline / new-vs-known confusion     | `baseline`               |
-| Before declaring an edit intent       | `change_control`         |
-| Finish blocked on after-run / profile | `verification_profiles`  |
-| `get_implementation_context` facets   | `implementation_context` |
-| Memory lanes, drafts, trajectories    | `engineering_memory`     |
-| HTTP auth, artifact paths, read-only  | `trust_boundaries`       |
-| Debugging CodeClone runtime (maintainer) | `observability`       |
+| Situation                                | Topic                       |
+|------------------------------------------|-----------------------------|
+| First MCP session on a repository        | `overview`, then `workflow` |
+| Threshold or sensitivity questions       | `analysis_profile`          |
+| Baseline / new-vs-known confusion        | `baseline`                  |
+| Before declaring an edit intent          | `change_control`            |
+| Finish blocked on after-run / profile    | `verification_profiles`     |
+| `get_implementation_context` facets      | `implementation_context`    |
+| Memory lanes, drafts, trajectories       | `engineering_memory`        |
+| HTTP auth, artifact paths, read-only     | `trust_boundaries`          |
+| Debugging CodeClone runtime (maintainer) | `observability`             |
 
 ---
 

@@ -1,5 +1,7 @@
 # Cursor plugin
 
+Contract: [Cursor plugin](../../../book/integrations/cursor-plugin.md).
+
 ## What ships in the plugin
 
 | Component                          | Path                            | Purpose                                                                                      |

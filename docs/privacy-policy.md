@@ -6,13 +6,15 @@
 # Privacy Policy
 
 This page describes the privacy behavior of CodeClone's local integration
-surfaces, including the Claude Desktop bundle.
+surfaces, including the VS Code extension, Cursor plugin, Claude Code plugin,
+Codex plugin, and Claude Desktop bundle.
 
 ## CodeClone local privacy model
 
 CodeClone itself is a local analysis tool.
 
-For the CLI, MCP server, VS Code extension, and Claude Desktop bundle:
+For the CLI, MCP server, VS Code extension, Cursor plugin, Claude Code plugin,
+Codex plugin, and Claude Desktop bundle:
 
 - CodeClone does not run its own telemetry service
 - CodeClone does not send repository contents to an external CodeClone backend

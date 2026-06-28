@@ -2,6 +2,8 @@
 
 # Claude Code setup
 
+Contract: [Claude Code plugin](../../../book/integrations/claude-code-plugin.md).
+
 CodeClone ships a native Claude Code plugin through the public
 [orenlab/codeclone-claude-code](https://github.com/orenlab/codeclone-claude-code)
 marketplace repository.

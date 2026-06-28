@@ -2,6 +2,8 @@
 
 # Claude Code Plugin
 
+Setup guide: [Claude Code setup](../../guide/integrations/claude-code/setup.md).
+
 ## Distribution contract
 
 The monorepo source lives under `plugins/claude-code-codeclone/`.
@@ -10,13 +12,13 @@ dedicated `orenlab/codeclone-claude-code` storefront.
 
 The distribution repository contains:
 
-| Path                                           | Role                                                             |
-|------------------------------------------------|------------------------------------------------------------------|
-| `.claude-plugin/marketplace.json`              | Marketplace catalog named `orenlab-codeclone`                    |
-| `plugins/codeclone/.claude-plugin/plugin.json` | Plugin identity and metadata                                     |
-| `plugins/codeclone/.mcp.json`                  | Local stdio MCP definition                                       |
+| Path                                           | Role                                                                                                                                                             |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `.claude-plugin/marketplace.json`              | Marketplace catalog named `orenlab-codeclone`                                                                                                                    |
+| `plugins/codeclone/.claude-plugin/plugin.json` | Plugin identity and metadata                                                                                                                                     |
+| `plugins/codeclone/.mcp.json`                  | Local stdio MCP definition                                                                                                                                       |
 | `plugins/codeclone/skills/`                    | Review, hotspots, production-triage, architecture-triage, blast-radius, change control, memory, implementation context, platform observability (maintainer-only) |
-| `plugins/codeclone/scripts/launch_mcp.py`      | Standalone workspace-first launcher                              |
+| `plugins/codeclone/scripts/launch_mcp.py`      | Standalone workspace-first launcher                                                                                                                              |
 
 ## Installation contract
 

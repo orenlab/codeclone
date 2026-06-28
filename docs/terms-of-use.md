@@ -7,7 +7,8 @@
 
 These terms describe the intended operational and integration boundaries of
 CodeClone and its local integration surfaces, including the MCP server,
-VS Code extension, Codex plugin, and Claude Desktop bundle.
+VS Code extension, Cursor plugin, Claude Code plugin, Codex plugin, and
+Claude Desktop bundle.
 
 ## Local-first execution model
 

@@ -78,6 +78,11 @@ flowchart LR
 A missing run returns `needs_analysis`. Invalid facets and paths outside the root
 raise a contract error.
 
+Exact facet page retrieval uses `get_implementation_context_page`. Status values
+are `ok`, `not_found` (projection no longer retained in MCP run history),
+`root_mismatch`, `run_not_found`, `run_mismatch`, and `facet_not_found`. Page
+retrieval never recomputes fresh context while claiming exactness.
+
 ---
 
 ## Budget and safety overflow

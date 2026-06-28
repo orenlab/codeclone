@@ -41,10 +41,10 @@ refs), `retrieval_policy` (`patch_trail_does_not_authorize_edits`,
 counts, verification status) for trajectory projection. Requires `audit_enabled=true`.
 
 **Persistence:** manual or job-driven trajectory rebuild projects Patch Trail into
-`memory_trajectory_patch_trails` and bumps trajectory projection to
-`trajectory-v2` or later (digest includes `patch_trail_digest`). The active
-`trajectory-v3` projection also carries deterministic quality scoring and agent
-subjects. Scoped retrieval surfaces `patch_trail_summary` / full `patch_trail` — see
+`memory_trajectory_patch_trails` under the active `trajectory-v3` projection
+(digest includes `patch_trail_digest`). The same projection carries
+deterministic quality scoring and agent subjects. Scoped retrieval surfaces
+`patch_trail_summary` / full `patch_trail` — see
 [Engineering Memory — Trajectory memory](../13-engineering-memory/trajectory-and-patch-trail.md).
 
 Refs: `codeclone/memory/trajectory/patch_trail.py`, `codeclone/audit/events.py`,

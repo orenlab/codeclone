@@ -5,7 +5,9 @@ coordination:
 
 - `list_workspace`: list active workspace intent records from all agents for a
   repository root. Includes `recovery_available` (with `run_available` and
-  per-candidate `hint`) and `recovery_next_step` when recoverable intents exist.
+  per-candidate `hint`), `recovery_next_step` when recoverable intents exist,
+  and workspace counters such as `stale_count`, `orphaned_count`, and
+  `total_agents`.
 - `renew`: refresh the active lease before long edits or test runs.
 - `gc_workspace`: remove expired, orphaned, or corrupted registry records.
 - `recover`: explicitly reclaim a recoverable intent when the caller has the

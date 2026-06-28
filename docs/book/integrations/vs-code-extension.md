@@ -2,6 +2,8 @@
 
 # VS Code Extension
 
+Setup guide: [VS Code setup](../../guide/integrations/vscode/setup.md).
+
 ## Trust model
 
 The extension uses a **limited Restricted Mode**:

@@ -2,6 +2,8 @@
 
 # Claude Desktop Bundle
 
+Setup guide: [Claude Desktop setup](../../guide/integrations/claude-desktop/setup.md).
+
 This contract covers the Claude Desktop `.mcpb` package. Claude Code uses the
 separate [Claude Code plugin](claude-code-plugin.md) and marketplace workflow.
 
@@ -34,7 +36,7 @@ The wrapper prefers a workspace-local `.venv`, then a Poetry environment, then
 user-local install paths, then `PATH`.
 
 The bundle does **not** pass `--ide-governance-channel`. Agents see the standard
-**33** default MCP tools (35 with `--ide-governance-channel`). VS Code session stats, audit trail webviews, and IDE
+**38** default MCP tools (40 with `--ide-governance-channel`). VS Code session stats, audit trail webviews, and IDE
 Memory
 governance (`prepare_governance` / `commit_governance`) require the VS Code
 extension launcher.

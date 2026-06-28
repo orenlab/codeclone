@@ -42,7 +42,7 @@ The published site contains:
 The docs workflow (`.github/workflows/docs.yml`) follows this order:
 
 1. install project dependencies
-2. build the site with `zensical build --clean --strict`
+2. build the site with `uv run --with zensical==0.0.46 zensical build --clean --strict`
 3. generate a live sample report into `site/examples/report/live`
 4. upload the built site as a GitHub Pages artifact
 5. deploy on pushes to `main`
@@ -78,18 +78,14 @@ git. `site/` remains ignored.
 
 ## Local preview
 
-=== "Build the site"
+Run the same local preview sequence as the publishing workflow:
 
-    ```bash title="Validate the Zensical site"
-    uv run --with zensical==0.0.46 zensical build --clean --strict
-    ```
+```bash title="Build docs and generate the live sample report"
+uv run --with zensical==0.0.46 zensical build --clean --strict
+uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
+```
 
-=== "Build the site and sample report"
-
-    ```bash title="Generate the live sample report into site/"
-    uv run --with zensical==0.0.46 zensical build --clean --strict
-    uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
-    ```
+For docs-only validation, run the first command alone.
 
 Then open:
 

@@ -93,9 +93,10 @@ Refs:
       renders the same blast-radius projection used by MCP.
     - `--patch-verify` compares the current run against the trusted clone
       baseline for baseline-relative regressions, previews gate status, and
-      exits `3` for blocking violations in `ci` or `strict` mode. Cannot combine
-      with changed-scope flags; patch-local before-run to after-run regression
-      claims require MCP change-control verify.
+      exits `3` for blocking violations in `ci` or `strict` mode. With
+      `--strictness relaxed`, violations are reported but the command exits
+      `0`. Cannot combine with changed-scope flags; patch-local before-run to
+      after-run regression claims require MCP change-control verify.
 - Session query mode is terminal-only:
     - `--session-stats` shows workspace session status: active agents, intents,
       and lease health. Read-only, does not run analysis.
@@ -211,10 +212,13 @@ Refs:
 - `--session-stats` cannot combine with explicit `--audit`, `--blast-radius`, or
   `--patch-verify`.
 - explicit `--audit` cannot combine with `--blast-radius` or `--patch-verify`.
-- Controller and workspace query modes are incompatible with changed-scope flags
-  (`--changed-only`, `--diff-against`, `--paths-from-git-diff`).
-- Controller and workspace query modes are incompatible with report output flags,
-  baseline update flags, and changed-scope flags.
+- Analysis-time controller query modes (`--blast-radius`, `--patch-verify`)
+  are incompatible with changed-scope flags (`--changed-only`,
+  `--diff-against`, `--paths-from-git-diff`).
+- Controller and workspace query modes are incompatible with report output flags
+  and baseline update flags. `--audit-json` is a pre-analysis audit query: it is
+  validated with audit settings but is not treated as explicit `--audit` for
+  `--session-stats` conflicts.
 - `--patch-verify` requires a trusted clone baseline.
 - `--audit` and `--audit-json` require `audit_enabled=true` in effective configuration.
 - Browser-open failure after successful HTML write is warning-only.

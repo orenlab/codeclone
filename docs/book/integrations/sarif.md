@@ -2,6 +2,8 @@
 
 # SARIF
 
+Guide: [SARIF export](../../guide/integrations/sarif/export.md).
+
 ## Source files
 
 - `codeclone/report/renderers/sarif.py`

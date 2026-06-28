@@ -89,6 +89,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 - [integrations/claude-code-plugin.md](integrations/claude-code-plugin.md) — Claude Code plugin contract
 - [integrations/codex-plugin.md](integrations/codex-plugin.md) — Codex plugin contract
 - [integrations/claude-desktop-bundle.md](integrations/claude-desktop-bundle.md) — Claude Desktop bundle contract
+- [integrations/github-action.md](integrations/github-action.md) — GitHub Action contract
 - [integrations/sarif.md](integrations/sarif.md) — SARIF projection contract
 
 ### Appendix

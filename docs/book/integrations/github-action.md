@@ -2,11 +2,14 @@
 
 # GitHub Action
 
+Setup guide: [Getting started: CI setup](../../getting-started.md#ci-setup).
+
 CodeClone ships a composite GitHub Action for CI and pull-request workflows:
 structural analysis, optional SARIF upload, PR summary comments, and
 deterministic JSON reports.
 
-**Authoritative reference:** [`.github/actions/codeclone/README.md`](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
+**Authoritative reference:** [
+`.github/actions/codeclone/README.md`](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
 in the CodeClone repository (inputs, outputs, exit codes, baseline requirements,
 and v2 workflow shape).
 

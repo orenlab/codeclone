@@ -130,6 +130,12 @@ Quality gates and metric collection:
 | `fail_on_api_break`            | `bool`        | `false` | Fail on public API breaking changes vs metrics baseline                             | Requires trusted metrics baseline with API surface snapshot; incompatible with `skip_metrics`; implies `api_surface` |
 | `fail_on_untested_hotspots`    | `bool`        | `false` | Fail when medium/high-risk functions measured by Coverage Join fall below threshold | Incompatible with `skip_metrics`; requires successful Coverage Join to fire                                          |
 
+The `-1` integer gate default means “disabled” in config. Some CLI gate flags
+are optional-value flags: enabling them without a value uses the help-snapshot
+default (`--fail-complexity` → `20`, `--fail-coupling` → `10`,
+`--fail-cohesion` → `4`, `--fail-health` → `60`). Supplying an explicit value or
+pyproject setting overrides that convenience default.
+
 Report outputs and local UX:
 
 | Key           | Type          | Default | Meaning                        | Requires / Implies                                                                      |
@@ -273,9 +279,9 @@ keys are contract errors.
     | `--session-stats` + explicit `--audit` | contract error |
     | `--session-stats` + `--blast-radius` or `--patch-verify` | contract error |
     | explicit `--audit` + `--blast-radius` or `--patch-verify` | contract error |
-    | any controller query + `--changed-only`, `--diff-against`, or `--paths-from-git-diff` | contract error |
-    | any controller query + report output flags | contract error |
-    | any controller query + `--update-baseline` / `--update-metrics-baseline` | contract error |
+    | `--blast-radius` or `--patch-verify` + `--changed-only`, `--diff-against`, or `--paths-from-git-diff` | contract error |
+    | controller/workspace query + report output flags | contract error |
+    | controller/workspace query + `--update-baseline` / `--update-metrics-baseline` | contract error |
     | `--strictness` without `--patch-verify` (when `--strictness` is explicit on argv) | contract error |
 
     Notes:

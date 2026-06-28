@@ -35,7 +35,7 @@ change-control, memory, or integration capability is gated.
   semantic search, Trajectory Memory, quality passports, anomaly detection, and
   the [Experience Layer](book/13-engineering-memory/experience-layer.md).
 - **Corpus Analytics** — offline clustering of change-control intents (`codeclone[analytics]`).
-- **33 MCP tools and native integrations** — VS Code, Cursor, Claude Code,
+- **38 MCP tools and native integrations** — VS Code, Cursor, Claude Code,
   Codex, and Claude Desktop on one canonical analysis.
 - **Platform Observability** — opt-in local runtime diagnostics.
 

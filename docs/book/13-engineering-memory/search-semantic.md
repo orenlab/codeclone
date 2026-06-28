@@ -107,7 +107,7 @@ Empty audit summaries are skipped.
 **Trajectory passports** when trajectories are enabled — projected via
 `project_trajectory()` from bounded trajectory fields (summary, outcome, subjects;
 see `codeclone/memory/semantic/projection.py`). Long texts become multiple index
-units under format **`2`** (below).
+units under format **`3`** (below).
 
 #### Surfaces
 
@@ -144,11 +144,12 @@ list index units still above the model window. Chunking reserves passage prefix
 and model special tokens; rebuild fails closed with
 `SemanticChunkingInvariantError` when a chunk cannot be proven to fit.
 
-Format **`2`** indexes long trajectory projections as multiple chunk rows linked
-by `parent_id` (single-chunk trajectories keep the trajectory id as `id`).
-Hybrid search oversamples trajectory `k × TRAJECTORY_SEARCH_OVERSAMPLE` (4),
-collapses chunk hits to the best score per trajectory, and sets
-`matched_chunk_index` / `matched_chunk_count` on the returned trajectory hit.
+Format **`3`** stores `source_revision` for each semantic row and indexes long
+trajectory projections as multiple chunk rows linked by `parent_id`
+(single-chunk trajectories keep the trajectory id as `id`). Hybrid search
+oversamples trajectory `k × TRAJECTORY_SEARCH_OVERSAMPLE` (4), collapses chunk
+hits to the best score per trajectory, and sets `matched_chunk_index` /
+`matched_chunk_count` on the returned trajectory hit.
 
 When semantic hits audit rows, `payload.audit_events` lists hydrated incidents
 (event type, bounded summary preview, score) alongside memory records.

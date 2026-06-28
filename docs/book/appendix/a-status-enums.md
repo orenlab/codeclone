@@ -15,10 +15,17 @@ Centralize machine-readable status sets used across baseline/cache/report/CLI co
 - Exit categories: `codeclone/contracts/__init__.py:ExitCode`
 - Intent status: `codeclone/surfaces/mcp/_intent.py:IntentStatus`
 - Intent ownership: `codeclone/surfaces/mcp/_workspace_intents.py:IntentOwnership`
-- Workspace intent status: `codeclone/surfaces/mcp/_workspace_intents.py:WorkspaceIntentStatus`
+- Workspace intent status and PID liveness:
+  `codeclone/surfaces/mcp/_workspace_intent_lifecycle.py`
 - Patch contract: `codeclone/surfaces/mcp/_patch_contract.py:PatchContractStatus`
+- Review receipt:
+  `codeclone/surfaces/mcp/_review_receipt.py:ReceiptVerdict` /
+  `ReceiptPatchStatus`
 - Verification profile: `codeclone/surfaces/mcp/_verification_profile.py:VerificationProfile`
-- Engineering Memory status: `codeclone/memory/enums.py:MemoryStatus`
+- Engineering Memory status and ingestion:
+  `codeclone/memory/enums.py:MemoryStatus` / `IngestionRunStatus`
+- Metrics baseline status:
+  `codeclone/baseline/_metrics_baseline_contract.py:MetricsBaselineStatus`
 
 ## Data model
 
@@ -101,6 +108,15 @@ top-level `status: "unverified"` is a **response string**, not this enum value.
 Semantics:
 [Intent registry & queue](../12-structural-change-controller/intent-registry-and-queue.md).
 
+### PidLiveness
+
+- `alive`
+- `dead`
+- `unknown`
+
+Used by workspace-intent ownership classification. Dead owners make records
+recoverable; unknown PID state is conservative and does not grant ownership.
+
 ### PatchContractStatus
 
 - `accepted`
@@ -111,6 +127,52 @@ Semantics:
 
 Semantics:
 [Patch contract verification](../12-structural-change-controller/patch-contract-verify.md).
+
+### Workflow response strings
+
+`start_controlled_change`:
+
+- `active`
+- `queued`
+- `blocked`
+- `needs_analysis`
+
+`finish_controlled_change`:
+
+- `accepted`
+- `accepted_with_external_changes`
+- `unverified`
+- `violated`
+- `expired`
+
+These are response statuses, not necessarily persisted workspace registry
+states. See
+[payload semantics](../12-structural-change-controller/payload-semantics.md).
+
+### Implementation-context freshness
+
+- `fresh`
+- `drifted`
+- `unknown`
+
+`freshness.status="drifted"` means the stored MCP run no longer matches live
+workspace evidence closely enough for safe edit planning; re-analyze before
+relying on that projection.
+
+### ReceiptVerdict
+
+- `clean`
+- `incomplete`
+- `needs_attention`
+
+Receipt verdicts summarize receipt completeness and review attention, not CI
+gates.
+
+### ReceiptPatchStatus
+
+- `accepted`
+- `violated`
+- `not_checked`
 
 ### VerificationProfile
 
@@ -136,6 +198,27 @@ Defined by `codeclone/memory/enums.py:MemoryStatus`. Semantics are defined in
 - `superseded` — replaced by a newer record
 - `rejected` — human rejected draft
 - `archived` — explicitly archived
+
+### IngestionRunStatus
+
+- `running`
+- `completed`
+- `failed`
+- `partial`
+
+### MetricsBaselineStatus
+
+- `ok`
+- `missing`
+- `too_large`
+- `invalid_json`
+- `invalid_type`
+- `missing_fields`
+- `mismatch_schema_version`
+- `mismatch_python_version`
+- `generator_mismatch`
+- `integrity_missing`
+- `integrity_failed`
 
 ## Contracts
 

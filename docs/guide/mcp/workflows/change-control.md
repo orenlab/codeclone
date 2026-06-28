@@ -25,6 +25,19 @@ sequenceDiagram
     MCP -->> Agent: status, summary, workspace_hygiene_after, intent_cleared
 ```
 
+When start or finish responses are compacted by response governance, do not ask
+the model to restate omitted evidence. Follow the exact drill-down pointer in
+`context_governance.omitted` or `_continuation`:
+
+| Omitted evidence             | Exact drill-down                                                          |
+|------------------------------|---------------------------------------------------------------------------|
+| Start blast graph/detail     | `get_blast_artifact(root, run_id, blast_artifact_id)`                     |
+| Structured finish receipt    | `get_review_receipt(root, run_id, receipt_digest, format="structured")`   |
+| Receipt markdown             | `get_review_receipt(root, run_id, receipt_digest, format="markdown")`     |
+| Full Patch Trail             | `get_patch_trail(root, patch_trail_digest)`                               |
+| Memory lane tail             | `get_memory_projection_page(root, cursor)`                                |
+| Implementation-context facet | `get_implementation_context_page(root, context_projection_digest, facet)` |
+
 ## Tool tiers
 
 | Tier           | Tools                                                 | When                |

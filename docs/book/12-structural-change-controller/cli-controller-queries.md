@@ -27,7 +27,7 @@ patch-local verification, which compares a clean before-run to an after-run.
 `ci` is the default; `strict` applies tighter controller budgets; `relaxed`
 reports violations but exits `0`.
 
-Controller query modes cannot combine with changed-scope flags
+Analysis-time controller query modes cannot combine with changed-scope flags
 (`--changed-only`, `--diff-against`, `--paths-from-git-diff`). Combining
 `--patch-verify` with `--diff-against` is a contract error — pick one workflow.
 
@@ -51,9 +51,9 @@ Enforced by `codeclone/surfaces/cli/workflow.py:_validate_controller_query_flags
 | `--session-stats` + explicit `--audit`                                    | contract error |
 | `--session-stats` + `--blast-radius` or `--patch-verify`                  | contract error |
 | explicit `--audit` + `--blast-radius` or `--patch-verify`                 | contract error |
-| any controller query + changed-scope flags                                | contract error |
-| any controller query + report output flags                                | contract error |
-| any controller query + baseline update flags                              | contract error |
+| `--blast-radius` or `--patch-verify` + changed-scope flags                | contract error |
+| controller/workspace query + report output flags                          | contract error |
+| controller/workspace query + baseline update flags                        | contract error |
 | `--strictness` without `--patch-verify` (when `--strictness` is explicit) | contract error |
 
 `--audit-json` is not treated as `--audit` for the session-stats mutual-exclusion
@@ -62,4 +62,6 @@ before analysis; only one runs per invocation (first match wins).
 
 CLI controller queries are terminal-only and read-only with respect to source
 files, baselines, reports, and analysis cache data. They are incompatible with
-report output flags and baseline update flags.
+report output flags and baseline update flags. `--audit-json` is a
+pre-analysis audit query and is validated with audit configuration rather than
+the explicit `--audit` mutual-exclusion branch.

@@ -2,6 +2,8 @@
 
 # Cursor Plugin
 
+Setup guide: [Cursor install and skills](../../guide/integrations/cursor/install-and-skills.md).
+
 ## Installation contract
 
 The public source is
@@ -45,17 +47,17 @@ Skills are invocable via `/name` in Cursor chat (see each `SKILL.md`).
 
 Nine skills ship under `plugins/cursor-codeclone/skills/`:
 
-| Skill                              | Role                                     |
-|------------------------------------|------------------------------------------|
-| `codeclone-change-control`         | Intent-first edit workflow               |
-| `codeclone-engineering-memory`     | Memory retrieval and draft writes        |
-| `codeclone-implementation-context` | Bounded structural context from MCP runs |
-| `codeclone-architecture-triage`    | Ranked architecture problems (not tasks) |
-| `codeclone-hotspots`               | Quick hotspot / health snapshot          |
-| `codeclone-review`                 | Conservative-first full review           |
+| Skill                              | Role                                                                           |
+|------------------------------------|--------------------------------------------------------------------------------|
+| `codeclone-change-control`         | Intent-first edit workflow                                                     |
+| `codeclone-engineering-memory`     | Memory retrieval and draft writes                                              |
+| `codeclone-implementation-context` | Bounded structural context from MCP runs                                       |
+| `codeclone-architecture-triage`    | Ranked architecture problems (not tasks)                                       |
+| `codeclone-hotspots`               | Quick hotspot / health snapshot                                                |
+| `codeclone-review`                 | Conservative-first full review                                                 |
 | `codeclone-platform-observability` | **Maintainer-only** — CodeClone runtime diagnostics (requires observer enable) |
-| `codeclone-blast-radius`           | Read-only blast-radius inspection        |
-| `codeclone-production-triage`      | Baseline-relative production triage      |
+| `codeclone-blast-radius`           | Read-only blast-radius inspection                                              |
+| `codeclone-production-triage`      | Baseline-relative production triage                                            |
 
 Codex and Claude Code plugins ship the same nine skills (byte-synced from
 `plugins/codeclone/skills/`).

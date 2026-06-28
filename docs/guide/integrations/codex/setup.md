@@ -1,5 +1,7 @@
 # Codex setup
 
+Contract: [Codex plugin](../../../book/integrations/codex-plugin.md).
+
 ## Install
 
 Install the plugin from the Codex marketplace:

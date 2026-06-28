@@ -32,18 +32,18 @@ McpSync -->|ingest system records|Store
 Never -.->|blocked|Store
 ```
 
-| Action                                  | Who                                   | Resulting status                           |
-|-----------------------------------------|---------------------------------------|--------------------------------------------|
-| Init / refresh ingest                   | Human or CI (`codeclone memory init`) | `active` system records                    |
-| Auto bootstrap / refresh from MCP run   | MCP when `mcp_sync_policy` allows     | `active` system records (same ingest path) |
-| `refresh_from_run`                      | Agent MCP (explicit)                  | Force ingest from selected MCP run         |
-| `record_candidate`                      | Agent MCP                             | `draft`                                    |
-| `finish(propose_memory=true)` on accept | Agent MCP                             | `draft` proposals + staleness side effects |
+| Action                                  | Who                                                         | Resulting status                           |
+|-----------------------------------------|-------------------------------------------------------------|--------------------------------------------|
+| Init / refresh ingest                   | Human or CI (`codeclone memory init`)                       | `active` system records                    |
+| Auto bootstrap / refresh from MCP run   | MCP when `mcp_sync_policy` allows                           | `active` system records (same ingest path) |
+| `refresh_from_run`                      | Agent MCP (explicit)                                        | Force ingest from selected MCP run         |
+| `record_candidate`                      | Agent MCP                                                   | `draft`                                    |
+| `finish(propose_memory=true)` on accept | Agent MCP                                                   | `draft` proposals + staleness side effects |
 | `approve`                               | Human CLI (`--i-know-what-im-doing`) or VS Code IDE channel | `active` + `verified`/`supported`          |
 | `reject`                                | Human CLI (`--i-know-what-im-doing`) or VS Code IDE channel | `rejected`                                 |
 | `archive`                               | Human CLI (`--i-know-what-im-doing`) or VS Code IDE channel | `archived`                                 |
-| Refresh detects drift                   | System on `init --refresh`            | `stale`                                    |
-| Patch touches linked path               | System on accepted finish             | `stale`                                    |
+| Refresh detects drift                   | System on `init --refresh`                                  | `stale`                                    |
+| Patch touches linked path               | System on accepted finish                                   | `stale`                                    |
 
 ---
 
@@ -67,9 +67,12 @@ stateDiagram-v2
 (`system`, `agent`, `human`) are separate axes. Agents must treat `draft` and
 `inferred` as non-authoritative.
 
-Default retrieval excludes `stale`. Keyword `search` excludes `draft` unless
-`include_drafts=true`; scoped `get_relevant_memory` and `for_path` /
-`for_symbol` include draft agent notes automatically so handoffs are visible.
-Draft records remain non-authoritative.
+Default retrieval excludes `stale`. It also filters unapproved `inferred`
+records from normal visibility; inferred records become visible only after
+human approval records the supporting authority. Keyword `search` excludes
+`draft` unless `include_drafts=true`; scoped `get_relevant_memory` and
+`for_path` / `for_symbol` include draft agent notes automatically so handoffs
+are visible. Draft and inferred records remain non-authoritative until human
+governance promotes them.
 
 ---

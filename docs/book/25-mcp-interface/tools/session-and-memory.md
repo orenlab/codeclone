@@ -1,11 +1,11 @@
 ### Session-local tools
 
-| Tool                     | Key parameters                 | Purpose                                                                                               |
-|--------------------------|--------------------------------|-------------------------------------------------------------------------------------------------------|
-| `mark_finding_reviewed`  | `finding_id`, `run_id`, `note` | Session-local review marker (in-memory)                                                               |
-| `list_reviewed_findings` | `run_id`                       | List reviewed markers for a run                                                                       |
-| `get_implementation_context_page` | `root`, `context_projection_digest`, `facet`, `offset`, `page_size` | Exact page from a `get_implementation_context` session-local projection artifact. Returns `not_found` after the projection leaves MCP run history; never recomputes fresh context as exact evidence |
-| `clear_session_runs`     | —                              | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process |
+| Tool                              | Key parameters                                                                         | Purpose                                                                                                                                                                                             |
+|-----------------------------------|----------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `mark_finding_reviewed`           | `finding_id`, `run_id`, `note`                                                         | Session-local review marker (in-memory)                                                                                                                                                             |
+| `list_reviewed_findings`          | `run_id`                                                                               | List reviewed markers for a run                                                                                                                                                                     |
+| `get_implementation_context_page` | `root`, `context_projection_digest`, `facet`, `offset`, `page_size`, optional `run_id` | Exact page from a `get_implementation_context` session-local projection artifact. Returns `not_found` after the projection leaves MCP run history; never recomputes fresh context as exact evidence |
+| `clear_session_runs`              | —                                                                                      | Reset in-memory runs, session review markers, and workspace intent registry state for the MCP process                                                                                               |
 
 ### Platform observability
 

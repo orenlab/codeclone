@@ -31,8 +31,10 @@ summary keeps edit-control and safety facts inline:
   `projection_digest`, detail contract version, and retrieval route
 
 The full omitted blast evidence is available through
-`get_blast_artifact(root, run_id, blast_artifact_id)` and is read from the audit
-trail exactly as stored when `start_controlled_change` ran. It is not recomputed
+`get_blast_artifact(root, run_id, blast_artifact_id)` or
+`get_blast_artifact(root, projection_digest=...)` and is read from the audit
+trail exactly as stored when `start_controlled_change` ran. If multiple lookup
+keys are supplied, they must identify the same artifact. It is not recomputed
 from the current workspace. `get_blast_radius(files=...)` remains useful for
 current analysis-context inspection, but it is labelled as recomputation and is
 not the exact drill-down path for evidence omitted from a previous start

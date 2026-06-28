@@ -817,14 +817,14 @@ Schema version stored in `memory_meta.schema_version`.
 
 Core tables:
 
-| Table                    | Role                                                        |
-|--------------------------|-------------------------------------------------------------|
-| `memory_records`         | Typed statements with status, confidence, origin, payload   |
-| `memory_subjects`        | Path/symbol/module links (`subject_kind`, `subject_key`)    |
-| `memory_evidence`        | Deterministic evidence refs (report, git_commit, doc, …)    |
-| `memory_fts`             | FTS5 search index (schema 1.1+)                             |
-| `memory_revisions`       | Governance audit trail                                      |
-| `memory_ingestion_runs`  | Init/refresh run metadata                                   |
+| Table                    | Role                                                                                                                |
+|--------------------------|---------------------------------------------------------------------------------------------------------------------|
+| `memory_records`         | Typed statements with status, confidence, origin, payload                                                           |
+| `memory_subjects`        | Path/symbol/module links (`subject_kind`, `subject_key`)                                                            |
+| `memory_evidence`        | Deterministic evidence refs (report, git_commit, doc, …)                                                            |
+| `memory_fts`             | FTS5 search index (schema 1.1+)                                                                                     |
+| `memory_revisions`       | Governance audit trail                                                                                              |
+| `memory_ingestion_runs`  | Init/refresh run metadata                                                                                           |
 | `memory_projection_jobs` | Coalesced trajectory/semantic/Experience jobs (schema 1.3+); `flush_claimed_by` flush-scheduling slot (schema 1.7+) |
 
 Trajectory tables (schema **`1.2`**+ trajectory DDL, active projection
@@ -858,28 +858,29 @@ Migration path: `codeclone/memory/schema_migrate.py`.
 See [Engineering Memory](../13-engineering-memory/index.md) for lifecycle and agent
 surfaces.
 
-## Semantic index sidecar (format `2`)
+## Semantic index sidecar (format `3`)
 
 Optional LanceDB directory (default `.codeclone/memory/semantic_index.lance`).
 Format version constant: `SEMANTIC_INDEX_FORMAT_VERSION` in
-`codeclone/contracts/__init__.py` (currently **`2`**).
+`codeclone/contracts/__init__.py` (currently **`3`**).
 
 Table columns (PyArrow):
 
-| Column             | Type            | Notes                                              |
-|--------------------|-----------------|----------------------------------------------------|
-| `id`               | string          | Row id; chunk rows use `trajectory:{id}:chunk:NNN` |
-| `source`           | string          | `memory` / `audit` / `trajectory`                  |
-| `parent_id`        | string (nullable) | Trajectory id for chunk rows; null for single-row  |
-| `chunk_index`      | int32 (nullable)  | Zero-based chunk index                             |
-| `chunk_count`      | int32 (nullable)  | Total chunks for the parent trajectory              |
-| `project_id`       | string          |                                                    |
-| `subject_path`     | string          |                                                    |
-| `kind`             | string          |                                                    |
-| `status`           | string          |                                                    |
-| `text_hash`        | string          | Chunk text hash (idempotent upsert key)            |
-| `embedding_model`  | string          |                                                    |
-| `vector`           | float32 list    | Fixed embedding dimension                          |
+| Column            | Type              | Notes                                               |
+|-------------------|-------------------|-----------------------------------------------------|
+| `id`              | string            | Row id; chunk rows use `trajectory:{id}:chunk:NNN`  |
+| `source`          | string            | `memory` / `audit` / `trajectory`                   |
+| `parent_id`       | string (nullable) | Trajectory id for chunk rows; null for single-row   |
+| `chunk_index`     | int32 (nullable)  | Zero-based chunk index                              |
+| `chunk_count`     | int32 (nullable)  | Total chunks for the parent trajectory              |
+| `project_id`      | string            |                                                     |
+| `subject_path`    | string            |                                                     |
+| `kind`            | string            |                                                     |
+| `status`          | string            |                                                     |
+| `text_hash`       | string            | Chunk text hash (idempotent upsert key)             |
+| `source_revision` | string            | Source payload revision used for idempotent rebuild |
+| `embedding_model` | string            |                                                     |
+| `vector`          | float32 list      | Fixed embedding dimension                           |
 
 Trajectory projections longer than the embedding model window are split into
 deterministic token-aligned chunks (strategy version
@@ -921,21 +922,21 @@ and LanceDB vector directory (default `.codeclone/analytics/corpus_vectors`).
 Derived offline analytics — not report, baseline, cache, audit, or Engineering
 Memory truth.
 
-| Artifact                | Role                                                                  |
-|-------------------------|-----------------------------------------------------------------------|
-| `corpus_snapshots`      | Immutable-by-contract snapshot metadata and source digests            |
-| `corpus_items`          | Normalized representation, metadata, and optional registry overlay    |
-| `embedding_generations` | Provider/model/preprocessing manifest                                  |
-| `embedding_items`       | Vector row keys, float32 digests, dimensions; no vector blobs          |
-| `clustering_runs`       | Requested/effective parameters, algorithm manifest, lifecycle status  |
-| `cluster_assignments`   | Per-run item label, strength, and membership digest                    |
-| `cluster_summaries`     | Canonical display id and persisted diagnostics per cluster/noise       |
-| `profile_manifest_snapshots` | Immutable canonical manifest values, labels, and descriptions     |
-| `profile_batches`       | One immutable execution receipt per profile sweep                      |
-| `profile_batch_runs`    | Ordered effective-parameter membership for each batch                  |
-| `profile_assessments`   | Technical-validity-aware suitability facts for batch members           |
-| `run_selections`        | Append-only global or profile-batch maintainer decisions               |
-| LanceDB sidecar         | Separate float32 vectors from Engineering Memory semantic index        |
+| Artifact                     | Role                                                                 |
+|------------------------------|----------------------------------------------------------------------|
+| `corpus_snapshots`           | Immutable-by-contract snapshot metadata and source digests           |
+| `corpus_items`               | Normalized representation, metadata, and optional registry overlay   |
+| `embedding_generations`      | Provider/model/preprocessing manifest                                |
+| `embedding_items`            | Vector row keys, float32 digests, dimensions; no vector blobs        |
+| `clustering_runs`            | Requested/effective parameters, algorithm manifest, lifecycle status |
+| `cluster_assignments`        | Per-run item label, strength, and membership digest                  |
+| `cluster_summaries`          | Canonical display id and persisted diagnostics per cluster/noise     |
+| `profile_manifest_snapshots` | Immutable canonical manifest values, labels, and descriptions        |
+| `profile_batches`            | One immutable execution receipt per profile sweep                    |
+| `profile_batch_runs`         | Ordered effective-parameter membership for each batch                |
+| `profile_assessments`        | Technical-validity-aware suitability facts for batch members         |
+| `run_selections`             | Append-only global or profile-batch maintainer decisions             |
+| LanceDB sidecar              | Separate float32 vectors from Engineering Memory semantic index      |
 
 Store schema version: `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` in
 `codeclone/contracts/__init__.py` (currently **`1.2`**).
@@ -1071,27 +1072,27 @@ for validity and privacy rules.
 
 Not defined in `codeclone/contracts/__init__.py`; bump in the owning module.
 
-| Constant | Value | Owner |
-|---|---|---|
-| `AUDIT_EVENT_CORE_VERSION` | `2` | `codeclone/audit/events.py` |
-| `CONTEXT_CONTRACT_VERSION` | `1` | `codeclone/surfaces/mcp/_implementation_context.py` |
-| `CALL_RESOLUTION_VERSION` | `1` | `codeclone/surfaces/mcp/_implementation_context.py` |
-| `TRAJECTORY_EXPORT_SCHEMA_VERSION` | `2` | `codeclone/memory/trajectory/profiles.py` |
+| Constant                           | Value | Owner                                               |
+|------------------------------------|-------|-----------------------------------------------------|
+| `AUDIT_EVENT_CORE_VERSION`         | `2`   | `codeclone/audit/events.py`                         |
+| `CONTEXT_CONTRACT_VERSION`         | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `CALL_RESOLUTION_VERSION`          | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `TRAJECTORY_EXPORT_SCHEMA_VERSION` | `2`   | `codeclone/memory/trajectory/profiles.py`           |
 
 Central corpus and governance constants (also in `codeclone/contracts/__init__.py`):
 
-| Constant | Value |
-|---|---|
-| `IDE_GOVERNANCE_PROTOCOL_VERSION` | `2` |
-| `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION` | `1.2` |
-| `CORPUS_EXPORT_SCHEMA_VERSION` | `1.3` |
-| `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `1` |
-| `CORPUS_CONTROL_PLANE_CONTRACT_VERSION` | `1.0` |
-| `CORPUS_REPRESENTATION_CONTRACT_VERSION` | `3` |
-| `CORPUS_NORMALIZER_VERSION` | `1` |
-| `CORPUS_EMBEDDING_CONTRACT_VERSION` | `2` |
-| `CORPUS_AGENT_LABEL_CONTRACT_VERSION` | `1` |
-| `CORPUS_PARTITION_MAP_VERSION` | `1` |
+| Constant                                 | Value |
+|------------------------------------------|-------|
+| `IDE_GOVERNANCE_PROTOCOL_VERSION`        | `2`   |
+| `CORPUS_ANALYTICS_STORE_SCHEMA_VERSION`  | `1.2` |
+| `CORPUS_EXPORT_SCHEMA_VERSION`           | `1.3` |
+| `CORPUS_PROFILE_MANIFEST_SCHEMA_VERSION` | `1`   |
+| `CORPUS_CONTROL_PLANE_CONTRACT_VERSION`  | `1.0` |
+| `CORPUS_REPRESENTATION_CONTRACT_VERSION` | `3`   |
+| `CORPUS_NORMALIZER_VERSION`              | `1`   |
+| `CORPUS_EMBEDDING_CONTRACT_VERSION`      | `2`   |
+| `CORPUS_AGENT_LABEL_CONTRACT_VERSION`    | `1`   |
+| `CORPUS_PARTITION_MAP_VERSION`           | `1`   |
 
 ## Refs
 

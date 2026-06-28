@@ -52,6 +52,7 @@ Mode router for inspection and search.
 | `trajectory_status`    | —                                           | Trajectory projection run metadata              |
 | `trajectory_search`    | `query`; optional `filters.include_routine` | Search stored trajectories                      |
 | `trajectory_get`       | `record_id` (trajectory id)                 | One trajectory + steps (always full)            |
+| `experience_get`       | `record_id` (Experience id)                 | One Experience + facets/evidence (always full)  |
 | `trajectory_anomalies` | optional `filters.include_routine`          | Detected trajectory contract anomalies          |
 | `trajectory_agents`    | optional `filters.include_routine`          | Aggregate quality/outcomes by exact agent label |
 | `trajectory_dashboard` | optional `filters.include_routine`          | Combined status, agent, and anomaly view        |
@@ -59,7 +60,8 @@ Mode router for inspection and search.
 List modes (`search`, `stale`, `drafts`, scoped `get_relevant_memory`) default
 to **compact** payloads: statement preview, `statement_length`, no `payload`.
 Use `mode=get` or `detail_level=full` for complete statements and payload.
-`trajectory_get` is also always full regardless of requested detail level.
+`trajectory_get` and `experience_get` are also always full regardless of
+requested detail level.
 
 Scoped retrieval keeps four typed lanes:
 
@@ -72,8 +74,9 @@ Scoped retrieval keeps four typed lanes:
 
 `subject_count` and `subjects_truncated=true` mean more linked subjects exist;
 they do not downgrade or discard the record. Each compact trajectory retains
-its own `patch_trail_summary`. The duplicate top-level `patch_trail_summary` is
-full-only.
+its own `patch_trail_summary`; the response no longer duplicates that summary
+at the top level. Use `query_engineering_memory(mode=trajectory_get)` for the
+full trajectory and persisted Patch Trail.
 
 Scoped compact `get_relevant_memory` responses use
 `context_governance.mode="partial_enforce"` with
@@ -84,6 +87,15 @@ budget, `context_governance.omitted` points to the digest-bound
 `get_memory_projection_page(root, cursor)`. Full-detail retrieval and
 continuation pages stay in `mode="observe"` because they return the requested
 complete object/page rather than applying a new packing policy.
+
+#### `get_memory_projection_page`
+
+Exact continuation for omitted `get_relevant_memory` lane tails. Pass the
+digest-bound `cursor` from `continuation.lanes.<lane>.page.cursor` plus the
+same absolute `root`. The page is tied to the normalized retrieval request,
+lane ordering version, and lane identity digest; when that identity no longer
+matches, the tool returns `status="snapshot_mismatch"` instead of silently
+continuing against fresh memory data.
 
 **Filters** (`filters` object):
 

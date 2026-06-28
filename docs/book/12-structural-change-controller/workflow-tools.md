@@ -1,4 +1,18 @@
-## Pre-Change Workflow
+## Primary workflow
+
+For normal edits, use the workflow tools:
+
+1. Run `analyze_repository` or `analyze_changed_paths`.
+2. Call `start_controlled_change(root, scope, intent, ...)`.
+3. Read `edit_allowed`; edit only when it is `true`.
+4. Retrieve scoped memory/context when useful.
+5. Run a post-edit analysis when the verification profile requires it.
+6. Call `finish_controlled_change(intent_id, changed_files|diff_ref, after_run_id?, ...)`.
+
+The atomic sequence below is advanced/diagnostic. It exists for debugging,
+queue/recovery operations, and older clients that do not yet use start/finish.
+
+## Atomic pre-change workflow
 
 1. Call `manage_change_intent(action="list_workspace", root="/abs/repo")` to
    see active intents from other agents before analysis.
@@ -9,7 +23,7 @@
 3. Declare scope with `manage_change_intent(action="declare")`.
 4. If `concurrent_intents` is non-empty, narrow scope or coordinate before
    editing.
-5. Inspect the returned `blast_radius_summary`.
+5. Inspect the returned `blast_radius`.
 6. Optionally call `get_blast_radius` for full dependent/context detail.
 7. Call `check_patch_contract(mode="budget")` to inspect the active regression
    budget and metric headroom before editing.

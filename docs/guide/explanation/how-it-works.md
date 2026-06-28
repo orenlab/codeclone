@@ -1,4 +1,4 @@
-<!-- doc-scope: HOW IT WORKS. class: explanation max-lines: 120
+<!-- doc-scope: HOW IT WORKS. class: explanation max-lines: 220
       NARRATIVE PIPELINE OVERVIEW — how CodeClone works.
      owns: pipeline stage descriptions, surfaces table, design principles.
      does-not-own: contract details (→ book/ chapters), MCP tools (→ guide/mcp/README.md),
@@ -167,18 +167,21 @@ Exit codes: [09-exit-codes](../../book/09-exit-codes.md).
 
 ## Surfaces
 
-Every output surface — CLI, HTML, MCP, IDE — is a projection of the same
-canonical report. No surface adds a second analysis engine.
+Every output surface — CLI, HTML, MCP, IDE, agent plugins, CI, and SARIF — is a
+projection of the same canonical report. No surface adds a second analysis
+engine.
 
-| Surface        | Role                               | Contract                                                  |
-|----------------|------------------------------------|-----------------------------------------------------------|
-| CLI            | Scripting and CI                   | [CLI](../../book/11-cli.md)                               |
-| MCP            | Read-only agent/client integration | [MCP interface](../../book/25-mcp-interface/index.md)     |
-| VS Code        | Guided IDE review                  | [VS Code](../integrations/vscode/setup.md)                |
-| Claude Desktop | Local `.mcpb` bundle               | [Claude Desktop](../integrations/claude-desktop/setup.md) |
-| Codex          | Marketplace plugin with skills     | [Codex](../integrations/codex/setup.md)                   |
-| Cursor         | Plugin with skills, rules, hooks   | [Cursor](../integrations/cursor/install-and-skills.md)    |
-| SARIF          | IDE code scanning                  | [SARIF](../integrations/sarif/export.md)                  |
+| Surface        | Role                               | Guide                                                            | Contract                                                           |
+|----------------|------------------------------------|------------------------------------------------------------------|--------------------------------------------------------------------|
+| CLI            | Scripting and CI                   | [Getting started](../../getting-started.md)                      | [CLI](../../book/11-cli.md)                                        |
+| MCP            | Read-only agent/client integration | [MCP guide](../mcp/README.md)                                    | [MCP interface](../../book/25-mcp-interface/index.md)              |
+| VS Code        | Guided IDE review                  | [Setup](../integrations/vscode/setup.md)                         | [VS Code](../../book/integrations/vs-code-extension.md)            |
+| Cursor         | Plugin with skills, rules, hooks   | [Install & skills](../integrations/cursor/install-and-skills.md) | [Cursor](../../book/integrations/cursor-plugin.md)                 |
+| Claude Code    | Marketplace plugin with skills     | [Install](../integrations/claude-code/setup.md)                  | [Claude Code](../../book/integrations/claude-code-plugin.md)       |
+| Codex          | Marketplace plugin with skills     | [Install](../integrations/codex/setup.md)                        | [Codex](../../book/integrations/codex-plugin.md)                   |
+| Claude Desktop | Local `.mcpb` bundle               | [Setup](../integrations/claude-desktop/setup.md)                 | [Claude Desktop](../../book/integrations/claude-desktop-bundle.md) |
+| GitHub Action  | CI wrapper over the CLI            | [CI setup](../../getting-started.md#ci-setup)                    | [GitHub Action](../../book/integrations/github-action.md)          |
+| SARIF          | IDE/code-scanning projection       | [Export](../integrations/sarif/export.md)                        | [SARIF](../../book/integrations/sarif.md)                          |
 
 ---
 

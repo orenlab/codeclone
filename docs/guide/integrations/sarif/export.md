@@ -1,5 +1,7 @@
 # SARIF export
 
+Contract: [SARIF projection](../../../book/integrations/sarif.md).
+
 ## Purpose
 
 Explain how CodeClone projects canonical findings into SARIF and what IDEs or
