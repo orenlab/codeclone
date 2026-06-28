@@ -28,7 +28,8 @@ evidence, platform self-observability, and broader IDE/agent integration.
 - **Native agent and IDE integrations** for VS Code, Claude Desktop, Claude Code, Codex, and Cursor, including
   governance, audit, memory, trajectory, and structural-review workflows.
 - Expanded controller, memory, trajectory, analytics, semantic-search, observability, blast-radius, patch-verification,
-  and diagnostic CLI/MCP surfaces.
+  and diagnostic CLI/MCP surfaces. The default MCP server surface is now **38 tools** (**40** when VS Code enables the
+  IDE governance channel).
 - Reorganized documentation into a contract-focused 00–26 book with unified integration guidance and explicit edition
   tiers.
 - MCP schemas now include parameter descriptions, deterministic `next_tool` guidance, token-budget tracking, workspace
@@ -39,6 +40,8 @@ evidence, platform self-observability, and broader IDE/agent integration.
 - Cache schema advanced to **2.9** for the rebuildable per-function relationship-fact projection and to **2.10** for
   intra-module, class-method, and receiver-aware call resolution.
 - Engineering Memory schema advanced to **1.7** for trajectory and Patch Trail evidence.
+- Semantic index format advanced to **3** for LanceDB rows with `source_revision`; existing semantic sidecars should be
+  rebuilt.
 - Corpus Analytics store schema advanced to **1.2**.
 - Corpus Analytics JSON export schema advanced through **1.2** and **1.3**.
 - Corpus Analytics representation contract advanced to **3**.
