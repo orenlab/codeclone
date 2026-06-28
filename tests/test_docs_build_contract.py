@@ -46,3 +46,34 @@ def test_docs_build_strict() -> None:
         timeout=120,
     )
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_sample_report_built_page_has_absolute_artifact_links() -> None:
+    site_root = _REPO_ROOT / "site"
+    build = subprocess.run(
+        [
+            "uv",
+            "run",
+            "--with",
+            "zensical==0.0.46",
+            "zensical",
+            "build",
+            "--clean",
+            "--strict",
+        ],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert build.returncode == 0, build.stderr or build.stdout
+    candidates = (
+        site_root / "examples" / "report" / "index.html",
+        site_root / "examples" / "report.html",
+    )
+    page = next((path for path in candidates if path.is_file()), None)
+    assert page is not None, "expected built sample report HTML page"
+    text = page.read_text(encoding="utf-8")
+    assert 'href="live/' not in text
+    assert 'href="./live/' not in text
+    assert "examples/report/live/index.html" in text
