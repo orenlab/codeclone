@@ -32,7 +32,7 @@ _ARTIFACT_NAMES: tuple[str, ...] = (
     "report.sarif",
     "manifest.json",
 )
-_RELATIVE_LIVE_HREF = re.compile(r'href="live/([a-zA-Z0-9_.-]+)"')
+_RELATIVE_LIVE_HREF = re.compile(r'href=(["\'])(?:\./)?live/([a-zA-Z0-9_.-]+)\1')
 
 
 @dataclass(frozen=True)
@@ -81,6 +81,9 @@ def _run_codeclone(scan_root: Path, artifacts: ReportArtifacts) -> None:
         str(artifacts.json),
         "--sarif",
         str(artifacts.sarif),
+        # Docs preview is report generation, not the structural CI gate.
+        "--no-fail-on-new",
+        "--no-fail-on-new-metrics",
         "--no-progress",
         "--quiet",
     ]
@@ -160,8 +163,30 @@ def _published_artifact_href(site_url: str, artifact_name: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{artifact_path}"
 
 
-def _sample_report_page_path(output_dir: Path) -> Path:
-    return output_dir.parent / "index.html"
+def _sample_report_page_paths(output_dir: Path) -> list[Path]:
+    site_root = output_dir.parent.parent.parent
+    candidates = (
+        output_dir.parent / "index.html",
+        site_root / "examples" / "report.html",
+    )
+    return [path for path in candidates if path.is_file()]
+
+
+def _patch_page_links(page: Path, site_url: str) -> None:
+    text = page.read_text(encoding="utf-8")
+
+    def _replace(match: re.Match[str]) -> str:
+        quote = match.group(1)
+        artifact_name = match.group(2)
+        href = _published_artifact_href(site_url, artifact_name)
+        return f"href={quote}{href}{quote}"
+
+    patched = _RELATIVE_LIVE_HREF.sub(_replace, text)
+    if _RELATIVE_LIVE_HREF.search(patched):
+        msg = f"relative live/* artifact links remain in {page}"
+        raise RuntimeError(msg)
+    if patched != text:
+        page.write_text(patched, encoding="utf-8")
 
 
 def _patch_sample_report_links(*, output_dir: Path, site_url: str) -> None:
@@ -171,19 +196,18 @@ def _patch_sample_report_links(*, output_dir: Path, site_url: str) -> None:
     trailing slash (common with navigation.instant), resolving to
     ``/examples/live/...`` instead of ``/examples/report/live/...``.
     """
-    report_page = _sample_report_page_path(output_dir)
-    if not report_page.is_file():
-        return
-    text = report_page.read_text(encoding="utf-8")
-
-    def _replace(match: re.Match[str]) -> str:
-        artifact_name = match.group(1)
-        href = _published_artifact_href(site_url, artifact_name)
-        return f'href="{href}"'
-
-    patched = _RELATIVE_LIVE_HREF.sub(_replace, text)
-    if patched != text:
-        report_page.write_text(patched, encoding="utf-8")
+    pages = _sample_report_page_paths(output_dir)
+    if not pages:
+        site_root = output_dir.parent.parent.parent
+        expected_index = output_dir.parent / "index.html"
+        expected_report = site_root / "examples" / "report.html"
+        msg = (
+            "sample report HTML page not found under built site; expected "
+            f"{expected_index} or {expected_report}"
+        )
+        raise FileNotFoundError(msg)
+    for page in pages:
+        _patch_page_links(page, site_url)
 
 
 def _verify_report_artifacts(destination: ReportArtifacts) -> None:

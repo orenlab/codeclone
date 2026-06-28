@@ -30,6 +30,23 @@ def test_published_artifact_href_uses_site_url_path_prefix() -> None:
     assert href == "https://orenlab.github.io/codeclone/examples/report/live/index.html"
 
 
+def test_sample_report_markdown_links_match_zensical_site_url() -> None:
+    module = _load_docs_report_namespace()
+    read_site_url = module["_read_site_url"]
+    published_artifact_href = module["_published_artifact_href"]
+    assert callable(read_site_url)
+    assert callable(published_artifact_href)
+    repo_root = Path(__file__).resolve().parents[1]
+    site_url = read_site_url(repo_root)
+    report_md = (repo_root / "docs" / "examples" / "report.md").read_text(
+        encoding="utf-8"
+    )
+    artifact_names = module["_ARTIFACT_NAMES"]
+    assert isinstance(artifact_names, tuple)
+    for artifact in artifact_names:
+        assert published_artifact_href(site_url, str(artifact)) in report_md
+
+
 def test_patch_sample_report_links_rewrites_relative_live_hrefs(
     tmp_path: Path,
 ) -> None:
@@ -65,6 +82,23 @@ def test_patch_sample_report_links_rewrites_relative_live_hrefs(
         'href="https://orenlab.github.io/codeclone/examples/report/live/report.json"'
         in patched
     )
+
+
+def test_patch_sample_report_links_requires_built_page(tmp_path: Path) -> None:
+    module = _load_docs_report_namespace()
+    patch_sample_report_links = module["_patch_sample_report_links"]
+    assert callable(patch_sample_report_links)
+    output_dir = tmp_path / "examples" / "report" / "live"
+    output_dir.mkdir(parents=True)
+    try:
+        patch_sample_report_links(
+            output_dir=output_dir,
+            site_url="https://orenlab.github.io/codeclone/",
+        )
+    except FileNotFoundError as exc:
+        assert "sample report HTML page not found" in str(exc)
+    else:
+        raise AssertionError("expected FileNotFoundError when page is missing")
 
 
 def test_docs_example_report_uses_main_entrypoint(
@@ -109,6 +143,8 @@ def test_docs_example_report_uses_main_entrypoint(
             str(artifacts.json),
             "--sarif",
             str(artifacts.sarif),
+            "--no-fail-on-new",
+            "--no-fail-on-new-metrics",
             "--no-progress",
             "--quiet",
         ],

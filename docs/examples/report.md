@@ -11,16 +11,16 @@ The example is rebuilt from the same tree that produces the published
 documentation, so the HTML, canonical JSON, and SARIF artifacts stay aligned.
 
 <p>
-  <a class="md-button md-button--primary" href="live/index.html" target="_blank" rel="noopener">
+  <a class="md-button md-button--primary" href="https://orenlab.github.io/codeclone/examples/report/live/index.html" target="_blank" rel="noopener">
     Open interactive HTML report
   </a>
-  <a class="md-button" href="live/report.json" target="_blank" rel="noopener">
+  <a class="md-button" href="https://orenlab.github.io/codeclone/examples/report/live/report.json" target="_blank" rel="noopener">
     Open canonical JSON
   </a>
-  <a class="md-button" href="live/report.sarif" target="_blank" rel="noopener">
+  <a class="md-button" href="https://orenlab.github.io/codeclone/examples/report/live/report.sarif" target="_blank" rel="noopener">
     Open SARIF
   </a>
-  <a class="md-button" href="live/manifest.json" target="_blank" rel="noopener">
+  <a class="md-button" href="https://orenlab.github.io/codeclone/examples/report/live/manifest.json" target="_blank" rel="noopener">
     View generation manifest
   </a>
 </p>
