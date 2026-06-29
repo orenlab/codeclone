@@ -649,6 +649,25 @@ def _payload_dicts(
     return tuple(cast("dict[str, object]", payload[key]) for key in keys)
 
 
+def _install_decorate_counter(
+    service: CodeCloneMCPService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[str]:
+    decorated_ids: list[str] = []
+    original_decorate = service._decorate_finding
+
+    def counting_decorate(
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        **kwargs: Any,
+    ) -> dict[str, object]:
+        decorated_ids.append(str(finding.get("id", "")))
+        return original_decorate(record, finding, **kwargs)
+
+    monkeypatch.setattr(service, "_decorate_finding", counting_decorate)
+    return decorated_ids
+
+
 def _two_clone_fixture_roots(tmp_path: Path) -> tuple[Path, Path]:
     first_root = tmp_path / "first"
     second_root = tmp_path / "second"
@@ -876,6 +895,25 @@ def _analyze_quality_repository(
         )
     )
     return service, summary
+
+
+def _analyze_multi_clone_repository(root: Path) -> CodeCloneMCPService:
+    _write_clone_fixture(root)
+    _write_clone_variant_fixture(
+        root,
+        relative_dir="pkg_extra",
+        module_name="more_dup.py",
+        seed=20,
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    return service
 
 
 def _file_registry(payload: dict[str, object]) -> dict[str, object]:
@@ -4020,6 +4058,46 @@ def test_mcp_service_list_findings_decorates_only_requested_page(
     baseline = service.list_findings(run_id=run_id, family="all", limit=50)
     assert cast(int, baseline["total"]) > 1
 
+    decorated_ids = _install_decorate_counter(service, monkeypatch)
+
+    payload = service.list_findings(
+        run_id=run_id,
+        family="all",
+        detail_level="summary",
+        limit=1,
+    )
+
+    assert payload["returned"] == 1
+    assert cast(int, payload["total"]) == cast(int, baseline["total"])
+    assert len(decorated_ids) == 1
+
+
+def test_mcp_service_list_hotspots_decorates_only_requested_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _analyze_multi_clone_repository(tmp_path)
+    baseline = service.list_hotspots(kind="highest_priority", limit=50)
+    assert cast(int, baseline["total"]) > 1
+
+    decorated_ids = _install_decorate_counter(service, monkeypatch)
+
+    payload = service.list_hotspots(kind="highest_priority", limit=1)
+
+    assert payload["returned"] == 1
+    assert cast(int, payload["total"]) == cast(int, baseline["total"])
+    assert len(decorated_ids) == 1
+
+
+def test_mcp_service_production_triage_decorates_only_returned_hotspots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _analyze_multi_clone_repository(tmp_path)
+    baseline = service.get_production_triage(max_hotspots=10)
+    baseline_hotspots = _mapping_child(baseline, "top_hotspots")
+    assert cast(int, baseline_hotspots["available"]) > 1
+
     decorated_ids: list[str] = []
     original_decorate = service._decorate_finding
 
@@ -4033,15 +4111,11 @@ def test_mcp_service_list_findings_decorates_only_requested_page(
 
     monkeypatch.setattr(service, "_decorate_finding", counting_decorate)
 
-    payload = service.list_findings(
-        run_id=run_id,
-        family="all",
-        detail_level="summary",
-        limit=1,
-    )
+    payload = service.get_production_triage(max_hotspots=1)
+    top_hotspots = _mapping_child(payload, "top_hotspots")
 
-    assert payload["returned"] == 1
-    assert cast(int, payload["total"]) == cast(int, baseline["total"])
+    assert top_hotspots["returned"] == 1
+    assert top_hotspots["available"] == baseline_hotspots["available"]
     assert len(decorated_ids) == 1
 
 

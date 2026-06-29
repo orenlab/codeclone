@@ -1122,12 +1122,17 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         )
         hotspot_limit = max(1, min(max_hotspots, 10))
         suggestion_limit = max(1, min(max_suggestions, 10))
-        production_hotspots = self._hotspot_rows(
+        production_hotspot_selection = self._hotspot_selection(
             record=record,
             kind="production_hotspots",
-            detail_level="summary",
             changed_paths=(),
             exclude_reviewed=False,
+            limit=hotspot_limit,
+        )
+        production_hotspots = self._decorate_hotspot_selection(
+            record=record,
+            selection=production_hotspot_selection,
+            detail_level="summary",
         )
         production_suggestions = [
             dict(row)
@@ -1156,11 +1161,10 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             },
             "top_hotspots": {
                 "kind": "production_hotspots",
-                "available": len(production_hotspots),
-                "returned": min(len(production_hotspots), hotspot_limit),
+                "available": production_hotspot_selection[1],
+                "returned": len(production_hotspots),
                 "items": [
-                    dict(_helpers._as_mapping(item))
-                    for item in production_hotspots[:hotspot_limit]
+                    dict(_helpers._as_mapping(item)) for item in production_hotspots
                 ],
             },
             "suggestions": {
