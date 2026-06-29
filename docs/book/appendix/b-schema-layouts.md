@@ -822,7 +822,7 @@ Core tables:
 | `memory_records`         | Typed statements with status, confidence, origin, payload                                                           |
 | `memory_subjects`        | Path/symbol/module links (`subject_kind`, `subject_key`)                                                            |
 | `memory_evidence`        | Deterministic evidence refs (report, git_commit, doc, …)                                                            |
-| `memory_fts`             | FTS5 search index (schema 1.1+)                                                                                     |
+| `memory_records_fts`     | FTS5 search index (schema 1.1+)                                                                                     |
 | `memory_revisions`       | Governance audit trail                                                                                              |
 | `memory_ingestion_runs`  | Init/refresh run metadata                                                                                           |
 | `memory_projection_jobs` | Coalesced trajectory/semantic/Experience jobs (schema 1.3+); `flush_claimed_by` flush-scheduling slot (schema 1.7+) |

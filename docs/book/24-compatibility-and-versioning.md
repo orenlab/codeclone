@@ -56,12 +56,19 @@ Current contract versions:
 - `AUDIT_EVENT_CORE_VERSION = "2"` (`codeclone/audit/events.py`; frozen audit step core)
 - `CONTEXT_CONTRACT_VERSION = "1"` (`codeclone/surfaces/mcp/_implementation_context.py`)
 - `CALL_RESOLUTION_VERSION = "1"` (`codeclone/surfaces/mcp/_implementation_context.py`)
+- `CONTEXT_GOVERNANCE_CONTRACT_VERSION = "1.0"` (`codeclone/surfaces/mcp/_context_governance.py`)
+- `CONTEXT_GOVERNANCE_ESTIMATOR = "utf8_bytes_div_4_v1"` (`codeclone/surfaces/mcp/_context_governance.py`)
+- `RECEIPT_VERSION = "1"` (`codeclone/surfaces/mcp/_review_receipt.py`)
+- `BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION = "1"` (`codeclone/surfaces/mcp/_blast_radius.py`)
 
 Refs:
 
 - `codeclone/contracts/__init__.py`
 - `codeclone/audit/events.py`
 - `codeclone/surfaces/mcp/_implementation_context.py`
+- `codeclone/surfaces/mcp/_context_governance.py`
+- `codeclone/surfaces/mcp/_review_receipt.py`
+- `codeclone/surfaces/mcp/_blast_radius.py`
 
 ## Contracts
 
@@ -82,6 +89,15 @@ Version bump rules:
   **`1.7`** the projection-job flush-scheduling column (`flush_claimed_by`)
 - bump **patch trail schema** (`PATCH_TRAIL_SCHEMA_VERSION`) when finish-time Patch
   Trail JSON shape changes incompatibly
+- bump **context governance contract** (`CONTEXT_GOVERNANCE_CONTRACT_VERSION`)
+  when MCP response-budget semantics, omission disclosure, or drill-down
+  capability meaning changes incompatibly; changing the deterministic context
+  estimator must be documented even when the envelope shape is unchanged
+- bump **review receipt version** (`RECEIPT_VERSION`) when structured receipt
+  identity or machine-readable receipt fields change incompatibly
+- bump **blast artifact detail contract**
+  (`BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION`) when stored start-time blast
+  artifact detail shape or retrieval identity semantics change incompatibly
 - bump **trajectory export schema** (`TRAJECTORY_EXPORT_SCHEMA_VERSION`) when JSONL
   row shape changes incompatibly
 - bump **trajectory projection**, **quality score**, or **Experience

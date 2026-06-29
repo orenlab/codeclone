@@ -47,6 +47,9 @@ Claude Code namespaces plugin skills with the plugin name:
 |---|---|
 | Repository review | `/codeclone:codeclone-review` |
 | Hotspot snapshot | `/codeclone:codeclone-hotspots` |
+| Production triage | `/codeclone:codeclone-production-triage` |
+| Architecture triage | `/codeclone:codeclone-architecture-triage` |
+| Blast-radius inspection | `/codeclone:codeclone-blast-radius` |
 | Controlled repository edit | `/codeclone:codeclone-change-control` |
 | Engineering Memory | `/codeclone:codeclone-engineering-memory` |
 | Implementation context | `/codeclone:codeclone-implementation-context` |

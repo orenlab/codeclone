@@ -64,7 +64,7 @@ graph TB
         REC[memory_records]
         SUB[memory_subjects]
         EV[memory_evidence]
-        FTS[memory_fts FTS5]
+        FTS[memory_records_fts FTS5]
         TRAJ[trajectory projection]
         EXP[Experience projection]
     end

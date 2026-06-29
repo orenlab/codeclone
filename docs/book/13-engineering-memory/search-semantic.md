@@ -10,7 +10,7 @@ candidates** and adjusts ranking (`semantic_proximity * 0.3` in
 
 ```mermaid
 flowchart LR
-    Q[Query text] --> FTS[FTS5 memory_fts]
+    Q[Query text] --> FTS[FTS5 memory_records_fts]
     Q --> EMB[EmbeddingProvider.embed_query]
     DOCS[Index projections] --> DOCEMB[EmbeddingProvider.embed_documents]
     EMB --> VEC[LanceDB k-NN]

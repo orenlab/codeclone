@@ -2,7 +2,7 @@
 
 ### FTS (always available)
 
-FTS5 index (`memory_fts`) indexes record statements and metadata.
+FTS5 index (`memory_records_fts`) indexes record statements and metadata.
 
 | `match_mode`    | Behavior                                      |
 |-----------------|-----------------------------------------------|

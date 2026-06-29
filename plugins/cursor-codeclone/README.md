@@ -89,9 +89,10 @@ Three rules ship in `rules/` (load via plugin discovery, not only manual symlink
 | `change-control-gate.mdc` | always     | Hard gate: `start` / `finish`, memory before finish when required |
 | `codeclone-python.mdc`    | `**/*.py`  | Analyze before structural edits; respect blast radius             |
 
-Chat skill ids use the `name:` field in each `SKILL.md` (folders `production-triage/`
-and `blast-radius/` differ from ids `codeclone-production-triage` and
-`codeclone-blast-radius`).
+Chat skill ids use the `name:` field in each `SKILL.md`. Current shipped folders
+and skill ids both use the `codeclone-*` names shown above; legacy local
+`production-triage/` and `blast-radius/` aliases are development leftovers and
+should not be documented as install paths.
 
 ---
 

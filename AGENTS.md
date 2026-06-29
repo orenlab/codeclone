@@ -286,6 +286,10 @@ Subsystem-local wire versions (not in `contracts/__init__.py`):
 | `AUDIT_EVENT_CORE_VERSION` | `2`   | `codeclone/audit/events.py`                         |
 | `CONTEXT_CONTRACT_VERSION` | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
 | `CALL_RESOLUTION_VERSION`  | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `CONTEXT_GOVERNANCE_CONTRACT_VERSION` | `1.0` | `codeclone/surfaces/mcp/_context_governance.py` |
+| `CONTEXT_GOVERNANCE_ESTIMATOR` | `utf8_bytes_div_4_v1` | `codeclone/surfaces/mcp/_context_governance.py` |
+| `RECEIPT_VERSION` | `1` | `codeclone/surfaces/mcp/_review_receipt.py` |
+| `BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION` | `1` | `codeclone/surfaces/mcp/_blast_radius.py` |
 
 When updating any doc that mentions a version, re-read `codeclone/contracts/__init__.py` first. Do not derive
 versions from another document.

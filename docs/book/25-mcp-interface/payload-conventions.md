@@ -57,44 +57,30 @@ Common statuses are `ok`, `not_found`, `ambiguous`, `digest_mismatch`, and
 `malformed_stored_receipt`; Patch Trail lookup may return
 `malformed_stored_patch_trail`.
 
-## Response governance compatibility audit
+## Response governance contract
 
-Response context governance rolls out additively. Until capability metadata
-advertises a leaner shape, clients must treat the current payload shape as the
-compatibility contract.
+Response context governance is live on the agent-facing MCP surface. Clients
+should treat `context_governance` as the compatibility envelope for bounded
+responses: it declares the contract version, deterministic estimator, active
+mode, exact drill-down capabilities, and any omitted evidence lanes.
+
+`partial_enforce` never removes mandatory control or safety facts. It only
+compacts recoverable evidence that has an exact retrieval route. When evidence
+is omitted, clients must follow `context_governance.omitted` or top-level
+`_continuation` instead of asking the model to reconstruct missing detail.
 
 Current `finish_controlled_change` compatibility facts:
 
-| Field                                                    | Current role                                              | Compatibility decision                                                                |
-|----------------------------------------------------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------|
-| `summary.receipt`                                        | compact created / skipped / failed status                 | keep; dashboards and skills use it as the receipt status signal                       |
-| `receipt.receipt_version` / `verdict` / `receipt_digest` | top-level receipt identity and compact routing fields     | prefer for identity checks before drill-down                                          |
-| `receipt.content`                                        | complete human-readable markdown receipt                  | keep inline while finish remains observe-only                                         |
-| `receipt.receipt_retrieval`                              | route to the durable structured receipt                   | use `get_review_receipt(..., format="structured")` for machine-readable receipt facts |
-| `receipt.receipt`                                        | legacy duplicate typed alias nested under markdown output | omitted by default; do not depend on it in finish responses                           |
-| `receipt_error`                                          | receipt failure reason                                    | keep; failed receipt creation prevents `auto_clear`                                   |
+| Field                                                    | Current role                                          | Compatibility decision                                                                |
+|----------------------------------------------------------|-------------------------------------------------------|---------------------------------------------------------------------------------------|
+| `summary.receipt`                                        | compact created / skipped / failed status             | keep; dashboards and skills use it as the receipt status signal                       |
+| `receipt.receipt_version` / `verdict` / `receipt_digest` | top-level receipt identity and compact routing fields | prefer for identity checks before drill-down                                          |
+| `receipt.content`                                        | human-readable markdown receipt when emitted inline   | recoverable; may be compacted or omitted with durable receipt drill-down              |
+| `receipt.receipt_retrieval`                              | route to the durable structured receipt               | use `get_review_receipt(..., format="structured")` for machine-readable receipt facts |
+| `receipt_error`                                          | receipt failure reason                                | keep; failed receipt creation prevents `auto_clear`                                   |
 
-Client and integration audit:
-
-| Surface               | Current dependency                                                          | Response-governance requirement                                   |
-|-----------------------|-----------------------------------------------------------------------------|-------------------------------------------------------------------|
-| MCP tests / snapshots | assert `summary.receipt`, receipt identity, and durable receipt retrieval   | update first when finish packing semantics change                 |
-| VS Code extension     | discovers tools through `tools/list`; does not own a separate finish schema | tolerate current shape and future capability metadata             |
-| Claude Desktop bundle | launches `codeclone-mcp`; no independent payload parser                     | no bundle shape change before MCP capability metadata             |
-| Claude Code plugin    | skills describe the workflow, not a custom parser                           | sync skills when finish response governance is enforced           |
-| Codex plugin          | skills describe the workflow, not a custom parser                           | sync skills when finish response governance is enforced           |
-| Cursor plugin         | skills/rules describe the workflow and receipt requirement                  | sync skills and rules when finish response governance is enforced |
-
-Before any default payload removal, MCP must advertise pre-call capability
-metadata for the response-governance contract. Clients should be able to detect:
-
-- context-governance contract version;
-- passive `observe` mode vs enforced response budgets;
-- whether `finish_controlled_change` still includes the typed receipt alias;
-- whether durable receipt, Patch Trail, blast-radius, implementation-context
-  page, and omitted-evidence drill-down resources are available.
-
-Payload slimming without that metadata is a contract break, even during alpha.
+Payload slimming without capability metadata, omission disclosure, and exact
+drill-down remains a contract break.
 
 ### Response `context_governance`
 

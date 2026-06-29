@@ -34,6 +34,10 @@ evidence, platform self-observability, and broader IDE/agent integration.
   tiers.
 - MCP schemas now include parameter descriptions, deterministic `next_tool` guidance, token-budget tracking, workspace
   hygiene warnings, and documentation-contract linting.
+- MCP response governance now advertises `context_governance` metadata for bounded agent replies. Workflow, memory, and
+  implementation-context responses preserve mandatory control facts inline, compact recoverable evidence under
+  `partial_enforce`, disclose omitted lanes, and expose exact drill-down through durable receipt, Patch Trail, blast
+  artifact, memory continuation, and implementation-context page retrieval.
 
 ### Contract changes
 
@@ -46,6 +50,8 @@ evidence, platform self-observability, and broader IDE/agent integration.
 - Corpus Analytics JSON export schema advanced through **1.2** and **1.3**.
 - Corpus Analytics representation contract advanced to **3**.
 - Corpus Analytics control-plane contract introduced at **1.0**.
+- MCP response governance contract introduced at **1.0** with deterministic `utf8_bytes_div_4_v1` context-unit
+  estimation and explicit `observe` / `partial_enforce` modes.
 - `derived.module_map` and `derived.review_queue` remain report-only projections excluded from the integrity digest;
   they add no analysis pass, metrics family, or report schema bump.
 - Live Implementation Context relationship facts remain off the canonical report and do not change canonical report
