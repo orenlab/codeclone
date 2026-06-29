@@ -25,10 +25,15 @@ from ._session_shared import (
     MCPServiceContractError,
 )
 
+MAX_BLAST_RADIUS_CACHE_ENTRIES = 64
+
 
 class _MCPSessionBlastRadiusMixin:
     _runs: CodeCloneMCPRunStore
-    _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
+    _blast_radius_cache: dict[
+        tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
+        BlastRadiusResult,
+    ]
 
     def get_blast_radius(
         self,
@@ -66,27 +71,37 @@ class _MCPSessionBlastRadiusMixin:
         allowed_scope: Sequence[str] = (),
     ) -> BlastRadiusResult:
         normalized_files = tuple(sorted(set(files)))
-        cache_key = (record.run_id, normalized_files, depth)
-        cacheable = (
-            not allowed_scope
-            and tuple(forbidden_patterns) == DEFAULT_DO_NOT_TOUCH_PATTERNS
+        default_forbidden = set(DEFAULT_DO_NOT_TOUCH_PATTERNS)
+        normalized_forbidden = tuple(
+            sorted(set(forbidden_patterns).difference(default_forbidden))
         )
-        if cacheable:
-            with self._state_lock:
-                cached = self._blast_radius_cache.get(cache_key)
+        normalized_allowed_scope = tuple(sorted(set(allowed_scope)))
+        cache_key = (
+            record.run_id,
+            normalized_files,
+            depth,
+            normalized_forbidden,
+            normalized_allowed_scope,
+        )
+        with self._state_lock:
+            cached = self._blast_radius_cache.get(cache_key)
             if cached is not None:
-                return cached
+                self._blast_radius_cache.pop(cache_key, None)
+                self._blast_radius_cache[cache_key] = cached
+        if cached is not None:
+            return cached
         result = compute_blast_radius(
             run_id=_helpers._short_run_id(record.run_id),
             report_document=record.report_document,
             files=normalized_files,
             depth=depth,
-            forbidden_patterns=forbidden_patterns,
-            allowed_scope=allowed_scope,
+            forbidden_patterns=normalized_forbidden,
+            allowed_scope=normalized_allowed_scope,
         )
-        if cacheable:
-            with self._state_lock:
-                self._blast_radius_cache[cache_key] = result
+        with self._state_lock:
+            while len(self._blast_radius_cache) >= MAX_BLAST_RADIUS_CACHE_ENTRIES:
+                self._blast_radius_cache.pop(next(iter(self._blast_radius_cache)))
+            self._blast_radius_cache[cache_key] = result
         return result
 
     def _validated_blast_radius_depth(self, depth: str) -> BlastRadiusDepth:

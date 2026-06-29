@@ -921,7 +921,10 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
-    _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
+    _blast_radius_cache: dict[
+        tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
+        BlastRadiusResult,
+    ]
     _context_projection_pages: dict[str, ContextProjectionArtifact]
     _memory_continuation_requests: dict[str, dict[str, object]]
     _active_intents: dict[str, IntentRecord]

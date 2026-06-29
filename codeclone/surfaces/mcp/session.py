@@ -130,7 +130,7 @@ class MCPSession(
         self._last_gate_results: dict[str, dict[str, object]] = {}
         self._spread_max_cache: dict[str, int] = {}
         self._blast_radius_cache: dict[
-            tuple[str, tuple[str, ...], str],
+            tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
             BlastRadiusResult,
         ] = {}
         self._context_projection_pages: dict[str, ContextProjectionArtifact] = {}

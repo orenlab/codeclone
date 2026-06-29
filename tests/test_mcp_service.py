@@ -32,6 +32,7 @@ import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
+import codeclone.surfaces.mcp._session_blast_radius_mixin as mcp_blast_session_mod
 import codeclone.surfaces.mcp._session_context_mixin as mcp_context_session_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
@@ -5135,6 +5136,65 @@ def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
         service.get_blast_radius(files=())
     with pytest.raises(MCPServiceContractError, match="Invalid value for depth"):
         service.get_blast_radius(files=("pkg/a.py",), depth="full")
+
+
+def test_mcp_service_blast_radius_cache_keys_intent_scope(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    with patch(
+        "codeclone.surfaces.mcp._session_blast_radius_mixin.compute_blast_radius",
+        wraps=mcp_blast_radius_mod.compute_blast_radius,
+    ) as compute:
+        first = service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=("pkg/z.py", "pkg/c.py", "pkg/c.py"),
+            allowed_scope=("pkg/b.py", "pkg/a.py"),
+        )
+        second = service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=("pkg/c.py", "pkg/z.py"),
+            allowed_scope=("pkg/a.py", "pkg/b.py", "pkg/a.py"),
+        )
+        third = service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=("pkg/c.py", "pkg/z.py"),
+            allowed_scope=("pkg/a.py",),
+        )
+
+    assert first is second
+    assert third is not first
+    assert compute.call_count == 2
+    assert len(service._blast_radius_cache) == 2
+
+
+def test_mcp_service_blast_radius_cache_is_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_blast_session_mod, "MAX_BLAST_RADIUS_CACHE_ENTRIES", 2)
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    for index in range(3):
+        service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=(f"pkg/forbidden_{index}.py",),
+        )
+
+    assert len(service._blast_radius_cache) == 2
 
 
 def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
@@ -12461,10 +12521,15 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
     service._spread_max_cache[stale.run_id] = 1
     from codeclone.analysis.blast_radius import BlastRadiusResult
 
-    service._blast_radius_cache[(stale.run_id, ("README.md",), "direct")] = cast(
-        "BlastRadiusResult",
-        {},
-    )
+    service._blast_radius_cache[
+        (
+            stale.run_id,
+            ("README.md",),
+            "direct",
+            (),
+            (),
+        )
+    ] = cast("BlastRadiusResult", {})
 
     service._runs.clear()
     service._prune_session_state()

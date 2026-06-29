@@ -146,11 +146,10 @@ Scope memory before edits; optional `semantic=true` on `mode=search` when
 `[tool.codeclone.memory.semantic]` is enabled, the semantic sidecar is installed,
 and semantic index rebuild succeeded (`manage_engineering_memory`
 `action=rebuild_semantic_index` or CLI `memory semantic rebuild`). Use
-`codeclone[semantic-local]`
-plus `embedding_provider = "fastembed"` for local semantic-quality recall;
-`codeclone[semantic-lancedb]` alone supports only the deterministic diagnostic
-provider. Human
-approve/reject: VS Code **Memory** view (preferred) or CLI
+`codeclone[semantic-local]` plus `embedding_provider = "fastembed"` for local
+semantic-quality recall; `codeclone[semantic-lancedb]` alone supports only the
+deterministic diagnostic provider. Human approve/reject: VS Code **Memory** view
+(preferred) or CLI
 `codeclone memory approve|reject|archive --i-know-what-im-doing` (MCP agents
 cannot approve).
 
@@ -198,5 +197,4 @@ governance). New server tools from upgraded `codeclone-mcp` pass through
 unfiltered.
 
 Monorepo: `plugins/cursor-codeclone/scripts/launch_mcp.py` delegates to
-`plugins/codeclone/scripts/launch_mcp.py`. Standalone releases must embed the
-full launcher body.
+`plugins/codeclone/scripts/launch_mcp.py`; standalone releases must embed the full launcher body.
