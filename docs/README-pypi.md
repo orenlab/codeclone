@@ -55,7 +55,7 @@ codeclone . --ci               # CI mode
 ## MCP Server
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
@@ -65,7 +65,7 @@ plugin, and Claude Desktop bundle.
 Engineering Memory, Corpus Analytics, and runtime diagnostics:
 
 ```bash
-uv tool install "codeclone[analytics]"
+uv tool install --prerelease allow "codeclone[analytics]"
 codeclone analytics build --root . --sweep --use-recommended
 codeclone memory trajectory dashboard --root .
 CODECLONE_OBSERVABILITY_ENABLED=1 codeclone .
