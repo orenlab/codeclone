@@ -313,8 +313,11 @@ class _MCPSessionFindingMixin:
         self,
         record: MCPRunRecord,
         canonical_id: str,
+        *,
+        canonical_to_short: Mapping[str, str] | None = None,
     ) -> str:
-        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
+        if canonical_to_short is None:
+            canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
         return canonical_to_short.get(canonical_id, canonical_id)
 
     def _resolve_canonical_finding_id(
@@ -359,7 +362,7 @@ class _MCPSessionFindingMixin:
             ],
         ]
 
-    def _query_findings(
+    def _ordered_finding_rows(
         self,
         *,
         record: MCPRunRecord,
@@ -369,10 +372,14 @@ class _MCPSessionFindingMixin:
         source_kind: str | None = None,
         novelty: FindingNoveltyFilter = "all",
         sort_by: FindingSort = "default",
-        detail_level: DetailLevel = "normal",
         changed_paths: Sequence[str] = (),
         exclude_reviewed: bool = False,
-    ) -> list[dict[str, object]]:
+    ) -> tuple[
+        list[dict[str, object]],
+        int,
+        dict[str, dict[str, object] | None],
+        dict[str, Mapping[str, object]],
+    ]:
         findings = self._base_findings(record)
         max_spread_value = max(
             (self._spread_value(finding) for finding in findings),
@@ -400,33 +407,65 @@ class _MCPSessionFindingMixin:
             )
             and (not exclude_reviewed or not self._finding_is_reviewed(record, finding))
         ]
-        remediation_map = {
-            str(finding.get("id", "")): self._remediation_for_finding(record, finding)
-            for finding in filtered
-        }
-        priority_map = {
-            str(finding.get("id", "")): self._priority_score(
-                record,
-                finding,
-                remediation=remediation_map[str(finding.get("id", ""))],
-                max_spread_value=max_spread_value,
-            )
-            for finding in filtered
-        }
+        remediation_map: dict[str, dict[str, object] | None] = {}
+        priority_map: dict[str, Mapping[str, object]] = {}
+        if sort_by == "priority":
+            for finding in filtered:
+                finding_id = str(finding.get("id", ""))
+                remediation = self._remediation_for_finding(record, finding)
+                remediation_map[finding_id] = remediation
+                priority_map[finding_id] = self._priority_score(
+                    record,
+                    finding,
+                    remediation=remediation,
+                    max_spread_value=max_spread_value,
+                )
         ordered = self._sort_findings(
             record=record,
             findings=filtered,
             sort_by=sort_by,
-            priority_map=priority_map,
+            priority_map=priority_map or None,
         )
+        return ordered, max_spread_value, remediation_map, priority_map
+
+    def _query_findings(
+        self,
+        *,
+        record: MCPRunRecord,
+        family: FindingFamilyFilter = "all",
+        category: str | None = None,
+        severity: str | None = None,
+        source_kind: str | None = None,
+        novelty: FindingNoveltyFilter = "all",
+        sort_by: FindingSort = "default",
+        detail_level: DetailLevel = "normal",
+        changed_paths: Sequence[str] = (),
+        exclude_reviewed: bool = False,
+    ) -> list[dict[str, object]]:
+        ordered, max_spread_value, remediation_map, priority_map = (
+            self._ordered_finding_rows(
+                record=record,
+                family=family,
+                category=category,
+                severity=severity,
+                source_kind=source_kind,
+                novelty=novelty,
+                sort_by=sort_by,
+                changed_paths=changed_paths,
+                exclude_reviewed=exclude_reviewed,
+            )
+        )
+        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
         return [
             self._decorate_finding(
                 record,
                 finding,
                 detail_level=detail_level,
-                remediation=remediation_map[str(finding.get("id", ""))],
-                priority_payload=priority_map[str(finding.get("id", ""))],
+                remediation=remediation_map.get(str(finding.get("id", ""))),
+                remediation_computed=str(finding.get("id", "")) in remediation_map,
+                priority_payload=priority_map.get(str(finding.get("id", ""))),
                 max_spread_value=max_spread_value,
+                canonical_to_short=canonical_to_short,
             )
             for finding in ordered
         ]
@@ -484,12 +523,14 @@ class _MCPSessionFindingMixin:
         *,
         detail_level: DetailLevel,
         remediation: Mapping[str, object] | None = None,
+        remediation_computed: bool = False,
         priority_payload: Mapping[str, object] | None = None,
         max_spread_value: int | None = None,
+        canonical_to_short: Mapping[str, str] | None = None,
     ) -> dict[str, object]:
         resolved_remediation = (
             remediation
-            if remediation is not None
+            if remediation_computed or remediation is not None
             else self._remediation_for_finding(record, finding)
         )
         resolved_priority_payload = (
@@ -504,7 +545,11 @@ class _MCPSessionFindingMixin:
         )
         payload = dict(finding)
         canonical_id = str(finding.get("id", "")).strip()
-        short_finding_id = self._short_finding_id(record, canonical_id)
+        short_finding_id = self._short_finding_id(
+            record,
+            canonical_id,
+            canonical_to_short=canonical_to_short,
+        )
         payload["canonical_id"] = canonical_id
         payload["short_id"] = short_finding_id
         payload["priority_score"] = resolved_priority_payload["score"]
@@ -1218,24 +1263,39 @@ class _MCPSessionFindingMixin:
             1,
             min(max_results if max_results is not None else limit, 200),
         )
-        filtered = self._query_findings(
-            record=record,
-            family=validated_family,
-            category=category,
-            severity=validated_severity,
-            source_kind=source_kind,
-            novelty=validated_novelty,
-            sort_by=validated_sort,
-            detail_level=validated_detail,
-            changed_paths=paths_filter,
-            exclude_reviewed=exclude_reviewed,
+        ordered, max_spread_value, remediation_map, priority_map = (
+            self._ordered_finding_rows(
+                record=record,
+                family=validated_family,
+                category=category,
+                severity=validated_severity,
+                source_kind=source_kind,
+                novelty=validated_novelty,
+                sort_by=validated_sort,
+                changed_paths=paths_filter,
+                exclude_reviewed=exclude_reviewed,
+            )
         )
         page = paginate(
-            filtered,
+            ordered,
             offset=offset,
             limit=normalized_limit,
             max_limit=200,
         )
+        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
+        items = [
+            self._decorate_finding(
+                record,
+                finding,
+                detail_level=validated_detail,
+                remediation=remediation_map.get(str(finding.get("id", ""))),
+                remediation_computed=str(finding.get("id", "")) in remediation_map,
+                priority_payload=priority_map.get(str(finding.get("id", ""))),
+                max_spread_value=max_spread_value,
+                canonical_to_short=canonical_to_short,
+            )
+            for finding in page.items
+        ]
         return {
             "run_id": _helpers._short_run_id(record.run_id),
             "detail_level": validated_detail,
@@ -1246,7 +1306,7 @@ class _MCPSessionFindingMixin:
             "returned": len(page.items),
             "total": page.total,
             "next_offset": page.next_offset,
-            "items": page.items,
+            "items": items,
         }
 
     def get_finding(

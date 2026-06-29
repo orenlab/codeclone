@@ -4011,6 +4011,40 @@ def test_mcp_service_list_findings_detail_levels_slim_and_full_payloads(
     )
 
 
+def test_mcp_service_list_findings_decorates_only_requested_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+    baseline = service.list_findings(run_id=run_id, family="all", limit=50)
+    assert cast(int, baseline["total"]) > 1
+
+    decorated_ids: list[str] = []
+    original_decorate = service._decorate_finding
+
+    def counting_decorate(
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        **kwargs: Any,
+    ) -> dict[str, object]:
+        decorated_ids.append(str(finding.get("id", "")))
+        return original_decorate(record, finding, **kwargs)
+
+    monkeypatch.setattr(service, "_decorate_finding", counting_decorate)
+
+    payload = service.list_findings(
+        run_id=run_id,
+        family="all",
+        detail_level="summary",
+        limit=1,
+    )
+
+    assert payload["returned"] == 1
+    assert cast(int, payload["total"]) == cast(int, baseline["total"])
+    assert len(decorated_ids) == 1
+
+
 def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
     first_root, second_root = _two_clone_fixture_roots(tmp_path)
     service = CodeCloneMCPService(history_limit=1)
@@ -13341,6 +13375,22 @@ def test_memory_patch_trail_lookup_branches(
         def close(self) -> None:
             self.closed = True
 
+    def install_lookup_store(
+        responses: list[tuple[list[dict[str, object]], int]],
+    ) -> None:
+        monkeypatch.setattr(
+            audit_mod,
+            "open_memory_db_readonly",
+            lambda _db: _LookupStore(responses=responses),
+        )
+        monkeypatch.setattr(
+            audit_mod,
+            "find_trajectory_patch_trails_for_lookup",
+            lambda conn, **kwargs: conn.find_trajectory_patch_trails_for_lookup(
+                **kwargs
+            ),
+        )
+
     ok_row: dict[str, object] = {
         "payload": {
             "schema_version": "1",
@@ -13351,11 +13401,7 @@ def test_memory_patch_trail_lookup_branches(
         "run_id": "run12345",
         "created_at_utc": "2026-01-01T00:00:00Z",
     }
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([ok_row], 0)]),
-    )
+    install_lookup_store([([ok_row], 0)])
     status, count, artifact = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
         run_id="run12345",
@@ -13365,11 +13411,7 @@ def test_memory_patch_trail_lookup_branches(
     assert count == 1
     assert artifact is not None
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([ok_row, ok_row], 0)]),
-    )
+    install_lookup_store([([ok_row, ok_row], 0)])
     ambiguous = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
         run_id="run12345",
@@ -13377,15 +13419,11 @@ def test_memory_patch_trail_lookup_branches(
     )
     assert ambiguous[:2] == ("ambiguous", 2)
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(
-            responses=[
-                ([], 0),
-                ([{"payload": {}, "patch_trail_digest": "e" * 64}], 0),
-            ]
-        ),
+    install_lookup_store(
+        [
+            ([], 0),
+            ([{"payload": {}, "patch_trail_digest": "e" * 64}], 0),
+        ]
     )
     mismatch = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
@@ -13394,11 +13432,7 @@ def test_memory_patch_trail_lookup_branches(
     )
     assert mismatch[0] == "digest_mismatch"
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([], 2)]),
-    )
+    install_lookup_store([([], 2)])
     malformed = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
         run_id=None,
@@ -13406,11 +13440,7 @@ def test_memory_patch_trail_lookup_branches(
     )
     assert malformed == ("malformed_stored_patch_trail", 0, None)
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([], 0)]),
-    )
+    install_lookup_store([([], 0)])
     empty_root = tmp_path / "no-memory-root"
     empty_root.mkdir()
     assert audit_mod._memory_patch_trail_lookup(
