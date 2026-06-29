@@ -205,7 +205,9 @@ class SqliteWorkspaceIntentStore:
         self._db_path = db_path
         self._retention_days = retention_days
         self._lock = threading.Lock()
-        self._conn = open_intent_registry_db(db_path)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        with workspace_registry_lock(self.registry_lock_path):
+            self._conn = open_intent_registry_db(db_path)
 
     @property
     def backend(self) -> str:
@@ -407,11 +409,12 @@ class SqliteWorkspaceIntentStore:
             ).fetchall()
         except sqlite3.Error:
             return ()
-        return tuple(
+        records = tuple(
             record
             for record in (_record_from_json(row[0]) for row in rows)
             if record is not None
         )
+        return tuple(sorted(records, key=record_sort_key))
 
     def _fetch_record_unlocked(
         self,

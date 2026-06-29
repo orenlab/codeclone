@@ -15,8 +15,8 @@ _SQLITE_PRAGMAS = (
     "PRAGMA journal_mode=WAL",
     "PRAGMA synchronous=NORMAL",
     "PRAGMA foreign_keys=OFF",
-    "PRAGMA busy_timeout=5000",
 )
+_SQLITE_BUSY_TIMEOUT_MS = 5000
 
 
 def open_sqlite_db(
@@ -55,6 +55,7 @@ def open_sqlite_db(
             factory=factory,
         )
     try:
+        conn.execute(f"PRAGMA busy_timeout={_SQLITE_BUSY_TIMEOUT_MS}")
         pragmas: tuple[str, ...] = _SQLITE_PRAGMAS
         if foreign_keys:
             pragmas = tuple(
