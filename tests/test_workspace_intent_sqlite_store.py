@@ -517,6 +517,7 @@ def test_sqlite_store_serializes_cross_process_writers(sqlite_root: Path) -> Non
     script = r"""
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from codeclone.surfaces.mcp._workspace_intent_store import SqliteWorkspaceIntentStore
@@ -537,6 +538,12 @@ try:
         intent_id=f"intent-cross-process-{idx:03d}",
         pid=40_000 + idx,
         start_epoch=1_000 + idx,
+    )
+    record = replace(
+        record,
+        declared_at_utc="2026-05-29T20:00:00Z",
+        expires_at_utc="2026-05-29T21:00:00Z",
+        lease_renewed_at_utc="2026-05-29T20:00:00Z",
     )
     raise SystemExit(0 if store.write(record) else 2)
 finally:
