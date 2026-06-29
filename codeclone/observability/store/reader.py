@@ -26,6 +26,7 @@ from ...analysis.phase_ledger import (
     PHASE_VOLUME_COUNTER_SUFFIXES,
 )
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+from ...utils.sqlite_store import open_sqlite_db_readonly
 from ..db_fingerprint import describe_fingerprint
 from ..views import (
     AgentTokenRow,
@@ -44,7 +45,7 @@ from ..views import (
     WaterfallGroup,
     WaterfallRow,
 )
-from .schema import observability_store_path
+from .schema import observability_store_path, validate_observability_schema
 
 _DEFAULT_WINDOW = 20
 
@@ -69,7 +70,7 @@ def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
     path = observability_store_path(root)
     if not path.is_file():
         return None
-    conn = sqlite3.connect(str(path))
+    conn = open_sqlite_db_readonly(path, validate_schema=validate_observability_schema)
     conn.row_factory = sqlite3.Row
     return conn
 
