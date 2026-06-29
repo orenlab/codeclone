@@ -158,7 +158,7 @@ Trajectory semantics:
 
 ## Open Triage
 
-**Open Triage** (`orenlab.codeclone.openTriage`) calls `get_production_triage` for
+**Open Triage** (`codeclone.openProductionTriage`) calls `get_production_triage` for
 the current run before opening the markdown panel. Repeated opens reuse the cached
 payload for 5 seconds when the run is unchanged and not marked stale; concurrent
 opens share one in-flight request.
