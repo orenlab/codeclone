@@ -31,14 +31,14 @@ MCP extra in the workspace or globally:
 
 ```bash
 uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
+uv pip install --prerelease allow --python .venv/bin/python "codeclone[mcp]"
 .venv/bin/codeclone-mcp --help
 ```
 
 Global fallback:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --help
 ```
 

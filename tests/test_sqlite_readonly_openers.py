@@ -20,7 +20,11 @@ from codeclone.audit.schema import (
 )
 from codeclone.audit.validation import AuditSchemaError
 from codeclone.contracts import CORPUS_ANALYTICS_STORE_SCHEMA_VERSION
-from codeclone.memory.schema import open_memory_db, open_memory_db_readonly
+from codeclone.memory.schema import (
+    MemorySchemaError,
+    open_memory_db,
+    open_memory_db_readonly,
+)
 from codeclone.surfaces.mcp._workspace_intent_schema import (
     IntentRegistrySchemaError,
     open_intent_registry_db,
@@ -146,6 +150,31 @@ def test_analytics_readonly_opener_requires_writable_migration(
         assert "analytics_assignment_update_guard" in triggers
     finally:
         migrated.close()
+
+
+def test_memory_readonly_opener_requires_writable_migration(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    writable = open_memory_db(db_path)
+    try:
+        writable.execute(
+            "UPDATE memory_meta SET value='1.0' WHERE key='schema_version'"
+        )
+        writable.commit()
+    finally:
+        writable.close()
+
+    with pytest.raises(MemorySchemaError, match="requires writable"):
+        open_memory_db_readonly(db_path)
+
+    raw = sqlite3.connect(db_path)
+    try:
+        assert raw.execute(
+            "SELECT value FROM memory_meta WHERE key='schema_version'"
+        ).fetchone() == ("1.0",)
+    finally:
+        raw.close()
 
 
 def test_analytics_schema_rejects_orphan_embedding_metadata(tmp_path: Path) -> None:

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import replace
@@ -507,6 +509,65 @@ def test_sqlite_payload_roundtrip_preserves_integrity(sqlite_root: Path) -> None
     ] == workspace_intents.compute_intent_digest(
         {k: v for k, v in payload.items() if k != "integrity"}
     )
+
+
+def test_sqlite_store_serializes_cross_process_writers(sqlite_root: Path) -> None:
+    db_path = sqlite_root / DEFAULT_INTENT_REGISTRY_DB_PATH
+    start_marker = sqlite_root / "start-writers"
+    script = r"""
+import sys
+import time
+from pathlib import Path
+
+from codeclone.surfaces.mcp._workspace_intent_store import SqliteWorkspaceIntentStore
+from tests.test_workspace_intents import _record
+
+db_path = Path(sys.argv[1])
+idx = int(sys.argv[2])
+start_marker = Path(sys.argv[3])
+deadline = time.monotonic() + 5
+while not start_marker.exists():
+    if time.monotonic() > deadline:
+        raise SystemExit("start marker timeout")
+    time.sleep(0.01)
+
+store = SqliteWorkspaceIntentStore(db_path=db_path, retention_days=7)
+try:
+    record = _record(
+        intent_id=f"intent-cross-process-{idx:03d}",
+        pid=40_000 + idx,
+        start_epoch=1_000 + idx,
+    )
+    raise SystemExit(0 if store.write(record) else 2)
+finally:
+    store.close()
+"""
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", script, str(db_path), str(idx), str(start_marker)],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        for idx in range(6)
+    ]
+    start_marker.write_text("go\n", encoding="utf-8")
+    results = [
+        (*process.communicate(timeout=10), process.returncode) for process in processes
+    ]
+
+    failures = [
+        (stdout, stderr, returncode)
+        for stdout, stderr, returncode in results
+        if returncode != 0
+    ]
+    assert failures == []
+
+    with _open_sqlite_store(sqlite_root) as store:
+        records = store.list_records_raw()
+    assert [record.intent_id for record in records] == [
+        f"intent-cross-process-{idx:03d}" for idx in range(6)
+    ]
 
 
 def test_gc_status_for_reason_maps_orphaned_status() -> None:

@@ -258,6 +258,10 @@ ReceiptRetrievalFormatParam = Annotated[
         description="Stored receipt output: structured (typed, default) or markdown.",
     ),
 ]
+PatchTrailRetrievalFormatParam = Annotated[
+    str,
+    Field(description="Stored patch-trail output: structured (typed, default)."),
+]
 ReceiptDigestParam = Annotated[
     str | None,
     Field(

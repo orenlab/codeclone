@@ -222,6 +222,12 @@ class MCPSession(
                 )
             )
         except Exception:
+            try:
+                from ...observability import record_counter
+
+                record_counter("audit.emit_dropped")
+            except Exception:
+                pass
             return None
 
     def _audit_writer_for_root(self, root: Path) -> AuditWriter:

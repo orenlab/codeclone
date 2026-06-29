@@ -244,7 +244,12 @@ def open_memory_db_readonly(path: Path) -> sqlite3.Connection:
     """Open an existing engineering-memory database without allowing writes."""
     from ..observability.sqlite_access import open_instrumented_sqlite_db_readonly
 
-    return open_instrumented_sqlite_db_readonly(path, validate_schema=ensure_schema)
+    conn = open_instrumented_sqlite_db_readonly(
+        path,
+        validate_schema=validate_schema_readonly,
+    )
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
@@ -261,6 +266,17 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         raise MemorySchemaError(
             "Unsupported engineering memory schema version: "
             f"{current!r}. Expected {ENGINEERING_MEMORY_SCHEMA_VERSION!r}."
+        )
+
+
+def validate_schema_readonly(conn: sqlite3.Connection) -> None:
+    """Validate an existing memory database without initializing or migrating."""
+
+    current = get_meta(conn, "schema_version")
+    if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
+        raise MemorySchemaError(
+            "Engineering Memory requires writable schema initialization or migration: "
+            f"found {current!r}, expected {ENGINEERING_MEMORY_SCHEMA_VERSION!r}."
         )
 
 
@@ -288,6 +304,7 @@ def create_schema_v1(conn: sqlite3.Connection) -> None:
 
 
 __all__ = [
+    "MemorySchemaError",
     "create_schema_v1",
     "create_trajectory_schema",
     "ensure_schema",
@@ -295,4 +312,5 @@ __all__ = [
     "open_memory_db",
     "open_memory_db_readonly",
     "set_meta",
+    "validate_schema_readonly",
 ]

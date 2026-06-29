@@ -9,7 +9,7 @@ const ANALYSIS_PROFILE_DEFAULTS = "defaults";
 const ANALYSIS_PROFILE_DEEPER_REVIEW = "deeperReview";
 const ANALYSIS_PROFILE_CUSTOM = "custom";
 const MINIMUM_SUPPORTED_CODECLONE_VERSION = "2.0.0";
-const PREVIEW_INSTALL_COMMAND = 'uv tool install "codeclone[mcp]"';
+const PREVIEW_INSTALL_COMMAND = 'uv tool install --prerelease allow "codeclone[mcp]"';
 const ANALYSIS_PROFILE_IDS = new Set([
     ANALYSIS_PROFILE_DEFAULTS,
     ANALYSIS_PROFILE_DEEPER_REVIEW,

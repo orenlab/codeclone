@@ -148,7 +148,7 @@ def assert_codex_plugin_readme_contract(readme_text: str) -> None:
         "prefers a workspace `.venv`",
         "current Poetry environment",
         "without relying on `sh -lc`",
-        'uv tool install "codeclone[mcp]"',
+        'uv tool install --prerelease allow "codeclone[mcp]"',
         "codeclone-change-control",
         "codeclone-architecture-triage",
         "codeclone-implementation-context",
@@ -167,5 +167,5 @@ def assert_claude_code_plugin_readme_contract(readme_text: str) -> None:
         readme_text,
         "claude plugin marketplace add orenlab/codeclone-claude-code",
         "claude plugin install codeclone@orenlab-codeclone",
-        'uv tool install "codeclone[mcp]"',
+        'uv tool install --prerelease allow "codeclone[mcp]"',
     )

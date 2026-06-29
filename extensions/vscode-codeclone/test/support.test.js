@@ -401,5 +401,8 @@ test("minimum supported CodeClone version and install command stay aligned", () 
     assert.equal(isMinimumSupportedCodeCloneVersion("2.0.1"), true);
     assert.equal(isMinimumSupportedCodeCloneVersion("2.0.0rc2"), false);
     assert.equal(isMinimumSupportedCodeCloneVersion("1.27.0"), false);
-    assert.equal(PREVIEW_INSTALL_COMMAND, 'uv tool install "codeclone[mcp]"');
+    assert.equal(
+        PREVIEW_INSTALL_COMMAND,
+        'uv tool install --prerelease allow "codeclone[mcp]"',
+    );
 });

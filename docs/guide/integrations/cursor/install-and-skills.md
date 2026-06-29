@@ -57,7 +57,7 @@ Install `codeclone[mcp]` separately so the bundled launcher can resolve
 `codeclone-mcp`:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --help
 ```
 

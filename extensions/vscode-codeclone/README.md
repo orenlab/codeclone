@@ -53,13 +53,13 @@ Install the `codeclone-mcp` launcher before enabling the extension.
 **Recommended (global tool via uv):**
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 ```
 
 **Current environment only:**
 
 ```bash
-uv pip install "codeclone[mcp]"
+uv pip install --prerelease allow "codeclone[mcp]"
 ```
 
 **Verify:**

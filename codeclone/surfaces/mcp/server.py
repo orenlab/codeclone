@@ -154,6 +154,7 @@ from .messages.params import (
     PatchModeParam,
     PatchTrailDetailParam,
     PatchTrailDigestParam,
+    PatchTrailRetrievalFormatParam,
     PathFilterParam,
     PrFormatParam,
     ProcessesParam,
@@ -857,11 +858,13 @@ def build_mcp_server(
         root: RootParam,
         run_id: RunIdParam = None,
         patch_trail_digest: PatchTrailDigestParam = None,
+        format: PatchTrailRetrievalFormatParam = "structured",
     ) -> dict[str, object]:
         return service.get_patch_trail(
             root=root,
             run_id=run_id,
             patch_trail_digest=patch_trail_digest,
+            format=format,
         )
 
     @tool(

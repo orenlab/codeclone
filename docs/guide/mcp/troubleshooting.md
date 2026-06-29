@@ -15,7 +15,7 @@ Normative contracts:
 
 | Symptom | Fix |
 |---------|-----|
-| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install "codeclone[mcp]"` or `pip install 'codeclone[mcp]'` |
+| `CodeClone MCP support requires the optional 'mcp' extra` | `uv tool install --prerelease allow "codeclone[mcp]"` or `pip install --pre 'codeclone[mcp]'` |
 | Client cannot find `codeclone-mcp` | Install the extra above, or point `command` at the full launcher path in MCP config |
 | Wrong / missing tools after upgrade | Restart the MCP process; confirm `codeclone --version` matches the client bundle |
 | Plugin installed but MCP silent | Check client MCP logs; verify stdio command is `codeclone-mcp --transport stdio` |

@@ -2485,17 +2485,52 @@ def test_mcp_session_audit_emit_swallows_writer_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = mcp_session_mod.MCPSession(history_limit=4)
+    counters: list[tuple[str, int]] = []
 
     def raise_writer(_root: Path) -> _RecordingAuditWriter:
         raise RuntimeError("audit unavailable")
 
     monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    monkeypatch.setattr(
+        "codeclone.observability.record_counter",
+        lambda key, value=1: counters.append((key, value)),
+    )
 
-    service._audit_emit(
-        root=tmp_path,
-        event_type="intent.declared",
-        severity="warn",
-        payload={"status": "active"},
+    assert (
+        service._audit_emit(
+            root=tmp_path,
+            event_type="intent.declared",
+            severity="warn",
+            payload={"status": "active"},
+        )
+        is None
+    )
+    assert counters == [("audit.emit_dropped", 1)]
+
+
+def test_mcp_session_audit_emit_swallows_counter_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    def raise_counter(_key: str, _value: int = 1) -> None:
+        raise RuntimeError("observability unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    monkeypatch.setattr("codeclone.observability.record_counter", raise_counter)
+
+    assert (
+        service._audit_emit(
+            root=tmp_path,
+            event_type="intent.declared",
+            severity="warn",
+            payload={"status": "active"},
+        )
+        is None
     )
 
 

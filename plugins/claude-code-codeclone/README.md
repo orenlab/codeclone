@@ -23,7 +23,7 @@ Inside an interactive Claude Code session, the equivalent commands are:
 Install the local MCP server separately:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --help
 ```
 
@@ -31,7 +31,7 @@ For a workspace-local environment:
 
 ```bash
 uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
+uv pip install --prerelease allow --python .venv/bin/python "codeclone[mcp]"
 .venv/bin/codeclone-mcp --help
 ```
 

@@ -1868,6 +1868,12 @@
   {
     "input_schema": {
       "properties": {
+        "format": {
+          "default": "structured",
+          "description": "Stored patch-trail output: structured (typed, default).",
+          "title": "Format",
+          "type": "string"
+        },
         "patch_trail_digest": {
           "anyOf": [
             {

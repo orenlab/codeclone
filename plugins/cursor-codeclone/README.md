@@ -38,7 +38,7 @@ it is not the public installation route.
 ### Install the MCP launcher
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 ```
 
 Verify:

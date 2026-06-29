@@ -38,13 +38,13 @@ to `PATH`. Runtime and version-mismatch messages identify that resolved launcher
 Recommended install:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 ```
 
 If you want the launcher inside the current environment instead:
 
 ```bash
-uv pip install "codeclone[mcp]"
+uv pip install --prerelease allow "codeclone[mcp]"
 ```
 
 Verify the launcher:
