@@ -633,6 +633,7 @@ def _build_cache(
         segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
         segment_min_stmt=_as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
         collect_api_surface=bool(getattr(args, "api_surface", False)),
+        write_enabled=False,
     )
     if policy != "off":
         cache.load()

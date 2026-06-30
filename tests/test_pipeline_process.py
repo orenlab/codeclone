@@ -406,6 +406,27 @@ def test_process_cache_put_file_entry_fallback_without_source_stats_support(
     assert cache.calls == 1
 
 
+def test_process_respects_read_only_cache_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    filepath, boot, discovery = _build_single_file_process_case(tmp_path)
+    cache = Cache(tmp_path / "cache.json", root=tmp_path, write_enabled=False)
+    monkeypatch.setattr(
+        core_worker,
+        "process_file",
+        _stub_process_file(
+            expected_root=str(tmp_path),
+            expected_filepath=filepath,
+        ),
+    )
+
+    result = process(boot=boot, discovery=discovery, cache=cache)
+
+    assert result.files_analyzed == 1
+    assert result.source_stats_by_file
+    assert cache.get_file_entry(filepath) is None
+
+
 def test_process_cache_put_file_entry_type_error_is_raised(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

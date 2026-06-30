@@ -437,6 +437,7 @@ class MCPSession(
                 raise MCPServiceError("CodeClone MCP expected a canonical JSON report.")
             report_document = _helpers._load_report_document(report_json)
             run_id = _helpers._report_digest(report_document)
+        cache.release_loaded_entries()
 
         warning_items = set(console.messages)
         baseline_warning = getattr(clone_baseline_state, "warning_message", None)

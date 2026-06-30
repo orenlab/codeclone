@@ -52,6 +52,13 @@ def _save_cache_after_analysis(
         require_status_console(printer).print(
             ui.fmt_cli_runtime_warning(ui.fmt_cache_save_failed(exc))
         )
+    _release_cache_entries(cache, allow_dirty=False)
+
+
+def _release_cache_entries(cache: object, *, allow_dirty: bool) -> None:
+    release = getattr(cache, "release_loaded_entries", None)
+    if callable(release):
+        release(allow_dirty=allow_dirty)
 
 
 _StageT = TypeVar("_StageT")
@@ -227,6 +234,8 @@ def run_analysis_stages(
                     cache_update_segment_projection_fn=cache_update_segment_projection_fn,
                     printer=printer,
                 )
+            else:
+                _release_cache_entries(cache, allow_dirty=True)
     else:
         analysis_result = analyze_fn(
             boot=boot,
@@ -240,6 +249,8 @@ def run_analysis_stages(
                 cache_update_segment_projection_fn=cache_update_segment_projection_fn,
                 printer=printer,
             )
+        else:
+            _release_cache_entries(cache, allow_dirty=True)
 
     coverage_join = getattr(analysis_result, "coverage_join", None)
     if (

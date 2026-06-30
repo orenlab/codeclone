@@ -32,6 +32,7 @@ from ..models import (
     StructuralFindingGroup,
     Unit,
 )
+from ..observability import span
 from ._canonicalize import (
     _as_file_stat_dict,
     _as_typed_block_list,
@@ -134,6 +135,7 @@ class Cache:
     __slots__ = (
         "_canonical_runtime_paths",
         "_dirty",
+        "_write_enabled",
         "analysis_profile",
         "cache_schema_version",
         "data",
@@ -162,9 +164,11 @@ class Cache:
         segment_min_loc: int = DEFAULT_SEGMENT_MIN_LOC,
         segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
         collect_api_surface: bool = False,
+        write_enabled: bool = True,
     ):
         self.path = Path(path)
         self.root = _resolve_root(root)
+        self._write_enabled = write_enabled
         self.fingerprint_version = BASELINE_FINGERPRINT_VERSION
         self.analysis_profile: AnalysisProfile = {
             "min_loc": min_loc,
@@ -190,7 +194,7 @@ class Cache:
             MAX_CACHE_SIZE_BYTES if max_size_bytes is None else max_size_bytes
         )
         self.segment_report_projection: SegmentReportProjection | None = None
-        self._dirty: bool = True
+        self._dirty: bool = write_enabled
 
     def _detect_legacy_secret_warning(self) -> str | None:
         secret_path = self.path.parent / LEGACY_CACHE_SECRET_FILENAME
@@ -264,14 +268,22 @@ class Cache:
         )
 
     def load(self) -> None:
-        try:
-            exists = self.path.exists()
-        except OSError as exc:
-            self._ignore_cache(
-                f"Cache unreadable; ignoring cache: {exc}",
-                status=CacheStatus.UNREADABLE,
-            )
-            return
+        size: int | None = None
+        with span(name="cache.stat") as stat_span:
+            try:
+                exists = self.path.exists()
+            except OSError as exc:
+                self._ignore_cache(
+                    f"Cache unreadable; ignoring cache: {exc}",
+                    status=CacheStatus.UNREADABLE,
+                )
+                return
+            if exists:
+                try:
+                    size = self.path.stat().st_size
+                    stat_span.set_counter("cache_file_bytes", size)
+                except OSError:
+                    pass
 
         if not exists:
             self._set_load_warning(None)
@@ -282,7 +294,10 @@ class Cache:
             return
 
         try:
-            size = self.path.stat().st_size
+            if size is None:
+                with span(name="cache.stat") as stat_span:
+                    size = self.path.stat().st_size
+                    stat_span.set_counter("cache_file_bytes", size)
             if size > self.max_size_bytes:
                 self._ignore_cache(
                     "Cache file too large "
@@ -291,7 +306,9 @@ class Cache:
                 )
                 return
 
-            raw_obj = read_json_document(self.path, max_bytes=self.max_size_bytes)
+            with span(name="cache.read_json") as read_span:
+                read_span.set_counter("cache_file_bytes", size)
+                raw_obj = read_json_document(self.path, max_bytes=self.max_size_bytes)
             parsed = self._load_and_validate(raw_obj)
             if parsed is None:
                 return
@@ -312,94 +329,99 @@ class Cache:
             )
 
     def _load_and_validate(self, raw_obj: object) -> CacheData | None:
-        raw = _as_str_dict(raw_obj)
-        if raw is None:
-            return self._reject_invalid_cache_format()
+        with span(name="cache.validate_envelope"):
+            raw = _as_str_dict(raw_obj)
+            if raw is None:
+                return self._reject_invalid_cache_format()
 
-        legacy_version = _as_str(raw.get("version"))
-        if legacy_version is not None:
-            return self._reject_version_mismatch(legacy_version)
+            legacy_version = _as_str(raw.get("version"))
+            if legacy_version is not None:
+                return self._reject_version_mismatch(legacy_version)
 
-        version = _as_str(raw.get("v"))
-        if version is None:
-            return self._reject_invalid_cache_format()
+            version = _as_str(raw.get("v"))
+            if version is None:
+                return self._reject_invalid_cache_format()
 
-        if version != self._CACHE_VERSION:
-            return self._reject_version_mismatch(version)
+            if version != self._CACHE_VERSION:
+                return self._reject_version_mismatch(version)
 
-        sig = _as_str(raw.get("sig"))
-        payload = _as_str_dict(raw.get("payload"))
-        if sig is None or payload is None:
-            return self._reject_invalid_cache_format(schema_version=version)
+            sig = _as_str(raw.get("sig"))
+            payload = _as_str_dict(raw.get("payload"))
+            if sig is None or payload is None:
+                return self._reject_invalid_cache_format(schema_version=version)
 
-        if not verify_cache_payload_signature(payload, sig):
-            return self._reject_cache_load(
-                "Cache signature mismatch; ignoring cache.",
-                status=CacheStatus.INTEGRITY_FAILED,
-                schema_version=version,
-            )
+            if not verify_cache_payload_signature(payload, sig):
+                return self._reject_cache_load(
+                    "Cache signature mismatch; ignoring cache.",
+                    status=CacheStatus.INTEGRITY_FAILED,
+                    schema_version=version,
+                )
 
-        runtime_tag = current_python_tag()
-        py_tag = _as_str(payload.get("py"))
-        if py_tag is None:
-            return self._reject_invalid_cache_format(schema_version=version)
+            runtime_tag = current_python_tag()
+            py_tag = _as_str(payload.get("py"))
+            if py_tag is None:
+                return self._reject_invalid_cache_format(schema_version=version)
 
-        if py_tag != runtime_tag:
-            return self._reject_cache_load(
-                "Cache python tag mismatch "
-                f"(found {py_tag}, expected {runtime_tag}); ignoring cache.",
-                status=CacheStatus.PYTHON_TAG_MISMATCH,
-                schema_version=version,
-            )
+            if py_tag != runtime_tag:
+                return self._reject_cache_load(
+                    "Cache python tag mismatch "
+                    f"(found {py_tag}, expected {runtime_tag}); ignoring cache.",
+                    status=CacheStatus.PYTHON_TAG_MISMATCH,
+                    schema_version=version,
+                )
 
-        fp_version = _as_str(payload.get("fp"))
-        if fp_version is None:
-            return self._reject_invalid_cache_format(schema_version=version)
+            fp_version = _as_str(payload.get("fp"))
+            if fp_version is None:
+                return self._reject_invalid_cache_format(schema_version=version)
 
-        if fp_version != self.fingerprint_version:
-            return self._reject_cache_load(
-                "Cache fingerprint version mismatch "
-                f"(found {fp_version}, expected {self.fingerprint_version}); "
-                "ignoring cache.",
-                status=CacheStatus.FINGERPRINT_MISMATCH,
-                schema_version=version,
-            )
+            if fp_version != self.fingerprint_version:
+                return self._reject_cache_load(
+                    "Cache fingerprint version mismatch "
+                    f"(found {fp_version}, expected {self.fingerprint_version}); "
+                    "ignoring cache.",
+                    status=CacheStatus.FINGERPRINT_MISMATCH,
+                    schema_version=version,
+                )
 
-        analysis_profile = _as_analysis_profile(payload.get("ap"))
-        if analysis_profile is None:
-            return self._reject_invalid_cache_format(schema_version=version)
+            analysis_profile = _as_analysis_profile(payload.get("ap"))
+            if analysis_profile is None:
+                return self._reject_invalid_cache_format(schema_version=version)
 
-        if analysis_profile != self.analysis_profile:
-            return self._reject_cache_load(
-                "Cache analysis profile mismatch "
-                f"(found min_loc={analysis_profile['min_loc']}, "
-                f"min_stmt={analysis_profile['min_stmt']}, "
-                "collect_api_surface="
-                f"{str(analysis_profile['collect_api_surface']).lower()}; "
-                f"expected min_loc={self.analysis_profile['min_loc']}, "
-                f"min_stmt={self.analysis_profile['min_stmt']}, "
-                "collect_api_surface="
-                f"{str(self.analysis_profile['collect_api_surface']).lower()}); "
-                "ignoring cache.",
-                status=CacheStatus.ANALYSIS_PROFILE_MISMATCH,
-                schema_version=version,
-            )
+            if analysis_profile != self.analysis_profile:
+                return self._reject_cache_load(
+                    "Cache analysis profile mismatch "
+                    f"(found min_loc={analysis_profile['min_loc']}, "
+                    f"min_stmt={analysis_profile['min_stmt']}, "
+                    "collect_api_surface="
+                    f"{str(analysis_profile['collect_api_surface']).lower()}; "
+                    f"expected min_loc={self.analysis_profile['min_loc']}, "
+                    f"min_stmt={self.analysis_profile['min_stmt']}, "
+                    "collect_api_surface="
+                    f"{str(self.analysis_profile['collect_api_surface']).lower()}); "
+                    "ignoring cache.",
+                    status=CacheStatus.ANALYSIS_PROFILE_MISMATCH,
+                    schema_version=version,
+                )
 
-        files_dict = _as_str_dict(payload.get("files"))
-        if files_dict is None:
-            return self._reject_invalid_cache_format(schema_version=version)
+            files_dict = _as_str_dict(payload.get("files"))
+            if files_dict is None:
+                return self._reject_invalid_cache_format(schema_version=version)
 
         parsed_files: dict[str, CacheEntry] = {}
-        for wire_path, file_entry_obj in files_dict.items():
-            runtime_path = runtime_filepath_from_wire(wire_path, root=self.root)
-            parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
-            if parsed_entry is None:
-                return self._reject_invalid_cache_format(schema_version=version)
-            parsed_files[runtime_path] = _canonicalize_cache_entry(parsed_entry)
-        self.segment_report_projection = decode_segment_report_projection(
-            payload.get("sr"),
-            root=self.root,
-        )
+        with span(name="cache.decode_entries") as decode_span:
+            decode_span.set_counter("cache_entries", len(files_dict))
+            for wire_path, file_entry_obj in files_dict.items():
+                runtime_path = runtime_filepath_from_wire(wire_path, root=self.root)
+                parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
+                if parsed_entry is None:
+                    return self._reject_invalid_cache_format(schema_version=version)
+                parsed_files[runtime_path] = _canonicalize_cache_entry(parsed_entry)
+            decode_span.set_counter("decoded_entries", len(parsed_files))
+        with span(name="cache.segment_projection"):
+            self.segment_report_projection = decode_segment_report_projection(
+                payload.get("sr"),
+                root=self.root,
+            )
 
         self.cache_schema_version = version
         return CacheData(
@@ -411,6 +433,8 @@ class Cache:
         )
 
     def save(self) -> None:
+        if not self._write_enabled:
+            return
         if not self._dirty:
             return
         try:
@@ -451,6 +475,16 @@ class Cache:
             self.data["analysis_profile"] = self.analysis_profile
         except OSError as exc:
             raise CacheError(f"Failed to save cache: {exc}") from exc
+
+    def release_loaded_entries(self, *, allow_dirty: bool = False) -> int:
+        if self._dirty and not allow_dirty:
+            return 0
+        with span(name="cache.release_entries") as release_span:
+            released = len(self.data["files"])
+            self.data["files"] = {}
+            self._canonical_runtime_paths.clear()
+            release_span.set_counter("released_entries", released)
+            return released
 
     @staticmethod
     def _decode_entry(value: object, filepath: str) -> CacheEntry | None:
@@ -565,6 +599,8 @@ class Cache:
         structural_findings: list[StructuralFindingGroup] | None = None,
         function_relationship_facts: Sequence[FunctionRelationshipFacts] | None = None,
     ) -> None:
+        if not self._write_enabled:
+            return
         runtime_path = runtime_filepath_from_wire(
             wire_filepath_from_runtime(filepath, root=self.root),
             root=self.root,
@@ -685,6 +721,8 @@ class Cache:
         )
 
     def prune_file_entries(self, existing_filepaths: Collection[str]) -> int:
+        if not self._write_enabled:
+            return 0
         keep_runtime_paths = {
             runtime_filepath_from_wire(
                 wire_filepath_from_runtime(filepath, root=self.root),

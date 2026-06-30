@@ -140,8 +140,17 @@ def _analysis() -> AnalysisResult:
 class _FakeCache:
     load_warning: str | None = None
 
+    def __init__(self) -> None:
+        self.saved = False
+        self.release_calls: list[bool] = []
+
     def save(self) -> None:
+        self.saved = True
         return None
+
+    def release_loaded_entries(self, *, allow_dirty: bool = False) -> int:
+        self.release_calls.append(allow_dirty)
+        return 0
 
 
 def _run_observed_pipeline(
@@ -153,6 +162,27 @@ def _run_observed_pipeline(
         boot=_boot(tmp_path, args),
         cache=cast(Cache, _FakeCache()),
     )
+
+
+def test_cli_pipeline_releases_cache_after_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = _FakeCache()
+    monkeypatch.setattr(cli, "discover", lambda **_kw: _discovery(("a.py",)))
+    monkeypatch.setattr(cli, "process", lambda **_kw: _processing())
+    monkeypatch.setattr(cli, "analyze", lambda **_kw: _analysis())
+    args = Namespace(
+        quiet=True, no_progress=True, blast_radius=False, patch_verify=False
+    )
+
+    cli._run_analysis_stages(
+        args=args,
+        boot=_boot(tmp_path, args),
+        cache=cast(Cache, cache),
+    )
+
+    assert cache.saved is True
+    assert cache.release_calls == [False]
 
 
 def _read_span_rows(tmp_path: Path) -> tuple[list[Any], dict[str, object]]:

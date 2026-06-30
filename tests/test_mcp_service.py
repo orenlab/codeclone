@@ -12,6 +12,7 @@ import json
 import os
 import sqlite3
 import subprocess
+from argparse import Namespace
 from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import replace
@@ -4488,6 +4489,31 @@ def test_mcp_service_rejects_refresh_cache_policy_in_read_only_mode(
                 cache_policy=cast("CachePolicy", "refresh"),
             )
         )
+
+
+def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
+    args = Namespace(
+        max_cache_size_mb=64,
+        min_loc=10,
+        min_stmt=6,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+        api_surface=False,
+    )
+
+    cache = mcp_helpers_mod._build_cache(
+        root_path=tmp_path,
+        args=args,
+        cache_path=tmp_path / "cache.json",
+        policy="off",
+    )
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    assert cache.get_file_entry("x.py") is None
+    assert not (tmp_path / "cache.json").exists()
 
 
 def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> None:

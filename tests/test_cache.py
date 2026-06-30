@@ -88,6 +88,7 @@ from codeclone.cache.projection import (
 )
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
+from codeclone.config.observability import ObservabilityConfig
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
 from codeclone.core.discovery import _decode_cached_function_relationship_facts
@@ -103,6 +104,11 @@ from codeclone.models import (
     SecuritySurface,
     SegmentUnit,
     Unit,
+)
+from codeclone.observability import bootstrap, operation, shutdown
+from codeclone.observability.store.schema import (
+    observability_store_path,
+    open_observability_store,
 )
 from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
 
@@ -195,6 +201,91 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     assert entry["units"][0]["qualname"] == "mod:func"
     assert loaded.load_status == CacheStatus.OK
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, root=tmp_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_load", surface="test"):
+            loaded = Cache(cache_path, root=tmp_path)
+            loaded.load()
+    finally:
+        shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        rows = conn.execute(
+            "SELECT name, counters_json FROM platform_spans ORDER BY rowid"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    counters_by_name = {name: json.loads(counters or "{}") for name, counters in rows}
+    assert "cache.stat" in counters_by_name
+    assert "cache.read_json" in counters_by_name
+    assert "cache.validate_envelope" in counters_by_name
+    assert "cache.decode_entries" in counters_by_name
+    assert "cache.segment_projection" in counters_by_name
+    assert counters_by_name["cache.stat"]["cache_file_bytes"] > 0
+    assert counters_by_name["cache.read_json"]["cache_file_bytes"] > 0
+    assert counters_by_name["cache.decode_entries"] == {
+        "cache_entries": 1,
+        "decoded_entries": 1,
+    }
+
+
+def test_cache_release_loaded_entries_clears_clean_loaded_entries(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    assert loaded.get_file_entry("x.py") is not None
+
+    assert loaded.release_loaded_entries() == 1
+    assert loaded.get_file_entry("x.py") is None
+    assert loaded.load_status == CacheStatus.OK
+    assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_release_loaded_entries_refuses_dirty_cache_by_default(
+    tmp_path: Path,
+) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+
+    assert cache.release_loaded_entries() == 0
+    assert cache.get_file_entry("x.py") is not None
+
+
+def test_cache_read_only_mode_suppresses_entry_writes(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path, write_enabled=False)
+    loaded.load()
+
+    loaded.put_file_entry("y.py", {"mtime_ns": 2, "size": 20}, [], [], [])
+    assert loaded.prune_file_entries([]) == 0
+    loaded.save()
+
+    assert loaded.get_file_entry("x.py") is not None
+    assert loaded.get_file_entry("y.py") is None
+    reloaded = Cache(cache_path)
+    reloaded.load()
+    assert reloaded.get_file_entry("x.py") is not None
+    assert reloaded.get_file_entry("y.py") is None
 
 
 def test_cache_roundtrip_preserves_function_relationship_facts(
