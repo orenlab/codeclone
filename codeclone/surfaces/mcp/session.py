@@ -255,20 +255,22 @@ class MCPSession(
             git_diff_ref=request.git_diff_ref,
         )
         args = self._build_args(root_path=root_path, request=request)
-        (
-            baseline_path,
-            baseline_exists,
-            metrics_baseline_path,
-            metrics_baseline_exists,
-            shared_baseline_payload,
-        ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
+        with span(name="pipeline.baseline"):
+            (
+                baseline_path,
+                baseline_exists,
+                metrics_baseline_path,
+                metrics_baseline_exists,
+                shared_baseline_payload,
+            ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
         cache_path = _helpers._resolve_cache_path(root_path=root_path, args=args)
-        cache = _helpers._build_cache(
-            root_path=root_path,
-            args=args,
-            cache_path=cache_path,
-            policy=request.cache_policy,
-        )
+        with span(name="pipeline.cache_load"):
+            cache = _helpers._build_cache(
+                root_path=root_path,
+                args=args,
+                cache_path=cache_path,
+                policy=request.cache_policy,
+            )
         console = _BufferConsole()
 
         # Stage spans so mcp.analyze_repository carries the same discover/process/
@@ -419,21 +421,22 @@ class MCPSession(
                 analysis_result.project_metrics
             )
 
-        report_artifacts = report(
-            boot=boot,
-            discovery=discovery_result,
-            processing=processing_result,
-            analysis=analysis_result,
-            report_meta=report_meta,
-            new_func=new_func,
-            new_block=new_block,
-            metrics_diff=metrics_diff,
-        )
-        report_json = report_artifacts.json
-        if report_json is None:
-            raise MCPServiceError("CodeClone MCP expected a canonical JSON report.")
-        report_document = _helpers._load_report_document(report_json)
-        run_id = _helpers._report_digest(report_document)
+        with span(name="pipeline.report"):
+            report_artifacts = report(
+                boot=boot,
+                discovery=discovery_result,
+                processing=processing_result,
+                analysis=analysis_result,
+                report_meta=report_meta,
+                new_func=new_func,
+                new_block=new_block,
+                metrics_diff=metrics_diff,
+            )
+            report_json = report_artifacts.json
+            if report_json is None:
+                raise MCPServiceError("CodeClone MCP expected a canonical JSON report.")
+            report_document = _helpers._load_report_document(report_json)
+            run_id = _helpers._report_digest(report_document)
 
         warning_items = set(console.messages)
         baseline_warning = getattr(clone_baseline_state, "warning_message", None)

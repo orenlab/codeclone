@@ -3087,7 +3087,7 @@
         },
         "limit": {
           "default": 10,
-          "description": "Row cap per section; clamped to [1, 50], else 10.",
+          "description": "Row cap per section; clamped to [1, 100], else 10.",
           "title": "Limit",
           "type": "integer"
         },
@@ -3101,7 +3101,7 @@
             }
           ],
           "default": null,
-          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "description": "Selects the operation for section=operation_detail; echoed in ignored_parameters for aggregate sections that do not consume it.",
           "title": "Operation Id"
         },
         "root": {
@@ -3110,7 +3110,7 @@
           "type": "string"
         },
         "section": {
-          "description": "Telemetry section to project: summary | slow_operations | memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | correlated_chains | costly_noops | pipeline | analysis_phase_cost.",
+          "description": "Telemetry section to project: summary | slow_operations | memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | correlated_chains | costly_noops | pipeline | analysis_phase_cost | operation_detail (per-span detail for one operation_id) | span_detail (one span_id).",
           "title": "Section",
           "type": "string"
         },
@@ -3124,7 +3124,7 @@
             }
           ],
           "default": null,
-          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "description": "Selects the span for section=span_detail; echoed in ignored_parameters for aggregate sections that do not consume it.",
           "title": "Span Id"
         },
         "window": {

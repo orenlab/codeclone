@@ -767,7 +767,9 @@ ObservabilitySectionParam = Annotated[
         description=(
             "Telemetry section to project: summary | slow_operations | "
             "memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | "
-            "correlated_chains | costly_noops | pipeline | analysis_phase_cost."
+            "correlated_chains | costly_noops | pipeline | analysis_phase_cost | "
+            "operation_detail (per-span detail for one operation_id) | "
+            "span_detail (one span_id)."
         ),
     ),
 ]
@@ -782,7 +784,7 @@ ObservabilityDetailParam = Annotated[
 ]
 ObservabilityLimitParam = Annotated[
     int,
-    Field(description="Row cap per section; clamped to [1, 50], else 10."),
+    Field(description="Row cap per section; clamped to [1, 100], else 10."),
 ]
 ObservabilityWindowParam = Annotated[
     str,
@@ -790,9 +792,19 @@ ObservabilityWindowParam = Annotated[
 ]
 ObservabilityOperationIdParam = Annotated[
     str | None,
-    Field(description="Reserved for detail sections; echoed in ignored_parameters."),
+    Field(
+        description=(
+            "Selects the operation for section=operation_detail; echoed in "
+            "ignored_parameters for aggregate sections that do not consume it."
+        ),
+    ),
 ]
 ObservabilitySpanIdParam = Annotated[
     str | None,
-    Field(description="Reserved for detail sections; echoed in ignored_parameters."),
+    Field(
+        description=(
+            "Selects the span for section=span_detail; echoed in "
+            "ignored_parameters for aggregate sections that do not consume it."
+        ),
+    ),
 ]

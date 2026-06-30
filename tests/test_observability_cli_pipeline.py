@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from argparse import Namespace
 from collections.abc import Iterator
 from pathlib import Path
@@ -263,6 +266,55 @@ def test_cli_pipeline_cache_only_keeps_legacy_process_counters(
         "files_analyzed": 0,
         "failed_files": 0,
     }
+
+
+def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "sample.py").write_text("def add(a, b):\n    return a + b\n", "utf-8")
+    env = os.environ.copy()
+    env["CODECLONE_OBSERVABILITY_ENABLED"] = "1"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "codeclone.main",
+            str(repo),
+            "--quiet",
+            "--no-progress",
+            "--cache-path",
+            str(repo / ".codeclone" / "test-cache.json"),
+        ],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = open_observability_store(observability_store_path(repo))
+    try:
+        rows = conn.execute(
+            "SELECT s.name, s.operation_id FROM platform_spans s "
+            "JOIN platform_operations o ON o.operation_id=s.operation_id "
+            "WHERE o.name='cli.analyze'"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    names = {row[0] for row in rows}
+    assert {
+        "pipeline.baseline",
+        "pipeline.cache_load",
+        "pipeline.bootstrap",
+        "pipeline.discover",
+        "pipeline.process",
+        "pipeline.analyze",
+        "pipeline.report",
+    } <= names
+    assert len({row[1] for row in rows}) == 1
 
 
 def test_observability_cli_help_and_stdout_trace(

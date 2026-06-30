@@ -166,7 +166,18 @@ def test_mcp_analyze_repository_emits_pipeline_spans(tmp_path: Path) -> None:
     finally:
         conn.close()
     names = {row[0] for row in rows}
-    assert {"pipeline.discover", "pipeline.process", "pipeline.analyze"} <= names
+    # IO work (baseline read, cache load) and the post-analyze report build/serialize
+    # are now first-class spans, so mcp.analyze is no longer blind between/around the
+    # bootstrap/discover/process/analyze stages.
+    assert {
+        "pipeline.baseline",
+        "pipeline.cache_load",
+        "pipeline.bootstrap",
+        "pipeline.discover",
+        "pipeline.process",
+        "pipeline.analyze",
+        "pipeline.report",
+    } <= names
 
 
 def test_db_query_counter_attaches_to_active_span(tmp_path: Path) -> None:

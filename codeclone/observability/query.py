@@ -17,17 +17,17 @@ payload bodies, no prompts.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 
 from ..config.observability import resolve_observability_config
 from .runtime import DB_COUNTER_VERSION
 from .store.reader import build_trace_view, open_observability_store_readonly
-from .views import AggregatesView, OperationView, TraceView
+from .views import AggregatesView, OperationView, SpanView, TraceView
 
 _DETAIL_LEVELS = ("compact", "normal", "full")
 _LIMIT_MIN = 1
-_LIMIT_MAX = 50
+_LIMIT_MAX = 100
 _LIMIT_DEFAULT = 10
 _COMPACT_ROWS = 5
 _CHAIN_CHILD_CAP = 12
@@ -52,6 +52,10 @@ _AGGREGATE_SECTIONS = (
     "pipeline",
     "analysis_phase_cost",
 )
+# Per-object detail sections: full per-span fields for one operation / span by id,
+# parity with the HTML trace. They consume operation_id / span_id and support
+# detail_level=full (aggregate sections downgrade full to normal).
+_DETAIL_SECTIONS = ("operation_detail", "span_detail")
 
 
 def _round1(value: float | None) -> float | None:
@@ -75,14 +79,13 @@ def _envelope(section: str, detail_level: str, window: str) -> dict[str, object]
     }
 
 
-def _resolve_detail(detail_level: str, warnings: list[str]) -> str:
+def _resolve_detail(detail_level: str, section: str, warnings: list[str]) -> str:
     if detail_level not in _DETAIL_LEVELS:
         warnings.append(f"unknown detail_level {detail_level!r}; using compact")
         return "compact"
-    if detail_level == "full":
-        # No aggregate section supports full; only operation_detail/span_detail
-        # (a future phase) do. Downgrade rather than error so an agent never
-        # stalls mid-diagnosis.
+    if detail_level == "full" and section not in _DETAIL_SECTIONS:
+        # Only the per-object detail sections support full; aggregate sections
+        # downgrade rather than error so an agent never stalls mid-diagnosis.
         warnings.append(
             "full detail is only available for operation_detail/span_detail; "
             "downgraded to normal"
@@ -101,12 +104,19 @@ def _clamp_limit(limit: int, warnings: list[str]) -> int:
     return limit
 
 
-def _ignored_parameters(operation_id: str | None, span_id: str | None) -> list[str]:
-    # P1 has only aggregate sections; the by-id selectors are not consumed yet.
+def _ignored_parameters(
+    section: str, operation_id: str | None, span_id: str | None
+) -> list[str]:
+    # operation_detail consumes operation_id; span_detail consumes span_id; every
+    # aggregate section ignores both. Echo the unused selector so the caller knows.
+    consumed = {
+        "operation_detail": "operation_id",
+        "span_detail": "span_id",
+    }.get(section)
     ignored = []
-    if operation_id is not None:
+    if operation_id is not None and consumed != "operation_id":
         ignored.append("operation_id")
-    if span_id is not None:
+    if span_id is not None and consumed != "span_id":
         ignored.append("span_id")
     return ignored
 
@@ -126,6 +136,7 @@ def _build_trace(conn: object, window: str) -> TraceView:
 def _slow_operations(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
     return [
         {
+            "operation_id": op.operation_id,
             "operation": op.name,
             "surface": op.surface,
             "duration_ms": round(op.duration_ms, 1),
@@ -138,6 +149,8 @@ def _slow_operations(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
 def _memory_pipeline_cost(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
     return [
         {
+            "span_id": s.span_id,
+            "operation_id": s.operation_id,
             "span": s.name,
             "operation": s.operation_name,
             "duration_ms": round(s.duration_ms, 1),
@@ -186,6 +199,8 @@ def _costly_noops(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
     noops = [s for s in agg.semantic_costs if s.no_op]
     return [
         {
+            "span_id": s.span_id,
+            "operation_id": s.operation_id,
             "span": s.name,
             "operation": s.operation_name,
             "duration_ms": round(s.duration_ms, 1),
@@ -303,6 +318,7 @@ def _chain_peak_rss_absolute(op: OperationView) -> float | None:
 def _correlated_chains(trace: TraceView, cap: int) -> list[dict[str, object]]:
     return [
         {
+            "operation_id": root.operation_id,
             "root": root.name,
             "children": _chain_descendant_names(root)[:_CHAIN_CHILD_CAP],
             "duration_ms": round(root.duration_ms, 1),
@@ -311,6 +327,73 @@ def _correlated_chains(trace: TraceView, cap: int) -> list[dict[str, object]]:
         }
         for root in trace.operation_tree[:cap]
     ]
+
+
+def _span_row(span: SpanView) -> dict[str, object]:
+    return {
+        "span_id": span.span_id,
+        "name": span.name,
+        "duration_ms": round(span.duration_ms, 1),
+        "span_status": span.status,
+        "parent_span_id": span.parent_span_id,
+        "reason_kind": span.reason_kind,
+        "started_at_utc": span.started_at_utc,
+        "rss_mb": _round1(span.rss_mb),
+        "peak_rss_mb": _round1(span.peak_rss_mb),
+        "rss_delta_mb": _round1(span.rss_delta_mb),
+        "peak_rss_delta_mb": _round1(span.peak_rss_delta_mb),
+        "counters": dict(span.counters),
+        "db_fingerprints": dict(span.db_fingerprints),
+    }
+
+
+def _iter_operations(ops: tuple[OperationView, ...]) -> Iterator[OperationView]:
+    for op in ops:
+        yield op
+        yield from _iter_operations(op.children)
+
+
+def _operation_detail_body(
+    trace: TraceView, operation_id: str, cap: int
+) -> dict[str, object]:
+    op = next(
+        (
+            candidate
+            for candidate in _iter_operations(trace.operation_tree)
+            if candidate.operation_id == operation_id
+        ),
+        None,
+    )
+    if op is None:
+        return {"status": "not_found", "operation_id": operation_id, "spans": []}
+    return {
+        "status": "ok",
+        "operation_id": op.operation_id,
+        "name": op.name,
+        "surface": op.surface,
+        "duration_ms": round(op.duration_ms, 1),
+        "op_status": op.status,
+        "rss_mb": _round1(op.rss_mb),
+        "peak_rss_mb": _round1(op.peak_rss_mb),
+        "rss_delta_mb": _round1(op.rss_delta_mb),
+        "peak_rss_delta_mb": _round1(op.peak_rss_delta_mb),
+        "cpu_user_ms": _round1(op.cpu_user_ms),
+        "cpu_system_ms": _round1(op.cpu_system_ms),
+        "span_count": len(op.spans),
+        "spans": [_span_row(span) for span in op.spans[:cap]],
+    }
+
+
+def _span_detail_body(trace: TraceView, span_id: str) -> dict[str, object]:
+    for op in _iter_operations(trace.operation_tree):
+        for span in op.spans:
+            if span.span_id == span_id:
+                row = _span_row(span)
+                row["status"] = "ok"
+                row["operation_id"] = op.operation_id
+                row["operation_name"] = op.name
+                return row
+    return {"status": "not_found", "span_id": span_id}
 
 
 def _memory_diagnostic(agg: AggregatesView) -> dict[str, object] | None:
@@ -478,22 +561,35 @@ def query_platform_observability(
     data — an absent store yields an inert ``disabled``/``no_store`` envelope.
     """
     warnings: list[str] = []
-    detail = _resolve_detail(detail_level, warnings)
+    detail = _resolve_detail(detail_level, section, warnings)
     clamped = _clamp_limit(limit, warnings)
-    row_cap = clamped if detail == "normal" else min(clamped, _COMPACT_ROWS)
+    row_cap = min(clamped, _COMPACT_ROWS) if detail == "compact" else clamped
 
     response = _envelope(section, detail, window)
     if detail != detail_level:
         response["requested_detail_level"] = detail_level
-    ignored = _ignored_parameters(operation_id, span_id)
+    ignored = _ignored_parameters(section, operation_id, span_id)
     if ignored:
         response["ignored_parameters"] = ignored
 
-    if section not in _AGGREGATE_SECTIONS:
+    if section not in _AGGREGATE_SECTIONS and section not in _DETAIL_SECTIONS:
         response["status"] = "invalid_section"
         response["error"] = f"unknown section {section!r}"
-        response["available_sections"] = list(_AGGREGATE_SECTIONS)
+        response["available_sections"] = [
+            *_AGGREGATE_SECTIONS,
+            *_DETAIL_SECTIONS,
+        ]
         response["rows"] = []
+        return _finalize(response, warnings)
+
+    if section == "operation_detail" and not operation_id:
+        response["status"] = "invalid_selector"
+        response["error"] = "operation_detail requires operation_id"
+        response["spans"] = []
+        return _finalize(response, warnings)
+    if section == "span_detail" and not span_id:
+        response["status"] = "invalid_selector"
+        response["error"] = "span_detail requires span_id"
         return _finalize(response, warnings)
 
     conn = open_observability_store_readonly(Path(root))
@@ -507,7 +603,13 @@ def query_platform_observability(
         conn.close()
 
     agg = trace.aggregates
-    if section == "summary":
+    if section == "operation_detail":
+        assert operation_id is not None
+        response.update(_operation_detail_body(trace, operation_id, row_cap))
+    elif section == "span_detail":
+        assert span_id is not None
+        response.update(_span_detail_body(trace, span_id))
+    elif section == "summary":
         response.update(_summary_body(trace))
     elif section == "agent_context":
         response.update(_agent_context_body(agg, row_cap))

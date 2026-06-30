@@ -33,7 +33,7 @@ from ...core.pipeline import analyze
 from ...core.reporting import gate, report
 from ...models import MetricsDiff
 from ...observability import bootstrap as start_observability
-from ...observability import operation
+from ...observability import operation, span
 from ...report.html import build_html_report
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
@@ -481,184 +481,193 @@ def _main_impl() -> None:
         validate_numeric_args_fn=_validate_numeric_args,
         printer=_console(),
     )
-    baseline_inputs = _resolve_baseline_inputs(
-        ap=ap,
-        args=args,
-        root_path=root_path,
-        baseline_path_from_args=baseline_path_from_args,
-        metrics_path_from_args=metrics_path_from_args,
-        probe_metrics_baseline_section_fn=_probe_metrics_baseline_section,
-        printer=_console(),
-    )
-    prepare_metrics_mode_and_ui(
-        args=args,
-        root_path=root_path,
-        baseline_path=baseline_inputs.baseline_path,
-        baseline_exists=baseline_inputs.baseline_exists,
-        metrics_baseline_path=baseline_inputs.metrics_baseline_path,
-        metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
-        configure_metrics_mode=_configure_metrics_mode,
-        print_banner=print_banner,
-    )
-
-    output_paths = _resolve_output_paths(
-        args,
-        report_path_origins=report_path_origins,
-        report_generated_at_utc=report_generated_at_utc,
-    )
-    _validate_report_ui_flags(args=args, output_paths=output_paths)
-    _validate_controller_query_flags(
-        args=args,
-        report_outputs_requested=bool(
-            output_paths.html
-            or output_paths.json
-            or output_paths.md
-            or output_paths.sarif
-            or output_paths.text
-            or bool_attr(args, "open_html_report")
-            or bool_attr(args, "timestamped_report_paths")
-        ),
-        strictness_explicit=strictness_explicit,
-    )
-    cache_path = _resolve_cache_path(
-        root_path=root_path,
-        args=args,
-        from_args=cache_path_from_args,
-    )
-
-    cache = Cache(
-        cache_path,
-        root=root_path,
-        max_size_bytes=args.max_cache_size_mb * 1024 * 1024,
-        min_loc=args.min_loc,
-        min_stmt=args.min_stmt,
-        block_min_loc=args.block_min_loc,
-        block_min_stmt=args.block_min_stmt,
-        segment_min_loc=args.segment_min_loc,
-        segment_min_stmt=args.segment_min_stmt,
-        collect_api_surface=bool(args.api_surface),
-    )
-    cache.load()
-    if cache.load_warning:
-        _console().print(ui.fmt_cli_runtime_warning(cache.load_warning))
-
-    boot = bootstrap(
-        args=args,
-        root=root_path,
-        output_paths=output_paths,
-        cache_path=cache_path,
-    )
-    # Freeze the env-resolved observability decision for this CLI process
-    # (default OFF) so the core pipeline stage spans attach to a cli.analyze op.
+    # Freeze the env-resolved observability decision for this CLI process (default
+    # OFF) before baseline/cache work so the whole cli.analyze operation is
+    # measured; span()/operation() are inert when disabled.
     start_observability(resolve_observability_config(), root=root_path)
     with operation(name="cli.analyze", surface="cli"):
+        with span(name="pipeline.baseline"):
+            baseline_inputs = _resolve_baseline_inputs(
+                ap=ap,
+                args=args,
+                root_path=root_path,
+                baseline_path_from_args=baseline_path_from_args,
+                metrics_path_from_args=metrics_path_from_args,
+                probe_metrics_baseline_section_fn=_probe_metrics_baseline_section,
+                printer=_console(),
+            )
+        prepare_metrics_mode_and_ui(
+            args=args,
+            root_path=root_path,
+            baseline_path=baseline_inputs.baseline_path,
+            baseline_exists=baseline_inputs.baseline_exists,
+            metrics_baseline_path=baseline_inputs.metrics_baseline_path,
+            metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
+            configure_metrics_mode=_configure_metrics_mode,
+            print_banner=print_banner,
+        )
+
+        output_paths = _resolve_output_paths(
+            args,
+            report_path_origins=report_path_origins,
+            report_generated_at_utc=report_generated_at_utc,
+        )
+        _validate_report_ui_flags(args=args, output_paths=output_paths)
+        _validate_controller_query_flags(
+            args=args,
+            report_outputs_requested=bool(
+                output_paths.html
+                or output_paths.json
+                or output_paths.md
+                or output_paths.sarif
+                or output_paths.text
+                or bool_attr(args, "open_html_report")
+                or bool_attr(args, "timestamped_report_paths")
+            ),
+            strictness_explicit=strictness_explicit,
+        )
+        cache_path = _resolve_cache_path(
+            root_path=root_path,
+            args=args,
+            from_args=cache_path_from_args,
+        )
+
+        with span(name="pipeline.cache_load"):
+            cache = Cache(
+                cache_path,
+                root=root_path,
+                max_size_bytes=args.max_cache_size_mb * 1024 * 1024,
+                min_loc=args.min_loc,
+                min_stmt=args.min_stmt,
+                block_min_loc=args.block_min_loc,
+                block_min_stmt=args.block_min_stmt,
+                segment_min_loc=args.segment_min_loc,
+                segment_min_stmt=args.segment_min_stmt,
+                collect_api_surface=bool(args.api_surface),
+            )
+            cache.load()
+        if cache.load_warning:
+            _console().print(ui.fmt_cli_runtime_warning(cache.load_warning))
+
+        with span(name="pipeline.bootstrap"):
+            boot = bootstrap(
+                args=args,
+                root=root_path,
+                output_paths=output_paths,
+                cache_path=cache_path,
+            )
         discovery_result, processing_result, analysis_result = _run_analysis_stages(
             args=args,
             boot=boot,
             cache=cache,
         )
 
-    source_read_contract_failure = (
-        bool(processing_result.source_read_failures)
-        and gating_mode_enabled(args)
-        and not args.update_baseline
-    )
-    shared_baseline_payload = (
-        baseline_inputs.shared_baseline_payload
-        if baseline_inputs.metrics_baseline_path == baseline_inputs.baseline_path
-        else None
-    )
-    baseline_state = _resolve_clone_baseline_state(
-        args=args,
-        baseline_path=baseline_inputs.baseline_path,
-        baseline_exists=baseline_inputs.baseline_exists,
-        analysis=analysis_result,
-        shared_baseline_payload=shared_baseline_payload,
-    )
-    metrics_baseline_state = _resolve_metrics_baseline_state(
-        args=args,
-        metrics_baseline_path=baseline_inputs.metrics_baseline_path,
-        metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
-        clone_baseline_state=baseline_state,
-        baseline_updated_path=baseline_state.updated_path,
-        analysis=analysis_result,
-        shared_baseline_payload=shared_baseline_payload,
-    )
-
-    cache_status, cache_schema_version = _resolve_cache_status(cache)
-    report_meta = cli_meta_mod.build_cli_report_meta(
-        codeclone_version=__version__,
-        scan_root=root_path,
-        baseline_path=baseline_inputs.baseline_path,
-        baseline_state=baseline_state,
-        cache_path=resolve_report_cache_path(cache_path),
-        cache_status=cache_status,
-        cache_schema_version=cache_schema_version,
-        processing_result=processing_result,
-        metrics_baseline_path=baseline_inputs.metrics_baseline_path,
-        metrics_baseline_state=metrics_baseline_state,
-        analysis_result=analysis_result,
-        args=args,
-        metrics_computed=_metrics_computed(args),
-        analysis_started_at_utc=analysis_started_at_utc,
-        report_generated_at_utc=report_generated_at_utc,
-    )
-
-    diff_context = _build_diff_context(
-        analysis=analysis_result,
-        baseline_path=baseline_inputs.baseline_path,
-        baseline_state=baseline_state,
-        metrics_baseline_state=metrics_baseline_state,
-    )
-    summary_counts = build_summary_counts(
-        discovery_result=discovery_result,
-        processing_result=processing_result,
-    )
-    if not _controller_query_mode(args):
-        _print_summary(
-            console=_console(),
-            quiet=args.quiet,
-            files_found=discovery_result.files_found,
-            files_analyzed=processing_result.files_analyzed,
-            cache_hits=discovery_result.cache_hits,
-            files_skipped=processing_result.files_skipped,
-            analyzed_lines=summary_counts["analyzed_lines"],
-            analyzed_functions=summary_counts["analyzed_functions"],
-            analyzed_methods=summary_counts["analyzed_methods"],
-            analyzed_classes=summary_counts["analyzed_classes"],
-            func_clones_count=analysis_result.func_clones_count,
-            block_clones_count=analysis_result.block_clones_count,
-            segment_clones_count=analysis_result.segment_clones_count,
-            suppressed_golden_fixture_groups=len(
-                getattr(analysis_result, "suppressed_clone_groups", ())
-            ),
-            suppressed_segment_groups=analysis_result.suppressed_segment_groups,
-            new_clones_count=diff_context.new_clones_count,
+        source_read_contract_failure = (
+            bool(processing_result.source_read_failures)
+            and gating_mode_enabled(args)
+            and not args.update_baseline
         )
-        print_metrics_if_available(
+        shared_baseline_payload = (
+            baseline_inputs.shared_baseline_payload
+            if baseline_inputs.metrics_baseline_path == baseline_inputs.baseline_path
+            else None
+        )
+        baseline_state = _resolve_clone_baseline_state(
             args=args,
+            baseline_path=baseline_inputs.baseline_path,
+            baseline_exists=baseline_inputs.baseline_exists,
             analysis=analysis_result,
-            metrics_diff=diff_context.metrics_diff,
-            api_surface_diff_available=diff_context.api_surface_diff_available,
-            console=_console(),
-            build_metrics_snapshot_fn=build_metrics_snapshot,
-            print_metrics_fn=_print_metrics,
+            shared_baseline_payload=shared_baseline_payload,
+        )
+        metrics_baseline_state = _resolve_metrics_baseline_state(
+            args=args,
+            metrics_baseline_path=baseline_inputs.metrics_baseline_path,
+            metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
+            clone_baseline_state=baseline_state,
+            baseline_updated_path=baseline_state.updated_path,
+            analysis=analysis_result,
+            shared_baseline_payload=shared_baseline_payload,
         )
 
-    report_artifacts = report(
-        boot=boot,
-        discovery=discovery_result,
-        processing=processing_result,
-        analysis=analysis_result,
-        report_meta=report_meta,
-        new_func=diff_context.new_func,
-        new_block=diff_context.new_block,
-        html_builder=build_html_report,
-        metrics_diff=diff_context.metrics_diff,
-        coverage_adoption_diff_available=diff_context.coverage_adoption_diff_available,
-        api_surface_diff_available=diff_context.api_surface_diff_available,
-        include_report_document=bool(changed_paths) or _controller_query_mode(args),
-    )
+        cache_status, cache_schema_version = _resolve_cache_status(cache)
+        report_meta = cli_meta_mod.build_cli_report_meta(
+            codeclone_version=__version__,
+            scan_root=root_path,
+            baseline_path=baseline_inputs.baseline_path,
+            baseline_state=baseline_state,
+            cache_path=resolve_report_cache_path(cache_path),
+            cache_status=cache_status,
+            cache_schema_version=cache_schema_version,
+            processing_result=processing_result,
+            metrics_baseline_path=baseline_inputs.metrics_baseline_path,
+            metrics_baseline_state=metrics_baseline_state,
+            analysis_result=analysis_result,
+            args=args,
+            metrics_computed=_metrics_computed(args),
+            analysis_started_at_utc=analysis_started_at_utc,
+            report_generated_at_utc=report_generated_at_utc,
+        )
+
+        diff_context = _build_diff_context(
+            analysis=analysis_result,
+            baseline_path=baseline_inputs.baseline_path,
+            baseline_state=baseline_state,
+            metrics_baseline_state=metrics_baseline_state,
+        )
+        summary_counts = build_summary_counts(
+            discovery_result=discovery_result,
+            processing_result=processing_result,
+        )
+        if not _controller_query_mode(args):
+            _print_summary(
+                console=_console(),
+                quiet=args.quiet,
+                files_found=discovery_result.files_found,
+                files_analyzed=processing_result.files_analyzed,
+                cache_hits=discovery_result.cache_hits,
+                files_skipped=processing_result.files_skipped,
+                analyzed_lines=summary_counts["analyzed_lines"],
+                analyzed_functions=summary_counts["analyzed_functions"],
+                analyzed_methods=summary_counts["analyzed_methods"],
+                analyzed_classes=summary_counts["analyzed_classes"],
+                func_clones_count=analysis_result.func_clones_count,
+                block_clones_count=analysis_result.block_clones_count,
+                segment_clones_count=analysis_result.segment_clones_count,
+                suppressed_golden_fixture_groups=len(
+                    getattr(analysis_result, "suppressed_clone_groups", ())
+                ),
+                suppressed_segment_groups=analysis_result.suppressed_segment_groups,
+                new_clones_count=diff_context.new_clones_count,
+            )
+            print_metrics_if_available(
+                args=args,
+                analysis=analysis_result,
+                metrics_diff=diff_context.metrics_diff,
+                api_surface_diff_available=diff_context.api_surface_diff_available,
+                console=_console(),
+                build_metrics_snapshot_fn=build_metrics_snapshot,
+                print_metrics_fn=_print_metrics,
+            )
+
+        with span(name="pipeline.report"):
+            report_artifacts = report(
+                boot=boot,
+                discovery=discovery_result,
+                processing=processing_result,
+                analysis=analysis_result,
+                report_meta=report_meta,
+                new_func=diff_context.new_func,
+                new_block=diff_context.new_block,
+                html_builder=build_html_report,
+                metrics_diff=diff_context.metrics_diff,
+                coverage_adoption_diff_available=(
+                    diff_context.coverage_adoption_diff_available
+                ),
+                api_surface_diff_available=diff_context.api_surface_diff_available,
+                include_report_document=(
+                    bool(changed_paths) or _controller_query_mode(args)
+                ),
+            )
     _emit_cli_analysis_completed_if_enabled(
         args=args,
         root_path=root_path,

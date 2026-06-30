@@ -242,6 +242,59 @@ def test_detail_selectors_ignored_and_echoed(tmp_path: Path) -> None:
     assert out["ignored_parameters"] == ["operation_id", "span_id"]
 
 
+def test_operation_detail_projects_per_span_progression(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    out = query_platform_observability(
+        root=tmp_path,
+        section="operation_detail",
+        detail_level="full",
+        operation_id="J",
+    )
+    # Per-object detail sections support full and consume operation_id.
+    assert out["status"] == "ok"
+    assert out["detail_level"] == "full"
+    assert out["operation_id"] == "J"
+    assert "ignored_parameters" not in out
+    assert out["span_count"] == 2
+    spans = {cast("str", s["span_id"]): s for s in _rows(out["spans"])}
+    assert spans["r"]["name"] == "memory.semantic.rebuild"
+    assert spans["r"]["rss_delta_mb"] == 440.0
+    counters = cast("dict[str, int]", spans["r"]["counters"])
+    assert counters["db_queries"] == 1370
+
+
+def test_span_detail_projects_one_span_by_id(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    out = query_platform_observability(
+        root=tmp_path, section="span_detail", span_id="d"
+    )
+    assert out["status"] == "ok"
+    assert out["span_id"] == "d"
+    assert out["operation_id"] == "J"
+    counters = cast("dict[str, int]", out["counters"])
+    assert counters["experiences_distilled"] == 47
+
+
+def test_detail_sections_fail_closed_on_missing_or_unknown_selector(
+    tmp_path: Path,
+) -> None:
+    _seed(tmp_path)
+    missing = query_platform_observability(root=tmp_path, section="operation_detail")
+    assert missing["status"] == "invalid_selector"
+    not_found = query_platform_observability(
+        root=tmp_path, section="span_detail", span_id="nope"
+    )
+    assert not_found["status"] == "not_found"
+
+
+def test_aggregate_rows_expose_ids_for_drilldown(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    out = query_platform_observability(
+        root=tmp_path, section="slow_operations", detail_level="normal"
+    )
+    assert all("operation_id" in row for row in _rows(out["rows"]))
+
+
 def test_absent_store_is_inert_not_error(tmp_path: Path) -> None:
     out = query_platform_observability(root=tmp_path, section="summary")
     assert out["status"] in {"disabled", "no_store"}
@@ -273,7 +326,7 @@ def test_limit_is_clamped_and_floored(tmp_path: Path) -> None:
     big = query_platform_observability(
         root=tmp_path, section="db_cost", detail_level="normal", limit=10000
     )
-    assert any("clamped to 50" in w for w in _texts(big["warnings"]))
+    assert any("clamped to 100" in w for w in _texts(big["warnings"]))
     bad = query_platform_observability(root=tmp_path, section="db_cost", limit=0)
     assert any("invalid" in w for w in _texts(bad["warnings"]))
 
@@ -348,7 +401,7 @@ def test_projection_helpers_and_diagnostic_edges(
     )
 
     warnings: list[str] = []
-    assert query_mod._resolve_detail("verbose", warnings) == "compact"
+    assert query_mod._resolve_detail("verbose", "summary", warnings) == "compact"
     assert warnings
 
     sentinel = object()
