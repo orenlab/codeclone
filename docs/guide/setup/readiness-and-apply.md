@@ -75,11 +75,14 @@ project file first, then re-run `plan`.
 
 ### Exit codes (`apply` only)
 
-| `status` in JSON                      | Exit code | Meaning                                          |
-|---------------------------------------|-----------|--------------------------------------------------|
-| `applied`, `dry_run`, `empty`, `noop` | `0`       | Success                                          |
-| `blocked`                             | `2`       | Preconditions failed (invalid/missing pyproject) |
-| `failed`, `partial`                   | `5`       | Write or merge error                             |
+| `status` in JSON             | Exit code | Meaning                                          |
+|------------------------------|-----------|--------------------------------------------------|
+| `applied`, `preview`, `noop` | `0`       | Success (`preview` when `--dry-run`)             |
+| `blocked`                    | `2`       | Preconditions failed (invalid/missing pyproject) |
+| `failed`, `partial`          | `5`       | Write or merge error                             |
+
+`plan` uses `status=empty` when no actions are needed (exit `0`). That is not an
+apply result status.
 
 `status`, `doctor`, and `plan` always exit `0` on successful projection
 (errors print to stderr and exit `5`).
@@ -97,10 +100,12 @@ use `plan` / `apply --json` instead.
 
 ## Readiness capabilities (snapshot)
 
-`status` and `doctor` project **capability axes** (install, configuration,
-runtime) for spheres such as analysis, MCP, Engineering Memory, audit, and
-optional extras (`semantic`, `analytics`, …). Maturity labels summarize how
-far the repo is toward a fully governed workflow.
+`status` and `doctor` project **14 capability probes** in **four groups**
+(`core_analysis`, `governed_agent_workflows`, `project_knowledge`,
+`team_and_release`) — for example analysis, baseline, MCP runtime, controlled
+change, audit, Engineering Memory, semantic retrieval, CI policy, and workspace
+hygiene. Maturity labels summarize how far the repo is toward a fully governed
+workflow.
 
 Full configuration keys live in [Config and Defaults](../../book/10-config-and-defaults.md).
 Engineering Memory setup continues with `codeclone memory init` after analysis —

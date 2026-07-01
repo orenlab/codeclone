@@ -107,6 +107,10 @@ Key state and surfaces:
   files, baselines, canonical/generated reports, and analysis cache; explicit
   controller, audit, memory, projection, and observability contracts may write
   only their documented bounded local state (install via `codeclone[mcp]`)
+- `codeclone setup` — lazy-loaded CLI readiness surface (`status`, `doctor`,
+  `plan`, `apply`, `wizard`); capability snapshots and bounded `pyproject.toml` /
+  `.gitignore` merges only — not MCP change control and never writes baselines,
+  cache, or canonical reports
 - `extensions/vscode-codeclone/` — stable VS Code extension as a native, read-only IDE client over `codeclone-mcp`
 - `extensions/claude-desktop-codeclone/` — stable Claude Desktop `.mcpb` bundle as a local install wrapper over
   `codeclone-mcp`
@@ -153,6 +157,14 @@ Hooks may rewrite files. Inspect `git diff` again afterward. Never use
 
 If you touched baseline/cache/report contracts or CLI/MCP audit surfaces, also exercise the CLI audit path
 (`--audit` / `codeclone/surfaces/cli/audit.py`) or the relevant audit/MCP tests.
+
+If you touched the setup readiness CLI surface (`codeclone setup`, pyproject writer,
+setup plan/apply/wizard), also run:
+
+```bash
+uv run pytest -q tests/test_cli_setup.py tests/test_pyproject_writer.py
+```
+
 If you touched `docs/`, `zensical.toml`, docs publishing workflow, or sample-report generation, also run:
 
 ```bash
@@ -281,15 +293,15 @@ doc.** Current central values (verified at write time):
 
 Subsystem-local wire versions (not in `contracts/__init__.py`):
 
-| Constant                   | Value | Owner                                               |
-|----------------------------|-------|-----------------------------------------------------|
-| `AUDIT_EVENT_CORE_VERSION` | `2`   | `codeclone/audit/events.py`                         |
-| `CONTEXT_CONTRACT_VERSION` | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
-| `CALL_RESOLUTION_VERSION`  | `1`   | `codeclone/surfaces/mcp/_implementation_context.py` |
-| `CONTEXT_GOVERNANCE_CONTRACT_VERSION` | `1.0` | `codeclone/surfaces/mcp/_context_governance.py` |
-| `CONTEXT_GOVERNANCE_ESTIMATOR` | `utf8_bytes_div_4_v1` | `codeclone/surfaces/mcp/_context_governance.py` |
-| `RECEIPT_VERSION` | `1` | `codeclone/surfaces/mcp/_review_receipt.py` |
-| `BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION` | `1` | `codeclone/surfaces/mcp/_blast_radius.py` |
+| Constant                                 | Value                 | Owner                                               |
+|------------------------------------------|-----------------------|-----------------------------------------------------|
+| `AUDIT_EVENT_CORE_VERSION`               | `2`                   | `codeclone/audit/events.py`                         |
+| `CONTEXT_CONTRACT_VERSION`               | `1`                   | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `CALL_RESOLUTION_VERSION`                | `1`                   | `codeclone/surfaces/mcp/_implementation_context.py` |
+| `CONTEXT_GOVERNANCE_CONTRACT_VERSION`    | `1.0`                 | `codeclone/surfaces/mcp/_context_governance.py`     |
+| `CONTEXT_GOVERNANCE_ESTIMATOR`           | `utf8_bytes_div_4_v1` | `codeclone/surfaces/mcp/_context_governance.py`     |
+| `RECEIPT_VERSION`                        | `1`                   | `codeclone/surfaces/mcp/_review_receipt.py`         |
+| `BLAST_ARTIFACT_DETAIL_CONTRACT_VERSION` | `1`                   | `codeclone/surfaces/mcp/_blast_radius.py`           |
 
 When updating any doc that mentions a version, re-read `codeclone/contracts/__init__.py` first. Do not derive
 versions from another document.
@@ -565,6 +577,9 @@ Before cutting a release:
   Observability authorize edits or override canonical report facts.
 - Don’t describe agent review, receipts, or automated checks as the mandatory
   human review required for merge.
+- Don’t conflate `codeclone setup apply` with MCP change control — setup never
+  declares intent, never returns `edit_allowed`, and must not write baselines,
+  analysis cache, or canonical reports.
 
 ---
 
@@ -581,7 +596,13 @@ Architecture is layered, but grounded in current code (not aspirational diagrams
 - **CLI entry + orchestration surface** (`codeclone/main.py`, `codeclone/surfaces/cli/*`, `codeclone/ui_messages/*`)
   owns argument parsing, runtime/config resolution, summaries, report writes, and exit routing.
   User-facing copy lives in `ui_messages/` submodules (`help`, `labels`, `runtime`,
-  `markers`, `formatters`, `controller`, `styling`).
+  `markers`, `formatters`, `controller`, `styling`, `setup`).
+- **Setup readiness CLI** (`codeclone/surfaces/cli/setup/*`, lazy-loaded from
+  `workflow.main()` when `sys.argv[1] == "setup"`) owns capability discovery,
+  `SetupSnapshot` / `SetupPlan` projections, Rich human rendering, bounded
+  `pyproject.toml` round-trip merges (`codeclone/config/pyproject_writer.py`), and
+  optional `.gitignore` append. Runs on base install without `surfaces.mcp.*`;
+  apply is not Structural Change Controller authorization.
 - **Config layer** (`codeclone/config/*`) is the single source of truth for option specs, parser construction,
   `pyproject.toml` loading, and CLI > pyproject > defaults resolution.
 - **Core orchestration** (`codeclone/core/*`) owns bootstrap → discovery → worker processing → project metrics →
@@ -664,6 +685,9 @@ Non-negotiable interpretation:
   analyzer, MCP server, or truth path.
 - The Cursor plugin is a local discovery and guidance surface over `codeclone-mcp` and must not introduce a second
   analyzer, MCP server, or truth path.
+- `codeclone setup` is a human onboarding CLI over canonical config/audit/memory
+  **probes**; it is not an MCP surface and does not grant edit permission for
+  governed repository patches.
 
 ## 13) Module map
 
@@ -674,7 +698,12 @@ Use this map to route changes to the right owner module.
   graph core shared by CLI/MCP controller projections; keep it independent from
   MCP session policy.
 - `codeclone/surfaces/cli/workflow.py` — top-level CLI orchestration and exit routing. Add CLI control flow here, not
-  in `main.py`.
+  in `main.py`; lazy-load `memory`, `analytics`, `observability`, and `setup` argv routes here only.
+- `codeclone/surfaces/cli/setup/*` — setup readiness CLI (`status`, `doctor`, `plan`, `apply`, `wizard`); discover/plan
+  engines, Rich renderers, wizard hub. Must not import `codeclone.surfaces.mcp.*`.
+- `codeclone/config/pyproject_writer.py` — round-trip `[tool.codeclone]` merge via `tomlkit` for setup apply.
+- `codeclone/utils/atomic_write.py` — shared atomic file replace for setup apply and pyproject writer.
+- `codeclone/paths/gitignore.py` — gitignore coverage helpers shared by setup plan/apply and tips.
 - `codeclone/surfaces/cli/*` — CLI support slices (startup, runtime, execution, post-run handling, summaries,
   reports, changed-scope logic, baseline state, audit rendering, console helpers). Keep them orchestration/UX-focused.
 - `codeclone/config/*` — parser construction, option specs/defaults, pyproject loading, config resolution. Do not
@@ -827,6 +856,7 @@ If you change a contract-sensitive zone, route docs/tests/approval deliberately.
 | Cache schema/profile/integrity (`codeclone/cache/store.py`, `codeclone/cache/versioning.py`, `codeclone/cache/integrity.py`)                                                                                  | `docs/book/08-cache.md`, `docs/book/appendix/b-schema-layouts.md`, `CHANGELOG.md`                                                                                                            | `tests/test_cache.py`, pipeline/CLI cache integration tests                                                                                                                                                                                                                                                                          | cache schema/status/profile compatibility semantics change                                                                      | cache payload/version/status semantics change                                                                         |
 | Canonical report JSON shape (`codeclone/report/document/*`, report projections)                                                                                                                               | `docs/book/05-report.md` (+ `docs/book/06-html-render.md` if rendering contract impacted), `docs/sarif.md` when SARIF changes, `CHANGELOG.md`                                                | `tests/test_report.py`, `tests/test_report_contract_coverage.py`, `tests/test_report_branch_invariants.py`, relevant report-format tests                                                                                                                                                                                             | finding/meta/summary schema changes                                                                                             | stable JSON fields/meaning/order guarantees change                                                                    |
 | CLI flags/help/exit behavior (`codeclone/main.py`, `codeclone/surfaces/cli/*`, `codeclone/config/*`, `codeclone/contracts/*`)                                                                                 | `docs/book/11-cli.md`, `docs/book/09-exit-codes.md`, `README.md`, `CHANGELOG.md`                                                                                                             | `tests/test_cli_unit.py`, `tests/test_cli_inprocess.py`, `tests/test_cli_smoke.py`                                                                                                                                                                                                                                                   | exit-code semantics, script-facing behavior, flag contracts change                                                              | user-visible CLI contract changes                                                                                     |
+| Setup readiness CLI (`codeclone/surfaces/cli/setup/*`, `codeclone/config/pyproject_writer.py`, `codeclone/paths/gitignore.py`, `codeclone/ui_messages/setup.py`)                                              | `docs/guide/setup/readiness-and-apply.md`, `docs/book/11-cli.md`, `docs/book/02-architecture-map.md`, `README.md`, `docs/getting-started.md`, plugin `codeclone-setup` skill, `CHANGELOG.md` | `tests/test_cli_setup.py`, `tests/test_pyproject_writer.py`, golden `tests/fixtures/contract_snapshots/setup_snapshot_v1.json` when wire schema changes                                                                                                                                                                              | lazy-load boundary (I-07), snapshot/plan JSON shape, apply bounded-write semantics, wizard TTY contract, exit codes on apply    | `SetupSnapshot` / `SetupPlan` / apply result payloads, probe matrix, or pyproject merge behavior change               |
 | Structural Change Controller (intent, blast radius, patch contract, hygiene, claims, receipts, Patch Trail)                                                                                                   | `docs/book/12-structural-change-controller/`, `docs/guide/change-control/`, `docs/book/14-claim-guard.md`, MCP/plugin guidance, `README.md`, `CHANGELOG.md`                                  | Controller/intent/verification/claim/receipt tests in `tests/test_mcp_service.py`, `tests/test_mcp_server.py`, `tests/test_verification_profile.py`, `tests/test_patch_trail_*.py`, plus tool-schema snapshots when payloads change                                                                                                  | edit authorization, scope/hygiene, verification profile, claim semantics, receipt or Patch Trail contract changes               | workflow tool payloads, status transitions, permission signals, verification/receipt schemas change                   |
 | Fingerprint-adjacent analysis (`codeclone/analysis/units.py`, `codeclone/analysis/_module_walk.py`, `codeclone/analysis/cfg.py`, `codeclone/analysis/normalizer.py`, `codeclone/findings/clones/grouping.py`) | `docs/book/03-core-pipeline.md`, `docs/book/04-cfg-semantics.md`, `docs/book/24-compatibility-and-versioning.md`, `CHANGELOG.md`                                                             | `tests/test_fingerprint.py`, `tests/test_extractor.py`, `tests/test_cfg.py`, golden tests (`tests/test_detector_golden.py`, `tests/test_golden_v2.py`)                                                                                                                                                                               | always (see Section 1.6)                                                                                                        | clone identity / NEW-vs-KNOWN / fingerprint inputs change                                                             |
 | Suppression semantics/reporting (`codeclone/analysis/suppressions.py`, `codeclone/analysis/_module_walk.py` dead-code wiring, report/UI counters)                                                             | `docs/book/19-inline-suppressions.md`, `docs/book/17-dead-code-contract.md`, `docs/book/05-report.md`, and interface docs if surfaced (`09-cli`, `10-html-render`)                           | `tests/test_suppressions.py`, `tests/test_extractor.py`, `tests/test_metrics_modules.py`, `tests/test_pipeline_metrics.py`, report/html/cli tests                                                                                                                                                                                    | declaration scope semantics, rule effect, or contract-visible counters/fields change                                            | suppression changes alter active finding output or contract-visible report payload                                    |
@@ -884,6 +914,10 @@ Policy:
 - Structural Change Controller intent, permission, scope/hygiene, blast-radius,
   verification-profile, claim, receipt, and Patch Trail semantics.
 - CLI flags, defaults, exit codes, and stable script-facing messages.
+- `codeclone setup` argv route: subcommands, `--json` stdout projections
+  (`setup_snapshot`, `setup_plan`, apply result), lazy-load isolation, bounded
+  apply scope (`pyproject.toml`, `.gitignore` only), and wizard TTY semantics.
+  Not MCP; no `edit_allowed`.
 - Baseline schema/trust semantics/integrity compatibility (`BASELINE_SCHEMA_VERSION` contract family).
 - Cache schema/status/profile compatibility/integrity (`CACHE_VERSION` contract family).
 - Canonical report JSON schema/payload semantics (`REPORT_SCHEMA_VERSION` contract family).

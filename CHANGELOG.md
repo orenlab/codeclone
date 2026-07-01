@@ -27,6 +27,9 @@ evidence, platform self-observability, and broader IDE/agent integration.
   tracking, and reviewed-state persistence.
 - **Native agent and IDE integrations** for VS Code, Claude Desktop, Claude Code, Codex, and Cursor, including
   governance, audit, memory, trajectory, and structural-review workflows.
+- **`codeclone setup`** — lazy-loaded CLI readiness surface (`status`, `doctor`, `plan`, `apply`, `wizard`) with
+  capability-aware snapshots, read-only diff preview, and bounded `pyproject.toml` / `.gitignore` merges (no MCP
+  intent, no baseline or report writes).
 - Expanded controller, memory, trajectory, analytics, semantic-search, observability, blast-radius, patch-verification,
   and diagnostic CLI/MCP surfaces. The default MCP server surface is now **38 tools** (**40** when VS Code enables the
   IDE governance channel).

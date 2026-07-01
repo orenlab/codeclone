@@ -40,11 +40,13 @@ Never writes `codeclone.baseline.json`, `.codeclone/cache`, or report artifacts.
 
 ## Exit codes (apply)
 
-| JSON `status`                                          | Exit |
-|--------------------------------------------------------|------|
-| success family (`applied`, `dry_run`, `empty`, `noop`) | 0    |
-| `blocked`                                              | 2    |
-| `failed`, `partial`                                    | 5    |
+| JSON `status`                  | Exit |
+|--------------------------------|------|
+| `applied`, `preview`, `noop`   | 0    |
+| `blocked`                      | 2    |
+| `failed`, `partial`            | 5    |
+
+(`preview` when `--dry-run`; `plan` uses `status=empty`.)
 
 ## Rules
 

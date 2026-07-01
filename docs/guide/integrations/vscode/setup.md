@@ -19,6 +19,19 @@ The extension helps you:
 
 It does not create a second truth model and it does not mutate the repository.
 
+## Repository readiness (CLI)
+
+Before connecting MCP or running governed edits, confirm `[tool.codeclone]` and
+`.gitignore` hygiene in the terminal:
+
+```bash
+codeclone setup status
+codeclone setup plan
+codeclone setup apply
+```
+
+Guide: [Repository setup and readiness](../../setup/readiness-and-apply.md).
+
 ## Install requirements
 
 Install from the VS Code Marketplace: **`orenlab.codeclone`** (publisher

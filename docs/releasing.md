@@ -138,16 +138,17 @@ Use this after `--all` or a single `--target` before tagging a plugin release:
    `.idea/`, `.DS_Store`; VS Code copy also lists `node_modules/`, `*.vsix`, `out/`.
 3. **Codex (`codeclone-codex`)** — root `README.md` is the distribution stub (not
    a duplicate of `plugins/codeclone/README.md`);
-   `plugins/codeclone/skills/` has nine skills;
+   `plugins/codeclone/skills/` has ten skills (including `codeclone-setup/`);
    `plugins/codeclone/.mcp.json` and `scripts/launch_mcp.py` present;
    `.agents/plugins/marketplace.json` has `name: orenlab-codeclone`.
 4. **Claude Code (`codeclone-claude-code`)** — root `README.md` documents the
    two-step marketplace install; `.claude-plugin/marketplace.json` has
    `name: orenlab-codeclone`; `plugins/codeclone/.claude-plugin/plugin.json`,
-   `.mcp.json`, nine skills, and the standalone launcher are present. The plugin
+   `.mcp.json`, ten skills, and the standalone launcher are present. The plugin
    manifest omits `version` intentionally so Git commit identity drives cache
    updates.
-5. **Cursor (`codeclone-cursor`)** — nine skills including `codeclone-production-triage/` and
+5. **Cursor (`codeclone-cursor`)** — ten skills including `codeclone-setup/`,
+   `codeclone-production-triage/`, and
    `codeclone-blast-radius/`; three rules under `rules/` (including `change-control-gate.mdc`);
    `scripts/launch_mcp.py` contains `resolve_launch_target` and **not** `runpy`;
    `mcp.json` still points at `./scripts/launch_mcp.py`.

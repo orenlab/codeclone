@@ -113,9 +113,11 @@ Refs:
     - `status` (default), `doctor` — read-only capability snapshot; `--json`
       emits `setup_snapshot` projection.
     - `plan` — read-only diff preview (`setup_plan`); `--json` for scripts.
-    - `apply` — executes plan actions; `--dry-run` previews writes; `--json`
-      emits apply result. Exit `2` when `status=blocked`, `5` when
-      `failed`/`partial`, else `0`.
+    - `apply` — executes plan actions; `--dry-run` previews writes (`status=preview`);
+      `--json` emits apply result. Apply `status` is one of `applied`, `preview`,
+      `noop`, `blocked`, `failed`, or `partial`. Exit `2` when `status=blocked`,
+      `5` when `failed`/`partial`, else `0`. (`plan` uses `status=empty` when
+      nothing to do — still exit `0`.)
     - `wizard` — interactive hub (TTY + Rich); no `--json`.
     - `--root PATH` on all subcommands.
     - Not an MCP or change-control surface — no intent or `edit_allowed`.

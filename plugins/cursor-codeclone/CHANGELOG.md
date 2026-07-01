@@ -3,11 +3,11 @@
 ## 0.1.0
 
 - Initial Cursor plugin for CodeClone
-- **Nine skills:** `codeclone-production-triage`, `codeclone-hotspots`,
+- **Ten skills:** `codeclone-production-triage`, `codeclone-hotspots`,
   `codeclone-blast-radius`, `codeclone-architecture-triage`,
   `codeclone-review`, `codeclone-change-control`,
   `codeclone-engineering-memory`, `codeclone-implementation-context`,
-  `codeclone-platform-observability` (optional semantic search documented in
+  `codeclone-platform-observability`, `codeclone-setup` (optional semantic search documented in
   skill + server config)
 - **One agent:** `codeclone-structural-reviewer` (`agents/structural-reviewer.md`)
 - **Three rules:** `codeclone-workflow.mdc`, `change-control-gate.mdc` (always),

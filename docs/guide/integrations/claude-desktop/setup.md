@@ -17,6 +17,17 @@ here is only for Claude Desktop.
 - Node.js (to build the bundle from source)
 - Python 3.10+ with `codeclone[mcp]` installed
 
+## Repository readiness (CLI)
+
+Run before first MCP session when `[tool.codeclone]` is missing:
+
+```bash
+codeclone setup status
+codeclone setup apply
+```
+
+Guide: [Repository setup and readiness](../../setup/readiness-and-apply.md).
+
 ## Install the MCP launcher
 
 The bundle prefers the current workspace launcher first:

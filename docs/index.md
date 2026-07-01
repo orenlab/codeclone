@@ -24,8 +24,9 @@ patch against the declared boundary, and generates an auditable review receipt.
 ## New here? Follow the path
 
 1. [**Install & first run**](getting-started.md) — install, analyze a repo, read the report.
-2. [**Connect your agent**](getting-started.md#mcp-setup) — wire CodeClone into your IDE or agent.
-3. [**Your first governed edit**](start/first-governed-edit.md) — declare → edit → verify, end to end.
+2. [**Repository setup**](guide/setup/readiness-and-apply.md) — readiness, plan, apply (CLI-only).
+3. [**Connect your agent**](getting-started.md#mcp-setup) — wire CodeClone into your IDE or agent.
+4. [**Your first governed edit**](start/first-governed-edit.md) — declare → edit → verify, end to end.
 
 !!! tip "Two tabs — pick one mental model"
     **Guide** — install, run, MCP workflows, IDE setup, recipes.
@@ -44,6 +45,7 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Goal                  | Start here                                        |
 |-----------------------|---------------------------------------------------|
 | First install and run | [Getting started](getting-started.md)             |
+| Repository readiness  | [Setup & readiness](guide/setup/readiness-and-apply.md) |
 | Understand the model  | [How it works](guide/explanation/how-it-works.md) |
 | Terminology lookup    | [Terminology](book/01-terminology.md)             |
 
@@ -61,6 +63,7 @@ patch against the declared boundary, and generates an auditable review receipt.
 | Goal                                | Start here                                                                    |
 |-------------------------------------|-------------------------------------------------------------------------------|
 | MCP usage (workflows, setup)        | [MCP guide](guide/mcp/README.md)                                              |
+| Repository setup (CLI)              | [Setup & readiness](guide/setup/readiness-and-apply.md)                        |
 | First governed edit (tutorial)      | [Your first governed edit](start/first-governed-edit.md)                      |
 | Change controller workflow          | [Structural Change Controller](book/12-structural-change-controller/index.md) |
 | Engineering Memory (scope context)  | [Engineering Memory](book/13-engineering-memory/index.md)                     |
