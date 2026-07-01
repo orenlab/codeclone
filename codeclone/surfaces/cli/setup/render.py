@@ -34,6 +34,13 @@ def render_setup_doctor(
     _render_doctor_plain(console=console, snapshot=snapshot)
 
 
+def render_setup_plan(*, console: PrinterLike, plan: Mapping[str, object]) -> None:
+    if supports_rich_console(console):
+        _render_plan_rich(console=console, plan=plan)
+        return
+    _render_plan_plain(console=console, plan=plan)
+
+
 def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
     _, _panel_cls, rule_cls, table_cls, _ = rich_panel_symbols()
     runtime = _mapping(snapshot.get("runtime"))
@@ -122,6 +129,84 @@ def _render_doctor_plain(console: PrinterLike, snapshot: Mapping[str, object]) -
             console.print(f"  evidence[{row.get('id')}]: {', '.join(evidence)}")
 
 
+def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:
+    _, panel_cls, rule_cls, table_cls, _ = rich_panel_symbols()
+    console.print(setup_ui.SETUP_PLAN_TITLE)
+    console.print()
+    console.print(
+        rule_cls(title="Plan summary", style="dim", characters="\u2500"),
+    )
+    console.print(
+        f"  [dim]Root:[/dim] {plan.get('root')}  "
+        f"[dim]Status:[/dim] {plan.get('status')}  "
+        f"[dim]Plan id:[/dim] {plan.get('plan_id')}"
+    )
+    console.print(f"  [dim]{setup_ui.SETUP_PLAN_READ_ONLY_NOTE}[/dim]")
+    console.print()
+
+    blockers = plan.get("blockers")
+    if isinstance(blockers, list) and blockers:
+        console.print(setup_ui.SETUP_PLAN_BLOCKED)
+        for blocker in blockers:
+            if isinstance(blocker, Mapping):
+                console.print(f"  - {blocker.get('kind')}: {blocker.get('reason', '')}")
+        console.print()
+
+    actions = _plan_actions(plan)
+    if not actions:
+        console.print(setup_ui.SETUP_PLAN_EMPTY)
+        return
+
+    table = table_cls(show_header=True, header_style="bold")
+    table.add_column("Action")
+    table.add_column("Target")
+    table.add_column("Status")
+    for action in actions:
+        table.add_row(
+            str(action.get("kind", "")),
+            str(action.get("path", "")),
+            str(action.get("status", "")),
+        )
+    console.print(table)
+    console.print()
+
+    for action in actions:
+        preview = action.get("preview")
+        diff = ""
+        if isinstance(preview, Mapping):
+            diff = str(preview.get("unified_diff", ""))
+        if not diff:
+            continue
+        title = f"{action.get('kind')} → {action.get('path')}"
+        console.print(panel_cls(diff.rstrip(), title=title))
+
+
+def _render_plan_plain(console: PrinterLike, plan: Mapping[str, object]) -> None:
+    console.print(setup_ui.SETUP_PLAN_TITLE)
+    console.print(f"status: {plan.get('status')}  plan_id: {plan.get('plan_id')}")
+    console.print(setup_ui.SETUP_PLAN_READ_ONLY_NOTE)
+    actions = _plan_actions(plan)
+    if not actions:
+        console.print(setup_ui.SETUP_PLAN_EMPTY)
+        return
+    for action in actions:
+        console.print(
+            f"{action.get('kind')} {action.get('path')}: {action.get('status')}"
+        )
+        preview = action.get("preview")
+        if isinstance(preview, Mapping):
+            diff = str(preview.get("unified_diff", "")).strip()
+            if diff:
+                console.print(diff)
+
+
+def _plan_actions(plan: Mapping[str, object]) -> list[Mapping[str, object]]:
+    raw = plan.get("actions")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, Mapping)]
+
+
 def _capabilities(snapshot: Mapping[str, object]) -> list[Mapping[str, object]]:
     raw = snapshot.get("capabilities")
     if not isinstance(raw, list):
@@ -135,4 +220,4 @@ def _mapping(value: object) -> Mapping[str, object]:
     return {}
 
 
-__all__ = ["render_setup_doctor", "render_setup_status"]
+__all__ = ["render_setup_doctor", "render_setup_plan", "render_setup_status"]

@@ -12,6 +12,12 @@ from typing import Final
 
 SETUP_STATUS_TITLE: Final = "CodeClone setup readiness"
 SETUP_DOCTOR_TITLE: Final = "CodeClone setup doctor"
+SETUP_PLAN_TITLE: Final = "CodeClone setup plan"
+SETUP_PLAN_EMPTY: Final = "No configuration changes recommended."
+SETUP_PLAN_BLOCKED: Final = (
+    "Plan blocked until pyproject.toml validation issues are resolved."
+)
+SETUP_PLAN_READ_ONLY_NOTE: Final = "Read-only preview — no files were modified."
 
 GROUP_LABELS: Final[dict[str, str]] = {
     "core_analysis": "Core analysis",
@@ -149,5 +155,9 @@ __all__ = [
     "REASON_WORKSPACE_HYGIENE",
     "REASON_WORKSPACE_HYGIENE_READY",
     "SETUP_DOCTOR_TITLE",
+    "SETUP_PLAN_BLOCKED",
+    "SETUP_PLAN_EMPTY",
+    "SETUP_PLAN_READ_ONLY_NOTE",
+    "SETUP_PLAN_TITLE",
     "SETUP_STATUS_TITLE",
 ]

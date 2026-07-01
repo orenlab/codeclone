@@ -47,8 +47,17 @@ ConfigurationAxis = Literal["configured", "unconfigured", "invalid", "not_requir
 RuntimeAxis = Literal["verified", "unavailable", "not_verified", "not_required"]
 
 
+def build_discover_context(root_path: Path) -> DiscoverContext:
+    """Build read-only discovery context for setup projections."""
+
+    return _build_context(root_path.resolve())
+
+
 def build_setup_snapshot(root_path: Path) -> dict[str, object]:
-    ctx = _build_context(root_path.resolve())
+    return build_setup_snapshot_from_context(build_discover_context(root_path))
+
+
+def build_setup_snapshot_from_context(ctx: DiscoverContext) -> dict[str, object]:
     probed = [_probe_capability(meta, ctx) for meta in sorted_capabilities()]
     capabilities = finalize_capabilities(probed, ctx)
     return {
@@ -647,4 +656,8 @@ def _memory_db_exists(ctx: DiscoverContext) -> bool:
     return bool(report is not None and report.db_exists)
 
 
-__all__ = ["build_setup_snapshot"]
+__all__ = [
+    "build_discover_context",
+    "build_setup_snapshot",
+    "build_setup_snapshot_from_context",
+]

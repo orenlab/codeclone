@@ -23,6 +23,7 @@ from codeclone.surfaces.cli.setup.engine.capabilities import (
     CapabilityMeta,
 )
 from codeclone.surfaces.cli.setup.engine.discover import build_setup_snapshot
+from codeclone.surfaces.cli.setup.engine.plan import build_setup_plan
 from codeclone.surfaces.cli.setup.engine.rollup import derive_readiness
 from codeclone.surfaces.cli.setup.main import setup_main
 from codeclone.utils.json_io import json_text
@@ -69,6 +70,12 @@ def base_install_find_spec(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def _capability_rows(snapshot: dict[str, object]) -> list[dict[str, object]]:
     raw = snapshot.get("capabilities")
+    assert isinstance(raw, list)
+    return [item for item in raw if isinstance(item, dict)]
+
+
+def _plan_actions(plan: dict[str, object]) -> list[dict[str, object]]:
+    raw = plan.get("actions")
     assert isinstance(raw, list)
     return [item for item in raw if isinstance(item, dict)]
 
@@ -402,3 +409,123 @@ def test_setup_json_serialization_contract(
     assert rendered.endswith("\n")
     roundtrip = json.loads(rendered)
     assert roundtrip["schema_version"] == "1"
+
+
+def test_setup_plan_proposes_pyproject_section(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    plan = build_setup_plan(tmp_path)
+
+    assert plan["projection_kind"] == "setup_plan"
+    assert plan["read_only"] is True
+    assert plan["status"] == "ready"
+    assert isinstance(plan["plan_id"], str) and len(str(plan["plan_id"])) == 16
+    actions = _plan_actions(plan)
+    merge = next(item for item in actions if item["kind"] == "pyproject_merge")
+    assert merge["capability_id"] == "analysis"
+    assert merge["changed_keys"] == ["baseline"]
+    preview = merge["preview"]
+    assert isinstance(preview, dict)
+    assert "tool.codeclone" in str(preview.get("unified_diff", ""))
+
+
+def test_setup_plan_proposes_gitignore_append(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+
+    plan = build_setup_plan(tmp_path)
+
+    gitignore = next(
+        item for item in _plan_actions(plan) if item["kind"] == "gitignore_append"
+    )
+    assert gitignore["capability_id"] == "workspace_hygiene"
+    assert gitignore["lines"] == [".codeclone/"]
+    preview = gitignore["preview"]
+    assert isinstance(preview, dict)
+    assert ".codeclone/" in str(preview.get("unified_diff", ""))
+
+
+def test_setup_plan_is_empty_when_satisfied(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    plan = build_setup_plan(tmp_path)
+
+    assert plan["status"] == "empty"
+    assert plan["actions"] == []
+
+
+def test_setup_plan_blocked_on_invalid_pyproject(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\nmin_loc = not-a-number\n",
+        encoding="utf-8",
+    )
+
+    plan = build_setup_plan(tmp_path)
+
+    blockers = plan["blockers"]
+    assert isinstance(blockers, list)
+    assert any(item.get("kind") == "invalid_pyproject" for item in blockers)
+    assert not any(
+        item.get("kind") == "pyproject_merge" for item in _plan_actions(plan)
+    )
+
+
+def test_setup_plan_does_not_write_files(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    before = pyproject.read_text(encoding="utf-8")
+
+    setup_main(["plan", "--root", str(tmp_path)])
+
+    assert pyproject.read_text(encoding="utf-8") == before
+
+
+def test_setup_plan_json_has_no_edit_allowed(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n',
+        encoding="utf-8",
+    )
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        setup_main(["plan", "--json", "--root", str(tmp_path)])
+    payload = json.loads(buf.getvalue())
+    rendered = json.dumps(payload)
+    assert "edit_allowed" not in rendered
+
+
+def test_setup_plan_idempotent(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    first = build_setup_plan(tmp_path)
+    second = build_setup_plan(tmp_path)
+
+    assert first["plan_id"] == second["plan_id"]
