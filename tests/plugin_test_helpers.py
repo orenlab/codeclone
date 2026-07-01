@@ -22,6 +22,7 @@ CODEX_PLUGIN_SKILL_NAMES: Final[tuple[str, ...]] = (
     "codeclone-platform-observability",
     "codeclone-production-triage",
     "codeclone-review",
+    "codeclone-setup",
 )
 
 CODEX_CURSOR_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = CODEX_PLUGIN_SKILL_NAMES
@@ -150,12 +151,13 @@ def assert_codex_plugin_readme_contract(readme_text: str) -> None:
         "without relying on `sh -lc`",
         'uv tool install --prerelease allow "codeclone[mcp]"',
         "codeclone-change-control",
+        "codeclone-setup",
         "codeclone-architecture-triage",
         "codeclone-implementation-context",
         "codeclone-production-triage",
         "codeclone-architecture-triage",
         "codeclone-blast-radius",
-        "Nine skills ship in the plugin",
+        "Ten skills ship in the plugin",
         "Structural Change Controller for AI-assisted Python",
     )
 

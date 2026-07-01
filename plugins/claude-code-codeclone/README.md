@@ -43,17 +43,18 @@ Claude Code settings.
 
 Claude Code namespaces plugin skills with the plugin name:
 
-| Skill | Invocation |
-|---|---|
-| Repository review | `/codeclone:codeclone-review` |
-| Hotspot snapshot | `/codeclone:codeclone-hotspots` |
-| Production triage | `/codeclone:codeclone-production-triage` |
-| Architecture triage | `/codeclone:codeclone-architecture-triage` |
-| Blast-radius inspection | `/codeclone:codeclone-blast-radius` |
-| Controlled repository edit | `/codeclone:codeclone-change-control` |
-| Engineering Memory | `/codeclone:codeclone-engineering-memory` |
-| Implementation context | `/codeclone:codeclone-implementation-context` |
+| Skill                                    | Invocation                                    |
+|------------------------------------------|-----------------------------------------------|
+| Repository review                        | `/codeclone:codeclone-review`                 |
+| Hotspot snapshot                         | `/codeclone:codeclone-hotspots`               |
+| Production triage                        | `/codeclone:codeclone-production-triage`      |
+| Architecture triage                      | `/codeclone:codeclone-architecture-triage`    |
+| Blast-radius inspection                  | `/codeclone:codeclone-blast-radius`           |
+| Controlled repository edit               | `/codeclone:codeclone-change-control`         |
+| Engineering Memory                       | `/codeclone:codeclone-engineering-memory`     |
+| Implementation context                   | `/codeclone:codeclone-implementation-context` |
 | Platform Observability (maintainer-only) | `/codeclone:codeclone-platform-observability` |
+| Repository setup (CLI)                   | `/codeclone:codeclone-setup`                  |
 
 The MCP server remains read-only with respect to source, baselines, cache, and
 canonical reports. Change control, audit, and Engineering Memory write only

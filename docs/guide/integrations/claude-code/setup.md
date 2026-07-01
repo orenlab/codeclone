@@ -79,12 +79,16 @@ a local MCP definition over the same canonical CodeClone server.
 
 Claude Code namespaces installed plugin skills:
 
-| Task               | Invocation                                |
-|--------------------|-------------------------------------------|
-| Repository review  | `/codeclone:codeclone-review`             |
-| Hotspot snapshot   | `/codeclone:codeclone-hotspots`           |
-| Controlled edit    | `/codeclone:codeclone-change-control`     |
-| Engineering Memory | `/codeclone:codeclone-engineering-memory` |
+| Task               | Invocation                                   |
+|--------------------|----------------------------------------------|
+| Repository review  | `/codeclone:codeclone-review`                |
+| Hotspot snapshot   | `/codeclone:codeclone-hotspots`              |
+| Controlled edit    | `/codeclone:codeclone-change-control`        |
+| Engineering Memory | `/codeclone:codeclone-engineering-memory`    |
+| Repository setup   | `/codeclone:codeclone-setup` (CLI — not MCP) |
+
+Run `codeclone setup status` before MCP when `[tool.codeclone]` is missing.
+Guide: [Repository setup and readiness](../../setup/readiness-and-apply.md).
 
 ## Update or remove
 

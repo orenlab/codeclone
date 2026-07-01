@@ -19,6 +19,7 @@ nav = [
     { "Home" = "index.md" },
     { "Get started" = [
         { "1. Install & first run" = "getting-started.md" },
+        { "Repository setup & readiness" = "guide/setup/readiness-and-apply.md" },
         { "2. Your first governed edit" = "start/first-governed-edit.md" },
         { "Example report" = "examples/report.md" },
     ] },

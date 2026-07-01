@@ -107,6 +107,19 @@ Refs:
     - `--audit-json` outputs audit payload footprint as JSON. Uses the same audit
       collector as `--audit` but does not set the `--audit` flag for combination
       validation. Requires `audit_enabled=true` in effective configuration.
+- Setup readiness commands (`codeclone setup`) are terminal-only; bounded
+  apply mutates only `pyproject.toml` and `.gitignore` — never baselines,
+  cache, or canonical reports:
+    - `status` (default), `doctor` — read-only capability snapshot; `--json`
+      emits `setup_snapshot` projection.
+    - `plan` — read-only diff preview (`setup_plan`); `--json` for scripts.
+    - `apply` — executes plan actions; `--dry-run` previews writes; `--json`
+      emits apply result. Exit `2` when `status=blocked`, `5` when
+      `failed`/`partial`, else `0`.
+    - `wizard` — interactive hub (TTY + Rich); no `--json`.
+    - `--root PATH` on all subcommands.
+    - Not an MCP or change-control surface — no intent or `edit_allowed`.
+    - Guide: [Repository setup and readiness](../guide/setup/readiness-and-apply.md).
 - Engineering Memory commands (`codeclone memory`) are terminal-only and
   read-only with respect to source files, baselines, and analysis cache:
     - `init [--refresh] [--dry-run] [--from-report PATH] [--no-docs] [--no-tests]`

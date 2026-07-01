@@ -84,3 +84,18 @@ Optional **semantic search**: off by default in
 `diagnostic` is deterministic, not semantic-quality embeddings; set
 `embedding_provider = "fastembed"` for FastEmbed. See
 [Engineering Memory](../../../book/13-engineering-memory/index.md).
+
+### codeclone-setup
+
+CLI-only repository readiness — **not** an MCP skill workflow. Run in the
+terminal before MCP change control when `[tool.codeclone]` or `.gitignore`
+hygiene is missing:
+
+```bash
+codeclone setup status
+codeclone setup plan
+codeclone setup apply
+```
+
+Or invoke the bundled skill for the same playbook. Full guide:
+[Repository setup and readiness](../../setup/readiness-and-apply.md).

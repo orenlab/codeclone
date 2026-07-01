@@ -8,7 +8,7 @@ Contract: [Cursor plugin](../../../book/integrations/cursor-plugin.md).
 |------------------------------------|---------------------------------|----------------------------------------------------------------------------------------------|
 | `.cursor-plugin/plugin.json`       | Manifest                        | `skills/`, `rules/`, `agents/`, `hooks/hooks.json`, `mcp.json`                               |
 | `mcp.json`                         | MCP                             | `python3` + `./scripts/launch_mcp.py` — resolves `codeclone-mcp` (`.venv` → Poetry → `PATH`) |
-| Skills (9)                         | `skills/*/`                     | See table below                                                                              |
+| Skills (10)                        | `skills/*/`                     | See table below                                                                              |
 | Agent                              | `agents/structural-reviewer.md` | Invoke id: **`codeclone-structural-reviewer`**                                               |
 | Rules (3)                          | `rules/*.mdc`                   | See **Rules**                                                                                |
 | Hooks                              | `hooks/hooks.json`              | Dispatches via `hooks/run_hook.py` (plugin manifest; optional project install)               |
@@ -31,8 +31,9 @@ name on disk):
 | `codeclone-engineering-memory/`     | `/codeclone-engineering-memory`     | `get_relevant_memory`, `query_engineering_memory`, drafts                  |
 | `codeclone-implementation-context/` | `/codeclone-implementation-context` | `get_implementation_context` after `start`                                 |
 | `codeclone-platform-observability/` | `/codeclone-platform-observability` | Maintainer-only: `query_platform_observability` (observer enable required) |
+| `codeclone-setup/`                  | `/codeclone-setup`                  | CLI readiness (`status`, `plan`, `apply`, `wizard`) — not MCP              |
 
-Codex and Claude Code plugins ship the same nine skills from `plugins/codeclone/skills/`.
+Codex and Claude Code plugins ship the same ten skills from `plugins/codeclone/skills/`.
 
 ## Install
 
@@ -172,6 +173,19 @@ observer metrics as repository quality or edit authorization.
 
 Playbook: [Maintainer workflow](../../../guide/observability/maintainer-workflow.md).
 
+## Repository readiness (CLI)
+
+Before MCP change control, confirm `[tool.codeclone]` and `.gitignore` hygiene
+in the terminal (or `/codeclone-setup`):
+
+```bash
+codeclone setup status
+codeclone setup plan
+codeclone setup apply
+```
+
+Guide: [Repository setup and readiness](../../setup/readiness-and-apply.md).
+
 ## Agent
 
 ### codeclone-structural-reviewer
@@ -189,7 +203,7 @@ failures or vulnerability claims.
 
 ## Runtime model
 
-Additive: local MCP via `launch_mcp.py`, nine skills, three rules (two
+Additive: local MCP via `launch_mcp.py`, ten skills, three rules (two
 `alwaysApply` + one Python glob), optional hooks. The full default agent MCP
 surface is passed through — the launcher does **not**
 pass `--ide-governance-channel` (VS Code adds +2 IDE-only tools and Memory

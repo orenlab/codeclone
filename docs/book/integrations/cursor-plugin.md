@@ -45,7 +45,7 @@ Skills are invocable via `/name` in Cursor chat (see each `SKILL.md`).
 
 ## Skills
 
-Nine skills ship under `plugins/cursor-codeclone/skills/`:
+Ten skills ship under `plugins/cursor-codeclone/skills/`:
 
 | Skill                              | Role                                                                           |
 |------------------------------------|--------------------------------------------------------------------------------|
@@ -58,8 +58,9 @@ Nine skills ship under `plugins/cursor-codeclone/skills/`:
 | `codeclone-platform-observability` | **Maintainer-only** — CodeClone runtime diagnostics (requires observer enable) |
 | `codeclone-blast-radius`           | Read-only blast-radius inspection                                              |
 | `codeclone-production-triage`      | Baseline-relative production triage                                            |
+| `codeclone-setup`                  | CLI repository readiness (status, plan, apply, wizard)                         |
 
-Codex and Claude Code plugins ship the same nine skills (byte-synced from
+Codex and Claude Code plugins ship the same ten skills (byte-synced from
 `plugins/codeclone/skills/`).
 
 ## Hooks

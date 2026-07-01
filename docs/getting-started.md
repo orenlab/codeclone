@@ -46,6 +46,22 @@ pip install "codeclone[mcp]"
     pip install --pre "codeclone[mcp]"                     # pip
     ```
 
+## Repository readiness
+
+Before CI gating or MCP change control, confirm the repository has sensible
+defaults for `[tool.codeclone]` and local state hygiene:
+
+```bash
+codeclone setup status
+codeclone setup plan
+codeclone setup apply
+```
+
+Prefer an interactive flow? Run `codeclone setup wizard` in a TTY.
+
+Full workflow, JSON contracts, and exit codes:
+[Repository setup and readiness](guide/setup/readiness-and-apply.md).
+
 ## First Run
 
 ```bash

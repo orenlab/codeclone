@@ -118,6 +118,7 @@ def test_codex_plugin_skill_exists() -> None:
     architecture_triage_skill_path = (
         plugin_root / "skills" / "codeclone-architecture-triage" / "SKILL.md"
     )
+    setup_skill_path = plugin_root / "skills" / "codeclone-setup" / "SKILL.md"
     skill_text = skill_path.read_text(encoding="utf-8")
     hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
     change_control_skill_text = change_control_skill_path.read_text(encoding="utf-8")
@@ -137,6 +138,7 @@ def test_codex_plugin_skill_exists() -> None:
     architecture_triage_skill_text = architecture_triage_skill_path.read_text(
         encoding="utf-8"
     )
+    setup_skill_text = setup_skill_path.read_text(encoding="utf-8")
     manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
     assert isinstance(manifest, dict)
 
@@ -282,6 +284,18 @@ def test_codex_plugin_skill_exists() -> None:
             "responsibility overload has no B",
         ),
     )
+    assert_all_contained(
+        setup_skill_text,
+        *(
+            "name: codeclone-setup",
+            "CLI-only",
+            "codeclone setup status",
+            "codeclone setup plan",
+            "codeclone setup apply",
+            "codeclone setup wizard",
+            "not MCP",
+        ),
+    )
 
     assert "Use MCP tools only." in manifest["instructions"]
     assert "help(topic=change_control" in manifest["instructions"]
@@ -301,5 +315,6 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     assert_repo_doc_paths_exist(
         root,
         "docs/guide/integrations/codex/setup.md",
+        "docs/guide/setup/readiness-and-apply.md",
         "docs/terms-of-use.md",
     )

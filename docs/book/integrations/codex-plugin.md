@@ -20,16 +20,17 @@ Setup guide: [Codex setup](../../guide/integrations/codex/setup.md).
 | `skills/codeclone-engineering-memory/`     | Engineering memory read/write skill      |
 | `skills/codeclone-implementation-context/` | Bounded pre-edit context skill           |
 | `skills/codeclone-platform-observability/` | Maintainer-only observer diagnostics     |
+| `skills/codeclone-setup/`                  | CLI repository readiness skill           |
 | `assets/`                                  | Plugin branding                          |
 
-Nine skills ship in the plugin (review, hotspots, production-triage,
+Ten skills ship in the plugin (review, hotspots, production-triage,
 architecture-triage, blast-radius, change-control, engineering-memory,
-implementation-context, platform-observability). The last is
+implementation-context, platform-observability, setup). The observability skill is
 **only** for developing CodeClone itself — not for end-user repository review.
 
 ## Runtime model
 
-Additive — the marketplace install provides a local MCP definition and **nine**
+Additive — the marketplace install provides a local MCP definition and **ten**
 skills. New canonical MCP surfaces from the local `codeclone-mcp` version flow
 through directly, including Coverage Join facts and the optional `coverage`
 help topic when supported. The plugin does not mutate `~/.codex/config.toml` or

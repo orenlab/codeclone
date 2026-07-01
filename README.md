@@ -75,7 +75,19 @@ uv tool install codeclone
 codeclone .
 ```
 
-### 2. Record the current structural baseline
+### 2. Check repository readiness
+
+Confirm `[tool.codeclone]` and local gitignore hygiene before MCP or CI gating:
+
+```bash
+codeclone setup status
+codeclone setup plan
+codeclone setup apply   # or: codeclone setup wizard
+```
+
+See [Repository setup and readiness](docs/guide/setup/readiness-and-apply.md).
+
+### 3. Record the current structural baseline
 
 Before asking an agent to change the repository, capture the accepted state once:
 
@@ -90,7 +102,7 @@ from findings that were already present, so agents and reviewers can focus on wh
 
 Updating the baseline is an explicit governance action. Do not regenerate it merely to make a failing check pass.
 
-### 3. Set up CodeClone for your AI agent (2.1 alpha)
+### 4. Set up CodeClone for your AI agent (2.1 alpha)
 
 Install the prerelease MCP server:
 
@@ -315,17 +327,29 @@ See [LICENSES.md](https://github.com/orenlab/codeclone/blob/main/LICENSES.md) fo
 - **Discussions:** <https://github.com/orenlab/codeclone/discussions>
 
 <!-- Shields -->
+
 [pypi-shield]: https://img.shields.io/pypi/v/codeclone?style=flat-square&color=6366f1
+
 [downloads-shield]: https://img.shields.io/pypi/dm/codeclone?style=flat-square&color=6366f1
+
 [python-shield]: https://img.shields.io/pypi/pyversions/codeclone?style=flat-square&color=6366f1
+
 [license-shield]: https://img.shields.io/badge/license-MPL--2.0-6366f1?style=flat-square
+
 [tests-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests
+
 [benchmark-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?branch=main&style=flat-square&label=benchmark
+
 [discord-shield]: https://img.shields.io/badge/Discord-Join%20community-5865F2?style=flat-square&logo=discord&logoColor=white
 
 <!-- Links -->
+
 [pypi-link]: https://pypi.org/project/codeclone/
+
 [license-link]: #license
+
 [tests-link]: https://github.com/orenlab/codeclone/actions/workflows/tests.yml
+
 [benchmark-link]: https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml
+
 [discord-link]: https://discord.com/invite/U72KmRvpUx

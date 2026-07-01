@@ -15,6 +15,7 @@ enums, payload semantics), use the [Contracts book](../book/README.md).
 | I want to…                                      | Page                                                                   |
 |-------------------------------------------------|------------------------------------------------------------------------|
 | Install and run locally                         | [Getting started](../getting-started.md)                               |
+| Check repository readiness and apply safe fixes | [Setup & readiness](setup/readiness-and-apply.md)                      |
 | Understand the pipeline                         | [How CodeClone works](explanation/how-it-works.md)                     |
 | Connect an AI agent via MCP                     | [MCP overview](mcp/README.md)                                          |
 | Govern agent edits                              | [Change control overview](change-control/overview.md)                  |
