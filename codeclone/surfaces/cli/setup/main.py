@@ -26,10 +26,12 @@ from .render import (
     render_setup_plan,
     render_setup_status,
 )
+from .wizard import run_setup_wizard
 
 SetupCommand = str
 PayloadBuilder = Callable[[Path], dict[str, object]]
 PayloadRenderer = Callable[[PrinterLike, dict[str, object]], None]
+DirectCommandHandler = Callable[[Path], int]
 
 
 def setup_main(argv: list[str]) -> int:
@@ -41,6 +43,9 @@ def setup_main(argv: list[str]) -> int:
         return int(ExitCode.CONTRACT_ERROR)
 
     command = args.command or "status"
+    direct_handler = _DIRECT_COMMANDS.get(command)
+    if direct_handler is not None:
+        return direct_handler(root_path)
     try:
         payload = _build_payload(command, root_path, dry_run=args.dry_run)
     except Exception as exc:
@@ -120,7 +125,11 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-_COMMANDS: tuple[SetupCommand, ...] = ("status", "doctor", "plan", "apply")
+_COMMANDS: tuple[SetupCommand, ...] = ("status", "doctor", "plan", "apply", "wizard")
+
+_DIRECT_COMMANDS: dict[SetupCommand, DirectCommandHandler] = {
+    "wizard": run_setup_wizard,
+}
 
 _PAYLOAD_BUILDERS: dict[SetupCommand, PayloadBuilder] = {
     "status": build_setup_snapshot,

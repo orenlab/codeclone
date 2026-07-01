@@ -311,11 +311,44 @@ def _plan_actions(plan: Mapping[str, object]) -> list[Mapping[str, object]]:
     return [item for item in raw if isinstance(item, Mapping)]
 
 
-def _capabilities(snapshot: Mapping[str, object]) -> list[Mapping[str, object]]:
+def snapshot_capabilities(
+    snapshot: Mapping[str, object],
+) -> list[Mapping[str, object]]:
     raw = snapshot.get("capabilities")
     if not isinstance(raw, list):
         return []
     return [item for item in raw if isinstance(item, Mapping)]
+
+
+def render_setup_capability_table(
+    console: PrinterLike,
+    rows: list[Mapping[str, object]],
+) -> None:
+    if supports_rich_console(console):
+        _, _panel_cls, _rule_cls, table_cls, _ = rich_panel_symbols()
+        table = table_cls(show_header=True, header_style="bold")
+        table.add_column("Capability")
+        table.add_column("Readiness")
+        table.add_column("Reason")
+        for row in rows:
+            reason = str(row.get("reason", ""))
+            table.add_row(
+                str(row.get("label", "")),
+                str(row.get("readiness", "")),
+                reason or "-",
+            )
+        console.print(table)
+        return
+    for row in rows:
+        reason = str(row.get("reason", ""))
+        line = f"{row.get('label')}: {row.get('readiness')}"
+        if reason:
+            line = f"{line} — {reason}"
+        console.print(line)
+
+
+def _capabilities(snapshot: Mapping[str, object]) -> list[Mapping[str, object]]:
+    return snapshot_capabilities(snapshot)
 
 
 def _mapping(value: object) -> Mapping[str, object]:
@@ -326,7 +359,9 @@ def _mapping(value: object) -> Mapping[str, object]:
 
 __all__ = [
     "render_setup_apply",
+    "render_setup_capability_table",
     "render_setup_doctor",
     "render_setup_plan",
     "render_setup_status",
+    "snapshot_capabilities",
 ]

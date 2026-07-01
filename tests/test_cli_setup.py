@@ -28,6 +28,7 @@ from codeclone.surfaces.cli.setup.engine.discover import build_setup_snapshot
 from codeclone.surfaces.cli.setup.engine.plan import build_setup_plan
 from codeclone.surfaces.cli.setup.engine.rollup import derive_readiness
 from codeclone.surfaces.cli.setup.main import setup_main
+from codeclone.surfaces.cli.setup.wizard import WizardPrompts, run_setup_wizard
 from codeclone.utils.json_io import json_text
 from tests.test_cli_inprocess import _write_current_python_baseline
 
@@ -615,3 +616,79 @@ def test_setup_apply_main_exit_success(
     _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
     assert setup_main(["apply", "--root", str(tmp_path)]) == int(ExitCode.SUCCESS)
+
+
+def test_setup_wizard_requires_tty(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+
+    assert setup_main(["wizard", "--root", str(tmp_path)]) == int(
+        ExitCode.CONTRACT_ERROR
+    )
+
+
+def test_setup_wizard_quit(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    choices = iter(["0"])
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: next(choices),
+        confirm=lambda _message, _default: False,
+    )
+
+    assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
+
+
+def test_setup_wizard_guided_apply(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    choices = iter(["g", "0"])
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: next(choices),
+        confirm=lambda _message, _default: True,
+    )
+
+    assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
+    assert ".codeclone/" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
+    assert "[tool.codeclone]" in (tmp_path / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_setup_wizard_guided_apply_skipped(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    before = pyproject.read_text(encoding="utf-8")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    choices = iter(["g", "0"])
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: next(choices),
+        confirm=lambda _message, _default: False,
+    )
+
+    assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
+    assert pyproject.read_text(encoding="utf-8") == before

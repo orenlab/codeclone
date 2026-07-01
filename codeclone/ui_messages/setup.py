@@ -21,6 +21,31 @@ SETUP_PLAN_READ_ONLY_NOTE: Final = "Read-only preview — no files were modified
 SETUP_APPLY_TITLE: Final = "CodeClone setup apply"
 SETUP_APPLY_NOOP: Final = "No plan actions were applied."
 SETUP_APPLY_BLOCKED: Final = "Apply blocked — fix plan blockers and re-run setup plan."
+SETUP_WIZARD_TITLE: Final = "CodeClone setup wizard"
+SETUP_WIZARD_HUB_RULE: Final = "Capability hub"
+SETUP_WIZARD_SPHERE_RULE: Final = "capability sphere"
+SETUP_WIZARD_PROMPT: Final = "Select hub item"
+SETUP_WIZARD_GUIDED_LABEL: Final = "Guided setup"
+SETUP_WIZARD_GUIDED_HINT: Final = "Plan → confirm → apply → refresh readiness"
+SETUP_WIZARD_DOCTOR_LABEL: Final = "Doctor"
+SETUP_WIZARD_DOCTOR_HINT: Final = "Verbose probe diagnostics"
+SETUP_WIZARD_QUIT_LABEL: Final = "Quit"
+SETUP_WIZARD_QUIT_HINT: Final = "Exit the wizard"
+SETUP_WIZARD_CONFIRM_APPLY: Final = "Apply the recommended configuration changes?"
+SETUP_WIZARD_APPLY_SKIPPED: Final = "Apply skipped — no files were modified."
+SETUP_WIZARD_GUIDED_BLOCKED: Final = (
+    "Guided setup blocked until pyproject.toml validation issues are resolved."
+)
+SETUP_WIZARD_GUIDED_EMPTY: Final = "Guided setup found no changes to apply."
+SETUP_WIZARD_UPDATED_READINESS: Final = "Updated readiness after apply:"
+SETUP_WIZARD_SPHERE_EMPTY: Final = "No capabilities in this sphere."
+SETUP_WIZARD_TTY_REQUIRED: Final = (
+    "Interactive setup wizard requires a TTY. "
+    "Use `codeclone setup plan` and `codeclone setup apply` instead."
+)
+SETUP_WIZARD_RICH_REQUIRED: Final = (
+    "Interactive setup wizard requires Rich console output."
+)
 
 GROUP_LABELS: Final[dict[str, str]] = {
     "core_analysis": "Core analysis",
@@ -166,4 +191,22 @@ __all__ = [
     "SETUP_PLAN_READ_ONLY_NOTE",
     "SETUP_PLAN_TITLE",
     "SETUP_STATUS_TITLE",
+    "SETUP_WIZARD_APPLY_SKIPPED",
+    "SETUP_WIZARD_CONFIRM_APPLY",
+    "SETUP_WIZARD_DOCTOR_HINT",
+    "SETUP_WIZARD_DOCTOR_LABEL",
+    "SETUP_WIZARD_GUIDED_BLOCKED",
+    "SETUP_WIZARD_GUIDED_EMPTY",
+    "SETUP_WIZARD_GUIDED_HINT",
+    "SETUP_WIZARD_GUIDED_LABEL",
+    "SETUP_WIZARD_HUB_RULE",
+    "SETUP_WIZARD_PROMPT",
+    "SETUP_WIZARD_QUIT_HINT",
+    "SETUP_WIZARD_QUIT_LABEL",
+    "SETUP_WIZARD_RICH_REQUIRED",
+    "SETUP_WIZARD_SPHERE_EMPTY",
+    "SETUP_WIZARD_SPHERE_RULE",
+    "SETUP_WIZARD_TITLE",
+    "SETUP_WIZARD_TTY_REQUIRED",
+    "SETUP_WIZARD_UPDATED_READINESS",
 ]
