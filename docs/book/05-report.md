@@ -1,4 +1,4 @@
-<!-- doc-scope: REPORT CONTRACT (schema v2.11).
+<!-- doc-scope: REPORT CONTRACT (schema v2.12).
      owns: report schema, section definitions, integrity metadata, explainability.
      does-not-own: HTML rendering (→ 06), CLI output modes (→ 11),
        SARIF projection (→ ../guide/integrations/sarif/export.md). -->
@@ -8,7 +8,7 @@
 ## Purpose
 
 Define the canonical report contract for the current `2.1` release line: report
-schema `2.11` plus deterministic text/Markdown/SARIF/HTML projections.
+schema `2.12` plus deterministic text/Markdown/SARIF/HTML projections.
 
 ## Public surface
 

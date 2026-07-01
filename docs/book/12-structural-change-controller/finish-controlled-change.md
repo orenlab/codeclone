@@ -99,19 +99,27 @@ Findings/hotspots tools still honor all three detail levels.
 | `projection_rebuild`            | Optional job enqueue on accept when projection policy is not `off` (non-CI)                           |
 
 Markdown receipt payloads expose top-level `receipt_version`, `verdict`,
-`receipt_digest`, `content`, and `receipt_retrieval` for compact identity and
-human review. The duplicate nested typed receipt is not returned by default;
-fetch the complete structured receipt after `auto_clear=true` with
-`get_review_receipt(root, run_id, receipt_digest, format="structured")`.
+`receipt_digest`, and `content` for compact identity and human review. When the
+receipt was durably written to the audit trail, the payload also includes
+`receipt_retrieval`; fetch the complete structured receipt after
+`auto_clear=true` with
+`get_review_receipt(root, run_id, receipt_digest, format="structured")`. If the
+audit write was unavailable, the response stays self-contained inline and
+reports `receipt_retrieval_unavailable="audit_write_failed"` instead of
+advertising a lookup that cannot succeed.
 
 `context_governance` measures the complete finish response as one payload and
 publishes a `finish_projection_v1` digest under
 `context_governance.response`. Finish responses use `mode="partial_enforce"` and
 `evidence_policy="response_budget_with_durable_artifact_lookup"`: mandatory
 control, scope, verification, hygiene, and action fields stay inline, while
-recoverable advisory lanes may be compacted. When receipt markdown content or
-Patch Trail detail is omitted, `context_governance.omitted` carries exact
-drill-down metadata for `get_review_receipt` or `get_patch_trail`.
+recoverable advisory lanes may be compacted only when exact lookup is available.
+When receipt markdown content or Patch Trail detail is omitted,
+`context_governance.omitted` carries exact drill-down metadata for
+`get_review_receipt` or `get_patch_trail`. If a durable audit write was not
+available for that response, the lane remains inline and
+`context_governance.enforcement_blocked.response_budget` names the unavailable
+lookup.
 
 ### Patch Trail on finish
 

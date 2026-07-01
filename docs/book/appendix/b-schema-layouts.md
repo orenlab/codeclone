@@ -307,11 +307,11 @@ Notes:
   Facts are rebuildable and off the canonical report; schema **`2.10`** adds
   cross-file aggregation onto the analysis result and MCP run record.
 
-## Report schema (`2.11`)
+## Report schema (`2.12`)
 
 ```json
 {
-  "report_schema_version": "2.11",
+  "report_schema_version": "2.12",
   "meta": {
     "codeclone_version": "2.0.2",
     "project_name": "codeclone",
@@ -629,7 +629,7 @@ Notes:
   },
   "integrity": {
     "canonicalization": {
-      "version": "1",
+      "version": "2",
       "scope": "canonical_only",
       "sections": [
         "report_schema_version",
@@ -637,6 +637,14 @@ Notes:
         "inventory",
         "findings",
         "metrics"
+      ],
+      "excluded": [
+        "meta.runtime",
+        "inventory.cache",
+        "inventory.files.analyzed",
+        "inventory.files.cached",
+        "inventory.files.source_io_skipped",
+        "findings.*.display_facts"
       ]
     },
     "digest": {
@@ -653,7 +661,7 @@ Notes:
 ```text
 # CodeClone Report
 - Markdown schema: 1.0
-- Source report schema: 2.11
+- Source report schema: 2.12
 ...
 ## Overview
 ## Inventory
@@ -739,7 +747,7 @@ Notes:
       ],
       "properties": {
         "profileVersion": "1.0",
-        "reportSchemaVersion": "2.11"
+        "reportSchemaVersion": "2.12"
       },
       "results": [
         {

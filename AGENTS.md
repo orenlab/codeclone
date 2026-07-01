@@ -259,7 +259,7 @@ doc.** Current central values (verified at write time):
 | `BASELINE_SCHEMA_VERSION`                | `2.1`           |
 | `BASELINE_FINGERPRINT_VERSION`           | `1`             |
 | `CACHE_VERSION`                          | `2.10`          |
-| `REPORT_SCHEMA_VERSION`                  | `2.11`          |
+| `REPORT_SCHEMA_VERSION`                  | `2.12`          |
 | `METRICS_BASELINE_SCHEMA_VERSION`        | `1.2`           |
 | `ENGINEERING_MEMORY_SCHEMA_VERSION`      | `1.7`           |
 | `SEMANTIC_INDEX_FORMAT_VERSION`          | `3`             |

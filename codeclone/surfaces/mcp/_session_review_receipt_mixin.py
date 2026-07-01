@@ -144,7 +144,7 @@ class _MCPSessionReviewReceiptMixin:
             "content": content,
             "receipt": receipt,
         }
-        self._audit_emit(
+        audit_sequence = self._audit_emit(
             root=record.root,
             event_type=EVENT_RECEIPT_CREATED,
             severity="info",
@@ -155,22 +155,25 @@ class _MCPSessionReviewReceiptMixin:
             payload=audit_payload,
         )
         # Default response dedup: keep the human-complete markdown receipt
-        # content plus identity and omits the duplicate nested typed receipt — now
-        # durably retrievable post-clear via get_review_receipt.
-        return {
+        # content plus identity and omit the duplicate nested typed receipt.
+        response: dict[str, object] = {
             "run_id": short_run_id,
             "format": output_format,
             "receipt_version": RECEIPT_VERSION,
             "verdict": verdict,
             "receipt_digest": digest,
             "content": content,
-            "receipt_retrieval": {
-                "tool": "get_review_receipt",
-                "run_id": short_run_id,
-                "receipt_digest": digest["value"],
-                "format": "structured",
-            },
         }
+        if audit_sequence is None:
+            response["receipt_retrieval_unavailable"] = "audit_write_failed"
+            return response
+        response["receipt_retrieval"] = {
+            "tool": "get_review_receipt",
+            "run_id": short_run_id,
+            "receipt_digest": digest["value"],
+            "format": "structured",
+        }
+        return response
 
     def _validated_receipt_format(self, value: str) -> str:
         if value not in VALID_RECEIPT_FORMATS:

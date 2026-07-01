@@ -34,7 +34,7 @@ If a statement is not enforced by code/tests, it is explicitly marked as non-con
 
 - [03-core-pipeline.md](03-core-pipeline.md) — canonical pipeline contract
 - [04-cfg-semantics.md](04-cfg-semantics.md) — CFG design and semantics
-- [05-report.md](05-report.md) — report contract (schema v2.11)
+- [05-report.md](05-report.md) — report contract (schema v2.12)
 - [06-html-render.md](06-html-render.md) — HTML rendering contract
 - [07-baseline.md](07-baseline.md) — baseline contract (schema v2.1)
 - [08-cache.md](08-cache.md) — cache contract (schema v2.10)

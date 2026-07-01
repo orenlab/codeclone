@@ -811,15 +811,18 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
     assert claim_guard["valid"] is True
     assert claim_guard["citations_found"] == 1
     assert "## CodeClone Agent Review Receipt" in str(receipt["content"])
-    # 34.3 dedup: the duplicate nested typed receipt is omitted by default and is
-    # reachable via the get_review_receipt drill-down pointer.
+    # The duplicate nested typed receipt is omitted by default. A durable
+    # drill-down pointer is only advertised when the audit event was persisted.
     assert "receipt" not in receipt
-    retrieval = cast("dict[str, object]", receipt["receipt_retrieval"])
-    assert retrieval["tool"] == "get_review_receipt"
-    assert (
-        retrieval["receipt_digest"]
-        == cast("dict[str, object]", receipt["receipt_digest"])["value"]
-    )
+    if "receipt_retrieval" in receipt:
+        retrieval = cast("dict[str, object]", receipt["receipt_retrieval"])
+        assert retrieval["tool"] == "get_review_receipt"
+        assert (
+            retrieval["receipt_digest"]
+            == cast("dict[str, object]", receipt["receipt_digest"])["value"]
+        )
+    else:
+        assert receipt["receipt_retrieval_unavailable"] == "audit_write_failed"
 
     run_summary_resource = list(
         asyncio.run(server.read_resource(f"codeclone://runs/{run_id}/summary"))

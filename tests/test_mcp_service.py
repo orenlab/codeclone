@@ -555,8 +555,9 @@ class _RecordingAuditWriter:
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
 
-    def emit(self, event: AuditEvent) -> None:
+    def emit(self, event: AuditEvent) -> int:
         self.events.append(event)
+        return len(self.events)
 
     def close(self) -> None:
         return None
@@ -7935,6 +7936,32 @@ def test_mcp_service_create_review_receipt_minimal_and_deterministic(
         service.create_review_receipt(run_id="receipt12", format="yaml")
 
 
+def test_mcp_service_create_review_receipt_does_not_claim_lookup_when_audit_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="receiptfail123456",
+        digest="receipt-fail-digest",
+        include_regression=False,
+        complexity=6,
+        health=92,
+    )
+    service._runs.register(record)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    markdown = service.create_review_receipt(run_id="receiptfail")
+
+    assert "## CodeClone Agent Review Receipt" in str(markdown["content"])
+    assert "receipt_retrieval" not in markdown
+    assert markdown["receipt_retrieval_unavailable"] == "audit_write_failed"
+
+
 def test_mcp_service_create_review_receipt_full_post_edit_workflow(
     tmp_path: Path,
 ) -> None:
@@ -11098,7 +11125,6 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     assert cast("dict[str, object]", cleared["summary"])["receipt"] == "created"
     receipt_payload = cast("dict[str, object]", cleared["receipt"])
     receipt_digest = cast("dict[str, object]", receipt_payload["receipt_digest"])
-    retrieval = cast("dict[str, object]", receipt_payload["receipt_retrieval"])
     assert {
         "format": receipt_payload["format"],
         "top_receipt_version": receipt_payload["receipt_version"],
@@ -11107,7 +11133,8 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "has_content": isinstance(receipt_payload["content"], str),
         # The duplicate nested typed receipt is omitted by default.
         "has_nested_typed": "receipt" in receipt_payload,
-        "retrieval_tool": retrieval["tool"],
+        "has_retrieval": "receipt_retrieval" in receipt_payload,
+        "retrieval_unavailable": receipt_payload["receipt_retrieval_unavailable"],
     } == {
         "format": "markdown",
         "top_receipt_version": "1",
@@ -11115,11 +11142,9 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "digest_kind": "receipt_v1",
         "has_content": True,
         "has_nested_typed": False,
-        "retrieval_tool": "get_review_receipt",
+        "has_retrieval": False,
+        "retrieval_unavailable": "audit_write_failed",
     }
-    # The drill-down pointer carries the canonical digest for fetching the omitted
-    # typed receipt; reachability is exercised in test_review_receipt_retrieval.
-    assert retrieval["receipt_digest"] == receipt_digest["value"]
     context_governance = cast("dict[str, object]", cleared["context_governance"])
     assert {
         "contract_version": context_governance["contract_version"],
@@ -11153,12 +11178,15 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "digest_kind": response_digest["kind"],
         "receipt_retrieval_blocked": "receipt_retrieval_unavailable"
         in enforcement_blocked["response_budget"],
+        "patch_trail_retrieval_blocked": "patch_trail_retrieval_unavailable"
+        in enforcement_blocked["response_budget"],
     } == {
         "tool": "finish_controlled_change",
         "budget_scope": "whole_response",
         "evidence_policy": "response_budget_with_durable_artifact_lookup",
         "digest_kind": "finish_projection_v1",
-        "receipt_retrieval_blocked": False,
+        "receipt_retrieval_blocked": True,
+        "patch_trail_retrieval_blocked": True,
     }
     assert (
         cast("dict[str, object]", context_governance["capabilities"])[
@@ -11167,6 +11195,34 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         is True
     )
     assert isinstance(context_governance["estimated"], int)
+
+
+def test_mcp_workflow_finish_keeps_evidence_inline_when_audit_lookup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, intent_id = _seed_docs_intent(tmp_path)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["README.md"],
+    )
+
+    assert finished["status"] == "accepted"
+    receipt = cast("dict[str, object]", finished["receipt"])
+    assert "receipt_retrieval" not in receipt
+    assert receipt["receipt_retrieval_unavailable"] == "audit_write_failed"
+    assert isinstance(receipt["content"], str)
+
+    patch_trail = cast("dict[str, object]", finished["patch_trail"])
+    assert patch_trail["retrieval_unavailable"] == "audit_write_failed"
+    assert "retrieval" not in patch_trail
+    evidence = cast("dict[str, object]", patch_trail["evidence"])
+    assert "patch_trail_audit_sequence" not in evidence
 
 
 def test_mcp_workflow_finish_python_structural_and_receipt_edges(

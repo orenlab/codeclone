@@ -168,7 +168,7 @@ def test_markdown_and_sarif_projections_do_not_emit_raw_html_tags(
     tmp_path: Path,
 ) -> None:
     report_payload: dict[str, object] = {
-        "report_schema_version": "2.11",
+        "report_schema_version": "2.12",
         "meta": {"generator": {"name": "codeclone", "version": "2.1.0"}},
         "inventory": {"files": 0, "lines": 0, "functions": 0, "classes": 0},
         "findings": {

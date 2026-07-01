@@ -787,6 +787,13 @@ class _MCPSessionWorkflowMixin:
                 evidence = dict(evidence_raw)
                 evidence["patch_trail_audit_sequence"] = patch_trail_audit_sequence
                 payload["evidence"] = evidence
+        else:
+            evidence_raw = payload.get("evidence", {})
+            if isinstance(evidence_raw, Mapping):
+                evidence = dict(evidence_raw)
+                evidence.pop("patch_trail_audit_sequence", None)
+                payload["evidence"] = evidence
+            payload["retrieval_unavailable"] = "audit_write_failed"
         return payload
 
     # ------------------------------------------------------------------
@@ -1217,7 +1224,7 @@ def _budgeted_finish_response(payload: Mapping[str, object]) -> dict[str, object
         packed,
         response_budget_lanes=response_budget_lanes,
     )
-    governed = attach_finish_context_governance(
+    governed = _attach_finish_governance(
         packed,
         evidence_omitted=omitted,
     )
@@ -1233,11 +1240,51 @@ def _budgeted_finish_response(payload: Mapping[str, object]) -> dict[str, object
             packed,
             response_budget_lanes=response_budget_lanes,
         )
-        governed = attach_finish_context_governance(
+        governed = _attach_finish_governance(
             packed,
             evidence_omitted=omitted,
         )
     return governed
+
+
+def _attach_finish_governance(
+    payload: Mapping[str, object],
+    *,
+    evidence_omitted: Mapping[str, object] | None,
+) -> dict[str, object]:
+    governed = attach_finish_context_governance(
+        payload,
+        evidence_omitted=evidence_omitted,
+    )
+    blockers = _finish_retrieval_blockers(payload)
+    if blockers:
+        governance = governed.get("context_governance")
+        if isinstance(governance, dict):
+            enforcement_blocked = governance.get("enforcement_blocked")
+            if isinstance(enforcement_blocked, dict):
+                response_budget = enforcement_blocked.get("response_budget")
+                if isinstance(response_budget, list):
+                    response_budget.extend(blockers)
+    return governed
+
+
+def _finish_retrieval_blockers(payload: Mapping[str, object]) -> list[str]:
+    blockers: list[str] = []
+    receipt = payload.get("receipt")
+    if (
+        isinstance(receipt, Mapping)
+        and isinstance(receipt.get("content"), str)
+        and not _receipt_content_retrievable(payload)
+    ):
+        blockers.append("receipt_retrieval_unavailable")
+    patch_trail = payload.get("patch_trail")
+    if (
+        isinstance(patch_trail, Mapping)
+        and str(patch_trail.get("patch_trail_digest", "")).strip()
+        and not _patch_trail_retrievable(payload)
+    ):
+        blockers.append("patch_trail_retrieval_unavailable")
+    return blockers
 
 
 def _next_reducible_finish_lane(payload: Mapping[str, object]) -> str | None:

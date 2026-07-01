@@ -76,7 +76,9 @@ Current `finish_controlled_change` compatibility facts:
 | `summary.receipt`                                        | compact created / skipped / failed status             | keep; dashboards and skills use it as the receipt status signal                       |
 | `receipt.receipt_version` / `verdict` / `receipt_digest` | top-level receipt identity and compact routing fields | prefer for identity checks before drill-down                                          |
 | `receipt.content`                                        | human-readable markdown receipt when emitted inline   | recoverable; may be compacted or omitted with durable receipt drill-down              |
-| `receipt.receipt_retrieval`                              | route to the durable structured receipt               | use `get_review_receipt(..., format="structured")` for machine-readable receipt facts |
+| `receipt.receipt_retrieval`                              | route to the durable structured receipt when persisted | use `get_review_receipt(..., format="structured")` for machine-readable receipt facts |
+| `receipt.receipt_retrieval_unavailable`                  | explicit inline-only receipt marker                   | no durable lookup is advertised; read `receipt.content` from the current response     |
+| `patch_trail.retrieval_unavailable`                      | explicit inline-only Patch Trail marker               | no durable lookup is advertised; read `patch_trail` from the current response         |
 | `receipt_error`                                          | receipt failure reason                                | keep; failed receipt creation prevents `auto_clear`                                   |
 
 Payload slimming without capability metadata, omission disclosure, and exact

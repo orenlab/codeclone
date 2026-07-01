@@ -143,7 +143,7 @@ gating decisions.
 ## 8. Reporting
 
 Detected findings can be rendered as interactive HTML, canonical JSON (schema
-`2.11`), deterministic text, Markdown, or SARIF projections. Reporting is
+`2.12`), deterministic text, Markdown, or SARIF projections. Reporting is
 separate from CI gating: report-only structural findings and segment clones do
 not change baseline diff or gate evaluation.
 

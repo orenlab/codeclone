@@ -22,13 +22,14 @@ from codeclone.audit.events import EVENT_ANALYSIS_COMPLETED, event_summary
 from codeclone.audit.reader import read_latest_analysis_run
 from codeclone.audit.schema import open_audit_db
 from codeclone.audit.writer import SqliteAuditWriter
+from codeclone.contracts import REPORT_SCHEMA_VERSION
 
 
 def _default_analysis_summary() -> dict[str, object]:
     return {
         "focus": "repository",
         "mode": "full",
-        "schema": "2.11",
+        "schema": REPORT_SCHEMA_VERSION,
         "health": {"score": 91, "grade": "A"},
         "findings": {"total": 12, "new": 1},
         "inventory": {"files": 44, "lines": 1000, "functions": 200},
@@ -131,7 +132,7 @@ def test_emit_accepts_mcp_internal_summary_shape(tmp_path: Path) -> None:
         tmp_path,
         summary={
             "analysis_mode": "full",
-            "report_schema_version": "2.11",
+            "report_schema_version": REPORT_SCHEMA_VERSION,
             "health": {"score": 88, "grade": "A"},
             "findings_summary": {"total": 3, "new": 0},
             "inventory": {"files": 10, "lines": 100, "functions": 5},
@@ -156,7 +157,7 @@ def test_emit_accepts_mcp_internal_summary_shape(tmp_path: Path) -> None:
 def test_analysis_completed_payload_from_report_document() -> None:
     payload = analysis_completed_payload_from_report(
         report_document={
-            "report_schema_version": "2.11",
+            "report_schema_version": REPORT_SCHEMA_VERSION,
             "meta": {
                 "runtime": {"analysis_mode": "full"},
                 "health_score": 82,
@@ -190,7 +191,7 @@ def test_emit_analysis_completed_from_report_writes_row(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     report = {
-        "report_schema_version": "2.11",
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 90},
         "inventory": {"file_registry": {"items": ["x.py"]}},
         "findings": {"total": 1},
@@ -233,7 +234,7 @@ def test_analysis_completed_payload_resolves_internal_summary_keys() -> None:
 def test_analysis_completed_payload_ignores_string_file_registry_items() -> None:
     payload = analysis_completed_payload_from_report(
         report_document={
-            "report_schema_version": "2.11",
+            "report_schema_version": REPORT_SCHEMA_VERSION,
             "meta": {"runtime": {"analysis_mode": "full"}},
             "inventory": {"file_registry": {"items": "not-a-list"}},
             "findings": {"total": 0},
@@ -277,7 +278,7 @@ def test_emit_analysis_completed_from_report_custom_agent_fields(
         encoding="utf-8",
     )
     report = {
-        "report_schema_version": "2.11",
+        "report_schema_version": REPORT_SCHEMA_VERSION,
         "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 90},
         "inventory": {"file_registry": {"items": ["x.py"]}},
         "findings": {"total": 1},

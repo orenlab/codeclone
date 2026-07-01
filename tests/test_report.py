@@ -7,6 +7,7 @@
 import ast
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
+from copy import deepcopy
 from hashlib import sha256
 from pathlib import Path
 from typing import cast
@@ -31,6 +32,7 @@ from codeclone.models import (
 )
 from codeclone.report.blocks import prepare_block_report_groups
 from codeclone.report.document.builder import build_report_document
+from codeclone.report.document.integrity import _build_integrity_payload
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html.sections._structural import (
     _finding_why_template_html,
@@ -102,6 +104,38 @@ def to_json_report(
         structural_findings=structural_findings or (),
     )
     return render_json_report_document(payload)
+
+
+def _expected_integrity_canonical_payload(
+    payload: Mapping[str, object],
+) -> dict[str, object]:
+    inventory = dict(cast(Mapping[str, object], payload["inventory"]))
+    files = dict(cast(Mapping[str, object], inventory.get("files", {})))
+    for key in ("analyzed", "cached", "source_io_skipped"):
+        files.pop(key, None)
+    inventory["files"] = files
+    inventory.pop("cache", None)
+    return {
+        "report_schema_version": payload["report_schema_version"],
+        "meta": {
+            key: value
+            for key, value in cast(Mapping[str, object], payload["meta"]).items()
+            if key != "runtime"
+        },
+        "inventory": inventory,
+        "findings": payload["findings"],
+        "metrics": payload["metrics"],
+    }
+
+
+def _canonical_digest(payload: Mapping[str, object]) -> str:
+    canonical_json = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return sha256(canonical_json).hexdigest()
 
 
 def to_text_report(
@@ -884,23 +918,9 @@ def test_report_json_integrity_matches_canonical_sections() -> None:
             {"codeclone_version": "1.4.0"},
         )
     )
-    canonical_payload = {
-        "report_schema_version": payload["report_schema_version"],
-        "meta": {
-            key: value for key, value in payload["meta"].items() if key != "runtime"
-        },
-        "inventory": payload["inventory"],
-        "findings": payload["findings"],
-        "metrics": payload["metrics"],
-    }
-    canonical_json = json.dumps(
-        canonical_payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
+    canonical_payload = _expected_integrity_canonical_payload(payload)
     assert payload["integrity"]["canonicalization"] == {
-        "version": "1",
+        "version": "2",
         "scope": "canonical_only",
         "sections": [
             "report_schema_version",
@@ -909,12 +929,81 @@ def test_report_json_integrity_matches_canonical_sections() -> None:
             "findings",
             "metrics",
         ],
+        "excluded": [
+            "meta.runtime",
+            "inventory.cache",
+            "inventory.files.analyzed",
+            "inventory.files.cached",
+            "inventory.files.source_io_skipped",
+            "findings.*.display_facts",
+        ],
     }
     assert payload["integrity"]["digest"] == {
         "verified": True,
         "algorithm": "sha256",
-        "value": sha256(canonical_json).hexdigest(),
+        "value": _canonical_digest(canonical_payload),
     }
+
+
+def test_report_json_integrity_ignores_cache_execution_provenance() -> None:
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {
+                "codeclone_version": "1.4.0",
+                "cache_used": True,
+                "cache_status": "ok",
+                "cache_schema_version": CACHE_VERSION,
+            },
+            inventory={
+                "files": {
+                    "total_found": 2,
+                    "analyzed": 0,
+                    "cached": 2,
+                    "skipped": 0,
+                    "source_io_skipped": 2,
+                },
+                "code": {
+                    "functions": 0,
+                    "methods": 0,
+                    "classes": 0,
+                    "parsed_lines": 12,
+                },
+            },
+        )
+    )
+    cache_off_payload = deepcopy(payload)
+    cache_off_inventory = cast(
+        dict[str, object],
+        cache_off_payload["inventory"],
+    )
+    cache_off_inventory["cache"] = {
+        "path": ".codeclone/cache.json",
+        "path_scope": "relative",
+        "used": False,
+        "status": "disabled",
+        "schema_version": None,
+    }
+    cache_off_files = cast(dict[str, object], cache_off_inventory["files"])
+    cache_off_files.update(
+        {
+            "analyzed": 2,
+            "cached": 0,
+            "source_io_skipped": 0,
+        }
+    )
+    cache_off_payload["integrity"] = _build_integrity_payload(
+        report_schema_version=str(cache_off_payload["report_schema_version"]),
+        meta=cast(Mapping[str, object], cache_off_payload["meta"]),
+        inventory=cast(Mapping[str, object], cache_off_payload["inventory"]),
+        findings=cast(Mapping[str, object], cache_off_payload["findings"]),
+        metrics=cast(Mapping[str, object], cache_off_payload["metrics"]),
+    )
+
+    assert payload["inventory"] != cache_off_payload["inventory"]
+    assert payload["integrity"]["digest"] == cache_off_payload["integrity"]["digest"]
 
 
 def test_report_json_integrity_ignores_derived_changes() -> None:
