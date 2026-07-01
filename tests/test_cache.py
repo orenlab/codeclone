@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Callable
@@ -81,7 +82,7 @@ from codeclone.cache.entries import (
     _unit_dict_from_model,
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
-from codeclone.cache.integrity import sign_cache_payload
+from codeclone.cache.integrity import canonical_json, sign_cache_payload
 from codeclone.cache.projection import (
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
@@ -1450,6 +1451,42 @@ def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> N
     loaded.load()
     assert loaded.load_warning is None
     assert loaded.get_file_entry("x.py") is not None
+
+
+def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> None:
+    cache = Cache(Path("cache.json"))
+    payload = _analysis_payload(
+        cache,
+        files={
+            "unicodé.py": {
+                "st": [1, 10],
+                "rn": ["Ω", "é"],
+            }
+        },
+    )
+    legacy_digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+    assert sign_cache_payload(payload) == legacy_digest
+
+
+def test_cache_load_accepts_legacy_string_signed_unicode_payload(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("unicodé.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    raw = json.loads(cache_path.read_text("utf-8"))
+    payload = cast(dict[str, object], raw["payload"])
+    raw["sig"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+
+    loaded = Cache(cache_path)
+    loaded.load()
+
+    assert loaded.load_warning is None
+    assert loaded.get_file_entry("unicodé.py") is not None
 
 
 def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> None:

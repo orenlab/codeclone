@@ -406,11 +406,17 @@ class Cache:
             files_dict = _as_str_dict(payload.get("files"))
             if files_dict is None:
                 return self._reject_invalid_cache_format(schema_version=version)
+            segment_projection_obj = payload.get("sr")
+            payload.pop("files", None)
+            payload.clear()
+            raw.clear()
 
         parsed_files: dict[str, CacheEntry] = {}
         with span(name="cache.decode_entries") as decode_span:
             decode_span.set_counter("cache_entries", len(files_dict))
-            for wire_path, file_entry_obj in files_dict.items():
+            while files_dict:
+                wire_path = next(iter(files_dict))
+                file_entry_obj = files_dict.pop(wire_path)
                 runtime_path = runtime_filepath_from_wire(wire_path, root=self.root)
                 parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
                 if parsed_entry is None:
@@ -419,7 +425,7 @@ class Cache:
             decode_span.set_counter("decoded_entries", len(parsed_files))
         with span(name="cache.segment_projection"):
             self.segment_report_projection = decode_segment_report_projection(
-                payload.get("sr"),
+                segment_projection_obj,
                 root=self.root,
             )
 
