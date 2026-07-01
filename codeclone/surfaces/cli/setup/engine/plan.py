@@ -16,7 +16,10 @@ from typing import Literal
 from .....config.pyproject_loader import open_repo_config
 from .....config.pyproject_writer import PyprojectWriterError, merge_tool_codeclone
 from .....contracts import DEFAULT_BASELINE_PATH
-from .....paths.gitignore import GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY
+from .....paths.gitignore import (
+    GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
+    append_gitignore_line,
+)
 from .....utils.json_io import json_text
 from .capabilities import DiscoverContext
 from .discover import build_discover_context
@@ -184,7 +187,7 @@ def _plan_gitignore_append(ctx: DiscoverContext) -> dict[str, object] | None:
             }
 
     line = GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY
-    after_text = _append_gitignore_line(before_text, line)
+    after_text = append_gitignore_line(before_text, line)
     if before_text == after_text:
         return None
 
@@ -239,14 +242,6 @@ def _read_pyproject_text(root_path: Path) -> str:
         return ""
     with open_repo_config(root_path) as handle:
         return handle.read().decode("utf-8")
-
-
-def _append_gitignore_line(before_text: str, line: str) -> str:
-    if not before_text:
-        return f"{line}\n"
-    if before_text.endswith("\n"):
-        return f"{before_text}{line}\n"
-    return f"{before_text}\n{line}\n"
 
 
 def _unified_diff(before_text: str, after_text: str, filename: str) -> str:

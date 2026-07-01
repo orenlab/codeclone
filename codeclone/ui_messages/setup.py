@@ -18,6 +18,9 @@ SETUP_PLAN_BLOCKED: Final = (
     "Plan blocked until pyproject.toml validation issues are resolved."
 )
 SETUP_PLAN_READ_ONLY_NOTE: Final = "Read-only preview — no files were modified."
+SETUP_APPLY_TITLE: Final = "CodeClone setup apply"
+SETUP_APPLY_NOOP: Final = "No plan actions were applied."
+SETUP_APPLY_BLOCKED: Final = "Apply blocked — fix plan blockers and re-run setup plan."
 
 GROUP_LABELS: Final[dict[str, str]] = {
     "core_analysis": "Core analysis",
@@ -154,6 +157,9 @@ __all__ = [
     "REASON_UNKNOWN_PROBE",
     "REASON_WORKSPACE_HYGIENE",
     "REASON_WORKSPACE_HYGIENE_READY",
+    "SETUP_APPLY_BLOCKED",
+    "SETUP_APPLY_NOOP",
+    "SETUP_APPLY_TITLE",
     "SETUP_DOCTOR_TITLE",
     "SETUP_PLAN_BLOCKED",
     "SETUP_PLAN_EMPTY",

@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Final
 
+from ..utils.atomic_write import write_text_atomically
 from .workspace import WORKSPACE_DIR_NAME
 
 _COVERING_PATTERN_CORES: Final[frozenset[str]] = frozenset(
@@ -85,13 +86,31 @@ def gitignore_codeclone_cache_tip_payload() -> dict[str, object]:
     }
 
 
+def append_gitignore_line(before_text: str, line: str) -> str:
+    """Append one gitignore entry with deterministic trailing newline."""
+
+    if not before_text:
+        return f"{line}\n"
+    if before_text.endswith("\n"):
+        return f"{before_text}{line}\n"
+    return f"{before_text}\n{line}\n"
+
+
+def write_gitignore_text_atomically(gitignore_path: Path, text: str) -> None:
+    """Write ``.gitignore`` text via temp file + ``os.replace``."""
+
+    write_text_atomically(gitignore_path, text)
+
+
 __all__ = [
     "GITIGNORE_CODECLONE_CACHE_MESSAGE",
     "GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY",
     "GITIGNORE_CODECLONE_CACHE_TIP_ID",
     "WORKSPACE_HYGIENE_CATEGORY",
+    "append_gitignore_line",
     "gitignore_codeclone_cache_tip_payload",
     "gitignore_pattern_covers_codeclone_cache",
     "normalize_gitignore_pattern",
     "repo_gitignore_covers_codeclone_cache",
+    "write_gitignore_text_atomically",
 ]

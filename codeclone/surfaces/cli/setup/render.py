@@ -9,11 +9,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import TYPE_CHECKING
 
 from ....ui_messages import setup as setup_ui
 from ..console import rich_panel_symbols, supports_rich_console
 from ..types import PrinterLike
 from .engine.capabilities import GROUP_ORDER
+
+if TYPE_CHECKING:
+    from rich.rule import Rule as RichRule
+    from rich.table import Table as RichTable
 
 
 def render_setup_status(
@@ -131,15 +136,14 @@ def _render_doctor_plain(console: PrinterLike, snapshot: Mapping[str, object]) -
 
 def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:
     _, panel_cls, rule_cls, table_cls, _ = rich_panel_symbols()
-    console.print(setup_ui.SETUP_PLAN_TITLE)
-    console.print()
-    console.print(
-        rule_cls(title="Plan summary", style="dim", characters="\u2500"),
-    )
-    console.print(
-        f"  [dim]Root:[/dim] {plan.get('root')}  "
-        f"[dim]Status:[/dim] {plan.get('status')}  "
-        f"[dim]Plan id:[/dim] {plan.get('plan_id')}"
+    _print_setup_rich_header(
+        console,
+        title=setup_ui.SETUP_PLAN_TITLE,
+        rule_title="Plan summary",
+        rule_cls=rule_cls,
+        root=plan.get("root"),
+        status=plan.get("status"),
+        plan_id=plan.get("plan_id"),
     )
     console.print(f"  [dim]{setup_ui.SETUP_PLAN_READ_ONLY_NOTE}[/dim]")
     console.print()
@@ -157,17 +161,12 @@ def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:
         console.print(setup_ui.SETUP_PLAN_EMPTY)
         return
 
-    table = table_cls(show_header=True, header_style="bold")
-    table.add_column("Action")
-    table.add_column("Target")
-    table.add_column("Status")
-    for action in actions:
-        table.add_row(
-            str(action.get("kind", "")),
-            str(action.get("path", "")),
-            str(action.get("status", "")),
-        )
-    console.print(table)
+    _print_kind_path_status_table(
+        console,
+        table_cls,
+        actions,
+        status_column="Status",
+    )
     console.print()
 
     for action in actions:
@@ -200,6 +199,111 @@ def _render_plan_plain(console: PrinterLike, plan: Mapping[str, object]) -> None
                 console.print(diff)
 
 
+def render_setup_apply(*, console: PrinterLike, result: Mapping[str, object]) -> None:
+    if supports_rich_console(console):
+        _render_apply_rich(console=console, result=result)
+        return
+    _render_apply_plain(console=console, result=result)
+
+
+def _render_apply_rich(console: PrinterLike, result: Mapping[str, object]) -> None:
+    _, _panel_cls, rule_cls, table_cls, _ = rich_panel_symbols()
+    _print_setup_rich_header(
+        console,
+        title=setup_ui.SETUP_APPLY_TITLE,
+        rule_title="Apply summary",
+        rule_cls=rule_cls,
+        root=result.get("root"),
+        status=result.get("status"),
+        plan_id=result.get("plan_id"),
+    )
+    if result.get("dry_run"):
+        console.print("  [dim]Dry run — no files were modified.[/dim]")
+    console.print()
+
+    status = str(result.get("status", ""))
+    if status == "blocked":
+        console.print(setup_ui.SETUP_APPLY_BLOCKED)
+        return
+    results = _apply_results(result)
+    if not results:
+        console.print(setup_ui.SETUP_APPLY_NOOP)
+        return
+
+    _print_kind_path_status_table(
+        console,
+        table_cls,
+        results,
+        status_column="Result",
+    )
+
+
+def _render_apply_plain(console: PrinterLike, result: Mapping[str, object]) -> None:
+    console.print(setup_ui.SETUP_APPLY_TITLE)
+    console.print(
+        f"status: {result.get('status')}  plan_id: {result.get('plan_id')}  "
+        f"dry_run: {result.get('dry_run')}"
+    )
+    if str(result.get("status", "")) == "blocked":
+        console.print(setup_ui.SETUP_APPLY_BLOCKED)
+        return
+    for row in _apply_results(result):
+        message = str(row.get("message", ""))
+        suffix = f" — {message}" if message else ""
+        console.print(
+            f"{row.get('kind')} {row.get('path')}: {row.get('status')}{suffix}"
+        )
+
+
+def _print_setup_rich_header(
+    console: PrinterLike,
+    *,
+    title: str,
+    rule_title: str,
+    rule_cls: type[RichRule],
+    root: object,
+    status: object,
+    plan_id: object,
+) -> None:
+    console.print(title)
+    console.print()
+    console.print(
+        rule_cls(title=rule_title, style="dim", characters="\u2500"),
+    )
+    console.print(
+        f"  [dim]Root:[/dim] {root}  "
+        f"[dim]Status:[/dim] {status}  "
+        f"[dim]Plan id:[/dim] {plan_id}"
+    )
+
+
+def _print_kind_path_status_table(
+    console: PrinterLike,
+    table_cls: type[RichTable],
+    rows: list[Mapping[str, object]],
+    *,
+    status_column: str,
+) -> None:
+    table = table_cls(show_header=True, header_style="bold")
+    table.add_column("Action")
+    table.add_column("Target")
+    table.add_column(status_column)
+    for row in rows:
+        table.add_row(
+            str(row.get("kind", "")),
+            str(row.get("path", "")),
+            str(row.get("status", "")),
+        )
+    console.print(table)
+
+
+def _apply_results(result: Mapping[str, object]) -> list[Mapping[str, object]]:
+    raw = result.get("results")
+    if not isinstance(raw, list):
+        return []
+    return [item for item in raw if isinstance(item, Mapping)]
+
+
 def _plan_actions(plan: Mapping[str, object]) -> list[Mapping[str, object]]:
     raw = plan.get("actions")
     if not isinstance(raw, list):
@@ -220,4 +324,9 @@ def _mapping(value: object) -> Mapping[str, object]:
     return {}
 
 
-__all__ = ["render_setup_doctor", "render_setup_plan", "render_setup_status"]
+__all__ = [
+    "render_setup_apply",
+    "render_setup_doctor",
+    "render_setup_plan",
+    "render_setup_status",
+]

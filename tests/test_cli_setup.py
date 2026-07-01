@@ -17,7 +17,9 @@ import pytest
 
 from codeclone.audit.events import EVENT_PATCH_VERIFIED, AuditEvent, repo_root_digest
 from codeclone.audit.writer import SqliteAuditWriter
+from codeclone.config.pyproject_loader import load_pyproject_config
 from codeclone.contracts import ExitCode
+from codeclone.surfaces.cli.setup.engine.apply import apply_setup_plan
 from codeclone.surfaces.cli.setup.engine.capabilities import (
     CapabilityAxes,
     CapabilityMeta,
@@ -529,3 +531,87 @@ def test_setup_plan_idempotent(
     second = build_setup_plan(tmp_path)
 
     assert first["plan_id"] == second["plan_id"]
+
+
+def test_setup_apply_writes_pyproject_section(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    result = apply_setup_plan(tmp_path)
+
+    assert result["projection_kind"] == "setup_apply"
+    assert result["status"] == "applied"
+    config = load_pyproject_config(tmp_path)
+    assert config["baseline"] == str(tmp_path / "codeclone.baseline.json")
+    assert "[tool.codeclone]" in (tmp_path / "pyproject.toml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_setup_apply_writes_gitignore(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+
+    result = apply_setup_plan(tmp_path)
+
+    assert result["status"] == "applied"
+    assert ".codeclone/" in (tmp_path / ".gitignore").read_text(encoding="utf-8")
+
+
+def test_setup_apply_noop_when_plan_empty(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    result = apply_setup_plan(tmp_path)
+
+    assert result["status"] == "noop"
+    assert result["results"] == []
+
+
+def test_setup_apply_dry_run_does_not_write(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    before = pyproject.read_text(encoding="utf-8")
+
+    result = apply_setup_plan(tmp_path, dry_run=True)
+
+    assert result["status"] == "preview"
+    assert result["dry_run"] is True
+    assert pyproject.read_text(encoding="utf-8") == before
+
+
+def test_setup_apply_idempotent_when_already_satisfied(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+
+    first = apply_setup_plan(tmp_path)
+    second = apply_setup_plan(tmp_path)
+
+    assert first["status"] == "noop"
+    assert second["status"] == "noop"
+
+
+def test_setup_apply_main_exit_success(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    assert setup_main(["apply", "--root", str(tmp_path)]) == int(ExitCode.SUCCESS)

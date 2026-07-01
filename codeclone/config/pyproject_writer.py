@@ -8,12 +8,11 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from ..utils.atomic_write import validate_atomic_target, write_text_atomically
 from .analytics_specs import ANALYTICS_NESTED_TABLE_KEY
 from .memory_specs import MEMORY_NESTED_TABLE_KEY
 from .pyproject_loader import (
@@ -133,21 +132,10 @@ def serialize_pyproject_document(document: TOMLDocument) -> str:
 def write_pyproject_text_atomically(config_path: Path, text: str) -> None:
     """Write pyproject text via temp file + ``os.replace``."""
 
-    _validate_atomic_target(config_path)
-    fd_num, tmp_name = tempfile.mkstemp(
-        dir=config_path.parent,
-        suffix=".tmp",
-    )
-    tmp_path = Path(tmp_name)
     try:
-        with os.fdopen(fd_num, "wb") as handle:
-            handle.write(text.encode("utf-8"))
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_path, config_path)
-    except BaseException:
-        tmp_path.unlink(missing_ok=True)
-        raise
+        write_text_atomically(config_path, text)
+    except OSError as exc:
+        raise PyprojectWriterError(str(exc)) from exc
 
 
 def merge_tool_codeclone(
@@ -257,13 +245,10 @@ def _load_tomlkit() -> Any:  # Any: lazy tomlkit import boundary
 
 
 def _validate_atomic_target(path: Path) -> None:
-    if path.is_symlink():
-        raise PyprojectWriterError(f"Refusing to replace symlink target: {path}")
-    parent = path.parent
-    if parent.exists() and parent.is_symlink():
-        raise PyprojectWriterError(
-            f"Refusing to write through symlink directory: {parent}"
-        )
+    try:
+        validate_atomic_target(path)
+    except OSError as exc:
+        raise PyprojectWriterError(str(exc)) from exc
 
 
 __all__ = [
