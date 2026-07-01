@@ -815,6 +815,10 @@ def _report_digest_from_document(report_document: dict[str, object]) -> str:
 
 
 def main() -> None:
+    if len(sys.argv) > 1 and sys.argv[1] == "setup":
+        from .setup import setup_main
+
+        raise SystemExit(setup_main(sys.argv[2:]))
     if len(sys.argv) > 1 and sys.argv[1] == "analytics":
         from .analytics import analytics_main
 

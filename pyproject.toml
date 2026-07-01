@@ -171,6 +171,8 @@ packages = [
     "codeclone.scanner",
     "codeclone.surfaces",
     "codeclone.surfaces.cli",
+    "codeclone.surfaces.cli.setup",
+    "codeclone.surfaces.cli.setup.engine",
     "codeclone.surfaces.mcp",
     "codeclone.surfaces.mcp.messages",
     "codeclone.surfaces.mcp.tools",
