@@ -20,7 +20,7 @@ from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -4300,10 +4300,6 @@ def test_mcp_service_root_and_helper_contract_errors(
         )
 
     with pytest.raises(MCPServiceError):
-        mcp_helpers_mod._load_report_document("{")
-    with pytest.raises(MCPServiceError):
-        mcp_helpers_mod._load_report_document("[]")
-    with pytest.raises(MCPServiceError):
         mcp_helpers_mod._report_digest({})
 
 
@@ -4514,6 +4510,65 @@ def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
 
     assert cache.get_file_entry("x.py") is None
     assert not (tmp_path / "cache.json").exists()
+
+
+def test_mcp_analyze_releases_cache_before_report_without_json_roundtrip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.core.reporting as core_reporting_mod
+
+    _write_clone_fixture(tmp_path)
+    events: list[str] = []
+    original_release = Cache.release_loaded_entries
+    original_report = cast(Any, mcp_session_mod).report
+
+    def _record_release(self: Cache, *, allow_dirty: bool = False) -> int:
+        events.append("release")
+        return original_release(self, allow_dirty=allow_dirty)
+
+    def _record_report(**kwargs: Any) -> object:
+        events.append("report")
+        return original_report(**kwargs)
+
+    forbidden_report_json = Mock(
+        side_effect=AssertionError(
+            "MCP analyze_repository must not serialize report JSON"
+        )
+    )
+    forbidden_report_load = Mock(
+        side_effect=AssertionError("MCP analyze_repository must not parse report JSON")
+    )
+
+    monkeypatch.setattr(Cache, "release_loaded_entries", _record_release)
+    monkeypatch.setattr(mcp_session_mod, "report", _record_report)
+    monkeypatch.setattr(
+        core_reporting_mod,
+        "render_json_report_document",
+        forbidden_report_json,
+    )
+    monkeypatch.setattr(
+        mcp_shared_mod,
+        "_load_report_document_payload",
+        forbidden_report_load,
+    )
+
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    assert summary["run_id"]
+    assert events == ["release", "report"]
+    assert forbidden_report_json.call_count == 0
+    assert forbidden_report_load.call_count == 0
+    assert service.get_report_section(section="all")["report_schema_version"] == (
+        REPORT_SCHEMA_VERSION
+    )
 
 
 def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> None:
@@ -4845,7 +4900,7 @@ def test_mcp_service_short_finding_ids_remain_unique_for_overlapping_clones(
         assert resolved["id"] == finding_id
 
 
-def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
+def test_mcp_service_reports_missing_report_document(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
     service_module = cast(
@@ -4862,12 +4917,13 @@ def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
             md=artifacts.md,
             sarif=artifacts.sarif,
             text=artifacts.text,
+            report_document=None,
         )
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(mcp_session_mod, "report", _fake_report)
     try:
-        with pytest.raises(MCPServiceError):
+        with pytest.raises(MCPServiceError, match="canonical report document"):
             service.analyze_repository(
                 MCPAnalysisRequest(
                     root=str(tmp_path),

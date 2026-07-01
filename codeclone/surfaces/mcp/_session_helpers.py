@@ -67,7 +67,6 @@ from ._session_shared import (
     _disambiguated_clone_short_ids_payload,
     _disambiguated_short_finding_id_payload,
     _leaf_symbol_name_payload,
-    _load_report_document_payload,
     _suggestion_finding_id_payload,
     _summarize_metrics_diff,
 )
@@ -653,10 +652,6 @@ def _metrics_computed(analysis_mode: AnalysisMode) -> tuple[str, ...]:
             "dead_code",
         )
     )
-
-
-def _load_report_document(report_json: str) -> dict[str, object]:
-    return _load_report_document_payload(report_json)
 
 
 def _report_digest(report_document: Mapping[str, object]) -> str:

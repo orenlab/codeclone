@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 
 from ...audit import AuditEvent, AuditWriter, repo_root_digest
@@ -421,9 +422,11 @@ class MCPSession(
                 analysis_result.project_metrics
             )
 
+        cache.release_loaded_entries()
         with span(name="pipeline.report"):
+            report_boot = replace(boot, output_paths=OutputPaths())
             report_artifacts = report(
-                boot=boot,
+                boot=report_boot,
                 discovery=discovery_result,
                 processing=processing_result,
                 analysis=analysis_result,
@@ -431,13 +434,14 @@ class MCPSession(
                 new_func=new_func,
                 new_block=new_block,
                 metrics_diff=metrics_diff,
+                include_report_document=True,
             )
-            report_json = report_artifacts.json
-            if report_json is None:
-                raise MCPServiceError("CodeClone MCP expected a canonical JSON report.")
-            report_document = _helpers._load_report_document(report_json)
+            report_document = report_artifacts.report_document
+            if report_document is None:
+                raise MCPServiceError(
+                    "CodeClone MCP expected a canonical report document."
+                )
             run_id = _helpers._report_digest(report_document)
-        cache.release_loaded_entries()
 
         warning_items = set(console.messages)
         baseline_warning = getattr(clone_baseline_state, "warning_message", None)
