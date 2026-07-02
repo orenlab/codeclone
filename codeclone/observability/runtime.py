@@ -18,16 +18,20 @@ from __future__ import annotations
 import sqlite3
 import time
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ..config.observability import ObservabilityConfig, resolve_observability_config
 from .db_fingerprint import fingerprint_sql
 from .models import OperationRecord, ProfileSample, SpanRecord
 from .reason_kind import ReasonKind
+
+if TYPE_CHECKING:
+    from sqlite3 import _Parameters as _SqlParams
 
 # Bound how many distinct SQL shapes a span persists; the diagnostic value is in
 # the few high-count statements, not the long tail.
@@ -515,9 +519,6 @@ def record_counter(key: str, value: int = 1) -> None:
     span_handle.add_counter(key, value)
 
 
-_SqlParams = Sequence[object] | Mapping[str, object]
-
-
 class _CountingConnection(sqlite3.Connection):
     """``sqlite3.Connection`` that counts logical statements on the active span.
 
@@ -529,14 +530,12 @@ class _CountingConnection(sqlite3.Connection):
     outside a span, so connection open (pragmas, schema) is not attributed.
     """
 
-    def execute(  # type: ignore[override]
-        self, sql: str, parameters: _SqlParams = ()
-    ) -> sqlite3.Cursor:
+    def execute(self, sql: str, parameters: _SqlParams = (), /) -> sqlite3.Cursor:
         _record_db_statement(sql, rows=1)
         return super().execute(sql, parameters)
 
-    def executemany(  # type: ignore[override]
-        self, sql: str, parameters: Iterable[_SqlParams]
+    def executemany(
+        self, sql: str, parameters: Iterable[_SqlParams], /
     ) -> sqlite3.Cursor:
         materialized = list(parameters)
         _record_db_statement(sql, rows=len(materialized))
