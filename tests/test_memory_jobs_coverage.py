@@ -67,6 +67,12 @@ from codeclone.report.meta import current_report_timestamp_utc
 from .memory_fixtures import cli_memory_repo
 
 
+def _mock_store_without_latest_done_job() -> MagicMock:
+    store = MagicMock()
+    store.connection.execute.return_value.fetchone.return_value = None
+    return store
+
+
 def test_spawn_projection_jobs_worker_success(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -279,7 +285,7 @@ def test_store_list_and_latest_done_projection_job(tmp_path: Path) -> None:
 def test_run_projection_job_failed_and_skipped() -> None:
     project = MagicMock()
     config = MagicMock()
-    store = MagicMock()
+    store = _mock_store_without_latest_done_job()
     with (
         patch(
             "codeclone.memory.jobs.worker.execute_trajectory_rebuild",
@@ -780,7 +786,7 @@ def test_run_projection_job_suppresses_bootstrap_span_when_delayed(
     project = MagicMock()
     project.id = "project"
     config = MagicMock()
-    store = MagicMock()
+    store = _mock_store_without_latest_done_job()
     skipped = {"status": "skipped"}
     patches = (
         patch(
