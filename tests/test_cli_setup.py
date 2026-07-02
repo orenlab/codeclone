@@ -6,29 +6,48 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import io
 import json
 import sys
+import types
+from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
+from typing import cast
+from unittest.mock import patch
 
 import pytest
 
 from codeclone.audit.events import EVENT_PATCH_VERIFIED, AuditEvent, repo_root_digest
 from codeclone.audit.writer import SqliteAuditWriter
 from codeclone.config.pyproject_loader import load_pyproject_config
+from codeclone.config.pyproject_writer import PyprojectWriterError
 from codeclone.contracts import ExitCode
+from codeclone.surfaces.cli.console import PlainConsole
+from codeclone.surfaces.cli.setup import render as setup_render
 from codeclone.surfaces.cli.setup.engine.apply import apply_setup_plan
 from codeclone.surfaces.cli.setup.engine.capabilities import (
+    CAPABILITY_REGISTRY,
     CapabilityAxes,
     CapabilityMeta,
+    DiscoverContext,
 )
-from codeclone.surfaces.cli.setup.engine.discover import build_setup_snapshot
+from codeclone.surfaces.cli.setup.engine.discover import (
+    _client_config_present,
+    build_setup_snapshot,
+)
 from codeclone.surfaces.cli.setup.engine.plan import build_setup_plan
-from codeclone.surfaces.cli.setup.engine.rollup import derive_readiness
+from codeclone.surfaces.cli.setup.engine.rollup import (
+    _axes_satisfied,
+    _optional_install_hint,
+    apply_capability_presentation,
+    derive_readiness,
+)
 from codeclone.surfaces.cli.setup.main import setup_main
 from codeclone.surfaces.cli.setup.wizard import WizardPrompts, run_setup_wizard
+from codeclone.surfaces.cli.types import PrinterLike
 from codeclone.utils.json_io import json_text
 from tests.test_cli_inprocess import _write_current_python_baseline
 
@@ -692,3 +711,1209 @@ def test_setup_wizard_guided_apply_skipped(
 
     assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
     assert pyproject.read_text(encoding="utf-8") == before
+
+
+def _fresh_apply_module() -> types.ModuleType:
+    return importlib.import_module("codeclone.surfaces.cli.setup.engine.apply")
+
+
+def _fresh_setup_main() -> Callable[..., int]:
+    setup_main = importlib.import_module("codeclone.surfaces.cli.setup.main").setup_main
+    return cast(Callable[..., int], setup_main)
+
+
+def _minimal_setup_snapshot(root: Path) -> dict[str, object]:
+    return {
+        "root": str(root),
+        "runtime": {"python_tag": "cp314", "codeclone_version": "2.1.0"},
+        "maturity": {
+            "connected": False,
+            "governed": False,
+            "evidence_backed": False,
+            "team_ready": False,
+            "release_ready": False,
+        },
+        "capabilities": [
+            {
+                "id": "analysis",
+                "group": "project_knowledge",
+                "label": "Analysis",
+                "readiness": "attention",
+                "availability": "core",
+                "reason": "missing pyproject section",
+                "installation": "installed",
+                "configuration": "missing",
+                "runtime": "not_verified",
+                "evidence": ["probe:pyproject"],
+                "recommended_action": "run setup plan",
+            }
+        ],
+    }
+
+
+def _rich_console() -> PrinterLike:
+    from rich.console import Console
+
+    return cast(PrinterLike, Console(file=io.StringIO(), force_terminal=True))
+
+
+def test_setup_render_status_plain_and_rich(tmp_path: Path) -> None:
+    snapshot = _minimal_setup_snapshot(tmp_path)
+    plain = PlainConsole()
+    setup_render.render_setup_status(console=plain, snapshot=snapshot)
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_status(console=_rich_console(), snapshot=snapshot)
+
+
+def test_setup_render_doctor_plain_and_rich(tmp_path: Path) -> None:
+    snapshot = _minimal_setup_snapshot(tmp_path)
+    plain = PlainConsole()
+    setup_render.render_setup_doctor(console=plain, snapshot=snapshot)
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_doctor(console=_rich_console(), snapshot=snapshot)
+
+
+def test_setup_render_plan_plain_and_rich(tmp_path: Path) -> None:
+    plan: dict[str, object] = {
+        "root": str(tmp_path),
+        "status": "ready",
+        "plan_id": "abcd1234ef567890",
+        "blockers": [{"kind": "invalid_pyproject", "reason": "bad min_loc"}],
+        "actions": [
+            {
+                "kind": "pyproject_merge",
+                "path": "pyproject.toml",
+                "status": "ready",
+                "preview": {"unified_diff": "+[tool.codeclone]\n"},
+            }
+        ],
+    }
+    plain = PlainConsole()
+    setup_render.render_setup_plan(console=plain, plan=plan)
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_plan(console=_rich_console(), plan=plan)
+
+    empty_plan: dict[str, object] = {"status": "empty", "plan_id": "empty000000000000"}
+    setup_render.render_setup_plan(console=plain, plan=empty_plan)
+
+
+def test_setup_render_apply_plain_and_rich(tmp_path: Path) -> None:
+    blocked: dict[str, object] = {
+        "status": "blocked",
+        "plan_id": "blocked0000000000",
+        "dry_run": False,
+        "results": [],
+    }
+    applied: dict[str, object] = {
+        "status": "applied",
+        "plan_id": "applied0000000000",
+        "dry_run": True,
+        "results": [
+            {
+                "kind": "gitignore_append",
+                "path": ".gitignore",
+                "status": "applied",
+                "message": "ok",
+            }
+        ],
+    }
+    plain = PlainConsole()
+    setup_render.render_setup_apply(console=plain, result=blocked)
+    setup_render.render_setup_apply(console=plain, result=applied)
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_apply(console=_rich_console(), result=applied)
+
+
+def test_setup_render_capability_table_and_helpers() -> None:
+    rows: list[Mapping[str, object]] = [
+        {"label": "Analysis", "readiness": "ready", "reason": ""},
+    ]
+    plain = PlainConsole()
+    setup_render.render_setup_capability_table(plain, rows)
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_capability_table(_rich_console(), rows)
+    assert setup_render.snapshot_capabilities({"capabilities": "not-a-list"}) == []
+    assert setup_render.snapshot_capabilities({"capabilities": rows}) == rows
+
+
+def test_setup_wizard_requires_rich_console(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    assert run_setup_wizard(tmp_path, console=PlainConsole()) == int(
+        ExitCode.CONTRACT_ERROR
+    )
+
+
+def test_setup_wizard_doctor_and_sphere(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    choices = iter(["d", "1", "0"])
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: next(choices),
+        confirm=lambda _message, _default: False,
+    )
+    assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
+
+
+def test_setup_wizard_guided_blocked_plan(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\nmin_loc = not-a-number\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    choices = iter(["g", "0"])
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: next(choices),
+        confirm=lambda _message, _default: True,
+    )
+    assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_setup_wizard_guided_empty_plan(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: True)
+    choices = iter(["g", "0"])
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: next(choices),
+        confirm=lambda _message, _default: True,
+    )
+    assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
+
+
+def test_setup_apply_blocked_and_failure_paths(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\nmin_loc = not-a-number\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    blocked = apply_setup_plan(tmp_path)
+    assert blocked["status"] == "blocked"
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+
+    def _fail_merge(*_args: object, **_kwargs: object) -> None:
+        raise PyprojectWriterError("merge failed")
+
+    apply_mod = _fresh_apply_module()
+    monkeypatch.setattr(apply_mod, "merge_tool_codeclone", _fail_merge)
+    failed = apply_mod.apply_setup_plan(tmp_path)
+    assert failed["status"] == "partial"
+    assert failed["results"][0]["status"] == "applied"
+    assert failed["results"][1]["status"] == "failed"
+
+
+def test_setup_apply_unsupported_action_kind(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan = {
+        "root": str(tmp_path),
+        "plan_id": "test000000000000",
+        "status": "ready",
+        "actions": [
+            {
+                "id": "bad-action",
+                "kind": "unknown_kind",
+                "path": "nowhere",
+                "status": "ready",
+            }
+        ],
+    }
+    apply_mod = _fresh_apply_module()
+    monkeypatch.setattr(apply_mod, "build_setup_plan", lambda _root: plan)
+    result = apply_mod.apply_setup_plan(tmp_path)
+    assert result["status"] == "failed"
+
+
+def test_setup_main_invalid_root(tmp_path: Path) -> None:
+    missing = tmp_path / "missing-root"
+    assert setup_main(["status", "--root", str(missing)]) == int(
+        ExitCode.CONTRACT_ERROR
+    )
+
+
+def test_setup_main_apply_failed_exit(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+
+    def _fail_merge(*_args: object, **_kwargs: object) -> None:
+        raise PyprojectWriterError("merge failed")
+
+    apply_mod = _fresh_apply_module()
+    monkeypatch.setattr(apply_mod, "merge_tool_codeclone", _fail_merge)
+    setup_main = _fresh_setup_main()
+    assert setup_main(["apply", "--root", str(tmp_path)]) == int(
+        ExitCode.INTERNAL_ERROR
+    )
+
+
+def test_setup_main_doctor_command(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = setup_main(["doctor", "--root", str(tmp_path)])
+    assert rc == int(ExitCode.SUCCESS)
+    assert "doctor" in buf.getvalue().lower() or "analysis" in buf.getvalue().lower()
+
+
+def test_setup_apply_dry_run_partial_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+
+    def _fail_merge(*_args: object, **_kwargs: object) -> None:
+        raise PyprojectWriterError("merge failed")
+
+    apply_mod = _fresh_apply_module()
+    monkeypatch.setattr(apply_mod, "merge_tool_codeclone", _fail_merge)
+    result = apply_mod.apply_setup_plan(tmp_path, dry_run=True)
+    assert result["status"] == "preview"
+    assert result["dry_run"] is True
+    assert result["results"][-1]["status"] == "failed"
+
+
+def test_setup_apply_gitignore_missing_lines(tmp_path: Path) -> None:
+    apply_mod = _fresh_apply_module()
+    action = {
+        "id": "gitignore_append:workspace_hygiene",
+        "kind": "gitignore_append",
+        "path": ".gitignore",
+        "status": "ready",
+        "lines": [],
+    }
+    row = apply_mod._apply_gitignore_append(tmp_path, action, dry_run=False)
+    assert row["status"] == "failed"
+    assert row["message"] == "missing lines"
+
+
+def test_setup_rollup_optional_install_hints() -> None:
+    assert "codeclone[mcp]" in _optional_install_hint(
+        CapabilityMeta(
+            id="mcp_runtime",
+            group="governed_agent_workflows",
+            availability="optional_extra",
+            optional_extra_name="mcp",
+        )
+    )
+    assert _optional_install_hint(
+        CapabilityMeta(
+            id="semantic_retrieval",
+            group="project_knowledge",
+            availability="optional_extra",
+            optional_extra_name="semantic-local",
+        )
+    ).endswith("semantic-local")
+    assert (
+        _optional_install_hint(
+            CapabilityMeta(
+                id="other",
+                group="project_knowledge",
+                availability="optional_extra",
+                optional_extra_name="unknown-extra",
+            )
+        )
+        == ""
+    )
+
+
+def test_setup_rollup_axes_satisfied_branches() -> None:
+    meta = CapabilityMeta(
+        id="analysis",
+        group="core_analysis",
+        availability="built_in",
+        requires_config=True,
+        requires_runtime_proof=True,
+    )
+    assert not _axes_satisfied(
+        meta,
+        CapabilityAxes(
+            installation="unknown",
+            configuration="configured",
+            runtime="verified",
+            evidence=[],
+        ),
+    )
+    assert not _axes_satisfied(
+        meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="unconfigured",
+            runtime="verified",
+            evidence=[],
+        ),
+    )
+    assert not _axes_satisfied(
+        meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="unavailable",
+            evidence=[],
+        ),
+    )
+
+
+def test_setup_discover_audit_summary_oserror(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_text("not sqlite", encoding="utf-8")
+
+    def _raise_oserror(**_kwargs: object) -> None:
+        raise OSError("audit unreadable")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.read_audit_summary",
+        _raise_oserror,
+    )
+    snapshot = build_setup_snapshot(tmp_path)
+    audit = next(
+        item for item in _capability_rows(snapshot) if item["id"] == "audit_and_intents"
+    )
+    assert audit["readiness"] in {"attention", "optional", "ready", "blocked"}
+
+
+def test_setup_main_payload_build_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+
+    def _boom(_root: Path) -> dict[str, object]:
+        raise RuntimeError("snapshot failed")
+
+    monkeypatch.setitem(setup_main_mod._PAYLOAD_BUILDERS, "status", _boom)
+    assert setup_main_mod.setup_main(["status", "--root", str(tmp_path)]) == int(
+        ExitCode.INTERNAL_ERROR
+    )
+
+
+def test_setup_apply_pyproject_merge_missing_updates(tmp_path: Path) -> None:
+    apply_mod = _fresh_apply_module()
+    row = apply_mod._apply_pyproject_merge(
+        tmp_path,
+        {
+            "id": "pyproject_merge:analysis",
+            "kind": "pyproject_merge",
+            "updates": "not-a-mapping",
+        },
+        dry_run=False,
+    )
+    assert row["status"] == "failed"
+    assert row["message"] == "missing updates"
+
+
+def test_setup_apply_pyproject_merge_already_satisfied(tmp_path: Path) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    apply_mod = _fresh_apply_module()
+    row = apply_mod._apply_pyproject_merge(
+        tmp_path,
+        {
+            "id": "pyproject_merge:audit_and_intents",
+            "kind": "pyproject_merge",
+            "updates": {"audit_enabled": True},
+        },
+        dry_run=False,
+    )
+    assert row["status"] == "skipped"
+
+
+def test_setup_plan_missing_pyproject_blocker(tmp_path: Path) -> None:
+    plan = build_setup_plan(tmp_path)
+    blockers = plan["blockers"]
+    assert isinstance(blockers, list)
+    assert any(item.get("kind") == "missing_pyproject" for item in blockers)
+
+
+def test_setup_rollup_derive_readiness_branches() -> None:
+    unsupported = CapabilityMeta(
+        id="legacy",
+        group="core_analysis",
+        availability="unsupported",
+    )
+    axes = CapabilityAxes(
+        installation="installed",
+        configuration="configured",
+        runtime="verified",
+        evidence=[],
+    )
+    assert derive_readiness(unsupported, axes) == "not_applicable"
+
+    optional_unknown = CapabilityMeta(
+        id="mcp_runtime",
+        group="governed_agent_workflows",
+        availability="optional_extra",
+        optional_extra_name="mcp",
+    )
+    assert (
+        derive_readiness(
+            optional_unknown,
+            CapabilityAxes(
+                installation="unknown",
+                configuration="not_required",
+                runtime="not_required",
+                evidence=[],
+            ),
+        )
+        == "attention"
+    )
+
+    built_in = CapabilityMeta(
+        id="analysis",
+        group="core_analysis",
+        availability="built_in",
+        requires_config=True,
+    )
+    assert (
+        derive_readiness(
+            built_in,
+            CapabilityAxes(
+                installation="installed",
+                configuration="invalid",
+                runtime="verified",
+                evidence=[],
+            ),
+        )
+        == "blocked"
+    )
+
+    assert (
+        derive_readiness(
+            built_in,
+            CapabilityAxes(
+                installation="unknown",
+                configuration="unconfigured",
+                runtime="not_verified",
+                evidence=[],
+            ),
+        )
+        == "attention"
+    )
+
+    assert (
+        derive_readiness(
+            CapabilityMeta(
+                id="analysis",
+                group="core_analysis",
+                availability="built_in",
+                requires_config=True,
+                requires_runtime_proof=True,
+            ),
+            CapabilityAxes(
+                installation="installed",
+                configuration="configured",
+                runtime="unavailable",
+                evidence=[],
+            ),
+        )
+        == "attention"
+    )
+
+
+def test_setup_wizard_default_prompts_rejects_plain_console() -> None:
+    from codeclone.surfaces.cli.setup.wizard import _default_wizard_prompts
+
+    with pytest.raises(RuntimeError, match="Rich"):
+        _default_wizard_prompts(PlainConsole())
+
+
+def _capability_meta(capability_id: str) -> CapabilityMeta:
+    return next(item for item in CAPABILITY_REGISTRY if item.id == capability_id)
+
+
+def _empty_discover_context(root: Path) -> DiscoverContext:
+    return DiscoverContext(
+        root_path=root,
+        config={},
+        config_error=None,
+        has_codeclone_section=False,
+        baseline_path=root / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+
+
+def test_setup_presentation_handlers(tmp_path: Path) -> None:
+    ctx = _empty_discover_context(tmp_path)
+    mcp_meta = _capability_meta("mcp_runtime")
+    missing_axes = CapabilityAxes(
+        installation="missing",
+        configuration="not_required",
+        runtime="not_required",
+        evidence=[],
+    )
+    readiness, reason, _action = apply_capability_presentation(
+        mcp_meta,
+        missing_axes,
+        "optional",
+        ctx,
+    )
+    assert readiness == "optional"
+    assert reason
+
+    controlled_meta = _capability_meta("controlled_change")
+    readiness, _, _ = apply_capability_presentation(
+        controlled_meta,
+        missing_axes,
+        "optional",
+        ctx,
+    )
+    assert readiness == "optional"
+
+    baseline_meta = _capability_meta("baseline")
+    readiness, _, _ = apply_capability_presentation(
+        baseline_meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="not_verified",
+            evidence=[],
+        ),
+        "ready",
+        ctx,
+    )
+    assert readiness == "ready"
+
+
+def test_setup_rollup_coverage_xml_hint() -> None:
+    hint = _optional_install_hint(
+        CapabilityMeta(
+            id="coverage_evidence",
+            group="project_knowledge",
+            availability="optional_extra",
+            optional_extra_name="coverage-xml",
+        )
+    )
+    assert "coverage-xml" in hint
+
+
+def test_setup_discover_audit_summary_exception(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_text("x", encoding="utf-8")
+
+    def _raise_runtime(**_kwargs: object) -> None:
+        raise RuntimeError("audit summary failed")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.read_audit_summary",
+        _raise_runtime,
+    )
+    snapshot = build_setup_snapshot(tmp_path)
+    assert snapshot["schema_version"] == "1"
+
+
+def test_setup_discover_client_config_from_cursor_mcp(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    cursor_dir = tmp_path / ".cursor"
+    cursor_dir.mkdir()
+    (cursor_dir / "mcp.json").write_text("{}", encoding="utf-8")
+    snapshot = build_setup_snapshot(tmp_path)
+    controlled = next(
+        item for item in _capability_rows(snapshot) if item["id"] == "controlled_change"
+    )
+    assert controlled["readiness"] in {"attention", "optional", "ready"}
+
+
+def test_setup_presentation_default_for_unknown_capability(tmp_path: Path) -> None:
+    ctx = _empty_discover_context(tmp_path)
+    unknown_meta = CapabilityMeta(
+        id="not_registered_capability",
+        group="core_analysis",
+        availability="built_in",
+    )
+    readiness, reason, action = apply_capability_presentation(
+        unknown_meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="verified",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert readiness == "attention"
+    assert reason
+    assert action == ""
+
+
+def test_setup_main_apply_blocked_exit_code() -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+    assert setup_main_mod._exit_code_for_payload("apply", {"status": "blocked"}) == int(
+        ExitCode.CONTRACT_ERROR
+    )
+
+
+def test_setup_rollup_analytics_optional_hint() -> None:
+    hint = _optional_install_hint(
+        CapabilityMeta(
+            id="analytics_cockpit",
+            group="project_knowledge",
+            availability="optional_extra",
+            optional_extra_name="analytics",
+        )
+    )
+    assert hint
+
+
+def test_setup_discover_vscode_settings_client_config(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    vscode_dir = tmp_path / ".vscode"
+    vscode_dir.mkdir()
+    (vscode_dir / "settings.json").write_text(
+        '{"mcp.servers": {"codeclone": {}}}',
+        encoding="utf-8",
+    )
+    snapshot = build_setup_snapshot(tmp_path)
+    maturity = cast(dict[str, object], snapshot["maturity"])
+    assert maturity["connected"] is True
+
+
+def test_setup_apply_gitignore_post_write_verification_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    apply_mod = _fresh_apply_module()
+    monkeypatch.setattr(
+        apply_mod,
+        "repo_gitignore_covers_codeclone_cache",
+        lambda _root: False,
+    )
+    row = apply_mod._apply_gitignore_append(
+        tmp_path,
+        {
+            "id": "gitignore_append:workspace_hygiene",
+            "kind": "gitignore_append",
+            "lines": [".codeclone/"],
+        },
+        dry_run=False,
+    )
+    assert row["status"] == "failed"
+    assert row["message"] == "post-write verification failed"
+
+
+def test_setup_derive_readiness_unconfigured_requires_config() -> None:
+    meta = CapabilityMeta(
+        id="analysis",
+        group="core_analysis",
+        availability="built_in",
+        requires_config=True,
+    )
+    assert (
+        derive_readiness(
+            meta,
+            CapabilityAxes(
+                installation="installed",
+                configuration="unconfigured",
+                runtime="not_verified",
+                evidence=[],
+            ),
+        )
+        == "attention"
+    )
+
+
+def test_setup_discover_root_mcp_json_client_config(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    (tmp_path / ".mcp.json").write_text("{}", encoding="utf-8")
+    snapshot = build_setup_snapshot(tmp_path)
+    maturity = cast(dict[str, object], snapshot["maturity"])
+    assert maturity["connected"] is True
+
+
+def test_setup_derive_readiness_optional_extra_invalid_config() -> None:
+    meta = CapabilityMeta(
+        id="mcp_runtime",
+        group="governed_agent_workflows",
+        availability="optional_extra",
+        optional_extra_name="mcp",
+    )
+    assert (
+        derive_readiness(
+            meta,
+            CapabilityAxes(
+                installation="installed",
+                configuration="invalid",
+                runtime="not_required",
+                evidence=[],
+            ),
+        )
+        == "attention"
+    )
+
+
+def test_setup_presentation_default_ready_path(tmp_path: Path) -> None:
+    ctx = _empty_discover_context(tmp_path)
+    readiness, reason, action = apply_capability_presentation(
+        CapabilityMeta(
+            id="not_registered_capability",
+            group="core_analysis",
+            availability="built_in",
+        ),
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="verified",
+            evidence=[],
+        ),
+        "ready",
+        ctx,
+    )
+    assert readiness == "ready"
+    assert reason == ""
+    assert action == ""
+
+
+def test_setup_apply_ignores_non_list_plan_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    apply_mod = _fresh_apply_module()
+    monkeypatch.setattr(
+        apply_mod,
+        "build_setup_plan",
+        lambda _root: {
+            "root": str(tmp_path),
+            "plan_id": "bad0000000000000",
+            "status": "ready",
+            "actions": "not-a-list",
+        },
+    )
+    result = apply_mod.apply_setup_plan(tmp_path)
+    assert result["status"] == "noop"
+
+
+def test_setup_apply_gitignore_read_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("node_modules/\n", encoding="utf-8")
+    apply_mod = _fresh_apply_module()
+    original_read_text = Path.read_text
+
+    def _patched_read_text(
+        self: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        if self == gitignore:
+            raise OSError("read failed")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", _patched_read_text)
+    row = apply_mod._apply_gitignore_append(
+        tmp_path,
+        {
+            "id": "gitignore_append:workspace_hygiene",
+            "kind": "gitignore_append",
+            "lines": [".codeclone/"],
+        },
+        dry_run=False,
+    )
+    assert row["status"] == "failed"
+    assert "read failed" in str(row["message"])
+
+
+def test_setup_discover_probe_unknown_capability(tmp_path: Path) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = _empty_discover_context(tmp_path)
+    probed = discover_mod._probe_capability(
+        CapabilityMeta(
+            id="capability_without_probe",
+            group="core_analysis",
+            availability="built_in",
+        ),
+        ctx,
+    )
+    assert probed.axes.installation == "unknown"
+    assert probed.axes.evidence == ["probe:unknown:capability"]
+
+
+def test_setup_apply_gitignore_write_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    apply_mod = _fresh_apply_module()
+
+    def _raise_oserror(*_args: object, **_kwargs: object) -> None:
+        raise OSError("write failed")
+
+    monkeypatch.setattr(apply_mod, "write_gitignore_text_atomically", _raise_oserror)
+    row = apply_mod._apply_gitignore_append(
+        tmp_path,
+        {
+            "id": "gitignore_append:workspace_hygiene",
+            "kind": "gitignore_append",
+            "lines": [".codeclone/"],
+        },
+        dry_run=False,
+    )
+    assert row["status"] == "failed"
+    assert row["message"] == "write failed"
+
+
+def test_setup_discover_vscode_settings_read_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    vscode_dir = tmp_path / ".vscode"
+    vscode_dir.mkdir()
+    settings = vscode_dir / "settings.json"
+    settings.write_text('{"mcp.servers": {"codeclone": {}}}', encoding="utf-8")
+    assert _client_config_present(tmp_path) is True
+    original_read_text = Path.read_text
+
+    def _patched_read_text(
+        self: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        if self == settings:
+            raise OSError("settings unreadable")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", _patched_read_text)
+    assert _client_config_present(tmp_path) is False
+
+
+def test_setup_rollup_axes_satisfied_invalid_configuration() -> None:
+    meta = CapabilityMeta(
+        id="analysis",
+        group="core_analysis",
+        availability="built_in",
+    )
+    assert not _axes_satisfied(
+        meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="invalid",
+            runtime="verified",
+            evidence=[],
+        ),
+    )
+
+
+def test_setup_discover_audit_resolve_and_summary_errors(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine.discover import build_discover_context
+
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+
+    def _resolve_oserror(**_kwargs: object) -> None:
+        raise OSError("audit path failed")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.resolve_audit_path",
+        _resolve_oserror,
+    )
+    ctx = build_discover_context(tmp_path)
+    assert ctx.audit_db_exists is False
+
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
+    db_path.parent.mkdir(parents=True)
+    db_path.write_bytes(b"present")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.resolve_audit_path",
+        lambda **_kwargs: db_path,
+    )
+
+    def _summary_runtime_error(**_kwargs: object) -> None:
+        raise RuntimeError("summary failed")
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.read_audit_summary",
+        _summary_runtime_error,
+    )
+    ctx_after_summary_error = build_discover_context(tmp_path)
+    assert ctx_after_summary_error.audit_db_exists is False
+    assert ctx_after_summary_error.audit_summary_events == 0
+
+
+def test_setup_discover_analysis_find_spec_import_error(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_find_spec = importlib.util.find_spec
+
+    def _raising_find_spec(name: str, package: object | None = None) -> object | None:
+        if name == "codeclone.core":
+            raise ImportError("blocked import")
+        return real_find_spec(name, package)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(importlib.util, "find_spec", _raising_find_spec)
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    snapshot = build_setup_snapshot(tmp_path)
+    analysis = next(
+        item for item in _capability_rows(snapshot) if item["id"] == "analysis"
+    )
+    assert analysis["installation"] == "unknown"
+
+
+def test_setup_discover_github_and_pre_commit_probes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = _empty_discover_context(tmp_path)
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "ci.yml").write_text("name: ci\n", encoding="utf-8")
+    (workflows / "codeclone.yml").write_text(
+        "uses: orenlab/codeclone-action\n",
+        encoding="utf-8",
+    )
+    github_axes = discover_mod._probe_github_workflow(ctx)
+    assert github_axes.configuration == "configured"
+
+    unreadable = workflows / "unreadable.yml"
+    unreadable.write_text("placeholder", encoding="utf-8")
+    original_read_text = Path.read_text
+
+    def _patched_read_text(
+        self: Path,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        if self == unreadable:
+            raise OSError("workflow unreadable")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", _patched_read_text)
+    broken_root = tmp_path / "broken-workflows"
+    broken_root.mkdir()
+    broken_ctx = _empty_discover_context(broken_root)
+    only_unreadable = broken_root / ".github" / "workflows"
+    only_unreadable.mkdir(parents=True)
+    (only_unreadable / "broken.yml").write_text("x", encoding="utf-8")
+    broken_axes = discover_mod._probe_github_workflow(broken_ctx)
+    assert broken_axes.configuration == "unconfigured"
+
+    pre_commit = tmp_path / ".pre-commit-config.yaml"
+    pre_commit.write_text("repos:\n  - repo: local\n", encoding="utf-8")
+    assert discover_mod._probe_pre_commit_hook(ctx).configuration == "unconfigured"
+
+    pre_commit.write_text("repos:\n  - repo: codeclone\n", encoding="utf-8")
+    assert discover_mod._probe_pre_commit_hook(ctx).configuration == "configured"
+
+    def _pre_commit_oserror(self: Path, *args: object, **kwargs: object) -> str:
+        if self == pre_commit:
+            raise OSError("pre-commit unreadable")
+        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(Path, "read_text", _pre_commit_oserror)
+    unreadable_pre_commit = discover_mod._probe_pre_commit_hook(ctx)
+    assert unreadable_pre_commit.installation == "unknown"
+
+
+def test_setup_discover_semantic_and_ci_policy_probes(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={"semantic_enabled": True},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+        memory_report=None,
+    )
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.check_capability",
+        lambda name: type("Status", (), {"available": name == "embed"})(),
+    )
+    semantic_axes = discover_mod._probe_semantic_retrieval(ctx)
+    assert semantic_axes.runtime == "not_verified"
+
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.codeclone]\nci = true\nbaseline = "missing.json"\n',
+        encoding="utf-8",
+    )
+    ci_ctx = build_setup_snapshot(tmp_path)
+    ci_policy = next(
+        item for item in _capability_rows(ci_ctx) if item["id"] == "ci_policy"
+    )
+    assert ci_policy["configuration"] == "unconfigured"
+
+
+def test_setup_discover_baseline_status_oserror(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.baseline import Baseline, BaselineStatus
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    baseline_path.write_text("{", encoding="utf-8")
+
+    def _load_oserror(self: Baseline, **_kwargs: object) -> None:
+        raise OSError("baseline unreadable")
+
+    monkeypatch.setattr(Baseline, "load", _load_oserror)
+    assert (
+        discover_mod._probe_baseline_status(baseline_path)
+        == BaselineStatus.INVALID_JSON
+    )
+
+
+def test_setup_discover_tool_codeclone_section_edge_cases(tmp_path: Path) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+    (tmp_path / "pyproject.toml").write_text("tool = 1\n", encoding="utf-8")
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+
+def test_setup_presentation_controlled_change_unconfigured(tmp_path: Path) -> None:
+    ctx = _empty_discover_context(tmp_path)
+    meta = _capability_meta("controlled_change")
+    readiness, reason, action = apply_capability_presentation(
+        meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="unconfigured",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert readiness == "attention"
+    assert reason
+    assert action
+
+
+def test_setup_presentation_default_optional_path(tmp_path: Path) -> None:
+    ctx = _empty_discover_context(tmp_path)
+    readiness, reason, action = apply_capability_presentation(
+        CapabilityMeta(
+            id="not_registered_capability",
+            group="core_analysis",
+            availability="optional_extra",
+            optional_extra_name="mcp",
+        ),
+        CapabilityAxes(
+            installation="missing",
+            configuration="not_required",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "optional",
+        ctx,
+    )
+    assert readiness == "optional"
+    assert reason
+    assert action
+
+
+def test_setup_presentation_baseline_untrusted(tmp_path: Path) -> None:
+    from codeclone.baseline.trust import BaselineStatus
+
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=BaselineStatus.INVALID_JSON,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+    meta = _capability_meta("baseline")
+    readiness, reason, action = apply_capability_presentation(
+        meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="unconfigured",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert readiness == "attention"
+    assert reason
+    assert action

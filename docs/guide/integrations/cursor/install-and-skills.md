@@ -96,95 +96,25 @@ ignores `/.cursor/` in `.gitignore`.
 
 ## Skills
 
-### codeclone-production-triage
+Use the table above for chat command names and primary MCP flows. Full playbooks
+live in `skills/<folder>/SKILL.md`. Change-control and implementation-context
+skills gate scoped Python edits; review, hotspots, blast-radius, and
+architecture-triage skills are read-only first passes.
 
-Two MCP calls: `analyze_repository` then `get_production_triage`. Baseline-relative
-triage — not patch-local verify. Suggests `codeclone-review` for a deeper session.
-
-### codeclone-hotspots
-
-Cheapest ad-hoc snapshot after `analyze_repository`; prefer `list_hotspots` /
-`check_*` before broad `list_findings`. Optional `help(topic="coverage")` when
-Coverage Join semantics matter.
-
-### codeclone-blast-radius
-
-Read-only: `get_blast_radius` after analysis. Does **not** call
-`start_controlled_change`. Use `codeclone-change-control` for edits.
-
-### codeclone-architecture-triage
-
-Read-only ranked architectural problems from one stored run: module_map, metrics,
-policy + structural shortlists, per-subject impact context, defect validation.
-Response-local priorities only — not CodeClone findings.
-
-### codeclone-review
-
-Conservative-first full review; optional deeper pass with explicit user request.
-Does not declare intent by itself.
-
-### codeclone-change-control
-
-Normal edit cycle uses workflow tools (not legacy-only atomic path):
-
-`analyze_repository` → `start_controlled_change` → `get_relevant_memory` → edit
-in scope → `analyze_repository` (when after-run required) → optional
-`record_candidate` → `finish_controlled_change`.
-
-Queue/recovery: `manage_change_intent` (`promote`, `recover`, …). Atomic
-`check_patch_contract` / `create_review_receipt` are advanced/debug only when
-workflow tools are unavailable.
-
-### codeclone-implementation-context
-
-Bounded structural, call-graph, contract, and change-control evidence from one
-stored MCP run. Call after `start_controlled_change` with `intent_id` before
-editing scoped Python work. Read-only — does not declare intent.
-
-### codeclone-engineering-memory
-
-Scope memory before edits; optional `semantic=true` on `mode=search` when
-`[tool.codeclone.memory.semantic]` is enabled, the semantic sidecar is installed,
-and semantic index rebuild succeeded (`manage_engineering_memory`
-`action=rebuild_semantic_index` or CLI `memory semantic rebuild`). Use
-`codeclone[semantic-local]` plus `embedding_provider = "fastembed"` for local
-semantic-quality recall; `codeclone[semantic-lancedb]` alone supports only the
-deterministic diagnostic provider. Human approve/reject: VS Code **Memory** view
+Engineering Memory: scope before edits; human approve via VS Code **Memory** view
 (preferred) or CLI
-`codeclone memory approve|reject|archive --i-know-what-im-doing` (MCP agents
-cannot approve).
+`codeclone memory approve|reject|archive --i-know-what-im-doing` — MCP agents
+cannot approve. Contract:
+[Engineering Memory](../../../book/13-engineering-memory/index.md).
 
-Full contract: [Engineering Memory](../../../book/13-engineering-memory/index.md).
-
-### codeclone-platform-observability
-
-**Maintainer-only** — not for users reviewing their Python repository.
-
-Diagnose CodeClone's own runtime (MCP latency, DB cost, memory pipeline) via
-`query_platform_observability` after **explicit** observer setup:
-
-```bash
-export CODECLONE_OBSERVABILITY_ENABLED=1
-# restart codeclone-mcp / CLI with this env, reproduce, then query sections
-```
-
-Without enablement the tool returns `status=disabled` or `no_store`. Never treat
-observer metrics as repository quality or edit authorization.
-
-Playbook: [Maintainer workflow](../../../guide/observability/maintainer-workflow.md).
+Maintainer-only `/codeclone-platform-observability` diagnoses CodeClone runtime
+after explicit observer enable — never repository quality. Playbook:
+[Maintainer workflow](../../../guide/observability/maintainer-workflow.md).
 
 ## Repository readiness (CLI)
 
-Before MCP change control, confirm `[tool.codeclone]` and `.gitignore` hygiene
-in the terminal (or `/codeclone-setup`):
-
-```bash
-codeclone setup status
-codeclone setup plan
-codeclone setup apply
-```
-
-Guide: [Repository setup and readiness](../../setup/readiness-and-apply.md).
+Terminal or `/codeclone-setup`: `codeclone setup status|plan|apply`. Guide:
+[Repository setup and readiness](../../setup/readiness-and-apply.md).
 
 ## Agent
 
