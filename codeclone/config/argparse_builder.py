@@ -7,11 +7,37 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import NoReturn
+from collections.abc import Callable, Iterable
+from typing import NoReturn, Protocol, TypeVar, overload
 
 from .. import ui_messages as ui
 from ..contracts import ExitCode, cli_help_epilog
 from .spec import ARGUMENT_GROUP_TITLES, DEFAULTS_BY_DEST, OPTIONS, OptionSpec
+
+_NamespaceT = TypeVar("_NamespaceT")
+
+
+class _TextWriter(Protocol):
+    def write(self, text: str, /) -> object: ...
+
+
+def _handle_interactive_help(
+    argv: tuple[str, ...],
+    *,
+    on_error: Callable[[str], NoReturn],
+) -> None:
+    from ..surfaces.cli.ui.help_presenter import (
+        help_flag_present,
+        interactive_help_requested,
+    )
+
+    if not interactive_help_requested(argv):
+        return
+    if not help_flag_present(argv):
+        on_error("--interactive-help must be used with --help")
+    from ..surfaces.cli.ui.help_tour import run_interactive_help_tour
+
+    raise SystemExit(run_interactive_help_tour())
 
 
 class _ArgumentParser(argparse.ArgumentParser):
@@ -21,6 +47,45 @@ class _ArgumentParser(argparse.ArgumentParser):
             int(ExitCode.CONTRACT_ERROR),
             f"CONTRACT ERROR: {message}\n",
         )
+
+    def print_help(self, file: _TextWriter | None = None) -> None:
+        from ..surfaces.cli.ui.help_presenter import print_static_help_mascot
+
+        print_static_help_mascot(file=file)
+        super().print_help(file=file)
+
+    @overload
+    def parse_args(
+        self,
+        args: Iterable[str] | None = None,
+        namespace: None = None,
+    ) -> argparse.Namespace: ...
+
+    @overload
+    def parse_args(
+        self,
+        args: Iterable[str] | None,
+        namespace: _NamespaceT,
+    ) -> _NamespaceT: ...
+
+    @overload
+    def parse_args(
+        self,
+        *,
+        namespace: _NamespaceT,
+    ) -> _NamespaceT: ...
+
+    def parse_args(
+        self,
+        args: Iterable[str] | None = None,
+        namespace: _NamespaceT | None = None,
+    ) -> argparse.Namespace | _NamespaceT:
+        argv = tuple(args) if args is not None else tuple(sys.argv[1:])
+        _handle_interactive_help(argv, on_error=self.error)
+        super_args = argv if args is not None else None
+        if namespace is None:
+            return super().parse_args(super_args)
+        return super().parse_args(super_args, namespace)
 
 
 class _HelpFormatter(argparse.RawTextHelpFormatter):
@@ -110,7 +175,10 @@ def _add_option(
 def build_parser(version: str) -> _ArgumentParser:
     parser = _ArgumentParser(
         prog="codeclone",
-        description="Structural code quality analysis for Python.",
+        description=(
+            "Deterministic Structural Change Controller for AI-assisted "
+            "Python development."
+        ),
         add_help=False,
         formatter_class=_HelpFormatter,
         epilog=cli_help_epilog(),

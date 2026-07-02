@@ -41,6 +41,10 @@ _RICH_THEME_STYLES: dict[str, str] = {
     "error": "bold red",
     "success": "bold green",
     "dim": "dim",
+    "codeclone.primary": "cyan",
+    "codeclone.muted": "dim",
+    "codeclone.success": "bold green",
+    "codeclone.attention": "yellow",
 }
 _RICH_MARKUP_TAG_RE = re.compile(r"\[/?[a-zA-Z][a-zA-Z0-9_ .#:-]*]")
 

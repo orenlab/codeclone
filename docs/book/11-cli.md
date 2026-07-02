@@ -60,6 +60,11 @@ Refs:
 ## Contracts
 
 - Help output includes canonical exit-code section and project links.
+- `codeclone --help --interactive-help` opens the guided product tour. The
+  flag is valid only together with `-h`/`--help`; there is no short alias.
+  The normal `--help` output remains deterministic text for scripts and
+  snapshots. In Rich terminals, the tour uses fixed-height mascot and detail
+  panels so steps do not reflow vertically while text is typed.
 - Bare report flags write to deterministic default paths under `.codeclone/`.
 - `--open-html-report` is layered on top of `--html`; it does not imply HTML output.
 - `--timestamped-report-paths` rewrites only default report paths requested via bare flags.

@@ -806,6 +806,14 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         help_text="Show this help message and exit.",
     ),
     _option(
+        dest="interactive_help",
+        group="General",
+        cli_kind="store_true",
+        flags=("--interactive-help",),
+        default=False,
+        help_text=ui.HELP_INTERACTIVE,
+    ),
+    _option(
         dest="version",
         group="General",
         cli_kind="version",

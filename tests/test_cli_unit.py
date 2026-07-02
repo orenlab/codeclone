@@ -639,7 +639,11 @@ def test_cli_help_text_consistency(
         "usage: codeclone ",
         "[--version]",
         "[-h]",
-        "Structural code quality analysis for Python.",
+        "--interactive-help",
+        (
+            "Deterministic Structural Change Controller for AI-assisted "
+            "Python development."
+        ),
         "Target:",
         "Analysis:",
         "--changed-only",
