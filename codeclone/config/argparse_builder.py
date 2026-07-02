@@ -42,46 +42,69 @@ def _add_option(
         )
         return
 
-    argument_kwargs: dict[str, object] = {"help": option.help_text}
-
     if option.cli_kind == "value":
-        argument_kwargs.update(
-            dest=option.dest,
-            nargs=option.nargs,
-            const=option.const,
-            metavar=option.metavar,
-        )
-        if option.value_type is not None:
-            argument_kwargs["type"] = option.value_type
+        if option.value_type is None:
+            group.add_argument(
+                *option.flags,
+                dest=option.dest,
+                nargs=option.nargs,
+                const=option.const,
+                metavar=option.metavar,
+                help=option.help_text,
+            )
+            return
+        if option.value_type is int:
+            group.add_argument(
+                *option.flags,
+                dest=option.dest,
+                nargs=option.nargs,
+                const=option.const,
+                metavar=option.metavar,
+                type=int,
+                help=option.help_text,
+            )
+            return
+        raise RuntimeError(f"Unsupported CLI option value type: {option.value_type}")
     elif option.cli_kind == "optional_path":
-        argument_kwargs.update(
+        group.add_argument(
+            *option.flags,
             dest=option.dest,
             nargs="?",
             const=option.const,
             metavar=option.metavar or "FILE",
+            help=option.help_text,
         )
+        return
     elif option.cli_kind == "bool_optional":
-        argument_kwargs.update(
+        group.add_argument(
+            *option.flags,
             action=argparse.BooleanOptionalAction,
             default=argparse.SUPPRESS,
+            help=option.help_text,
         )
+        return
     elif option.cli_kind in {"store_true", "store_false"}:
-        argument_kwargs.update(
+        group.add_argument(
+            *option.flags,
             dest=option.dest,
             action=option.cli_kind,
             default=argparse.SUPPRESS,
+            help=option.help_text,
         )
+        return
     elif option.cli_kind == "help":
-        argument_kwargs["action"] = "help"
+        group.add_argument(*option.flags, action="help", help=option.help_text)
+        return
     elif option.cli_kind == "version":
-        argument_kwargs.update(
+        group.add_argument(
+            *option.flags,
             action="version",
             version=ui.version_output(version),
+            help=option.help_text,
         )
+        return
     else:
         raise RuntimeError(f"Unsupported CLI option kind: {option.cli_kind}")
-
-    group.add_argument(*option.flags, **argument_kwargs)  # type: ignore[arg-type]
 
 
 def build_parser(version: str) -> _ArgumentParser:
