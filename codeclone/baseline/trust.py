@@ -22,7 +22,7 @@ from ..contracts.errors import BaselineValidationError
 from ..utils.json_io import read_json_object as _read_json_object
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
+    from collections.abc import Collection, Sequence
 
 BASELINE_GENERATOR = "codeclone"
 _BASELINE_SCHEMA_MAX_MINOR_BY_MAJOR = {1: 0, 2: 1}
@@ -117,16 +117,17 @@ def _parse_generator_meta(
         return raw_generator, generator_version
 
     if isinstance(raw_generator, dict):
+        generator_obj = _generator_object(raw_generator, path=path)
         allowed_keys = {"name", "version"}
-        extra = set(raw_generator.keys()) - allowed_keys
+        extra = set(generator_obj.keys()) - allowed_keys
         if extra:
             raise BaselineValidationError(
                 f"Invalid baseline schema at {path}: unexpected generator keys: "
                 f"{', '.join(sorted(extra))}",
                 status=BaselineStatus.INVALID_TYPE,
             )
-        generator_name = _require_str(raw_generator, "name", path=path)
-        generator_version = _optional_str(raw_generator, "version", path=path)
+        generator_name = _require_str(generator_obj, "name", path=path)
+        generator_version = _optional_str(generator_obj, "version", path=path)
 
         if generator_version is None:
             generator_version = _optional_str(meta_obj, "generator_version", path=path)
@@ -141,6 +142,24 @@ def _parse_generator_meta(
         f"Invalid baseline schema at {path}: 'generator' must be string or object",
         status=BaselineStatus.INVALID_TYPE,
     )
+
+
+def _generator_object(value: object, *, path: Path) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise BaselineValidationError(
+            f"Invalid baseline schema at {path}: 'generator' must be object",
+            status=BaselineStatus.INVALID_TYPE,
+        )
+
+    invalid_keys = [key for key in value if not isinstance(key, str)]
+    if invalid_keys:
+        raise BaselineValidationError(
+            f"Invalid baseline schema at {path}: 'generator' keys must be str",
+            status=BaselineStatus.INVALID_TYPE,
+        )
+    return {
+        raw_key: item for raw_key, item in value.items() if isinstance(raw_key, str)
+    }
 
 
 def _compute_payload_sha256(
@@ -261,12 +280,7 @@ def _require_sorted_unique_ids(
             f"Invalid baseline schema at {path}: '{key}' must be list[str]",
             status=BaselineStatus.INVALID_TYPE,
         )
-    if not all(isinstance(item, str) for item in value):
-        raise BaselineValidationError(
-            f"Invalid baseline schema at {path}: '{key}' must be list[str]",
-            status=BaselineStatus.INVALID_TYPE,
-        )
-    values = list(value)
+    values = _require_str_items(value, key=key, path=path)
     if values != sorted(values) or len(values) != len(set(values)):
         raise BaselineValidationError(
             f"Invalid baseline schema at {path}: '{key}' must be sorted and unique",
@@ -275,6 +289,16 @@ def _require_sorted_unique_ids(
     if not all(pattern.fullmatch(item) for item in values):
         raise BaselineValidationError(
             f"Invalid baseline schema at {path}: '{key}' has invalid id format",
+            status=BaselineStatus.INVALID_TYPE,
+        )
+    return values
+
+
+def _require_str_items(value: Sequence[object], *, key: str, path: Path) -> list[str]:
+    values = [item for item in value if isinstance(item, str)]
+    if len(values) != len(value):
+        raise BaselineValidationError(
+            f"Invalid baseline schema at {path}: '{key}' must be list[str]",
             status=BaselineStatus.INVALID_TYPE,
         )
     return values
