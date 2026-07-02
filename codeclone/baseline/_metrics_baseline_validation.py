@@ -143,6 +143,24 @@ def _require_str(payload: dict[str, object], key: str, *, path: Path) -> str:
     )
 
 
+def _require_object(value: object, *, label: str, path: Path) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise BaselineValidationError(
+            f"Invalid metrics baseline schema at {path}: {label} must be object",
+            status=MetricsBaselineStatus.INVALID_TYPE,
+        )
+
+    result: dict[str, object] = {}
+    for raw_key, item in value.items():
+        if not isinstance(raw_key, str):
+            raise BaselineValidationError(
+                f"Invalid metrics baseline schema at {path}: {label} keys must be str",
+                status=MetricsBaselineStatus.INVALID_TYPE,
+            )
+        result[raw_key] = item
+    return result
+
+
 def _extract_metrics_payload_sha256(
     payload: dict[str, object],
     *,
@@ -201,18 +219,33 @@ def _require_str_list(
     *,
     path: Path,
 ) -> list[str]:
-    value = payload.get(key)
+    return _require_str_list_value(
+        payload.get(key),
+        error_message=f"{key!r} must be list[str]",
+        path=path,
+    )
+
+
+def _require_str_list_value(
+    value: object,
+    *,
+    error_message: str,
+    path: Path,
+) -> list[str]:
     if not isinstance(value, list):
         raise BaselineValidationError(
-            f"Invalid metrics baseline schema at {path}: {key!r} must be list[str]",
+            f"Invalid metrics baseline schema at {path}: {error_message}",
             status=MetricsBaselineStatus.INVALID_TYPE,
         )
-    if not all(isinstance(item, str) for item in value):
-        raise BaselineValidationError(
-            f"Invalid metrics baseline schema at {path}: {key!r} must be list[str]",
-            status=MetricsBaselineStatus.INVALID_TYPE,
-        )
-    return value
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise BaselineValidationError(
+                f"Invalid metrics baseline schema at {path}: {error_message}",
+                status=MetricsBaselineStatus.INVALID_TYPE,
+            )
+        result.append(item)
+    return result
 
 
 def _parse_cycles(
@@ -230,19 +263,12 @@ def _parse_cycles(
 
     cycles: list[tuple[str, ...]] = []
     for cycle in value:
-        if not isinstance(cycle, list):
-            raise BaselineValidationError(
-                "Invalid metrics baseline schema at "
-                f"{path}: {key!r} cycle item must be list[str]",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            )
-        if not all(isinstance(item, str) for item in cycle):
-            raise BaselineValidationError(
-                "Invalid metrics baseline schema at "
-                f"{path}: {key!r} cycle item must be list[str]",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            )
-        cycles.append(tuple(cycle))
+        cycle_items = _require_str_list_value(
+            cycle,
+            error_message=f"{key!r} cycle item must be list[str]",
+            path=path,
+        )
+        cycles.append(tuple(cycle_items))
     return tuple(sorted(set(cycles)))
 
 
@@ -267,6 +293,7 @@ def _parse_generator(
         return generator, version_value
 
     if isinstance(generator, dict):
+        generator = _require_object(generator, label="generator", path=path)
         allowed_keys = {"name", "version"}
         extra = set(generator.keys()) - allowed_keys
         if extra:
@@ -304,16 +331,8 @@ def _require_embedded_clone_baseline_payload(
 ) -> tuple[dict[str, object], dict[str, object]]:
     meta_obj = payload.get("meta")
     clones_obj = payload.get("clones")
-    if not isinstance(meta_obj, dict):
-        raise BaselineValidationError(
-            f"Invalid baseline schema at {path}: 'meta' must be object",
-            status=MetricsBaselineStatus.INVALID_TYPE,
-        )
-    if not isinstance(clones_obj, dict):
-        raise BaselineValidationError(
-            f"Invalid baseline schema at {path}: 'clones' must be object",
-            status=MetricsBaselineStatus.INVALID_TYPE,
-        )
+    meta_obj = _require_object(meta_obj, label="'meta'", path=path)
+    clones_obj = _require_object(clones_obj, label="'clones'", path=path)
     _require_str(meta_obj, "payload_sha256", path=path)
     _require_str(meta_obj, "python_tag", path=path)
     _require_str(meta_obj, "created_at", path=path)
@@ -512,6 +531,7 @@ def _parse_api_surface_snapshot(
                 "api surface module must be object",
                 status=MetricsBaselineStatus.INVALID_TYPE,
             )
+        raw_module = _require_object(raw_module, label="api surface module", path=path)
         module = _require_str(raw_module, "module", path=path)
         wire_filepath = _require_str(raw_module, "filepath", path=path)
         filepath = runtime_filepath_from_wire(wire_filepath, root=root)
@@ -531,6 +551,11 @@ def _parse_api_surface_snapshot(
                     "api surface symbol must be object",
                     status=MetricsBaselineStatus.INVALID_TYPE,
                 )
+            raw_symbol = _require_object(
+                raw_symbol,
+                label="api surface symbol",
+                path=path,
+            )
             local_name = _optional_require_str(raw_symbol, "local_name", path=path)
             legacy_qualname = _optional_require_str(raw_symbol, "qualname", path=path)
             if local_name is None and legacy_qualname is None:
@@ -564,6 +589,7 @@ def _parse_api_surface_snapshot(
                         "api param must be object",
                         status=MetricsBaselineStatus.INVALID_TYPE,
                     )
+                raw_param = _require_object(raw_param, label="api param", path=path)
                 name = _require_str(raw_param, "name", path=path)
                 param_kind = _require_str(raw_param, "kind", path=path)
                 has_default = raw_param.get("has_default")
