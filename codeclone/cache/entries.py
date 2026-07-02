@@ -312,126 +312,120 @@ def _as_risk_literal(value: object) -> Literal["low", "medium", "high"] | None:
 
 
 def _as_relationship_kind(value: object) -> Literal["call", "reference"] | None:
-    match value:
-        case "call" | "reference":
-            return value
-        case _:
-            return None
+    if value == "call":
+        return "call"
+    if value == "reference":
+        return "reference"
+    return None
 
 
 def _as_relationship_resolution_status(
     value: object,
 ) -> Literal["resolved", "unresolved"] | None:
-    match value:
-        case "resolved" | "unresolved":
-            return value
-        case _:
-            return None
+    if value == "resolved":
+        return "resolved"
+    if value == "unresolved":
+        return "unresolved"
+    return None
 
 
 def _as_relationship_origin_lane(
     value: object,
 ) -> Literal["production", "test"] | None:
-    match value:
-        case "production" | "test":
-            return value
-        case _:
-            return None
+    if value == "production":
+        return "production"
+    if value == "test":
+        return "test"
+    return None
 
 
 def _as_security_surface_category(value: object) -> str | None:
-    match value:
-        case (
-            "archive_extraction"
-            | "crypto_transport"
-            | "database_boundary"
-            | "deserialization"
-            | "dynamic_execution"
-            | "dynamic_loading"
-            | "filesystem_mutation"
-            | "identity_token"
-            | "network_boundary"
-            | "process_boundary"
-        ):
-            return value
-        case _:
-            return None
+    if not isinstance(value, str):
+        return None
+    if value in {
+        "archive_extraction",
+        "crypto_transport",
+        "database_boundary",
+        "deserialization",
+        "dynamic_execution",
+        "dynamic_loading",
+        "filesystem_mutation",
+        "identity_token",
+        "network_boundary",
+        "process_boundary",
+    }:
+        return value
+    return None
 
 
 def _as_security_surface_location_scope(value: object) -> str | None:
-    match value:
-        case "module" | "class" | "callable":
-            return value
-        case _:
-            return None
+    if isinstance(value, str) and value in {"module", "class", "callable"}:
+        return value
+    return None
 
 
 def _as_security_surface_classification_mode(value: object) -> str | None:
-    match value:
-        case "exact_builtin" | "exact_call" | "exact_import":
-            return value
-        case _:
-            return None
+    if isinstance(value, str) and value in {
+        "exact_builtin",
+        "exact_call",
+        "exact_import",
+    }:
+        return value
+    return None
 
 
 def _as_security_surface_evidence_kind(value: object) -> str | None:
-    match value:
-        case "builtin" | "call" | "import":
-            return value
-        case _:
-            return None
+    if isinstance(value, str) and value in {"builtin", "call", "import"}:
+        return value
+    return None
 
 
 def _as_runtime_reachability_framework(value: object) -> str | None:
-    match value:
-        case (
-            "aiogram"
-            | "aiohttp"
-            | "flask"
-            | "celery"
-            | "click"
-            | "dependency_injector"
-            | "django"
-            | "fastapi"
-            | "pydantic"
-            | "sqlalchemy"
-            | "starlette"
-            | "typer"
-        ):
-            return value
-        case _:
-            return None
+    if not isinstance(value, str):
+        return None
+    if value in {
+        "aiogram",
+        "aiohttp",
+        "flask",
+        "celery",
+        "click",
+        "dependency_injector",
+        "django",
+        "fastapi",
+        "pydantic",
+        "sqlalchemy",
+        "starlette",
+        "typer",
+    }:
+        return value
+    return None
 
 
 def _as_runtime_reachability_edge_kind(value: object) -> str | None:
-    match value:
-        case (
-            "declares_dependency"
-            | "provides"
-            | "registers_command"
-            | "registers_handler"
-            | "registers_task"
-            | "runtime_hook"
-        ):
-            return value
-        case _:
-            return None
+    if not isinstance(value, str):
+        return None
+    if value in {
+        "declares_dependency",
+        "provides",
+        "registers_command",
+        "registers_handler",
+        "registers_task",
+        "runtime_hook",
+    }:
+        return value
+    return None
 
 
 def _as_runtime_reachability_confidence(value: object) -> str | None:
-    match value:
-        case "high" | "medium" | "low":
-            return value
-        case _:
-            return None
+    if isinstance(value, str) and value in {"high", "medium", "low"}:
+        return value
+    return None
 
 
 def _as_runtime_reachability_target_kind(value: object) -> str | None:
-    match value:
-        case "function" | "class" | "method":
-            return value
-        case _:
-            return None
+    if isinstance(value, str) and value in {"function", "class", "method"}:
+        return value
+    return None
 
 
 def _new_optional_metrics_payload() -> tuple[
