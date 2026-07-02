@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from typing import TypeGuard
 
 __all__ = ["as_float", "as_int", "as_mapping", "as_sequence", "as_str"]
 
@@ -41,13 +42,23 @@ def as_str(value: object, default: str = "") -> str:
     return value if isinstance(value, str) else default
 
 
+def _is_str_key_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping) and all(isinstance(key, str) for key in value)
+
+
 def as_mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
+    if _is_str_key_mapping(value):
         return value
     return {}
 
 
+def _is_non_text_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    )
+
+
 def as_sequence(value: object) -> Sequence[object]:
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+    if _is_non_text_sequence(value):
         return value
     return ()

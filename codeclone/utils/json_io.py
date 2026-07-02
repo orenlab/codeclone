@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import tempfile
 from pathlib import Path
+from typing import TypeGuard
 
 import orjson
 
@@ -61,13 +62,17 @@ def read_json_document(
     return orjson.loads(read_bounded_bytes(path, max_bytes=max_bytes))
 
 
+def _is_json_object(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict) and all(isinstance(key, str) for key in value)
+
+
 def read_json_object(
     path: Path,
     *,
     max_bytes: int = DEFAULT_MAX_JSON_BYTES,
 ) -> dict[str, object]:
     payload = read_json_document(path, max_bytes=max_bytes)
-    if not isinstance(payload, dict):
+    if not _is_json_object(payload):
         raise TypeError("JSON payload must be an object")
     return payload
 
