@@ -17,7 +17,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 import orjson
 
@@ -83,13 +82,20 @@ def _percentile(values: list[float], q: float) -> float:
     return ordered[min(index, len(ordered) - 1)]
 
 
-def _parse_counters(raw: object) -> dict[str, int]:
+def _parse_counters(
+    raw: str | bytes | bytearray | memoryview | None,
+) -> dict[str, int]:
     if not raw:
         return {}
-    parsed = orjson.loads(cast("str", raw))
-    return (
-        {str(k): int(v) for k, v in parsed.items()} if isinstance(parsed, dict) else {}
-    )
+    parsed = orjson.loads(raw)
+    if not isinstance(parsed, dict):
+        return {}
+    counters: dict[str, int] = {}
+    for key, value in parsed.items():
+        if isinstance(value, bool) or not isinstance(value, str | int | float):
+            continue
+        counters[str(key)] = int(value)
+    return counters
 
 
 def _optional_float(row: sqlite3.Row, key: str) -> float | None:

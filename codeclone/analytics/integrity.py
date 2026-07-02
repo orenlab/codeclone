@@ -11,7 +11,7 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeVar
 
 from ..contracts import CORPUS_EMBEDDING_CONTRACT_VERSION
 from .clustering.models import NOISE_LABEL
@@ -43,6 +43,7 @@ REQUIRED_ALGORITHM_MANIFEST_PATHS = (
     "clustering_metric",
     "hdbscan_core_dist_n_jobs",
 )
+_MappingKeyT = TypeVar("_MappingKeyT")
 _MANIFEST_VERSION_FIELDS = frozenset(REQUIRED_ALGORITHM_MANIFEST_PATHS[:5])
 _MANIFEST_FIXED_FIELDS: dict[str, object] = {
     "vector_preprocessing": "l2_normalize",
@@ -175,7 +176,7 @@ def load_validated_snapshot_vectors(
         vector = row["vector"]
         if not isinstance(vector, list):
             raise AnalyticsWorkflowError(f"invalid vector payload for {item_id}")
-        typed_vector = [float(value) for value in vector]
+        typed_vector = _float_vector(vector, item_id=item_id)
         if len(typed_vector) != generation.dimensions:
             raise AnalyticsWorkflowError(
                 f"vector dimension mismatch for {item_id}: "
@@ -316,7 +317,11 @@ def _decode_validity_json(
 ) -> _ValidityJsonContext:
     effective, effective_ok = _json_object(run.effective_parameters_json)
     raw_manifest = effective.get("algorithm_manifest") if effective_ok else None
-    manifest = raw_manifest.copy() if isinstance(raw_manifest, dict) else None
+    manifest = (
+        _copy_str_key_mapping(raw_manifest)
+        if isinstance(raw_manifest, Mapping)
+        else None
+    )
     shapes = [
         _json_object(snapshot.source_stores_json)[1],
         _json_object(snapshot.source_schema_versions_json)[1],
@@ -581,7 +586,10 @@ def _diagnostic_numbers_are_finite(diagnostics: Mapping[str, object]) -> bool:
     distributions = diagnostics.get("metadata_distributions")
     if not isinstance(distributions, Mapping):
         return True
-    for values in _mapping_values(distributions):
+    normalized_distributions = _copy_str_key_mapping(distributions)
+    if normalized_distributions is None:
+        return False
+    for values in _mapping_values(normalized_distributions):
         for cell in _mapping_values(values):
             for field in ("numerator", "denominator", "rate"):
                 if not _persisted_number_is_finite(cell.get(field)):
@@ -590,17 +598,40 @@ def _diagnostic_numbers_are_finite(diagnostics: Mapping[str, object]) -> bool:
 
 
 def _mapping_values(value: Mapping[str, object]) -> tuple[Mapping[str, object], ...]:
-    return tuple(
-        cast(Mapping[str, object], item)
-        for item in value.values()
-        if isinstance(item, Mapping)
-    )
+    mappings: list[Mapping[str, object]] = []
+    for item in value.values():
+        if not isinstance(item, Mapping):
+            continue
+        normalized = _copy_str_key_mapping(item)
+        if normalized is not None:
+            mappings.append(normalized)
+    return tuple(mappings)
 
 
 def _persisted_number_is_finite(value: object) -> bool:
     if value is None or isinstance(value, bool) or not isinstance(value, int | float):
         return True
     return math.isfinite(value)
+
+
+def _float_vector(vector: Sequence[object], *, item_id: str) -> list[float]:
+    typed_vector: list[float] = []
+    for value in vector:
+        if isinstance(value, bool) or not isinstance(value, str | int | float):
+            raise AnalyticsWorkflowError(f"invalid vector payload for {item_id}")
+        typed_vector.append(float(value))
+    return typed_vector
+
+
+def _copy_str_key_mapping(
+    value: Mapping[_MappingKeyT, object],
+) -> dict[str, object] | None:
+    normalized: dict[str, object] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            return None
+        normalized[key] = item
+    return normalized
 
 
 def _invariant_sort_key(code: str) -> tuple[int, str]:
