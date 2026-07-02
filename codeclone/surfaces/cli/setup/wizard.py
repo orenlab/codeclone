@@ -128,7 +128,12 @@ def _run_guided_setup(
         console.print(setup_ui.SETUP_WIZARD_APPLY_SKIPPED)
         return int(ExitCode.SUCCESS)
 
-    result = apply_setup_plan(root_path)
+    # Bind apply to the plan the operator just confirmed so a concurrent repo
+    # change between preview and apply is refused rather than silently applied.
+    result = apply_setup_plan(
+        root_path,
+        expected_plan_id=str(plan.get("plan_id", "")),
+    )
     console.print()
     render_setup_apply(console=console, result=result)
     apply_exit = _apply_result_exit(str(result.get("status", "")))
@@ -156,7 +161,7 @@ def _guided_plan_exit(console: PrinterLike, status: str) -> int | None:
 def _apply_result_exit(status: str) -> int | None:
     if status in _APPLY_FAILURE_STATUS:
         return int(ExitCode.INTERNAL_ERROR)
-    if status == "blocked":
+    if status in {"blocked", "stale_plan"}:
         return int(ExitCode.CONTRACT_ERROR)
     return None
 

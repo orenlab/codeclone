@@ -20,14 +20,33 @@ from .....paths.gitignore import (
 )
 from .plan import build_setup_plan
 
-ApplyStatus = Literal["noop", "preview", "applied", "partial", "failed", "blocked"]
+ApplyStatus = Literal[
+    "noop", "preview", "applied", "partial", "failed", "blocked", "stale_plan"
+]
 ActionApplyStatus = Literal["applied", "preview", "skipped", "failed"]
 
 
-def apply_setup_plan(root_path: Path, *, dry_run: bool = False) -> dict[str, object]:
-    """Recompute the current plan and apply ready actions in sorted order."""
+def apply_setup_plan(
+    root_path: Path,
+    *,
+    dry_run: bool = False,
+    expected_plan_id: str | None = None,
+) -> dict[str, object]:
+    """Recompute the current plan and apply ready actions in sorted order.
+
+    When ``expected_plan_id`` is supplied, the recomputed plan must match it or the
+    apply is refused with ``status="stale_plan"`` (guards against the repository
+    changing between a ``setup plan`` preview and ``setup apply``).
+    """
 
     plan = build_setup_plan(root_path)
+    if expected_plan_id and str(plan.get("plan_id", "")) != expected_plan_id:
+        return _build_apply_result(
+            plan,
+            status="stale_plan",
+            dry_run=dry_run,
+            results=(),
+        )
     ready_actions = _ready_actions(plan)
     if not ready_actions:
         return _build_apply_result(

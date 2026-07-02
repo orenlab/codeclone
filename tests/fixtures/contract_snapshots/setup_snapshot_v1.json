@@ -57,7 +57,7 @@
       "label": "Audit & intents",
       "readiness": "attention",
       "reason": "Audit trail is disabled in pyproject configuration",
-      "recommended_action": "Enable audit_enabled in [tool.codeclone] to record controller events.",
+      "recommended_action": "Set audit_enabled = true under [tool.codeclone] to record controller events.",
       "runtime": "not_required"
     },
     {
@@ -131,8 +131,8 @@
       "installation": "installed",
       "label": "Engineering Memory",
       "readiness": "attention",
-      "reason": "Engineering Memory store is missing or empty",
-      "recommended_action": "Run codeclone memory init after analysis to populate Engineering Memory.",
+      "reason": "Engineering Memory store has not been created yet",
+      "recommended_action": "Run codeclone memory init after analysis to create the store.",
       "runtime": "not_verified"
     },
     {
@@ -152,17 +152,18 @@
     },
     {
       "availability": "built_in",
-      "configuration": "configured",
+      "configuration": "unconfigured",
       "evidence": [
-        "probe:pyproject:ci_flags"
+        "probe:pyproject:ci_flags",
+        "probe:pyproject:ci_flags:absent"
       ],
       "group": "team_and_release",
       "id": "ci_policy",
       "installation": "installed",
       "label": "CI policy",
-      "readiness": "ready",
-      "reason": "",
-      "recommended_action": "",
+      "readiness": "attention",
+      "reason": "CI gating is optional and is not currently enabled in configuration",
+      "recommended_action": "Enable ci / fail_on_new under [tool.codeclone] to gate changes in CI.",
       "runtime": "not_required"
     },
     {

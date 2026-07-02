@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from ..utils.atomic_write import validate_atomic_target, write_text_atomically
+from ..utils.atomic_write import write_text_atomically
 from .analytics_specs import ANALYTICS_NESTED_TABLE_KEY
 from .memory_specs import MEMORY_NESTED_TABLE_KEY
 from .pyproject_loader import (
@@ -242,13 +242,6 @@ def _load_tomlkit() -> Any:  # Any: lazy tomlkit import boundary
             "tomlkit is required for pyproject writes; install codeclone dependencies."
         ) from exc
     return tomlkit_module
-
-
-def _validate_atomic_target(path: Path) -> None:
-    try:
-        validate_atomic_target(path)
-    except OSError as exc:
-        raise PyprojectWriterError(str(exc)) from exc
 
 
 __all__ = [

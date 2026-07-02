@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ....contracts import ExitCode
+from ....ui_messages import setup as setup_ui
 from ....utils.json_io import json_text
 from ..console import make_query_console
 from ..types import PrinterLike
@@ -31,53 +32,137 @@ from .wizard import run_setup_wizard
 SetupCommand = str
 PayloadBuilder = Callable[[Path], dict[str, object]]
 PayloadRenderer = Callable[[PrinterLike, dict[str, object]], None]
-DirectCommandHandler = Callable[[Path], int]
+
+_APPLY_FAILURE_STATUS: frozenset[str] = frozenset({"failed", "partial"})
+_APPLY_CONTRACT_STATUS: frozenset[str] = frozenset({"blocked", "stale_plan"})
+
+# argparse attribute -> usage message when the flag is used outside `apply`.
+_APPLY_ONLY_FLAGS: tuple[tuple[str, str], ...] = (
+    ("dry_run", setup_ui.SETUP_DRY_RUN_ONLY_APPLY),
+    ("yes", setup_ui.SETUP_YES_ONLY_APPLY),
+    ("plan_id", setup_ui.SETUP_PLAN_ID_ONLY_APPLY),
+)
 
 
 def setup_main(argv: list[str]) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
     root_path = Path(args.root).expanduser().resolve()
-    if not root_path.is_dir():
-        print(f"Repository root does not exist: {root_path}", file=sys.stderr)
+    command = args.command or "status"
+
+    usage_error = _precheck_error(command, root_path, args)
+    if usage_error is not None:
+        print(usage_error, file=sys.stderr)
         return int(ExitCode.CONTRACT_ERROR)
 
-    command = args.command or "status"
-    direct_handler = _DIRECT_COMMANDS.get(command)
-    if direct_handler is not None:
-        return direct_handler(root_path)
     try:
-        payload = _build_payload(command, root_path, dry_run=args.dry_run)
+        return _dispatch(command, root_path, args)
     except Exception as exc:
-        print(f"Setup readiness failed: {exc}", file=sys.stderr)
+        print(f"Setup failed: {exc}", file=sys.stderr)
         return int(ExitCode.INTERNAL_ERROR)
 
+
+def _precheck_error(
+    command: SetupCommand,
+    root_path: Path,
+    args: argparse.Namespace,
+) -> str | None:
+    if not root_path.is_dir():
+        return f"Repository root does not exist: {root_path}"
+    if command != "apply":
+        for attr, message in _APPLY_ONLY_FLAGS:
+            if getattr(args, attr):
+                return message
+    if args.json and command == "wizard":
+        return setup_ui.SETUP_WIZARD_JSON_UNSUPPORTED
+    return None
+
+
+def _dispatch(
+    command: SetupCommand,
+    root_path: Path,
+    args: argparse.Namespace,
+) -> int:
+    if command == "wizard":
+        return run_setup_wizard(root_path)
+    if command == "apply":
+        return _run_apply(root_path, args)
+
+    payload = _PAYLOAD_BUILDERS[command](root_path)
     if args.json:
         _write_json_stdout(payload)
     else:
         _render_payload(command, payload)
-
-    return _exit_code_for_payload(command, payload)
-
-
-def _build_payload(
-    command: SetupCommand,
-    root_path: Path,
-    *,
-    dry_run: bool,
-) -> dict[str, object]:
-    if command == "apply":
-        return apply_setup_plan(root_path, dry_run=dry_run)
-    return _PAYLOAD_BUILDERS[command](root_path)
+    return int(ExitCode.SUCCESS)
 
 
-def _exit_code_for_payload(command: SetupCommand, payload: dict[str, object]) -> int:
-    if command != "apply":
-        return int(ExitCode.SUCCESS)
-    status = str(payload.get("status", ""))
-    if status in {"failed", "partial"}:
+def _run_apply(root_path: Path, args: argparse.Namespace) -> int:
+    if not args.dry_run and not args.yes:
+        gate_exit = _confirmation_gate(root_path)
+        if gate_exit is not None:
+            return gate_exit
+
+    result = apply_setup_plan(
+        root_path,
+        dry_run=args.dry_run,
+        expected_plan_id=args.plan_id or None,
+    )
+    status = str(result.get("status", ""))
+    if args.json:
+        _write_json_stdout(result)
+    elif status == "stale_plan":
+        print(setup_ui.SETUP_APPLY_STALE_PLAN, file=sys.stderr)
+    else:
+        _render_payload("apply", result)
+    return _exit_code_for_apply(status)
+
+
+def _confirmation_gate(root_path: Path) -> int | None:
+    """Preview the plan and confirm before an interactive apply.
+
+    Returns ``None`` when the caller may proceed with the write; otherwise an exit
+    code: refuse without a TTY (``CONTRACT_ERROR``) or an operator decline
+    (``SUCCESS``, nothing written).
+    """
+
+    confirmed = _confirm_apply(root_path)
+    if confirmed:
+        return None
+    if confirmed is None:
+        message, stream, code = (
+            setup_ui.SETUP_APPLY_CONFIRM_REQUIRED,
+            sys.stderr,
+            ExitCode.CONTRACT_ERROR,
+        )
+    else:
+        message, stream, code = (
+            setup_ui.SETUP_APPLY_ABORTED,
+            sys.stdout,
+            ExitCode.SUCCESS,
+        )
+    print(message, file=stream)
+    return int(code)
+
+
+def _confirm_apply(root_path: Path) -> bool | None:
+    """Preview the plan and ask for confirmation on a TTY.
+
+    Returns ``None`` when no interactive terminal is available (caller must refuse
+    without ``--yes``), otherwise the operator's yes/no decision.
+    """
+
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    console = make_query_console(no_color=False)
+    render_setup_plan(console=console, plan=build_setup_plan(root_path))
+    reply = input(f"{setup_ui.SETUP_APPLY_CONFIRM_PROMPT} [y/N] ").strip().lower()
+    return reply in {"y", "yes"}
+
+
+def _exit_code_for_apply(status: str) -> int:
+    if status in _APPLY_FAILURE_STATUS:
         return int(ExitCode.INTERNAL_ERROR)
-    if status == "blocked":
+    if status in _APPLY_CONTRACT_STATUS:
         return int(ExitCode.CONTRACT_ERROR)
     return int(ExitCode.SUCCESS)
 
@@ -105,17 +190,28 @@ def _build_parser() -> argparse.ArgumentParser:
         nargs="?",
         choices=_COMMANDS,
         default="status",
-        help="Readiness view (default: status).",
+        help="Readiness view or action (default: status).",
     )
     parser.add_argument(
         "--json",
         action="store_true",
-        help="Emit setup projection JSON to stdout.",
+        help="Emit setup projection JSON to stdout (status/doctor/plan/apply).",
     )
     parser.add_argument(
         "--dry-run",
         action="store_true",
         help="For apply: preview writes without modifying files.",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="For apply: skip the confirmation prompt (required non-interactively).",
+    )
+    parser.add_argument(
+        "--plan-id",
+        default="",
+        help="For apply: only proceed if the recomputed plan matches this id.",
     )
     parser.add_argument(
         "--root",
@@ -126,10 +222,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 _COMMANDS: tuple[SetupCommand, ...] = ("status", "doctor", "plan", "apply", "wizard")
-
-_DIRECT_COMMANDS: dict[SetupCommand, DirectCommandHandler] = {
-    "wizard": run_setup_wizard,
-}
 
 _PAYLOAD_BUILDERS: dict[SetupCommand, PayloadBuilder] = {
     "status": build_setup_snapshot,

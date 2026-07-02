@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
 from typing import Literal
@@ -208,6 +209,13 @@ def _probe_analysis(ctx: DiscoverContext) -> CapabilityAxes:
 
 def _probe_baseline(ctx: DiscoverContext) -> CapabilityAxes:
     evidence = ["probe:path:baseline"]
+    if ctx.baseline_path.is_symlink():
+        return CapabilityAxes(
+            installation="unknown",
+            configuration="not_required",
+            runtime="not_required",
+            evidence=[*evidence, "probe:path:baseline:symlink"],
+        )
     if not ctx.baseline_path.exists():
         return CapabilityAxes(
             installation="installed",
@@ -215,7 +223,14 @@ def _probe_baseline(ctx: DiscoverContext) -> CapabilityAxes:
             runtime="not_required",
             evidence=[*evidence, "probe:path:baseline:missing"],
         )
-
+    if ctx.baseline_status is None:
+        # File present but could not be read (permissions / IO error): fail closed.
+        return CapabilityAxes(
+            installation="unknown",
+            configuration="not_required",
+            runtime="not_required",
+            evidence=[*evidence, "probe:path:baseline:unreadable"],
+        )
     if ctx.baseline_status is BaselineStatus.OK:
         return CapabilityAxes(
             installation="installed",
@@ -224,9 +239,8 @@ def _probe_baseline(ctx: DiscoverContext) -> CapabilityAxes:
             evidence=[*evidence, "probe:baseline:trust"],
         )
 
-    status_token = (
-        ctx.baseline_status.value if ctx.baseline_status is not None else "unknown"
-    )
+    # Present but untrusted/corrupt: attention (baseline never hard-blocks core
+    # analysis), with the precise status carried on evidence for doctor output.
     return CapabilityAxes(
         installation="installed",
         configuration="unconfigured",
@@ -234,7 +248,7 @@ def _probe_baseline(ctx: DiscoverContext) -> CapabilityAxes:
         evidence=[
             *evidence,
             "probe:baseline:trust",
-            f"probe:baseline:status:{status_token}",
+            f"probe:baseline:status:{ctx.baseline_status.value}",
         ],
     )
 
@@ -315,10 +329,14 @@ def _probe_audit_and_intents(ctx: DiscoverContext) -> CapabilityAxes:
         )
 
     evidence.append("probe:audit:summary")
+    # DB present and enabled: distinguish a populated trail (runtime-verified) from
+    # an empty one (configured but nothing recorded yet).
+    has_events = ctx.audit_summary_events > 0
+    runtime: RuntimeAxis = "verified" if has_events else "not_verified"
     return CapabilityAxes(
         installation="installed",
         configuration="configured",
-        runtime="not_verified",
+        runtime=runtime,
         evidence=evidence,
     )
 
@@ -327,6 +345,7 @@ def _probe_engineering_memory(ctx: DiscoverContext) -> CapabilityAxes:
     evidence = ["probe:memory:status"]
     report = ctx.memory_report
     if report is None:
+        # No report is only produced when pyproject config failed to load.
         return CapabilityAxes(
             installation="installed",
             configuration="invalid" if ctx.config_error else "unconfigured",
@@ -340,11 +359,13 @@ def _probe_engineering_memory(ctx: DiscoverContext) -> CapabilityAxes:
             runtime="not_verified",
             evidence=evidence,
         )
+    # Store present: verified only when it actually holds records.
+    runtime: RuntimeAxis = "verified" if report.record_count > 0 else "not_verified"
     return CapabilityAxes(
         installation="installed",
         configuration="configured",
-        runtime="not_verified",
-        evidence=evidence,
+        runtime=runtime,
+        evidence=[*evidence, "probe:memory:records"],
     )
 
 
@@ -361,11 +382,12 @@ def _probe_semantic_retrieval(ctx: DiscoverContext) -> CapabilityAxes:
 
     report = ctx.memory_report
     if report is None or not report.db_exists:
+        # Packages present but semantic retrieval needs a memory store to operate.
         return CapabilityAxes(
             installation="installed",
-            configuration="not_required",
+            configuration="unconfigured",
             runtime="not_verified",
-            evidence=evidence,
+            evidence=[*evidence, "probe:memory:store:missing"],
         )
 
     memory_config = resolve_memory_config(ctx.root_path, pyproject_config=ctx.config)
@@ -431,11 +453,13 @@ def _probe_ci_policy(ctx: DiscoverContext) -> CapabilityAxes:
         for flag in ("ci", "fail_on_new", "fail_on_new_metrics")
     )
     if not ci_like:
+        # No CI gating flags set. This is an opt-in team feature, so report it as
+        # not-yet-configured (attention) rather than claiming it is "configured".
         return CapabilityAxes(
             installation="installed",
-            configuration="configured",
+            configuration="unconfigured",
             runtime="not_required",
-            evidence=evidence,
+            evidence=[*evidence, "probe:pyproject:ci_flags:absent"],
         )
 
     if ctx.baseline_status is not BaselineStatus.OK:
@@ -474,12 +498,13 @@ def _probe_github_workflow(ctx: DiscoverContext) -> CapabilityAxes:
             evidence=[*evidence, "probe:file:.github/workflows:missing"],
         )
     markers = ("codeclone", "orenlab/codeclone")
+    saw_unreadable = False
     for path in sorted(workflows_dir.glob("*")):
         if path.suffix not in {".yml", ".yaml"}:
             continue
-        try:
-            text = path.read_text(encoding="utf-8")
-        except OSError:
+        text, existed = _safe_read_text(path)
+        if text is None:
+            saw_unreadable = saw_unreadable or existed
             continue
         lowered = text.lower()
         if any(marker in lowered for marker in markers):
@@ -489,6 +514,13 @@ def _probe_github_workflow(ctx: DiscoverContext) -> CapabilityAxes:
                 runtime="not_required",
                 evidence=[*evidence, f"probe:file:{path.name}"],
             )
+    if saw_unreadable:
+        return CapabilityAxes(
+            installation="unknown",
+            configuration="not_required",
+            runtime="not_required",
+            evidence=[*evidence, "probe:file:.github/workflows:unreadable"],
+        )
     return CapabilityAxes(
         installation="installed",
         configuration="unconfigured",
@@ -500,21 +532,20 @@ def _probe_github_workflow(ctx: DiscoverContext) -> CapabilityAxes:
 def _probe_pre_commit_hook(ctx: DiscoverContext) -> CapabilityAxes:
     config_path = ctx.root_path / ".pre-commit-config.yaml"
     evidence = ["probe:file:.pre-commit-config.yaml"]
-    if not config_path.is_file():
+    text, existed = _safe_read_text(config_path)
+    if text is None:
+        if existed:
+            return CapabilityAxes(
+                installation="unknown",
+                configuration="not_required",
+                runtime="not_required",
+                evidence=[*evidence, "probe:file:.pre-commit-config.yaml:unreadable"],
+            )
         return CapabilityAxes(
             installation="installed",
             configuration="unconfigured",
             runtime="not_required",
             evidence=[*evidence, "probe:file:.pre-commit-config.yaml:missing"],
-        )
-    try:
-        text = config_path.read_text(encoding="utf-8")
-    except OSError:
-        return CapabilityAxes(
-            installation="unknown",
-            configuration="unconfigured",
-            runtime="not_required",
-            evidence=[*evidence, "probe:file:.pre-commit-config.yaml:unreadable"],
         )
     if "codeclone" in text.lower():
         return CapabilityAxes(
@@ -578,7 +609,8 @@ def _probe_baseline_status(baseline_path: Path) -> BaselineStatus | None:
     except BaselineValidationError as exc:
         return coerce_baseline_status(exc.status)
     except OSError:
-        return BaselineStatus.INVALID_JSON
+        # Unreadable file (permissions / IO): unknown, not "invalid JSON".
+        return None
     return BaselineStatus.OK
 
 
@@ -637,18 +669,38 @@ def _tool_codeclone_section_present(root_path: Path) -> bool:
 
 
 def _client_config_present(root_path: Path) -> bool:
-    if (root_path / ".cursor" / "mcp.json").is_file():
-        return True
-    if (root_path / ".mcp.json").is_file():
-        return True
+    for candidate in (root_path / ".cursor" / "mcp.json", root_path / ".mcp.json"):
+        if candidate.is_file() and not candidate.is_symlink():
+            return True
     vscode_settings = root_path / ".vscode" / "settings.json"
-    if vscode_settings.is_file():
-        try:
-            text = vscode_settings.read_text(encoding="utf-8")
-        except OSError:
-            return False
-        return "codeclone" in text.lower()
-    return False
+    text, _existed = _safe_read_text(vscode_settings)
+    if text is None:
+        return False
+    lowered = text.lower()
+    # Match the MCP server key names, not any incidental "codeclone" substring
+    # (a path or comment) that would falsely mark the client as configured.
+    return "codeclone-mcp" in lowered or '"codeclone"' in lowered
+
+
+def _safe_read_text(path: Path) -> tuple[str | None, bool]:
+    """Read a regular file under the repo root without following symlinks.
+
+    Returns ``(text, existed)``. ``text`` is ``None`` when the path is absent, is
+    a symlink (refused), or cannot be read; ``existed`` is ``True`` whenever the
+    path is present on disk (including a refused symlink or an unreadable file),
+    which lets callers distinguish "missing" from "present but unknown".
+    """
+
+    if path.is_symlink():
+        return None, True
+    if not path.is_file():
+        return None, False
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        with open(fd, encoding="utf-8") as handle:
+            return handle.read(), True
+    except OSError:
+        return None, True
 
 
 def _memory_db_exists(ctx: DiscoverContext) -> bool:

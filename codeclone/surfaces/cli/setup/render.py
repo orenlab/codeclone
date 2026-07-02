@@ -49,6 +49,7 @@ def render_setup_plan(*, console: PrinterLike, plan: Mapping[str, object]) -> No
 def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
     _, _panel_cls, rule_cls, table_cls, _ = rich_panel_symbols()
     runtime = _mapping(snapshot.get("runtime"))
+    install = _mapping(snapshot.get("install"))
     console.print(setup_ui.SETUP_STATUS_TITLE)
     console.print()
     console.print(
@@ -57,7 +58,14 @@ def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
     console.print(
         f"  [dim]Root:[/dim] {snapshot.get('root')}  "
         f"[dim]Python:[/dim] {runtime.get('python_tag')}  "
-        f"[dim]CodeClone:[/dim] {runtime.get('codeclone_version')}"
+        f"[dim]CodeClone:[/dim] {runtime.get('codeclone_version')}  "
+        f"[dim]{setup_ui.SETUP_STATUS_BASE_LABEL}:[/dim] {install.get('base')}"
+    )
+    commit = snapshot.get("head_commit") or "\u2014"
+    console.print(
+        f"  [dim]Schema:[/dim] {snapshot.get('schema_version')}  "
+        f"[dim]Recomputation:[/dim] {snapshot.get('recomputation')}  "
+        f"[dim]Commit:[/dim] {commit}"
     )
     maturity = _mapping(snapshot.get("maturity"))
     console.print(
@@ -76,14 +84,17 @@ def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
         console.print(setup_ui.GROUP_LABELS[group])
         table = table_cls(show_header=True, header_style="bold")
         table.add_column("Capability", style="bold")
+        table.add_column("Availability")
         table.add_column("Readiness")
         table.add_column("Reason")
+        table.add_column("Next step")
         for row in rows:
-            reason = str(row.get("reason", ""))
             table.add_row(
                 str(row.get("label", "")),
+                _availability_label(row.get("availability")),
                 str(row.get("readiness", "")),
-                reason if reason else "-",
+                str(row.get("reason", "")) or "-",
+                str(row.get("recommended_action", "")) or "-",
             )
         console.print(table)
         console.print()
@@ -92,36 +103,59 @@ def _render_status_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
 def _render_doctor_rich(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
     _, panel_cls, rule_cls, _table_cls, _ = rich_panel_symbols()
     _render_status_rich(console, snapshot)
-    console.print(rule_cls(title="Probe diagnostics", style="dim", characters="\u2500"))
-    for row in _capabilities(snapshot):
-        cap_id = str(row.get("id", ""))
-        evidence = row.get("evidence")
-        evidence_text = ", ".join(evidence) if isinstance(evidence, list) else ""
-        action = str(row.get("recommended_action", ""))
-        body = (
-            f"id={cap_id}\n"
-            f"installation={row.get('installation')}  "
-            f"configuration={row.get('configuration')}  "
-            f"runtime={row.get('runtime')}\n"
-            f"evidence={evidence_text or '-'}\n"
-            f"action={action or '-'}"
+    console.print(
+        rule_cls(
+            title=setup_ui.SETUP_DOCTOR_PROBES_HEADER,
+            style="dim",
+            characters="\u2500",
         )
-        console.print(panel_cls(body, title=str(row.get("label", cap_id))))
+    )
+    for row in _capabilities(snapshot):
+        console.print(
+            panel_cls(
+                _doctor_body(row),
+                title=str(row.get("label", row.get("id", ""))),
+            )
+        )
+
+
+def _doctor_body(row: Mapping[str, object]) -> str:
+    evidence = row.get("evidence")
+    evidence_text = ", ".join(evidence) if isinstance(evidence, list) else ""
+    reason = str(row.get("reason", ""))
+    action = str(row.get("recommended_action", ""))
+    return (
+        f"id={row.get('id')}  availability={row.get('availability')}  "
+        f"readiness={row.get('readiness')}\n"
+        f"installation={row.get('installation')}  "
+        f"configuration={row.get('configuration')}  "
+        f"runtime={row.get('runtime')}\n"
+        f"cause={reason or '-'}\n"
+        f"{setup_ui.SETUP_DOCTOR_PROBES_LABEL}={evidence_text or '-'}\n"
+        f"action={action or '-'}"
+    )
 
 
 def _render_status_plain(console: PrinterLike, snapshot: Mapping[str, object]) -> None:
     runtime = _mapping(snapshot.get("runtime"))
+    install = _mapping(snapshot.get("install"))
     console.print(setup_ui.SETUP_STATUS_TITLE)
     console.print(f"root: {snapshot.get('root')}")
     console.print(
         f"python: {runtime.get('python_tag')}  "
-        f"codeclone: {runtime.get('codeclone_version')}"
+        f"codeclone: {runtime.get('codeclone_version')}  "
+        f"base: {install.get('base')}  "
+        f"schema: {snapshot.get('schema_version')}"
     )
     for row in _capabilities(snapshot):
         reason = str(row.get("reason", ""))
-        line = f"{row.get('label')}: {row.get('readiness')} ({row.get('availability')})"
+        action = str(row.get("recommended_action", ""))
+        availability = _availability_label(row.get("availability"))
+        line = f"{row.get('label')}: {row.get('readiness')} ({availability})"
         if reason:
             line = f"{line} — {reason}"
+        if action:
+            line = f"{line} → {action}"
         console.print(line)
 
 
@@ -131,7 +165,12 @@ def _render_doctor_plain(console: PrinterLike, snapshot: Mapping[str, object]) -
     for row in _capabilities(snapshot):
         evidence = row.get("evidence")
         if isinstance(evidence, list) and evidence:
-            console.print(f"  evidence[{row.get('id')}]: {', '.join(evidence)}")
+            label = setup_ui.SETUP_DOCTOR_PROBES_LABEL
+            console.print(f"  {label}[{row.get('id')}]: {', '.join(evidence)}")
+
+
+def _availability_label(availability: object) -> str:
+    return setup_ui.AVAILABILITY_LABELS.get(str(availability), str(availability))
 
 
 def _render_plan_rich(console: PrinterLike, plan: Mapping[str, object]) -> None:

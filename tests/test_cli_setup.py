@@ -42,8 +42,8 @@ from codeclone.surfaces.cli.setup.engine.plan import build_setup_plan
 from codeclone.surfaces.cli.setup.engine.rollup import (
     _axes_satisfied,
     _optional_install_hint,
-    apply_capability_presentation,
     derive_readiness,
+    describe_capability,
 )
 from codeclone.surfaces.cli.setup.main import setup_main
 from codeclone.surfaces.cli.setup.wizard import WizardPrompts, run_setup_wizard
@@ -88,6 +88,19 @@ def base_install_find_spec(monkeypatch: pytest.MonkeyPatch) -> None:
         "codeclone.analytics.capabilities._package_available",
         lambda _name: False,
     )
+
+
+def _present(
+    meta: CapabilityMeta,
+    axes: CapabilityAxes,
+    readiness: str,
+    ctx: DiscoverContext,
+) -> tuple[str, str, str]:
+    """Bridge for tests: readiness is authoritative (derive_readiness); this echoes
+    the given readiness and returns the presentation reason/action for it."""
+
+    reason, action = describe_capability(meta, axes, readiness, ctx)  # type: ignore[arg-type]
+    return readiness, reason, action
 
 
 def _capability_rows(snapshot: dict[str, object]) -> list[dict[str, object]]:
@@ -202,6 +215,9 @@ def test_setup_json_stable_ordering(
     root = _build_canonical_fixture_root(tmp_path)
     first = build_setup_snapshot(root)
     second = build_setup_snapshot(root)
+    # Full byte-identical determinism on a fixed repo/install/config state (I-05).
+    assert first == second
+    assert json_text(first, sort_keys=True) == json_text(second, sort_keys=True)
     first_caps = _capability_rows(first)
     second_caps = _capability_rows(second)
     assert first_caps == second_caps
@@ -210,18 +226,22 @@ def test_setup_json_stable_ordering(
         group: index for index, group in enumerate(GROUP_ORDER)
     }
     assert groups == sorted(groups, key=lambda group: group_rank[group])
-    within_group_ids = [
-        item["id"]
-        for group in GROUP_ORDER
-        for item in first_caps
-        if item["group"] == group
+    # Global order is (group rank, then capability id lexicographically).
+    ordered_keys = [
+        (group_rank[str(item["group"])], str(item["id"])) for item in first_caps
     ]
-    assert within_group_ids == sorted(
-        within_group_ids,
-        key=lambda cap_id: next(
-            index for index, item in enumerate(first_caps) if item["id"] == cap_id
-        ),
-    )
+    assert ordered_keys == sorted(ordered_keys)
+    # And within each group, ids are strictly lexicographic.
+    for group in GROUP_ORDER:
+        ids_in_group = [
+            str(item["id"]) for item in first_caps if item["group"] == group
+        ]
+        assert ids_in_group == sorted(ids_in_group)
+    # evidence lists are sorted within each capability.
+    for item in first_caps:
+        evidence = item["evidence"]
+        assert isinstance(evidence, list)
+        assert evidence == sorted(evidence)
 
 
 def test_baseline_ready_with_trusted_baseline(
@@ -259,11 +279,12 @@ def test_malformed_pyproject_marks_analysis_invalid(
         encoding="utf-8",
     )
     snapshot = build_setup_snapshot(tmp_path)
-    analysis = next(
-        item for item in _capability_rows(snapshot) if item["id"] == "analysis"
-    )
-    assert analysis["configuration"] == "invalid"
-    assert analysis["readiness"] == "blocked"
+    rows = {str(item["id"]): item for item in _capability_rows(snapshot)}
+    # Every built-in required capability fails closed to blocked; in particular
+    # engineering_memory must not be masked as attention (no false "run init").
+    for cap_id in ("analysis", "engineering_memory", "audit_and_intents", "ci_policy"):
+        assert rows[cap_id]["configuration"] == "invalid"
+        assert rows[cap_id]["readiness"] == "blocked"
 
 
 def test_optional_extra_installed_invalid_config_is_attention_not_blocked() -> None:
@@ -390,7 +411,7 @@ def test_status_output_positioning_vocabulary(
     assert "edit_allowed" not in text
 
 
-def test_audit_configured_is_attention_not_blocked(
+def test_audit_populated_trail_is_ready(
     tmp_path: Path,
     base_install_find_spec: None,
 ) -> None:
@@ -417,8 +438,26 @@ def test_audit_configured_is_attention_not_blocked(
     audit = next(
         item for item in _capability_rows(snapshot) if item["id"] == "audit_and_intents"
     )
+    # A populated audit trail is runtime-verified -> ready (never blocked).
+    assert audit["runtime"] == "verified"
+    assert audit["readiness"] == "ready"
+
+
+def test_audit_enabled_empty_db_is_attention(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
+    db_path = tmp_path / ".codeclone" / "db" / "audit.sqlite3"
+    db_path.parent.mkdir(parents=True)
+    SqliteAuditWriter(db_path=db_path, payloads="compact", retention_days=30).close()
+    snapshot = build_setup_snapshot(tmp_path)
+    audit = next(
+        item for item in _capability_rows(snapshot) if item["id"] == "audit_and_intents"
+    )
+    # DB exists but no events recorded yet -> attention, not ready, never blocked.
     assert audit["readiness"] == "attention"
-    assert str(audit["readiness"]) != "blocked"
+    assert audit["runtime"] == "not_verified"
 
 
 def test_setup_json_serialization_contract(
@@ -634,7 +673,9 @@ def test_setup_apply_main_exit_success(
 ) -> None:
     _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=True)
     (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
-    assert setup_main(["apply", "--root", str(tmp_path)]) == int(ExitCode.SUCCESS)
+    assert setup_main(["apply", "--yes", "--root", str(tmp_path)]) == int(
+        ExitCode.SUCCESS
+    )
 
 
 def test_setup_wizard_requires_tty(
@@ -976,7 +1017,7 @@ def test_setup_main_apply_failed_exit(
     apply_mod = _fresh_apply_module()
     monkeypatch.setattr(apply_mod, "merge_tool_codeclone", _fail_merge)
     setup_main = _fresh_setup_main()
-    assert setup_main(["apply", "--root", str(tmp_path)]) == int(
+    assert setup_main(["apply", "--yes", "--root", str(tmp_path)]) == int(
         ExitCode.INTERNAL_ERROR
     )
 
@@ -1290,7 +1331,7 @@ def test_setup_presentation_handlers(tmp_path: Path) -> None:
         runtime="not_required",
         evidence=[],
     )
-    readiness, reason, _action = apply_capability_presentation(
+    readiness, reason, _action = _present(
         mcp_meta,
         missing_axes,
         "optional",
@@ -1300,7 +1341,7 @@ def test_setup_presentation_handlers(tmp_path: Path) -> None:
     assert reason
 
     controlled_meta = _capability_meta("controlled_change")
-    readiness, _, _ = apply_capability_presentation(
+    readiness, _, _ = _present(
         controlled_meta,
         missing_axes,
         "optional",
@@ -1309,7 +1350,7 @@ def test_setup_presentation_handlers(tmp_path: Path) -> None:
     assert readiness == "optional"
 
     baseline_meta = _capability_meta("baseline")
-    readiness, _, _ = apply_capability_presentation(
+    readiness, _, _ = _present(
         baseline_meta,
         CapabilityAxes(
             installation="installed",
@@ -1378,7 +1419,7 @@ def test_setup_presentation_default_for_unknown_capability(tmp_path: Path) -> No
         group="core_analysis",
         availability="built_in",
     )
-    readiness, reason, action = apply_capability_presentation(
+    readiness, reason, action = _present(
         unknown_meta,
         CapabilityAxes(
             installation="installed",
@@ -1396,9 +1437,16 @@ def test_setup_presentation_default_for_unknown_capability(tmp_path: Path) -> No
 
 def test_setup_main_apply_blocked_exit_code() -> None:
     setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
-    assert setup_main_mod._exit_code_for_payload("apply", {"status": "blocked"}) == int(
+    assert setup_main_mod._exit_code_for_apply("blocked") == int(
         ExitCode.CONTRACT_ERROR
     )
+    assert setup_main_mod._exit_code_for_apply("stale_plan") == int(
+        ExitCode.CONTRACT_ERROR
+    )
+    assert setup_main_mod._exit_code_for_apply("partial") == int(
+        ExitCode.INTERNAL_ERROR
+    )
+    assert setup_main_mod._exit_code_for_apply("applied") == int(ExitCode.SUCCESS)
 
 
 def test_setup_rollup_analytics_optional_hint() -> None:
@@ -1507,7 +1555,7 @@ def test_setup_derive_readiness_optional_extra_invalid_config() -> None:
 
 def test_setup_presentation_default_ready_path(tmp_path: Path) -> None:
     ctx = _empty_discover_context(tmp_path)
-    readiness, reason, action = apply_capability_presentation(
+    readiness, reason, action = _present(
         CapabilityMeta(
             id="not_registered_capability",
             group="core_analysis",
@@ -1617,27 +1665,17 @@ def test_setup_apply_gitignore_write_oserror(
     assert row["message"] == "write failed"
 
 
-def test_setup_discover_vscode_settings_read_oserror(
+def test_setup_discover_vscode_settings_symlink_refused(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     vscode_dir = tmp_path / ".vscode"
     vscode_dir.mkdir()
     settings = vscode_dir / "settings.json"
     settings.write_text('{"mcp.servers": {"codeclone": {}}}', encoding="utf-8")
     assert _client_config_present(tmp_path) is True
-    original_read_text = Path.read_text
-
-    def _patched_read_text(
-        self: Path,
-        *args: object,
-        **kwargs: object,
-    ) -> str:
-        if self == settings:
-            raise OSError("settings unreadable")
-        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(Path, "read_text", _patched_read_text)
+    # A symlinked settings file is refused (fail closed), so not detected.
+    settings.unlink()
+    settings.symlink_to(tmp_path / "does-not-exist.json")
     assert _client_config_present(tmp_path) is False
 
 
@@ -1721,7 +1759,6 @@ def test_setup_discover_analysis_find_spec_import_error(
 
 def test_setup_discover_github_and_pre_commit_probes(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from codeclone.surfaces.cli.setup.engine import discover as discover_mod
 
@@ -1736,28 +1773,15 @@ def test_setup_discover_github_and_pre_commit_probes(
     github_axes = discover_mod._probe_github_workflow(ctx)
     assert github_axes.configuration == "configured"
 
-    unreadable = workflows / "unreadable.yml"
-    unreadable.write_text("placeholder", encoding="utf-8")
-    original_read_text = Path.read_text
-
-    def _patched_read_text(
-        self: Path,
-        *args: object,
-        **kwargs: object,
-    ) -> str:
-        if self == unreadable:
-            raise OSError("workflow unreadable")
-        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(Path, "read_text", _patched_read_text)
+    # A workflow that is a refused symlink is the only entry -> unknown install.
     broken_root = tmp_path / "broken-workflows"
     broken_root.mkdir()
     broken_ctx = _empty_discover_context(broken_root)
     only_unreadable = broken_root / ".github" / "workflows"
     only_unreadable.mkdir(parents=True)
-    (only_unreadable / "broken.yml").write_text("x", encoding="utf-8")
+    (only_unreadable / "broken.yml").symlink_to(broken_root / "missing.yml")
     broken_axes = discover_mod._probe_github_workflow(broken_ctx)
-    assert broken_axes.configuration == "unconfigured"
+    assert broken_axes.installation == "unknown"
 
     pre_commit = tmp_path / ".pre-commit-config.yaml"
     pre_commit.write_text("repos:\n  - repo: local\n", encoding="utf-8")
@@ -1766,13 +1790,12 @@ def test_setup_discover_github_and_pre_commit_probes(
     pre_commit.write_text("repos:\n  - repo: codeclone\n", encoding="utf-8")
     assert discover_mod._probe_pre_commit_hook(ctx).configuration == "configured"
 
-    def _pre_commit_oserror(self: Path, *args: object, **kwargs: object) -> str:
-        if self == pre_commit:
-            raise OSError("pre-commit unreadable")
-        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
-
-    monkeypatch.setattr(Path, "read_text", _pre_commit_oserror)
-    unreadable_pre_commit = discover_mod._probe_pre_commit_hook(ctx)
+    # A symlinked pre-commit config is refused -> unknown installation.
+    symlink_root = tmp_path / "symlink-precommit"
+    symlink_root.mkdir()
+    symlink_ctx = _empty_discover_context(symlink_root)
+    (symlink_root / ".pre-commit-config.yaml").symlink_to(symlink_root / "missing.yaml")
+    unreadable_pre_commit = discover_mod._probe_pre_commit_hook(symlink_ctx)
     assert unreadable_pre_commit.installation == "unknown"
 
 
@@ -1818,7 +1841,7 @@ def test_setup_discover_baseline_status_oserror(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from codeclone.baseline import Baseline, BaselineStatus
+    from codeclone.baseline import Baseline
     from codeclone.surfaces.cli.setup.engine import discover as discover_mod
 
     baseline_path = tmp_path / "codeclone.baseline.json"
@@ -1828,10 +1851,8 @@ def test_setup_discover_baseline_status_oserror(
         raise OSError("baseline unreadable")
 
     monkeypatch.setattr(Baseline, "load", _load_oserror)
-    assert (
-        discover_mod._probe_baseline_status(baseline_path)
-        == BaselineStatus.INVALID_JSON
-    )
+    # An unreadable baseline is "unknown" (fail closed), not "invalid JSON".
+    assert discover_mod._probe_baseline_status(baseline_path) is None
 
 
 def test_setup_discover_tool_codeclone_section_edge_cases(tmp_path: Path) -> None:
@@ -1849,7 +1870,7 @@ def test_setup_discover_tool_codeclone_section_edge_cases(tmp_path: Path) -> Non
 def test_setup_presentation_controlled_change_unconfigured(tmp_path: Path) -> None:
     ctx = _empty_discover_context(tmp_path)
     meta = _capability_meta("controlled_change")
-    readiness, reason, action = apply_capability_presentation(
+    readiness, reason, action = _present(
         meta,
         CapabilityAxes(
             installation="installed",
@@ -1867,7 +1888,7 @@ def test_setup_presentation_controlled_change_unconfigured(tmp_path: Path) -> No
 
 def test_setup_presentation_default_optional_path(tmp_path: Path) -> None:
     ctx = _empty_discover_context(tmp_path)
-    readiness, reason, action = apply_capability_presentation(
+    readiness, reason, action = _present(
         CapabilityMeta(
             id="not_registered_capability",
             group="core_analysis",
@@ -1903,7 +1924,7 @@ def test_setup_presentation_baseline_untrusted(tmp_path: Path) -> None:
         mcp_installed=False,
     )
     meta = _capability_meta("baseline")
-    readiness, reason, action = apply_capability_presentation(
+    readiness, reason, action = _present(
         meta,
         CapabilityAxes(
             installation="installed",
@@ -1917,3 +1938,173 @@ def test_setup_presentation_baseline_untrusted(tmp_path: Path) -> None:
     assert readiness == "attention"
     assert reason
     assert action
+
+
+# ---------------------------------------------------------------------------
+# Isolation / permission regression (§17.2, §17.4, AC-01, AC-09)
+# ---------------------------------------------------------------------------
+
+
+def test_setup_main_does_not_import_mcp_surface(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    for name in list(sys.modules):
+        if name.startswith("codeclone.surfaces.mcp"):
+            del sys.modules[name]
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        assert setup_main(["status", "--json", "--root", str(tmp_path)]) == int(
+            ExitCode.SUCCESS
+        )
+    assert not any(name.startswith("codeclone.surfaces.mcp") for name in sys.modules)
+
+
+def test_setup_does_not_create_intents(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    for command in ("status", "doctor", "plan"):
+        with redirect_stdout(io.StringIO()):
+            setup_main([command, "--root", str(tmp_path)])
+    assert not (tmp_path / ".codeclone" / "intents").exists()
+
+
+# ---------------------------------------------------------------------------
+# Mutation safety: confirmation gate and plan-id binding (§3.3, TOCTOU)
+# ---------------------------------------------------------------------------
+
+
+def test_apply_refuses_without_yes_noninteractive(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+    monkeypatch.setattr("sys.stdout.isatty", lambda: False)
+    before = pyproject.read_text(encoding="utf-8")
+    rc = setup_main(["apply", "--root", str(tmp_path)])
+    assert rc == int(ExitCode.CONTRACT_ERROR)
+    assert pyproject.read_text(encoding="utf-8") == before
+
+
+def test_apply_stale_plan_id_refused_no_write(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    result = apply_setup_plan(tmp_path, expected_plan_id="deadbeefdeadbeef")
+    assert result["status"] == "stale_plan"
+    assert "[tool.codeclone]" not in pyproject.read_text(encoding="utf-8")
+
+
+def test_apply_matching_plan_id_proceeds(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+    (tmp_path / ".gitignore").write_text(".codeclone/\n", encoding="utf-8")
+    plan = build_setup_plan(tmp_path)
+    result = apply_setup_plan(tmp_path, expected_plan_id=str(plan["plan_id"]))
+    assert result["status"] == "applied"
+
+
+# ---------------------------------------------------------------------------
+# Flag validation (§10.9 grammar)
+# ---------------------------------------------------------------------------
+
+
+def test_flag_validation_rejects_dry_run_on_status(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    assert setup_main(["status", "--dry-run", "--root", str(tmp_path)]) == int(
+        ExitCode.CONTRACT_ERROR
+    )
+
+
+def test_flag_validation_rejects_wizard_json(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    assert setup_main(["wizard", "--json", "--root", str(tmp_path)]) == int(
+        ExitCode.CONTRACT_ERROR
+    )
+
+
+# ---------------------------------------------------------------------------
+# Readiness honesty regressions (§8.5, §10.4.3)
+# ---------------------------------------------------------------------------
+
+
+def test_ci_policy_not_enabled_is_attention(
+    tmp_path: Path,
+    base_install_find_spec: None,
+) -> None:
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    snapshot = build_setup_snapshot(tmp_path)
+    ci_policy = next(
+        item for item in _capability_rows(snapshot) if item["id"] == "ci_policy"
+    )
+    assert ci_policy["configuration"] == "unconfigured"
+    assert ci_policy["readiness"] == "attention"
+
+
+def test_semantic_without_store_is_attention(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.check_capability",
+        lambda name: type(
+            "Status", (), {"available": name == "embed", "missing_packages": []}
+        )(),
+    )
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+        memory_report=None,
+    )
+    axes = discover_mod._probe_semantic_retrieval(ctx)
+    # Packages present but no memory store to index -> unconfigured -> attention.
+    assert axes.installation == "installed"
+    assert axes.configuration == "unconfigured"
+    assert derive_readiness(_capability_meta("semantic_retrieval"), axes) == "attention"
+
+
+def test_governed_maturity_reachable_when_mcp_configured(
+    tmp_path: Path,
+) -> None:
+    # Regression for the maturity.governed inversion: installing AND configuring
+    # MCP must make controlled_change ready and governed True.
+    if importlib.util.find_spec("mcp") is None:
+        pytest.skip("mcp extra not installed in this environment")
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    (tmp_path / ".mcp.json").write_text("{}", encoding="utf-8")
+    snapshot = build_setup_snapshot(tmp_path)
+    controlled = next(
+        item for item in _capability_rows(snapshot) if item["id"] == "controlled_change"
+    )
+    assert controlled["readiness"] == "ready"
+    maturity = cast(dict[str, object], snapshot["maturity"])
+    assert maturity["governed"] is True

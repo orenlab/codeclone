@@ -118,6 +118,7 @@ CAPABILITY_REGISTRY: Final[tuple[CapabilityMeta, ...]] = (
         group="governed_agent_workflows",
         availability="optional_extra",
         optional_extra_name="mcp",
+        requires_runtime_proof=True,
     ),
     CapabilityMeta(
         id="controlled_change",
@@ -131,12 +132,14 @@ CAPABILITY_REGISTRY: Final[tuple[CapabilityMeta, ...]] = (
         group="governed_agent_workflows",
         availability="built_in",
         requires_config=True,
+        requires_runtime_proof=True,
     ),
     CapabilityMeta(
         id="engineering_memory",
         group="project_knowledge",
         availability="built_in",
         requires_config=True,
+        requires_runtime_proof=True,
     ),
     CapabilityMeta(
         id="semantic_retrieval",
