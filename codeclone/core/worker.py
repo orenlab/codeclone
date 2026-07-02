@@ -139,6 +139,26 @@ def process_file(
         )
 
 
+def _call_process_file(
+    process_callable: Callable[..., FileProcessResult],
+    filepath: str,
+    root: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+    *,
+    supported_kwargs: dict[str, object],
+) -> FileProcessResult:
+    return process_callable(
+        filepath,
+        root,
+        cfg,
+        min_loc,
+        min_stmt,
+        **supported_kwargs,
+    )
+
+
 def _invoke_process_file(
     filepath: str,
     root: str,
@@ -176,13 +196,14 @@ def _invoke_process_file(
             for key, value in optional_kwargs.items()
             if key in supported_names
         }
-    return process_callable(
+    return _call_process_file(
+        process_callable,
         filepath,
         root,
         cfg,
         min_loc,
         min_stmt,
-        **supported_kwargs,
+        supported_kwargs=supported_kwargs,
     )
 
 
