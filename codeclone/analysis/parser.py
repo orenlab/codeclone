@@ -13,12 +13,25 @@ import os
 import signal
 import tokenize
 from contextlib import contextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ..contracts.errors import ParseError
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping
+
+
+class _ResourceUsage(Protocol):
+    ru_utime: float
+    ru_stime: float
+
+
+@runtime_checkable
+class _ResourceModule(Protocol):
+    RUSAGE_SELF: int
+
+    def getrusage(self, who: int, /) -> _ResourceUsage: ...
+
 
 PARSE_TIMEOUT_SECONDS = 5
 
@@ -33,10 +46,10 @@ _DECLARATION_TOKEN_STRINGS = frozenset({"def", "async", "class"})
 
 def _consumed_cpu_seconds(resource_module: object) -> float:
     """Return consumed CPU seconds for the current process."""
+    if not isinstance(resource_module, _ResourceModule):
+        return 0.0
     try:
-        usage = resource_module.getrusage(  # type: ignore[attr-defined]
-            resource_module.RUSAGE_SELF  # type: ignore[attr-defined]
-        )
+        usage = resource_module.getrusage(resource_module.RUSAGE_SELF)
         return float(usage.ru_utime) + float(usage.ru_stime)
     except Exception:
         return 0.0

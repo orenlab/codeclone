@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import ast
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from ..meta_markers import CFG_META_PREFIX
 from .cfg_model import CFG, Block
@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 __all__ = ["CFG", "CFGBuilder"]
 
 TryStar = getattr(ast, "TryStar", ast.Try)
+_AstNodeT = TypeVar("_AstNodeT", bound=ast.AST)
 
 
 @dataclass(slots=True)
@@ -29,6 +30,34 @@ class _LoopContext:
 
 def _meta_expr(value: str) -> ast.Expr:
     return ast.Expr(value=ast.Name(id=f"{CFG_META_PREFIX}{value}", ctx=ast.Load()))
+
+
+def _list_of_ast(value: object, item_type: type[_AstNodeT]) -> list[_AstNodeT] | None:
+    if not isinstance(value, list):
+        return None
+    result: list[_AstNodeT] = []
+    for item in value:
+        if not isinstance(item, item_type):
+            return None
+        result.append(item)
+    return result
+
+
+def _try_star_parts(
+    stmt: ast.stmt,
+) -> (
+    tuple[list[ast.stmt], list[ast.ExceptHandler], list[ast.stmt], list[ast.stmt]]
+    | None
+):
+    if TryStar is ast.Try or not isinstance(stmt, TryStar):
+        return None
+    body = _list_of_ast(getattr(stmt, "body", None), ast.stmt)
+    handlers = _list_of_ast(getattr(stmt, "handlers", None), ast.ExceptHandler)
+    orelse = _list_of_ast(getattr(stmt, "orelse", None), ast.stmt)
+    finalbody = _list_of_ast(getattr(stmt, "finalbody", None), ast.stmt)
+    if body is None or handlers is None or orelse is None or finalbody is None:
+        return None
+    return body, handlers, orelse, finalbody
 
 
 # =========================
@@ -104,13 +133,6 @@ class CFGBuilder:
                     orelse=stmt.orelse,
                     finalbody=stmt.finalbody,
                 )
-            case _ if TryStar is not None and isinstance(stmt, TryStar):
-                self._visit_try(
-                    body=stmt.body,
-                    handlers=stmt.handlers,
-                    orelse=stmt.orelse,
-                    finalbody=stmt.finalbody,
-                )
 
             case ast.With() | ast.AsyncWith():
                 self._visit_with(stmt)
@@ -119,6 +141,16 @@ class CFGBuilder:
                 self._visit_match(stmt)
 
             case _:
+                try_star_parts = _try_star_parts(stmt)
+                if try_star_parts is not None:
+                    body, handlers, orelse, finalbody = try_star_parts
+                    self._visit_try(
+                        body=body,
+                        handlers=handlers,
+                        orelse=orelse,
+                        finalbody=finalbody,
+                    )
+                    return
                 self.current.statements.append(stmt)
 
     # ---------- Control Flow ----------
