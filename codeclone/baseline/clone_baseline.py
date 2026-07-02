@@ -117,16 +117,8 @@ class Baseline:
 
         meta_obj = payload.get("meta")
         clones_obj = payload.get("clones")
-        if not isinstance(meta_obj, dict):
-            raise BaselineValidationError(
-                f"Invalid baseline schema at {self.path}: 'meta' must be object",
-                status=_trust.BaselineStatus.INVALID_TYPE,
-            )
-        if not isinstance(clones_obj, dict):
-            raise BaselineValidationError(
-                f"Invalid baseline schema at {self.path}: 'clones' must be object",
-                status=_trust.BaselineStatus.INVALID_TYPE,
-            )
+        meta_obj = _require_object(meta_obj, label="'meta'", path=self.path)
+        clones_obj = _require_object(clones_obj, label="'clones'", path=self.path)
 
         _validate_required_keys(meta_obj, _META_REQUIRED_KEYS, path=self.path)
         _validate_required_keys(clones_obj, _CLONES_REQUIRED_KEYS, path=self.path)
@@ -211,6 +203,8 @@ class Baseline:
             if preserved_metrics_hash is not None:
                 meta_obj = payload.get("meta")
                 if isinstance(meta_obj, dict):
+                    meta_obj = _require_object(meta_obj, label="'meta'", path=self.path)
+                    payload["meta"] = meta_obj
                     meta_obj["metrics_payload_sha256"] = preserved_metrics_hash
                     if preserved_api_surface_hash is not None:
                         meta_obj["api_surface_payload_sha256"] = (
@@ -412,6 +406,36 @@ def _validate_top_level_structure(payload: dict[str, object], *, path: Path) -> 
     )
 
 
+def _require_object(value: object, *, label: str, path: Path) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise BaselineValidationError(
+            f"Invalid baseline schema at {path}: {label} must be object",
+            status=_trust.BaselineStatus.INVALID_TYPE,
+        )
+
+    result: dict[str, object] = {}
+    for raw_key, item in value.items():
+        if not isinstance(raw_key, str):
+            raise BaselineValidationError(
+                f"Invalid baseline schema at {path}: {label} keys must be str",
+                status=_trust.BaselineStatus.INVALID_TYPE,
+            )
+        result[raw_key] = item
+    return result
+
+
+def _optional_object(
+    value: object,
+    *,
+    label: str,
+    path: Path,
+) -> dict[str, object] | None:
+    try:
+        return _require_object(value, label=label, path=path)
+    except BaselineValidationError:
+        return None
+
+
 def _validate_required_keys(
     obj: dict[str, object], required: set[str], *, path: Path
 ) -> None:
@@ -453,14 +477,18 @@ def _preserve_embedded_metrics(
         return None, None, None, None
     metrics_obj = payload.get("metrics")
     api_surface_obj = payload.get("api_surface")
-    preserved_api_surface = (
-        dict(api_surface_obj) if isinstance(api_surface_obj, dict) else None
+    preserved_api_surface = _optional_object(
+        api_surface_obj,
+        label="'api_surface'",
+        path=path,
     )
-    if not isinstance(metrics_obj, dict):
+    metrics_obj = _optional_object(metrics_obj, label="'metrics'", path=path)
+    if metrics_obj is None:
         return None, None, preserved_api_surface, None
     meta_obj = payload.get("meta")
-    if not isinstance(meta_obj, dict):
-        return dict(metrics_obj), None, preserved_api_surface, None
+    meta_obj = _optional_object(meta_obj, label="'meta'", path=path)
+    if meta_obj is None:
+        return metrics_obj, None, preserved_api_surface, None
     metrics_hash = meta_obj.get("metrics_payload_sha256")
     api_surface_hash = meta_obj.get("api_surface_payload_sha256")
     normalized_api_surface_hash = (
@@ -468,13 +496,13 @@ def _preserve_embedded_metrics(
     )
     if not isinstance(metrics_hash, str):
         return (
-            dict(metrics_obj),
+            metrics_obj,
             None,
             preserved_api_surface,
             normalized_api_surface_hash,
         )
     return (
-        dict(metrics_obj),
+        metrics_obj,
         metrics_hash,
         preserved_api_surface,
         normalized_api_surface_hash,

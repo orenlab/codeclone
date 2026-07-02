@@ -49,6 +49,7 @@ from ._metrics_baseline_validation import (
     _parse_generator,
     _parse_snapshot,
     _require_embedded_clone_baseline_payload,
+    _require_object,
     _require_str,
     _resolve_embedded_schema_version,
     _validate_exact_keys,
@@ -87,16 +88,27 @@ def probe_metrics_baseline_section(path: Path) -> MetricsBaselineSectionProbe:
             has_metrics_section=True,
             payload=None,
         )
-    if not isinstance(raw_payload, dict):
+    payload = _probe_json_object(raw_payload, path=path)
+    if payload is None:
         return MetricsBaselineSectionProbe(
             has_metrics_section=True,
             payload=None,
         )
-    payload = dict(raw_payload)
     return MetricsBaselineSectionProbe(
         has_metrics_section=("metrics" in payload),
         payload=payload,
     )
+
+
+def _probe_json_object(value: object, *, path: Path) -> dict[str, object] | None:
+    try:
+        return _require_object(
+            value,
+            label="metrics baseline payload",
+            path=path,
+        )
+    except BaselineValidationError:
+        return None
 
 
 class MetricsBaseline:
@@ -179,18 +191,8 @@ class MetricsBaseline:
 
         meta_obj = payload.get("meta")
         metrics_obj = payload.get("metrics")
-        if not isinstance(meta_obj, dict):
-            raise BaselineValidationError(
-                f"Invalid metrics baseline schema at {self.path}: "
-                "'meta' must be object",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            )
-        if not isinstance(metrics_obj, dict):
-            raise BaselineValidationError(
-                f"Invalid metrics baseline schema at {self.path}: "
-                "'metrics' must be object",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            )
+        meta_obj = _require_object(meta_obj, label="'meta'", path=self.path)
+        metrics_obj = _require_object(metrics_obj, label="'metrics'", path=self.path)
 
         _validate_required_keys(meta_obj, _META_REQUIRED_KEYS, path=self.path)
         _validate_required_keys(metrics_obj, _METRICS_REQUIRED_KEYS, path=self.path)
@@ -243,12 +245,7 @@ class MetricsBaseline:
             api_surface_root=self.path.parent,
         )
         payload_meta = payload.get("meta")
-        if not isinstance(payload_meta, dict):
-            raise BaselineValidationError(
-                f"Invalid metrics baseline schema at {self.path}: "
-                "'meta' must be object",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            )
+        payload_meta = _require_object(payload_meta, label="'meta'", path=self.path)
         payload_metrics_hash = _require_str(
             payload_meta,
             "payload_sha256",
