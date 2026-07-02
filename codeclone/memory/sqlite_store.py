@@ -10,11 +10,21 @@ import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import cast
+from typing import TypeVar
 
 from ..report.meta import current_report_timestamp_utc
 from ..utils.iterutils import chunked
-from .enums import LinkRelation
+from .enums import (
+    EvidenceKind,
+    LinkRelation,
+    MemoryConfidence,
+    MemoryIngestSource,
+    MemoryOrigin,
+    MemoryRecordType,
+    MemoryStatus,
+    SubjectKind,
+    SubjectRelation,
+)
 from .experience.models import Experience
 from .locks import memory_init_lock
 from .models import (
@@ -48,6 +58,144 @@ from .trajectory.models import (
 )
 
 _SQLITE_IN_QUERY_BATCH = 500
+_SqliteParam = str | int | float | bytes | None
+_LiteralT = TypeVar("_LiteralT", bound=str)
+
+_MEMORY_RECORD_TYPE_VALUES: tuple[MemoryRecordType, ...] = (
+    "module_role",
+    "contract_note",
+    "test_anchor",
+    "document_link",
+    "risk_note",
+    "public_surface",
+    "contradiction_note",
+    "architecture_decision",
+    "change_rationale",
+    "protocol_rule",
+    "stale_marker",
+    "human_note",
+)
+_MEMORY_STATUS_VALUES: tuple[MemoryStatus, ...] = (
+    "draft",
+    "active",
+    "historical",
+    "stale",
+    "superseded",
+    "rejected",
+    "archived",
+)
+_MEMORY_CONFIDENCE_VALUES: tuple[MemoryConfidence, ...] = (
+    "inferred",
+    "supported",
+    "verified",
+)
+_MEMORY_ORIGIN_VALUES: tuple[MemoryOrigin, ...] = ("system", "agent", "human")
+_MEMORY_INGEST_SOURCE_VALUES: tuple[MemoryIngestSource, ...] = (
+    "analysis",
+    "contract",
+    "doc",
+    "test",
+    "git",
+    "receipt",
+    "audit",
+    "agent",
+    "human",
+    "snapshot",
+)
+_SUBJECT_KIND_VALUES: tuple[SubjectKind, ...] = (
+    "path",
+    "symbol",
+    "module",
+    "package",
+    "test",
+    "doc",
+    "contract",
+    "mcp_tool",
+    "mcp_resource",
+    "cli_option",
+    "report_field",
+    "baseline_schema",
+    "cache_schema",
+    "config_key",
+    "plugin_surface",
+)
+_SUBJECT_RELATION_VALUES: tuple[SubjectRelation, ...] = (
+    "about",
+    "owns",
+    "tests",
+    "documents",
+    "depends_on",
+    "imports",
+    "exports",
+)
+_EVIDENCE_KIND_VALUES: tuple[EvidenceKind, ...] = (
+    "code",
+    "test",
+    "doc",
+    "spec",
+    "receipt",
+    "git_commit",
+    "report",
+    "baseline",
+    "cache",
+    "audit_event",
+    "trajectory",
+    "external_url",
+)
+_LINK_RELATION_VALUES: tuple[LinkRelation, ...] = (
+    "supersedes",
+    "depends_on",
+    "contradicts",
+    "explains",
+    "implements",
+    "tests",
+    "documents",
+    "deprecates",
+    "related_to",
+    "implicit_coupling",
+)
+_MEMORY_RECORD_TYPES: Mapping[str, MemoryRecordType] = {
+    value: value for value in _MEMORY_RECORD_TYPE_VALUES
+}
+_MEMORY_STATUSES: Mapping[str, MemoryStatus] = {
+    value: value for value in _MEMORY_STATUS_VALUES
+}
+_MEMORY_CONFIDENCES: Mapping[str, MemoryConfidence] = {
+    value: value for value in _MEMORY_CONFIDENCE_VALUES
+}
+_MEMORY_ORIGINS: Mapping[str, MemoryOrigin] = {
+    value: value for value in _MEMORY_ORIGIN_VALUES
+}
+_MEMORY_INGEST_SOURCES: Mapping[str, MemoryIngestSource] = {
+    value: value for value in _MEMORY_INGEST_SOURCE_VALUES
+}
+_SUBJECT_KINDS: Mapping[str, SubjectKind] = {
+    value: value for value in _SUBJECT_KIND_VALUES
+}
+_SUBJECT_RELATIONS: Mapping[str, SubjectRelation] = {
+    value: value for value in _SUBJECT_RELATION_VALUES
+}
+_EVIDENCE_KINDS: Mapping[str, EvidenceKind] = {
+    value: value for value in _EVIDENCE_KIND_VALUES
+}
+_LINK_RELATIONS: Mapping[str, LinkRelation] = {
+    value: value for value in _LINK_RELATION_VALUES
+}
+
+
+def _literal_from_row(
+    row: sqlite3.Row,
+    column: str,
+    *,
+    field: str,
+    allowed: Mapping[str, _LiteralT],
+) -> _LiteralT:
+    value = row[column]
+    if isinstance(value, str):
+        literal = allowed.get(value)
+        if literal is not None:
+            return literal
+    raise ValueError(f"Invalid Engineering Memory {field}: {value!r}")
 
 
 class SqliteEngineeringMemoryStore:
@@ -440,7 +588,7 @@ class SqliteEngineeringMemoryStore:
 
     def query_records(self, query: MemoryQuery) -> Sequence[MemoryRecord]:
         clauses = ["project_id=?"]
-        params: list[object] = [query.project_id]
+        params: list[_SqliteParam] = [query.project_id]
         if query.types:
             placeholders = ", ".join("?" for _ in query.types)
             clauses.append(f"type IN ({placeholders})")
@@ -484,9 +632,19 @@ class SqliteEngineeringMemoryStore:
             MemorySubject(
                 id=str(row["id"]),
                 memory_id=str(row["memory_id"]),
-                subject_kind=str(row["subject_kind"]),  # type: ignore[arg-type]
+                subject_kind=_literal_from_row(
+                    row,
+                    "subject_kind",
+                    field="subject_kind",
+                    allowed=_SUBJECT_KINDS,
+                ),
                 subject_key=str(row["subject_key"]),
-                relation=str(row["relation"]),  # type: ignore[arg-type]
+                relation=_literal_from_row(
+                    row,
+                    "relation",
+                    field="subject_relation",
+                    allowed=_SUBJECT_RELATIONS,
+                ),
             )
             for row in rows
         ]
@@ -517,9 +675,19 @@ class SqliteEngineeringMemoryStore:
                     MemorySubject(
                         id=str(row["id"]),
                         memory_id=memory_id,
-                        subject_kind=str(row["subject_kind"]),  # type: ignore[arg-type]
+                        subject_kind=_literal_from_row(
+                            row,
+                            "subject_kind",
+                            field="subject_kind",
+                            allowed=_SUBJECT_KINDS,
+                        ),
                         subject_key=str(row["subject_key"]),
-                        relation=str(row["relation"]),  # type: ignore[arg-type]
+                        relation=_literal_from_row(
+                            row,
+                            "relation",
+                            field="subject_relation",
+                            allowed=_SUBJECT_RELATIONS,
+                        ),
                     )
                 )
         return grouped
@@ -539,7 +707,12 @@ class SqliteEngineeringMemoryStore:
             MemoryEvidence(
                 id=str(row["id"]),
                 memory_id=str(row["memory_id"]),
-                evidence_kind=str(row["evidence_kind"]),  # type: ignore[arg-type]
+                evidence_kind=_literal_from_row(
+                    row,
+                    "evidence_kind",
+                    field="evidence_kind",
+                    allowed=_EVIDENCE_KINDS,
+                ),
                 ref=str(row["ref"]),
                 locator=str(row["locator"]) if row["locator"] is not None else None,
                 quote=str(row["quote"]) if row["quote"] is not None else None,
@@ -689,7 +862,7 @@ class SqliteEngineeringMemoryStore:
             "memory_records_fts MATCH ?",
             "memory_records_fts.project_id = ?",
         ]
-        params: list[object] = [match_expr, project_id]
+        params: list[_SqliteParam] = [match_expr, project_id]
         _append_search_filters(
             clauses,
             params,
@@ -730,7 +903,7 @@ class SqliteEngineeringMemoryStore:
         if not tokens:
             return []
         clauses = ["project_id=?"]
-        params: list[object] = [project_id]
+        params: list[_SqliteParam] = [project_id]
         token_clauses: list[str] = []
         for token in tokens:
             token_clauses.append(
@@ -884,7 +1057,12 @@ class SqliteEngineeringMemoryStore:
                 project_id=str(row["project_id"]),
                 from_memory_id=str(row["from_memory_id"]),
                 to_memory_id=str(row["to_memory_id"]),
-                relation=cast(LinkRelation, str(row["relation"])),
+                relation=_literal_from_row(
+                    row,
+                    "relation",
+                    field="link_relation",
+                    allowed=_LINK_RELATIONS,
+                ),
                 created_by=str(row["created_by"]),
                 created_at_utc=str(row["created_at_utc"]),
             )
@@ -1214,7 +1392,7 @@ class SqliteEngineeringMemoryStore:
 
 def _append_in_filter(
     clauses: list[str],
-    params: list[object],
+    params: list[_SqliteParam],
     values: Sequence[str],
     column: str,
 ) -> None:
@@ -1227,7 +1405,7 @@ def _append_in_filter(
 
 def _append_confidence_filter(
     clauses: list[str],
-    params: list[object],
+    params: list[_SqliteParam],
     confidences: Sequence[str],
     *,
     via_subquery: bool,
@@ -1248,7 +1426,7 @@ def _append_confidence_filter(
 
 def _append_search_filters(
     clauses: list[str],
-    params: list[object],
+    params: list[_SqliteParam],
     types: Sequence[str],
     statuses: Sequence[str],
     confidences: Sequence[str],
@@ -1285,11 +1463,36 @@ def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
         id=str(row["id"]),
         project_id=str(row["project_id"]),
         identity_key=str(row["identity_key"]),
-        type=str(row["type"]),  # type: ignore[arg-type]
-        status=str(row["status"]),  # type: ignore[arg-type]
-        confidence=str(row["confidence"]),  # type: ignore[arg-type]
-        origin=str(row["origin"]),  # type: ignore[arg-type]
-        ingest_source=str(row["ingest_source"]),  # type: ignore[arg-type]
+        type=_literal_from_row(
+            row,
+            "type",
+            field="record_type",
+            allowed=_MEMORY_RECORD_TYPES,
+        ),
+        status=_literal_from_row(
+            row,
+            "status",
+            field="record_status",
+            allowed=_MEMORY_STATUSES,
+        ),
+        confidence=_literal_from_row(
+            row,
+            "confidence",
+            field="record_confidence",
+            allowed=_MEMORY_CONFIDENCES,
+        ),
+        origin=_literal_from_row(
+            row,
+            "origin",
+            field="record_origin",
+            allowed=_MEMORY_ORIGINS,
+        ),
+        ingest_source=_literal_from_row(
+            row,
+            "ingest_source",
+            field="record_ingest_source",
+            allowed=_MEMORY_INGEST_SOURCES,
+        ),
         statement=str(row["statement"]),
         summary=str(row["summary"]) if row["summary"] is not None else None,
         payload=payload,
