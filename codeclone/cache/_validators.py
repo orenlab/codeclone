@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from typing import TypeGuard
 
 from .entries import (
@@ -318,11 +318,13 @@ def _is_string_list(value: object) -> TypeGuard[list[str]]:
 
 
 def _has_typed_fields(
-    value: Mapping[str, object],
+    value: object,
     *,
     string_keys: Sequence[str],
     int_keys: Sequence[str],
 ) -> bool:
+    if not isinstance(value, dict):
+        return False
     return all(isinstance(value.get(key), str) for key in string_keys) and all(
         isinstance(value.get(key), int) for key in int_keys
     )

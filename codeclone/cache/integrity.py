@@ -28,15 +28,20 @@ def as_int_or_none(value: object) -> int | None:
 
 
 def as_object_list(value: object) -> list[object] | None:
-    return value if isinstance(value, list) else None
+    if not isinstance(value, list):
+        return None
+    return list(value)
 
 
 def as_str_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
-    if not all(isinstance(key, str) for key in value):
-        return None
-    return value
+    result: dict[str, object] = {}
+    for raw_key, item in value.items():
+        if not isinstance(raw_key, str):
+            return None
+        result[raw_key] = item
+    return result
 
 
 def canonical_json(data: object) -> str:
