@@ -65,7 +65,13 @@ from codeclone.analytics.clustering.sweep import (
 from codeclone.analytics.contracts import (
     INTENT_REPRESENTATION_DESCRIPTION,
     INTENT_REPRESENTATION_DESCRIPTION_WITH_FRAME,
+    ClusteringRunRecord,
+    ClusteringRunStatus,
     CorpusItemRecord,
+    CorpusLane,
+    CorpusSnapshotRecord,
+    ProfileBatchRecord,
+    ProfileBatchStatus,
 )
 from codeclone.analytics.corpus.adapters import intent_historical
 from codeclone.analytics.corpus.adapters.intent_historical import (
@@ -91,8 +97,10 @@ from codeclone.analytics.corpus.representations.intent import (
 )
 from codeclone.analytics.exceptions import (
     AnalyticsCapabilityError,
+    AnalyticsStoreError,
     AnalyticsWorkflowError,
 )
+from codeclone.analytics.store.sqlite import SqliteCorpusAnalyticsStore
 from codeclone.audit.reader import AuditRecord
 from codeclone.config.analytics import resolve_analytics_config
 from codeclone.memory.trajectory.models import Trajectory, TrajectoryStep
@@ -148,6 +156,106 @@ def _corpus_item(
         metadata_json=metadata_json,
         registry_overlay_json=None,
     )
+
+
+def _snapshot(*, lane: CorpusLane = "intent") -> CorpusSnapshotRecord:
+    return CorpusSnapshotRecord(
+        snapshot_id="snap",
+        lane=lane,
+        representation_kind=INTENT_REPRESENTATION_DESCRIPTION,
+        representation_version="1",
+        source_stores_json="{}",
+        source_schema_versions_json="{}",
+        record_count=0,
+        source_digest="source-digest",
+        created_at_utc="2026-01-01T00:00:00Z",
+    )
+
+
+def test_corpus_store_validates_snapshot_lane_on_write_and_read(
+    tmp_path: Path,
+) -> None:
+    store = SqliteCorpusAnalyticsStore.open(tmp_path / "analytics.sqlite3")
+    try:
+        invalid = _snapshot(lane=cast(CorpusLane, "audit"))
+        with pytest.raises(AnalyticsStoreError, match="corpus analytics lane"):
+            store.insert_snapshot(invalid, ())
+
+        store._conn.execute(
+            """
+            INSERT INTO corpus_snapshots (
+                snapshot_id, lane, representation_kind, representation_version,
+                source_stores_json, source_schema_versions_json, record_count,
+                source_digest, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "corrupt",
+                "audit",
+                INTENT_REPRESENTATION_DESCRIPTION,
+                "1",
+                "{}",
+                "{}",
+                0,
+                "source-digest",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+        with pytest.raises(AnalyticsStoreError, match="corpus analytics lane"):
+            store.get_snapshot("corrupt")
+    finally:
+        store.close()
+
+
+def test_corpus_store_validates_status_literals_before_write(tmp_path: Path) -> None:
+    store = SqliteCorpusAnalyticsStore.open(tmp_path / "analytics.sqlite3")
+    try:
+        run = ClusteringRunRecord(
+            clustering_run_id="run",
+            snapshot_id="snap",
+            embedding_generation_id="generation",
+            requested_parameters_json="{}",
+            effective_parameters_json="{}",
+            random_seed=0,
+            run_digest="digest",
+            recommended_by_heuristic=False,
+            selected_by_maintainer=False,
+            status=cast(ClusteringRunStatus, "done"),
+            created_at_utc="2026-01-01T00:00:00Z",
+            finished_at_utc=None,
+            error_message=None,
+        )
+        with pytest.raises(
+            AnalyticsStoreError,
+            match=r"corpus analytics clustering_run\.status",
+        ):
+            store.insert_clustering_run(run)
+
+        batch = ProfileBatchRecord(
+            profile_batch_id="batch",
+            snapshot_id="snap",
+            embedding_generation_id="generation",
+            profile_id="profile",
+            profile_manifest_digest="manifest",
+            candidate_space_digest="candidates",
+            started_at_utc="2026-01-01T00:00:00Z",
+            finished_at_utc=None,
+            status=cast(ProfileBatchStatus, "pending"),
+            candidate_count_planned=1,
+            candidate_count_succeeded=0,
+            candidate_count_failed=0,
+            recommended_clustering_run_id=None,
+            recommendation_rationale_json=None,
+            batch_max_cluster_count=None,
+            created_at_utc="2026-01-01T00:00:00Z",
+        )
+        with pytest.raises(
+            AnalyticsStoreError,
+            match=r"corpus analytics profile_batch\.status",
+        ):
+            store.insert_profile_batch(batch)
+    finally:
+        store.close()
 
 
 def test_identity_keys() -> None:
@@ -1660,10 +1768,10 @@ def test_check_capability_import_error_path(
 
     original = importlib_module.import_module
 
-    def _import(name: str) -> object:
+    def _import(name: str, package: str | None = None) -> object:
         if name == "fastembed":
             raise ImportError("missing")
-        return original(name)
+        return original(name, package)
 
     monkeypatch.setattr(
         "codeclone.analytics.capabilities.importlib.import_module",

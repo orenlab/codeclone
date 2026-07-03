@@ -28,6 +28,7 @@ def _insert_legacy_memory_record_type(
     record_id: str,
     record_type: str,
     path: str,
+    schema_version: str = "1.7",
 ) -> None:
     from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 
@@ -74,7 +75,7 @@ def _insert_legacy_memory_record_type(
             None,
             None,
             None,
-            "1.7",
+            schema_version,
         ),
     )
     store._conn.execute(
@@ -248,6 +249,47 @@ def test_memory_retrieval_quarantines_legacy_invalid_record_type(
     assert payload["record_count"] == 0
     assert get_payload["status"] == "not_found"
     assert relevant["record_count"] == 0
+
+
+def test_memory_retrieval_quarantines_legacy_record_schema_version(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        record_id = "mem-legacy-invalid-schema"
+        _insert_legacy_memory_record_type(
+            store,
+            project_id=project.id,
+            record_id=record_id,
+            record_type="risk_note",
+            path="pkg/legacy.py",
+            schema_version="0",
+        )
+
+        payload = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="for_path",
+            path="pkg/legacy.py",
+            max_results=10,
+            include_stale=True,
+        )
+        get_payload = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="get",
+            record_id=record_id,
+        )
+
+    assert payload["status"] == "ok"
+    assert isinstance(payload["payload"], dict)
+    assert payload["payload"]["record_count"] == 0
+    assert get_payload["status"] == "not_found"
 
 
 def test_query_engineering_memory_rejects_invalid_filter_literals(

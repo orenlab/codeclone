@@ -12,6 +12,7 @@ from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import TypeVar
 
+from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
 from ..report.meta import current_report_timestamp_utc
 from ..utils.iterutils import chunked
 from .enums import (
@@ -1367,6 +1368,8 @@ def _append_canonical_record_filters(
     *,
     prefix: str = "",
 ) -> None:
+    clauses.append(f"{prefix}schema_version=?")
+    params.append(ENGINEERING_MEMORY_SCHEMA_VERSION)
     _append_in_filter(clauses, params, MEMORY_RECORD_TYPE_VALUES, f"{prefix}type")
     _append_in_filter(clauses, params, MEMORY_STATUS_VALUES, f"{prefix}status")
     _append_in_filter(
@@ -1440,91 +1443,101 @@ def _record_content_equal(left: MemoryRecord, right: MemoryRecord) -> bool:
 
 def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
     payload = parse_payload_json(row["payload_json"])
-    return MemoryRecord(
-        id=str(row["id"]),
-        project_id=str(row["project_id"]),
-        identity_key=str(row["identity_key"]),
-        type=_literal_from_row(
-            row,
-            "type",
-            field="record_type",
-            allowed=_MEMORY_RECORD_TYPES,
-        ),
-        status=_literal_from_row(
-            row,
-            "status",
-            field="record_status",
-            allowed=_MEMORY_STATUSES,
-        ),
-        confidence=_literal_from_row(
-            row,
-            "confidence",
-            field="record_confidence",
-            allowed=_MEMORY_CONFIDENCES,
-        ),
-        origin=_literal_from_row(
-            row,
-            "origin",
-            field="record_origin",
-            allowed=_MEMORY_ORIGINS,
-        ),
-        ingest_source=_literal_from_row(
-            row,
-            "ingest_source",
-            field="record_ingest_source",
-            allowed=_MEMORY_INGEST_SOURCES,
-        ),
-        statement=str(row["statement"]),
-        summary=str(row["summary"]) if row["summary"] is not None else None,
-        payload=payload,
-        created_at_utc=str(row["created_at_utc"]),
-        updated_at_utc=str(row["updated_at_utc"]),
-        last_verified_at_utc=(
-            str(row["last_verified_at_utc"])
-            if row["last_verified_at_utc"] is not None
-            else None
-        ),
-        expires_at_utc=(
-            str(row["expires_at_utc"]) if row["expires_at_utc"] is not None else None
-        ),
-        created_by=str(row["created_by"]),
-        verified_by=str(row["verified_by"]) if row["verified_by"] is not None else None,
-        approved_by=str(row["approved_by"]) if row["approved_by"] is not None else None,
-        approved_at_utc=(
-            str(row["approved_at_utc"]) if row["approved_at_utc"] is not None else None
-        ),
-        report_digest=(
-            str(row["report_digest"]) if row["report_digest"] is not None else None
-        ),
-        code_fingerprint=(
-            str(row["code_fingerprint"])
-            if row["code_fingerprint"] is not None
-            else None
-        ),
-        stale_reason=(
-            str(row["stale_reason"]) if row["stale_reason"] is not None else None
-        ),
-        created_on_branch=(
-            str(row["created_on_branch"])
-            if row["created_on_branch"] is not None
-            else None
-        ),
-        created_at_commit=(
-            str(row["created_at_commit"])
-            if row["created_at_commit"] is not None
-            else None
-        ),
-        verified_on_branch=(
-            str(row["verified_on_branch"])
-            if row["verified_on_branch"] is not None
-            else None
-        ),
-        verified_at_commit=(
-            str(row["verified_at_commit"])
-            if row["verified_at_commit"] is not None
-            else None
-        ),
-        schema_version=str(row["schema_version"]),
+    return validate_memory_record(
+        MemoryRecord(
+            id=str(row["id"]),
+            project_id=str(row["project_id"]),
+            identity_key=str(row["identity_key"]),
+            type=_literal_from_row(
+                row,
+                "type",
+                field="record_type",
+                allowed=_MEMORY_RECORD_TYPES,
+            ),
+            status=_literal_from_row(
+                row,
+                "status",
+                field="record_status",
+                allowed=_MEMORY_STATUSES,
+            ),
+            confidence=_literal_from_row(
+                row,
+                "confidence",
+                field="record_confidence",
+                allowed=_MEMORY_CONFIDENCES,
+            ),
+            origin=_literal_from_row(
+                row,
+                "origin",
+                field="record_origin",
+                allowed=_MEMORY_ORIGINS,
+            ),
+            ingest_source=_literal_from_row(
+                row,
+                "ingest_source",
+                field="record_ingest_source",
+                allowed=_MEMORY_INGEST_SOURCES,
+            ),
+            statement=str(row["statement"]),
+            summary=str(row["summary"]) if row["summary"] is not None else None,
+            payload=payload,
+            created_at_utc=str(row["created_at_utc"]),
+            updated_at_utc=str(row["updated_at_utc"]),
+            last_verified_at_utc=(
+                str(row["last_verified_at_utc"])
+                if row["last_verified_at_utc"] is not None
+                else None
+            ),
+            expires_at_utc=(
+                str(row["expires_at_utc"])
+                if row["expires_at_utc"] is not None
+                else None
+            ),
+            created_by=str(row["created_by"]),
+            verified_by=(
+                str(row["verified_by"]) if row["verified_by"] is not None else None
+            ),
+            approved_by=(
+                str(row["approved_by"]) if row["approved_by"] is not None else None
+            ),
+            approved_at_utc=(
+                str(row["approved_at_utc"])
+                if row["approved_at_utc"] is not None
+                else None
+            ),
+            report_digest=(
+                str(row["report_digest"]) if row["report_digest"] is not None else None
+            ),
+            code_fingerprint=(
+                str(row["code_fingerprint"])
+                if row["code_fingerprint"] is not None
+                else None
+            ),
+            stale_reason=(
+                str(row["stale_reason"]) if row["stale_reason"] is not None else None
+            ),
+            created_on_branch=(
+                str(row["created_on_branch"])
+                if row["created_on_branch"] is not None
+                else None
+            ),
+            created_at_commit=(
+                str(row["created_at_commit"])
+                if row["created_at_commit"] is not None
+                else None
+            ),
+            verified_on_branch=(
+                str(row["verified_on_branch"])
+                if row["verified_on_branch"] is not None
+                else None
+            ),
+            verified_at_commit=(
+                str(row["verified_at_commit"])
+                if row["verified_at_commit"] is not None
+                else None
+            ),
+            schema_version=str(row["schema_version"]),
+        )
     )
 
 

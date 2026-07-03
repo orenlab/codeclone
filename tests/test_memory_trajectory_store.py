@@ -108,6 +108,34 @@ def test_rebuild_trajectories_from_audit_is_idempotent(tmp_path: Path) -> None:
         assert store.latest_trajectory_projection_run(project_id=project.id) is not None
 
 
+def test_trajectory_store_rejects_corrupt_persisted_literals(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        _write_workflow_events(root, audit_db)
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory_id = store.list_trajectories(project_id=project.id)[0].id
+
+        store._conn.execute(
+            "UPDATE memory_trajectories SET outcome=? WHERE id=?",
+            ("maybe", trajectory_id),
+        )
+        with pytest.raises(ValueError, match="trajectory outcome"):
+            store.find_trajectory(trajectory_id)
+
+        store._conn.execute(
+            "UPDATE memory_trajectories SET outcome=?, labels_json=? WHERE id=?",
+            ("accepted", '["unknown_label"]', trajectory_id),
+        )
+        with pytest.raises(ValueError, match="trajectory label"):
+            store.find_trajectory(trajectory_id)
+
+
 def test_find_trajectories_by_ids_batch_matches_single_path(tmp_path: Path) -> None:
     from codeclone.memory.trajectory import store as trajectory_store
 
