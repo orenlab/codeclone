@@ -40,6 +40,7 @@ from codeclone.surfaces.cli.setup.engine.discover import (
 )
 from codeclone.surfaces.cli.setup.engine.plan import build_setup_plan
 from codeclone.surfaces.cli.setup.engine.rollup import (
+    Readiness,
     _axes_satisfied,
     _optional_install_hint,
     derive_readiness,
@@ -93,7 +94,7 @@ def base_install_find_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     def _fake_find_spec(name: str, package: object | None = None) -> object | None:
         if name in _OPTIONAL_MODULES:
             return None
-        return real_find_spec(name, package)  # type: ignore[arg-type]
+        return real_find_spec(name, cast(str | None, package))
 
     monkeypatch.setattr(importlib.util, "find_spec", _fake_find_spec)
     monkeypatch.setattr(
@@ -111,20 +112,25 @@ def _present(
     """Bridge for tests: readiness is authoritative (derive_readiness); this echoes
     the given readiness and returns the presentation reason/action for it."""
 
-    reason, action = describe_capability(meta, axes, readiness, ctx)  # type: ignore[arg-type]
+    reason, action = describe_capability(
+        meta,
+        axes,
+        cast(Readiness, readiness),
+        ctx,
+    )
     return readiness, reason, action
 
 
 def _capability_rows(snapshot: dict[str, object]) -> list[dict[str, object]]:
     raw = snapshot.get("capabilities")
     assert isinstance(raw, list)
-    return [item for item in raw if isinstance(item, dict)]
+    return [cast(dict[str, object], item) for item in raw if isinstance(item, dict)]
 
 
 def _plan_actions(plan: dict[str, object]) -> list[dict[str, object]]:
     raw = plan.get("actions")
     assert isinstance(raw, list)
-    return [item for item in raw if isinstance(item, dict)]
+    return [cast(dict[str, object], item) for item in raw if isinstance(item, dict)]
 
 
 def _normalize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
@@ -136,8 +142,9 @@ def _normalize_snapshot(snapshot: dict[str, object]) -> dict[str, object]:
     normalized["head_commit"] = None
     runtime = normalized.get("runtime")
     if isinstance(runtime, dict):
-        runtime["python_tag"] = "<PYTHON_TAG>"
-        runtime["codeclone_version"] = "<VERSION>"
+        runtime_fields = cast(dict[str, object], runtime)
+        runtime_fields["python_tag"] = "<PYTHON_TAG>"
+        runtime_fields["codeclone_version"] = "<VERSION>"
     return normalized
 
 
@@ -553,7 +560,10 @@ def test_setup_plan_blocked_on_invalid_pyproject(
 
     blockers = plan["blockers"]
     assert isinstance(blockers, list)
-    assert any(item.get("kind") == "invalid_pyproject" for item in blockers)
+    blocker_rows = [
+        cast(dict[str, object], item) for item in blockers if isinstance(item, dict)
+    ]
+    assert any(item.get("kind") == "invalid_pyproject" for item in blocker_rows)
     assert not any(
         item.get("kind") == "pyproject_merge" for item in _plan_actions(plan)
     )
@@ -703,6 +713,58 @@ def test_setup_wizard_requires_tty(
     )
 
 
+def test_setup_render_payload_default_console_respects_no_color(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+    calls: list[bool | None] = []
+    rendered: list[PrinterLike] = []
+
+    def _fake_console(*, no_color: bool | None = None) -> PlainConsole:
+        calls.append(no_color)
+        return PlainConsole()
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(setup_main_mod, "make_query_console", _fake_console)
+    monkeypatch.setitem(
+        setup_main_mod._PAYLOAD_RENDERERS,
+        "status",
+        lambda console, _payload: rendered.append(console),
+    )
+
+    setup_main_mod._render_payload("status", {})
+
+    assert calls == [None]
+    assert len(rendered) == 1
+
+
+def test_setup_confirm_apply_default_console_respects_no_color(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+    calls: list[bool | None] = []
+
+    def _fake_console(*, no_color: bool | None = None) -> PlainConsole:
+        calls.append(no_color)
+        return PlainConsole()
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(setup_main_mod, "make_query_console", _fake_console)
+    monkeypatch.setattr(
+        setup_main_mod,
+        "build_setup_plan",
+        lambda _root: {"projection_kind": "setup_plan"},
+    )
+    monkeypatch.setattr(setup_main_mod, "render_setup_plan", lambda **_kwargs: None)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "n")
+
+    assert setup_main_mod._confirm_apply(tmp_path) is False
+    assert calls == [None]
+
+
 def test_setup_wizard_quit(
     tmp_path: Path,
     base_install_find_spec: None,
@@ -719,6 +781,26 @@ def test_setup_wizard_quit(
     )
 
     assert run_setup_wizard(tmp_path, prompts=prompts) == int(ExitCode.SUCCESS)
+
+
+def test_setup_wizard_default_console_respects_no_color(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup import wizard as wizard_mod
+
+    calls: list[bool | None] = []
+
+    def _fake_console(*, no_color: bool | None = None) -> PlainConsole:
+        calls.append(no_color)
+        return PlainConsole()
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(wizard_mod, "_interactive_terminal_available", lambda: True)
+    monkeypatch.setattr(wizard_mod, "make_query_console", _fake_console)
+
+    assert wizard_mod.run_setup_wizard(tmp_path) == int(ExitCode.CONTRACT_ERROR)
+    assert calls == [None]
 
 
 def test_setup_wizard_guided_apply(
@@ -1221,7 +1303,10 @@ def test_setup_plan_missing_pyproject_blocker(tmp_path: Path) -> None:
     plan = build_setup_plan(tmp_path)
     blockers = plan["blockers"]
     assert isinstance(blockers, list)
-    assert any(item.get("kind") == "missing_pyproject" for item in blockers)
+    blocker_rows = [
+        cast(dict[str, object], item) for item in blockers if isinstance(item, dict)
+    ]
+    assert any(item.get("kind") == "missing_pyproject" for item in blocker_rows)
 
 
 def test_setup_rollup_derive_readiness_branches() -> None:
@@ -1617,12 +1702,12 @@ def test_setup_apply_gitignore_read_oserror(
 
     def _patched_read_text(
         self: Path,
-        *args: object,
-        **kwargs: object,
+        encoding: str | None = None,
+        errors: str | None = None,
     ) -> str:
         if self == gitignore:
             raise OSError("read failed")
-        return original_read_text(self, *args, **kwargs)  # type: ignore[arg-type]
+        return original_read_text(self, encoding=encoding, errors=errors)
 
     monkeypatch.setattr(Path, "read_text", _patched_read_text)
     row = apply_mod._apply_gitignore_append(
@@ -1758,7 +1843,7 @@ def test_setup_discover_analysis_find_spec_import_error(
     def _raising_find_spec(name: str, package: object | None = None) -> object | None:
         if name == "codeclone.core":
             raise ImportError("blocked import")
-        return real_find_spec(name, package)  # type: ignore[arg-type]
+        return real_find_spec(name, cast(str | None, package))
 
     monkeypatch.setattr(importlib.util, "find_spec", _raising_find_spec)
     _write_minimal_pyproject(tmp_path / "pyproject.toml")

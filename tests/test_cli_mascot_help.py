@@ -338,3 +338,35 @@ def test_run_interactive_help_tour_rich_step_uses_typewriter_ticks(
         cursor_blink_interval=0.02,
     )
     assert len(sleeps) > 5
+
+
+def test_run_interactive_help_tour_default_console_respects_no_color(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.console import PlainConsole
+    from codeclone.surfaces.cli.ui import help_tour
+
+    calls: list[bool | None] = []
+
+    def _fake_console(*, no_color: bool | None = None) -> PlainConsole:
+        calls.append(no_color)
+        return PlainConsole()
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(help_tour, "make_query_console", _fake_console)
+    monkeypatch.setattr(help_tour, "_interactive_terminal_available", lambda: False)
+
+    rc = help_tour.run_interactive_help_tour(
+        steps=(
+            HelpTourStep(
+                AsterState.IDLE,
+                "Short",
+                "Plain fallback",
+                animate=False,
+            ),
+        ),
+        sleep=lambda _seconds: None,
+    )
+
+    assert rc == 0
+    assert calls == [None]

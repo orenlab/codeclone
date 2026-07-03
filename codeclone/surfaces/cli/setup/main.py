@@ -153,7 +153,7 @@ def _confirm_apply(root_path: Path) -> bool | None:
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
-    console = make_query_console(no_color=False)
+    console = make_query_console()
     render_setup_plan(console=console, plan=build_setup_plan(root_path))
     reply = input(f"{setup_ui.SETUP_APPLY_CONFIRM_PROMPT} [y/N] ").strip().lower()
     return reply in {"y", "yes"}
@@ -179,7 +179,7 @@ def _write_json_stdout(payload: dict[str, object]) -> None:
 
 
 def _render_payload(command: SetupCommand, payload: dict[str, object]) -> None:
-    console = make_query_console(no_color=False)
+    console = make_query_console()
     _PAYLOAD_RENDERERS[command](console, payload)
 
 

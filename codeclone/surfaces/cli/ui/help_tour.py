@@ -305,7 +305,7 @@ def run_interactive_help_tour(
     plain_step_pause: float = 1.5,
 ) -> int:
     if console is None:
-        console = make_query_console(no_color=False)
+        console = make_query_console()
 
     rich_console = _rich_console_or_none(console)
     if not _interactive_terminal_available() or rich_console is None:

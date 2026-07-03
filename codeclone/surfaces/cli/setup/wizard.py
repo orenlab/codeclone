@@ -12,7 +12,7 @@ import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 from ....contracts import ExitCode
 from ....ui_messages import setup as setup_ui
@@ -62,7 +62,7 @@ def run_setup_wizard(
         print(setup_ui.SETUP_WIZARD_TTY_REQUIRED, file=sys.stderr)
         return int(ExitCode.CONTRACT_ERROR)
 
-    resolved_console = console or make_query_console(no_color=False)
+    resolved_console = console or make_query_console()
     if not supports_rich_console(resolved_console):
         print(setup_ui.SETUP_WIZARD_RICH_REQUIRED, file=sys.stderr)
         return int(ExitCode.CONTRACT_ERROR)
@@ -302,7 +302,7 @@ def _group_summary(snapshot: Mapping[str, object], group: CapabilityGroup) -> st
 
 def _mapping(value: object) -> Mapping[str, object]:
     if isinstance(value, Mapping):
-        return value
+        return cast("Mapping[str, object]", value)
     return {}
 
 
