@@ -32,6 +32,11 @@ from codeclone.paths.gitignore import (
         (".codeclone/**", True),
         ("**/.codeclone/", True),
         ("**/.codeclone/**", True),
+        ("nested/.cache/codeclone", True),
+        ("nested/.cache/codeclone/**", True),
+        ("build.codeclone", False),
+        ("myapp.codeclone/**", False),
+        ("build.cache/codeclone", False),
         (".cache/*", False),
         ("node_modules/", False),
         ("", False),
@@ -66,6 +71,9 @@ def test_repo_gitignore_covers_codeclone_cache(tmp_path: Path) -> None:
     assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
 
     (tmp_path / ".gitignore").write_text("node_modules/\n", encoding="utf-8")
+    assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
+
+    (tmp_path / ".gitignore").write_text("build.codeclone\n", encoding="utf-8")
     assert repo_gitignore_covers_codeclone_cache(tmp_path) is False
 
     (tmp_path / ".gitignore").write_text(".cache/\n", encoding="utf-8")

@@ -50,15 +50,9 @@ def gitignore_pattern_covers_codeclone_cache(pattern: str) -> bool:
     if not normalized or normalized.startswith("!"):
         return False
     core = normalized.lstrip("/").rstrip("/")
-    if core in _COVERING_PATTERN_CORES:
-        return True
-    return core.endswith(
-        (
-            ".codeclone",
-            ".codeclone/**",
-            ".cache/codeclone",
-            ".cache/codeclone/**",
-        )
+    return any(
+        core == covering_core or core.endswith(f"/{covering_core}")
+        for covering_core in _COVERING_PATTERN_CORES
     )
 
 
