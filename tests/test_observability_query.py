@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import cast
 
@@ -28,6 +29,26 @@ def _rows(value: object) -> list[dict[str, object]]:
 
 def _texts(value: object) -> list[str]:
     return cast("list[str]", value)
+
+
+def _seed_future_observability_schema(root: Path) -> None:
+    path = observability_store_path(root)
+    path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO platform_meta(key, value)
+            VALUES('schema_version', '999.0');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _seed(tmp_path: Path) -> None:
@@ -115,6 +136,21 @@ def _seed(tmp_path: Path) -> None:
         )
     finally:
         conn.close()
+
+
+def test_query_platform_observability_future_schema_returns_inert_envelope(
+    tmp_path: Path,
+) -> None:
+    _seed_future_observability_schema(tmp_path)
+
+    result = query_platform_observability(
+        root=tmp_path,
+        section="summary",
+    )
+
+    assert result["status"] == "incompatible_schema"
+    assert result["rows"] == []
+    assert "newer than this CodeClone build" in str(result["error"])
 
 
 def _seed_analysis_phases(tmp_path: Path) -> None:
@@ -412,7 +448,8 @@ def test_projection_helpers_and_diagnostic_edges(
         return sentinel
 
     monkeypatch.setattr(query_mod, "build_trace_view", _build_trace)
-    assert query_mod._build_trace(object(), "corr-1") is sentinel
+    conn = cast(sqlite3.Connection, object())
+    assert query_mod._build_trace(conn, "corr-1") is sentinel
     assert calls == [{"correlation_id": "corr-1"}]
 
     empty_child = OperationView(

@@ -17,6 +17,7 @@ payload bodies, no prompts.
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
@@ -127,10 +128,10 @@ def _absent_status() -> str:
     return "no_store" if resolve_observability_config().enabled else "disabled"
 
 
-def _build_trace(conn: object, window: str) -> TraceView:
+def _build_trace(conn: sqlite3.Connection, window: str) -> TraceView:
     if window == "latest":
-        return build_trace_view(conn)  # type: ignore[arg-type]
-    return build_trace_view(conn, correlation_id=window)  # type: ignore[arg-type]
+        return build_trace_view(conn)
+    return build_trace_view(conn, correlation_id=window)
 
 
 def _slow_operations(agg: AggregatesView, cap: int) -> list[dict[str, object]]:
@@ -592,7 +593,13 @@ def query_platform_observability(
         response["error"] = "span_detail requires span_id"
         return _finalize(response, warnings)
 
-    conn = open_observability_store_readonly(Path(root))
+    try:
+        conn = open_observability_store_readonly(Path(root))
+    except RuntimeError as exc:
+        response["status"] = "incompatible_schema"
+        response["error"] = str(exc)
+        response["rows"] = []
+        return _finalize(response, warnings)
     if conn is None:
         response["status"] = _absent_status()
         response["rows"] = []

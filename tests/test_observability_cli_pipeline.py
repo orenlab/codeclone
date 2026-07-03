@@ -44,6 +44,7 @@ from codeclone.observability.store.schema import (
 )
 from codeclone.observability.store.writer import write_operation
 from codeclone.surfaces.cli.observability import observability_main
+from tests.test_observability_query import _seed_future_observability_schema
 
 
 @pytest.fixture(autouse=True)
@@ -433,3 +434,17 @@ def test_observability_cli_missing_store_and_file_outputs(
     assert html_path.is_file()
     assert f"Wrote {json_path}" in out
     assert f"Wrote {html_path}" in out
+
+
+def test_observability_cli_future_schema_reports_internal_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_future_observability_schema(tmp_path)
+
+    code = observability_main(["trace", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert code == int(ExitCode.INTERNAL_ERROR)
+    assert "INTERNAL ERROR" in out
+    assert "newer than this CodeClone build" in out
