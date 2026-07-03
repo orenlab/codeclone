@@ -37,6 +37,7 @@ from ....memory.trajectory.store import (
 )
 from ....utils.json_io import json_text
 from ...agent_labels import map_agent_family
+from ...mapping import copy_str_key_mapping
 from ..keys import (
     representation_key,
     representation_version_for_kind,
@@ -462,9 +463,7 @@ def _materialized_metadata(item: HistoricalIntentSourceItem) -> dict[str, object
 
 
 def _str_key_mapping(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        return {}
-    return {key: item for key, item in value.items() if isinstance(key, str)}
+    return copy_str_key_mapping(value)
 
 
 def default_source_schema_versions() -> dict[str, str]:

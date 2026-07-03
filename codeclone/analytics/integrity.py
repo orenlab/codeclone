@@ -11,7 +11,6 @@ import math
 from collections import Counter, defaultdict
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
-from typing import TypeVar
 
 from ..contracts import CORPUS_EMBEDDING_CONTRACT_VERSION
 from .clustering.models import NOISE_LABEL
@@ -26,6 +25,7 @@ from .contracts import (
 )
 from .corpus.keys import membership_digest
 from .exceptions import AnalyticsWorkflowError
+from .mapping import copy_str_key_mapping as _copy_str_key_mapping
 from .store.protocols import CorpusStore, VectorGenerationStore
 from .store.vectors_lancedb import vector_digest, vector_row_key
 
@@ -43,7 +43,6 @@ REQUIRED_ALGORITHM_MANIFEST_PATHS = (
     "clustering_metric",
     "hdbscan_core_dist_n_jobs",
 )
-_MappingKeyT = TypeVar("_MappingKeyT")
 _MANIFEST_VERSION_FIELDS = frozenset(REQUIRED_ALGORITHM_MANIFEST_PATHS[:5])
 _MANIFEST_FIXED_FIELDS: dict[str, object] = {
     "vector_preprocessing": "l2_normalize",
@@ -587,8 +586,6 @@ def _diagnostic_numbers_are_finite(diagnostics: Mapping[str, object]) -> bool:
     if not isinstance(distributions, Mapping):
         return True
     normalized_distributions = _copy_str_key_mapping(distributions)
-    if normalized_distributions is None:
-        return False
     for values in _mapping_values(normalized_distributions):
         for cell in _mapping_values(values):
             for field in ("numerator", "denominator", "rate"):
@@ -603,8 +600,7 @@ def _mapping_values(value: Mapping[str, object]) -> tuple[Mapping[str, object], 
         if not isinstance(item, Mapping):
             continue
         normalized = _copy_str_key_mapping(item)
-        if normalized is not None:
-            mappings.append(normalized)
+        mappings.append(normalized)
     return tuple(mappings)
 
 
@@ -621,17 +617,6 @@ def _float_vector(vector: Sequence[object], *, item_id: str) -> list[float]:
             raise AnalyticsWorkflowError(f"invalid vector payload for {item_id}")
         typed_vector.append(float(value))
     return typed_vector
-
-
-def _copy_str_key_mapping(
-    value: Mapping[_MappingKeyT, object],
-) -> dict[str, object] | None:
-    normalized: dict[str, object] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            return None
-        normalized[key] = item
-    return normalized
 
 
 def _invariant_sort_key(code: str) -> tuple[int, str]:

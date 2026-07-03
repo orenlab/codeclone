@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 from ..clustering.models import NOISE_LABEL
 from ..contracts import ClusteringRunRecord, CorpusSnapshotRecord
 from ..exceptions import AnalyticsWorkflowError
+from ..mapping import copy_str_key_mapping
 from ..store.sqlite import SqliteCorpusAnalyticsStore
 from .interpret import (
     build_profile_summary,
@@ -532,9 +533,7 @@ def _display_metadata_value(value: object) -> str:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        return {}
-    return {key: item for key, item in value.items() if isinstance(key, str)}
+    return copy_str_key_mapping(value)
 
 
 def _mapping_list(value: object) -> list[dict[str, object]]:

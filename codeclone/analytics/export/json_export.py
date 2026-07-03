@@ -22,6 +22,7 @@ from ..contracts import (
     EmbeddingItemRecord,
 )
 from ..exceptions import AnalyticsWorkflowError
+from ..mapping import copy_str_key_mapping
 from ..report.interpret import (
     INTERPRETATION_CONTRACT_VERSION,
     build_profile_summary,
@@ -207,9 +208,7 @@ def _full_projection_payload(
 
 
 def _str_key_mapping(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        return {}
-    return {key: item for key, item in value.items() if isinstance(key, str)}
+    return copy_str_key_mapping(value)
 
 
 def _snapshot_dict(snapshot: CorpusSnapshotRecord) -> dict[str, object]:

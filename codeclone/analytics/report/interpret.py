@@ -37,6 +37,7 @@ from ..contracts import (
 )
 from ..exceptions import AnalyticsWorkflowError
 from ..integrity import PartitionValidityAssessment, assess_partition_validity
+from ..mapping import copy_str_key_mapping
 from ..metrics.partition_metrics import (
     RunPartitionMetrics,
     compute_run_partition_metrics,
@@ -1116,9 +1117,7 @@ def _json_string_list(text: str) -> list[str]:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    if not isinstance(value, Mapping):
-        return {}
-    return {key: item for key, item in value.items() if isinstance(key, str)}
+    return copy_str_key_mapping(value)
 
 
 def _mapping_list(value: object) -> list[dict[str, object]]:

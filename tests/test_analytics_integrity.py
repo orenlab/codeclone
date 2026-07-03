@@ -31,6 +31,7 @@ from codeclone.analytics.integrity import (
     validate_generation_metadata,
     validate_persisted_run,
 )
+from codeclone.analytics.mapping import copy_str_key_mapping
 from codeclone.analytics.store.protocols import CorpusStore, VectorGenerationStore
 from codeclone.analytics.store.vectors_lancedb import vector_digest, vector_row_key
 from codeclone.contracts import CORPUS_EMBEDDING_CONTRACT_VERSION
@@ -582,3 +583,8 @@ def test_validity_shape_and_numeric_edges(
         ).failed_invariants
         == expected
     )
+
+
+def test_integrity_mapping_helper_rejects_non_string_keys() -> None:
+    with pytest.raises(AnalyticsWorkflowError, match="non-string key"):
+        copy_str_key_mapping({1: "lost", "kept": "value"})

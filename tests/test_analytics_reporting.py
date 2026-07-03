@@ -30,6 +30,7 @@ from codeclone.analytics.contracts import (
     ProfileManifestSnapshotRecord,
     RunSelectionRecord,
 )
+from codeclone.analytics.corpus.adapters import intent_historical
 from codeclone.analytics.corpus.keys import membership_digest
 from codeclone.analytics.exceptions import AnalyticsWorkflowError
 from codeclone.analytics.export import json_export
@@ -905,6 +906,19 @@ def test_html_projection_helper_empty_and_malformed_rows() -> None:
     assert html_report._ratio(None) == "unavailable"
 
 
+def test_analytics_mapping_helpers_reject_non_string_keys() -> None:
+    invalid = {1: "lost", "kept": "value"}
+
+    with pytest.raises(AnalyticsWorkflowError, match="non-string key"):
+        html_report._mapping(invalid)
+    with pytest.raises(AnalyticsWorkflowError, match="non-string key"):
+        interpret_report._mapping(invalid)
+    with pytest.raises(AnalyticsWorkflowError, match="non-string key"):
+        json_export._str_key_mapping(invalid)
+    with pytest.raises(AnalyticsWorkflowError, match="non-string key"):
+        intent_historical._str_key_mapping(invalid)
+
+
 def test_enrich_run_for_export_rejects_foreign_snapshot() -> None:
     store = _ReportStore()
     with pytest.raises(AnalyticsWorkflowError, match="does not belong"):
@@ -919,8 +933,9 @@ def test_profile_summary_and_comparison_batch_errors() -> None:
     class _MissingManifestStore(_ProfileReportStore):
         def get_profile_manifest_snapshot(
             self,
-            _profile_manifest_digest: str,
+            profile_manifest_digest: str,
         ) -> ProfileManifestSnapshotRecord | None:
+            assert profile_manifest_digest
             return None
 
     missing_manifest = _MissingManifestStore()
