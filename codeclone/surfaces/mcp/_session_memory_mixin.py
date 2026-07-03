@@ -13,6 +13,7 @@ from typing import cast
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...memory.embedding import resolve_embedding_provider
+from ...memory.enums import MemoryRecordType, validate_memory_record_type
 from ...memory.exceptions import (
     MemoryCapacityError,
     MemoryContractError,
@@ -241,7 +242,7 @@ class _MCPSessionMemoryMixin:
         *,
         root: str,
         action: str,
-        record_type: str | None = None,
+        record_type: MemoryRecordType | None = None,
         statement: str | None = None,
         subject_path: str | None = None,
         text: str | None = None,
@@ -444,7 +445,7 @@ class _MCPSessionMemoryMixin:
         *,
         project: MemoryProject,
         config: MemoryConfig,
-        record_type: str | None,
+        record_type: MemoryRecordType | None,
         statement: str | None,
         subject_path: str | None,
     ) -> dict[str, object]:
@@ -454,10 +455,14 @@ class _MCPSessionMemoryMixin:
             raise MCPServiceContractError(
                 "record_candidate requires record_type and statement."
             )
+        try:
+            canonical_type = validate_memory_record_type(record_type)
+        except ValueError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
         record = record_candidate(
             store,
             project=project,
-            record_type=record_type,  # type: ignore[arg-type]
+            record_type=canonical_type,
             statement=statement,
             subject_path=subject_path,
             max_candidates=config.max_candidates,

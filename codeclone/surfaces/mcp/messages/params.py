@@ -11,6 +11,8 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import Field
 
+from ....memory.enums import MemoryRecordType
+
 RootParam = Annotated[str, Field(description="Absolute repository root path.")]
 OptionalRootParam = Annotated[
     str | None,
@@ -740,7 +742,7 @@ GovernanceProtocolParam = Annotated[
     Field(description="IDE attestation protocol version (currently 2)."),
 ]
 MemoryRecordTypeParam = Annotated[
-    str | None,
+    MemoryRecordType | None,
     Field(description="Memory record type for record_candidate."),
 ]
 MemoryStatementParam = Annotated[

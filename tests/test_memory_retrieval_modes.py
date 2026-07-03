@@ -9,10 +9,82 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
+import pytest
+
+from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.governance import record_candidate
+from codeclone.memory.models import generate_memory_id
 from codeclone.memory.retrieval import query_engineering_memory
+from codeclone.memory.retrieval.service import get_relevant_memory
+from codeclone.report.meta import current_report_timestamp_utc
 
 from .memory_fixtures import memory_store, seed_path_subject_record
+
+
+def _insert_legacy_memory_record_type(
+    store: object,
+    *,
+    project_id: str,
+    record_id: str,
+    record_type: str,
+    path: str,
+) -> None:
+    from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+
+    assert isinstance(store, SqliteEngineeringMemoryStore)
+    now = current_report_timestamp_utc()
+    store._conn.execute(
+        """
+        INSERT INTO memory_records(
+            id, project_id, identity_key, type, status, confidence, origin,
+            ingest_source, statement, summary, payload_json, created_at_utc,
+            updated_at_utc, last_verified_at_utc, expires_at_utc, created_by,
+            verified_by, approved_by, approved_at_utc, report_digest,
+            code_fingerprint, stale_reason, created_on_branch, created_at_commit,
+            verified_on_branch, verified_at_commit, schema_version
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?
+        )
+        """,
+        (
+            record_id,
+            project_id,
+            f"{record_type}:path:{path}:legacy",
+            record_type,
+            "active",
+            "inferred",
+            "agent",
+            "agent",
+            "legacy non-canonical memory record",
+            None,
+            None,
+            now,
+            now,
+            None,
+            None,
+            "legacy-test",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            "1.7",
+        ),
+    )
+    store._conn.execute(
+        """
+        INSERT INTO memory_subjects(id, memory_id, subject_kind, subject_key, relation)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (generate_memory_id(prefix="subj"), record_id, "path", path, "about"),
+    )
+    store._conn.commit()
 
 
 def test_query_engineering_memory_get_stale_drafts_coverage(
@@ -126,6 +198,75 @@ def test_query_engineering_memory_get_missing_record(tmp_path: Path) -> None:
             record_id="missing-id",
         )
     assert result["status"] == "not_found"
+
+
+def test_memory_retrieval_quarantines_legacy_invalid_record_type(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, db_path):
+        record_id = "mem-legacy-invalid-type"
+        _insert_legacy_memory_record_type(
+            store,
+            project_id=project.id,
+            record_id=record_id,
+            record_type="decision",
+            path="pkg/legacy.py",
+        )
+
+        for_path = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="for_path",
+            path="pkg/legacy.py",
+            max_results=10,
+            include_stale=True,
+        )
+        get_payload = query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="get",
+            record_id=record_id,
+        )
+        relevant = get_relevant_memory(
+            store,
+            project_id=project.id,
+            scope_paths=("pkg/legacy.py",),
+            scope_resolved_from="test",
+            max_records=5,
+            include_stale=True,
+        )
+
+    assert for_path["status"] == "ok"
+    payload = for_path["payload"]
+    assert isinstance(payload, dict)
+    assert payload["record_count"] == 0
+    assert get_payload["status"] == "not_found"
+    assert relevant["record_count"] == 0
+
+
+def test_query_engineering_memory_rejects_invalid_filter_literals(
+    tmp_path: Path,
+) -> None:
+    with (
+        memory_store(tmp_path) as (root, project, store, db_path),
+        pytest.raises(MemoryContractError, match="record_type"),
+    ):
+        query_engineering_memory(
+            store,
+            project_id=project.id,
+            root_path=root,
+            backend="sqlite",
+            db_path=db_path,
+            mode="search",
+            query="legacy",
+            filters={"types": ["decision"]},
+        )
 
 
 def test_handle_semantic_search_disabled_block(tmp_path: Path) -> None:

@@ -18,7 +18,7 @@ from ..config.memory_defaults import (
     DEFAULT_MEMORY_TARGET_STATEMENT_CHARS,
 )
 from ..report.meta import current_report_timestamp_utc
-from .enums import MemoryRecordType
+from .enums import MemoryRecordType, validate_memory_record_type
 from .exceptions import MemoryCapacityError, MemoryContractError
 from .identity import make_identity_key
 from .models import (
@@ -108,6 +108,14 @@ MEMORY_STATEMENT_TOO_LONG_ERROR = (
     "Compress it into one evidence-linked conclusion; store details in "
     "receipt/spec/docs."
 )
+
+
+def _validate_candidate_record_type(record_type: MemoryRecordType) -> MemoryRecordType:
+    try:
+        return validate_memory_record_type(record_type)
+    except ValueError as exc:
+        raise MemoryContractError(str(exc)) from exc
+
 
 _VS_CODE_CHANNEL_RE = re.compile(r"\bvs\s*code\b|\bvscode\b", re.IGNORECASE)
 _HUMAN_GOVERNANCE_MARKERS = (
@@ -468,6 +476,7 @@ def record_candidate(
     max_candidates: int,
     max_statement_chars: int = DEFAULT_MEMORY_MAX_STATEMENT_CHARS,
 ) -> MemoryRecord:
+    record_type = _validate_candidate_record_type(record_type)
     stripped = statement.strip()
     if not stripped:
         raise MemoryContractError("Candidate statement must not be empty.")
@@ -561,6 +570,7 @@ def promote_experience(
     Idempotent: re-promoting the same experience is rejected. The experience keeps
     informing agents advisorily whether or not it is ever promoted.
     """
+    record_type = _validate_candidate_record_type(record_type)
     experience = store.find_experience(experience_id)
     if experience is None or experience.project_id != project.id:
         raise MemoryContractError(f"Experience not found: {experience_id}")

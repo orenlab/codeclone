@@ -8,13 +8,21 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
 from ...observability import is_observability_enabled, record_counter, span
 from ..embedding import embed_query
-from ..enums import LinkRelation, MemoryConfidence, MemoryRecordType, MemoryStatus
+from ..enums import (
+    LinkRelation,
+    MemoryConfidence,
+    MemoryRecordType,
+    MemoryStatus,
+    validate_memory_confidence,
+    validate_memory_record_type,
+    validate_memory_status,
+)
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..experience.models import Experience
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
@@ -1039,22 +1047,50 @@ def _parse_filters(
     include_routine = False
     if filters is None:
         return (), (), (), match_mode, include_routine
+    allowed_keys = {"types", "statuses", "confidences", "match_mode", "include_routine"}
+    unknown = sorted(str(key) for key in filters if key not in allowed_keys)
+    if unknown:
+        raise MemoryContractError(
+            f"Unknown memory filter key(s): {', '.join(unknown)}."
+        )
     raw_types = filters.get("types")
     if isinstance(raw_types, list):
-        types.extend(cast(MemoryRecordType, str(item)) for item in raw_types)
+        try:
+            types.extend(validate_memory_record_type(item) for item in raw_types)
+        except ValueError as exc:
+            raise MemoryContractError(str(exc)) from exc
+    elif raw_types is not None:
+        raise MemoryContractError("memory filter types must be a list of strings.")
     raw_statuses = filters.get("statuses")
     if isinstance(raw_statuses, list):
-        statuses.extend(cast(MemoryStatus, str(item)) for item in raw_statuses)
+        try:
+            statuses.extend(validate_memory_status(item) for item in raw_statuses)
+        except ValueError as exc:
+            raise MemoryContractError(str(exc)) from exc
+    elif raw_statuses is not None:
+        raise MemoryContractError("memory filter statuses must be a list of strings.")
     raw_confidences = filters.get("confidences")
     if isinstance(raw_confidences, list):
-        confidences.extend(
-            cast(MemoryConfidence, str(item)) for item in raw_confidences
+        try:
+            confidences.extend(
+                validate_memory_confidence(item) for item in raw_confidences
+            )
+        except ValueError as exc:
+            raise MemoryContractError(str(exc)) from exc
+    elif raw_confidences is not None:
+        raise MemoryContractError(
+            "memory filter confidences must be a list of strings."
         )
     raw_match = filters.get("match_mode")
-    if raw_match in {"all", "any"}:
-        match_mode = cast(SearchMatchMode, raw_match)
-    if bool(filters.get("include_routine")):
-        include_routine = True
+    if raw_match == "all" or raw_match == "any":
+        match_mode = raw_match
+    elif raw_match is not None:
+        raise MemoryContractError("memory filter match_mode must be 'any' or 'all'.")
+    raw_include_routine = filters.get("include_routine")
+    if isinstance(raw_include_routine, bool):
+        include_routine = raw_include_routine
+    elif raw_include_routine is not None:
+        raise MemoryContractError("memory filter include_routine must be boolean.")
     return (
         tuple(types),
         tuple(statuses),

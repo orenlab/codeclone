@@ -9,10 +9,16 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from codeclone.memory.identity import make_identity_key
 from codeclone.memory.models import (
+    IngestionRun,
+    MemoryEvidence,
+    MemoryLink,
     MemoryRecord,
     MemoryRevision,
+    MemorySubject,
     generate_memory_id,
 )
 from codeclone.memory.project import resolve_project_identity
@@ -104,11 +110,87 @@ def test_store_crud_upsert_and_revision(tmp_path: Path) -> None:
         store.close()
 
 
+def test_store_validates_database_bound_memory_inputs(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        record = _sample_record(project_id=project.id)
+        invalid_record = replace(record, type="decision")  # type: ignore[arg-type]
+        with pytest.raises(ValueError, match=r"record: type"):
+            store.upsert_record(invalid_record)
+
+        store.upsert_record(record)
+        invalid_subject = MemorySubject(
+            id=generate_memory_id(prefix="subj"),
+            memory_id=record.id,
+            subject_kind="repo_file",  # type: ignore[arg-type]
+            subject_key="pkg/mod.py",
+            relation="about",
+        )
+        with pytest.raises(ValueError, match=r"subject: subject_kind"):
+            store.write_subject(invalid_subject)
+
+        invalid_evidence = MemoryEvidence(
+            id=generate_memory_id(prefix="evid"),
+            memory_id=record.id,
+            evidence_kind="unknown",  # type: ignore[arg-type]
+            ref="test",
+            locator=None,
+            quote=None,
+            digest=None,
+            created_at_utc=current_report_timestamp_utc(),
+        )
+        with pytest.raises(ValueError, match=r"evidence: evidence_kind"):
+            store.write_evidence(invalid_evidence)
+
+        invalid_link = MemoryLink(
+            id=generate_memory_id(prefix="link"),
+            project_id=project.id,
+            from_memory_id=record.id,
+            to_memory_id=record.id,
+            relation="references",  # type: ignore[arg-type]
+            created_by="test",
+            created_at_utc=current_report_timestamp_utc(),
+        )
+        with pytest.raises(ValueError, match=r"link: relation"):
+            store.write_link(invalid_link)
+
+        with pytest.raises(ValueError, match="record_status"):
+            store.update_record_status(record.id, status="pending")
+
+        empty_statement = replace(record, statement="")
+        with pytest.raises(ValueError, match=r"record: statement"):
+            store.upsert_record(empty_statement)
+
+        wrong_schema = replace(record, id=generate_memory_id(), schema_version="0")
+        with pytest.raises(ValueError, match=r"record: schema_version"):
+            store.upsert_record(wrong_schema)
+
+        invalid_run = IngestionRun(
+            id=generate_memory_id(prefix="run"),
+            project_id=project.id,
+            mode="refresh",
+            started_at_utc=current_report_timestamp_utc(),
+            finished_at_utc=None,
+            status="completed",
+            analysis_fingerprint=None,
+            report_digest=None,
+            branch=None,
+            commit=None,
+            records_created=-1,
+        )
+        with pytest.raises(ValueError, match=r"ingestion_run: records_created"):
+            store.write_ingestion_run(invalid_run)
+    finally:
+        store.close()
+
+
 def test_write_subject_is_idempotent_and_prune_removes_duplicates(
     tmp_path: Path,
 ) -> None:
-    from codeclone.memory.models import MemorySubject
-
     root = tmp_path / "repo"
     root.mkdir()
     project = resolve_project_identity(root)

@@ -2821,6 +2821,20 @@
         "record_type": {
           "anyOf": [
             {
+              "enum": [
+                "module_role",
+                "contract_note",
+                "test_anchor",
+                "document_link",
+                "risk_note",
+                "public_surface",
+                "contradiction_note",
+                "architecture_decision",
+                "change_rationale",
+                "protocol_rule",
+                "stale_marker",
+                "human_note"
+              ],
               "type": "string"
             },
             {

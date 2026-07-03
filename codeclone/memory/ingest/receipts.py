@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from contextlib import suppress
 
 from ...report.meta import current_report_timestamp_utc
+from ..enums import MemoryRecordType, validate_memory_record_type
 from ..governance import record_candidate
 from ..models import MemoryProject, generate_memory_id
 from ..sqlite_store import SqliteEngineeringMemoryStore
@@ -19,7 +20,7 @@ def _try_append_text_candidate(
     store: SqliteEngineeringMemoryStore,
     *,
     project: MemoryProject,
-    record_type: str,
+    record_type: MemoryRecordType,
     text: object,
     subject_path: str | None,
     created_by: str,
@@ -29,10 +30,11 @@ def _try_append_text_candidate(
     if not isinstance(text, str) or not text.strip() or not subject_path:
         return None
     try:
+        canonical_type = validate_memory_record_type(record_type)
         record = record_candidate(
             store,
             project=project,
-            record_type=record_type,  # type: ignore[arg-type]
+            record_type=canonical_type,
             statement=text.strip()[:max_statement_chars],
             subject_path=subject_path,
             created_by=created_by,
