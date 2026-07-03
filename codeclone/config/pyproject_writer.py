@@ -189,13 +189,8 @@ def merge_tool_codeclone(
             preview_text=preview_text,
         )
 
+    _validate_pyproject_text_before_write(root_path=root_path, text=preview_text)
     write_pyproject_text_atomically(config_path, preview_text)
-    try:
-        load_pyproject_config(root_path)
-    except ConfigValidationError as exc:
-        raise PyprojectWriterError(
-            "Written pyproject.toml failed validation after merge"
-        ) from exc
 
     return PyprojectWriteResult(
         config_path=config_path,
@@ -203,6 +198,19 @@ def merge_tool_codeclone(
         created_section=created_section,
         dry_run=False,
     )
+
+
+def _validate_pyproject_text_before_write(*, root_path: Path, text: str) -> None:
+    """Validate serialized pyproject text before it is installed."""
+
+    tomlkit = _load_tomlkit()
+    try:
+        payload = tomlkit.parse(text)
+        load_pyproject_config(root_path, load_toml=lambda _path: payload)
+    except (ConfigValidationError, ValueError) as exc:
+        raise PyprojectWriterError(
+            "Merged pyproject.toml failed validation before write"
+        ) from exc
 
 
 def _ensure_tool_codeclone_table(document: TOMLDocument) -> tuple[TomlTable, bool]:

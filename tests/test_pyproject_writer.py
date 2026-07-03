@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from codeclone.config import pyproject_writer as pyproject_writer_mod
 from codeclone.config.pyproject_loader import (
     ConfigValidationError,
     load_pyproject_config,
@@ -229,22 +230,45 @@ def test_merge_rejects_written_payload_validation_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _write_pyproject(tmp_path / "pyproject.toml", "[tool.codeclone]\n")
-    calls = {"count": 0}
-    real_loader = load_pyproject_config
+    pyproject = tmp_path / "pyproject.toml"
+    _write_pyproject(pyproject, "[tool.codeclone]\n")
+    before = pyproject.read_text(encoding="utf-8")
+    writes: list[str] = []
 
-    def _loader(root: Path) -> dict[str, object]:
-        calls["count"] += 1
-        if calls["count"] > 1:
-            raise ConfigValidationError("broken after write")
-        return real_loader(root)
+    def _reject_preview(*, root_path: Path, text: str) -> None:
+        raise PyprojectWriterError(
+            "Merged pyproject.toml failed validation before write"
+        )
+
+    def _write(_config_path: Path, text: str) -> None:
+        writes.append(text)
 
     monkeypatch.setattr(
-        "codeclone.config.pyproject_writer.load_pyproject_config",
-        _loader,
+        "codeclone.config.pyproject_writer._validate_pyproject_text_before_write",
+        _reject_preview,
     )
-    with pytest.raises(PyprojectWriterError, match="failed validation after merge"):
+    monkeypatch.setattr(
+        "codeclone.config.pyproject_writer.write_pyproject_text_atomically",
+        _write,
+    )
+
+    with pytest.raises(PyprojectWriterError, match="failed validation before write"):
         merge_tool_codeclone(tmp_path, {"audit_enabled": True})
+    assert pyproject.read_text(encoding="utf-8") == before
+    assert writes == []
+
+
+def test_validate_pyproject_text_before_write_uses_loader_contract(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "pyproject.toml").write_text("[tool.codeclone]\n", encoding="utf-8")
+    text = '[tool.codeclone]\nmin_loc = "not-an-int"\n'
+
+    with pytest.raises(PyprojectWriterError, match="failed validation before write"):
+        pyproject_writer_mod._validate_pyproject_text_before_write(
+            root_path=tmp_path,
+            text=text,
+        )
 
 
 def test_apply_tool_codeclone_updates_skips_unchanged_key(tmp_path: Path) -> None:
