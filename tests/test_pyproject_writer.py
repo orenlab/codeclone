@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import errno
+import os
 import stat
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from codeclone.config.pyproject_writer import (
     validate_tool_codeclone_updates,
     write_pyproject_text_atomically,
 )
+from codeclone.utils import atomic_write as atomic_write_mod
 from codeclone.utils.atomic_write import validate_atomic_target, write_text_atomically
 
 
@@ -308,6 +311,80 @@ def test_write_pyproject_text_atomically_preserves_existing_mode(
 
     assert _permission_bits(config_path) == 0o644
     assert load_pyproject_config(tmp_path)["min_loc"] == 5
+
+
+def test_write_text_atomically_fsyncs_parent_after_replace(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+    events: list[tuple[str, str]] = []
+    real_replace = os.replace
+
+    def _replace(src: Path, dst: Path) -> None:
+        events.append(("replace", str(dst)))
+        real_replace(src, dst)
+
+    def _fsync_parent(path: Path) -> None:
+        events.append(("fsync_parent", str(path.parent)))
+
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.replace", _replace)
+    monkeypatch.setattr(
+        "codeclone.utils.atomic_write._fsync_parent_directory",
+        _fsync_parent,
+    )
+
+    write_text_atomically(target, "hello\n")
+
+    assert target.read_text(encoding="utf-8") == "hello\n"
+    assert events[-2:] == [
+        ("replace", str(target)),
+        ("fsync_parent", str(tmp_path)),
+    ]
+
+
+def test_fsync_parent_directory_uses_directory_fd(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+    events: list[tuple[str, int | str]] = []
+
+    def _open(path: object, _flags: int) -> int:
+        events.append(("open", str(path)))
+        return 4242
+
+    def _fsync(fd_num: int) -> None:
+        events.append(("fsync", fd_num))
+
+    def _close(fd_num: int) -> None:
+        events.append(("close", fd_num))
+
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.open", _open)
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.fsync", _fsync)
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.close", _close)
+
+    atomic_write_mod._fsync_parent_directory(target)
+
+    assert events == [
+        ("open", str(tmp_path)),
+        ("fsync", 4242),
+        ("close", 4242),
+    ]
+
+
+def test_write_text_atomically_ignores_unsupported_parent_fsync(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+
+    def _open(_path: object, _flags: int) -> int:
+        raise OSError(errno.EINVAL, "directory fsync unsupported")
+
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.open", _open)
+
+    atomic_write_mod._fsync_parent_directory(target)
 
 
 def test_write_text_atomically_cleans_up_temp_on_replace_failure(

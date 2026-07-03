@@ -11,7 +11,12 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+from errno import EACCES, EBADF, EINVAL, ENOSYS, ENOTSUP, EPERM
 from pathlib import Path
+
+_UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS = frozenset(
+    {EACCES, EBADF, EINVAL, ENOSYS, ENOTSUP, EPERM}
+)
 
 
 def write_text_atomically(path: Path, text: str) -> None:
@@ -31,6 +36,7 @@ def write_text_atomically(path: Path, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_path, path)
+        _fsync_parent_directory(path)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -56,6 +62,26 @@ def _chmod_open_file(fd_num: int, path: Path, mode: int) -> None:
         os.fchmod(fd_num, mode)
         return
     os.chmod(path, mode)
+
+
+def _fsync_parent_directory(path: Path) -> None:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    try:
+        fd_num = os.open(path.parent, flags)
+    except OSError as exc:
+        if exc.errno in _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS:
+            return
+        raise
+    try:
+        try:
+            os.fsync(fd_num)
+        except OSError as exc:
+            if exc.errno not in _UNSUPPORTED_DIRECTORY_FSYNC_ERRNOS:
+                raise
+    finally:
+        os.close(fd_num)
 
 
 def validate_atomic_target(path: Path) -> None:
