@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -24,6 +25,10 @@ from codeclone.config.pyproject_writer import (
     write_pyproject_text_atomically,
 )
 from codeclone.utils.atomic_write import validate_atomic_target, write_text_atomically
+
+
+def _permission_bits(path: Path) -> int:
+    return stat.S_IMODE(path.stat().st_mode)
 
 
 def _write_pyproject(path: Path, content: str) -> None:
@@ -276,6 +281,33 @@ def test_write_text_atomically_and_validate_target(tmp_path: Path) -> None:
         pytest.skip(f"directory symlink unavailable: {exc}")
     with pytest.raises(OSError, match="symlink directory"):
         validate_atomic_target(nested)
+
+
+def test_write_text_atomically_preserves_existing_mode(tmp_path: Path) -> None:
+    target = tmp_path / "out.txt"
+    target.write_text("before\n", encoding="utf-8")
+    target.chmod(0o644)
+
+    write_text_atomically(target, "after\n")
+
+    assert target.read_text(encoding="utf-8") == "after\n"
+    assert _permission_bits(target) == 0o644
+
+
+def test_write_pyproject_text_atomically_preserves_existing_mode(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text("[tool.codeclone]\nmin_loc = 4\n", encoding="utf-8")
+    config_path.chmod(0o644)
+
+    write_pyproject_text_atomically(
+        config_path,
+        "[tool.codeclone]\nmin_loc = 5\n",
+    )
+
+    assert _permission_bits(config_path) == 0o644
+    assert load_pyproject_config(tmp_path)["min_loc"] == 5
 
 
 def test_write_text_atomically_cleans_up_temp_on_replace_failure(
