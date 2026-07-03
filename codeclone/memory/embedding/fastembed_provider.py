@@ -51,6 +51,18 @@ def _encoding_length(encoding: object) -> int:
     return 0
 
 
+def _encoding_token_ids(encoding: object) -> list[int]:
+    ids = getattr(encoding, "ids", ())
+    if not isinstance(ids, Iterable) or isinstance(ids, str | bytes | bytearray):
+        return []
+    token_ids: list[int] = []
+    for token_id in ids:
+        if isinstance(token_id, bool) or not isinstance(token_id, int):
+            return []
+        token_ids.append(token_id)
+    return token_ids
+
+
 def _tokenizer_encode_ops(
     tokenizer: object,
 ) -> (
@@ -285,7 +297,7 @@ class FastEmbedEmbeddingProvider:
                 _verify_chunk_passage_input(encode, text, model_max_tokens=max_length)
                 return (text,)
             content_encoding = encode(text, add_special_tokens=False)
-            content_ids = list(getattr(content_encoding, "ids", ()))
+            content_ids = _encoding_token_ids(content_encoding)
             payload_budget = _chunk_payload_token_budget(
                 encode,
                 model_max_tokens=max_length,
@@ -380,7 +392,14 @@ class FastEmbedEmbeddingProvider:
             raise MemorySemanticUnavailableError(
                 "fastembed returned a non-iterable embedding vector"
             )
-        return [float(value) for value in raw_vector]
+        vector: list[float] = []
+        for value in raw_vector:
+            if isinstance(value, bool) or not isinstance(value, str | int | float):
+                raise MemorySemanticUnavailableError(
+                    "fastembed returned a non-numeric embedding vector"
+                )
+            vector.append(float(value))
+        return vector
 
 
 __all__ = ["FastEmbedEmbeddingProvider", "known_model_max_tokens"]
