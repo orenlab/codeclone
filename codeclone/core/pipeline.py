@@ -71,8 +71,10 @@ def _artifact_dead_items(
     value: object,
     default: tuple[DeadItem, ...],
 ) -> tuple[DeadItem, ...]:
-    if isinstance(value, tuple) and all(isinstance(item, DeadItem) for item in value):
-        return value
+    if isinstance(value, tuple):
+        dead_items = tuple(item for item in value if isinstance(item, DeadItem))
+        if len(dead_items) == len(value):
+            return dead_items
     return default
 
 
@@ -197,6 +199,7 @@ def analyze(
     segment_groups_raw = segment_split.active_groups
     segment_groups_raw_digest = _segment_groups_digest(segment_groups_raw)
     cached_projection = discovery.cached_segment_report_projection
+    segment_groups: dict[str, list[dict[str, object]]]
     if (
         cached_projection is not None
         and cached_projection.get("digest") == segment_groups_raw_digest
