@@ -1018,9 +1018,14 @@ def _memory_retrieval_continuation(
 
 def _string_list(payload: Mapping[str, object], key: str) -> list[str]:
     value = payload.get(key)
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    if not isinstance(value, list):
         raise MemoryContractError(f"memory continuation request {key} is invalid")
-    return list(value)
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise MemoryContractError(f"memory continuation request {key} is invalid")
+        result.append(item)
+    return result
 
 
 def _load_patch_trails_for_trajectories(
@@ -1029,6 +1034,16 @@ def _load_patch_trails_for_trajectories(
     trajectory_ids: Sequence[str],
 ) -> dict[str, dict[str, object]]:
     return store.load_trajectory_patch_trails(trajectory_ids)
+
+
+_MEMORY_FILTER_KEYS = (
+    "types",
+    "statuses",
+    "confidences",
+    "match_mode",
+    "include_routine",
+)
+_MEMORY_FILTER_KEY_SET = frozenset(_MEMORY_FILTER_KEYS)
 
 
 def _parse_filters(
@@ -1047,11 +1062,11 @@ def _parse_filters(
     include_routine = False
     if filters is None:
         return (), (), (), match_mode, include_routine
-    allowed_keys = {"types", "statuses", "confidences", "match_mode", "include_routine"}
-    unknown = sorted(str(key) for key in filters if key not in allowed_keys)
+    unknown = sorted(str(key) for key in filters if key not in _MEMORY_FILTER_KEY_SET)
     if unknown:
         raise MemoryContractError(
-            f"Unknown memory filter key(s): {', '.join(unknown)}."
+            f"Unknown memory filter key(s): {', '.join(unknown)}. "
+            f"Allowed keys: {', '.join(_MEMORY_FILTER_KEYS)}."
         )
     raw_types = filters.get("types")
     if isinstance(raw_types, list):
@@ -1082,8 +1097,10 @@ def _parse_filters(
             "memory filter confidences must be a list of strings."
         )
     raw_match = filters.get("match_mode")
-    if raw_match == "all" or raw_match == "any":
-        match_mode = raw_match
+    if raw_match == "all":
+        match_mode = "all"
+    elif raw_match == "any":
+        match_mode = "any"
     elif raw_match is not None:
         raise MemoryContractError("memory filter match_mode must be 'any' or 'all'.")
     raw_include_routine = filters.get("include_routine")

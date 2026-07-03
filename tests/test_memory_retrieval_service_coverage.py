@@ -13,6 +13,7 @@ from typing import cast
 
 import pytest
 
+from codeclone.memory.enums import MemoryConfidence, MemoryStatus
 from codeclone.memory.exceptions import MemoryContractError
 from codeclone.memory.experience.models import Experience
 from codeclone.memory.models import MemoryEvidence, MemoryRecord, MemorySubject
@@ -25,15 +26,19 @@ from codeclone.report.meta import current_report_timestamp_utc
 from .memory_fixtures import memory_store
 
 
-def _record(*, status: str = "active", confidence: str = "verified") -> MemoryRecord:
+def _record(
+    *,
+    status: MemoryStatus = "active",
+    confidence: MemoryConfidence = "verified",
+) -> MemoryRecord:
     now = current_report_timestamp_utc()
     return MemoryRecord(
         id="mem-1",
         project_id="proj",
         identity_key="id-1",
         type="contract_note",
-        status=status,  # type: ignore[arg-type]
-        confidence=confidence,  # type: ignore[arg-type]
+        status=status,
+        confidence=confidence,
         origin="system",
         ingest_source="analysis",
         statement="hello",
@@ -57,13 +62,14 @@ def _record(*, status: str = "active", confidence: str = "verified") -> MemoryRe
     )
 
 
-def _stub_store(records: list[MemoryRecord]) -> object:
-    return SimpleNamespace(
+def _stub_store(records: list[MemoryRecord]) -> SqliteEngineeringMemoryStore:
+    store = SimpleNamespace(
         find_record=lambda _record_id: None,
         list_subjects_for_memory=lambda _record_id: [],
         count_evidence_for_memory=lambda _record_id: 0,
         query_records=lambda _query: records,
     )
+    return cast(SqliteEngineeringMemoryStore, store)
 
 
 def test_record_visible_serialize_and_parse_filters_branches() -> None:
@@ -113,6 +119,15 @@ def test_record_visible_serialize_and_parse_filters_branches() -> None:
     assert mode == "all"
     assert include_routine is False
 
+    with pytest.raises(MemoryContractError) as exc_info:
+        retrieval_service._parse_filters({"typo": ["contract_note"]})
+    message = str(exc_info.value)
+    assert "Unknown memory filter key(s): typo." in message
+    assert (
+        "Allowed keys: types, statuses, confidences, match_mode, include_routine."
+        in message
+    )
+
 
 def test_retrieval_service_error_and_fallback_branches() -> None:
     with pytest.raises(TypeError, match="Path instances"):
@@ -125,7 +140,7 @@ def test_retrieval_service_error_and_fallback_branches() -> None:
 
     with pytest.raises(MemoryContractError, match="mode=get requires record_id"):
         retrieval_service._handle_get_mode(
-            _stub_store([]),  # type: ignore[arg-type]
+            _stub_store([]),
             mode="get",
             project_id="proj",
             record_id=None,
@@ -145,7 +160,7 @@ def test_retrieval_service_error_and_fallback_branches() -> None:
 def test_for_symbol_and_unknown_mode_paths() -> None:
     store_with_records = _stub_store([_record()])
     got = retrieval_service._fetch_for_symbol_mode_records(
-        store_with_records,  # type: ignore[arg-type]
+        store_with_records,
         project_id="proj",
         symbol="pkg.mod.symbol",
         filter_types=(),
@@ -155,7 +170,7 @@ def test_for_symbol_and_unknown_mode_paths() -> None:
     assert len(got) == 1
 
     empty = retrieval_service._fetch_for_symbol_mode_records(
-        _stub_store([]),  # type: ignore[arg-type]
+        _stub_store([]),
         project_id="proj",
         symbol="nosplit",
         filter_types=(),
@@ -165,7 +180,7 @@ def test_for_symbol_and_unknown_mode_paths() -> None:
     assert empty == ()
 
     fallback = retrieval_service._records_for_list_mode(
-        _stub_store([]),  # type: ignore[arg-type]
+        _stub_store([]),
         mode="unknown",
         project_id="proj",
         path=None,
@@ -259,6 +274,7 @@ def test_compact_record_subjects_are_bounded_and_scope_relevant() -> None:
     }
     compact_subjects = compact["subjects"]
     assert isinstance(compact_subjects, list)
+    compact_subjects = cast("list[dict[str, object]]", compact_subjects)
     assert len(compact_subjects) == retrieval_service.COMPACT_MEMORY_SUBJECT_LIMIT
     assert compact_subjects[0]["subject_key"] == "pkg/service.py"
     full_subjects = full.get("subjects")

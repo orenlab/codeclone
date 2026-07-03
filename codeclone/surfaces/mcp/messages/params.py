@@ -613,7 +613,8 @@ MemoryFiltersParam = Annotated[
             "Optional filters: types, statuses, confidences, match_mode "
             "(any|all, search mode only), include_routine (trajectory_search, "
             "trajectory_anomalies, trajectory_agents, trajectory_dashboard; "
-            "default false excludes run:* routine workflows)."
+            "default false excludes run:* routine workflows). Unknown filter "
+            "keys are rejected with a typed contract error."
         ),
     ),
 ]

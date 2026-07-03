@@ -99,12 +99,16 @@ continuing against fresh memory data.
 
 **Filters** (`filters` object):
 
-| Key           | Values                   | Notes                                 |
-|---------------|--------------------------|---------------------------------------|
-| `types`       | list of record types     | e.g. `["contract_note", "risk_note"]` |
-| `statuses`    | list of statuses         | e.g. `["active"]`                     |
-| `confidences` | list of confidences      | e.g. `["verified"]`                   |
-| `match_mode`  | `any` (default) or `all` | **search mode only** — token matching |
+Unknown filter keys are rejected with a typed contract error; callers should
+omit unsupported keys rather than expect them to be ignored.
+
+| Key               | Values                   | Notes                                                                 |
+|-------------------|--------------------------|-----------------------------------------------------------------------|
+| `types`           | list of record types     | e.g. `["contract_note", "risk_note"]`                                 |
+| `statuses`        | list of statuses         | e.g. `["active"]`                                                     |
+| `confidences`     | list of confidences      | e.g. `["verified"]`                                                   |
+| `match_mode`      | `any` (default) or `all` | **search mode only** — token matching                                 |
+| `include_routine` | boolean                  | trajectory modes only; default `false` excludes `run:*` routine flows |
 
 CLI equivalent: `codeclone memory search QUERY --match any|all`.
 
