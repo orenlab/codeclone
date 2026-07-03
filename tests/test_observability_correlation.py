@@ -18,6 +18,7 @@ import pytest
 import codeclone.memory.jobs.spawn as spawn
 import codeclone.memory.jobs.worker as worker
 from codeclone.config.observability import ObservabilityConfig
+from codeclone.memory.models import MemoryProject
 from codeclone.observability import (
     bootstrap,
     counting_connection_factory,
@@ -36,6 +37,31 @@ from codeclone.observability.store.schema import (
 def _reset_runtime() -> Iterator[None]:
     yield
     shutdown()
+
+
+def _empty_projection_jobs_connection() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE memory_projection_jobs(
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            job_kind TEXT NOT NULL,
+            status TEXT NOT NULL,
+            trigger TEXT NOT NULL,
+            requested_at_utc TEXT NOT NULL,
+            started_at_utc TEXT,
+            finished_at_utc TEXT,
+            claimed_by TEXT,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            stimulus_json TEXT NOT NULL,
+            result_json TEXT,
+            error_message TEXT,
+            flush_claimed_by TEXT
+        )
+        """
+    )
+    return conn
 
 
 def test_current_operation_context(tmp_path: Path) -> None:
@@ -68,14 +94,26 @@ def test_run_projection_job_links_under_finish(
 
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     store = MagicMock()
+    store.connection = _empty_projection_jobs_connection()
+    project = MemoryProject(
+        id="proj-test",
+        root=str(tmp_path),
+        git_remote=None,
+        git_branch=None,
+        git_head=None,
+        python_tag=None,
+        created_at_utc="2026-01-01T00:00:00.000000Z",
+        updated_at_utc="2026-01-01T00:00:00.000000Z",
+    )
     worker.run_projection_job(
         store,
         job_id="j1",
         root_path=tmp_path,
         config=MagicMock(),
-        project=MagicMock(),
+        project=project,
         stimulus={},
     )
+    store.connection.close()
     shutdown()
 
     conn = open_observability_store(observability_store_path(tmp_path))

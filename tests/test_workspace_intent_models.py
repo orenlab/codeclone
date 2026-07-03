@@ -117,9 +117,9 @@ def test_workspace_intent_document_rejects_naive_timestamp() -> None:
 
 
 def test_workspace_intent_document_rejects_invalid_dirty_snapshot() -> None:
-    from tests.test_workspace_intents import _record
+    from tests.test_workspace_intents import _record, _signed_payload_with
 
-    record = replace(
+    payload = _signed_payload_with(
         _record(),
         dirty_snapshot={
             "git_available": True,
@@ -133,7 +133,7 @@ def test_workspace_intent_document_rejects_invalid_dirty_snapshot() -> None:
             },
         },
     )
-    assert parse_workspace_document(signed_payload_dict_from_record(record)) is None
+    assert parse_workspace_document(payload) is None
 
 
 @pytest.mark.parametrize(
@@ -185,10 +185,10 @@ def test_workspace_intent_document_rejects_invalid_dirty_snapshot() -> None:
 def test_workspace_intent_document_dirty_snapshot_validation_messages(
     dirty_snapshot: dict[str, object],
 ) -> None:
-    from tests.test_workspace_intents import _record
+    from tests.test_workspace_intents import _record, _signed_payload_with
 
-    record = replace(_record(), dirty_snapshot=dirty_snapshot)
-    assert parse_workspace_document(signed_payload_dict_from_record(record)) is None
+    payload = _signed_payload_with(_record(), dirty_snapshot=dirty_snapshot)
+    assert parse_workspace_document(payload) is None
 
 
 def test_signed_payload_json_roundtrip_via_pydantic() -> None:

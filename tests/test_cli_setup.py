@@ -74,6 +74,18 @@ _OPTIONAL_MODULES = frozenset(
 )
 
 
+def _pop_modules_with_prefix(prefix: str) -> dict[str, types.ModuleType]:
+    removed: dict[str, types.ModuleType] = {}
+    for name in list(sys.modules):
+        if name == prefix or name.startswith(f"{prefix}."):
+            removed[name] = sys.modules.pop(name)
+    return removed
+
+
+def _restore_modules(modules: Mapping[str, types.ModuleType]) -> None:
+    sys.modules.update(modules)
+
+
 @pytest.fixture
 def base_install_find_spec(monkeypatch: pytest.MonkeyPatch) -> None:
     real_find_spec = importlib.util.find_spec
@@ -1950,15 +1962,18 @@ def test_setup_main_does_not_import_mcp_surface(
     base_install_find_spec: None,
 ) -> None:
     _write_minimal_pyproject(tmp_path / "pyproject.toml")
-    for name in list(sys.modules):
-        if name.startswith("codeclone.surfaces.mcp"):
-            del sys.modules[name]
-    buf = io.StringIO()
-    with redirect_stdout(buf):
-        assert setup_main(["status", "--json", "--root", str(tmp_path)]) == int(
-            ExitCode.SUCCESS
+    removed_mcp_modules = _pop_modules_with_prefix("codeclone.surfaces.mcp")
+    try:
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            assert setup_main(["status", "--json", "--root", str(tmp_path)]) == int(
+                ExitCode.SUCCESS
+            )
+        assert not any(
+            name.startswith("codeclone.surfaces.mcp") for name in sys.modules
         )
-    assert not any(name.startswith("codeclone.surfaces.mcp") for name in sys.modules)
+    finally:
+        _restore_modules(removed_mcp_modules)
 
 
 def test_setup_does_not_create_intents(

@@ -408,9 +408,16 @@ def record_from_document(document: WorkspaceIntentDocument) -> WorkspaceIntentRe
 
 def signed_payload_dict_from_record(record: object) -> dict[str, object]:
     if not isinstance(record, WorkspaceIntentRecord):
-        msg = "record must be a WorkspaceIntentRecord"
-        raise TypeError(msg)
-    unsigned = record.unsigned_payload()
+        raise TypeError("record must be a WorkspaceIntentRecord")
+    raw_unsigned = record.unsigned_payload()
+    provisional = {
+        **raw_unsigned,
+        "integrity": {"payload_sha256": compute_intent_digest(raw_unsigned)},
+    }
+    document = parse_workspace_document(provisional)
+    if document is None:
+        raise ValueError("record must contain a valid WorkspaceIntentRecord payload")
+    unsigned = unsigned_document_payload(document)
     return {
         **unsigned,
         "integrity": {"payload_sha256": compute_intent_digest(unsigned)},

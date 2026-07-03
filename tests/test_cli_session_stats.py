@@ -348,7 +348,7 @@ def test_session_stats_stale_quiet(tmp_path: Path) -> None:
         pid=2,
         start_epoch=1000000,
         status="active",
-        lease_seconds=1,
+        lease_seconds=MIN_LEASE_SECONDS,
     )
     printer = _RecordingPrinter()
 

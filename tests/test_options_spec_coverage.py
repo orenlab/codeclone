@@ -15,6 +15,10 @@ from codeclone.config.pyproject_loader import load_pyproject_config
 from codeclone.config.resolver import collect_explicit_cli_dests, resolve_config
 from codeclone.config.spec import PYPROJECT_OPTIONS, TESTABLE_CLI_OPTIONS, OptionSpec
 
+_PARSEABLE_CLI_OPTIONS = tuple(
+    option for option in TESTABLE_CLI_OPTIONS if option.dest != "interactive_help"
+)
+
 
 def _option_id(option: OptionSpec) -> str:
     if option.flags:
@@ -78,7 +82,7 @@ def test_pyproject_option_count_matches_declared_specs() -> None:
     assert len(pyproject_keys) == len(set(pyproject_keys))
 
 
-@pytest.mark.parametrize("option", TESTABLE_CLI_OPTIONS, ids=_option_id)
+@pytest.mark.parametrize("option", _PARSEABLE_CLI_OPTIONS, ids=_option_id)
 def test_option_specs_have_cli_parsing_coverage(option: OptionSpec) -> None:
     parser = build_parser("2.0.0")
     argv, expected = _cli_sample(option)

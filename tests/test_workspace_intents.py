@@ -199,7 +199,7 @@ def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
         "forbidden": [],
     }
     invalid = _record(scope=invalid_scope)
-    signed = workspace_intents.signed_payload(invalid)
+    signed = _signed_payload_with(invalid)
     assert workspace_intents.validate_workspace_record(signed) is None
 
     traversal_scope: dict[str, object] = {
@@ -209,9 +209,7 @@ def test_workspace_intent_validation_rejects_tampered_and_invalid_paths(
     }
     traversal = _record(scope=traversal_scope)
     assert (
-        workspace_intents.validate_workspace_record(
-            workspace_intents.signed_payload(traversal)
-        )
+        workspace_intents.validate_workspace_record(_signed_payload_with(traversal))
         is None
     )
 
@@ -1245,7 +1243,7 @@ class TestSafeIntentId:
 def test_validate_workspace_record_rejects_traversal_intent_id() -> None:
     """validate_workspace_record rejects intent_id with path separators."""
     malicious = _record(intent_id="../../etc/passwd")
-    payload = workspace_intents.signed_payload(malicious)
+    payload = _signed_payload_with(malicious)
     assert workspace_intents.validate_workspace_record(payload) is None
 
 
