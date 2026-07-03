@@ -75,11 +75,12 @@ project file first, then re-run `plan`.
 
 ### Exit codes (`apply` only)
 
-| `status` in JSON             | Exit code | Meaning                                          |
-|------------------------------|-----------|--------------------------------------------------|
-| `applied`, `preview`, `noop` | `0`       | Success (`preview` when `--dry-run`)             |
-| `blocked`                    | `2`       | Preconditions failed (invalid/missing pyproject) |
-| `failed`, `partial`          | `5`       | Write or merge error                             |
+| `status` in JSON             | Exit code | Meaning                                                 |
+|------------------------------|-----------|---------------------------------------------------------|
+| `applied`, `preview`, `noop` | `0`       | Success (`preview` when `--dry-run`)                    |
+| `blocked`                    | `2`       | Preconditions failed (invalid/missing pyproject)        |
+| `stale_plan`                 | `2`       | Repository changed since the plan was computed          |
+| `failed`, `partial`          | `5`       | Write or merge error                                    |
 
 `plan` uses `status=empty` when no actions are needed (exit `0`). That is not an
 apply result status.
