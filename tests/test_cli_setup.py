@@ -765,6 +765,23 @@ def test_setup_confirm_apply_default_console_respects_no_color(
     assert calls == [None]
 
 
+def test_setup_apply_interactive_binds_confirmed_plan_id(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text('[project]\nname = "demo"\n', encoding="utf-8")
+
+    monkeypatch.setattr(setup_main_mod, "_confirm_apply", lambda _root: "stale-plan")
+
+    rc = setup_main_mod.setup_main(["apply", "--root", str(tmp_path)])
+
+    assert rc == int(ExitCode.CONTRACT_ERROR)
+    assert "[tool.codeclone]" not in pyproject.read_text(encoding="utf-8")
+
+
 def test_setup_wizard_quit(
     tmp_path: Path,
     base_install_find_spec: None,

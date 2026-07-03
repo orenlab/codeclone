@@ -97,15 +97,18 @@ def _dispatch(
 
 
 def _run_apply(root_path: Path, args: argparse.Namespace) -> int:
+    expected_plan_id = args.plan_id or None
     if not args.dry_run and not args.yes:
-        gate_exit = _confirmation_gate(root_path)
+        confirmed_plan_id, gate_exit = _confirmation_gate(root_path)
         if gate_exit is not None:
             return gate_exit
+        if expected_plan_id is None:
+            expected_plan_id = confirmed_plan_id
 
     result = apply_setup_plan(
         root_path,
         dry_run=args.dry_run,
-        expected_plan_id=args.plan_id or None,
+        expected_plan_id=expected_plan_id,
     )
     status = str(result.get("status", ""))
     if args.json:
@@ -117,17 +120,17 @@ def _run_apply(root_path: Path, args: argparse.Namespace) -> int:
     return _exit_code_for_apply(status)
 
 
-def _confirmation_gate(root_path: Path) -> int | None:
+def _confirmation_gate(root_path: Path) -> tuple[str | None, int | None]:
     """Preview the plan and confirm before an interactive apply.
 
-    Returns ``None`` when the caller may proceed with the write; otherwise an exit
-    code: refuse without a TTY (``CONTRACT_ERROR``) or an operator decline
-    (``SUCCESS``, nothing written).
+    Returns ``(plan_id, None)`` when the caller may proceed with the confirmed
+    plan. Otherwise returns ``(None, exit_code)``: refuse without a TTY
+    (``CONTRACT_ERROR``) or an operator decline (``SUCCESS``, nothing written).
     """
 
     confirmed = _confirm_apply(root_path)
-    if confirmed:
-        return None
+    if isinstance(confirmed, str):
+        return confirmed, None
     if confirmed is None:
         message, stream, code = (
             setup_ui.SETUP_APPLY_CONFIRM_REQUIRED,
@@ -141,22 +144,26 @@ def _confirmation_gate(root_path: Path) -> int | None:
             ExitCode.SUCCESS,
         )
     print(message, file=stream)
-    return int(code)
+    return None, int(code)
 
 
-def _confirm_apply(root_path: Path) -> bool | None:
+def _confirm_apply(root_path: Path) -> str | bool | None:
     """Preview the plan and ask for confirmation on a TTY.
 
-    Returns ``None`` when no interactive terminal is available (caller must refuse
-    without ``--yes``), otherwise the operator's yes/no decision.
+    Returns the confirmed ``plan_id`` when the operator accepts, ``False`` when
+    they decline, or ``None`` when no interactive terminal is available (caller
+    must refuse without ``--yes``).
     """
 
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         return None
     console = make_query_console()
-    render_setup_plan(console=console, plan=build_setup_plan(root_path))
+    plan = build_setup_plan(root_path)
+    render_setup_plan(console=console, plan=plan)
     reply = input(f"{setup_ui.SETUP_APPLY_CONFIRM_PROMPT} [y/N] ").strip().lower()
-    return reply in {"y", "yes"}
+    if reply in {"y", "yes"}:
+        return str(plan.get("plan_id", ""))
+    return False
 
 
 def _exit_code_for_apply(status: str) -> int:
