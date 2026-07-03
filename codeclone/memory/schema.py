@@ -257,6 +257,8 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     if current is None:
         create_schema_v1(conn)
         return
+    from .schema_migrate import reconcile_memory_record_schema_versions
+
     if current != ENGINEERING_MEMORY_SCHEMA_VERSION:
         from .schema_migrate import migrate_memory_schema
 
@@ -267,6 +269,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             "Unsupported engineering memory schema version: "
             f"{current!r}. Expected {ENGINEERING_MEMORY_SCHEMA_VERSION!r}."
         )
+    reconcile_memory_record_schema_versions(conn)
 
 
 def validate_schema_readonly(conn: sqlite3.Connection) -> None:
