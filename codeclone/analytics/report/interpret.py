@@ -664,7 +664,7 @@ def _provenance_completeness(
     for item in items:
         metadata = _json_mapping(item.metadata_json)
         provenance = metadata.get("provenance")
-        provenance_map = provenance if isinstance(provenance, Mapping) else {}
+        provenance_map = _mapping(provenance)
         if (
             _provenance_presence(
                 provenance_map,
@@ -736,8 +736,10 @@ def _registry_overlay_presence(
 ) -> bool | None:
     # Slice 1 only established non-null overlay content as positive evidence.
     value = provenance.get("registry_overlay")
-    if isinstance(value, Mapping) and isinstance(value.get("present"), bool):
-        return bool(value["present"])
+    if isinstance(value, Mapping):
+        present = value.get("present")
+        if isinstance(present, bool):
+            return present
     if item.registry_overlay_json is None:
         return None
     overlay = _json_mapping_or_none(item.registry_overlay_json)
@@ -1114,20 +1116,22 @@ def _json_string_list(text: str) -> list[str]:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, Mapping) else {}
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _mapping_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
+    return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
 def _mapping_cells(value: object) -> list[tuple[str, dict[str, object]]]:
     if not isinstance(value, Mapping):
         return []
     return [
-        (str(key), dict(cell))
+        (str(key), _mapping(cell))
         for key, cell in sorted(value.items())
         if isinstance(cell, Mapping)
     ]

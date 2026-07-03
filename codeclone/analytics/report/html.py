@@ -532,13 +532,15 @@ def _display_metadata_value(value: object) -> str:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, Mapping) else {}
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _mapping_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
+    return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
 def _escaped(value: object) -> str:

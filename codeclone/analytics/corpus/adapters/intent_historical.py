@@ -443,22 +443,28 @@ def materialize_corpus_item(
 def _materialized_metadata(item: HistoricalIntentSourceItem) -> dict[str, object]:
     metadata = dict(item.metadata)
     provenance = {
-        key: dict(value) if isinstance(value, dict) else value
+        key: _str_key_mapping(value) if isinstance(value, Mapping) else value
         for key, value in item.provenance.items()
     }
-    trajectory = provenance.get("trajectory")
-    if not isinstance(trajectory, dict):
+    trajectory = _str_key_mapping(provenance.get("trajectory"))
+    if not trajectory:
         trajectory = {}
-        provenance["trajectory"] = trajectory
     trajectory["selected"] = trajectory.get("selected_trajectory_id") is not None
-    patch_trail = provenance.get("patch_trail")
-    if not isinstance(patch_trail, dict):
+    provenance["trajectory"] = trajectory
+    patch_trail = _str_key_mapping(provenance.get("patch_trail"))
+    if not patch_trail:
         patch_trail = {}
-        provenance["patch_trail"] = patch_trail
     patch_trail["present"] = patch_trail.get("digest") is not None
+    provenance["patch_trail"] = patch_trail
     provenance["registry_overlay"] = {"present": item.registry_overlay is not None}
     metadata["provenance"] = provenance
     return metadata
+
+
+def _str_key_mapping(value: object) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def default_source_schema_versions() -> dict[str, str]:

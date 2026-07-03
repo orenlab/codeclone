@@ -148,7 +148,7 @@ class AnalyticsVectorStore:
             if not isinstance(vector, list):
                 msg = "vector must be a list of floats"
                 raise TypeError(msg)
-            float_vector = [float(value) for value in vector]
+            float_vector = _float_vector(vector)
             if len(float_vector) != self._dimension:
                 raise AnalyticsStoreError(
                     f"vector dimension mismatch: actual={len(float_vector)}, "
@@ -191,7 +191,7 @@ class AnalyticsVectorStore:
         ).items():
             vector = row.get("vector")
             if isinstance(vector, list):
-                loaded[item_id] = [float(value) for value in vector]
+                loaded[item_id] = _float_vector(vector)
         return loaded
 
     def read_vector_rows(
@@ -232,7 +232,7 @@ class AnalyticsVectorStore:
                     loaded[item_id] = {
                         "vector_row_key": str(row.get("vector_row_key", "")),
                         "vector_digest": str(row.get("vector_digest", "")),
-                        "vector": [float(value) for value in vector],
+                        "vector": _float_vector(vector),
                     }
         return loaded
 
@@ -270,6 +270,16 @@ class AnalyticsVectorStore:
 
 def _sql_literal(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
+
+
+def _float_vector(vector: Sequence[object]) -> list[float]:
+    float_vector: list[float] = []
+    for value in vector:
+        if isinstance(value, bool) or not isinstance(value, str | int | float):
+            msg = "vector must be a list of floats"
+            raise TypeError(msg)
+        float_vector.append(float(value))
+    return float_vector
 
 
 __all__ = ["AnalyticsVectorStore", "vector_digest", "vector_row_key"]
