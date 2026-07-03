@@ -1139,7 +1139,9 @@ def _int_or_none(value: object) -> int | None:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    return value if isinstance(value, dict) else {}
+    if not isinstance(value, dict):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _analysis_payload_from_json(value: object) -> dict[str, object]:

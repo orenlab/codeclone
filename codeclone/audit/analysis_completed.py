@@ -201,7 +201,9 @@ def _findings_summary(summary: Mapping[str, object]) -> Mapping[str, object]:
 
 
 def _mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _sequence(value: object) -> tuple[object, ...]:

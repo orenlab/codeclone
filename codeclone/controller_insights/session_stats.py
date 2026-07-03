@@ -378,7 +378,9 @@ def _mapping_at(
         if not isinstance(current, dict):
             return None
         current = current.get(key)
-    return current if isinstance(current, dict) else None
+    if not isinstance(current, dict):
+        return None
+    return {key: item for key, item in current.items() if isinstance(key, str)}
 
 
 def _string_field(payload: Mapping[str, object] | None, key: str) -> str | None:
