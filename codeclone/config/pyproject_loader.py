@@ -328,12 +328,14 @@ def _validated_string_list(*, key: str, value: object) -> tuple[str, ...]:
         raise ConfigValidationError(
             f"Invalid value type for tool.codeclone.{key}: expected list[str]"
         )
-    if not all(isinstance(item, str) for item in value):
-        raise ConfigValidationError(
-            f"Invalid value type for tool.codeclone.{key}: expected list[str]"
-        )
+    string_values: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ConfigValidationError(
+                f"Invalid value type for tool.codeclone.{key}: expected list[str]"
+            )
+        string_values.append(item)
     try:
-        string_values = [item for item in value if isinstance(item, str)]
         return normalize_golden_fixture_patterns(string_values)
     except GoldenFixturePatternError as exc:
         raise ConfigValidationError(str(exc)) from exc
