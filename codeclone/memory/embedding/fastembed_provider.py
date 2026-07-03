@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib
+import numbers
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, cast
@@ -394,7 +395,12 @@ class FastEmbedEmbeddingProvider:
             )
         vector: list[float] = []
         for value in raw_vector:
-            if isinstance(value, bool) or not isinstance(value, str | int | float):
+            # Real fastembed output is a numpy float32 array; iterating it yields
+            # numpy.float32 scalars, which are NOT Python `float`/`int` subclasses
+            # but ARE registered as numbers.Real. numbers.Real also excludes str
+            # (avoiding float("abc") surfacing a bare ValueError), while bool is
+            # excluded explicitly so True/False are not coerced to 1.0/0.0.
+            if isinstance(value, bool) or not isinstance(value, numbers.Real):
                 raise MemorySemanticUnavailableError(
                     "fastembed returned a non-numeric embedding vector"
                 )

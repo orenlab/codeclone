@@ -324,6 +324,24 @@ def test_fastembed_provider_fails_clear_on_string_vector(
         embed_query(provider, "bad vector")
 
 
+def test_fastembed_provider_coerces_numpy_float32_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Real fastembed TextEmbedding.embed() yields numpy float32 1-D arrays;
+    # iterating one produces numpy.float32 scalars, which are NOT Python
+    # float/int subclasses. The provider must still coerce them to Python
+    # floats instead of rejecting every real embedding as "non-numeric".
+    numpy = pytest.importorskip("numpy")
+    vector = numpy.asarray([0.5] * 384, dtype=numpy.float32)
+    provider, _created = _resolve_fastembed_provider(monkeypatch, vectors=[vector])
+
+    result = embed_query(provider, "numpy vector")
+
+    assert len(result) == 384
+    assert all(type(value) is float for value in result)
+    assert result == [0.5] * 384
+
+
 def test_fastembed_provider_fails_clear_when_extra_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
