@@ -289,7 +289,8 @@ def _render_plain_tour(
             printer.print(stat)
         printer.print(step.body)
         printer.print("")
-        sleep(plain_step_pause)
+        if plain_step_pause > 0:
+            sleep(plain_step_pause)
 
 
 def run_interactive_help_tour(
@@ -308,10 +309,10 @@ def run_interactive_help_tour(
         console = make_query_console()
 
     rich_console = _rich_console_or_none(console)
-    if not _interactive_terminal_available() or rich_console is None:
-        _render_plain_tour(
-            steps, console, sleep=sleep, plain_step_pause=plain_step_pause
-        )
+    interactive_available = _interactive_terminal_available()
+    if not interactive_available or rich_console is None:
+        plain_pause = plain_step_pause if interactive_available else 0.0
+        _render_plain_tour(steps, console, sleep=sleep, plain_step_pause=plain_pause)
         return 0
 
     use_unicode = mascot_use_unicode(

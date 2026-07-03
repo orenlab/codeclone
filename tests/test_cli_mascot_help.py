@@ -91,6 +91,32 @@ def test_run_interactive_help_tour_plain_fallback() -> None:
     assert run_interactive_help_tour(console=console, sleep=lambda _s: None) == 0
 
 
+def test_run_interactive_help_tour_non_tty_plain_fallback_does_not_sleep(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.console import PlainConsole
+    from codeclone.surfaces.cli.ui import help_tour
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(help_tour, "_interactive_terminal_available", lambda: False)
+
+    rc = help_tour.run_interactive_help_tour(
+        console=PlainConsole(),
+        steps=(
+            HelpTourStep(
+                AsterState.IDLE,
+                "Short",
+                "Plain fallback",
+                animate=False,
+            ),
+        ),
+        sleep=lambda seconds: sleeps.append(seconds),
+    )
+
+    assert rc == 0
+    assert sleeps == []
+
+
 def test_progress_presenter_builds_group_with_mascot() -> None:
     pytest.importorskip("rich")
     from rich.console import Console
