@@ -342,6 +342,20 @@ def test_fastembed_provider_coerces_numpy_float32_vectors(
     assert result == [0.5] * 384
 
 
+def test_fastembed_provider_rejects_non_real_vector_element(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A non-Real element *inside* an iterable vector (here a str) must be
+    # rejected cleanly as "non-numeric" rather than surfacing a bare ValueError
+    # from float("bad"). This pins the element-level numbers.Real branch, which
+    # the whole-vector str guard (vectors=["bad"], caught as "non-iterable")
+    # never reaches.
+    provider, _created = _resolve_fastembed_provider(monkeypatch, vectors=[["bad"]])
+
+    with pytest.raises(MemorySemanticUnavailableError, match="non-numeric"):
+        embed_query(provider, "bad element")
+
+
 def test_fastembed_provider_fails_clear_when_extra_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
