@@ -247,14 +247,6 @@ class _PlainTextStub:
         self.style = style
 
 
-def test_is_record_mapping_preserves_mapping_identity() -> None:
-    record: dict[str, object] = {"type": "module_role", "statement": "hello"}
-    value: object = record
-    assert memory_render._is_record_mapping(value)
-    assert value is record
-    assert not memory_render._is_record_mapping("not-a-mapping")
-
-
 def test_search_row_preserves_payload_objects_without_coercion() -> None:
     from rich.text import Text as RichText
 

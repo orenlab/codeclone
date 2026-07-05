@@ -7,13 +7,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import TYPE_CHECKING, TypeGuard
+from typing import TYPE_CHECKING
 
 from ...memory.coverage import ScopeCoverageReport
 from ...memory.display import format_memory_record_line
 from ...memory.models import MemoryRecord
 from ...memory.status_report import MemoryStatusReport
 from ...memory.vacuum import VacuumReport
+from ...utils.payload_narrow import is_record_mapping
 from .console import make_query_console, rich_panel_symbols, supports_rich_console
 from .types import PrinterLike
 
@@ -26,10 +27,6 @@ if TYPE_CHECKING:
     _MemoryRowBuilder = Callable[[int, object, type[RichText]], Sequence[object]]
 else:
     _MemoryRowBuilder = Callable[[int, object, object], Sequence[object]]
-
-
-def _is_record_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
-    return isinstance(value, Mapping)
 
 
 def _record_table_columns(
@@ -314,7 +311,7 @@ def _search_row(
     item: object,
     text_cls: type[RichText],
 ) -> Sequence[object]:
-    mapping: Mapping[str, object] = item if _is_record_mapping(item) else {}
+    mapping: Mapping[str, object] = item if is_record_mapping(item) else {}
     record_type = str(mapping.get("type", "?"))
     status = str(mapping.get("status", "?"))
     return (
@@ -330,7 +327,7 @@ def _stale_row(
     item: object,
     _text_cls: type[RichText],
 ) -> Sequence[object]:
-    mapping: Mapping[str, object] = item if _is_record_mapping(item) else {}
+    mapping: Mapping[str, object] = item if is_record_mapping(item) else {}
     return (
         str(index),
         str(mapping.get("type", "?")),

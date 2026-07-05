@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from pathlib import Path
-from typing import TypeGuard, cast
+from typing import cast
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
@@ -66,6 +66,12 @@ from ...observability import (
     span,
 )
 from ...utils.coerce import as_int
+from ...utils.payload_narrow import (
+    dict_items_from_list,
+    is_payload_dict,
+    mapping_items_from_list,
+    nested_payload_dict,
+)
 from .memory_analysis import load_report_for_memory_init
 from .memory_render import (
     memory_console,
@@ -88,32 +94,6 @@ _CLI_GOVERNANCE_BREAK_GLASS_MESSAGE = (
     "governance channel, or pass --i-know-what-im-doing for an explicit "
     "human break-glass action."
 )
-
-
-def _is_payload_dict(value: object) -> TypeGuard[dict[str, object]]:
-    return isinstance(value, dict)
-
-
-def _is_record_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
-    return isinstance(value, Mapping)
-
-
-def _mapping_items_from_list(values: object) -> list[Mapping[str, object]]:
-    if not isinstance(values, list):
-        return []
-    return [item for item in values if _is_record_mapping(item)]
-
-
-def _dict_items_from_list(values: object) -> list[dict[str, object]]:
-    if not isinstance(values, list):
-        return []
-    return [item for item in values if _is_payload_dict(item)]
-
-
-def _nested_payload_dict(value: object) -> dict[str, object]:
-    if _is_payload_dict(value):
-        return value
-    return {}
 
 
 def _print_memory_contract_error(console: PrinterLike, exc: MemoryContractError) -> int:
@@ -642,10 +622,10 @@ def _run_search(
         store.close()
 
     payload = result.get("payload")
-    if not _is_payload_dict(payload):
+    if not is_payload_dict(payload):
         console.print("Memory search returned an unexpected payload.")
         return int(ExitCode.INTERNAL_ERROR)
-    typed_records = _mapping_items_from_list(payload.get("records"))
+    typed_records = mapping_items_from_list(payload.get("records"))
     render_search_results(console=console, query=str(args.query), records=typed_records)
     _print_semantic_advisory(console, result.get("semantic"))
     return int(ExitCode.SUCCESS)
@@ -696,8 +676,8 @@ def _run_stale(
     finally:
         store.close()
     payload = result.get("payload")
-    records = payload.get("records") if _is_payload_dict(payload) else None
-    typed_records = _mapping_items_from_list(records)
+    records = payload.get("records") if is_payload_dict(payload) else None
+    typed_records = mapping_items_from_list(records)
     render_stale_records(console=console, records=typed_records)
     return int(ExitCode.SUCCESS)
 
@@ -968,8 +948,8 @@ def _run_trajectory_search(
     finally:
         store.close()
     payload = result.get("payload")
-    trajectories = payload.get("trajectories") if _is_payload_dict(payload) else None
-    typed = _dict_items_from_list(trajectories)
+    trajectories = payload.get("trajectories") if is_payload_dict(payload) else None
+    typed = dict_items_from_list(trajectories)
     render_trajectory_search_results(
         console=console,
         query=str(args.query),
@@ -1005,7 +985,7 @@ def _run_trajectory_agents(
     finally:
         store.close()
     payload = result.get("payload")
-    if not _is_payload_dict(payload):
+    if not is_payload_dict(payload):
         console.print("Unexpected trajectory agents payload.")
         return int(ExitCode.INTERNAL_ERROR)
     if bool(getattr(args, "json", False)):
@@ -1037,7 +1017,7 @@ def _run_trajectory_anomalies(
     finally:
         store.close()
     payload = result.get("payload")
-    if not _is_payload_dict(payload):
+    if not is_payload_dict(payload):
         console.print("Unexpected trajectory anomalies payload.")
         return int(ExitCode.INTERNAL_ERROR)
     if bool(getattr(args, "json", False)):
@@ -1069,14 +1049,14 @@ def _run_trajectory_dashboard(
     finally:
         store.close()
     payload = result.get("payload")
-    if not _is_payload_dict(payload):
+    if not is_payload_dict(payload):
         console.print("Unexpected trajectory dashboard payload.")
         return int(ExitCode.INTERNAL_ERROR)
     if bool(getattr(args, "json", False)):
         console.print(json.dumps(payload, indent=2, sort_keys=True))
         return int(ExitCode.SUCCESS)
     status_raw = payload.get("status")
-    if _is_payload_dict(status_raw):
+    if is_payload_dict(status_raw):
         status = status_raw
         latest = status.get("latest_projection")
         render_trajectory_status(
@@ -1085,17 +1065,17 @@ def _run_trajectory_dashboard(
             count=as_int(status.get("trajectory_count", 0)),
             latest_run=None,
         )
-        if _is_payload_dict(latest) and latest.get("finished_at_utc"):
+        if is_payload_dict(latest) and latest.get("finished_at_utc"):
             console.print(
                 f"  latest projection finished: {latest.get('finished_at_utc')}",
                 markup=False,
             )
     agents_raw = payload.get("agents")
-    if _is_payload_dict(agents_raw):
+    if is_payload_dict(agents_raw):
         console.print("")
         render_trajectory_agents(console=console, payload=agents_raw)
     anomalies_raw = payload.get("anomalies")
-    if _is_payload_dict(anomalies_raw):
+    if is_payload_dict(anomalies_raw):
         console.print("")
         render_trajectory_anomalies(console=console, payload=anomalies_raw)
     return int(ExitCode.SUCCESS)
@@ -1382,7 +1362,7 @@ def _run_semantic_probe(
             f"Semantic projection probe unavailable: {reason}.",
         )
     lanes_obj = payload.get("lanes")
-    if not _is_payload_dict(lanes_obj):
+    if not is_payload_dict(lanes_obj):
         return _semantic_unavailable(
             console, "Semantic projection probe returned invalid payload."
         )
@@ -1392,15 +1372,15 @@ def _run_semantic_probe(
     console.print(f"  model_max_tokens: {payload.get('model_max_tokens')}")
     for lane in ("memory", "audit", "trajectory"):
         stats_raw = lanes.get(lane, {})
-        if not _is_payload_dict(stats_raw):
+        if not is_payload_dict(stats_raw):
             continue
         stats = stats_raw
-        chars = _nested_payload_dict(stats.get("chars"))
-        tokens = _nested_payload_dict(stats.get("tokens"))
-        overflow = _nested_payload_dict(stats.get("token_overflow"))
-        truncation = _nested_payload_dict(stats.get("truncation"))
-        raw_tokens = _nested_payload_dict(tokens.get("raw"))
-        effective_tokens = _nested_payload_dict(tokens.get("effective"))
+        chars = nested_payload_dict(stats.get("chars"))
+        tokens = nested_payload_dict(stats.get("tokens"))
+        overflow = nested_payload_dict(stats.get("token_overflow"))
+        truncation = nested_payload_dict(stats.get("truncation"))
+        raw_tokens = nested_payload_dict(tokens.get("raw"))
+        effective_tokens = nested_payload_dict(tokens.get("effective"))
         console.print(f"  {lane}: {as_int(stats.get('documents', 0))} documents")
         console.print(
             "    chars p50/p95/max: "
