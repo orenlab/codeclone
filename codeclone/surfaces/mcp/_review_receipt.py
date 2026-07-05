@@ -13,6 +13,7 @@ from typing import Final, Literal
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.payload_narrow import is_record_mapping
 from ._verification_profile import (
     check_matrix,
     classify_patch,
@@ -396,7 +397,7 @@ def _signed_delta(value: object) -> str:
 
 
 def _optional_mapping(value: object) -> Mapping[str, object] | None:
-    return value if isinstance(value, Mapping) else None
+    return value if is_record_mapping(value) else None
 
 
 def _mapping_rows(value: object) -> list[Mapping[str, object]]:
