@@ -8,8 +8,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _DOCS = _REPO_ROOT / "docs"
+pytestmark = pytest.mark.skipif(
+    not (_DOCS / "index.md").is_file(),
+    reason="repo docs source tree is not present",
+)
 
 _GUIDE_MAX_LINES = 200
 _CONTRACT_SPLIT_MAX_LINES = 200

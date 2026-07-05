@@ -7,12 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.assertion_helpers import assert_all_contained
 from tests.plugin_test_helpers import (
     assert_codex_manifest_interface,
     assert_codex_plugin_readme_contract,
     assert_repo_doc_paths_exist,
     load_json,
+    repo_docs_source_available,
 )
 
 
@@ -312,6 +315,8 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     plugin_root = root / "plugins" / "codeclone"
     readme_text = (plugin_root / "README.md").read_text(encoding="utf-8")
     assert_codex_plugin_readme_contract(readme_text)
+    if not repo_docs_source_available(root):
+        pytest.skip("repo docs source tree is not present")
     assert_repo_doc_paths_exist(
         root,
         "docs/guide/integrations/codex/setup.md",

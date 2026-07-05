@@ -8,12 +8,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from tests.plugin_test_helpers import (
     CODEX_CLAUDE_SYNC_SKILL_NAMES,
     assert_claude_code_plugin_readme_contract,
     assert_plugin_skills_match_codex,
     assert_repo_doc_paths_exist,
     load_json,
+    repo_docs_source_available,
 )
 
 
@@ -66,6 +69,8 @@ def test_claude_code_marketplace_overlay_and_install_docs() -> None:
     assert marketplace["metadata"]["description"]
     assert marketplace["plugins"][0]["source"] == "./plugins/codeclone"
     assert_claude_code_plugin_readme_contract(readme)
+    if not repo_docs_source_available(root):
+        pytest.skip("repo docs source tree is not present")
     assert_repo_doc_paths_exist(
         root,
         "docs/guide/integrations/claude-code/setup.md",

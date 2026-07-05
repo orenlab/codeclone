@@ -131,6 +131,10 @@ def assert_plugin_skills_match_codex(
         assert plugin_text == codex_text, skill_name
 
 
+def repo_docs_source_available(root: Path) -> bool:
+    return (root / "docs" / "index.md").is_file()
+
+
 def assert_repo_doc_paths_exist(root: Path, *relative_paths: str) -> None:
     for relative in relative_paths:
         assert (root / relative).is_file(), relative
