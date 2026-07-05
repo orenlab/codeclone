@@ -22,7 +22,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeGuard
 
 COMMENT_MARKER = "<!-- codeclone-report -->"
 DEFAULT_CODECLONE_PACKAGE_VERSION = "2.1.0a1"
@@ -340,10 +340,16 @@ def _run_result_from_paths(*, exit_code: int, inputs: ActionInputs) -> RunResult
     )
 
 
+def _is_json_object(value: object) -> TypeGuard[dict[str, object]]:
+    """Return true for JSON object values decoded from report payloads."""
+
+    return isinstance(value, dict)
+
+
 def _mapping(value: object) -> dict[str, object]:
     """Return ``value`` when it is a JSON object, otherwise an empty mapping."""
 
-    return value if isinstance(value, dict) else {}
+    return value if _is_json_object(value) else {}
 
 
 def _int(value: object, default: int = 0) -> int:
