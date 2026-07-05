@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from ...audit import EVENT_CLAIM_COMPLETED, EVENT_CLAIM_VIOLATED
 from ...metrics.registry import METRIC_FAMILIES
 from . import _session_helpers as _helpers
@@ -14,11 +16,30 @@ from ._claim_guard import (
     validate_claims,
     validate_text_input,
 )
-from ._session_shared import MCPRunRecord, MCPServiceContractError
+from ._session_finding_mixin import _MCPSessionFindingMixin
+from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_shared import (
+    CodeCloneMCPRunStore,
+    MCPRunRecord,
+    MCPServiceContractError,
+)
 from ._verification_profile import classify_patch
 
 
+def _intent_session(
+    session: _MCPSessionClaimGuardMixin,
+) -> _MCPSessionIntentMixin:
+    return cast(_MCPSessionIntentMixin, session)
+
+
+def _finding_session(
+    session: _MCPSessionClaimGuardMixin,
+) -> _MCPSessionFindingMixin:
+    return cast(_MCPSessionFindingMixin, session)
+
+
 class _MCPSessionClaimGuardMixin:
+    _runs: CodeCloneMCPRunStore
     def validate_review_claims(
         self,
         *,
@@ -43,12 +64,13 @@ class _MCPSessionClaimGuardMixin:
         )
         result = {"run_id": _helpers._short_run_id(record.run_id), **payload}
         valid = bool(result.get("valid"))
-        self._audit_emit(
+        intent_session = _intent_session(self)
+        intent_session._audit_emit(
             root=record.root,
             event_type=EVENT_CLAIM_COMPLETED if valid else EVENT_CLAIM_VIOLATED,
             severity="info" if valid else "warn",
             run_id=_helpers._short_run_id(record.run_id),
-            report_digest=self._report_digest_value(record),
+            report_digest=intent_session._report_digest_value(record),
             status="valid" if valid else "violated",
             payload=result,
         )
@@ -60,10 +82,13 @@ class _MCPSessionClaimGuardMixin:
         *,
         patch_health_delta: int | None = None,
     ) -> ReportContext:
-        _canonical_to_short, short_to_canonical = self._finding_id_maps(record)
+        finding_session = _finding_session(self)
+        _canonical_to_short, short_to_canonical = finding_session._finding_id_maps(
+            record
+        )
         findings = {
             canonical_id: dict(finding)
-            for finding in self._base_findings(record)
+            for finding in finding_session._base_findings(record)
             if (canonical_id := str(finding.get("id", "")).strip())
         }
         changed_paths = list(record.changed_paths)
@@ -81,7 +106,8 @@ class _MCPSessionClaimGuardMixin:
                     if not family.gate_keys
                 )
             ),
-            has_comparison_run=self._previous_run_for_root(record) is not None,
+            has_comparison_run=finding_session._previous_run_for_root(record)
+            is not None,
             metric_families=frozenset(sorted(METRIC_FAMILIES)),
             verification_profile=profile_value,
             patch_health_delta=patch_health_delta,
