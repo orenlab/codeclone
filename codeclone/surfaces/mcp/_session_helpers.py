@@ -28,6 +28,7 @@ from ...domain.source_scope import (
 )
 from ...models import MetricsDiff
 from ...utils import coerce as _coerce
+from ...utils.payload_narrow import is_record_mapping
 from ...utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -180,7 +181,7 @@ def _metrics_detail_family(value: str | None) -> MetricsDetailFamily | None:
 def _dict_rows(value: object) -> list[dict[str, object]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
+    return [dict(item) for item in value if is_record_mapping(item)]
 
 
 def _string_rows(value: object) -> list[str]:
