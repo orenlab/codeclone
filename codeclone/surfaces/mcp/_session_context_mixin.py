@@ -12,8 +12,9 @@ from collections.abc import Mapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final, Protocol, cast
+from typing import Final, Protocol, TypeGuard, cast
 
+from ...utils.payload_narrow import is_payload_dict, is_record_mapping
 from ...utils.repo_paths import RepoPathError, resolve_repo_relative_path
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult, blast_radius_to_payload
@@ -295,16 +296,20 @@ def _shrink_context_lane(payload: dict[str, object], lane: _ContextLaneRef) -> N
     }
 
 
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return isinstance(value, list)
+
+
 def _context_lane_container(
     payload: Mapping[str, object],
     lane: _ContextLaneRef,
 ) -> dict[str, object] | None:
     current: object = payload
     for key in lane[0]:
-        if not isinstance(current, Mapping):
+        if not is_record_mapping(current):
             return None
         current = current.get(key)
-    return current if isinstance(current, dict) else None
+    return current if is_payload_dict(current) else None
 
 
 def _context_lane_items(
@@ -315,7 +320,9 @@ def _context_lane_items(
     if container is None:
         return None
     items = container.get(lane[1])
-    return items if isinstance(items, list) else None
+    if not _is_object_list(items):
+        return None
+    return items
 
 
 def _context_omitted_key(lane: _ContextLaneRef) -> str:
