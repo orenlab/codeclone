@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeGuard
 
 from .....config.pyproject_writer import PyprojectWriterError, merge_tool_codeclone
 from .....paths.gitignore import (
@@ -85,10 +85,16 @@ def _ready_actions(plan: Mapping[str, object]) -> list[dict[str, object]]:
     if not isinstance(raw, list):
         return []
     ready = [
-        item for item in raw if isinstance(item, dict) and item.get("status") == "ready"
+        item
+        for item in raw
+        if _is_action_item(item) and item.get("status") == "ready"
     ]
     ready.sort(key=lambda item: str(item.get("id", "")))
     return ready
+
+
+def _is_action_item(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def _noop_or_blocked_status(plan: Mapping[str, object]) -> ApplyStatus:

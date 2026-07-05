@@ -27,7 +27,7 @@ from codeclone.config.pyproject_writer import PyprojectWriterError
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli.console import PlainConsole
 from codeclone.surfaces.cli.setup import render as setup_render
-from codeclone.surfaces.cli.setup.engine.apply import apply_setup_plan
+from codeclone.surfaces.cli.setup.engine.apply import _ready_actions, apply_setup_plan
 from codeclone.surfaces.cli.setup.engine.capabilities import (
     CAPABILITY_REGISTRY,
     CapabilityAxes,
@@ -2115,6 +2115,24 @@ def test_apply_refuses_without_yes_noninteractive(
     rc = setup_main(["apply", "--root", str(tmp_path)])
     assert rc == int(ExitCode.CONTRACT_ERROR)
     assert pyproject.read_text(encoding="utf-8") == before
+
+
+def test_ready_actions_filters_ready_dict_items_and_preserves_identity() -> None:
+    ready_action: dict[str, object] = {"id": "b", "status": "ready"}
+    pending_action: dict[str, object] = {"id": "a", "status": "pending"}
+    plan = {
+        "actions": [
+            "skip",
+            ready_action,
+            pending_action,
+            {"id": "c", "status": "ready"},
+        ]
+    }
+
+    ready = _ready_actions(plan)
+
+    assert [item["id"] for item in ready] == ["b", "c"]
+    assert ready[0] is ready_action
 
 
 def test_apply_stale_plan_id_refused_no_write(
