@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from ...audit import (
     EVENT_BLAST_RADIUS,
@@ -42,6 +43,8 @@ from ._intent import (
     normalize_expected_effects,
     normalize_intent_scope,
 )
+from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
+from ._session_finding_mixin import _MCPSessionFindingMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -79,6 +82,9 @@ from ._workspace_intents import (
 )
 from .messages import intent as intent_msgs
 
+if TYPE_CHECKING:
+    from ._session_finding_mixin import _StateLock
+
 
 @dataclass(frozen=True, slots=True)
 class _RecoveryTarget:
@@ -96,6 +102,7 @@ class _RecoveryRun:
 class _MCPSessionIntentMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _state_lock: _StateLock
     _intent_sequence: int
     _agent_pid: int
     _agent_start_epoch: int
@@ -124,13 +131,16 @@ class _MCPSessionIntentMixin:
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
-        payload = super().get_blast_radius(
+        blast_radius_session = cast(_MCPSessionBlastRadiusMixin, super())
+        payload = blast_radius_session.get_blast_radius(
             files=files,
             run_id=record.run_id,
             depth=depth,
             include=include,
         )
-        normalized_payload = _helpers.coerce_object_dict(payload)
+        normalized_payload = _helpers.coerce_object_dict(
+            cast(Mapping[object, object], payload)
+        )
         self._renew_lease_for_run(record=record)
         self._audit_emit(
             root=record.root,
@@ -237,7 +247,8 @@ class _MCPSessionIntentMixin:
         description = str(intent or "").strip()
         if not description:
             raise MCPServiceContractError("action='declare' requires intent text.")
-        blast = self._blast_radius_result(
+        blast_radius_session = cast(_MCPSessionBlastRadiusMixin, self)
+        blast = blast_radius_session._blast_radius_result(
             record=record,
             files=normalized_scope.allowed_paths,
             depth="direct",
@@ -633,9 +644,15 @@ class _MCPSessionIntentMixin:
             )
             return payload
         actual = (
-            self._normalize_changed_paths(root_path=record.root, paths=changed_files)
+            cast(_MCPSessionFindingMixin, self)._normalize_changed_paths(
+                root_path=record.root,
+                paths=changed_files,
+            )
             if changed_files
-            else self._git_diff_paths(root_path=record.root, git_diff_ref=str(diff_ref))
+            else cast(_MCPSessionFindingMixin, self)._git_diff_paths(
+                root_path=record.root,
+                git_diff_ref=str(diff_ref),
+            )
         )
         check_result = self._intent_check_result(intent=active_intent, actual=actual)
         updated = replace(
