@@ -1099,12 +1099,9 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 offset=offset,
                 limit=limit,
             )
-        payload = report_document.get(validated_section)
-        if not isinstance(payload, Mapping):
-            raise MCPServiceContractError(
-                f"Report section '{validated_section}' is not available in this run."
-            )
-        return dict(payload)
+        return dict(
+            require_mapping_section(report_document, section=validated_section)
+        )
 
     def get_production_triage(
         self,
