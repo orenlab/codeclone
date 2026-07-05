@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeGuard
 
 from ....ui_messages import setup as setup_ui
 from ..console import rich_panel_symbols, supports_rich_console
@@ -121,7 +121,7 @@ def _render_doctor_rich(console: PrinterLike, snapshot: Mapping[str, object]) ->
 
 def _doctor_body(row: Mapping[str, object]) -> str:
     evidence = row.get("evidence")
-    evidence_text = ", ".join(evidence) if isinstance(evidence, list) else ""
+    evidence_text = ", ".join(evidence) if _is_string_list(evidence) else ""
     reason = str(row.get("reason", ""))
     action = str(row.get("recommended_action", ""))
     return (
@@ -164,7 +164,7 @@ def _render_doctor_plain(console: PrinterLike, snapshot: Mapping[str, object]) -
     _render_status_plain(console, snapshot)
     for row in _capabilities(snapshot):
         evidence = row.get("evidence")
-        if isinstance(evidence, list) and evidence:
+        if _is_string_list(evidence) and evidence:
             label = setup_ui.SETUP_DOCTOR_PROBES_LABEL
             console.print(f"  {label}[{row.get('id')}]: {', '.join(evidence)}")
 
@@ -337,26 +337,17 @@ def _print_kind_path_status_table(
 
 
 def _apply_results(result: Mapping[str, object]) -> list[Mapping[str, object]]:
-    raw = result.get("results")
-    if not isinstance(raw, list):
-        return []
-    return [item for item in raw if isinstance(item, Mapping)]
+    return _mapping_rows(result.get("results"))
 
 
 def _plan_actions(plan: Mapping[str, object]) -> list[Mapping[str, object]]:
-    raw = plan.get("actions")
-    if not isinstance(raw, list):
-        return []
-    return [item for item in raw if isinstance(item, Mapping)]
+    return _mapping_rows(plan.get("actions"))
 
 
 def snapshot_capabilities(
     snapshot: Mapping[str, object],
 ) -> list[Mapping[str, object]]:
-    raw = snapshot.get("capabilities")
-    if not isinstance(raw, list):
-        return []
-    return [item for item in raw if isinstance(item, Mapping)]
+    return _mapping_rows(snapshot.get("capabilities"))
 
 
 def render_setup_capability_table(
@@ -391,9 +382,23 @@ def _capabilities(snapshot: Mapping[str, object]) -> list[Mapping[str, object]]:
 
 
 def _mapping(value: object) -> Mapping[str, object]:
-    if isinstance(value, Mapping):
+    if _is_mapping(value):
         return value
     return {}
+
+
+def _mapping_rows(value: object) -> list[Mapping[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if _is_mapping(item)]
+
+
+def _is_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _is_string_list(value: object) -> TypeGuard[list[str]]:
+    return isinstance(value, list)
 
 
 __all__ = [

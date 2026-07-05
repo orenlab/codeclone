@@ -11,7 +11,7 @@ from __future__ import annotations
 import difflib
 import hashlib
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypeGuard
 
 from .....config.pyproject_loader import open_repo_config
 from .....config.pyproject_writer import PyprojectWriterError, merge_tool_codeclone
@@ -222,7 +222,7 @@ def _compute_plan_id(payload: dict[str, object]) -> str:
     raw_actions = payload.get("actions", [])
     action_items: list[dict[str, object]] = []
     if isinstance(raw_actions, list):
-        action_items = [item for item in raw_actions if isinstance(item, dict)]
+        action_items = [item for item in raw_actions if _is_action_item(item)]
     canonical = {
         "head_commit": payload.get("head_commit"),
         "root": payload.get("root"),
@@ -234,6 +234,10 @@ def _compute_plan_id(payload: dict[str, object]) -> str:
     }
     digest_input = json_text(canonical, sort_keys=True, trailing_newline=False)
     return hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+
+
+def _is_action_item(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def _read_pyproject_text(root_path: Path) -> str:
