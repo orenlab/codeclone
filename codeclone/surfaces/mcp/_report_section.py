@@ -14,6 +14,7 @@ from typing import Final
 from ...domain.findings import FAMILY_CLONES, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.payload_narrow import is_record_mapping
 from ._session_shared import MCPServiceContractError
 from .payloads import paginate
 
@@ -161,7 +162,7 @@ def require_mapping_section(
     section: str,
 ) -> Mapping[str, object]:
     payload = report_document.get(section)
-    if not isinstance(payload, Mapping):
+    if not is_record_mapping(payload):
         raise MCPServiceContractError(
             f"Report section '{section}' is not available in this run."
         )
