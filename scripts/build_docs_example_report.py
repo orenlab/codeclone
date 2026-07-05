@@ -32,7 +32,7 @@ _ARTIFACT_NAMES: tuple[str, ...] = (
     "report.sarif",
     "manifest.json",
 )
-_RELATIVE_LIVE_HREF = re.compile(r'href=(["\'])(?:\./)?live/([a-zA-Z0-9_.-]+)\1')
+_RELATIVE_LIVE_HREF = re.compile(r'href=(["\'])(?:\.{1,2}/)?live/([a-zA-Z0-9_.-]+)\1')
 
 
 @dataclass(frozen=True)
