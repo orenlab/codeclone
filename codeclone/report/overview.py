@@ -321,7 +321,7 @@ def build_directory_hotspots(
             finding_groups = len(row.finding_ids)
             affected_items = row.affected_items
             files = len(row.files)
-            item = {
+            item: dict[str, object] = {
                 "path": row.path,
                 "finding_groups": finding_groups,
                 "affected_items": affected_items,
@@ -646,7 +646,7 @@ def _metric_summary_count(
     summary = metric_map.get("summary")
     if not isinstance(summary, Mapping):
         return 0
-    return int(summary.get(summary_key, summary.get(fallback_key, 0)))
+    return _as_int(summary.get(summary_key, summary.get(fallback_key, 0)))
 
 
 def _top_risks(

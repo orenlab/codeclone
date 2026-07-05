@@ -340,7 +340,7 @@ def _build_derived_overview(
 def _representative_location_rows(
     suggestion: Suggestion,
 ) -> list[dict[str, object]]:
-    rows = [
+    rows: list[dict[str, object]] = [
         {
             "relative_path": (
                 location.relative_path
@@ -537,7 +537,7 @@ def _safe_relative_path(item: Mapping[str, object]) -> str:
 def _finding_representative_rows(
     group: Mapping[str, object],
 ) -> list[dict[str, object]]:
-    rows = [
+    rows: list[dict[str, object]] = [
         {
             "relative_path": _safe_relative_path(item),
             "start_line": _as_int(item.get("start_line")),
