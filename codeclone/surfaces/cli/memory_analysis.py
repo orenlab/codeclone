@@ -32,7 +32,7 @@ from . import reports_output as cli_reports_output
 from . import runtime as cli_runtime
 from . import startup as cli_startup
 from . import state as cli_state
-from .console import PlainConsole
+from .console import PlainConsole, _rich_progress_symbols
 from .types import require_status_console
 
 ReportSource = Literal["explicit_report", "trusted_cache", "fresh_analysis"]
@@ -43,18 +43,6 @@ class LoadedMemoryReport:
     document: dict[str, object]
     source: ReportSource
     rejected_cache_reason: str | None = None
-
-
-def _rich_progress_symbols() -> tuple[type, type, type, type, type]:
-    from rich.progress import (
-        BarColumn,
-        Progress,
-        SpinnerColumn,
-        TextColumn,
-        TimeElapsedColumn,
-    )
-
-    return Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 
 
 def load_report_for_memory_init(
@@ -226,6 +214,7 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
 __all__ = [
     "LoadedMemoryReport",
     "ReportSource",
+    "_rich_progress_symbols",
     "load_report_for_memory_init",
     "run_memory_analysis_report",
 ]
