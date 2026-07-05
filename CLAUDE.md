@@ -95,8 +95,8 @@ Workflow profiles determine which steps are needed:
 ### Memory-aware workflow
 
 Engineering Memory is a local SQLite store of evidence-linked repository facts.
-Full playbook: `docs/book/13-engineering-memory/index.md`. MCP help:
-`help(topic="engineering_memory")`.
+MCP help: `help(topic="engineering_memory")`. Published contract pages **TBD**
+during the docs-site migration; verify behavior against code and tests.
 
 **Chat is not memory.** Text in this conversation is ephemeral (context shrink,
 new session, new MCP process). Anything the next agent must remember belongs in
@@ -152,6 +152,7 @@ one durable note through MCP **before** step 7 (`finish`):
 
 ```text
 manage_engineering_memory(
+  root="<abs_path>",
   action=record_candidate,
   record_type=risk_note | change_rationale,
   statement="<what happened, what we learned, what to do next time>",
@@ -391,7 +392,7 @@ See `AGENTS.md` §3 for surface-specific commands.
 
 - Never update golden snapshots merely to "fix" tests. Snapshot updates
   require explicit user approval and a contract/schema change rationale.
-- Never change fingerprint semantics without `FINGERPRINT_VERSION` review.
+- Never change fingerprint semantics without `BASELINE_FINGERPRINT_VERSION` review.
 - Never make base `codeclone` depend on MCP runtime packages.
 - Never let MCP mutate baselines, source files, canonical reports, or
   analysis cache. Ephemeral coordination state (workspace intents) and
@@ -412,5 +413,6 @@ Optional body with context.
 ```
 
 Scopes: `mcp`, `cli`, `core`, `baseline`, `cache`, `report`, `html`,
-`metrics`, `docs`, `vscode`, `codex`, `claude-desktop`.
+`metrics`, `memory`, `observability`, `analytics`, `docs`, `vscode`,
+`codex`, `claude-desktop`, `claude-code`, `cursor`.
 Prefixes: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
