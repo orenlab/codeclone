@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from copy import deepcopy
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 from ...audit.events import EVENT_BLAST_ARTIFACT_CREATED, EVENT_PATCH_TRAIL_COMPUTED
 from ...memory.trajectory.patch_trail import compute_patch_trail
@@ -51,6 +51,13 @@ from ._intent import (
 )
 from ._patch_contract import PatchContractStatus
 from ._patch_trail_bridge import build_patch_trail_inputs
+from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
+from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
+from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
+from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_memory_mixin import _MCPSessionMemoryMixin
+from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
+from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunRecord,
@@ -77,12 +84,45 @@ _ACCEPTED_STATUSES: Final[frozenset[str]] = frozenset(
 _FINISH_REDUCIBLE_LANES: Final[tuple[str, ...]] = ("receipt_content", "patch_trail")
 
 
+def _intent_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionIntentMixin:
+    return cast(_MCPSessionIntentMixin, session)
+
+
+def _blast_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionBlastRadiusMixin:
+    return cast(_MCPSessionBlastRadiusMixin, session)
+
+
+def _patch_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionPatchContractMixin:
+    return cast(_MCPSessionPatchContractMixin, session)
+
+
+def _receipt_session(
+    session: _MCPSessionWorkflowMixin,
+) -> _MCPSessionReviewReceiptMixin:
+    return cast(_MCPSessionReviewReceiptMixin, session)
+
+
+def _finding_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionFindingMixin:
+    return cast(_MCPSessionFindingMixin, session)
+
+
+def _claim_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionClaimGuardMixin:
+    return cast(_MCPSessionClaimGuardMixin, session)
+
+
+def _memory_session(session: _MCPSessionWorkflowMixin) -> _MCPSessionMemoryMixin:
+    return cast(_MCPSessionMemoryMixin, session)
+
+
 class _MCPSessionWorkflowMixin:
     """Workflow orchestration over atomic change-control primitives."""
 
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
     _start_replay_cache: dict[str, dict[str, object]]
+    _state_lock: _StateLock
+    _agent_pid: int
+    _agent_start_epoch: int
 
     # ------------------------------------------------------------------
     # start_controlled_change
@@ -106,6 +146,9 @@ class _MCPSessionWorkflowMixin:
         validated_blast_detail = _validated_blast_radius_detail(blast_radius_detail)
         validated_dirty_scope_policy = _validated_dirty_scope_policy(dirty_scope_policy)
         root_path = _helpers._resolve_root(root)
+        intent_session = _intent_session(self)
+        blast_session = _blast_session(self)
+        patch_session = _patch_session(self)
         request_key = _start_replay_request_key(
             root_path=root_path,
             scope=scope,
@@ -121,7 +164,7 @@ class _MCPSessionWorkflowMixin:
         )
 
         # 1. Workspace check (lazy close inside list_workspace)
-        workspace_before = self._list_workspace_intents(root=root)
+        workspace_before = intent_session._list_workspace_intents(root=root)
 
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
@@ -152,7 +195,7 @@ class _MCPSessionWorkflowMixin:
             return replay_payload
 
         # 3. Declare intent
-        declare_payload = self._declare_change_intent(
+        declare_payload = intent_session._declare_change_intent(
             run_id=record.run_id,
             scope=scope,
             intent=intent,
@@ -166,7 +209,7 @@ class _MCPSessionWorkflowMixin:
 
         # Queued: no blast radius or budget
         if declare_status == IntentStatus.QUEUED.value:
-            workspace_after = self._list_workspace_intents(root=root)
+            workspace_after = intent_session._list_workspace_intents(root=root)
             queued_payload: dict[str, object] = {
                 "intent_id": intent_id,
                 "status": "queued",
@@ -192,7 +235,7 @@ class _MCPSessionWorkflowMixin:
             )
 
         # 4. Fresh workspace snapshot after declare
-        workspace_after = self._list_workspace_intents(root=root)
+        workspace_after = intent_session._list_workspace_intents(root=root)
 
         with self._state_lock:
             active_intent = self._active_intents.get(intent_id)
@@ -215,7 +258,7 @@ class _MCPSessionWorkflowMixin:
         )
 
         # 5. Blast radius (full payload, not just declare's subset)
-        blast_result = self._blast_radius_result(
+        blast_result = blast_session._blast_radius_result(
             record=record,
             files=active_intent.scope.allowed_paths,
             depth="direct",
@@ -237,13 +280,13 @@ class _MCPSessionWorkflowMixin:
             source_tool="start_controlled_change",
         )
         blast_artifact_ref = blast_artifact_reference(blast_artifact)
-        blast_artifact_audit_sequence = self._audit_emit(
+        blast_artifact_audit_sequence = intent_session._audit_emit(
             root=record.root,
             event_type=EVENT_BLAST_ARTIFACT_CREATED,
             severity="info",
             run_id=_helpers._short_run_id(record.run_id),
             intent_id=intent_id,
-            report_digest=self._report_digest_value(record),
+            report_digest=intent_session._report_digest_value(record),
             status=str(blast_payload.get("radius_level", "")),
             payload=blast_artifact,
         )
@@ -258,10 +301,10 @@ class _MCPSessionWorkflowMixin:
         )
 
         # 7. Budget
-        budget_payload = self._patch_contract_budget(
+        budget_payload = patch_session._patch_contract_budget(
             run_id=record.run_id,
             intent_id=intent_id,
-            strictness=self._validated_strictness(strictness),
+            strictness=patch_session._validated_strictness(strictness),
         )
 
         concurrent_intents = _as_conflict_list(
@@ -446,8 +489,10 @@ class _MCPSessionWorkflowMixin:
         detail_level: str = "summary",
         patch_trail_detail: str = "summary",
     ) -> dict[str, object]:
+        intent_session = _intent_session(self)
+        patch_session = _patch_session(self)
         # 1. Resolve intent
-        record, active_intent = self._resolve_intent(
+        record, active_intent = intent_session._resolve_intent(
             run_id=None,
             intent_id=intent_id,
         )
@@ -537,7 +582,7 @@ class _MCPSessionWorkflowMixin:
         )
 
         # 3. Check (writes IntentRecord.check_result — required for receipt)
-        check_payload = self._check_change_intent(
+        check_payload = intent_session._check_change_intent(
             run_id=None,
             intent_id=intent_id,
             diff_ref=None,
@@ -593,11 +638,11 @@ class _MCPSessionWorkflowMixin:
             )
 
         # 5. Verify (before_run_id auto-resolves from intent)
-        verify_payload = self._patch_contract_verify(
+        verify_payload = patch_session._patch_contract_verify(
             before_run_id=None,
             after_run_id=after_run_id,
             intent_id=intent_id,
-            strictness=self._validated_strictness(strictness),
+            strictness=patch_session._validated_strictness(strictness),
             diff_ref=None,
             changed_files=scope_files,
         )
@@ -659,7 +704,7 @@ class _MCPSessionWorkflowMixin:
         receipt_error: str | None = None
         if create_receipt:
             try:
-                receipt_payload = self.create_review_receipt(
+                receipt_payload = _receipt_session(self).create_review_receipt(
                     run_id=record.run_id,
                     intent_id=intent_id,
                 )
@@ -669,7 +714,7 @@ class _MCPSessionWorkflowMixin:
         # 9. Auto-clear (only on accepted, only if receipt didn't fail)
         intent_cleared = False
         if auto_clear and verify_status in _ACCEPTED_STATUSES and receipt_error is None:
-            self._clear_change_intent(intent_id=intent_id)
+            intent_session._clear_change_intent(intent_id=intent_id)
             intent_cleared = True
 
         # External workspace changes (dirty outside the declared scope) are
@@ -719,7 +764,8 @@ class _MCPSessionWorkflowMixin:
             result["health_regression_advisory"] = health_regression_advisory
         if propose_memory and verify_status in _ACCEPTED_STATUSES:
             profile = verify_payload.get("verification_profile")
-            memory_hook = self.finish_propose_memory(
+            memory_session = _memory_session(self)
+            memory_hook = memory_session.finish_propose_memory(
                 root_path=record.root,
                 changed_files=resolved_files,
                 claims_text=claims_text,
@@ -729,8 +775,9 @@ class _MCPSessionWorkflowMixin:
             if memory_hook:
                 result.update(memory_hook)
         if verify_status in _ACCEPTED_STATUSES:
-            projection_hook = self.maybe_auto_enqueue_projection_rebuild(
-                root_path=record.root,
+            memory_session = _memory_session(self)
+            projection_hook = memory_session.maybe_auto_enqueue_projection_rebuild(
+                root_path=record.root
             )
             if projection_hook is not None:
                 result["projection_rebuild"] = projection_hook
@@ -770,7 +817,8 @@ class _MCPSessionWorkflowMixin:
             }
             else "info"
         )
-        patch_trail_audit_sequence = self._audit_emit(
+        intent_session = _intent_session(self)
+        patch_trail_audit_sequence = intent_session._audit_emit(
             root=record.root,
             event_type=EVENT_PATCH_TRAIL_COMPUTED,
             severity=severity,
@@ -825,9 +873,10 @@ class _MCPSessionWorkflowMixin:
         has_ref = diff_ref is not None and str(diff_ref).strip() != ""
         if has_files and has_ref:
             raise MCPServiceContractError(workflow_msgs.FINISH_EVIDENCE_XOR)
+        finding_session = _finding_session(self)
         if has_ref:
             return _require_non_empty_changed_evidence(
-                self._git_diff_paths(
+                finding_session._git_diff_paths(
                     root_path=root_path,
                     git_diff_ref=str(diff_ref),
                 )
@@ -835,7 +884,7 @@ class _MCPSessionWorkflowMixin:
         if has_files:
             assert changed_files is not None
             return _require_non_empty_changed_evidence(
-                self._normalize_changed_paths(
+                finding_session._normalize_changed_paths(
                     root_path=root_path,
                     paths=changed_files,
                 )
@@ -857,7 +906,7 @@ class _MCPSessionWorkflowMixin:
         if not needs_transitive:
             return None
 
-        transitive_result = self._blast_radius_result(
+        transitive_result = _blast_session(self)._blast_radius_result(
             record=record,
             files=intent.scope.allowed_paths,
             depth="transitive",
@@ -890,12 +939,10 @@ class _MCPSessionWorkflowMixin:
             health_delta = structural_delta.get("health_delta")
             if isinstance(health_delta, int):
                 patch_health_delta = health_delta
-        return _helpers.coerce_object_dict(
-            self.validate_review_claims(
-                text=claims_text,
-                run_id=record.run_id,
-                patch_health_delta=patch_health_delta,
-            )
+        return _claim_session(self).validate_review_claims(
+            text=claims_text,
+            run_id=record.run_id,
+            patch_health_delta=patch_health_delta,
         )
 
     @staticmethod
@@ -1004,7 +1051,11 @@ def _start_governance_omitted(
     blast_artifact = payload.get("blast_artifact")
     if isinstance(blast_artifact, Mapping):
         return {
-            "blast_radius": _start_blast_radius_omission_from_artifact(blast_artifact)
+            "blast_radius": _start_blast_radius_omission_from_artifact(
+                _helpers.coerce_object_dict(
+                    cast(Mapping[object, object], blast_artifact)
+                )
+            )
         }
     return None
 
@@ -1113,7 +1164,11 @@ def _workspace_summary_from_declare(
 def _as_conflict_list(value: object) -> list[dict[str, object]]:
     if not isinstance(value, list):
         return []
-    return [item for item in value if isinstance(item, dict)]
+    return [
+        _helpers.coerce_object_dict(cast(Mapping[object, object], item))
+        for item in value
+        if isinstance(item, Mapping)
+    ]
 
 
 def _require_non_empty_changed_evidence(paths: Sequence[str]) -> tuple[str, ...]:
@@ -1264,7 +1319,8 @@ def _attach_finish_governance(
             if isinstance(enforcement_blocked, dict):
                 response_budget = enforcement_blocked.get("response_budget")
                 if isinstance(response_budget, list):
-                    response_budget.extend(blockers)
+                    response_budget_values = cast(list[object], response_budget)
+                    response_budget_values.extend(blockers)
     return governed
 
 
@@ -1305,7 +1361,9 @@ def _shrink_finish_lane(payload: dict[str, object], lane: str) -> None:
     if lane == "patch_trail":
         patch_trail = payload.get("patch_trail")
         if isinstance(patch_trail, Mapping):
-            payload["patch_trail"] = _compact_patch_trail_reference(patch_trail)
+            payload["patch_trail"] = _compact_patch_trail_reference(
+                _helpers.coerce_object_dict(cast(Mapping[object, object], patch_trail))
+            )
 
 
 def _finish_governance_omitted(
@@ -1334,6 +1392,9 @@ def _receipt_content_retrievable(payload: Mapping[str, object]) -> bool:
     receipt = payload.get("receipt")
     if not isinstance(receipt, Mapping):
         return False
+    receipt_payload = _helpers.coerce_object_dict(
+        cast(Mapping[object, object], receipt)
+    )
     content = receipt.get("content")
     if not isinstance(content, str) or not content:
         return False
@@ -1341,7 +1402,7 @@ def _receipt_content_retrievable(payload: Mapping[str, object]) -> bool:
     if not isinstance(retrieval, Mapping):
         return False
     return retrieval.get("tool") == "get_review_receipt" and bool(
-        _receipt_digest_value(receipt)
+        _receipt_digest_value(receipt_payload)
     )
 
 
@@ -1349,7 +1410,10 @@ def _patch_trail_retrievable(payload: Mapping[str, object]) -> bool:
     patch_trail = payload.get("patch_trail")
     if not isinstance(patch_trail, Mapping):
         return False
-    if _is_compact_patch_trail_reference(patch_trail):
+    patch_trail_payload = _helpers.coerce_object_dict(
+        cast(Mapping[object, object], patch_trail)
+    )
+    if _is_compact_patch_trail_reference(patch_trail_payload):
         return False
     digest = str(patch_trail.get("patch_trail_digest", "")).strip()
     if not digest:
@@ -1366,7 +1430,10 @@ def _receipt_content_omission(
     receipt = payload.get("receipt")
     if not isinstance(receipt, Mapping):
         return None
-    digest = _receipt_digest_value(receipt)
+    receipt_payload = _helpers.coerce_object_dict(
+        cast(Mapping[object, object], receipt)
+    )
+    digest = _receipt_digest_value(receipt_payload)
     if not digest:
         return None
     retrieval = receipt.get("receipt_retrieval")
