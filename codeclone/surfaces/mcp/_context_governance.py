@@ -20,6 +20,8 @@ from typing import Final
 
 import orjson
 
+from ...utils.payload_narrow import is_record_mapping
+
 CONTEXT_GOVERNANCE_CONTRACT_VERSION: Final = "1.0"
 CONTEXT_GOVERNANCE_DIGEST_VERSION: Final = "1"
 CONTEXT_GOVERNANCE_ESTIMATOR: Final = "utf8_bytes_div_4_v1"
@@ -367,17 +369,18 @@ def _continuation_lane(
     lane: str,
     omission: object,
 ) -> dict[str, object] | None:
-    if not isinstance(omission, Mapping):
+    if not is_record_mapping(omission):
         return None
+    omission_mapping = omission
     lane_payload: dict[str, object] = {
         "lane": lane,
-        "reason": str(omission.get("reason", "omitted_by_response_budget")),
+        "reason": str(omission_mapping.get("reason", "omitted_by_response_budget")),
     }
     for key in ("shown", "total", "omitted", "facet", "offset", "limit"):
-        if key in omission:
-            lane_payload[key] = omission[key]
+        if key in omission_mapping:
+            lane_payload[key] = omission_mapping[key]
 
-    retrieval = _as_mapping_or_none(omission.get("retrieval"))
+    retrieval = _as_mapping_or_none(omission_mapping.get("retrieval"))
     if retrieval is not None:
         _merge_simple_keys(
             lane_payload,
@@ -398,7 +401,7 @@ def _continuation_lane(
             ),
         )
 
-    drill_down = _as_mapping_or_none(omission.get("drill_down"))
+    drill_down = _as_mapping_or_none(omission_mapping.get("drill_down"))
     if drill_down is not None:
         _merge_simple_keys(
             lane_payload,
@@ -434,7 +437,9 @@ def _merge_simple_keys(
 
 
 def _as_mapping_or_none(value: object) -> Mapping[str, object] | None:
-    return value if isinstance(value, Mapping) else None
+    if is_record_mapping(value):
+        return value
+    return None
 
 
 def _resolve_dotted_path(payload: Mapping[str, object], dotted_path: str) -> object:
