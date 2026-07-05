@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from typing import Protocol
 
 from ... import ui_messages as ui
 from ...cache.store import Cache, resolve_cache_status
@@ -16,6 +17,19 @@ from ...contracts import ExitCode
 from . import state as cli_state
 from .attrs import bool_attr, int_attr, optional_text_attr, set_bool_attr
 from .types import PrinterLike, require_status_console
+
+
+class _ConfigureMetricsModeHook(Protocol):
+    def __call__(
+        self,
+        *,
+        args: object,
+        metrics_baseline_exists: bool,
+    ) -> None: ...
+
+
+class _PrintBannerHook(Protocol):
+    def __call__(self, *, root: Path) -> None: ...
 
 
 def validate_numeric_args(args: object) -> bool:
@@ -152,8 +166,8 @@ def prepare_metrics_mode_and_ui(
     baseline_exists: bool,
     metrics_baseline_path: Path,
     metrics_baseline_exists: bool,
-    configure_metrics_mode: object,
-    print_banner: object,
+    configure_metrics_mode: _ConfigureMetricsModeHook | None,
+    print_banner: _PrintBannerHook | None,
 ) -> None:
     if (
         bool_attr(args, "update_baseline")
@@ -161,7 +175,7 @@ def prepare_metrics_mode_and_ui(
         and not bool_attr(args, "update_metrics_baseline")
     ):
         set_bool_attr(args, "update_metrics_baseline", True)
-    if callable(configure_metrics_mode):
+    if configure_metrics_mode is not None:
         configure_metrics_mode(
             args=args,
             metrics_baseline_exists=metrics_baseline_exists,
@@ -176,7 +190,7 @@ def prepare_metrics_mode_and_ui(
     if bool_attr(args, "quiet"):
         set_bool_attr(args, "no_progress", True)
         return
-    if callable(print_banner):
+    if print_banner is not None:
         print_banner(root=root_path)
 
 

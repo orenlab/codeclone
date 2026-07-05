@@ -2033,6 +2033,87 @@ def test_configure_metrics_mode_forces_api_surface_for_api_break_gate() -> None:
     assert args.api_surface is True
 
 
+def test_prepare_metrics_mode_and_ui_invokes_hooks_and_skips_banner_when_quiet(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    def _configure_metrics_mode(
+        *,
+        args: object,
+        metrics_baseline_exists: bool,
+    ) -> None:
+        calls.append(("configure", metrics_baseline_exists))
+
+    def _print_banner(*, root: Path) -> None:
+        calls.append(("banner", root))
+
+    args = Namespace(
+        update_baseline=False,
+        skip_metrics=False,
+        update_metrics_baseline=False,
+        quiet=False,
+        no_progress=False,
+    )
+    baseline_path = tmp_path / "codeclone.baseline.json"
+
+    cli_runtime.prepare_metrics_mode_and_ui(
+        args=args,
+        root_path=tmp_path,
+        baseline_path=baseline_path,
+        baseline_exists=False,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=False,
+        configure_metrics_mode=_configure_metrics_mode,
+        print_banner=_print_banner,
+    )
+
+    assert calls == [("configure", False), ("banner", tmp_path)]
+    assert args.no_progress is False
+
+    args.quiet = True
+    calls.clear()
+    cli_runtime.prepare_metrics_mode_and_ui(
+        args=args,
+        root_path=tmp_path,
+        baseline_path=baseline_path,
+        baseline_exists=False,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=False,
+        configure_metrics_mode=_configure_metrics_mode,
+        print_banner=_print_banner,
+    )
+
+    assert calls == [("configure", False)]
+    assert args.no_progress is True
+
+
+def test_prepare_metrics_mode_and_ui_skips_optional_hooks_when_none(
+    tmp_path: Path,
+) -> None:
+    args = Namespace(
+        update_baseline=False,
+        skip_metrics=False,
+        update_metrics_baseline=False,
+        quiet=False,
+        no_progress=False,
+    )
+    baseline_path = tmp_path / "codeclone.baseline.json"
+
+    cli_runtime.prepare_metrics_mode_and_ui(
+        args=args,
+        root_path=tmp_path,
+        baseline_path=baseline_path,
+        baseline_exists=False,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=False,
+        configure_metrics_mode=None,
+        print_banner=None,
+    )
+
+    assert args.no_progress is False
+
+
 def test_probe_metrics_baseline_section_for_non_object_payload(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     path.write_text("[]", "utf-8")
