@@ -13,7 +13,7 @@ import os
 import sqlite3
 import subprocess
 from argparse import Namespace
-from collections import OrderedDict
+from collections import OrderedDict, UserDict
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
@@ -11462,6 +11462,55 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
     assert summary["claims"] == "skipped_not_recommended"
 
 
+def test_mcp_patch_changed_file_evidence_prefers_explicit_changed_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    calls: list[str] = []
+
+    def normalize_changed_paths(**kwargs: object) -> tuple[str, ...]:
+        calls.append("changed_files")
+        assert kwargs["root_path"] == tmp_path
+        assert kwargs["paths"] == ["pkg/a.py"]
+        return ("pkg/a.py",)
+
+    def git_diff_paths(**kwargs: object) -> tuple[str, ...]:
+        calls.append("diff_ref")
+        assert kwargs["root_path"] == tmp_path
+        assert kwargs["git_diff_ref"] == "HEAD~1"
+        return ("pkg/from_diff.py",)
+
+    monkeypatch.setattr(service, "_normalize_changed_paths", normalize_changed_paths)
+    monkeypatch.setattr(service, "_git_diff_paths", git_diff_paths)
+
+    assert service._patch_changed_file_evidence(
+        root_path=tmp_path,
+        changed_files=["pkg/a.py"],
+        diff_ref="HEAD~1",
+    ) == ("pkg/a.py",)
+    assert calls == ["changed_files"]
+
+    calls.clear()
+    assert service._patch_changed_file_evidence(
+        root_path=tmp_path,
+        changed_files=None,
+        diff_ref="HEAD~1",
+    ) == ("pkg/from_diff.py",)
+    assert calls == ["diff_ref"]
+
+    calls.clear()
+    assert (
+        service._patch_changed_file_evidence(
+            root_path=tmp_path,
+            changed_files=None,
+            diff_ref=None,
+        )
+        is None
+    )
+    assert calls == []
+
+
 def test_mcp_finish_response_budget_omits_retrievable_advisory_lanes() -> None:
     payload: dict[str, object] = {
         "intent_id": "intent-1",
@@ -12015,6 +12064,14 @@ def test_mcp_intent_renew_and_workflow_helper_edges(tmp_path: Path) -> None:
         {"blocked_by": [{"ownership": "foreign_active"}]},
     )["concurrent_intents"] == [{"ownership": "foreign_active"}]
     assert workflow_mod._as_conflict_list("not-a-list") == []
+    conflict = {"ownership": "foreign_active", "count": 1}
+    assert workflow_mod._as_conflict_list([conflict]) == [
+        {"ownership": "foreign_active", "count": 1}
+    ]
+    user_mapping = UserDict({1: "numeric-key", "scope": "docs"})
+    assert workflow_mod._as_conflict_list([user_mapping]) == [
+        {"1": "numeric-key", "scope": "docs"}
+    ]
     with pytest.raises(MCPServiceContractError):
         workflow_mod._validated_dirty_scope_policy("invalid")
     dirty_hygiene = WorkspaceHygieneResult(

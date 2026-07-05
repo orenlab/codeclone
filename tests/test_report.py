@@ -1585,6 +1585,47 @@ def test_report_overview_materializes_source_breakdown_and_hotlist_cards() -> No
     assert test_fixture_hotspots[0]["title"] == "Function clone group (Type-2)"
 
 
+@pytest.mark.parametrize(
+    ("summary_value", "expected"),
+    [
+        (3, 3),
+        ("4", 4),
+        ("not-a-count", 0),
+        (1.5, 0),
+        (True, 1),
+        (None, 0),
+    ],
+)
+def test_report_overview_metric_summary_count_uses_contract_coercion(
+    summary_value: object,
+    expected: int,
+) -> None:
+    metrics: dict[str, object] = {
+        "dead_code": {"summary": {"high_confidence": summary_value}}
+    }
+    assert (
+        overview_mod._metric_summary_count(
+            metrics,
+            "dead_code",
+            "high_confidence",
+        )
+        == expected
+    )
+
+
+def test_report_overview_metric_summary_count_uses_fallback_key() -> None:
+    metrics: dict[str, object] = {"dead_code": {"summary": {"critical": "2"}}}
+    assert (
+        overview_mod._metric_summary_count(
+            metrics,
+            "dead_code",
+            "high_confidence",
+            fallback_key="critical",
+        )
+        == 2
+    )
+
+
 def test_report_overview_clone_summary_variants() -> None:
     assert (
         overview_mod._clone_summary_from_group(

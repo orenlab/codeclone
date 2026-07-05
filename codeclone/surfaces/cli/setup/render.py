@@ -398,7 +398,7 @@ def _is_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
 
 
 def _is_string_list(value: object) -> TypeGuard[list[str]]:
-    return isinstance(value, list)
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 __all__ = [

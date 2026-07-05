@@ -917,6 +917,12 @@ def test_setup_render_status_plain_and_rich(tmp_path: Path) -> None:
         setup_render.render_setup_status(console=_rich_console(), snapshot=snapshot)
 
 
+def test_setup_render_string_list_guard_requires_string_elements() -> None:
+    assert setup_render._is_string_list(["probe:pyproject"]) is True
+    assert setup_render._is_string_list(["probe:pyproject", 1]) is False
+    assert setup_render._is_string_list(("probe:pyproject",)) is False
+
+
 def test_setup_render_doctor_plain_and_rich(tmp_path: Path) -> None:
     snapshot = _minimal_setup_snapshot(tmp_path)
     plain = PlainConsole()
