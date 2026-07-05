@@ -434,6 +434,37 @@ def test_memory_cli_trajectory_and_job_fallback_edges(
     ) == int(ExitCode.SUCCESS)
 
 
+def test_is_payload_dict_preserves_dict_identity() -> None:
+    from codeclone.surfaces.cli import memory
+
+    record: dict[str, object] = {"type": "module_role"}
+    value: object = record
+    assert memory._is_payload_dict(value)
+    assert value is record
+    assert not memory._is_payload_dict("not-a-dict")
+
+
+def test_mapping_items_from_list_preserves_mapping_identity() -> None:
+    from codeclone.surfaces.cli import memory
+
+    numpy = pytest.importorskip("numpy")
+    weight = numpy.float32(2.5)
+    record: dict[str, object] = {"weight": weight}
+    items = memory._mapping_items_from_list([record])
+    assert len(items) == 1
+    assert items[0] is record
+    assert items[0]["weight"] is weight
+
+
+def test_dict_items_from_list_preserves_dict_identity() -> None:
+    from codeclone.surfaces.cli import memory
+
+    record: dict[str, object] = {"trajectory_id": "t-1"}
+    items = memory._dict_items_from_list([record])
+    assert len(items) == 1
+    assert items[0] is record
+
+
 def test_memory_cli_semantic_text_without_subject_path() -> None:
     from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
     from codeclone.memory.semantic.models import SemanticSearchResult
