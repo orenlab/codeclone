@@ -916,9 +916,7 @@ def _memory_lane_items(
     for lane, _count_key in _MEMORY_RESPONSE_LANES:
         value = payload.get(lane)
         items = value if isinstance(value, list) else []
-        lanes[lane] = [
-            dict(item) for item in items if is_payload_dict(item)
-        ]
+        lanes[lane] = [dict(item) for item in items if is_payload_dict(item)]
     return lanes
 
 

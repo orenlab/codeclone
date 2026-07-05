@@ -85,9 +85,7 @@ def _ready_actions(plan: Mapping[str, object]) -> list[dict[str, object]]:
     if not isinstance(raw, list):
         return []
     ready = [
-        item
-        for item in raw
-        if _is_action_item(item) and item.get("status") == "ready"
+        item for item in raw if _is_action_item(item) and item.get("status") == "ready"
     ]
     ready.sort(key=lambda item: str(item.get("id", "")))
     return ready

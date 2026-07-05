@@ -40,6 +40,7 @@ def _finding_session(
 
 class _MCPSessionClaimGuardMixin:
     _runs: CodeCloneMCPRunStore
+
     def validate_review_claims(
         self,
         *,

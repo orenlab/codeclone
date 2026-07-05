@@ -1099,9 +1099,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 offset=offset,
                 limit=limit,
             )
-        return dict(
-            require_mapping_section(report_document, section=validated_section)
-        )
+        return dict(require_mapping_section(report_document, section=validated_section))
 
     def get_production_triage(
         self,
