@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import Protocol, TypeGuard
 
 from ... import __version__
 from ... import ui_messages as ui
@@ -779,7 +779,7 @@ def _emit_cli_analysis_completed_if_enabled(
 ) -> None:
     if not bool(getattr(args, "audit_enabled", False)):
         return
-    if not isinstance(report_document, dict):
+    if not _is_report_document(report_document):
         return
     digest = _report_digest_from_document(report_document)
     if not digest:
@@ -802,6 +802,10 @@ def _emit_cli_analysis_completed_if_enabled(
         )
     except Exception:
         return None
+
+
+def _is_report_document(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
 
 
 def _report_digest_from_document(report_document: dict[str, object]) -> str:

@@ -1110,6 +1110,16 @@ def test_reader_int_meta_value_error() -> None:
 # ── workflow.py: analysis.completed CLI emit ──
 
 
+def test_is_report_document_type_guard_preserves_identity() -> None:
+    from codeclone.surfaces.cli.workflow import _is_report_document
+
+    document: dict[str, object] = {"integrity": {"digest": {"value": "abc"}}}
+    value: object = document
+    assert _is_report_document(value)
+    assert value is document
+    assert not _is_report_document("not-a-dict")
+
+
 def test_report_digest_from_document_missing_integrity() -> None:
     from codeclone.surfaces.cli.workflow import _report_digest_from_document
 
