@@ -8,6 +8,7 @@ from __future__ import annotations
 import inspect
 from typing import Protocol
 
+from ...utils.payload_narrow import is_payload_dict
 from ._workspace_intents import safe_remove_own_intent
 from .session import (
     DEFAULT_MCP_HISTORY_LIMIT,
@@ -192,7 +193,7 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
     def _run_dict(self, method_name: str, **params: object) -> dict[str, object]:
         bound = getattr(self._session_cls, method_name).__get__(self, type(self))
         result = run_kw(bound, params)
-        if not isinstance(result, dict):
+        if not is_payload_dict(result):
             raise TypeError(f"MCP session method '{method_name}' must return a dict.")
         return result
 
