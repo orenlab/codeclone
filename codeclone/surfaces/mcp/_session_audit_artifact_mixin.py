@@ -38,6 +38,7 @@ from ...config.memory import resolve_memory_config
 from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.schema import open_memory_db_readonly
 from ...memory.trajectory.store import find_trajectory_patch_trails_for_lookup
+from ...utils.payload_narrow import is_record_mapping
 from ._context_governance import (
     BLAST_ARTIFACT_RETRIEVAL_RESPONSE_PROJECTION_KIND,
     PATCH_TRAIL_RETRIEVAL_RESPONSE_PROJECTION_KIND,
@@ -422,7 +423,7 @@ def _stored_patch_trail_from_memory(
     row: Mapping[str, object],
 ) -> StoredPatchTrail | None:
     payload = row.get("payload")
-    if not isinstance(payload, Mapping):
+    if not is_record_mapping(payload):
         return None
     digest = str(row.get("patch_trail_digest", "")).strip()
     if not digest:
@@ -434,7 +435,7 @@ def _stored_patch_trail_from_memory(
         verification_status=_str_or_none(payload.get("verification_status")),
         schema_version=_str_or_none(payload.get("schema_version")),
         created_at_utc=str(row.get("created_at_utc", "")).strip(),
-        payload=dict(payload),
+        payload=payload,
     )
 
 
@@ -491,8 +492,8 @@ def _stored_receipt_markdown(receipt: StoredReviewReceipt) -> str:
     if isinstance(content, str) and content:
         return content
     typed = receipt.payload.get("receipt")
-    if isinstance(typed, Mapping):
-        return render_receipt_markdown(dict(typed))
+    if is_record_mapping(typed):
+        return render_receipt_markdown(typed)
     return ""
 
 
