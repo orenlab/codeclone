@@ -9,6 +9,7 @@ from __future__ import annotations
 import re
 import sqlite3
 from collections.abc import Mapping, Sequence
+from typing import TypeGuard
 
 import orjson
 
@@ -191,7 +192,7 @@ def extract_trajectory_citations(trajectory: Trajectory) -> list[dict[str, objec
 def _event_core_facts(event_core_json: str) -> Mapping[str, object] | None:
     core = _load_event_core(event_core_json)
     facts = core.get("facts")
-    return facts if isinstance(facts, Mapping) else None
+    return facts if _is_object_mapping(facts) else None
 
 
 def _citation_items_from_facts(
@@ -200,7 +201,7 @@ def _citation_items_from_facts(
     raw_citations = facts.get("citations")
     if not isinstance(raw_citations, list):
         return []
-    return [item for item in raw_citations if isinstance(item, Mapping)]
+    return [item for item in raw_citations if _is_object_mapping(item)]
 
 
 def _append_trajectory_citation(
@@ -466,7 +467,11 @@ def _load_event_core(event_core_json: str) -> Mapping[str, object]:
         loaded = orjson.loads(event_core_json)
     except orjson.JSONDecodeError:
         return {}
-    return loaded if isinstance(loaded, Mapping) else {}
+    return loaded if _is_object_mapping(loaded) else {}
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
 
 
 def _preview_text(value: str) -> str:

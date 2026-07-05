@@ -6,9 +6,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import cast
+from typing import TypeGuard, cast
 
 import pytest
 
@@ -326,7 +326,7 @@ def test_memory_continuation_page_emits_next_cursor_for_remaining_items() -> Non
     assert page["response_complete"] is False
     assert "next" in page
     next_ref = page["next"]
-    assert isinstance(next_ref, dict)
+    assert _is_object_mapping(next_ref)
     assert next_ref["offset"] == 2
 
 
@@ -525,9 +525,11 @@ def _tampered_cursor(payload: dict[str, object]) -> str:
     return _encode_cursor(signed)
 
 
-def _continuation_request_resolver(payload: Mapping[str, object]) -> object:
+def _continuation_request_resolver(
+    payload: Mapping[str, object],
+) -> Callable[[str], object]:
     internal = payload.get("_memory_projection_request")
-    if not isinstance(internal, Mapping):
+    if not _is_object_mapping(internal):
         raise AssertionError("expected _memory_projection_request in payload")
     digest = memory_projection_request_digest(internal)
     digest_value = str(digest["value"])
@@ -537,6 +539,10 @@ def _continuation_request_resolver(payload: Mapping[str, object]) -> object:
         return stored if value == digest_value else None
 
     return _resolve
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
 
 
 def _lane_page(payload: dict[str, object], lane: str) -> dict[str, object]:

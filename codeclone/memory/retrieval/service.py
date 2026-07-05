@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
@@ -837,7 +837,7 @@ def get_memory_projection_page(
     project_id: str,
     cursor: str,
     page_size: int = DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE,
-    resolve_request: object | None = None,
+    resolve_request: Callable[[str], object] | None = None,
 ) -> dict[str, object]:
     """Return a digest-bound continuation page for a memory retrieval lane."""
 
