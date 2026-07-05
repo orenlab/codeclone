@@ -59,8 +59,8 @@ def _open_lock_file(lock_path: Path) -> BinaryIO:
     return os.fdopen(fd, "r+b")
 
 
-def _acquire_exclusive_lock(handle: object) -> None:
-    fileno = handle.fileno()  # type: ignore[attr-defined]
+def _acquire_exclusive_lock(handle: BinaryIO) -> None:
+    fileno = handle.fileno()
     if sys.platform == "win32":
         import msvcrt
 
@@ -71,8 +71,8 @@ def _acquire_exclusive_lock(handle: object) -> None:
     fcntl.flock(fileno, fcntl.LOCK_EX | fcntl.LOCK_NB)
 
 
-def _release_exclusive_lock(handle: object) -> None:
-    fileno = handle.fileno()  # type: ignore[attr-defined]
+def _release_exclusive_lock(handle: BinaryIO) -> None:
+    fileno = handle.fileno()
     if sys.platform == "win32":
         import msvcrt
 
