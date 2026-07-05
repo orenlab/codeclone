@@ -11,6 +11,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
+from types import TracebackType
 
 from ...audit import AuditEvent, AuditWriter, repo_root_digest
 from ...audit.runtime import open_audit_writer_for_root
@@ -33,6 +34,7 @@ from ._session_baseline import (
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_context_mixin import _MCPSessionContextMixin
+from ._session_finding_mixin import _StateLock
 from ._session_insights_mixin import _MCPSessionInsightsMixin
 from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_memory_mixin import _MCPSessionMemoryMixin
@@ -83,6 +85,32 @@ from ._session_workflow_mixin import _MCPSessionWorkflowMixin
 from ._workspace_drift import build_run_manifest
 from ._workspace_hygiene import collect_dirty_snapshot
 
+
+class _RuntimeStateLock:
+    """RLock adapter with a typing-friendly context manager surface."""
+
+    __slots__ = ("_lock",)
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+
+    def __enter__(self) -> object:
+        return self._lock.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        self._lock.__exit__(exc_type, exc, tb)
+        return None
+
+
+def _new_state_lock() -> _StateLock:
+    return _RuntimeStateLock()
+
+
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
     "MAX_MCP_HISTORY_LIMIT",
@@ -126,7 +154,7 @@ class MCPSession(
         self._ide_governance = IdeGovernanceSessionState(
             channel_enabled=ide_governance_channel
         )
-        self._state_lock = RLock()
+        self._state_lock = _new_state_lock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
         self._last_gate_results: dict[str, dict[str, object]] = {}
         self._spread_max_cache: dict[str, int] = {}
