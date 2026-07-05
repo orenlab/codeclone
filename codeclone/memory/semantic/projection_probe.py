@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Literal, TypedDict
+from typing import Literal, TypedDict, TypeGuard
 
 from ..embedding.length import (
     LengthDistribution,
@@ -188,10 +188,14 @@ def _append_probe_sample(
         )
 
 
+def _is_semantic_lane(name: str) -> TypeGuard[SemanticLane]:
+    return name in {"memory", "audit", "trajectory"}
+
+
 def _lane_name(name: str) -> SemanticLane:
-    if name not in {"memory", "audit", "trajectory"}:
+    if not _is_semantic_lane(name):
         raise ValueError(f"unknown semantic lane: {name}")
-    return name  # type: ignore[return-value]
+    return name
 
 
 def _lane_payload(
