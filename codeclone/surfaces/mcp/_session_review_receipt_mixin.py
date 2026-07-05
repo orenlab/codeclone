@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Mapping, Sequence
+from typing import cast
 
 from ...audit import (
     EVENT_RECEIPT_CREATED,
@@ -30,11 +31,39 @@ from ._review_receipt import (
     receipt_verdict,
     render_receipt_markdown,
 )
+from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
+from ._session_intent_mixin import _MCPSessionIntentMixin
+from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunRecord,
     MCPServiceContractError,
 )
+from ._session_state_mixin import _MCPSessionStateMixin
+
+
+def _intent_session(
+    session: _MCPSessionReviewReceiptMixin,
+) -> _MCPSessionIntentMixin:
+    return cast(_MCPSessionIntentMixin, session)
+
+
+def _patch_session(
+    session: _MCPSessionReviewReceiptMixin,
+) -> _MCPSessionPatchContractMixin:
+    return cast(_MCPSessionPatchContractMixin, session)
+
+
+def _finding_session(
+    session: _MCPSessionReviewReceiptMixin,
+) -> _MCPSessionFindingMixin:
+    return cast(_MCPSessionFindingMixin, session)
+
+
+def _state_session(
+    session: _MCPSessionReviewReceiptMixin,
+) -> _MCPSessionStateMixin:
+    return cast(_MCPSessionStateMixin, session)
 
 
 class _MCPSessionReviewReceiptMixin:
@@ -42,6 +71,7 @@ class _MCPSessionReviewReceiptMixin:
     _active_intents: dict[str, IntentRecord]
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
+    _state_lock: _StateLock
 
     def create_review_receipt(
         self,
@@ -112,7 +142,7 @@ class _MCPSessionReviewReceiptMixin:
             ),
         }
         if output_format == "json":
-            self._audit_emit(
+            _intent_session(self)._audit_emit(
                 root=record.root,
                 event_type=EVENT_RECEIPT_CREATED,
                 severity="info",
@@ -144,7 +174,7 @@ class _MCPSessionReviewReceiptMixin:
             "content": content,
             "receipt": receipt,
         }
-        audit_sequence = self._audit_emit(
+        audit_sequence = _intent_session(self)._audit_emit(
             root=record.root,
             event_type=EVENT_RECEIPT_CREATED,
             severity="info",
@@ -192,12 +222,15 @@ class _MCPSessionReviewReceiptMixin:
         intent_record: MCPRunRecord | None = None
         intent: IntentRecord | None
         if intent_id is not None:
-            intent_record, intent = self._resolve_intent(
+            intent_record, intent = _intent_session(self)._resolve_intent(
                 run_id=None,
                 intent_id=intent_id,
             )
         else:
-            intent = self._optional_intent(record=record, intent_id=None)
+            intent = _patch_session(self)._optional_intent(
+                record=record,
+                intent_id=None,
+            )
         if intent is not None and intent.run_id != record.run_id:
             intent_record = intent_record or self._runs.get(intent.run_id)
             if intent_record.root != record.root:
@@ -224,11 +257,12 @@ class _MCPSessionReviewReceiptMixin:
     ) -> list[dict[str, object]]:
         if not changed_paths:
             return []
-        findings = self._base_findings(record)
+        finding_session = _finding_session(self)
+        findings = finding_session._base_findings(record)
         return [
             finding
             for finding in findings
-            if self._finding_touches_paths(
+            if finding_session._finding_touches_paths(
                 finding=finding,
                 changed_paths=changed_paths,
             )
@@ -309,7 +343,8 @@ class _MCPSessionReviewReceiptMixin:
         }
 
     def _reviewed_evidence(self, record: MCPRunRecord) -> dict[str, object]:
-        findings = self._base_findings(record)
+        finding_session = _finding_session(self)
+        findings = finding_session._base_findings(record)
         gate_relevant = [
             finding
             for finding in findings
@@ -325,10 +360,13 @@ class _MCPSessionReviewReceiptMixin:
             finding = self._finding_by_id(record=record, canonical_id=canonical_id)
             if finding is None:
                 continue
-            summary = self._finding_summary_card(record, finding)
+            summary = finding_session._finding_summary_card(record, finding)
             items.append(
                 {
-                    "finding_id": self._short_finding_id(record, canonical_id),
+                    "finding_id": finding_session._short_finding_id(
+                        record,
+                        canonical_id,
+                    ),
                     "kind": str(summary.get("kind") or "finding"),
                     "severity": str(summary.get("severity") or "info"),
                     "note": note,
@@ -346,7 +384,7 @@ class _MCPSessionReviewReceiptMixin:
         record: MCPRunRecord,
         canonical_id: str,
     ) -> dict[str, object] | None:
-        for finding in self._base_findings(record):
+        for finding in _finding_session(self)._base_findings(record):
             if isinstance(finding, dict) and str(finding.get("id", "")) == canonical_id:
                 return finding
         return None
@@ -365,7 +403,7 @@ class _MCPSessionReviewReceiptMixin:
                 "health_delta": None,
                 "verdict": "not_applicable",
             }
-        previous = self._previous_run_for_root(record)
+        previous = _finding_session(self)._previous_run_for_root(record)
         if previous is None:
             return {
                 "available": False,
@@ -374,7 +412,7 @@ class _MCPSessionReviewReceiptMixin:
                 "health_delta": None,
                 "verdict": "not_available",
             }
-        compare_payload = self.compare_runs(
+        compare_payload = _state_session(self).compare_runs(
             run_id_before=previous.run_id,
             run_id_after=record.run_id,
             focus="all",
