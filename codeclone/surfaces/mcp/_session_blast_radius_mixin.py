@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import cast
 
 from . import _session_helpers as _helpers
 from ._blast_radius import (
@@ -19,6 +20,7 @@ from ._blast_radius import (
     blast_radius_to_payload,
     compute_blast_radius,
 )
+from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunRecord,
@@ -28,8 +30,15 @@ from ._session_shared import (
 MAX_BLAST_RADIUS_CACHE_ENTRIES = 64
 
 
+def _finding_session(
+    session: _MCPSessionBlastRadiusMixin,
+) -> _MCPSessionFindingMixin:
+    return cast(_MCPSessionFindingMixin, session)
+
+
 class _MCPSessionBlastRadiusMixin:
     _runs: CodeCloneMCPRunStore
+    _state_lock: _StateLock
     _blast_radius_cache: dict[
         tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
         BlastRadiusResult,
@@ -45,7 +54,7 @@ class _MCPSessionBlastRadiusMixin:
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
         normalized_depth = self._validated_blast_radius_depth(depth)
-        normalized_files = self._normalize_changed_paths(
+        normalized_files = _finding_session(self)._normalize_changed_paths(
             root_path=record.root,
             paths=files,
         )
