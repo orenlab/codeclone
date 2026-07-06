@@ -818,6 +818,19 @@ def test_fastembed_tokenizer_helper_edge_paths() -> None:
     assert provider_mod._encoding_length(_Encoding()) == 3
     assert provider_mod._encoding_length(object()) == 0
 
+    class _StringIds:
+        def __init__(self) -> None:
+            self.ids = "abc"
+
+    class _BoolTokenIds:
+        def __init__(self) -> None:
+            self.ids = [1, True, 3]
+
+    assert provider_mod._encoding_token_ids(object()) == []
+    assert provider_mod._encoding_token_ids(_StringIds()) == []
+    assert provider_mod._encoding_token_ids(_BoolTokenIds()) == []
+    assert provider_mod._encoding_token_ids(_Encoding()) == [1, 2, 3]
+
 
 def test_fastembed_tokenizer_max_length_rejects_non_positive() -> None:
     from codeclone.memory.embedding import fastembed_provider as provider_mod

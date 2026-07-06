@@ -3011,3 +3011,108 @@ def test_integrity_read_json_document_forwards_max_bytes(tmp_path: Path) -> None
     path = tmp_path / "doc.json"
     path.write_text('{"ok": true}', encoding="utf-8")
     assert read_json_document(path, max_bytes=64) == {"ok": True}
+
+
+def test_canonicalize_helpers_reject_invalid_structural_shapes() -> None:
+    from codeclone.cache._canonicalize import (
+        _as_str_value_dict,
+        _as_structural_group_dict,
+        _as_structural_occurrence_dict,
+        _as_typed_structural_finding_list,
+        _as_typed_structural_occurrence_list,
+        _decode_structural_findings_section,
+    )
+
+    assert _as_str_value_dict({"key": 1}) is None
+    assert (
+        _as_structural_occurrence_dict({"qualname": "pkg.fn", "start": "x", "end": 1})
+        is None
+    )
+    assert (
+        _as_typed_structural_occurrence_list(
+            [{"qualname": "pkg.fn", "start": 1, "end": "x"}]
+        )
+        is None
+    )
+    assert _as_typed_structural_occurrence_list("not-a-list") is None
+    assert (
+        _as_structural_group_dict(
+            {
+                "finding_kind": "dup",
+                "finding_key": "k1",
+                "signature": {"kind": 1},
+                "items": [{"qualname": "pkg.fn", "start": 1, "end": 2}],
+            }
+        )
+        is None
+    )
+    assert _as_typed_structural_finding_list([{"finding_kind": "dup"}]) is None
+    ok, findings = _decode_structural_findings_section(None)
+    assert ok is True and findings is None
+    bad, findings = _decode_structural_findings_section([{"finding_kind": "dup"}])
+    assert bad is False and findings is None
+
+    assert _as_structural_occurrence_dict(None) is None
+    assert (
+        _as_structural_group_dict(
+            {
+                "finding_kind": "dup",
+                "finding_key": "k1",
+                "signature": {"kind": "sig"},
+                "items": [None],
+            }
+        )
+        is None
+    )
+    assert _as_typed_structural_finding_list([None]) is None
+
+
+def test_attach_optional_cache_sections_sets_relationship_facts() -> None:
+    base = cast(
+        CacheEntry,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": [],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "referenced_qualnames": [],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    attached = _attach_optional_cache_sections(
+        base,
+        function_relationship_facts=[
+            {
+                "source_qualname": "pkg.mod:src",
+                "relationships": [
+                    {
+                        "relation_kind": "calls",
+                        "resolution_status": "resolved",
+                        "origin_lane": "analysis",
+                        "source_qualname": "pkg.mod:src",
+                        "target_qualname": "pkg.mod:tgt",
+                        "path": "pkg/mod.py",
+                        "line": 1,
+                        "expression": "tgt()",
+                        "resolution_rule": "direct",
+                    }
+                ],
+            }
+        ],
+        structural_findings=[
+            {
+                "finding_kind": "dup",
+                "finding_key": "k1",
+                "signature": {"kind": "sig"},
+                "items": [{"qualname": "pkg.mod:fn", "start": 1, "end": 2}],
+            }
+        ],
+    )
+    relationships = attached["function_relationship_facts"][0]["relationships"]
+    assert relationships[0]["relation_kind"] == "calls"
+    assert attached["structural_findings"][0]["finding_kind"] == "dup"

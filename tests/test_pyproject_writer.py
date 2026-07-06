@@ -9,6 +9,7 @@ from __future__ import annotations
 import errno
 import os
 import stat
+import types
 from pathlib import Path
 
 import pytest
@@ -425,3 +426,68 @@ def test_write_text_atomically_cleans_up_temp_on_replace_failure(
         write_text_atomically(target, "hello\n")
     assert not target.exists()
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_chmod_open_file_falls_back_when_fchmod_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+    chmod_calls: list[tuple[object, int]] = []
+    shim = types.SimpleNamespace(
+        chmod=lambda path, mode: chmod_calls.append((path, mode)),
+    )
+
+    monkeypatch.setattr(atomic_write_mod, "os", shim)
+
+    atomic_write_mod._chmod_open_file(0, target, 0o644)
+
+    assert chmod_calls == [(target, 0o644)]
+
+
+def test_fsync_parent_directory_reraises_unsupported_open_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+
+    def _open(_path: object, _flags: int) -> int:
+        raise OSError(errno.EROFS, "read-only filesystem")
+
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.open", _open)
+
+    with pytest.raises(OSError, match="read-only filesystem"):
+        atomic_write_mod._fsync_parent_directory(target)
+
+
+def test_fsync_parent_directory_reraises_unsupported_fsync_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+
+    def _fsync(_fd: int) -> None:
+        raise OSError(errno.EROFS, "read-only filesystem")
+
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.open", lambda *_args: 9)
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.fsync", _fsync)
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.close", lambda _fd: None)
+
+    with pytest.raises(OSError, match="read-only filesystem"):
+        atomic_write_mod._fsync_parent_directory(target)
+
+
+def test_fsync_parent_directory_ignores_unsupported_fsync_errno(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "out.txt"
+
+    def _fsync(_fd: int) -> None:
+        raise OSError(errno.EINVAL, "directory fsync unsupported")
+
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.open", lambda *_args: 9)
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.fsync", _fsync)
+    monkeypatch.setattr("codeclone.utils.atomic_write.os.close", lambda _fd: None)
+
+    atomic_write_mod._fsync_parent_directory(target)

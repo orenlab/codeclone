@@ -1223,7 +1223,13 @@ def test_discovery_cache_runtime_row_parser_rejects_invalid_enums() -> None:
         _runtime_reachability_target_kind,
     )
 
+    assert _runtime_reachability_confidence("high") == "high"
+    assert _runtime_reachability_confidence("medium") == "medium"
+    assert _runtime_reachability_confidence("low") == "low"
     assert _runtime_reachability_confidence("bogus") is None
+    assert _runtime_reachability_target_kind("function") == "function"
+    assert _runtime_reachability_target_kind("class") == "class"
+    assert _runtime_reachability_target_kind("method") == "method"
     assert _runtime_reachability_target_kind("bogus") is None
     assert (
         _runtime_reachability_from_cache_row(

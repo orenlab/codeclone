@@ -63,6 +63,26 @@ def test_advisory_file_lock_rejects_symlink_target(tmp_path: Path) -> None:
         raise AssertionError("symlink lock must not be acquired")
 
 
+def test_open_lock_file_uses_append_mode_on_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock_path = tmp_path / "memory.lock"
+    opened: list[str] = []
+
+    def _open(_self: object, mode: str, **_kwargs: object) -> io.BytesIO:
+        opened.append(mode)
+        return io.BytesIO(b"")
+
+    monkeypatch.setattr("codeclone.utils.file_lock.sys.platform", "win32")
+    monkeypatch.setattr(type(lock_path), "open", _open, raising=False)
+
+    handle = file_lock._open_lock_file(lock_path)
+    handle.close()
+
+    assert opened == ["a+b"]
+
+
 def test_file_lock_windows_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_msvcrt = types.SimpleNamespace(LK_NBLCK=1, LK_UNLCK=2, calls=[])
 

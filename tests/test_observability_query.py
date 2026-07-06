@@ -251,6 +251,43 @@ def test_analysis_phase_cost_section_and_summary_routing(tmp_path: Path) -> None
     assert "analysis" in diagnostics
 
 
+def test_analysis_diagnostic_helper_branches() -> None:
+    from codeclone.observability.views import AggregatesView, AnalysisPhaseRow
+
+    assert query_mod._analysis_diagnostic(AggregatesView(operation_count=0)) is None
+    assert (
+        query_mod._analysis_diagnostic(
+            AggregatesView(
+                operation_count=1,
+                analysis_phases=(
+                    AnalysisPhaseRow(
+                        phase="unit_cfg",
+                        worker_elapsed_ms=1.0,
+                        share_permille=100,
+                        verdict="balanced",
+                    ),
+                ),
+            )
+        )
+        is None
+    )
+    heavy = query_mod._analysis_diagnostic(
+        AggregatesView(
+            operation_count=1,
+            analysis_phases=(
+                AnalysisPhaseRow(
+                    phase="unit_cfg",
+                    worker_elapsed_ms=2500.0,
+                    share_permille=833,
+                    verdict="phase_heavy",
+                ),
+            ),
+        )
+    )
+    assert heavy is not None
+    assert heavy["kind"] == "analysis"
+
+
 def test_summary_does_not_embed_raw_trace(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(root=tmp_path, section="summary")
@@ -321,10 +358,19 @@ def test_detail_sections_fail_closed_on_missing_or_unknown_selector(
     _seed(tmp_path)
     missing = query_platform_observability(root=tmp_path, section="operation_detail")
     assert missing["status"] == "invalid_selector"
+    missing_span = query_platform_observability(root=tmp_path, section="span_detail")
+    assert missing_span["status"] == "invalid_selector"
+    assert missing_span["error"] == "span_detail requires span_id"
     not_found = query_platform_observability(
         root=tmp_path, section="span_detail", span_id="nope"
     )
     assert not_found["status"] == "not_found"
+    missing_operation = query_platform_observability(
+        root=tmp_path,
+        section="operation_detail",
+        operation_id="missing-op",
+    )
+    assert missing_operation["status"] == "not_found"
 
 
 def test_aggregate_rows_expose_ids_for_drilldown(tmp_path: Path) -> None:

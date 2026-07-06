@@ -199,6 +199,65 @@ def test_payload_is_order_independent() -> None:
     assert first == second
 
 
+def test_wide_namespace_falls_back_to_package_depth_two() -> None:
+    # P1>28 and P2>28 with module_count<=80 -> final fallback row (line 821).
+    mods = [f"r{root}.s{sub}.leaf" for root in range(30) for sub in range(2)]
+    edges = [(mods[index], mods[index + 1]) for index in range(len(mods) - 1)]
+    module_map: Any = _build_derived_module_map(_payload(edges=edges))
+    assert module_map["summary"]["module_count"] == 60
+    assert module_map["default_zoom"] == "packages"
+    assert module_map["graph_packages"]["package_depth"] == 2
+
+
+def test_self_loop_edges_are_ignored_at_module_zoom() -> None:
+    module_map: Any = _build_derived_module_map(
+        _payload(edges=[("pkg.a", "pkg.a"), ("pkg.a", "pkg.b")])
+    )
+    edge_pairs = {
+        (edge["source"], edge["target"])
+        for edge in module_map["graph_modules"]["edges"]
+    }
+    assert ("pkg.a", "pkg.a") not in edge_pairs
+    assert ("pkg.a", "pkg.b") in edge_pairs
+
+
+def test_unwind_signals_cover_import_instability_and_sink_paths() -> None:
+    module_map: Any = _build_derived_module_map(
+        _payload(
+            edges=[("sink.mod", "other.mod"), ("unstable.mod", "other.mod")],
+            chains=[["chain.a", "chain.b"]],
+            overloaded=[
+                _overloaded(
+                    "chain.b",
+                    fan_in=3,
+                    fan_out=1,
+                    candidate_status="non_candidate",
+                ),
+                _overloaded(
+                    "sink.mod",
+                    fan_in=20,
+                    fan_out=2,
+                    instability=0.8,
+                    candidate_status="ranked_only",
+                    candidate_reasons=["repeated_import_pressure"],
+                ),
+                _overloaded(
+                    "unstable.mod",
+                    fan_in=2,
+                    fan_out=4,
+                    instability=0.9,
+                    candidate_status="non_candidate",
+                ),
+            ],
+        )
+    )
+    rows = {row["module"]: row for row in module_map["unwind_candidates"]}
+    assert "repeated_import_pressure" in rows["sink.mod"]["signals"]
+    assert "high_instability" in rows["unstable.mod"]["signals"]
+    assert "central_sink" in rows["sink.mod"]["signals"]
+    assert "chain_bottleneck" in rows["chain.b"]["signals"]
+
+
 def test_ranked_only_population_has_no_candidate_overlay() -> None:
     overloaded = [
         _overloaded("a.b", candidate_status="ranked_only"),

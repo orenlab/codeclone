@@ -12694,6 +12694,164 @@ def test_measure_payload_ignores_invalid_context_governance_estimate() -> None:
     assert tokens > 17
 
 
+def test_measure_payload_ignores_mismatched_context_governance_contract() -> None:
+    from codeclone.surfaces.mcp._context_governance import (
+        CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+        CONTEXT_GOVERNANCE_ESTIMATOR,
+    )
+    from codeclone.surfaces.mcp.payloads import measure_payload
+
+    _baseline_byte_size, _baseline_tokens = measure_payload({"items": list(range(4))})
+    _wrong_version_byte_size, wrong_version_tokens = measure_payload(
+        {
+            "items": list(range(4)),
+            "context_governance": {
+                "contract_version": "0.0",
+                "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
+                "estimated": 3,
+            },
+        }
+    )
+    _wrong_estimator_byte_size, wrong_estimator_tokens = measure_payload(
+        {
+            "items": list(range(4)),
+            "context_governance": {
+                "contract_version": CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+                "estimator": "legacy-estimator",
+                "estimated": 3,
+            },
+        }
+    )
+
+    assert wrong_version_tokens != 3
+    assert wrong_estimator_tokens != 3
+    assert wrong_version_tokens > 0
+    assert wrong_estimator_tokens > 0
+
+
+def test_hotspot_empty_reason_reports_no_findings_in_run(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _dummy_run_record(tmp_path, "run-empty")
+    reason = service._hotspot_empty_reason(
+        record=record,
+        kind="most_actionable",
+        detail_level="summary",
+        changed_paths=(),
+        exclude_reviewed=False,
+    )
+    assert reason == "no_findings_in_run"
+
+
+def test_list_hotspots_reports_all_items_reviewed_empty_reason(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    hotspots_before = service.list_hotspots(
+        kind="highest_spread",
+        run_id=summary["run_id"],
+        exclude_reviewed=False,
+    )
+    for item in cast("list[dict[str, object]]", hotspots_before["items"]):
+        service.mark_finding_reviewed(
+            finding_id=str(item["id"]),
+            run_id=summary["run_id"],
+        )
+    hotspots = service.list_hotspots(
+        kind="highest_spread",
+        run_id=summary["run_id"],
+        exclude_reviewed=True,
+    )
+    assert hotspots["total"] == 0
+    assert hotspots["empty_reason"] == "all_items_reviewed"
+
+
+def test_hotspot_empty_reason_reports_kind_specific_paths(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    base_document: dict[str, object] = {
+        "findings": {
+            "groups": {
+                "clones": {
+                    "functions": [
+                        {
+                            "id": "clone:function:g1",
+                            "locations": [{"path": "pkg/dup.py"}],
+                        }
+                    ],
+                    "blocks": [],
+                    "segments": [],
+                }
+            }
+        },
+        "derived": {"hotlists": {}},
+    }
+    record = replace(
+        _dummy_run_record(tmp_path, "hotspot-empty-reasons"),
+        report_document=base_document,
+    )
+    service._runs.register(record)
+
+    assert (
+        service._hotspot_empty_reason(
+            record=record,
+            kind="highest_priority",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "no_ranked_findings"
+    )
+    assert (
+        service._hotspot_empty_reason(
+            record=record,
+            kind="highest_spread",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "no_spread_hotspots"
+    )
+    assert (
+        service._hotspot_empty_reason(
+            record=record,
+            kind="most_actionable",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "no_items_above_actionability_threshold"
+    )
+
+    filtered_record = replace(
+        record,
+        report_document={
+            **base_document,
+            "derived": {
+                "hotlists": {
+                    "highest_spread_ids": ["clone:function:missing"],
+                }
+            },
+        },
+    )
+    assert (
+        service._hotspot_empty_reason(
+            record=filtered_record,
+            kind="highest_spread",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "hotlist_items_filtered_or_unavailable"
+    )
+
+
 def test_mcp_payload_paginate_and_finding_resolution() -> None:
     from codeclone.surfaces.mcp.payloads import (
         PageWindow,
@@ -13177,6 +13335,20 @@ def test_get_report_section_module_map_paginates_graph_lanes(tmp_path: Path) -> 
     )
 
 
+def test_get_report_section_module_map_requires_derived_payload(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(
+        replace(
+            _dummy_run_record(tmp_path, "empty-derived-run"),
+            report_document={"derived": {}},
+        )
+    )
+    with pytest.raises(MCPServiceContractError, match=r"module_map.*not available"):
+        service.get_report_section(run_id="empty-derived-run", section="module_map")
+
+
 def test_get_report_section_module_map_clones_only_returns_shell(
     tmp_path: Path,
 ) -> None:
@@ -13545,6 +13717,18 @@ def test_workflow_start_blast_and_finish_governance_helper_branches(
     )
     assert direct_omitted["omitted"] == 2
     assert workflow_mod._start_blast_omission_row("lane", "not-a-mapping") is None
+    omission_row = workflow_mod._start_blast_omission_row(
+        "direct_dependents",
+        {"total": "2", "shown": 0, "truncated": True, "retrieval": {}},
+    )
+    assert omission_row is not None
+    assert omission_row[1]["omitted"] == 2
+    truncated_only = workflow_mod._start_blast_omission_row(
+        "review_context",
+        {"total": 2, "shown": 2, "truncated": True, "retrieval": {}},
+    )
+    assert truncated_only is not None
+    assert truncated_only[1]["omitted"] == 0
 
     assert workflow_mod._start_non_negative_int(True) == 0
     assert workflow_mod._start_non_negative_int("12") == 12
@@ -13646,26 +13830,152 @@ def test_workflow_start_blast_and_finish_governance_helper_branches(
     assert (
         workflow_mod._patch_trail_retrievable(
             {
-                "patch_trail_digest": "trail" * 16,
-                "retrieval": {"tool": "get_patch_trail"},
+                "patch_trail": {
+                    "patch_trail_digest": "trail" * 16,
+                    "retrieval": {"tool": "get_patch_trail"},
+                }
             }
-        )
-        is False
-    )
-    assert (
-        workflow_mod._patch_trail_retrievable(
-            {"patch_trail_digest": "   ", "evidence": {}}
         )
         is False
     )
     assert (
         workflow_mod._patch_trail_retrievable(
             {
-                "patch_trail_digest": "trail" * 16,
-                "evidence": "bad",
+                "patch_trail": {
+                    "patch_trail_digest": "   ",
+                    "evidence": {},
+                }
             }
         )
         is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {
+                "patch_trail": {
+                    "patch_trail_digest": "trail" * 16,
+                    "evidence": "bad",
+                }
+            }
+        )
+        is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {
+                "patch_trail": {
+                    "patch_trail_digest": "trail" * 16,
+                    "evidence": {"patch_trail_audit_sequence": 3},
+                }
+            }
+        )
+        is True
+    )
+
+    blocker_payload = {
+        "receipt": {
+            "content": "body",
+            "receipt_retrieval": {"tool": "other"},
+        },
+        "patch_trail": {
+            "patch_trail_digest": "trail" * 16,
+            "evidence": {},
+        },
+    }
+    assert workflow_mod._finish_retrieval_blockers(blocker_payload) == [
+        "receipt_retrieval_unavailable",
+        "patch_trail_retrieval_unavailable",
+    ]
+    shrink_payload: dict[str, object] = {
+        "receipt": {"content": "body"},
+        "patch_trail": {
+            "patch_trail_digest": "trail" * 16,
+            "evidence": {"patch_trail_audit_sequence": 4},
+            "schema_version": "1",
+        },
+    }
+    workflow_mod._shrink_finish_lane(shrink_payload, "receipt_content")
+    assert "content" not in cast("dict[str, object]", shrink_payload["receipt"])
+    workflow_mod._shrink_finish_lane(shrink_payload, "patch_trail")
+    compact_trail = cast("dict[str, object]", shrink_payload["patch_trail"])
+    retrieval = cast("dict[str, object]", compact_trail["retrieval"])
+    assert retrieval["tool"] == "get_patch_trail"
+    assert (
+        workflow_mod._next_reducible_finish_lane(
+            {
+                "receipt": {
+                    "content": "body",
+                    "receipt_retrieval": {
+                        "tool": "get_review_receipt",
+                        "receipt_digest": "r" * 64,
+                    },
+                    "receipt_digest": {"value": "r" * 64},
+                }
+            }
+        )
+        == "receipt_content"
+    )
+    governed_finish = workflow_mod._attach_finish_governance(
+        {
+            **blocker_payload,
+            "context_governance": {
+                "enforcement_blocked": {"response_budget": []},
+            },
+        },
+        evidence_omitted=None,
+    )
+    enforcement_blocked = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", governed_finish["context_governance"])[
+            "enforcement_blocked"
+        ],
+    )
+    assert "patch_trail_retrieval_unavailable" in cast(
+        "list[str]", enforcement_blocked["response_budget"]
+    )
+    omitted = workflow_mod._finish_governance_omitted(
+        {
+            "receipt": {
+                "run_id": "run12345",
+                "content": "body",
+                "receipt_digest": {"value": "r" * 64},
+            },
+            "patch_trail": {
+                "patch_trail_digest": "t" * 64,
+                "schema_version": "1",
+            },
+        },
+        response_budget_lanes={"receipt_content", "patch_trail"},
+    )
+    assert omitted is not None
+    assert "receipt.content" in omitted
+    assert "patch_trail" in omitted
+
+    no_receipt_dict: dict[str, object] = {"receipt": "bad"}
+    workflow_mod._shrink_finish_lane(no_receipt_dict, "receipt_content")
+    workflow_mod._shrink_finish_lane({"patch_trail": "bad"}, "patch_trail")
+    compact_without_audit = workflow_mod._compact_patch_trail_reference(
+        {
+            "patch_trail_digest": "trail" * 16,
+            "schema_version": "1",
+            "evidence": {},
+        }
+    )
+    assert "patch_trail_audit_sequence" not in cast(
+        "dict[str, object]", compact_without_audit["retrieval"]
+    )
+    assert (
+        workflow_mod._receipt_digest_value(
+            {"receipt_retrieval": {"receipt_digest": "d" * 64}}
+        )
+        == "d" * 64
+    )
+    assert (
+        workflow_mod._finish_governance_omitted(
+            {"receipt": {"content": "only"}},
+            response_budget_lanes={"receipt_content"},
+        )
+        is None
     )
     assert workflow_mod._receipt_content_omission({"receipt": {"content": "x"}}) is None
     assert workflow_mod._patch_trail_omission({"patch_trail": {}}) is None
@@ -14310,3 +14620,38 @@ def test_include_record_in_hook_cleanup_recoverable_prefix_and_unknown_ownership
         )
         is False
     )
+
+
+def test_context_governance_helper_edges() -> None:
+    with pytest.raises(ValueError, match="digest kind"):
+        mcp_context_governance_mod.context_governance_digest("  ", {"ok": True})
+
+    assert (
+        mcp_context_governance_mod._continuation_lane(
+            {"cursor": "lane-1"},
+            lane="memory.records",
+            omission="not-a-mapping",
+        )
+        is None
+    )
+
+    lane = mcp_context_governance_mod._continuation_lane(
+        {"nested": {"cursor": "lane-2"}},
+        lane="memory.records",
+        omission={
+            "reason": "response_budget",
+            "shown": 0,
+            "total": 3,
+            "drill_down": {"cursor_path": "nested.cursor"},
+        },
+    )
+    assert lane is not None
+    assert lane["cursor"] == "lane-2"
+
+    assert mcp_context_governance_mod._resolve_dotted_path({}, "..bad") is None
+    assert (
+        mcp_context_governance_mod._resolve_dotted_path({"items": []}, "items.id")
+        is None
+    )
+
+    assert mcp_context_governance_mod._continuation_payload({}, {}) is None

@@ -48,3 +48,11 @@ def test_nested_payload_dict_preserves_dict_identity() -> None:
     nested: dict[str, object] = {"p50": 1}
     assert payload_narrow.nested_payload_dict(nested) is nested
     assert payload_narrow.nested_payload_dict("bad") == {}
+
+
+def test_mapping_items_from_list_rejects_non_list_input() -> None:
+    assert payload_narrow.mapping_items_from_list({"not": "a list"}) == []
+
+
+def test_dict_items_from_list_rejects_non_list_input() -> None:
+    assert payload_narrow.dict_items_from_list("not-a-list") == []

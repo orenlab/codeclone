@@ -8,13 +8,17 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
+from typing import cast
+from unittest.mock import patch
 
 import pytest
 
 from codeclone.config.argparse_builder import build_parser
 from codeclone.contracts import ExitCode
 from codeclone.surfaces.cli import workflow as cli_workflow
+from codeclone.surfaces.cli.console import PlainConsole
 from codeclone.surfaces.cli.ui.help_presenter import (
     interactive_help_requested,
     static_help_mascot_lines,
@@ -31,6 +35,43 @@ from codeclone.surfaces.cli.ui.mascot_frames import (
 from codeclone.surfaces.cli.ui.progress_presenter import ProgressPresenter
 from codeclone.surfaces.cli.ui.tour_panel import TourStatsLines, build_step_panel
 from codeclone.surfaces.cli.ui.typewriter import TypewriterPanel
+
+
+def _run_animated_rich_step(
+    *,
+    body: str,
+    tick_interval: float,
+    frame_interval: float,
+    char_interval: float,
+    min_read_pause: float,
+    cursor_blink_interval: float,
+) -> list[float]:
+    from rich.console import Console
+
+    from codeclone.surfaces.cli.console import make_query_console
+    from codeclone.surfaces.cli.ui import help_tour as help_tour_mod
+
+    sleeps: list[float] = []
+    step = HelpTourStep(
+        AsterState.SCANNING,
+        "Animated",
+        body,
+        animate=True,
+        animation=AsterAnimation.GRAPH_PULSE,
+    )
+    presenter = ProgressPresenter(cast(Console, make_query_console(no_color=False)))
+    help_tour_mod._run_rich_step(
+        presenter,
+        step,
+        use_unicode=True,
+        sleep=lambda seconds: sleeps.append(seconds),
+        tick_interval=tick_interval,
+        frame_interval=frame_interval,
+        char_interval=char_interval,
+        min_read_pause=min_read_pause,
+        cursor_blink_interval=cursor_blink_interval,
+    )
+    return sleeps
 
 
 def test_static_help_mascot_lines_include_product_tagline() -> None:
@@ -196,6 +237,45 @@ def test_aster_plain_lines_ascii_fallback() -> None:
     assert any("Analysis complete" in line for line in lines)
 
 
+def test_mascot_use_unicode_respects_no_color_and_encoding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.ui import mascot as mascot_mod
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert mascot_mod.mascot_use_unicode() is False
+
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    assert mascot_mod.mascot_use_unicode(no_color=True) is False
+
+    class _BrokenStdout:
+        encoding = "ascii"
+
+    monkeypatch.setattr(os, "environ", {})
+    monkeypatch.setattr(sys, "stdout", _BrokenStdout())
+    assert mascot_mod.mascot_use_unicode() is False
+
+
+def test_aster_plain_lines_short_middle_row_uses_body_only() -> None:
+    lines = Aster(
+        AsterState.IDLE,
+        message="Hi",
+        frame_lines=("top", "x", "bottom"),
+        use_unicode=False,
+    ).plain_lines()
+    assert any("Structural Change Controller" in line for line in lines)
+
+
+def test_help_tour_rich_console_or_none_returns_none_for_non_rich_printer() -> None:
+    from codeclone.surfaces.cli.ui import help_tour as help_tour_mod
+
+    class _RichCapablePlain(PlainConsole):
+        pass
+
+    with patch.object(help_tour_mod, "supports_rich_console", return_value=True):
+        assert help_tour_mod._rich_console_or_none(_RichCapablePlain()) is None
+
+
 def test_typewriter_panel_reveals_partial_text_with_cursor() -> None:
     pytest.importorskip("rich")
     from codeclone.surfaces.cli.console import make_console
@@ -330,6 +410,21 @@ def test_tour_step_panel_height_is_stable_with_or_without_stats() -> None:
     assert heights == {10}
 
 
+def test_run_rich_step_advances_animation_and_cursor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("rich")
+    sleeps = _run_animated_rich_step(
+        body="abc",
+        tick_interval=0.01,
+        frame_interval=0.01,
+        char_interval=0.01,
+        min_read_pause=0.02,
+        cursor_blink_interval=0.01,
+    )
+    assert len(sleeps) >= 8
+
+
 def test_run_interactive_help_tour_rich_step_uses_typewriter_ticks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -364,6 +459,73 @@ def test_run_interactive_help_tour_rich_step_uses_typewriter_ticks(
         cursor_blink_interval=0.02,
     )
     assert len(sleeps) > 5
+
+
+def test_render_plain_tour_sleeps_when_interactive_without_rich(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.console import PlainConsole
+    from codeclone.surfaces.cli.ui import help_tour as help_tour_mod
+
+    sleeps: list[float] = []
+    monkeypatch.setattr(help_tour_mod, "_interactive_terminal_available", lambda: True)
+
+    help_tour_mod._render_plain_tour(
+        (
+            HelpTourStep(
+                AsterState.IDLE,
+                "Plain pause",
+                "Body",
+                animate=False,
+            ),
+        ),
+        PlainConsole(),
+        sleep=lambda seconds: sleeps.append(seconds),
+        plain_step_pause=0.25,
+    )
+
+    assert sleeps == [0.25]
+
+
+def test_run_rich_step_animation_frame_and_char_intervals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pytest.importorskip("rich")
+    sleeps = _run_animated_rich_step(
+        body="abcd",
+        tick_interval=0.05,
+        frame_interval=0.05,
+        char_interval=0.05,
+        min_read_pause=0.05,
+        cursor_blink_interval=0.05,
+    )
+    assert len(sleeps) >= 6
+
+
+def test_mascot_frames_ascii_catalog_paths() -> None:
+    from codeclone.surfaces.cli.ui.mascot_frames import (
+        AsterAnimation,
+        AsterState,
+        animation_frames_for_kind,
+        animation_frames_for_state,
+        graph_pulse_animation_frames,
+        resolve_animation,
+        scanning_animation_frames,
+    )
+
+    assert scanning_animation_frames(use_unicode=False)
+    assert graph_pulse_animation_frames(use_unicode=False)
+    assert animation_frames_for_kind(
+        AsterAnimation.GRAPH_PULSE,
+        use_unicode=False,
+    )
+    assert animation_frames_for_state(AsterState.SCANNING, use_unicode=False)
+    assert resolve_animation(
+        AsterState.SCANNING,
+        animation=AsterAnimation.GRAPH_PULSE,
+        animate=True,
+        use_unicode=False,
+    )
 
 
 def test_run_interactive_help_tour_default_console_respects_no_color(

@@ -7,10 +7,12 @@
 from __future__ import annotations
 
 import json
+from typing import cast
 
 from codeclone.audit.events import (
     EVENT_ANALYSIS_COMPLETED,
     EVENT_BLAST_ARTIFACT_CREATED,
+    EVENT_BLAST_RADIUS,
     EVENT_INTENT_CLEARED,
     EVENT_INTENT_QUEUE_BLOCKED,
     EVENT_PATCH_TRAIL_COMPUTED,
@@ -20,6 +22,7 @@ from codeclone.audit.events import (
     compact_payload_for_event,
     event_core_for_event,
     event_summary,
+    normalize_audit_surface,
     projection_supplement_facts_from_payload,
 )
 
@@ -225,3 +228,43 @@ def test_analysis_completed_summary_and_projection_supplement() -> None:
         json.dumps(["not", "mapping"]),
     )
     assert supplement == {}
+
+
+def test_normalize_audit_surface_and_scope_truncation_branches() -> None:
+    assert normalize_audit_surface(None, payload={"source": "cli"}) == "cli"
+    assert normalize_audit_surface(None, payload={"source": "mcp"}) == "mcp"
+    assert normalize_audit_surface("CLI") == "cli"
+
+    blast_radius = compact_payload_for_event(
+        event_type=EVENT_BLAST_RADIUS,
+        payload={
+            "radius_level": "low",
+            "direct_dependents": ["pkg/a.py"],
+            "transitive_dependents": [],
+            "clone_cohort_members": [],
+            "do_not_touch": [],
+            "review_context": [],
+        },
+    )
+    assert blast_radius["radius_level"] == "low"
+    assert blast_radius["direct_dependents"] == 1
+
+    declared = [f"pkg/file_{index}.py" for index in range(55)]
+    check_core = event_core_for_event(
+        _event(
+            "intent.checked",
+            status="clean",
+            declared_scope=declared,
+            actual_changed_files=["pkg/file_0.py"],
+        )
+    )
+    check_facts = _facts(check_core)
+    assert check_facts.get("paths_truncated") is True
+    declared_scope_paths = cast(
+        list[object], check_facts.get("declared_scope_paths", [])
+    )
+    untouched_in_declared = cast(
+        list[object], check_facts.get("untouched_in_declared", [])
+    )
+    assert len(declared_scope_paths) == 50
+    assert len(untouched_in_declared) == 49

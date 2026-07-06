@@ -15,7 +15,7 @@ import types
 from collections.abc import Callable, Mapping
 from contextlib import redirect_stdout
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import patch
 
 import pytest
@@ -950,6 +950,27 @@ def test_setup_render_plan_plain_and_rich(tmp_path: Path) -> None:
     setup_render.render_setup_plan(console=plain, plan=plan)
     with patch.object(setup_render, "supports_rich_console", return_value=True):
         setup_render.render_setup_plan(console=_rich_console(), plan=plan)
+        setup_render.render_setup_plan(
+            console=_rich_console(),
+            plan={
+                "status": "ready",
+                "plan_id": "preview00000000000",
+                "actions": [
+                    {
+                        "kind": "pyproject_merge",
+                        "path": "pyproject.toml",
+                        "status": "ready",
+                        "preview": {"unified_diff": ""},
+                    },
+                    {
+                        "kind": "gitignore_append",
+                        "path": ".gitignore",
+                        "status": "ready",
+                        "preview": {"unified_diff": "+.codeclone/\n"},
+                    },
+                ],
+            },
+        )
 
     empty_plan: dict[str, object] = {"status": "empty", "plan_id": "empty000000000000"}
     setup_render.render_setup_plan(console=plain, plan=empty_plan)
@@ -2249,3 +2270,863 @@ def test_governed_maturity_reachable_when_mcp_configured(
     assert controlled["readiness"] == "ready"
     maturity = cast(dict[str, object], snapshot["maturity"])
     assert maturity["governed"] is True
+
+
+def test_setup_discover_analysis_missing_core_spec(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    monkeypatch.setattr(importlib.util, "find_spec", lambda _name: None)
+    axes = discover_mod._probe_analysis(_empty_discover_context(tmp_path))
+    assert axes.installation == "unknown"
+
+
+def test_setup_discover_baseline_symlink_and_untrusted_status(
+    tmp_path: Path,
+) -> None:
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    symlink_root = tmp_path / "baseline-symlink"
+    symlink_root.mkdir()
+    (symlink_root / "codeclone.baseline.json").symlink_to(symlink_root / "missing.json")
+    symlink_axes = discover_mod._probe_baseline(
+        DiscoverContext(
+            root_path=symlink_root,
+            config={},
+            config_error=None,
+            has_codeclone_section=True,
+            baseline_path=symlink_root / "codeclone.baseline.json",
+            baseline_status=BaselineStatus.OK,
+            head_commit=None,
+            install_extras={},
+            mcp_installed=False,
+        )
+    )
+    assert symlink_axes.installation == "unknown"
+
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    baseline_path.write_text("{}", encoding="utf-8")
+    unreadable_axes = discover_mod._probe_baseline(
+        DiscoverContext(
+            root_path=tmp_path,
+            config={},
+            config_error=None,
+            has_codeclone_section=True,
+            baseline_path=baseline_path,
+            baseline_status=None,
+            head_commit=None,
+            install_extras={},
+            mcp_installed=False,
+        )
+    )
+    assert unreadable_axes.installation == "unknown"
+
+    untrusted_axes = discover_mod._probe_baseline(
+        DiscoverContext(
+            root_path=tmp_path,
+            config={},
+            config_error=None,
+            has_codeclone_section=True,
+            baseline_path=tmp_path / "codeclone.baseline.json",
+            baseline_status=BaselineStatus.INVALID_JSON,
+            head_commit=None,
+            install_extras={},
+            mcp_installed=False,
+        )
+    )
+    assert untrusted_axes.configuration == "unconfigured"
+    assert "probe:baseline:status:invalid_json" in untrusted_axes.evidence
+
+
+def test_setup_discover_github_workflow_skips_non_yaml_and_reports_missing(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = _empty_discover_context(tmp_path)
+    workflows = tmp_path / ".github" / "workflows"
+    workflows.mkdir(parents=True)
+    (workflows / "README.md").write_text("not a workflow", encoding="utf-8")
+    (workflows / "ci.txt").write_text("still not yaml", encoding="utf-8")
+    missing_axes = discover_mod._probe_github_workflow(ctx)
+    assert missing_axes.configuration == "unconfigured"
+    assert "probe:file:.github/workflows:not_found" in missing_axes.evidence
+
+
+def test_setup_discover_extra_installed_unknown_extra_returns_false() -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    assert discover_mod._extra_installed("not-a-real-extra") is False
+
+
+def test_setup_plan_blocked_pyproject_merge_and_gitignore_read_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.pyproject_writer import PyprojectWriterError
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+        gitignore_covers_cache=False,
+    )
+
+    def _raise_writer_error(*_args: object, **_kwargs: object) -> object:
+        raise PyprojectWriterError("blocked merge")
+
+    monkeypatch.setattr(plan_mod, "merge_tool_codeclone", _raise_writer_error)
+    blocked = plan_mod._plan_pyproject_merge(
+        ctx,
+        capability_id="analysis",
+        updates={"min_loc": 7},
+    )
+    assert blocked is not None
+    assert blocked["status"] == "blocked"
+
+    gitignore = tmp_path / ".gitignore"
+
+    def _read_text(_self: object, *_args: object, **_kwargs: object) -> str:
+        raise OSError("permission denied")
+
+    monkeypatch.setattr(type(gitignore), "is_file", lambda _self: True, raising=False)
+    monkeypatch.setattr(type(gitignore), "read_text", _read_text, raising=False)
+    blocked_gitignore = plan_mod._plan_gitignore_append(ctx)
+    assert blocked_gitignore is not None
+    assert blocked_gitignore["status"] == "blocked"
+
+
+def test_setup_plan_status_derivation_and_empty_diff(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    assert plan_mod._derive_plan_status([], [{"code": "x"}]) == "blocked"
+    assert plan_mod._derive_plan_status([], []) == "empty"
+    assert plan_mod._unified_diff("", "", "pyproject.toml") == ""
+
+
+def test_setup_wizard_helper_exit_paths_and_rich_requirement() -> None:
+    from codeclone.surfaces.cli.setup import wizard as wizard_mod
+
+    assert wizard_mod._guided_plan_exit(PlainConsole(), "unknown-status") is None
+    assert wizard_mod._apply_result_exit("applied") is None
+    assert wizard_mod._apply_result_exit("blocked") == int(ExitCode.CONTRACT_ERROR)
+    assert wizard_mod._apply_result_exit("failed") == int(ExitCode.INTERNAL_ERROR)
+    with pytest.raises(RuntimeError, match="Rich"):
+        wizard_mod._default_wizard_prompts(PlainConsole())
+
+
+def test_setup_discover_controlled_change_unconfigured_client(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=True,
+        client_config_present=False,
+    )
+    axes = discover_mod._probe_controlled_change(ctx)
+    assert axes.configuration == "unconfigured"
+    assert "probe:client:mcp_config:missing" in axes.evidence
+
+
+def test_setup_discover_ci_policy_metrics_section_without_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.baseline.metrics_baseline import MetricsBaselineSectionProbe
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\n"
+        'baseline = "codeclone.baseline.json"\n'
+        "ci = true\n"
+        "fail_on_new = true\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "codeclone.baseline.json").write_text("{}", encoding="utf-8")
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={"ci": True, "fail_on_new": True},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=BaselineStatus.OK,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+
+    monkeypatch.setattr(
+        discover_mod,
+        "probe_metrics_baseline_section",
+        lambda _path: MetricsBaselineSectionProbe(
+            has_metrics_section=True,
+            payload=None,
+        ),
+    )
+    axes = discover_mod._probe_ci_policy(ctx)
+    assert axes.configuration == "unconfigured"
+    assert "probe:metrics_baseline:section" in axes.evidence
+
+
+def test_setup_discover_baseline_status_maps_validation_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.baseline.clone_baseline import Baseline
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.contracts.errors import BaselineValidationError
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    baseline_path.write_text("{}", encoding="utf-8")
+
+    def _raise_validation(self: Baseline, **_kwargs: object) -> None:
+        raise BaselineValidationError("invalid", status="invalid_json")
+
+    monkeypatch.setattr(Baseline, "load", _raise_validation)
+    assert (
+        discover_mod._probe_baseline_status(baseline_path)
+        == BaselineStatus.INVALID_JSON
+    )
+
+
+def test_setup_discover_tool_codeclone_section_tomli_and_read_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\nmin_loc = 5\n",
+        encoding="utf-8",
+    )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is True
+
+    monkeypatch.setattr(discover_mod, "sys", sys)
+    monkeypatch.setattr(discover_mod, "importlib", importlib)
+    monkeypatch.setattr(sys, "version_info", (3, 10, 0, "final", 0))
+
+    def _missing_tomli(_name: str) -> object:
+        raise ModuleNotFoundError("tomli")
+
+    monkeypatch.setattr(importlib, "import_module", _missing_tomli)
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+    invalid = tmp_path / "pyproject.toml"
+    invalid.write_text("not valid toml", encoding="utf-8")
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        monkeypatch.setattr(
+            tomllib,
+            "load",
+            lambda _handle: (_ for _ in ()).throw(ValueError("bad toml")),
+        )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+
+def test_setup_discover_safe_read_text_oserror(tmp_path: Path) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    target = tmp_path / "settings.json"
+    target.write_text("{}", encoding="utf-8")
+    target.chmod(0o000)
+    try:
+        text, existed = discover_mod._safe_read_text(target)
+        assert text is None
+        assert existed is True
+    finally:
+        target.chmod(0o644)
+
+
+def test_setup_plan_gitignore_noop_when_append_is_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text(".cache/\n", encoding="utf-8")
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+        gitignore_covers_cache=False,
+    )
+    monkeypatch.setattr(
+        plan_mod,
+        "append_gitignore_line",
+        lambda before_text, _line: before_text,
+    )
+    assert plan_mod._plan_gitignore_append(ctx) is None
+
+
+def test_setup_plan_compute_plan_id_ignores_non_action_items() -> None:
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    plan_id = plan_mod._compute_plan_id(
+        {
+            "root": "/tmp/demo",
+            "head_commit": None,
+            "blockers": [],
+            "actions": ["not-an-action", {"id": "x", "status": "ready"}],
+        }
+    )
+    assert len(plan_id) == 16
+
+
+def test_setup_rollup_guidance_branches(tmp_path: Path) -> None:
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.memory.status_report import MemoryStatusReport
+    from codeclone.surfaces.cli.setup.engine import rollup as rollup_mod
+
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=BaselineStatus.MISSING,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+    baseline_meta = _capability_meta("baseline")
+    unreadable_reason, unreadable_action = rollup_mod._describe_baseline(
+        baseline_meta,
+        CapabilityAxes(
+            installation="unknown",
+            configuration="not_required",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert unreadable_reason
+    assert "codeclone.baseline.json" in unreadable_action
+
+    generic_reason, _generic_action = rollup_mod._describe_generic(
+        CapabilityMeta(
+            id="custom",
+            group="core_analysis",
+            availability="built_in",
+        ),
+        CapabilityAxes(
+            installation="unknown",
+            configuration="configured",
+            runtime="verified",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert generic_reason
+
+    not_applicable_reason, _ = rollup_mod._describe_generic(
+        CapabilityMeta(
+            id="custom",
+            group="core_analysis",
+            availability="built_in",
+        ),
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="verified",
+            evidence=[],
+        ),
+        "not_applicable",
+        ctx,
+    )
+    assert not_applicable_reason
+
+    memory_meta = _capability_meta("engineering_memory")
+    empty_store_reason, _ = rollup_mod._describe_engineering_memory(
+        memory_meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        DiscoverContext(
+            root_path=tmp_path,
+            config={},
+            config_error=None,
+            has_codeclone_section=True,
+            baseline_path=tmp_path / "codeclone.baseline.json",
+            baseline_status=None,
+            head_commit=None,
+            install_extras={},
+            mcp_installed=False,
+            memory_report=MemoryStatusReport(
+                db_path=tmp_path / ".codeclone/memory/engineering_memory.sqlite3",
+                schema_version="1.1",
+                project_id="proj-1",
+                project_root=str(tmp_path),
+                backend="sqlite",
+                git_available=False,
+                git_branch=None,
+                git_head=None,
+                last_analysis_fingerprint=None,
+                last_init_run_id=None,
+                record_count=0,
+                records_by_type={},
+                records_by_status={},
+                db_exists=True,
+            ),
+        ),
+    )
+    assert empty_store_reason
+
+    semantic_meta = _capability_meta("semantic_retrieval")
+    disabled_reason, _ = rollup_mod._describe_semantic_retrieval(
+        semantic_meta,
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        DiscoverContext(
+            root_path=tmp_path,
+            config={},
+            config_error=None,
+            has_codeclone_section=True,
+            baseline_path=tmp_path / "codeclone.baseline.json",
+            baseline_status=None,
+            head_commit=None,
+            install_extras={},
+            mcp_installed=False,
+            memory_report=MemoryStatusReport(
+                db_path=tmp_path / ".codeclone/memory/engineering_memory.sqlite3",
+                schema_version="1.1",
+                project_id="proj-1",
+                project_root=str(tmp_path),
+                backend="sqlite",
+                git_available=False,
+                git_branch=None,
+                git_head=None,
+                last_analysis_fingerprint=None,
+                last_init_run_id=None,
+                record_count=1,
+                records_by_type={"module_role": 1},
+                records_by_status={"active": 1},
+                db_exists=True,
+            ),
+        ),
+    )
+    assert disabled_reason
+
+
+def test_setup_wizard_sphere_and_mapping_helpers(tmp_path: Path) -> None:
+    from codeclone.surfaces.cli.setup import wizard as wizard_mod
+    from codeclone.surfaces.cli.setup.engine.capabilities import GROUP_ORDER
+
+    console = _rich_console()
+    wizard_mod._render_sphere(
+        console,
+        {"capabilities": []},
+        group=GROUP_ORDER[0],
+    )
+    assert wizard_mod._group_summary({"capabilities": []}, GROUP_ORDER[0])
+    assert wizard_mod._group_for_choice("999") is None
+    assert wizard_mod._mapping("not-a-mapping") == {}
+
+    pytest.importorskip("rich")
+    from rich.console import Console
+
+    rich_console = Console(file=io.StringIO(), force_terminal=True)
+    prompts = wizard_mod._default_wizard_prompts(cast(PrinterLike, rich_console))
+    assert prompts.ask_choice is not None
+    assert prompts.confirm is not None
+
+
+def test_setup_render_plain_branches(tmp_path: Path) -> None:
+    snapshot = _minimal_setup_snapshot(tmp_path)
+    plain = PlainConsole()
+    setup_render._render_status_plain(plain, snapshot)
+    setup_render._render_doctor_plain(plain, snapshot)
+    assert setup_render._availability_label("unknown_kind") == "unknown_kind"
+
+    plan: dict[str, object] = {
+        "status": "blocked",
+        "plan_id": "plan00000000000000",
+        "blockers": ["not-a-mapping"],
+        "actions": [
+            {
+                "kind": "pyproject_merge",
+                "path": "pyproject.toml",
+                "status": "ready",
+                "preview": "not-a-mapping",
+            }
+        ],
+    }
+    setup_render._render_plan_plain(plain, plan)
+    setup_render._render_apply_plain(
+        plain,
+        {"status": "blocked", "plan_id": "blocked0000000000", "dry_run": False},
+    )
+
+
+def test_setup_wizard_process_hub_choice_renders_sphere(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.setup import wizard as wizard_mod
+
+    snapshot = _minimal_setup_snapshot(tmp_path)
+    console = _rich_console()
+    prompts = WizardPrompts(
+        ask_choice=lambda _message, _choices: "1",
+        confirm=lambda _message, _default: False,
+    )
+    assert (
+        wizard_mod._process_hub_choice(
+            "1",
+            root_path=tmp_path,
+            console=console,
+            snapshot=snapshot,
+            prompts=prompts,
+        )
+        is None
+    )
+
+
+def test_setup_wizard_guided_apply_failure_returns_internal_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup import wizard as wizard_mod
+
+    monkeypatch.setattr(
+        wizard_mod,
+        "build_setup_plan",
+        lambda _root: {"status": "ready", "plan_id": "plan-1", "actions": []},
+    )
+    monkeypatch.setattr(
+        wizard_mod,
+        "apply_setup_plan",
+        lambda *_args, **_kwargs: {"status": "failed"},
+    )
+    monkeypatch.setattr(wizard_mod, "render_setup_plan", lambda **_kwargs: None)
+    monkeypatch.setattr(wizard_mod, "render_setup_apply", lambda **_kwargs: None)
+
+    exit_code = wizard_mod._run_guided_setup(
+        tmp_path,
+        console=_rich_console(),
+        prompts=WizardPrompts(
+            ask_choice=lambda _message, _choices: "g",
+            confirm=lambda _message, _default: True,
+        ),
+    )
+    assert exit_code == int(ExitCode.INTERNAL_ERROR)
+
+
+def test_setup_main_confirmation_gate_decline_and_non_tty(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+
+    monkeypatch.setattr(setup_main_mod, "_confirm_apply", lambda _root: False)
+    plan_id, exit_code = setup_main_mod._confirmation_gate(tmp_path)
+    assert plan_id is None
+    assert exit_code == int(ExitCode.SUCCESS)
+
+    monkeypatch.setattr(setup_main_mod, "_confirm_apply", lambda _root: None)
+    plan_id, exit_code = setup_main_mod._confirmation_gate(tmp_path)
+    assert plan_id is None
+    assert exit_code == int(ExitCode.CONTRACT_ERROR)
+
+
+def test_setup_discover_tool_codeclone_python310_tomli_branches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\nmin_loc = 3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(discover_mod, "sys", sys)
+    monkeypatch.setattr(discover_mod, "importlib", importlib)
+    monkeypatch.setattr(sys, "version_info", (3, 10, 0, "final", 0))
+
+    class _TomliNoLoad:
+        pass
+
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: (
+            _TomliNoLoad() if name == "tomli" else importlib.import_module(name)
+        ),
+    )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+    class _TomliBadLoad:
+        load = "not-callable"
+
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: (
+            _TomliBadLoad() if name == "tomli" else importlib.import_module(name)
+        ),
+    )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+
+def test_setup_discover_tool_codeclone_open_oserror_and_non_dict_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text("[tool.codeclone]\nmin_loc = 1\n", encoding="utf-8")
+
+    real_open = Path.open
+
+    def _open(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == pyproject:
+            raise OSError("denied")
+        return real_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", _open)
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+    if sys.version_info >= (3, 11):
+        import tomllib
+
+        monkeypatch.setattr(tomllib, "load", lambda _handle: ["not", "a", "dict"])
+        assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+
+def test_setup_plan_pyproject_merge_noop_when_keys_unchanged(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    _write_minimal_pyproject(tmp_path / "pyproject.toml", audit_enabled=False)
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={"audit_enabled": False},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+    assert (
+        plan_mod._plan_pyproject_merge(
+            ctx,
+            capability_id="audit_and_intents",
+            updates={"audit_enabled": False},
+        )
+        is None
+    )
+
+
+def test_setup_plan_append_pyproject_action_skips_none_merge(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import plan as plan_mod
+
+    _write_minimal_pyproject(tmp_path / "pyproject.toml")
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=None,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+    actions: list[dict[str, object]] = []
+    plan_mod._append_pyproject_action(
+        actions,
+        ctx,
+        capability_id="analysis",
+        updates={"audit_enabled": False},
+    )
+    assert actions == []
+
+
+def test_setup_rollup_derive_readiness_conservative_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup.engine import rollup as rollup_mod
+
+    meta = CapabilityMeta(
+        id="analysis",
+        group="core_analysis",
+        availability="built_in",
+        requires_config=True,
+        requires_runtime_proof=True,
+    )
+    axes = CapabilityAxes(
+        installation="installed",
+        configuration="configured",
+        runtime="verified",
+        evidence=[],
+    )
+    monkeypatch.setattr(rollup_mod, "_axes_satisfied", lambda *_args, **_kwargs: False)
+    assert rollup_mod.derive_readiness(meta, axes) == "attention"
+
+
+def test_setup_rollup_baseline_untrusted_and_external_file_guidance(
+    tmp_path: Path,
+) -> None:
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.surfaces.cli.setup.engine import rollup as rollup_mod
+
+    ctx = DiscoverContext(
+        root_path=tmp_path,
+        config={},
+        config_error=None,
+        has_codeclone_section=True,
+        baseline_path=tmp_path / "codeclone.baseline.json",
+        baseline_status=BaselineStatus.GENERATOR_MISMATCH,
+        head_commit=None,
+        install_extras={},
+        mcp_installed=False,
+    )
+    reason, action = rollup_mod._describe_baseline(
+        _capability_meta("baseline"),
+        CapabilityAxes(
+            installation="installed",
+            configuration="configured",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert reason
+    assert action
+
+    github_reason, _ = rollup_mod._describe_github_workflow(
+        _capability_meta("github_workflow"),
+        CapabilityAxes(
+            installation="unknown",
+            configuration="not_required",
+            runtime="not_required",
+            evidence=[],
+        ),
+        "attention",
+        ctx,
+    )
+    assert github_reason
+
+
+def test_setup_wizard_default_prompts_invoke_rich_askers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.surfaces.cli.setup import wizard as wizard_mod
+
+    pytest.importorskip("rich")
+    from rich.console import Console
+
+    calls: list[str] = []
+
+    class _FakePrompt:
+        @staticmethod
+        def ask(
+            _message: str,
+            *,
+            choices: list[str],
+            show_choices: bool,
+            console: object,
+        ) -> str:
+            calls.append("choice")
+            return choices[0]
+
+    class _FakeConfirm:
+        @staticmethod
+        def ask(_message: str, *, default: bool, console: object) -> bool:
+            calls.append("confirm")
+            return default
+
+    import rich.prompt as rich_prompt_mod
+
+    monkeypatch.setattr(rich_prompt_mod, "Prompt", _FakePrompt)
+    monkeypatch.setattr(rich_prompt_mod, "Confirm", _FakeConfirm)
+
+    rich_console = Console(file=io.StringIO(), force_terminal=True)
+    prompts = wizard_mod._default_wizard_prompts(cast(PrinterLike, rich_console))
+    assert prompts.ask_choice("pick", ["1", "2"]) == "1"
+    assert prompts.confirm("ok?", True) is True
+    assert calls == ["choice", "confirm"]
+
+
+def test_setup_render_rich_and_plain_capability_reason_branches() -> None:
+    rows: list[Mapping[str, object]] = [
+        {"label": "Analysis", "readiness": "ready", "reason": "needs config"},
+    ]
+    plain = PlainConsole()
+    setup_render.render_setup_capability_table(plain, rows)
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_capability_table(_rich_console(), rows)
+
+    blocked_plan: dict[str, object] = {
+        "status": "blocked",
+        "plan_id": "blocked0000000000",
+        "root": "/tmp",
+        "blockers": [{"kind": "invalid_pyproject", "reason": "bad"}],
+        "actions": [
+            {
+                "kind": "pyproject_merge",
+                "path": "pyproject.toml",
+                "status": "ready",
+                "preview": {"unified_diff": "+line\n"},
+            }
+        ],
+    }
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_plan(console=_rich_console(), plan=blocked_plan)
+        setup_render.render_setup_apply(
+            console=_rich_console(),
+            result={
+                "status": "blocked",
+                "plan_id": "blocked0000000000",
+                "dry_run": False,
+                "results": [],
+            },
+        )
