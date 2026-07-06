@@ -41,6 +41,7 @@ from codeclone.models import Unit
 from codeclone.report.gates.reasons import parse_metric_reason_entry
 from tests._assertions import (
     assert_contains_all,
+    assert_contains_none,
     assert_mapping_entries,
     assert_missing_keys,
 )
@@ -211,9 +212,12 @@ def _assert_parallel_cli_exit(
 
 
 def _assert_after_summary(output: str, marker: str, *expected_parts: str) -> None:
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(output)
     for expected_part in expected_parts:
-        assert expected_part in output
-    assert output.index("Summary") < output.index(marker)
+        assert expected_part in normalized
+    assert normalized.index("Summary") < normalized.index(marker)
 
 
 def _write_python_module(
@@ -455,11 +459,13 @@ def _assert_baseline_failure_meta(
     if expected_message not in combined_output:
         assert "Invalid baseline" in combined_output or "not trusted" in combined_output
     if strict_fail:
-        assert "CI requires a trusted baseline" in out
-        assert "Run: codeclone . --update-baseline" in out
+        assert_contains_all(out, "CI requires a trusted baseline")
+        assert_contains_all(out, "Run: codeclone . --update-baseline")
     else:
-        assert "Baseline is not trusted for this run and will be ignored" in out
-        assert "Run: codeclone . --update-baseline" in out
+        assert_contains_all(
+            out, "Baseline is not trusted for this run and will be ignored"
+        )
+        assert_contains_all(out, "Run: codeclone . --update-baseline")
     payload_out = json.loads(json_out.read_text("utf-8"))
     baseline_meta = _report_meta_baseline(payload_out)
     assert baseline_meta["status"] == expected_status
@@ -467,11 +473,11 @@ def _assert_baseline_failure_meta(
 
 
 def _assert_fail_on_new_summary(out: str, *, include_blocks: bool = True) -> None:
-    assert "GATING FAILURE [new-clones]" in out
-    assert "new_function_clone_groups" in out
+    assert_contains_all(out, "GATING FAILURE [new-clones]")
+    assert_contains_all(out, "new_function_clone_groups")
     if include_blocks:
-        assert "new_block_clone_groups" in out
-    assert "codeclone . --update-baseline" in out
+        assert_contains_all(out, "new_block_clone_groups")
+    assert_contains_all(out, "codeclone . --update-baseline")
 
 
 def _patch_baseline_diff(
@@ -578,7 +584,7 @@ def _assert_worker_failure_internal_error(
         args.append("--no-progress")
     _assert_cli_exit(monkeypatch, args, expected_code=5)
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
 
 
 _SUMMARY_METRIC_MAP: dict[str, str] = {
@@ -598,16 +604,22 @@ _SUMMARY_METRIC_MAP: dict[str, str] = {
 
 
 def _summary_metric(out: str, label: str) -> int:
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(out)
     keyword = _SUMMARY_METRIC_MAP.get(label, label)
-    match = re.search(rf"(\d[\d,]*)\s+{re.escape(keyword)}", out)
+    match = re.search(rf"(\d[\d,]*)\s+{re.escape(keyword)}", normalized)
     if match:
         return int(match.group(1).replace(",", ""))
-    raise AssertionError(f"summary label not found: {label}\n{out}")
+    raise AssertionError(f"summary label not found: {label}\n{normalized}")
 
 
 def _compact_summary_metric(out: str, key: str) -> int:
-    match = re.search(rf"{re.escape(key)}=(\d+)", out)
-    assert match, f"compact summary key not found: {key}\n{out}"
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(out)
+    match = re.search(rf"{re.escape(key)}=(\d+)", normalized)
+    assert match, f"compact summary key not found: {key}\n{normalized}"
     return int(match.group(1))
 
 
@@ -713,8 +725,8 @@ def _source_read_error_result(filepath: str) -> CliFileProcessResult:
 
 
 def _assert_unreadable_source_contract_error(out: str) -> None:
-    assert "CONTRACT ERROR:" in out
-    assert "could not be read in CI/gating mode" in out
+    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "could not be read in CI/gating mode")
 
 
 def test_cli_main_no_progress_parallel(
@@ -748,8 +760,8 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert "Summary" in out
-    assert "func" in out
+    assert_contains_all(out, "Summary")
+    assert_contains_all(out, "func")
 
 
 def test_cli_default_cache_dir_uses_root(
@@ -845,7 +857,7 @@ def test_cli_cache_not_shared_between_projects(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root2), "--no-progress"])
     out = capsys.readouterr().out
-    assert "Cache signature mismatch" not in out
+    assert_contains_none(out, "Cache signature mismatch")
 
 
 def test_cli_warns_on_legacy_cache(
@@ -864,9 +876,9 @@ def test_cli_warns_on_legacy_cache(
         [str(root), "--baseline", str(baseline), "--no-progress"],
     )
     out = capsys.readouterr().out
-    assert "Legacy cache file found at" in out
-    assert "Cache is now stored per-project" in out
-    assert "`.codeclone/` to .gitignore" in out
+    assert_contains_all(out, "Legacy cache file found at")
+    assert_contains_all(out, "Cache is now stored per-project")
+    assert_contains_all(out, "`.codeclone/` to .gitignore")
 
 
 def test_cli_warns_on_legacy_repo_workspace(
@@ -933,7 +945,7 @@ def test_cli_legacy_cache_resolve_failure(
         [str(root), "--baseline", str(baseline), "--no-progress"],
     )
     out = capsys.readouterr().out
-    assert "Legacy cache file found at" in out
+    assert_contains_all(out, "Legacy cache file found at")
 
 
 def test_cli_no_legacy_warning_with_cache_override(
@@ -954,7 +966,7 @@ def test_cli_no_legacy_warning_with_cache_override(
         ],
     )
     out = capsys.readouterr().out
-    assert "Legacy cache file found at" not in out
+    assert_contains_none(out, "Legacy cache file found at")
 
 
 def test_cli_no_legacy_warning_when_legacy_missing(
@@ -968,7 +980,7 @@ def test_cli_no_legacy_warning_when_legacy_missing(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root), "--no-progress"])
     out = capsys.readouterr().out
-    assert "Legacy cache file found at" not in out
+    assert_contains_none(out, "Legacy cache file found at")
 
 
 def test_cli_no_legacy_warning_when_paths_match(
@@ -1026,7 +1038,7 @@ def test_cli_no_legacy_warning_when_paths_match(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(root), "--no-progress"])
     out = capsys.readouterr().out
-    assert "Legacy cache file found at" not in out
+    assert_contains_none(out, "Legacy cache file found at")
 
 
 @pytest.mark.parametrize(
@@ -1101,7 +1113,7 @@ def test_cli_main_progress_fallback(
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
-    assert "falling back to sequential" in out
+    assert_contains_all(out, "falling back to sequential")
 
 
 def test_cli_main_no_progress_fallback(
@@ -1115,7 +1127,7 @@ def test_cli_main_no_progress_fallback(
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _FailingExecutor)
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2", "--no-progress"])
     out = capsys.readouterr().out
-    assert "falling back to sequential" in out
+    assert_contains_all(out, "falling back to sequential")
 
 
 def test_cli_main_no_progress_fallback_quiet(
@@ -1140,7 +1152,7 @@ def test_cli_main_no_progress_fallback_quiet(
         ],
     )
     out = capsys.readouterr().out
-    assert "Processing" not in out
+    assert_contains_none(out, "Processing")
 
 
 def test_cli_main_progress_path(
@@ -1174,7 +1186,7 @@ def test_cli_unexpected_root_resolution_failure_is_internal(
         _run_main(monkeypatch, ["bad"])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
 
 
 def test_cli_unexpected_grouping_failure_is_internal(
@@ -1192,7 +1204,7 @@ def test_cli_unexpected_grouping_failure_is_internal(
         _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
 
 
 def test_cli_unexpected_html_render_failure_is_internal(
@@ -1214,7 +1226,7 @@ def test_cli_unexpected_html_render_failure_is_internal(
         )
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
 
 
 def test_cli_main_outputs(
@@ -1254,9 +1266,12 @@ def test_cli_main_outputs(
     for artifact in (html_out, json_out, md_out, sarif_out, text_out):
         assert artifact.exists()
     out = capsys.readouterr().out
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(out)
     for label in ("HTML", "JSON", "Markdown", "SARIF", "Text"):
-        assert label in out
-    assert out.index("Summary") < out.index("report saved:")
+        assert_contains_all(out, label)
+    assert normalized.index("Summary") < normalized.index("report saved:")
 
 
 def test_cli_open_html_report_opens_written_html(
@@ -1290,7 +1305,7 @@ def test_cli_open_html_report_failure_warns_without_failing(
     _run_parallel_main(monkeypatch, _open_html_report_args(tmp_path, html_out))
     assert html_out.exists()
     out = capsys.readouterr().out
-    assert "Failed to open HTML report in browser" in out
+    assert_contains_all(out, "Failed to open HTML report in browser")
     assert re.search(r"cannot\s+open out\.html", out) is not None
 
 
@@ -1383,7 +1398,7 @@ def test_cli_report_flag_contract_errors(
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert expected_message in out
+    assert_contains_all(out, expected_message)
 
 
 def test_cli_reports_include_audit_metadata_ok(
@@ -1488,7 +1503,7 @@ def test_cli_reports_include_audit_metadata_fingerprint_mismatch(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "fingerprint version mismatch" in out
+    assert_contains_all(out, "fingerprint version mismatch")
     _assert_report_baseline_meta(
         payload,
         status="mismatch_fingerprint_version",
@@ -1514,7 +1529,7 @@ def test_cli_reports_include_audit_metadata_schema_mismatch(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "schema version is newer than supported" in out
+    assert_contains_all(out, "schema version is newer than supported")
     _assert_report_baseline_meta(
         payload,
         status="mismatch_schema_version",
@@ -1540,7 +1555,7 @@ def test_cli_reports_include_audit_metadata_python_mismatch(
         expect_exit_code=2,
     )
     out = capsys.readouterr().out
-    assert "python tag mismatch" in out
+    assert_contains_all(out, "python tag mismatch")
     _assert_report_baseline_meta(
         payload,
         status="mismatch_python_version",
@@ -1563,8 +1578,8 @@ def test_cli_reports_include_audit_metadata_invalid_baseline(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "Invalid baseline file" in out
-    assert "Baseline is not trusted for this run and will be ignored" in out
+    assert_contains_all(out, "Invalid baseline file")
+    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
     _assert_report_baseline_meta(payload, status="invalid_json", loaded=False)
 
 
@@ -1592,7 +1607,7 @@ def test_cli_reports_include_audit_metadata_legacy_baseline(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "legacy" in out
+    assert_contains_all(out, "legacy")
     _assert_report_baseline_meta(payload, status="missing_fields", loaded=False)
 
 
@@ -1695,8 +1710,8 @@ fail_on_new_metrics = true
 
     out = capsys.readouterr().out
     assert out.count("Invalid baseline file") == 1
-    assert "CI requires a trusted baseline" not in out
-    assert "Baseline-aware gates require a trusted baseline" in out
+    assert_contains_none(out, "CI requires a trusted baseline")
+    assert_contains_all(out, "Baseline-aware gates require a trusted baseline")
 
 
 def test_cli_reports_include_audit_metadata_integrity_failed(
@@ -1721,8 +1736,8 @@ def test_cli_reports_include_audit_metadata_integrity_failed(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "integrity check failed" in out
-    assert "Baseline is not trusted for this run and will be ignored" in out
+    assert_contains_all(out, "integrity check failed")
+    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
     _assert_report_baseline_meta(payload, status="integrity_failed", loaded=False)
 
 
@@ -1743,8 +1758,8 @@ def test_cli_reports_include_audit_metadata_generator_mismatch(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "generator mismatch" in out
-    assert "Baseline is not trusted for this run and will be ignored" in out
+    assert_contains_all(out, "generator mismatch")
+    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
     _assert_report_baseline_meta(payload, status="generator_mismatch", loaded=False)
 
 
@@ -1804,8 +1819,14 @@ def test_cli_reports_include_audit_metadata_integrity_missing(
         extra_args=["--baseline", str(baseline_path)],
     )
     out = capsys.readouterr().out
-    assert "missing required fields" in out or "Invalid baseline schema" in out
-    assert "Baseline is not trusted for this run and will be ignored" in out
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(out)
+    assert (
+        "missing required fields" in normalized
+        or "Invalid baseline schema" in normalized
+    )
+    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
     _assert_report_baseline_meta(payload_out, status="missing_fields", loaded=False)
 
 
@@ -1827,8 +1848,8 @@ def test_cli_reports_include_audit_metadata_baseline_too_large(
         ],
     )
     out = capsys.readouterr().out
-    assert "too large" in out
-    assert "Baseline is not trusted for this run and will be ignored" in out
+    assert_contains_all(out, "too large")
+    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
     _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
@@ -1888,7 +1909,7 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert "Baseline is not trusted for this run and will be ignored" in out
+    assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
     assert _summary_metric(out, "New vs baseline") > 0
     report = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(report)["status"] == "generator_mismatch"
@@ -1956,7 +1977,7 @@ def test_cli_invalid_baseline_fails_in_ci(
         expect_exit_code=2,
     )
     out = capsys.readouterr().out
-    assert "Invalid baseline file" in out
+    assert_contains_all(out, "Invalid baseline file")
     _assert_report_baseline_meta(payload, status="invalid_json", loaded=False)
 
 
@@ -1980,7 +2001,7 @@ def test_cli_too_large_baseline_fails_in_ci(
         expect_exit_code=2,
     )
     out = capsys.readouterr().out
-    assert "too large" in out
+    assert_contains_all(out, "too large")
     _assert_report_baseline_meta(payload, status="too_large", loaded=False)
 
 
@@ -2029,7 +2050,7 @@ def test_cli_reports_cache_used_false_on_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert expected_message in out
+    assert_contains_all(out, expected_message)
     _assert_report_cache_meta(
         payload,
         used=False,
@@ -2061,7 +2082,7 @@ def test_cli_reports_cache_too_large_respects_max_size_flag(
         ],
     )
     out = capsys.readouterr().out
-    assert "Cache file too large" in out
+    assert_contains_all(out, "Cache file too large")
     _assert_report_cache_meta(
         payload,
         used=False,
@@ -2193,7 +2214,7 @@ def test_cli_cache_analysis_profile_compatibility(
     out = capsys.readouterr().out
     payload = json.loads(json_second.read_text("utf-8"))
     if expected_warning is not None:
-        assert expected_warning in out
+        assert_contains_all(out, expected_warning)
     _assert_report_cache_meta(
         payload,
         used=expected_cache_used,
@@ -2239,8 +2260,7 @@ def test_cli_output_extension_validation(
         )
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert f"Invalid {label} output extension" in out
-    assert expected in out
+    assert_contains_all(out, f"Invalid {label} output extension", expected)
 
 
 def test_cli_output_path_resolve_error_contract(
@@ -2266,8 +2286,8 @@ def test_cli_output_path_resolve_error_contract(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "Invalid HTML output path" in out
+    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "Invalid HTML output path")
 
 
 def test_cli_report_write_error_is_contract_error(
@@ -2299,8 +2319,8 @@ def test_cli_report_write_error_is_contract_error(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "Failed to write HTML report" in out
+    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "Failed to write HTML report")
 
 
 def test_cli_outputs_quiet_no_print(
@@ -2335,7 +2355,7 @@ def test_cli_outputs_quiet_no_print(
     assert json_out.exists()
     assert text_out.exists()
     out = capsys.readouterr().out
-    assert "report saved" not in out
+    assert_contains_none(out, "report saved")
 
 
 def test_cli_shows_vscode_extension_tip_once_per_version(
@@ -2496,7 +2516,7 @@ def test_cli_update_baseline_skips_version_check(
         ],
     )
     out = capsys.readouterr().out
-    assert "Baseline updated" in out
+    assert_contains_all(out, "Baseline updated")
 
 
 def test_cli_update_baseline(
@@ -2531,7 +2551,7 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert "Baseline updated" in out
+    assert_contains_all(out, "Baseline updated")
     assert baseline.exists()
 
 
@@ -2651,8 +2671,8 @@ def test_cli_update_baseline_write_error_is_contract_error(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "Failed to write baseline file" in out
+    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "Failed to write baseline file")
 
 
 def test_cli_update_baseline_with_invalid_existing_file(
@@ -2676,8 +2696,8 @@ def test_cli_update_baseline_with_invalid_existing_file(
         ],
     )
     out = capsys.readouterr().out
-    assert "Baseline updated" in out
-    assert "Invalid baseline file" not in out
+    assert_contains_all(out, "Baseline updated")
+    assert_contains_none(out, "Invalid baseline file")
     payload = json.loads(baseline_path.read_text("utf-8"))
     meta = payload["meta"]
     assert isinstance(meta, dict)
@@ -2705,8 +2725,8 @@ def test_cli_baseline_missing_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert "Baseline file not found" in out
-    assert "Run: codeclone . --update-baseline" in out
+    assert_contains_all(out, "Baseline file not found")
+    assert_contains_all(out, "Run: codeclone . --update-baseline")
 
 
 def test_cli_baseline_missing_fails_in_ci(
@@ -2729,8 +2749,8 @@ def test_cli_baseline_missing_fails_in_ci(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "Baseline file not found" in out
-    assert "CI requires a trusted baseline" in out
+    assert_contains_all(out, "Baseline file not found")
+    assert_contains_all(out, "CI requires a trusted baseline")
 
 
 def test_cli_new_clones_warning(
@@ -2766,7 +2786,7 @@ def f2():
         ],
     )
     out = capsys.readouterr().out
-    assert "New clones detected but --fail-on-new not set" in out
+    assert_contains_all(out, "New clones detected but --fail-on-new not set")
 
 
 def test_cli_baseline_python_version_mismatch_warns(
@@ -2787,8 +2807,8 @@ def test_cli_baseline_python_version_mismatch_warns(
         ],
     )
     out = capsys.readouterr().out
-    assert "python tag mismatch" in out
-    assert "will be ignored" in out
+    assert_contains_all(out, "python tag mismatch")
+    assert_contains_all(out, "will be ignored")
 
 
 def test_cli_baseline_fingerprint_mismatch_fails(
@@ -2815,7 +2835,7 @@ def test_cli_baseline_fingerprint_mismatch_fails(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "fingerprint version mismatch" in out
+    assert_contains_all(out, "fingerprint version mismatch")
 
 
 def test_cli_baseline_missing_fields_fails(
@@ -2848,7 +2868,7 @@ def test_cli_baseline_missing_fields_fails(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "legacy (<=1.3.x)" in out
+    assert_contains_all(out, "legacy (<=1.3.x)")
 
 
 def test_cli_baseline_schema_version_mismatch_fails(
@@ -2870,7 +2890,7 @@ def test_cli_baseline_schema_version_mismatch_fails(
         expect_exit_code=2,
     )
     out = capsys.readouterr().out
-    assert "schema version is newer than supported" in out
+    assert_contains_all(out, "schema version is newer than supported")
     assert _report_meta_baseline(payload)["status"] == "mismatch_schema_version"
 
 
@@ -2893,8 +2913,8 @@ def test_cli_baseline_schema_and_fingerprint_mismatch_status_prefers_schema(
         expect_exit_code=2,
     )
     out = capsys.readouterr().out
-    assert "schema version is newer than supported" in out
-    assert "fingerprint version mismatch" not in out
+    assert_contains_all(out, "schema version is newer than supported")
+    assert_contains_none(out, "fingerprint version mismatch")
     assert _report_meta_baseline(payload)["status"] == "mismatch_schema_version"
 
 
@@ -2916,8 +2936,8 @@ def test_cli_baseline_fingerprint_and_python_mismatch_status_prefers_fingerprint
         expect_exit_code=2,
     )
     out = capsys.readouterr().out
-    assert "fingerprint version mismatch" in out
-    assert "Python version mismatch" not in out
+    assert_contains_all(out, "fingerprint version mismatch")
+    assert_contains_none(out, "Python version mismatch")
     assert _report_meta_baseline(payload)["status"] == "mismatch_fingerprint_version"
 
 
@@ -2951,7 +2971,7 @@ def test_cli_negative_size_limits_fail_fast(
         _run_main(monkeypatch, ["--max-baseline-size-mb", "-1"])
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "non-negative integers" in out
+    assert_contains_all(out, "non-negative integers")
 
 
 def test_cli_main_fail_threshold(
@@ -3099,9 +3119,9 @@ def f2():
         )
     assert exc.value.code == 3
     out = capsys.readouterr().out
-    assert "GATING FAILURE [new-clones]" in out
+    assert_contains_all(out, "GATING FAILURE [new-clones]")
     _assert_fail_on_new_summary(out, include_blocks=False)
-    assert "CodeClone v" not in out
+    assert_contains_none(out, "CodeClone v")
 
 
 def test_cli_blocks_processing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3139,7 +3159,7 @@ def test_cli_cache_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert "Cache signature mismatch" in out
+    assert_contains_all(out, "Cache signature mismatch")
 
 
 def test_cli_cache_save_warning(
@@ -3163,7 +3183,7 @@ def test_cli_cache_save_warning(
         ],
     )
     out = capsys.readouterr().out
-    assert "Failed to save cache" in out
+    assert_contains_all(out, "Failed to save cache")
 
 
 def test_cli_cache_save_warning_quiet(
@@ -3193,7 +3213,7 @@ def test_cli_cache_save_warning_quiet(
         ],
     )
     out = capsys.readouterr().out
-    assert "Failed to save cache" in out
+    assert_contains_all(out, "Failed to save cache")
 
 
 def test_cli_invalid_root(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3226,8 +3246,8 @@ def test_cli_invalid_baseline_path_error_contract(
         expected_code=2,
     )
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "Invalid baseline path" in out
+    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "Invalid baseline path")
 
 
 def test_cli_discovery_cache_hit(
@@ -3352,7 +3372,7 @@ def test_cli_unreadable_source_normal_mode_warns_and_continues(
     )
     captured = capsys.readouterr()
     combined = captured.out + captured.err
-    assert "CONTRACT ERROR:" not in combined
+    assert_contains_none(combined, "CONTRACT ERROR:")
     assert _summary_metric(captured.out, "Files skipped") == 1
     payload = json.loads(json_out.read_text("utf-8"))
     assert _report_inventory_files(payload)["source_io_skipped"] == 1
@@ -3455,7 +3475,7 @@ def test_cli_contract_error_priority_over_gating_failure_for_unreadable_source(
     assert exc.value.code == 2
     out = capsys.readouterr().out
     _assert_unreadable_source_contract_error(out)
-    assert "GATING FAILURE:" not in out
+    assert_contains_none(out, "GATING FAILURE:")
 
 
 def test_cli_unreadable_source_ci_shows_overflow_summary(
@@ -3493,7 +3513,7 @@ def test_cli_unreadable_source_ci_shows_overflow_summary(
     assert exc.value.code == 2
     out = capsys.readouterr().out
     _assert_unreadable_source_contract_error(out)
-    assert "... and 1 more" in out
+    assert_contains_all(out, "... and 1 more")
 
 
 def test_cli_report_meta_cache_path_resolve_oserror_fallback(
@@ -3567,11 +3587,11 @@ def test_cli_ci_discovery_cache_hit(
         ],
     )
     out = capsys.readouterr().out
-    assert "CodeClone v" not in out
-    assert "Summary" in out
-    assert "Analyzing" not in out
-    assert "\x1b[" not in out
-    assert "new=" in out
+    assert_contains_none(out, "CodeClone v")
+    assert_contains_all(out, "Summary")
+    assert_contains_none(out, "Analyzing")
+    assert_contains_none(out, "\x1b[")
+    assert_contains_all(out, "new=")
     assert _compact_summary_metric(out, "found") == 1
     assert _compact_summary_metric(out, "analyzed") == 0
     assert _compact_summary_metric(out, "cached") == 1
@@ -3609,14 +3629,14 @@ def test_cli_summary_format_stable(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
-    assert "Summary" in out
+    assert_contains_all(out, "Summary")
     assert out.count("Summary") == 1
-    assert "Metrics" not in out
-    assert "Adoption" not in out
-    assert "Overloaded" not in out
-    assert "callables" in out
-    assert "Files parsed" not in out
-    assert "Input" not in out
+    assert_contains_none(out, "Metrics")
+    assert_contains_none(out, "Adoption")
+    assert_contains_none(out, "Overloaded")
+    assert_contains_all(out, "callables")
+    assert_contains_none(out, "Files parsed")
+    assert_contains_none(out, "Input")
     assert _summary_metric(out, "Files found") >= 0
     assert _summary_metric(out, "analyzed") >= 0
     assert _summary_metric(out, "from cache") >= 0
@@ -3679,9 +3699,9 @@ def test_cli_summary_with_api_surface_shows_public_api_line(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress", "--api-surface"])
     out = capsys.readouterr().out
-    assert "Public API" in out
-    assert "symbols" in out
-    assert "modules" in out
+    assert_contains_all(out, "Public API")
+    assert_contains_all(out, "symbols")
+    assert_contains_all(out, "modules")
 
 
 def test_cli_ci_summary_includes_adoption_and_public_api_lines(
@@ -3841,8 +3861,8 @@ def test_cli_public_api_breaking_count_stable_across_warm_cache(
     )
     warm_out = capsys.readouterr().out
 
-    assert "1 breaking" in cold_out
-    assert "1 breaking" in warm_out
+    assert_contains_all(cold_out, "1 breaking")
+    assert_contains_all(warm_out, "1 breaking")
 
 
 def test_cli_api_surface_ignores_non_api_warm_cache(
@@ -3888,7 +3908,7 @@ def test_cli_api_surface_ignores_non_api_warm_cache(
 
     assert _summary_metric(out, "analyzed") == 1
     assert _summary_metric(out, "from cache") == 0
-    assert "Public API" in out
+    assert_contains_all(out, "Public API")
     assert cast("dict[str, object]", api_surface_summary)["enabled"] is True
     assert cast("dict[str, object]", api_surface_summary)["public_symbols"] == 1
     assert cast("dict[str, object]", api_surface_summary)["modules"] == 1
@@ -3904,7 +3924,8 @@ def test_cli_summary_no_color_has_no_ansi(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress", "--no-color"])
     out = capsys.readouterr().out
-    assert "\x1b[" not in out
+    # --no-color suppresses palette colors; Rich may still emit bold/dim SGR codes.
+    assert not re.search(r"\x1b\[(?:3[0-7]|9[0-7]|38;5|48;5)", out)
 
 
 def test_cli_scan_failed_is_internal_error(
@@ -3920,7 +3941,7 @@ def test_cli_scan_failed_is_internal_error(
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
 
 
 def test_cli_scan_oserror_is_contract_error(
@@ -3936,8 +3957,8 @@ def test_cli_scan_oserror_is_contract_error(
         _run_main(monkeypatch, [str(tmp_path)])
     assert exc.value.code == 2
     out = capsys.readouterr().out
-    assert "CONTRACT ERROR:" in out
-    assert "Scan failed" in out
+    assert_contains_all(out, "CONTRACT ERROR:")
+    assert_contains_all(out, "Scan failed")
 
 
 def test_cli_failed_files_report(
@@ -3957,8 +3978,8 @@ def test_cli_failed_files_report(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
-    assert "files failed to process" in out
-    assert "and 2 more" in out
+    assert_contains_all(out, "files failed to process")
+    assert_contains_all(out, "and 2 more")
 
 
 def test_cli_failed_files_report_single(
@@ -3978,8 +3999,8 @@ def test_cli_failed_files_report_single(
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     out = capsys.readouterr().out
-    assert "files failed to process" in out
-    assert "and 1 more" not in out
+    assert_contains_all(out, "files failed to process")
+    assert_contains_none(out, "and 1 more")
 
 
 def test_cli_worker_failed(
@@ -3999,7 +4020,7 @@ def test_cli_worker_failed(
         _run_main(monkeypatch, [str(tmp_path), "--no-progress"])
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
 
 
 def test_cli_worker_failed_progress_sequential(
@@ -4079,7 +4100,7 @@ def test_cli_fail_on_new_no_report_path(
         expected_code=3,
     )
     out = capsys.readouterr().out
-    assert "\n  report" not in out
+    assert_contains_none(out, "\n  report")
 
 
 @pytest.mark.parametrize(
@@ -4131,13 +4152,19 @@ def test_cli_fail_on_new_verbose_single_kind(
             "Details (function clone hashes):" in out or "Function clone hashes:" in out
         )
     else:
-        assert "Details (function clone hashes):" not in out
-        assert "Function clone hashes:" not in out
+        assert_contains_none(out, "Details (function clone hashes):")
+        assert_contains_none(out, "Function clone hashes:")
     if expect_block:
-        assert "Details (block clone hashes):" in out or "Block clone hashes:" in out
+        from tests._assertions import strip_ansi
+
+        normalized = strip_ansi(out)
+        assert (
+            "Details (block clone hashes):" in normalized
+            or "Block clone hashes:" in normalized
+        )
     else:
-        assert "Details (block clone hashes):" not in out
-        assert "Block clone hashes:" not in out
+        assert_contains_none(out, "Details (block clone hashes):")
+        assert_contains_none(out, "Block clone hashes:")
 
 
 def test_cli_fail_on_new_verbose_and_report_path(
@@ -4172,12 +4199,21 @@ def test_cli_fail_on_new_verbose_and_report_path(
         expected_code=3,
     )
     out = capsys.readouterr().out
-    assert "report" in out
-    assert str(html_out) in out or html_out.name in out
-    assert "Details (function clone hashes):" in out or "Function clone hashes:" in out
-    assert "- fhash1" in out
-    assert "Details (block clone hashes):" in out or "Block clone hashes:" in out
-    assert "- bhash1" in out
+    from tests._assertions import strip_ansi
+
+    normalized = strip_ansi(out)
+    assert_contains_all(out, "report")
+    assert str(html_out) in normalized or html_out.name in normalized
+    assert (
+        "Details (function clone hashes):" in normalized
+        or "Function clone hashes:" in normalized
+    )
+    assert_contains_all(out, "- fhash1")
+    assert (
+        "Details (block clone hashes):" in normalized
+        or "Block clone hashes:" in normalized
+    )
+    assert_contains_all(out, "- bhash1")
 
 
 def test_cli_fail_on_new_default_report_path(
@@ -4213,8 +4249,8 @@ def test_cli_fail_on_new_default_report_path(
         expected_code=3,
     )
     out = capsys.readouterr().out
-    assert "report" in out
-    assert ".codeclone/report.html" in out
+    assert_contains_all(out, "report")
+    assert_contains_all(out, ".codeclone/report.html")
 
 
 def test_cli_batch_result_none_no_progress(
@@ -4228,7 +4264,7 @@ def test_cli_batch_result_none_no_progress(
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2", "--no-progress"])
     out = capsys.readouterr().out
-    assert "Failed to process batch item" in out
+    assert_contains_all(out, "Failed to process batch item")
 
 
 def test_cli_batch_result_none_progress(
@@ -4243,7 +4279,7 @@ def test_cli_batch_result_none_progress(
     _patch_fixed_executor(monkeypatch, _FixedFuture(value=None))
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
-    assert "Worker failed" in out
+    assert_contains_all(out, "Worker failed")
 
 
 def test_cli_failed_batch_item_no_progress(
@@ -4257,7 +4293,7 @@ def test_cli_failed_batch_item_no_progress(
     _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2", "--no-progress"])
     out = capsys.readouterr().out
-    assert "Failed to process batch item" in out
+    assert_contains_all(out, "Failed to process batch item")
 
 
 def test_cli_failed_batch_item_progress(
@@ -4272,7 +4308,7 @@ def test_cli_failed_batch_item_progress(
     _patch_fixed_executor(monkeypatch, _FixedFuture(error=RuntimeError("boom")))
     _run_main(monkeypatch, [str(tmp_path), "--processes", "2"])
     out = capsys.readouterr().out
-    assert "Worker failed" in out
+    assert_contains_all(out, "Worker failed")
 
 
 # ---------------------------------------------------------------------------
