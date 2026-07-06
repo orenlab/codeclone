@@ -193,10 +193,14 @@ def _seed_analysis_phases(tmp_path: Path) -> None:
 def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(root=tmp_path, section="summary")
-    assert out["surface"] == "platform_observability"
-    assert out["user_facing"] is False
-    assert out["operations"] == 4
-    assert out["costly_noops"] == 1
+    expected_scalars = {
+        "surface": "platform_observability",
+        "status": "ok",
+        "user_facing": False,
+        "operations": 4,
+        "costly_noops": 1,
+    }
+    assert {key: out[key] for key in expected_scalars} == expected_scalars
     assert out["context_pressure_units"] == out["context_pressure_tokens"]
     kinds = {d["kind"] for d in _rows(out["top_diagnostics"])}
     assert {"memory", "db", "context"} <= kinds
@@ -336,6 +340,16 @@ def test_absent_store_is_inert_not_error(tmp_path: Path) -> None:
     assert out["status"] in {"disabled", "no_store"}
     assert out["rows"] == []
     assert out["user_facing"] is False
+
+
+def test_empty_store_reports_empty_status(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    conn.close()
+
+    out = query_platform_observability(root=tmp_path, section="summary")
+
+    assert out["status"] == "empty"
+    assert out["operations"] == 0
 
 
 def test_disabled_vs_no_store_split(

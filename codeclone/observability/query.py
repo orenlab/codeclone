@@ -502,6 +502,20 @@ def _summary_body(trace: TraceView) -> dict[str, object]:
     return body
 
 
+def _aggregate_status(agg: AggregatesView) -> str:
+    return "ok" if agg.operation_count else "empty"
+
+
+def _apply_aggregate_status(
+    response: dict[str, object],
+    *,
+    section: str,
+    agg: AggregatesView,
+) -> None:
+    if section in _AGGREGATE_SECTIONS:
+        response["status"] = _aggregate_status(agg)
+
+
 def _recommended_next_sections(
     section: str, agg: AggregatesView
 ) -> list[dict[str, object]]:
@@ -610,6 +624,7 @@ def query_platform_observability(
         conn.close()
 
     agg = trace.aggregates
+    _apply_aggregate_status(response, section=section, agg=agg)
     if section == "operation_detail":
         assert operation_id is not None
         response.update(_operation_detail_body(trace, operation_id, row_cap))
