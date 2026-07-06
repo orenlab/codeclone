@@ -1,0 +1,553 @@
+version: "3"
+
+repository:
+  product: codeclone
+  language: python
+  review_artifacts_dir: .codeclone/reviews
+
+# Docs site is in transition; do not require docs surfaces in coverage matrices unless
+# the caller explicitly re-enables docs_review.enabled for a targeted docs audit.
+docs_review:
+  mode: transitional
+  transitional_note: "Omit docs/** from mandatory surface coverage until the docs migration completes."
+
+auto_profile:
+  default: balanced
+  large_range: economy
+
+coordinator_routing:
+  economy:
+    direct: sonnet
+    decomposed: sonnet
+  balanced:
+    direct: opus
+    decomposed: opus
+  thorough:
+    direct: opus
+    decomposed: opus
+
+churn_skip:
+  enabled: true
+  max_changed_lines: 20
+  max_changed_files: 2
+
+review_profiles:
+  economy:
+    coordinator: opus
+    inventory: haiku
+    low_risk: haiku
+    medium_risk: sonnet
+    high_risk: sonnet
+    critical_escalation: opus
+    default_max_agents: 8
+    default_max_concurrency: 4
+  balanced:
+    coordinator: opus
+    inventory: haiku
+    low_risk: haiku
+    medium_risk: sonnet
+    high_risk: sonnet
+    critical_escalation: opus
+    default_max_agents: 12
+    default_max_concurrency: 4
+  thorough:
+    coordinator: opus
+    inventory: haiku
+    low_risk: sonnet
+    medium_risk: sonnet
+    high_risk: opus
+    critical_escalation: opus
+    default_max_agents: 20
+    default_max_concurrency: 6
+
+canonical_contracts:
+  - deterministic_outputs
+  - report_schema
+  - baseline_semantics
+  - metrics_baseline_semantics
+  - cache_compatibility
+  - fingerprint_identity
+  - finding_identity
+  - gate_semantics
+  - edit_allowed_authority
+  - workspace_intent_coordination
+  - audit_event_core
+  - persisted_memory_compatibility
+  - restart_and_recovery_behavior
+  - cli_machine_output_isolation
+  - mcp_response_contracts
+  - integration_distribution_layout
+
+contract_owners:
+  entry: codeclone/main.py
+  models: codeclone/models.py
+  contracts: codeclone/contracts
+  domain: codeclone/domain
+  config: codeclone/config
+  core: codeclone/core
+  analysis: codeclone/analysis
+  blocks: codeclone/blocks
+  scanner: codeclone/scanner
+  qualnames: codeclone/qualnames
+  findings: codeclone/findings
+  metrics: codeclone/metrics
+  meta_markers: codeclone/meta_markers
+  baseline: codeclone/baseline
+  cache: codeclone/cache
+  report: codeclone/report
+  memory: codeclone/memory
+  analytics: codeclone/analytics
+  audit: codeclone/audit
+  observability: codeclone/observability
+  budget: codeclone/budget
+  controller_insights: codeclone/controller_insights
+  workspace_intent: codeclone/workspace_intent
+  controller: codeclone/surfaces/mcp
+  cli: codeclone/surfaces/cli
+  ui_messages: codeclone/ui_messages
+  filesystem: codeclone/utils
+  paths: codeclone/paths
+  packaging: pyproject.toml
+  distribution_sync: scripts/sync_integrations.py
+  vscode_extension: extensions/vscode-codeclone
+  claude_desktop_bundle: extensions/claude-desktop-codeclone
+
+  claude_code_plugin: plugins/claude-code-codeclone
+  codex_plugin: plugins/codeclone
+  cursor_plugin: plugins/cursor-codeclone
+  github_action: .github/actions/codeclone
+  benchmarks: benchmarks
+  tests: tests
+  review_orchestration: tools/review
+
+surface_catalog:
+  engine_entry:
+    paths:
+      - codeclone/main.py
+      - codeclone/models.py
+      - codeclone/__init__.py
+      - codeclone/py.typed
+    default_risk: high
+    owner: entry
+  engine_core:
+    paths: [codeclone/core/**]
+    default_risk: critical
+    owner: core
+  analysis_pipeline:
+    paths:
+      - codeclone/analysis/**
+      - codeclone/blocks/**
+      - codeclone/scanner/**
+      - codeclone/qualnames/**
+    default_risk: critical
+    owner: analysis
+  findings_metrics:
+    paths:
+      - codeclone/findings/**
+      - codeclone/metrics/**
+      - codeclone/meta_markers/**
+    default_risk: critical
+    owner: findings
+  domain_models:
+    paths: [codeclone/domain/**]
+    default_risk: high
+    owner: domain
+  contracts_reports:
+    paths: [codeclone/contracts/**, codeclone/report/**]
+    default_risk: critical
+    owner: contracts
+  baseline_cache:
+    paths: [codeclone/baseline/**, codeclone/cache/**]
+    default_risk: critical
+    owner: baseline
+  audit_observability:
+    paths: [codeclone/audit/**, codeclone/observability/**]
+    default_risk: high
+    owner: audit
+  config:
+    paths: [codeclone/config/**]
+    default_risk: high
+    owner: config
+  memory_persistence:
+    paths: [codeclone/memory/**]
+    default_risk: critical
+    owner: memory
+  mcp_controller:
+    paths:
+      - codeclone/surfaces/__init__.py
+      - codeclone/surfaces/mcp/**
+      - codeclone/workspace_intent/**
+    default_risk: critical
+    owner: controller
+  cli_public_surface:
+    paths:
+      - codeclone/surfaces/cli/**
+      - codeclone/ui_messages/**
+    default_risk: high
+    owner: cli
+  controller_support:
+    paths:
+      - codeclone/budget/**
+      - codeclone/controller_insights/**
+    default_risk: high
+    owner: budget
+  analytics:
+    paths: [codeclone/analytics/**]
+    default_risk: high
+    owner: analytics
+  filesystem_mutation:
+    paths: [codeclone/utils/**, codeclone/paths/**]
+    default_risk: high
+    owner: filesystem
+  integrations_vscode:
+    paths: [extensions/vscode-codeclone/**]
+    default_risk: high
+    owner: vscode_extension
+  integrations_claude_desktop:
+    paths: [extensions/claude-desktop-codeclone/**]
+    default_risk: high
+    owner: claude_desktop_bundle
+  integrations_jetbrains:
+    paths: [extensions/jetbrains-codeclone/**]
+    default_risk: high
+    owner: jetbrains_plugin
+    status: disabled
+  integrations_plugins:
+    paths:
+      - plugins/claude-code-codeclone/**
+      - plugins/codeclone/**
+      - plugins/cursor-codeclone/**
+      - .agents/plugins/**
+    default_risk: high
+    owner: codex_plugin
+  distribution_sync:
+    paths:
+      - scripts/**
+    default_risk: critical
+    owner: distribution_sync
+  dependencies_packaging:
+    paths:
+      - pyproject.toml
+      - uv.lock
+      - zensical.toml
+      - .pre-commit-config.yaml
+      - .github/**
+    default_risk: critical
+    owner: packaging
+  repo_governance:
+    paths:
+      - Agents.md
+      - CLAUDE.md
+      - CHANGELOG.md
+      - SECURITY.md
+      - LICENSE
+      - LICENSE-MIT
+      - .gitignore
+      - .dockerignore
+    default_risk: low
+    owner: contracts
+  review_orchestration:
+    paths:
+      - tools/review/**
+      - scripts/install_review_kit.sh
+      - .claude/review/**
+      - .claude/agents/review-coordinator.md
+      - .claude/agents/review-scout.md
+      - .claude/agents/surface-reviewer.md
+      - .claude/agents/critical-reviewer.md
+      - .claude/skills/review-change/**
+      - tools/review/agents/**
+      - tools/review/skill/**
+    default_risk: medium
+    owner: review_orchestration
+  benchmarks:
+    paths: [benchmarks/**]
+    default_risk: medium
+    owner: benchmarks
+  specs:
+    paths: [specs/**]
+    default_risk: low
+    owner: contracts
+  tests:
+    paths: [tests/**]
+    default_risk: medium
+    owner: tests
+
+high_risk_paths:
+  - codeclone/main.py
+  - codeclone/models.py
+  - codeclone/contracts/**
+  - codeclone/core/**
+  - codeclone/analysis/**
+  - codeclone/blocks/**
+  - codeclone/findings/**
+  - codeclone/metrics/**
+  - codeclone/domain/**
+  - codeclone/audit/**
+  - codeclone/observability/**
+  - codeclone/baseline/**
+  - codeclone/cache/**
+  - codeclone/config/**
+  - codeclone/memory/**
+  - codeclone/analytics/**
+  - codeclone/report/**
+  - codeclone/surfaces/mcp/**
+  - codeclone/workspace_intent/**
+  - codeclone/surfaces/cli/**
+  - codeclone/ui_messages/**
+  - codeclone/budget/**
+  - codeclone/controller_insights/**
+  - codeclone/utils/**
+  - codeclone/paths/**
+  - extensions/**
+  - plugins/**
+  - scripts/sync_integrations.py
+  - scripts/integration_dist/**
+  - .github/actions/**
+  - .github/workflows/**
+  - pyproject.toml
+  - uv.lock
+
+protected_or_generated_paths:
+  - .codeclone/**
+  - .codeclone/reviews/**
+  - codeclone.baseline.json
+  - htmlcov/**
+  - .coverage*
+  - tests/fixtures/contract_snapshots/**
+
+always_on_vectors:
+  - runtime_correctness
+  - behavior_preservation
+  - error_handling_and_surfacing
+  - test_adequacy
+  - scope_honesty
+  - contract_consistency
+  - determinism
+  - contract_invariant_failure_proof
+
+conditional_vectors:
+  persistence:
+    path_hints:
+      - "**/*schema*.py"
+      - "**/*store*.py"
+      - "**/*sqlite*.py"
+      - "**/*migration*.py"
+      - codeclone/baseline/**
+      - codeclone/cache/**
+      - codeclone/memory/**
+      - codeclone/workspace_intent/**
+      - codeclone/audit/**
+    vectors:
+      - persisted_data_compatibility
+      - migration_and_repair
+      - read_write_symmetry
+      - transaction_and_recovery
+  public_surface:
+    path_hints:
+      - codeclone/surfaces/cli/**
+      - codeclone/surfaces/mcp/**
+      - codeclone/contracts/**
+      - codeclone/main.py
+      - pyproject.toml
+      - extensions/**
+      - plugins/**
+    vectors:
+      - public_api_compatibility
+      - input_validation
+      - output_and_exit_contracts
+      - error_surfacing
+  fingerprint_adjacent:
+    path_hints:
+      - codeclone/analysis/**
+      - codeclone/blocks/**
+      - codeclone/findings/**
+      - codeclone/baseline/**
+    vectors:
+      - fingerprint_stability
+      - clone_identity
+      - baseline_novelty_semantics
+  concurrency:
+    keyword_hints: [async, await, lock, queue, thread, process, transaction, rlock]
+    vectors:
+      - ordering_and_races
+      - cancellation_and_cleanup
+      - idempotency_and_replay
+  cache_and_identity:
+    keyword_hints: [cache, digest, fingerprint, baseline, canonical, payload_sha256]
+    vectors:
+      - invalidation
+      - digest_identity
+      - stale_state
+      - backward_compatibility
+  security:
+    keyword_hints:
+      - path
+      - symlink
+      - subprocess
+      - shell
+      - token
+      - secret
+      - credential
+      - permission
+    vectors:
+      - trust_boundary
+      - path_traversal
+      - injection_and_execution
+      - sensitive_data_exposure
+  typing_and_models:
+    keyword_hints:
+      - cast
+      - TypeGuard
+      - Literal
+      - TypedDict
+      - Protocol
+      - enum
+      - classifier
+      - discriminator
+      - object
+      - Any
+    vectors:
+      - runtime_domain_validation
+      - unknown_and_legacy_values
+      - nullable_and_partial_inputs
+      - coercion_semantics
+  performance:
+    keyword_hints: [loop, batch, cache, index, query, serialize, deserialize]
+    vectors:
+      - complexity_and_amplification
+      - allocation_and_io
+      - boundedness
+  ui_and_rendering:
+    path_hints:
+      - codeclone/surfaces/cli/**
+      - codeclone/ui_messages/**
+      - codeclone/report/html/**
+    vectors:
+      - machine_output_isolation
+      - tty_and_ci_fallbacks
+      - accessibility_and_no_color
+  dependencies:
+    path_hints: [pyproject.toml, uv.lock]
+    vectors:
+      - dependency_delta
+      - supply_chain
+      - version_compatibility
+      - install_and_upgrade
+  integration_distribution:
+    path_hints:
+      - scripts/sync_integrations.py
+      - scripts/integration_dist/**
+      - extensions/**
+      - plugins/**
+      - .github/actions/**
+    vectors:
+      - storefront_layout_parity
+      - launcher_fidelity
+      - manifest_provenance
+      - client_contract_drift
+
+surface_verification:
+  codeclone/surfaces/mcp/**:
+    - uv run pytest -q tests/test_mcp_service.py tests/test_mcp_server.py
+  codeclone/memory/**:
+    - uv run pytest -q tests/test_memory_compact_contract.py
+  tests/**:
+    - uv run pytest -q tests/test_architecture.py
+
+release_mode:
+  activates_extra_vectors:
+    - dependency_delta
+    - install_and_upgrade
+    - persisted_data_compatibility
+    - migration_and_repair
+    - storefront_layout_parity
+    - manifest_provenance
+    - public_api_compatibility
+  mandatory_verification_when_touched:
+    pyproject.toml:
+      - uv lock --check
+    uv.lock:
+      - uv lock --check
+    scripts/sync_integrations.py:
+      - uv run pytest -q tests/test_sync_integrations.py
+    extensions/vscode-codeclone/**:
+      - node --check extensions/vscode-codeclone/src/extension.js
+    plugins/cursor-codeclone/**:
+      - uv run pytest -q tests/test_cursor_plugin.py
+
+approved_read_only_commands:
+  - git status --short
+  - git rev-parse
+  - git show
+  - git diff
+  - git log
+  - git grep
+  - rg
+  - uv run ty check
+  - uv run mypy
+  - uv run pytest
+  - uv run pre-commit run
+  - uv lock --check
+  - codeclone
+  - node --check
+  - python3 -m json.tool
+
+forbidden_review_actions:
+  - edit_repository_files
+  - update_baselines
+  - regenerate_contract_snapshots
+  - modify_generated_artifacts
+  - change_git_index
+  - create_commits
+  - push_branches
+
+large_range_review:
+  enabled: true
+  decompose_large_commits: true
+  thresholds:
+    commits: 10
+    changed_files: 50
+    changed_lines: 2000
+  mandatory_fanout: true
+  clean_verdict_requires:
+    - no_unreviewed_critical_surface
+    - no_sampled_only_critical_surface
+    - no_release_risk_needs_more_evidence
+    - all_planned_critical_units_completed
+    - contradictions_resolved
+    - explicit_decomposition_tree
+    - no_unmapped_changed_paths
+  required_outputs:
+    - decomposition
+    - unit_artifacts
+    - aggregate_review
+    - manifest
+
+verdict_policy:
+  clean:
+    requires:
+      - no_p0_or_p1_findings
+      - no_unresolved_release_risk_candidates
+      - target_sha_verified
+      - required_units_complete
+      - no_unmapped_changed_paths
+  changes_required:
+    triggers:
+      - proven_defect
+      - missing_required_test
+      - broken_contract
+      - compatibility_or_recovery_gap
+      - unresolved_release_risk_candidate
+  blocked:
+    triggers:
+      - target_mismatch
+      - inaccessible_required_files
+      - unreviewable_scope
+      - review_orchestration_failed
+  insufficient_evidence:
+    triggers:
+      - critical_unit_not_executed
+      - unresolved_contradiction
+      - mandatory_verification_not_run
+      - unmapped_changed_paths

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://codeclone.dev/schemas/review-artifact-v3.json",
+  "title": "CodeClone review contracts v3",
+  "type": "object",
+  "oneOf": [
+    {"$ref": "#/$defs/review_packet"},
+    {"$ref": "#/$defs/review_artifact"}
+  ],
+  "$defs": {
+    "review_packet": {
+      "$ref": "packet-v3.schema.json"
+    },
+    "review_artifact": {
+      "type": "object",
+      "required": [
+        "review_contract_version",
+        "mode",
+        "base_sha",
+        "head_sha",
+        "verdict",
+        "profile",
+        "findings",
+        "candidate_ledger",
+        "test_proof",
+        "evidence_limitations"
+      ],
+      "properties": {
+        "review_contract_version": {"const": 3},
+        "mode": {"enum": ["commit", "range", "release", "surface"]},
+        "base_sha": {"type": "string", "minLength": 40, "maxLength": 64},
+        "head_sha": {"type": "string", "minLength": 40, "maxLength": 64},
+        "verdict": {
+          "enum": ["CLEAN", "CHANGES_REQUIRED", "BLOCKED", "INSUFFICIENT_EVIDENCE"]
+        },
+        "profile": {"enum": ["economy", "balanced", "thorough"]},
+        "findings": {"type": "array"},
+        "candidate_ledger": {"type": "array"},
+        "test_proof": {
+          "type": "object",
+          "required": ["contract", "invariants", "failures"],
+          "properties": {
+            "contract": {"type": "string"},
+            "invariants": {"type": "string"},
+            "failures": {"type": "string"}
+          }
+        },
+        "review_units": {"type": "array"},
+        "unmapped_paths": {"type": "array", "items": {"type": "string"}},
+        "evidence_limitations": {"type": "array"},
+        "cost_estimate": {"type": "object"},
+        "incremental": {"type": "object"}
+      }
+    }
+  }
+}
