@@ -84,6 +84,7 @@ from .messages import intent as intent_msgs
 
 if TYPE_CHECKING:
     from ._session_finding_mixin import _StateLock
+    from ._workspace_hygiene import DirtySnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -237,6 +238,7 @@ class _MCPSessionIntentMixin:
         expected_effects: Sequence[str] | None,
         ttl_seconds: int | None,
         on_conflict: str | None = None,
+        dirty_snapshot: DirtySnapshot | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
         try:
@@ -294,9 +296,7 @@ class _MCPSessionIntentMixin:
             intent=record_payload,
             ttl_seconds=ttl,
         )
-        from ._workspace_hygiene import collect_dirty_snapshot
-
-        dirty_snapshot = collect_dirty_snapshot(record.root)
+        dirty_snapshot = _dirty_snapshot_for_declare(record.root, dirty_snapshot)
         workspace_record = replace(
             workspace_record,
             dirty_snapshot=dirty_snapshot.to_payload(),
@@ -1532,6 +1532,17 @@ class _MCPSessionIntentMixin:
             required_action=required_action,
             message=message,
         )
+
+
+def _dirty_snapshot_for_declare(
+    root: Path,
+    dirty_snapshot: DirtySnapshot | None,
+) -> DirtySnapshot:
+    if dirty_snapshot is not None:
+        return dirty_snapshot
+    from ._workspace_hygiene import collect_dirty_snapshot
+
+    return collect_dirty_snapshot(root)
 
 
 def _apply_blast_context(

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from ...observability import record_counter, span
 from ._workspace_intent_lifecycle import (
     WorkspaceIntentStatus,
     is_terminal_workspace_intent_status,
@@ -274,65 +275,78 @@ def collect_dirty_paths(
     scoped_paths: Sequence[str] | None = None,
 ) -> DirtyPathsResult:
     """Collect repo-relative dirty paths from the git working tree."""
-    if not _git_available(root):
-        return DirtyPathsResult(git_available=False, dirty_paths=())
-    try:
-        completed = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return DirtyPathsResult(git_available=False, dirty_paths=())
-    dirty = _dirty_paths_from_porcelain(completed.stdout)
-    if scoped_paths is not None:
-        scope_set = {_normalize_path(path) for path in scoped_paths if path.strip()}
-        dirty = tuple(sorted(path for path in dirty if _path_in_scope(path, scope_set)))
-    return DirtyPathsResult(git_available=True, dirty_paths=dirty)
+    with span(name="hygiene.collect_dirty_paths") as dirty_paths_span:
+        if not _git_available(root):
+            return DirtyPathsResult(git_available=False, dirty_paths=())
+        try:
+            with span(name="hygiene.git.status", reason="dirty_paths"):
+                completed = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return DirtyPathsResult(git_available=False, dirty_paths=())
+        dirty = _dirty_paths_from_porcelain(completed.stdout)
+        if scoped_paths is not None:
+            scope_set = {_normalize_path(path) for path in scoped_paths if path.strip()}
+            dirty = tuple(
+                sorted(path for path in dirty if _path_in_scope(path, scope_set))
+            )
+        dirty_paths_span.set_counter("dirty_paths", len(dirty))
+        return DirtyPathsResult(git_available=True, dirty_paths=dirty)
 
 
 def collect_dirty_snapshot(root: Path) -> DirtySnapshot:
     """Collect full git dirty state with stable per-path digests when available."""
-    captured_at = format_utc(utc_now())
-    if not _git_available(root):
+    with span(name="hygiene.collect_dirty_snapshot") as snapshot_span:
+        captured_at = format_utc(utc_now())
+        if not _git_available(root):
+            return DirtySnapshot(
+                git_available=False,
+                captured_at_utc=captured_at,
+                entries=(),
+            )
+        try:
+            with span(name="hygiene.git.status", reason="dirty_snapshot"):
+                completed = subprocess.run(
+                    ["git", "status", "--porcelain=v1"],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return DirtySnapshot(
+                git_available=False,
+                captured_at_utc=captured_at,
+                entries=(),
+            )
+        raw_entries = _dirty_entries_from_porcelain(completed.stdout)
+        with span(name="hygiene.dirty_entry_digests") as digest_span:
+            entries = tuple(
+                DirtySnapshotEntry(
+                    path=path,
+                    status_xy=status_xy,
+                    digest=digest,
+                    digest_status=digest_status,
+                )
+                for path, status_xy in raw_entries
+                for digest, digest_status in (
+                    _dirty_entry_digest(root, path, status_xy),
+                )
+            )
+            digest_span.set_counter("dirty_entries", len(entries))
+        snapshot_span.set_counter("dirty_paths", len(entries))
         return DirtySnapshot(
-            git_available=False,
+            git_available=True,
             captured_at_utc=captured_at,
-            entries=(),
+            entries=tuple(sorted(entries, key=lambda entry: entry.path)),
         )
-    try:
-        completed = subprocess.run(
-            ["git", "status", "--porcelain=v1"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return DirtySnapshot(
-            git_available=False,
-            captured_at_utc=captured_at,
-            entries=(),
-        )
-    entries = tuple(
-        DirtySnapshotEntry(
-            path=path,
-            status_xy=status_xy,
-            digest=digest,
-            digest_status=digest_status,
-        )
-        for path, status_xy in _dirty_entries_from_porcelain(completed.stdout)
-        for digest, digest_status in (_dirty_entry_digest(root, path, status_xy),)
-    )
-    return DirtySnapshot(
-        git_available=True,
-        captured_at_utc=captured_at,
-        entries=tuple(sorted(entries, key=lambda entry: entry.path)),
-    )
 
 
 def dirty_snapshot_from_payload(payload: object) -> DirtySnapshot | None:
@@ -904,6 +918,7 @@ def _dirty_entry_digest(
 
 
 def _git_diff_bytes(root: Path, args: Sequence[str]) -> bytes | None:
+    record_counter("git_diff_invocations")
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -923,6 +938,7 @@ def _git_diff_bytes(root: Path, args: Sequence[str]) -> bytes | None:
 
 
 def _untracked_file_digest(root: Path, path: str) -> tuple[str | None, str]:
+    record_counter("untracked_file_reads")
     target = (root / path).resolve()
     try:
         target.relative_to(root.resolve())
@@ -945,14 +961,15 @@ def _untracked_file_digest(root: Path, path: str) -> tuple[str | None, str]:
 
 def _git_available(root: Path) -> bool:
     try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        with span(name="hygiene.git.rev_parse"):
+            completed = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
     return completed.stdout.strip().lower() == "true"

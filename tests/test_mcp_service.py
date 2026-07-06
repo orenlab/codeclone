@@ -10940,6 +10940,59 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
     _assert_start_context_governance(replay, enforced=False)
 
 
+def test_mcp_workflow_start_reuses_dirty_snapshot_for_replay_and_declare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init_git_readme(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(
+            mcp_workspace_hygiene_mod.DirtySnapshotEntry(
+                path="README.md",
+                status_xy=" M",
+                digest="a" * 64,
+                digest_status="ok",
+            ),
+        ),
+    )
+    calls: list[Path] = []
+
+    def _collect_dirty_snapshot(root: Path) -> mcp_workspace_hygiene_mod.DirtySnapshot:
+        calls.append(root)
+        return snapshot
+
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "collect_dirty_snapshot",
+        _collect_dirty_snapshot,
+    )
+
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+    )
+
+    assert calls == [tmp_path.resolve()]
+    dirty_summary = cast("dict[str, object]", started["dirty_snapshot"])
+    assert dirty_summary["paths_count"] == 1
+    persisted = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=str(started["intent_id"]),
+        apply_lazy_close=False,
+    )
+    assert persisted is not None
+    assert persisted.dirty_snapshot == snapshot.to_payload()
+    replay_entry = next(iter(service._start_replay_cache.values()))
+    assert replay_entry[
+        "workspace_state_digest"
+    ] == workflow_mod._start_workspace_state_digest_from_snapshot(snapshot)
+
+
 def test_mcp_workflow_start_replay_rejects_workspace_drift(tmp_path: Path) -> None:
     _init_git_readme(tmp_path)
     service = CodeCloneMCPService(history_limit=4)

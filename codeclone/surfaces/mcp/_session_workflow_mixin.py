@@ -63,7 +63,7 @@ from ._session_shared import (
     MCPRunRecord,
     MCPServiceContractError,
 )
-from ._workspace_hygiene import WorkspaceHygieneResult
+from ._workspace_hygiene import DirtySnapshot, WorkspaceHygieneResult
 from .messages import errors as err_msgs
 from .messages import workflow as workflow_msgs
 
@@ -183,7 +183,12 @@ class _MCPSessionWorkflowMixin:
                 )
             )
 
-        current_workspace_state_digest = _start_workspace_state_digest(root_path)
+        from ._workspace_hygiene import collect_dirty_snapshot
+
+        workspace_state_snapshot = collect_dirty_snapshot(root_path)
+        current_workspace_state_digest = _start_workspace_state_digest_from_snapshot(
+            workspace_state_snapshot
+        )
         registry_digest = _start_registry_digest(workspace_before)
         replay_payload = self._start_replay_payload(
             request_key=request_key,
@@ -202,6 +207,7 @@ class _MCPSessionWorkflowMixin:
             expected_effects=expected_effects,
             ttl_seconds=ttl_seconds,
             on_conflict=on_conflict,
+            dirty_snapshot=workspace_state_snapshot,
         )
 
         intent_id = str(declare_payload.get("intent_id", ""))
@@ -377,7 +383,7 @@ class _MCPSessionWorkflowMixin:
             intent=active_intent,
             payload=payload,
             workspace_after=workspace_after,
-            workspace_state_digest=_start_workspace_state_digest(root_path),
+            workspace_state_digest=current_workspace_state_digest,
             scope_digest=context_governance_digest(
                 "boundary_v1", active_intent.scope.to_payload()
             ),
@@ -1734,15 +1740,15 @@ def _start_replay_request_key(
     return context_governance_digest("start_request_v1", payload)["value"]
 
 
-def _start_workspace_state_digest(root_path: Path) -> dict[str, str]:
-    from ._workspace_hygiene import collect_dirty_snapshot
-
-    snapshot = collect_dirty_snapshot(root_path).to_payload()
+def _start_workspace_state_digest_from_snapshot(
+    snapshot: DirtySnapshot,
+) -> dict[str, str]:
+    snapshot_payload = snapshot.to_payload()
     return context_governance_digest(
         "workspace_state_v1",
         {
-            "git_available": snapshot.get("git_available"),
-            "entries": snapshot.get("entries", {}),
+            "git_available": snapshot_payload.get("git_available"),
+            "entries": snapshot_payload.get("entries", {}),
         },
     )
 
