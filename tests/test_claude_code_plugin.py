@@ -73,6 +73,6 @@ def test_claude_code_marketplace_overlay_and_install_docs() -> None:
         pytest.skip("repo docs source tree is not present")
     assert_repo_doc_paths_exist(
         root,
-        "docs/guide/integrations/claude-code/setup.md",
-        "docs/book/integrations/claude-code-plugin.md",
+        "docs/integrations/claude.md",
+        "docs/guides/agent-safe-change.md",
     )

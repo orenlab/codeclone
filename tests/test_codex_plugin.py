@@ -319,7 +319,7 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
         pytest.skip("repo docs source tree is not present")
     assert_repo_doc_paths_exist(
         root,
-        "docs/guide/integrations/codex/setup.md",
-        "docs/guide/setup/readiness-and-apply.md",
+        "docs/integrations/codex.md",
+        "docs/guides/setup-project.md",
         "docs/terms-of-use.md",
     )
