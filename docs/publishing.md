@@ -1,7 +1,15 @@
+---
+title: "Publishing the Docs Site"
+audience: public
+doc_type: runbook
+status: draft
+source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+---
+
 <!-- doc-scope: DOCS-SITE BUILD AND PUBLISHING only.
      owns: Zensical build flow, docs.yml workflow, sample report generation,
        local preview commands, maintenance rules.
-     does-not-own: storefront sync (→ releasing.md), contract content (→ book/).
+     does-not-own: storefront sync (→ releasing.md), contract content (→ concepts/, reference/, internal/).
      rule: split from the former combined publishing page. Do not re-merge. -->
 
 # Publishing the Docs Site
@@ -31,11 +39,13 @@ remains the current repository code and CI workflow.
 
 The published site contains:
 
-- the documentation tree under `docs/`
-- the contract book under `docs/book/`
-- guide pages such as architecture narrative and integration pages
+- the public documentation tree (concepts, guides, integrations, reference,
+  and troubleshooting pages)
 - a live sample report for the current repository build under
   `Examples / Sample Report`
+
+Repository/agent-facing content lives in a separate, unpublished internal
+tree and is not part of the built site.
 
 ## Build flow
 

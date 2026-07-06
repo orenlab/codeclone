@@ -1,99 +1,80 @@
-<!-- doc-scope: GOAL-ROUTER LANDING PAGE.
-     owns: intro paragraph, goal→link routing tables.
-     does-not-own: full book TOC (book/README.md), install instructions
-       (getting-started.md), local preview commands (publishing.md).
-     rule: keep under 95 lines. Add links, not content. -->
-
-# CodeClone Docs
-
-> Structural Change Controller for AI-assisted Python development —
-> deterministic, baseline-aware, built for CI and AI agents.
-
-CodeClone runs one deterministic analysis pipeline and emits a canonical JSON
-report. Every surface — CLI, HTML, MCP, IDE — is a projection of that report.
-Humans and AI agents operate on the same structural facts.
-
-The v2.1 change controller starts before the first edit: an agent declares what
-it intends to change, CodeClone maps the structural blast radius, verifies the
-patch against the declared boundary, and generates an auditable review receipt.
-
-!!! note "Documentation for the in-development v2.1 line"
-    This site tracks the unreleased **v2.1** line; for the current stable release
-    see [CodeClone v2.0.2](https://github.com/orenlab/codeclone/tree/v2.0.2).
-
-## New here? Follow the path
-
-1. [**Install & first run**](getting-started.md) — install, analyze a repo, read the report.
-2. [**Repository setup**](guide/setup/readiness-and-apply.md) — readiness, plan, apply (CLI-only).
-3. [**Connect your agent**](getting-started.md#mcp-setup) — wire CodeClone into your IDE or agent.
-4. [**Your first governed edit**](start/first-governed-edit.md) — declare → edit → verify, end to end.
-
-!!! tip "Two tabs — pick one mental model"
-    **Guide** — install, run, MCP workflows, IDE setup, recipes.
-    Start at the [Guide hub](guide/README.md).
-
-    **Contracts** — normative guarantees, schemas, enums, payload semantics.
-    Start at the [Contracts book](book/README.md).
-
-!!! note "Licensing"
-    Source code: MPL-2.0. Documentation and docs-site content: MIT.
-
+---
+title: "CodeClone documentation"
+audience: public
+doc_type: landing
+status: draft
+source_commit: "582228177b2f57d9b9823ff1da9b6a0620f1297f"
 ---
 
-## Getting Started
+# CodeClone
 
-| Goal                  | Start here                                        |
-|-----------------------|---------------------------------------------------|
-| First install and run | [Getting started](getting-started.md)             |
-| Repository readiness  | [Setup & readiness](guide/setup/readiness-and-apply.md) |
-| Understand the model  | [How it works](guide/explanation/how-it-works.md) |
-| Terminology lookup    | [Terminology](book/01-terminology.md)             |
+## What CodeClone is
 
-## CI and Gating
+CodeClone is a deterministic structural controller for Python codebases. It provides change-control governance, code health analysis, and integration with AI-assisted development workflows. CodeClone enforces intent-driven edits through a workspace-aware protocol that tracks patches, verifies scope boundaries, and maintains audit trails.
 
-| Goal                          | Start here                                                |
-|-------------------------------|-----------------------------------------------------------|
-| Baseline-aware CI             | [Getting started: CI setup](getting-started.md#ci-setup)  |
-| Exit codes and failure policy | [Exit codes](book/09-exit-codes.md)                       |
-| Quality gates and metrics     | [Metrics and gates](book/16-metrics-and-quality-gates.md) |
-| Baseline contract             | [Baseline](book/07-baseline.md)                           |
+## Core workflow
 
-## AI Agent Governance
+CodeClone operates through a declared-intent model:
 
-| Goal                                | Start here                                                                    |
-|-------------------------------------|-------------------------------------------------------------------------------|
-| MCP usage (workflows, setup)        | [MCP guide](guide/mcp/README.md)                                              |
-| Repository setup (CLI)              | [Setup & readiness](guide/setup/readiness-and-apply.md)                        |
-| First governed edit (tutorial)      | [Your first governed edit](start/first-governed-edit.md)                      |
-| Change controller workflow          | [Structural Change Controller](book/12-structural-change-controller/index.md) |
-| Engineering Memory (scope context)  | [Engineering Memory](book/13-engineering-memory/index.md)                     |
-| Trajectories and recurring patterns | [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md)  |
-| MCP interface contract              | [MCP interface](book/25-mcp-interface/index.md)                               |
+1. **Declare intent** — articulate the scope and purpose of your change
+2. **Analyze** — run structural analysis to establish baseline metrics and dependencies
+3. **Edit** — make changes within the declared scope with real-time workspace awareness
+4. **Verify** — re-analyze and validate that changes stay within scope and meet quality gates
+5. **Accept** — finish the intent when verification passes, clearing the workspace for the next change
 
-## IDE and Agent Clients
+This workflow prevents silent scope creep, catches architectural violations early, and maintains a durable audit trail of who changed what and why.
 
-| Surface               | Guide (how to)                                                      | Contract (guarantees)                                                 |
-|-----------------------|---------------------------------------------------------------------|-----------------------------------------------------------------------|
-| VS Code extension     | [Setup](guide/integrations/vscode/setup.md)                         | [VS Code contract](book/integrations/vs-code-extension.md)            |
-| Cursor plugin         | [Install & skills](guide/integrations/cursor/install-and-skills.md) | [Cursor contract](book/integrations/cursor-plugin.md)                 |
-| Claude Code plugin    | [Install](guide/integrations/claude-code/setup.md)                  | [Claude Code contract](book/integrations/claude-code-plugin.md)       |
-| Codex plugin          | [Install](guide/integrations/codex/setup.md)                        | [Codex contract](book/integrations/codex-plugin.md)                   |
-| Claude Desktop bundle | [Setup](guide/integrations/claude-desktop/setup.md)                 | [Claude Desktop contract](book/integrations/claude-desktop-bundle.md) |
-| GitHub Action         | [CI setup](getting-started.md#ci-setup)                             | [GitHub Action contract](book/integrations/github-action.md)          |
-| SARIF & code scanning | [Export](guide/integrations/sarif/export.md)                        | [SARIF contract](book/integrations/sarif.md)                          |
+## Where to start
 
-## Reports
+CodeClone integrates into your development environment through MCP (Model Context Protocol). If you are using Claude Code or Claude Desktop with CodeClone enabled:
 
-| Goal                    | Start here                            |
-|-------------------------|---------------------------------------|
-| Report model and schema | [Report contract](book/05-report.md)  |
-| HTML rendering          | [HTML render](book/06-html-render.md) |
-| Live sample             | [Sample report](examples/report.md)   |
+- Start with the change-control workflow when making edits to Python code or governance config
+- Use analysis commands to understand code health, architecture coupling, and test coverage
+- Reference the Engineering Memory store to review past decisions and avoid repeating mistakes
+- Consult skill documentation for specialized workflows (e.g., release audits, security reviews)
 
-## Maintainers & internals
+*Documentation gap: specific CLI commands, configuration keys, and skill names are not available in this overview context. See the full documentation for command reference and configuration details.*
 
-Operating or building CodeClone itself? See [Platform Observability](guide/observability/diagnostics.md)
-and [Corpus Analytics](guide/analytics/overview.md) under the **Maintainers** tab.
+## Key concepts
 
-**Editions & plans** — CodeClone is open source and runs locally; Team and Enterprise add scaled retention, managed
-options, and support. Pick the level that fits your needs: [Plans and retention](plans-and-retention.md).
+| Concept | Definition |
+|---------|-----------|
+| **Intent** | A declared change operation with defined scope, purpose, and workspace state |
+| **Scope** | The set of files and code regions the intent is permitted to modify |
+| **Verification** | Structural analysis that checks scope boundaries, quality metrics, and test coverage |
+| **Baseline** | A stored snapshot of metrics and artifacts from a previous analysis run |
+| **Engineering Memory** | A durable local store of evidence-linked facts, decisions, and past findings |
+| **Patch Contract** | The verification model that determines which structural checks apply to a change |
+| **Health Score** | A composite metric combining complexity, coupling, cohesion, coverage, and clones |
+
+## Integrations
+
+CodeClone integrates with:
+
+- **Claude Code** and **Claude Desktop** — via MCP for intent-driven edits and governance
+- **VS Code** — Memory view for approving and managing engineering memory records
+- **Git** — workspace and git state awareness for intent tracking and audit trails
+- **Python testing** — coverage and test integration for health metric computation
+- **SARIF, JSON, Markdown, HTML** — multiple report formats for analysis results
+
+## Reference
+
+- **Repository**: https://github.com/orenlab/codeclone
+- **Issues**: https://github.com/orenlab/codeclone/issues
+- **Documentation**: https://orenlab.github.io/codeclone/
+- **Version**: 2.1.0a1
+
+For full architecture, contract specifications, and the agent playbook, see `AGENTS.md` in the repository.
+
+```mermaid
+graph LR
+    A["Declare Intent"] --> B["Analyze"]
+    B --> C["Edit"]
+    C --> D["Verify"]
+    D -->|Pass| E["Accept"]
+    D -->|Fail| F["Refine"]
+    F --> C
+    E --> G["Audit Trail"]
+    H["Engineering Memory"] -.-> C
+    H -.-> D
+```

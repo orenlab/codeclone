@@ -67,12 +67,18 @@ nav = [
         { "Reports" = "troubleshooting/reports.md" },
         { "Terminal output" = "troubleshooting/terminal-output.md" },
     ] },
+    { "Legal & plans" = [
+        { "Privacy Policy" = "privacy-policy.md" },
+        { "Terms of Use" = "terms-of-use.md" },
+        { "Plans and Retention" = "plans-and-retention.md" },
+    ] },
+    { "Maintainers" = [
+        { "Docs site" = [
+            { "Publishing the docs site" = "publishing.md" },
+            { "Releasing & storefront sync" = "releasing.md" },
+        ] },
+    ] },
 ]
-# "Legal & plans" (Privacy Policy, Terms of Use, Plans and Retention) and
-# "Maintainers > Docs site" (Publishing, Releasing) were part of the prior
-# approved nav (mem-b9172373) but their source pages were removed with the
-# old docs/book/** tree. Pending owner-supplied content; re-add both the page
-# and its nav entry together once that text exists, never a nav entry alone.
 
 [project.theme]
 logo = "assets/codeclone-docs-wordmark.svg"

@@ -1,3 +1,11 @@
+---
+title: "Releasing & Storefront Sync"
+audience: public
+doc_type: runbook
+status: draft
+source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+---
+
 <!-- doc-scope: STOREFRONT SYNC AND RELEASE WORKFLOW only.
      owns: sync_integrations.py usage, layout models, post-sync checklist,
        Cursor and Claude Code launcher overrides.
