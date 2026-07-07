@@ -409,6 +409,30 @@ def workspace_dirty_summary(*, root: Path) -> dict[str, object]:
     }
 
 
+def dirty_summary_from_snapshot(snapshot: DirtySnapshot | None) -> dict[str, object]:
+    """Repo-level dirty summary derived from an existing finish snapshot.
+
+    Same shape as workspace_dirty_summary, reusing the single finish-time
+    snapshot instead of a redundant git read. A missing or git-unavailable
+    snapshot yields the identical degraded envelope.
+    """
+    if snapshot is None or not snapshot.git_available:
+        return {
+            "git_available": False,
+            "dirty_paths_count": 0,
+            "dirty_paths_sample": [],
+            "sample_truncated": False,
+        }
+    paths = snapshot.paths
+    sample, truncated = _bounded_sample(paths)
+    return {
+        "git_available": True,
+        "dirty_paths_count": len(paths),
+        "dirty_paths_sample": list(sample),
+        "sample_truncated": truncated,
+    }
+
+
 def _declared_scope_sets(
     allowed_files: Sequence[str],
     allowed_related: Sequence[str] | None,
@@ -531,26 +555,38 @@ def finish_hygiene_check(
     strict_finish: bool | None = None,
 ) -> WorkspaceHygieneResult:
     """Finish-time hygiene gate against declared scope and git evidence."""
-    hygiene = evaluate_scoped_hygiene(
-        root=root,
-        allowed_files=allowed_files,
-        allowed_related=allowed_related,
+    # Single finish-time tree read: this snapshot is the sole source of truth for
+    # finish workspace state. Git availability, the blocking-scope edit gate, and
+    # foreign overlaps are all derived from it (blocking scope is a subset of the
+    # full tree), replacing a redundant scoped read; the repo-level
+    # workspace_dirty_summary is likewise derived from this snapshot by the caller.
+    current_snapshot = collect_dirty_snapshot(root)
+    blocking_scope, related_scope, declared_scope = _declared_scope_sets(
+        allowed_files,
+        allowed_related,
+    )
+    if not current_snapshot.git_available:
+        return WorkspaceHygieneResult(
+            git_available=False,
+            dirty_paths=(),
+            dirty_paths_in_scope=(),
+            dirty_paths_outside_scope=(),
+            foreign_dirty_overlaps=(),
+            blocks_edit=False,
+        )
+    all_dirty_paths = current_snapshot.paths
+    dirty_in_blocking = tuple(
+        sorted(path for path in all_dirty_paths if _path_in_scope(path, blocking_scope))
+    )
+    foreign_dirty_overlaps = _foreign_dirty_overlaps(
+        dirty_paths=dirty_in_blocking,
         store=store,
         own_pid=own_pid,
         own_start_epoch=own_start_epoch,
         own_intent_id=own_intent_id,
     )
-    if not hygiene.git_available:
-        return hygiene
-    current_snapshot = collect_dirty_snapshot(root)
-    if not current_snapshot.git_available:
-        return hygiene
-    all_dirty_paths = current_snapshot.paths
+    blocks_edit = bool(dirty_in_blocking)
     evidence = {_normalize_path(path) for path in resolved_files if path.strip()}
-    blocking_scope, related_scope, declared_scope = _declared_scope_sets(
-        allowed_files,
-        allowed_related,
-    )
     dirty_in_declared = tuple(
         sorted(path for path in all_dirty_paths if _path_in_scope(path, declared_scope))
     )
@@ -602,17 +638,17 @@ def finish_hygiene_check(
     # dirty_paths_outside_scope and the attribution detail).
     finish_block_reason = _finish_block_reason(
         unacknowledged=unacknowledged,
-        foreign_dirty_overlaps=hygiene.foreign_dirty_overlaps,
+        foreign_dirty_overlaps=foreign_dirty_overlaps,
         unattributed_unscoped=unattributed_unscoped,
         strict_finish=strict_finish,
     )
     return WorkspaceHygieneResult(
-        git_available=hygiene.git_available,
+        git_available=True,
         dirty_paths=all_dirty_paths,
         dirty_paths_in_scope=dirty_in_declared,
         dirty_paths_outside_scope=dirty_outside_declared,
-        foreign_dirty_overlaps=hygiene.foreign_dirty_overlaps,
-        blocks_edit=hygiene.blocks_edit,
+        foreign_dirty_overlaps=foreign_dirty_overlaps,
+        blocks_edit=blocks_edit,
         unacknowledged_dirty_in_scope=unacknowledged,
         # Legacy alias retained for one contract cycle. These paths are
         # unattributed, not proven to be owned by the current agent.
@@ -1032,6 +1068,7 @@ __all__ = [
     "collect_dirty_paths",
     "collect_dirty_snapshot",
     "dirty_snapshot_from_payload",
+    "dirty_summary_from_snapshot",
     "evaluate_scoped_hygiene",
     "finish_hygiene_check",
     "hygiene_blocks_start_edit",

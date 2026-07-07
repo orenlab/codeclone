@@ -538,8 +538,8 @@ class _MCPSessionWorkflowMixin:
 
         from ._workspace_hygiene import (
             dirty_snapshot_from_payload,
+            dirty_summary_from_snapshot,
             finish_hygiene_check,
-            workspace_dirty_summary,
         )
         from ._workspace_intent_store import get_workspace_intent_store
 
@@ -561,7 +561,10 @@ class _MCPSessionWorkflowMixin:
         )
         workspace_hygiene_after = {
             **finish_hygiene.to_payload(detail_level=detail_level),
-            "workspace_dirty_summary": workspace_dirty_summary(root=record.root),
+            # Reuse the single finish snapshot rather than a third git read.
+            "workspace_dirty_summary": dirty_summary_from_snapshot(
+                finish_hygiene.dirty_snapshot
+            ),
         }
         if finish_hygiene.blocks_finish:
             block_reason = finish_hygiene.finish_block_reason or ""

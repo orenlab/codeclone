@@ -343,17 +343,9 @@ def test_workspace_hygiene_state_helpers_and_finish_short_circuit(
     )
     assert _git_diff_bytes(tmp_path, ["diff"]) == b"bin"
 
-    monkeypatch.setattr(
-        "codeclone.surfaces.mcp._workspace_hygiene.evaluate_scoped_hygiene",
-        lambda **kwargs: WorkspaceHygieneResult(
-            git_available=True,
-            dirty_paths=("pkg/a.py",),
-            dirty_paths_in_scope=("pkg/a.py",),
-            dirty_paths_outside_scope=(),
-            foreign_dirty_overlaps=(),
-            blocks_edit=False,
-        ),
-    )
+    # Finish derives git availability from the single finish snapshot: when
+    # collect_dirty_snapshot reports git unavailable, finish_hygiene_check
+    # returns the degraded envelope (there is no second scoped read to consult).
     monkeypatch.setattr(
         "codeclone.surfaces.mcp._workspace_hygiene.collect_dirty_snapshot",
         lambda _root: DirtySnapshot(
@@ -370,4 +362,4 @@ def test_workspace_hygiene_state_helpers_and_finish_short_circuit(
         own_start_epoch=1,
         own_intent_id="intent-a",
     )
-    assert result.git_available is True
+    assert result.git_available is False
