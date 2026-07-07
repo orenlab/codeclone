@@ -194,7 +194,6 @@ codeclone = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["tools/review"]
 addopts = "-ra"
 markers = [
     "needs_sqlite_cleanup: run expensive gc.get_objects() sqlite teardown after this test (fallback when connect tracking misses leaks)",
@@ -269,7 +268,7 @@ warn_return_any = true
 disallow_any_generics = true
 disallow_untyped_defs = true
 no_implicit_optional = true
-files = ["codeclone", "tests", "tools/review/review_kit"]
+files = ["codeclone", "tests"]
 exclude = [
     "^build/",
     "^site/",

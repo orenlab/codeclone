@@ -88,15 +88,14 @@ graph TD
 | `codeclone/contracts/__init__.py` | Version constants (`BASELINE_FINGERPRINT_VERSION`, etc.); read by tools and MCP memory ingest |
 | `codeclone.audit.reader`      | Read-only artifact access (no MCP dependency); CLI entry point                        |
 | `codeclone.surfaces.mcp.server:main` | MCP server entry point (`codeclone-mcp`); imports MCP runtime                  |
-| `tools/review/` (pythonpath)  | Maintainer-only review kit; **must not** ship in wheel                                 |
 
 ### review_kit exclusion
 
-`tools/review/review_kit` is maintainer-only. **Contract:** Do not add it to `setuptools.packages` or include it in the wheel.
-
-**How it works:** `pytest.ini_options.pythonpath = ["tools/review"]` allows tests to import `review_kit` during test runs only. The module is never installed in the package.
-
-**Failure mode:** If `review_kit` is accidentally packaged, wheel size bloats (~150 KB), and private contracts leak into public installs.
+The maintainer-only review kit is not tracked in this repository — it lives
+under the gitignored `.claude/` tree (`.claude/tools/review/`). It is therefore
+structurally excluded from the sdist/wheel: only `codeclone.*` packages are
+declared in `[tool.setuptools].packages`, which is enforced by
+`tests/test_packaging.py::test_setuptools_packages_are_codeclone_only`.
 
 ## Failure modes
 
@@ -130,20 +129,6 @@ git push origin v2.1.1
 uv run --with build python -m build --sdist --wheel
 uv run --with twine twine check dist/*
 ```
-
-### review_kit in wheel
-
-**Symptom:** Installed package contains `review_kit` module.
-
-**Detection:**
-```bash
-python -c "import codeclone.review_kit"  # Should fail
-pip show codeclone | grep Location
-cd $(pip show codeclone | grep Location | cut -d' ' -f2)
-ls -la codeclone/ | grep review  # Should be empty
-```
-
-**Fix:** Never add `tools/review` to `setuptools.packages`. Ensure `pytest.ini_options.pythonpath` is not mirrored in package config.
 
 ### MCP import in base CLI
 
@@ -223,7 +208,7 @@ No approval gate exists between build and PyPI publish. **QA responsibility:** E
 | `mcp` is optional                        | `pyproject.toml` line 68–71       | supported     |
 | MCP-only edit cycle                      | CLAUDE.md § Change control; MCP server surface only | supported |
 | Base CLI has no MCP import               | `codeclone.audit.reader` contract; `codeclone.main` entry point | path_only |
-| review_kit must not ship                 | `pytest.ini_options.pythonpath`; no setuptools pkg inclusion | path_only |
+| review_kit must not ship                 | out of repo (`.claude/tools/review/`, gitignored); no setuptools pkg inclusion | supported |
 | Publish automates on release tag         | `.github/workflows/publish.yml` line 8, 96–117 | supported |
 | Tag-to-version gate enforced             | `.github/workflows/publish.yml` line 45–61       | supported |
 | Twine validation required                | `.github/workflows/publish.yml` line 66–67       | supported |

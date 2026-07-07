@@ -6,9 +6,6 @@
 
 from __future__ import annotations
 
-import subprocess
-import sys
-import zipfile
 from pathlib import Path
 from typing import cast
 
@@ -68,30 +65,3 @@ def test_setuptools_packages_are_codeclone_only() -> None:
         "Remove non-codeclone packages from [tool.setuptools].packages: "
         + ", ".join(non_codeclone)
     )
-
-
-def test_wheel_excludes_internal_review_kit(tmp_path: Path) -> None:
-    """Built wheel must not install review_kit into site-packages."""
-
-    repo_root = Path(__file__).resolve().parents[1]
-    subprocess.run(
-        [sys.executable, "-m", "build", "--wheel", "-o", str(tmp_path)],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    wheels = sorted(tmp_path.glob("*.whl"))
-    assert len(wheels) == 1
-
-    with zipfile.ZipFile(wheels[0]) as archive:
-        names = archive.namelist()
-        review_paths = [name for name in names if name.startswith("review_kit/")]
-        assert review_paths == []
-
-        top_level_entries = [
-            name for name in names if name.endswith(".dist-info/top_level.txt")
-        ]
-        assert len(top_level_entries) == 1
-        top_level = archive.read(top_level_entries[0]).decode().splitlines()
-        assert "review_kit" not in top_level
