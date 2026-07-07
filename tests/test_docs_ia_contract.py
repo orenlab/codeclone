@@ -109,7 +109,7 @@ def _load_zensical_config() -> dict[str, object]:
         tomllib = importlib.import_module("tomllib")
         return cast(dict[str, object], tomllib.loads(text))
     tomli = importlib.import_module("tomli")
-    return cast(dict[str, object], tomli.loads(text.encode("utf-8")))
+    return cast(dict[str, object], tomli.loads(text))
 
 
 def test_zensical_nav_targets_exist() -> None:
