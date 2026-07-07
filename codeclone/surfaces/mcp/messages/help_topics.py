@@ -24,46 +24,94 @@ class MCPHelpTopicSpec:
     anti_patterns: tuple[str, ...] = ()
 
 
-MCP_BOOK_URL: Final = f"{DOCS_URL}book/"
-MCP_GUIDE_URL: Final = f"{DOCS_URL}guide/mcp/"
 MCP_INTERFACE_DOC_LINK: Final[tuple[str, str]] = (
     "MCP interface contract",
-    f"{MCP_BOOK_URL}25-mcp-interface/",
+    f"{DOCS_URL}concepts/mcp/",
 )
 BASELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Baseline contract",
-    f"{MCP_BOOK_URL}07-baseline/",
+    f"{DOCS_URL}concepts/reports/",
 )
 CONFIG_DOC_LINK: Final[tuple[str, str]] = (
     "Config and defaults",
-    f"{MCP_BOOK_URL}10-config-and-defaults/",
+    f"{DOCS_URL}reference/configuration/",
 )
 REPORT_DOC_LINK: Final[tuple[str, str]] = (
     "Report contract",
-    f"{MCP_BOOK_URL}05-report/",
+    f"{DOCS_URL}reference/reports/",
 )
 CLI_DOC_LINK: Final[tuple[str, str]] = (
     "CLI contract",
-    f"{MCP_BOOK_URL}11-cli/",
+    f"{DOCS_URL}reference/cli/",
 )
 PIPELINE_DOC_LINK: Final[tuple[str, str]] = (
     "Core pipeline",
-    f"{MCP_BOOK_URL}03-core-pipeline/",
+    f"{DOCS_URL}concepts/structural-analysis/",
 )
 SUPPRESSIONS_DOC_LINK: Final[tuple[str, str]] = (
     "Inline suppressions contract",
-    f"{MCP_BOOK_URL}19-inline-suppressions/",
+    f"{DOCS_URL}reference/suppressions/",
 )
-MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = ("MCP usage guide", MCP_GUIDE_URL)
+MCP_GUIDE_DOC_LINK: Final[tuple[str, str]] = (
+    "MCP usage guide",
+    f"{DOCS_URL}guides/agent-safe-change/",
+)
 CHANGE_CONTROL_DOC_LINK: Final[tuple[str, str]] = (
     "Structural change controller",
-    f"{MCP_BOOK_URL}12-structural-change-controller/",
+    f"{DOCS_URL}concepts/controlled-change/",
 )
 ENGINEERING_MEMORY_DOC_LINK: Final[tuple[str, str]] = (
     "Engineering Memory",
-    f"{MCP_BOOK_URL}13-engineering-memory/",
+    f"{DOCS_URL}concepts/engineering-memory/",
 )
 HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
+    "overview": MCPHelpTopicSpec(
+        summary=(
+            "Index of CodeClone MCP workflows. Use it to choose the narrowest "
+            "tool before spending context on broad evidence."
+        ),
+        key_points=(
+            (
+                "Start with analyze_repository or analyze_changed_paths, then "
+                "open get_run_summary or get_production_triage."
+            ),
+            (
+                "Use list_hotspots or focused check_* tools before broad "
+                "list_findings calls."
+            ),
+            (
+                "Budgeted responses disclose hidden evidence through "
+                "context_governance.omitted and the top-level _continuation "
+                "pointer."
+            ),
+            (
+                "For edits, use start_controlled_change, retrieve scoped "
+                "memory/context, then finish_controlled_change."
+            ),
+        ),
+        recommended_tools=(
+            "analyze_repository",
+            "analyze_changed_paths",
+            "get_run_summary",
+            "get_production_triage",
+            "list_hotspots",
+            "get_implementation_context",
+            "get_relevant_memory",
+            "start_controlled_change",
+            "finish_controlled_change",
+        ),
+        doc_links=(MCP_INTERFACE_DOC_LINK, MCP_GUIDE_DOC_LINK),
+        warnings=(
+            (
+                "The overview is an index, not a substitute for the specific "
+                "topic help that owns each contract."
+            ),
+        ),
+        anti_patterns=(
+            "Starting with broad list_findings when a hotlist or check_* tool fits.",
+            "Ignoring _continuation when context_governance.omitted is present.",
+        ),
+    ),
     "workflow": MCPHelpTopicSpec(
         summary=(
             "CodeClone MCP is triage-first and budget-aware. Start with a "
@@ -656,7 +704,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "detail_level compact|normal; full is reserved for future "
                 "by-id detail sections and downgrades to normal here. limit "
-                "clamps to [1, 50]."
+                "clamps to [1, 100]."
             ),
             (
                 "Anti-inference: this is CodeClone's runtime, not the user "

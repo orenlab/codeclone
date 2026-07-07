@@ -9,7 +9,9 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
+from types import TracebackType
 
 from ...audit import AuditEvent, AuditWriter, repo_root_digest
 from ...audit.runtime import open_audit_writer_for_root
@@ -32,6 +34,7 @@ from ._session_baseline import (
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
 from ._session_context_mixin import _MCPSessionContextMixin
+from ._session_finding_mixin import _StateLock
 from ._session_insights_mixin import _MCPSessionInsightsMixin
 from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_memory_mixin import _MCPSessionMemoryMixin
@@ -82,6 +85,32 @@ from ._session_workflow_mixin import _MCPSessionWorkflowMixin
 from ._workspace_drift import build_run_manifest
 from ._workspace_hygiene import collect_dirty_snapshot
 
+
+class _RuntimeStateLock:
+    """RLock adapter with a typing-friendly context manager surface."""
+
+    __slots__ = ("_lock",)
+
+    def __init__(self) -> None:
+        self._lock = RLock()
+
+    def __enter__(self) -> object:
+        return self._lock.__enter__()
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        tb: TracebackType | None,
+    ) -> bool | None:
+        self._lock.__exit__(exc_type, exc, tb)
+        return None
+
+
+def _new_state_lock() -> _StateLock:
+    return _RuntimeStateLock()
+
+
 __all__ = [
     "DEFAULT_MCP_HISTORY_LIMIT",
     "MAX_MCP_HISTORY_LIMIT",
@@ -125,12 +154,12 @@ class MCPSession(
         self._ide_governance = IdeGovernanceSessionState(
             channel_enabled=ide_governance_channel
         )
-        self._state_lock = RLock()
+        self._state_lock = _new_state_lock()
         self._review_state: dict[str, OrderedDict[str, str | None]] = {}
         self._last_gate_results: dict[str, dict[str, object]] = {}
         self._spread_max_cache: dict[str, int] = {}
         self._blast_radius_cache: dict[
-            tuple[str, tuple[str, ...], str],
+            tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
             BlastRadiusResult,
         ] = {}
         self._context_projection_pages: dict[str, ContextProjectionArtifact] = {}
@@ -222,6 +251,12 @@ class MCPSession(
                 )
             )
         except Exception:
+            try:
+                from ...observability import record_counter
+
+                record_counter("audit.emit_dropped")
+            except Exception:
+                pass
             return None
 
     def _audit_writer_for_root(self, root: Path) -> AuditWriter:
@@ -249,20 +284,22 @@ class MCPSession(
             git_diff_ref=request.git_diff_ref,
         )
         args = self._build_args(root_path=root_path, request=request)
-        (
-            baseline_path,
-            baseline_exists,
-            metrics_baseline_path,
-            metrics_baseline_exists,
-            shared_baseline_payload,
-        ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
+        with span(name="pipeline.baseline"):
+            (
+                baseline_path,
+                baseline_exists,
+                metrics_baseline_path,
+                metrics_baseline_exists,
+                shared_baseline_payload,
+            ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
         cache_path = _helpers._resolve_cache_path(root_path=root_path, args=args)
-        cache = _helpers._build_cache(
-            root_path=root_path,
-            args=args,
-            cache_path=cache_path,
-            policy=request.cache_policy,
-        )
+        with span(name="pipeline.cache_load"):
+            cache = _helpers._build_cache(
+                root_path=root_path,
+                args=args,
+                cache_path=cache_path,
+                policy=request.cache_policy,
+            )
         console = _BufferConsole()
 
         # Stage spans so mcp.analyze_repository carries the same discover/process/
@@ -413,21 +450,26 @@ class MCPSession(
                 analysis_result.project_metrics
             )
 
-        report_artifacts = report(
-            boot=boot,
-            discovery=discovery_result,
-            processing=processing_result,
-            analysis=analysis_result,
-            report_meta=report_meta,
-            new_func=new_func,
-            new_block=new_block,
-            metrics_diff=metrics_diff,
-        )
-        report_json = report_artifacts.json
-        if report_json is None:
-            raise MCPServiceError("CodeClone MCP expected a canonical JSON report.")
-        report_document = _helpers._load_report_document(report_json)
-        run_id = _helpers._report_digest(report_document)
+        cache.release_loaded_entries()
+        with span(name="pipeline.report"):
+            report_boot = replace(boot, output_paths=OutputPaths())
+            report_artifacts = report(
+                boot=report_boot,
+                discovery=discovery_result,
+                processing=processing_result,
+                analysis=analysis_result,
+                report_meta=report_meta,
+                new_func=new_func,
+                new_block=new_block,
+                metrics_diff=metrics_diff,
+                include_report_document=True,
+            )
+            report_document = report_artifacts.report_document
+            if report_document is None:
+                raise MCPServiceError(
+                    "CodeClone MCP expected a canonical report document."
+                )
+            run_id = _helpers._report_digest(report_document)
 
         warning_items = set(console.messages)
         baseline_warning = getattr(clone_baseline_state, "warning_message", None)

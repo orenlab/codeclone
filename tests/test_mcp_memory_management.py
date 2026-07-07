@@ -135,6 +135,17 @@ def test_mcp_manage_memory_validation_errors(tmp_path: Path) -> None:
                 action="record_candidate",
                 statement="missing type",
             )
+        with pytest.raises(
+            MCPServiceContractError,
+            match="Invalid Engineering Memory record_type",
+        ):
+            service.manage_engineering_memory(
+                root=root_str,
+                action="record_candidate",
+                record_type="decision",
+                statement="bad type",
+                subject_path="pkg/mod.py",
+            )
         with pytest.raises(MCPServiceContractError, match="validate_claims requires"):
             service.manage_engineering_memory(
                 root=root_str,

@@ -499,6 +499,14 @@ def test_context_governance_enforcement_truth_table() -> None:
         }, label
 
 
+def test_as_mapping_or_none_preserves_mapping_identity() -> None:
+    mapping: dict[str, object] = {"facet": "memory_record", "shown": 0}
+    value: object = mapping
+    result = governance_mod._as_mapping_or_none(value)
+    assert result is mapping
+    assert governance_mod._as_mapping_or_none("bad") is None
+
+
 def test_context_governance_has_no_tokenizer_dependency() -> None:
     source = inspect.getsource(governance_mod)
 

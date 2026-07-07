@@ -279,13 +279,13 @@ class _MCPSessionFindingMixin:
             return None
         return _helpers._resolve_root(cleaned_root)
 
-    def _finding_id_maps(
+    def _finding_id_maps_for_findings(
         self,
-        record: MCPRunRecord,
+        findings: Sequence[Mapping[str, object]],
     ) -> tuple[dict[str, str], dict[str, str]]:
         canonical_ids = sorted(
             str(finding.get("id", ""))
-            for finding in self._base_findings(record)
+            for finding in findings
             if str(finding.get("id", ""))
         )
         base_ids = {
@@ -309,12 +309,21 @@ class _MCPSessionFindingMixin:
                 short_to_canonical[disambiguated] = canonical_id
         return canonical_to_short, short_to_canonical
 
+    def _finding_id_maps(
+        self,
+        record: MCPRunRecord,
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        return self._finding_id_maps_for_findings(self._base_findings(record))
+
     def _short_finding_id(
         self,
         record: MCPRunRecord,
         canonical_id: str,
+        *,
+        canonical_to_short: Mapping[str, str] | None = None,
     ) -> str:
-        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
+        if canonical_to_short is None:
+            canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
         return canonical_to_short.get(canonical_id, canonical_id)
 
     def _resolve_canonical_finding_id(
@@ -359,7 +368,7 @@ class _MCPSessionFindingMixin:
             ],
         ]
 
-    def _query_findings(
+    def _ordered_finding_rows(
         self,
         *,
         record: MCPRunRecord,
@@ -369,10 +378,14 @@ class _MCPSessionFindingMixin:
         source_kind: str | None = None,
         novelty: FindingNoveltyFilter = "all",
         sort_by: FindingSort = "default",
-        detail_level: DetailLevel = "normal",
         changed_paths: Sequence[str] = (),
         exclude_reviewed: bool = False,
-    ) -> list[dict[str, object]]:
+    ) -> tuple[
+        list[dict[str, object]],
+        int,
+        dict[str, dict[str, object] | None],
+        dict[str, Mapping[str, object]],
+    ]:
         findings = self._base_findings(record)
         max_spread_value = max(
             (self._spread_value(finding) for finding in findings),
@@ -400,33 +413,65 @@ class _MCPSessionFindingMixin:
             )
             and (not exclude_reviewed or not self._finding_is_reviewed(record, finding))
         ]
-        remediation_map = {
-            str(finding.get("id", "")): self._remediation_for_finding(record, finding)
-            for finding in filtered
-        }
-        priority_map = {
-            str(finding.get("id", "")): self._priority_score(
-                record,
-                finding,
-                remediation=remediation_map[str(finding.get("id", ""))],
-                max_spread_value=max_spread_value,
-            )
-            for finding in filtered
-        }
+        remediation_map: dict[str, dict[str, object] | None] = {}
+        priority_map: dict[str, Mapping[str, object]] = {}
+        if sort_by == "priority":
+            for finding in filtered:
+                finding_id = str(finding.get("id", ""))
+                remediation = self._remediation_for_finding(record, finding)
+                remediation_map[finding_id] = remediation
+                priority_map[finding_id] = self._priority_score(
+                    record,
+                    finding,
+                    remediation=remediation,
+                    max_spread_value=max_spread_value,
+                )
         ordered = self._sort_findings(
             record=record,
             findings=filtered,
             sort_by=sort_by,
-            priority_map=priority_map,
+            priority_map=priority_map or None,
         )
+        return ordered, max_spread_value, remediation_map, priority_map
+
+    def _query_findings(
+        self,
+        *,
+        record: MCPRunRecord,
+        family: FindingFamilyFilter = "all",
+        category: str | None = None,
+        severity: str | None = None,
+        source_kind: str | None = None,
+        novelty: FindingNoveltyFilter = "all",
+        sort_by: FindingSort = "default",
+        detail_level: DetailLevel = "normal",
+        changed_paths: Sequence[str] = (),
+        exclude_reviewed: bool = False,
+    ) -> list[dict[str, object]]:
+        ordered, max_spread_value, remediation_map, priority_map = (
+            self._ordered_finding_rows(
+                record=record,
+                family=family,
+                category=category,
+                severity=severity,
+                source_kind=source_kind,
+                novelty=novelty,
+                sort_by=sort_by,
+                changed_paths=changed_paths,
+                exclude_reviewed=exclude_reviewed,
+            )
+        )
+        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
         return [
             self._decorate_finding(
                 record,
                 finding,
                 detail_level=detail_level,
-                remediation=remediation_map[str(finding.get("id", ""))],
-                priority_payload=priority_map[str(finding.get("id", ""))],
+                remediation=remediation_map.get(str(finding.get("id", ""))),
+                remediation_computed=str(finding.get("id", "")) in remediation_map,
+                priority_payload=priority_map.get(str(finding.get("id", ""))),
                 max_spread_value=max_spread_value,
+                canonical_to_short=canonical_to_short,
             )
             for finding in ordered
         ]
@@ -484,12 +529,14 @@ class _MCPSessionFindingMixin:
         *,
         detail_level: DetailLevel,
         remediation: Mapping[str, object] | None = None,
+        remediation_computed: bool = False,
         priority_payload: Mapping[str, object] | None = None,
         max_spread_value: int | None = None,
+        canonical_to_short: Mapping[str, str] | None = None,
     ) -> dict[str, object]:
         resolved_remediation = (
             remediation
-            if remediation is not None
+            if remediation_computed or remediation is not None
             else self._remediation_for_finding(record, finding)
         )
         resolved_priority_payload = (
@@ -503,6 +550,14 @@ class _MCPSessionFindingMixin:
             )
         )
         payload = dict(finding)
+        canonical_id = str(finding.get("id", "")).strip()
+        short_finding_id = self._short_finding_id(
+            record,
+            canonical_id,
+            canonical_to_short=canonical_to_short,
+        )
+        payload["canonical_id"] = canonical_id
+        payload["short_id"] = short_finding_id
         payload["priority_score"] = resolved_priority_payload["score"]
         payload["priority_factors"] = resolved_priority_payload["factors"]
         payload["locations"] = self._locations_for_finding(
@@ -510,7 +565,8 @@ class _MCPSessionFindingMixin:
             finding,
             include_uri=detail_level == "full",
         )
-        payload["html_anchor"] = f"finding-{finding.get('id', '')}"
+        payload["html_anchor"] = f"finding-{canonical_id}"
+        payload["novelty"] = self._finding_novelty(finding)
         if resolved_remediation is not None:
             payload["remediation"] = resolved_remediation
         return self._project_finding_detail(
@@ -526,18 +582,29 @@ class _MCPSessionFindingMixin:
         *,
         detail_level: DetailLevel,
     ) -> dict[str, object]:
+        canonical_id = str(finding.get("canonical_id") or finding.get("id", "")).strip()
+        short_finding_id = str(
+            finding.get("short_id") or self._short_finding_id(record, canonical_id)
+        )
+        html_anchor = str(
+            finding.get("html_anchor") or f"finding-{canonical_id}"
+        ).strip()
         if detail_level == "full":
             full_payload = dict(finding)
-            full_payload["id"] = self._short_finding_id(
-                record,
-                str(finding.get("id", "")),
-            )
+            full_payload["id"] = short_finding_id
+            full_payload["short_id"] = short_finding_id
+            full_payload["canonical_id"] = canonical_id
+            full_payload["html_anchor"] = html_anchor
+            full_payload["novelty"] = self._finding_novelty(finding)
             return full_payload
         payload: dict[str, object] = {
-            "id": self._short_finding_id(record, str(finding.get("id", ""))),
+            "id": short_finding_id,
+            "short_id": short_finding_id,
+            "canonical_id": canonical_id,
+            "html_anchor": html_anchor,
             "kind": _helpers._finding_kind_label(finding),
             "severity": str(finding.get("severity", "")),
-            "novelty": str(finding.get("novelty", "")),
+            "novelty": self._finding_novelty(finding),
             "scope": _helpers._finding_source_kind(finding),
             "count": _as_int(finding.get("count", 0), 0),
             "spread": dict(_helpers._as_mapping(finding.get("spread"))),
@@ -635,7 +702,7 @@ class _MCPSessionFindingMixin:
         ).strip()
         if source_kind is not None and dominant_kind != source_kind:
             return False
-        return novelty == "all" or str(finding.get("novelty", "")).strip() == novelty
+        return novelty == "all" or self._finding_novelty(finding) == novelty
 
     def _finding_touches_paths(
         self,
@@ -706,7 +773,7 @@ class _MCPSessionFindingMixin:
                 0.6,
             ),
             "novelty_weight": _NOVELTY_WEIGHT.get(
-                str(finding.get("novelty", "")),
+                self._finding_novelty(finding),
                 0.7,
             ),
             "runtime_weight": _RUNTIME_WEIGHT.get(
@@ -764,6 +831,11 @@ class _MCPSessionFindingMixin:
         functions = _as_int(spread.get("functions", 0), 0)
         count = _as_int(finding.get("count", 0), 0)
         return max(files, functions, count, 1)
+
+    @staticmethod
+    def _finding_novelty(finding: Mapping[str, object]) -> str:
+        novelty = str(finding.get("novelty", "")).strip()
+        return novelty or "known"
 
     def _locations_for_finding(
         self,
@@ -823,7 +895,7 @@ class _MCPSessionFindingMixin:
         spread_functions = _as_int(getattr(suggestion, "spread_functions", 0), 0)
         title = str(getattr(suggestion, "title", "")).strip()
         severity = str(finding.get("severity", "")).strip()
-        novelty = str(finding.get("novelty", "known")).strip()
+        novelty = self._finding_novelty(finding)
         count = _as_int(
             getattr(suggestion, "fact_count", 0) or finding.get("count", 0) or 0,
             0,
@@ -875,30 +947,61 @@ class _MCPSessionFindingMixin:
         changed_paths: Sequence[str],
         exclude_reviewed: bool,
     ) -> list[dict[str, object]]:
+        selection = self._hotspot_selection(
+            record=record,
+            kind=kind,
+            changed_paths=changed_paths,
+            exclude_reviewed=exclude_reviewed,
+            limit=None,
+        )
+        return self._decorate_hotspot_selection(
+            record=record,
+            selection=selection,
+            detail_level=detail_level,
+        )
+
+    def _hotspot_selection(
+        self,
+        *,
+        record: MCPRunRecord,
+        kind: HotlistKind,
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+        limit: int | None,
+    ) -> tuple[
+        list[dict[str, object]],
+        int,
+        int,
+        dict[str, dict[str, object] | None],
+        dict[str, Mapping[str, object]],
+        dict[str, str],
+    ]:
         findings = self._base_findings(record)
         finding_index = {str(finding.get("id", "")): finding for finding in findings}
+        canonical_to_short, _short_to_canonical = self._finding_id_maps_for_findings(
+            findings
+        )
         max_spread_value = max(
             (self._spread_value(finding) for finding in findings),
             default=0,
         )
         with self._state_lock:
             self._spread_max_cache[record.run_id] = max_spread_value
-        remediation_map = {
-            str(finding.get("id", "")): self._remediation_for_finding(record, finding)
-            for finding in findings
-        }
-        priority_map = {
-            str(finding.get("id", "")): self._priority_score(
-                record,
-                finding,
-                remediation=remediation_map[str(finding.get("id", ""))],
-                max_spread_value=max_spread_value,
-            )
-            for finding in findings
-        }
+        remediation_map: dict[str, dict[str, object] | None] = {}
+        priority_map: dict[str, Mapping[str, object]] = {}
         derived = _helpers._as_mapping(record.report_document.get("derived"))
         hotlists = _helpers._as_mapping(derived.get("hotlists"))
         if kind == "highest_priority":
+            for finding in findings:
+                finding_id = str(finding.get("id", ""))
+                remediation = self._remediation_for_finding(record, finding)
+                remediation_map[finding_id] = remediation
+                priority_map[finding_id] = self._priority_score(
+                    record,
+                    finding,
+                    remediation=remediation,
+                    max_spread_value=max_spread_value,
+                )
             ordered_ids = [
                 str(finding.get("id", ""))
                 for finding in self._sort_findings(
@@ -911,34 +1014,126 @@ class _MCPSessionFindingMixin:
         else:
             hotlist_key = _HOTLIST_REPORT_KEYS.get(kind)
             if hotlist_key is None:
-                return []
+                return (
+                    [],
+                    0,
+                    max_spread_value,
+                    remediation_map,
+                    priority_map,
+                    canonical_to_short,
+                )
             ordered_ids = [
                 str(item)
                 for item in _helpers._as_sequence(hotlists.get(hotlist_key))
                 if str(item)
             ]
-        rows: list[dict[str, object]] = []
+        selected: list[dict[str, object]] = []
+        total = 0
         for finding_id in ordered_ids:
-            finding = finding_index.get(finding_id)
-            if finding is None or not self._include_hotspot_finding(
+            finding_row = finding_index.get(finding_id)
+            if finding_row is None or not self._include_hotspot_finding(
                 record=record,
-                finding=finding,
+                finding=finding_row,
                 changed_paths=changed_paths,
                 exclude_reviewed=exclude_reviewed,
             ):
                 continue
-            finding_id_key = str(finding.get("id", ""))
+            total += 1
+            if limit is None or len(selected) < limit:
+                selected.append(dict(finding_row))
+        return (
+            selected,
+            total,
+            max_spread_value,
+            remediation_map,
+            priority_map,
+            canonical_to_short,
+        )
+
+    def _decorate_hotspot_selection(
+        self,
+        *,
+        record: MCPRunRecord,
+        selection: tuple[
+            list[dict[str, object]],
+            int,
+            int,
+            dict[str, dict[str, object] | None],
+            dict[str, Mapping[str, object]],
+            dict[str, str],
+        ],
+        detail_level: DetailLevel,
+    ) -> list[dict[str, object]]:
+        (
+            findings,
+            _total,
+            max_spread_value,
+            remediation_map,
+            priority_map,
+            canonical_to_short,
+        ) = selection
+        rows: list[dict[str, object]] = []
+        for finding in findings:
+            finding_id = str(finding.get("id", ""))
             rows.append(
                 self._decorate_finding(
                     record,
                     finding,
                     detail_level=detail_level,
-                    remediation=remediation_map[finding_id_key],
-                    priority_payload=priority_map[finding_id_key],
+                    remediation=remediation_map.get(finding_id),
+                    remediation_computed=finding_id in remediation_map,
+                    priority_payload=priority_map.get(finding_id),
                     max_spread_value=max_spread_value,
+                    canonical_to_short=canonical_to_short,
                 )
             )
         return rows
+
+    def _hotspot_empty_reason(
+        self,
+        *,
+        record: MCPRunRecord,
+        kind: HotlistKind,
+        detail_level: DetailLevel,
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+    ) -> str:
+        findings = self._base_findings(record)
+        if not findings:
+            return "no_findings_in_run"
+        if changed_paths:
+            return "changed_paths_filter_excluded_all"
+        if exclude_reviewed:
+            rows_with_reviewed = self._hotspot_rows(
+                record=record,
+                kind=kind,
+                detail_level=detail_level,
+                changed_paths=(),
+                exclude_reviewed=False,
+            )
+            if rows_with_reviewed:
+                return "all_items_reviewed"
+        if kind == "highest_priority":
+            return "no_ranked_findings"
+
+        hotlist_key = _HOTLIST_REPORT_KEYS.get(kind)
+        if hotlist_key is None:
+            return "unsupported_hotlist_kind"
+        derived = _helpers._as_mapping(record.report_document.get("derived"))
+        hotlists = _helpers._as_mapping(derived.get("hotlists"))
+        hotlist_ids = [
+            str(item)
+            for item in _helpers._as_sequence(hotlists.get(hotlist_key))
+            if str(item)
+        ]
+        if not hotlist_ids:
+            return {
+                "most_actionable": "no_items_above_actionability_threshold",
+                "highest_spread": "no_spread_hotspots",
+                "production_hotspots": "no_production_hotspots",
+                "test_fixture_hotspots": "no_test_fixture_hotspots",
+            }.get(kind, "hotlist_unpopulated")
+        return "hotlist_items_filtered_or_unavailable"
 
     def _granular_payload(
         self,
@@ -1071,17 +1266,24 @@ class _MCPSessionFindingMixin:
             )
             for suggestion in record.suggestions
         }
+        canonical_to_short, short_to_canonical = self._finding_id_maps(record)
         rows: list[dict[str, object]] = []
         for row in canonical_rows:
             canonical_finding_id = str(row.get("finding_id", ""))
             action = _helpers._as_mapping(row.get("action"))
-            try:
+            resolved_canonical_id = resolve_finding_id(
+                canonical_to_short=canonical_to_short,
+                short_to_canonical=short_to_canonical,
+                finding_id=canonical_finding_id,
+            )
+            if resolved_canonical_id is None:
+                finding_id = _helpers._base_short_finding_id(canonical_finding_id)
+            else:
                 finding_id = self._short_finding_id(
                     record,
-                    self._resolve_canonical_finding_id(record, canonical_finding_id),
+                    resolved_canonical_id,
+                    canonical_to_short=canonical_to_short,
                 )
-            except MCPFindingNotFoundError:
-                finding_id = _helpers._base_short_finding_id(canonical_finding_id)
             rows.append(
                 {
                     "id": f"suggestion:{finding_id}",
@@ -1151,24 +1353,39 @@ class _MCPSessionFindingMixin:
             1,
             min(max_results if max_results is not None else limit, 200),
         )
-        filtered = self._query_findings(
-            record=record,
-            family=validated_family,
-            category=category,
-            severity=validated_severity,
-            source_kind=source_kind,
-            novelty=validated_novelty,
-            sort_by=validated_sort,
-            detail_level=validated_detail,
-            changed_paths=paths_filter,
-            exclude_reviewed=exclude_reviewed,
+        ordered, max_spread_value, remediation_map, priority_map = (
+            self._ordered_finding_rows(
+                record=record,
+                family=validated_family,
+                category=category,
+                severity=validated_severity,
+                source_kind=source_kind,
+                novelty=validated_novelty,
+                sort_by=validated_sort,
+                changed_paths=paths_filter,
+                exclude_reviewed=exclude_reviewed,
+            )
         )
         page = paginate(
-            filtered,
+            ordered,
             offset=offset,
             limit=normalized_limit,
             max_limit=200,
         )
+        canonical_to_short, _short_to_canonical = self._finding_id_maps(record)
+        items = [
+            self._decorate_finding(
+                record,
+                finding,
+                detail_level=validated_detail,
+                remediation=remediation_map.get(str(finding.get("id", ""))),
+                remediation_computed=str(finding.get("id", "")) in remediation_map,
+                priority_payload=priority_map.get(str(finding.get("id", ""))),
+                max_spread_value=max_spread_value,
+                canonical_to_short=canonical_to_short,
+            )
+            for finding in page.items
+        ]
         return {
             "run_id": _helpers._short_run_id(record.run_id),
             "detail_level": validated_detail,
@@ -1179,7 +1396,7 @@ class _MCPSessionFindingMixin:
             "returned": len(page.items),
             "total": page.total,
             "next_offset": page.next_offset,
-            "items": page.items,
+            "items": items,
         }
 
     def get_finding(
@@ -1195,17 +1412,18 @@ class _MCPSessionFindingMixin:
             detail_level,
             _VALID_DETAIL_LEVELS,
         )
-        canonical_id = self._resolve_canonical_finding_id(record, finding_id)
-        for finding in self._base_findings(record):
-            if str(finding.get("id")) == canonical_id:
-                return self._decorate_finding(
-                    record,
-                    finding,
-                    detail_level=validated_detail,
-                )
-        raise MCPFindingNotFoundError(
-            f"Finding id '{finding_id}' was not found in run "
-            f"'{_helpers._short_run_id(record.run_id)}'."
+        finding_payload, canonical_id = self._lookup_finding_detail(
+            record=record,
+            finding_id=finding_id,
+            detail_level=validated_detail,
+        )
+        if finding_payload is not None:
+            return finding_payload
+        return self._finding_not_found_payload(
+            record=record,
+            finding_id=finding_id,
+            detail_level=validated_detail,
+            canonical_id=canonical_id,
         )
 
     def _service_get_finding(
@@ -1215,11 +1433,70 @@ class _MCPSessionFindingMixin:
         run_id: str | None = None,
         detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
-        return self.get_finding(
-            finding_id=finding_id,
-            run_id=run_id,
-            detail_level=detail_level,
+        record = self._runs.get(run_id)
+        validated_detail = _helpers._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
         )
+        finding_payload, _canonical_id = self._lookup_finding_detail(
+            record=record,
+            finding_id=finding_id,
+            detail_level=validated_detail,
+        )
+        if finding_payload is not None:
+            return finding_payload
+        raise MCPFindingNotFoundError(
+            f"Finding id '{finding_id}' was not found in run "
+            f"'{_helpers._short_run_id(record.run_id)}'."
+        )
+
+    def _lookup_finding_detail(
+        self,
+        *,
+        record: MCPRunRecord,
+        finding_id: str,
+        detail_level: DetailLevel,
+    ) -> tuple[dict[str, object] | None, str | None]:
+        try:
+            canonical_id = self._resolve_canonical_finding_id(record, finding_id)
+        except MCPFindingNotFoundError:
+            return None, None
+        for finding in self._base_findings(record):
+            if str(finding.get("id")) == canonical_id:
+                return (
+                    self._decorate_finding(
+                        record,
+                        finding,
+                        detail_level=detail_level,
+                    ),
+                    canonical_id,
+                )
+        return None, canonical_id
+
+    def _finding_not_found_payload(
+        self,
+        *,
+        record: MCPRunRecord,
+        finding_id: str,
+        detail_level: DetailLevel,
+        canonical_id: str | None = None,
+    ) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "status": "not_found",
+            "run_id": _helpers._short_run_id(record.run_id),
+            "finding_id": finding_id,
+            "detail_level": detail_level,
+            "accepted_id_forms": ["short_id", "canonical_id"],
+            "next_tool": "list_hotspots",
+            "message": (
+                "Finding id was not found in this MCP run. Use list_hotspots, "
+                "list_findings, or a focused check_* tool to obtain current ids."
+            ),
+        }
+        if canonical_id:
+            payload["canonical_id"] = canonical_id
+        return payload
 
     def get_remediation(
         self,
@@ -1284,28 +1561,62 @@ class _MCPSessionFindingMixin:
             changed_paths=changed_paths,
             git_diff_ref=git_diff_ref,
         )
-        rows = self._hotspot_rows(
+        normalized_limit = max(
+            1,
+            min(max_results if max_results is not None else limit, 50),
+        )
+        selection = self._hotspot_selection(
+            record=record,
+            kind=validated_kind,
+            changed_paths=paths_filter,
+            exclude_reviewed=exclude_reviewed,
+            limit=normalized_limit,
+        )
+        rows = self._decorate_hotspot_selection(
+            record=record,
+            selection=selection,
+            detail_level=validated_detail,
+        )
+        payload: dict[str, object] = {
+            "run_id": _helpers._short_run_id(record.run_id),
+            "kind": validated_kind,
+            "detail_level": validated_detail,
+            "changed_paths": list(paths_filter),
+            "returned": len(rows),
+            "total": selection[1],
+            "items": [dict(_helpers._as_mapping(item)) for item in rows],
+        }
+        self._attach_hotspot_empty_reason(
+            payload,
             record=record,
             kind=validated_kind,
             detail_level=validated_detail,
             changed_paths=paths_filter,
             exclude_reviewed=exclude_reviewed,
+            rows=rows,
         )
-        normalized_limit = max(
-            1,
-            min(max_results if max_results is not None else limit, 50),
+        return payload
+
+    def _attach_hotspot_empty_reason(
+        self,
+        payload: dict[str, object],
+        *,
+        record: MCPRunRecord,
+        kind: HotlistKind,
+        detail_level: DetailLevel,
+        changed_paths: Sequence[str],
+        exclude_reviewed: bool,
+        rows: Sequence[Mapping[str, object]],
+    ) -> None:
+        if rows:
+            return
+        payload["empty_reason"] = self._hotspot_empty_reason(
+            record=record,
+            kind=kind,
+            detail_level=detail_level,
+            changed_paths=changed_paths,
+            exclude_reviewed=exclude_reviewed,
         )
-        return {
-            "run_id": _helpers._short_run_id(record.run_id),
-            "kind": validated_kind,
-            "detail_level": validated_detail,
-            "changed_paths": list(paths_filter),
-            "returned": min(len(rows), normalized_limit),
-            "total": len(rows),
-            "items": [
-                dict(_helpers._as_mapping(item)) for item in rows[:normalized_limit]
-            ],
-        }
 
     def mark_finding_reviewed(
         self,

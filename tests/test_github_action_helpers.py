@@ -181,6 +181,14 @@ def test_render_pr_comment_uses_canonical_report_summary() -> None:
     )
 
 
+def test_mapping_returns_json_object_unchanged() -> None:
+    action_impl = _load_action_impl()
+    payload: dict[str, object] = {"status": "ok", "count": 1}
+
+    assert action_impl._mapping(payload) is payload
+    assert action_impl._mapping(None) == {}
+
+
 def test_resolve_install_target_uses_repo_source_for_local_action_checkout(
     tmp_path: Path,
 ) -> None:

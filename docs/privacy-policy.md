@@ -1,18 +1,28 @@
+---
+title: "Privacy Policy"
+audience: public
+doc_type: legal
+status: draft
+source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+---
+
 <!-- doc-scope: PRIVACY POLICY — legal content.
      owns: privacy policy text.
-     does-not-own: MCP read-only contract (→ book/25, book/21).
+     does-not-own: MCP read-only contract (→ concepts/mcp.md, internal/).
      rule: cross-link to contracts, do not restate them. -->
 
 # Privacy Policy
 
 This page describes the privacy behavior of CodeClone's local integration
-surfaces, including the Claude Desktop bundle.
+surfaces, including the VS Code extension, Cursor plugin, Claude Code plugin,
+Codex plugin, and Claude Desktop bundle.
 
 ## CodeClone local privacy model
 
 CodeClone itself is a local analysis tool.
 
-For the CLI, MCP server, VS Code extension, and Claude Desktop bundle:
+For the CLI, MCP server, VS Code extension, Cursor plugin, Claude Code plugin,
+Codex plugin, and Claude Desktop bundle:
 
 - CodeClone does not run its own telemetry service
 - CodeClone does not send repository contents to an external CodeClone backend
@@ -27,7 +37,6 @@ For the CLI, MCP server, VS Code extension, and Claude Desktop bundle:
 CodeClone does not provide a remote telemetry exporter. Automatic pruning of
 the Platform Observability database is not currently enforced; users who enable
 persistence control that local file's lifecycle. See
-[Platform Observability](book/26-platform-observability.md) and
 [Plans and Retention](plans-and-retention.md).
 
 ## Claude Desktop bundle specifics

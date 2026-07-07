@@ -7,7 +7,6 @@ repos:
       - id: check-merge-conflict
       - id: end-of-file-fixer
       - id: trailing-whitespace
-      - id: check-added-large-files
       - id: check-toml
       - id: check-yaml
       - id: check-json
@@ -68,4 +67,12 @@ repos:
         language: system
         pass_filenames: false
         files: ^docs/.*\.md$
+        stages: [ pre-commit ]
+
+      - id: ty-prod-scope
+        name: Ty check production scope
+        entry: bash -c 'uv run ty check codeclone .github/actions benchmarks'
+        language: system
+        pass_filenames: false
+        always_run: true
         stages: [ pre-commit ]

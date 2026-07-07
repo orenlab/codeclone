@@ -1577,7 +1577,7 @@
           "type": "string"
         },
         "finding_id": {
-          "description": "Short or full canonical finding id.",
+          "description": "Short MCP finding id or full canonical finding id; get_finding returns status=not_found for unknown ids.",
           "title": "Finding Id",
           "type": "string"
         },
@@ -1868,6 +1868,12 @@
   {
     "input_schema": {
       "properties": {
+        "format": {
+          "default": "structured",
+          "description": "Stored patch-trail output: structured (typed, default).",
+          "title": "Format",
+          "type": "string"
+        },
         "patch_trail_digest": {
           "anyOf": [
             {
@@ -2038,7 +2044,7 @@
           "type": "string"
         },
         "finding_id": {
-          "description": "Short or full canonical finding id.",
+          "description": "Short MCP finding id or full canonical finding id; get_finding returns status=not_found for unknown ids.",
           "title": "Finding Id",
           "type": "string"
         },
@@ -2211,7 +2217,7 @@
           "type": "string"
         },
         "topic": {
-          "description": "workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, implementation_context, verification_profiles, observability",
+          "description": "overview, workflow, analysis_profile, suppressions, baseline, coverage, latest_runs, review_state, changed_scope, change_control, trust_boundaries, engineering_memory, implementation_context, verification_profiles, observability",
           "title": "Topic",
           "type": "string"
         }
@@ -2815,6 +2821,20 @@
         "record_type": {
           "anyOf": [
             {
+              "enum": [
+                "module_role",
+                "contract_note",
+                "test_anchor",
+                "document_link",
+                "risk_note",
+                "public_surface",
+                "contradiction_note",
+                "architecture_decision",
+                "change_rationale",
+                "protocol_rule",
+                "stale_marker",
+                "human_note"
+              ],
               "type": "string"
             },
             {
@@ -2896,7 +2916,7 @@
     "input_schema": {
       "properties": {
         "finding_id": {
-          "description": "Short or full canonical finding id.",
+          "description": "Short MCP finding id or full canonical finding id; get_finding returns status=not_found for unknown ids.",
           "title": "Finding Id",
           "type": "string"
         },
@@ -2955,7 +2975,7 @@
             }
           ],
           "default": null,
-          "description": "Optional filters: types, statuses, confidences, match_mode (any|all, search mode only), include_routine (trajectory_search, trajectory_anomalies, trajectory_agents, trajectory_dashboard; default false excludes run:* routine workflows).",
+          "description": "Optional filters: types, statuses, confidences, match_mode (any|all, search mode only), include_routine (trajectory_search, trajectory_anomalies, trajectory_agents, trajectory_dashboard; default false excludes run:* routine workflows). Unknown filter keys are rejected with a typed contract error.",
           "title": "Filters"
         },
         "include_drafts": {
@@ -3081,7 +3101,7 @@
         },
         "limit": {
           "default": 10,
-          "description": "Row cap per section; clamped to [1, 50], else 10.",
+          "description": "Row cap per section; clamped to [1, 100], else 10.",
           "title": "Limit",
           "type": "integer"
         },
@@ -3095,7 +3115,7 @@
             }
           ],
           "default": null,
-          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "description": "Selects the operation for section=operation_detail; echoed in ignored_parameters for aggregate sections that do not consume it.",
           "title": "Operation Id"
         },
         "root": {
@@ -3104,7 +3124,7 @@
           "type": "string"
         },
         "section": {
-          "description": "Telemetry section to project: summary | slow_operations | memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | correlated_chains | costly_noops | pipeline | analysis_phase_cost.",
+          "description": "Telemetry section to project: summary | slow_operations | memory_pipeline_cost | db_cost | agent_context | mcp_tool_matrix | correlated_chains | costly_noops | pipeline | analysis_phase_cost | operation_detail (per-span detail for one operation_id) | span_detail (one span_id).",
           "title": "Section",
           "type": "string"
         },
@@ -3118,7 +3138,7 @@
             }
           ],
           "default": null,
-          "description": "Reserved for detail sections; echoed in ignored_parameters.",
+          "description": "Selects the span for section=span_detail; echoed in ignored_parameters for aggregate sections that do not consume it.",
           "title": "Span Id"
         },
         "window": {

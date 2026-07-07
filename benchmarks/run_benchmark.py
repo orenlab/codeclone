@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean, median, pstdev
-from typing import Literal, cast
+from typing import Literal, TypeGuard, cast
 
 from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
@@ -707,9 +707,19 @@ def _comparison_metrics(scenarios: list[dict[str, object]]) -> dict[str, float]:
     return comparisons
 
 
+def _is_json_object(value: object) -> TypeGuard[dict[str, object]]:
+    return isinstance(value, dict)
+
+
+def _require_json_object(value: object, *, message: str) -> dict[str, object]:
+    if _is_json_object(value):
+        return value
+    raise RuntimeError(message)
+
+
 def _load_benchmark_payload(path: Path) -> dict[str, object]:
     payload_obj: object = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload_obj, dict):
+    if not _is_json_object(payload_obj):
         raise RuntimeError(f"benchmark payload is not an object: {path}")
     return payload_obj
 
@@ -721,12 +731,13 @@ def _scenario_medians(payload: Mapping[str, object]) -> dict[str, float]:
 
     medians: dict[str, float] = {}
     for item in scenarios_obj:
-        if not isinstance(item, dict):
+        if not _is_json_object(item):
             raise RuntimeError("benchmark scenario entry is not an object")
         name = item.get("name")
-        stats = item.get("stats_seconds")
-        if not isinstance(name, str) or not isinstance(stats, dict):
+        stats_obj = item.get("stats_seconds")
+        if not isinstance(name, str) or not _is_json_object(stats_obj):
             raise RuntimeError("benchmark scenario entry is missing name/stats_seconds")
+        stats = stats_obj
         median = stats.get("median")
         if not isinstance(median, (int, float)):
             raise RuntimeError(f"benchmark scenario {name} is missing median timing")
@@ -960,10 +971,14 @@ def main() -> int:
         print("startup probes:")
         for probe in startup_probe_results:
             name = str(probe["name"])
-            stats = probe["stats_seconds"]
-            cpu_stats = probe["child_cpu_stats_seconds"]
-            assert isinstance(stats, dict)
-            assert isinstance(cpu_stats, dict)
+            stats = _require_json_object(
+                probe["stats_seconds"],
+                message="startup probe stats_seconds is not an object",
+            )
+            cpu_stats = _require_json_object(
+                probe["child_cpu_stats_seconds"],
+                message="startup probe child_cpu_stats_seconds is not an object",
+            )
             print(
                 f"- {name:22s} median={_as_float(stats['median']):.4f}s "
                 f"first={_as_float(probe['first_seconds']):.4f}s "
@@ -971,18 +986,26 @@ def main() -> int:
             )
     for scenario in scenario_results:
         name = str(scenario["name"])
-        stats = scenario["stats_seconds"]
-        cpu_stats = scenario["child_cpu_stats_seconds"]
-        inventory = scenario["inventory_sample"]
-        exit_counts = scenario["exit_code_counts"]
-        assert isinstance(stats, dict)
-        assert isinstance(cpu_stats, dict)
-        assert isinstance(inventory, dict)
-        assert isinstance(exit_counts, dict)
-        median_s = float(stats["median"])
-        p95_s = float(stats["p95"])
-        stdev_s = float(stats["stdev"])
-        cpu_median_s = float(cpu_stats["median"])
+        stats = _require_json_object(
+            scenario["stats_seconds"],
+            message="scenario stats_seconds is not an object",
+        )
+        cpu_stats = _require_json_object(
+            scenario["child_cpu_stats_seconds"],
+            message="scenario child_cpu_stats_seconds is not an object",
+        )
+        inventory = _require_json_object(
+            scenario["inventory_sample"],
+            message="scenario inventory_sample is not an object",
+        )
+        exit_counts = _require_json_object(
+            scenario["exit_code_counts"],
+            message="scenario exit_code_counts is not an object",
+        )
+        median_s = _as_float(stats["median"])
+        p95_s = _as_float(stats["p95"])
+        stdev_s = _as_float(stats["stdev"])
+        cpu_median_s = _as_float(cpu_stats["median"])
         print(
             f"- {name:20s} median={median_s:.4f}s "
             f"p95={p95_s:.4f}s stdev={stdev_s:.4f}s "

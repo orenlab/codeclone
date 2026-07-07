@@ -17,8 +17,10 @@ import sqlite3
 from pathlib import Path
 
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+from ...utils.sqlite_store import get_meta_value, open_sqlite_db
 
 _OBSERVABILITY_DB_RELATIVE = ".codeclone/db/platform_observability.sqlite3"
+_SCHEMA_META_KEY = "schema_version"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS platform_meta (
@@ -126,7 +128,43 @@ def _ensure_operation_columns(conn: sqlite3.Connection) -> None:
     _ensure_peak_rss_columns(conn, table="platform_operations", existing=existing)
 
 
+def _schema_version_key(value: str) -> tuple[int, ...] | None:
+    parts: list[int] = []
+    for part in value.split("."):
+        if not part.isdigit():
+            return None
+        parts.append(int(part))
+    return tuple(parts) if parts else None
+
+
+def validate_observability_schema(conn: sqlite3.Connection) -> None:
+    stored = get_meta_value(
+        conn,
+        meta_table="platform_meta",
+        key=_SCHEMA_META_KEY,
+    )
+    if stored is None:
+        return
+    stored_key = _schema_version_key(stored)
+    current_key = _schema_version_key(PLATFORM_OBSERVABILITY_SCHEMA_VERSION)
+    if stored_key is None or current_key is None:
+        msg = (
+            "Unsupported Platform Observability schema version "
+            f"{stored!r}; current supported version is "
+            f"{PLATFORM_OBSERVABILITY_SCHEMA_VERSION!r}."
+        )
+        raise RuntimeError(msg)
+    if stored_key > current_key:
+        msg = (
+            "Platform Observability store schema "
+            f"{stored!r} is newer than this CodeClone build supports "
+            f"({PLATFORM_OBSERVABILITY_SCHEMA_VERSION!r})."
+        )
+        raise RuntimeError(msg)
+
+
 def create_observability_schema(conn: sqlite3.Connection) -> None:
+    validate_observability_schema(conn)
     conn.executescript(_SCHEMA)
     _ensure_span_columns(conn)
     _ensure_operation_columns(conn)
@@ -139,14 +177,12 @@ def create_observability_schema(conn: sqlite3.Connection) -> None:
 
 def open_observability_store(path: Path) -> sqlite3.Connection:
     """Open (creating the parent dir + schema) the observability store."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(path))
-    create_observability_schema(conn)
-    return conn
+    return open_sqlite_db(path, ensure_schema=create_observability_schema)
 
 
 __all__ = [
     "create_observability_schema",
     "observability_store_path",
     "open_observability_store",
+    "validate_observability_schema",
 ]

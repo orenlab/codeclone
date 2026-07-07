@@ -12,7 +12,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, NoReturn
+from typing import Literal, NoReturn, TypeGuard
 
 from ..contracts import IDE_GOVERNANCE_PROTOCOL_VERSION
 from .exceptions import MemoryContractError
@@ -299,11 +299,15 @@ def _find_project_record(
     return record
 
 
+def _is_governance_decision(value: str) -> TypeGuard[GovernanceDecision]:
+    return value in {"approve", "reject", "archive"}
+
+
 def _validate_decision(decision: str) -> GovernanceDecision:
     normalized = decision.strip().lower()
-    if normalized not in {"approve", "reject", "archive"}:
+    if not _is_governance_decision(normalized):
         _raise_memory_contract(f"Unknown governance decision: {decision!r}")
-    return normalized  # type: ignore[return-value]
+    return normalized
 
 
 def _validate_record_for_decision(

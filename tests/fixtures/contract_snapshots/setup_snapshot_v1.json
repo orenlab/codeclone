@@ -1,0 +1,246 @@
+{
+  "capabilities": [
+    {
+      "availability": "built_in",
+      "configuration": "configured",
+      "evidence": [
+        "probe:import:codeclone.core",
+        "probe:pyproject:tool.codeclone"
+      ],
+      "group": "core_analysis",
+      "id": "analysis",
+      "installation": "installed",
+      "label": "Repository analysis",
+      "readiness": "ready",
+      "reason": "",
+      "recommended_action": "",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "built_in",
+      "configuration": "configured",
+      "evidence": [
+        "probe:baseline:trust",
+        "probe:path:baseline"
+      ],
+      "group": "core_analysis",
+      "id": "baseline",
+      "installation": "installed",
+      "label": "Baseline & trust",
+      "readiness": "ready",
+      "reason": "",
+      "recommended_action": "",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "built_in",
+      "configuration": "not_required",
+      "evidence": [],
+      "group": "core_analysis",
+      "id": "reports",
+      "installation": "installed",
+      "label": "Reports",
+      "readiness": "ready",
+      "reason": "",
+      "recommended_action": "",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "built_in",
+      "configuration": "unconfigured",
+      "evidence": [
+        "probe:audit:enabled"
+      ],
+      "group": "governed_agent_workflows",
+      "id": "audit_and_intents",
+      "installation": "installed",
+      "label": "Audit & intents",
+      "readiness": "attention",
+      "reason": "Audit trail is disabled in pyproject configuration",
+      "recommended_action": "Set audit_enabled = true under [tool.codeclone] to record controller events.",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "optional_extra",
+      "configuration": "not_required",
+      "evidence": [
+        "probe:find_spec:mcp"
+      ],
+      "group": "governed_agent_workflows",
+      "id": "controlled_change",
+      "installation": "missing",
+      "label": "Controlled changes",
+      "readiness": "optional",
+      "reason": "Requires codeclone[mcp]",
+      "recommended_action": "uv tool install \"codeclone[mcp]\" then configure MCP in your client",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "optional_extra",
+      "configuration": "not_required",
+      "evidence": [
+        "probe:find_spec:mcp"
+      ],
+      "group": "governed_agent_workflows",
+      "id": "mcp_runtime",
+      "installation": "missing",
+      "label": "MCP runtime",
+      "readiness": "optional",
+      "reason": "Requires codeclone[mcp]",
+      "recommended_action": "CodeClone MCP support requires the optional 'mcp' extra. Install it with: pip install 'codeclone[mcp]'",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "optional_extra",
+      "configuration": "not_required",
+      "evidence": [
+        "probe:capability:analytics:full"
+      ],
+      "group": "project_knowledge",
+      "id": "analytics_cockpit",
+      "installation": "missing",
+      "label": "Cockpit / analytics",
+      "readiness": "optional",
+      "reason": "Requires codeclone[analytics]",
+      "recommended_action": "uv sync --extra analytics",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "optional_extra",
+      "configuration": "not_required",
+      "evidence": [
+        "probe:find_spec:defusedxml"
+      ],
+      "group": "project_knowledge",
+      "id": "coverage_evidence",
+      "installation": "missing",
+      "label": "Coverage evidence",
+      "readiness": "optional",
+      "reason": "Requires codeclone[coverage-xml]",
+      "recommended_action": "uv sync --extra coverage-xml",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "built_in",
+      "configuration": "unconfigured",
+      "evidence": [
+        "probe:memory:status"
+      ],
+      "group": "project_knowledge",
+      "id": "engineering_memory",
+      "installation": "installed",
+      "label": "Engineering Memory",
+      "readiness": "attention",
+      "reason": "Engineering Memory store has not been created yet",
+      "recommended_action": "Run codeclone memory init after analysis to create the store.",
+      "runtime": "not_verified"
+    },
+    {
+      "availability": "optional_extra",
+      "configuration": "not_required",
+      "evidence": [
+        "probe:capability:embed"
+      ],
+      "group": "project_knowledge",
+      "id": "semantic_retrieval",
+      "installation": "missing",
+      "label": "Semantic retrieval",
+      "readiness": "optional",
+      "reason": "Requires semantic optional extras",
+      "recommended_action": "uv sync --extra semantic-local",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "built_in",
+      "configuration": "unconfigured",
+      "evidence": [
+        "probe:pyproject:ci_flags",
+        "probe:pyproject:ci_flags:absent"
+      ],
+      "group": "team_and_release",
+      "id": "ci_policy",
+      "installation": "installed",
+      "label": "CI policy",
+      "readiness": "attention",
+      "reason": "CI gating is optional and is not currently enabled in configuration",
+      "recommended_action": "Enable ci / fail_on_new under [tool.codeclone] to gate changes in CI.",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "external_tool",
+      "configuration": "unconfigured",
+      "evidence": [
+        "probe:file:.github/workflows",
+        "probe:file:.github/workflows:missing"
+      ],
+      "group": "team_and_release",
+      "id": "github_workflow",
+      "installation": "installed",
+      "label": "GitHub workflow",
+      "readiness": "attention",
+      "reason": "No GitHub Actions workflow referencing CodeClone found",
+      "recommended_action": "Add a GitHub Actions workflow that runs codeclone in CI.",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "external_tool",
+      "configuration": "unconfigured",
+      "evidence": [
+        "probe:file:.pre-commit-config.yaml",
+        "probe:file:.pre-commit-config.yaml:missing"
+      ],
+      "group": "team_and_release",
+      "id": "pre_commit_hook",
+      "installation": "installed",
+      "label": "pre-commit hook",
+      "readiness": "attention",
+      "reason": "No pre-commit hook referencing CodeClone found",
+      "recommended_action": "Add a pre-commit hook entry for codeclone.",
+      "runtime": "not_required"
+    },
+    {
+      "availability": "built_in",
+      "configuration": "configured",
+      "evidence": [
+        "probe:gitignore:codeclone_cache"
+      ],
+      "group": "team_and_release",
+      "id": "workspace_hygiene",
+      "installation": "installed",
+      "label": "Workspace hygiene",
+      "readiness": "ready",
+      "reason": "",
+      "recommended_action": "",
+      "runtime": "not_required"
+    }
+  ],
+  "head_commit": null,
+  "install": {
+    "base": "installed",
+    "extras": {
+      "analytics": "missing",
+      "coverage-xml": "missing",
+      "mcp": "missing",
+      "perf": "missing",
+      "semantic-fastembed": "missing",
+      "semantic-lancedb": "missing",
+      "semantic-local": "missing",
+      "token-bench": "missing"
+    }
+  },
+  "maturity": {
+    "connected": true,
+    "evidence_backed": false,
+    "governed": true,
+    "release_ready": true,
+    "team_ready": true
+  },
+  "projection_kind": "setup_snapshot",
+  "recomputation": true,
+  "root": "<ROOT>",
+  "runtime": {
+    "codeclone_version": "<VERSION>",
+    "python_tag": "<PYTHON_TAG>"
+  },
+  "schema_version": "1"
+}

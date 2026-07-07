@@ -45,14 +45,28 @@ from .entries import (
     SegmentDict,
     SourceStatsDict,
     StructuralFindingGroupDict,
+    StructuralFindingOccurrenceDict,
     UnitDict,
 )
+from .integrity import as_str_dict as _as_str_key_dict
 
 _ValidatedItemT = TypeVar("_ValidatedItemT")
 
 
 def _is_str_item(value: object) -> TypeGuard[str]:
     return isinstance(value, str)
+
+
+def _as_str_value_dict(value: object) -> dict[str, str] | None:
+    mapping = _as_str_key_dict(value)
+    if mapping is None:
+        return None
+    result: dict[str, str] = {}
+    for key, item in mapping.items():
+        if not isinstance(item, str):
+            return None
+        result[key] = item
+    return result
 
 
 def _as_file_stat_dict(value: object) -> FileStat | None:
@@ -137,6 +151,86 @@ def _as_typed_string_list(value: object) -> list[str] | None:
     return _as_typed_list(value, predicate=_is_str_item)
 
 
+def _as_structural_occurrence_dict(
+    value: object,
+) -> StructuralFindingOccurrenceDict | None:
+    item = _as_str_key_dict(value)
+    if item is None:
+        return None
+    qualname = item.get("qualname")
+    start = item.get("start")
+    end = item.get("end")
+    if (
+        not isinstance(qualname, str)
+        or not isinstance(start, int)
+        or not isinstance(end, int)
+    ):
+        return None
+    return StructuralFindingOccurrenceDict(qualname=qualname, start=start, end=end)
+
+
+def _as_typed_structural_occurrence_list(
+    value: object,
+) -> list[StructuralFindingOccurrenceDict] | None:
+    if not isinstance(value, list):
+        return None
+    items: list[StructuralFindingOccurrenceDict] = []
+    for raw_item in value:
+        item = _as_structural_occurrence_dict(raw_item)
+        if item is None:
+            return None
+        items.append(item)
+    return items
+
+
+def _as_structural_group_dict(value: object) -> StructuralFindingGroupDict | None:
+    group = _as_str_key_dict(value)
+    if group is None:
+        return None
+    finding_kind = group.get("finding_kind")
+    finding_key = group.get("finding_key")
+    signature = _as_str_value_dict(group.get("signature"))
+    raw_items = group.get("items")
+    if (
+        not isinstance(finding_kind, str)
+        or not isinstance(finding_key, str)
+        or signature is None
+    ):
+        return None
+    items = _as_typed_structural_occurrence_list(raw_items)
+    if items is None:
+        return None
+    return StructuralFindingGroupDict(
+        finding_kind=finding_kind,
+        finding_key=finding_key,
+        signature=signature,
+        items=items,
+    )
+
+
+def _as_typed_structural_finding_list(
+    value: object,
+) -> list[StructuralFindingGroupDict] | None:
+    if not isinstance(value, list):
+        return None
+    groups: list[StructuralFindingGroupDict] = []
+    for raw_group in value:
+        group = _as_structural_group_dict(raw_group)
+        if group is None:
+            return None
+        groups.append(group)
+    return groups
+
+
+def _decode_structural_findings_section(
+    value: object,
+) -> tuple[bool, list[StructuralFindingGroupDict] | None]:
+    if value is None:
+        return True, None
+    structural_findings = _as_typed_structural_finding_list(value)
+    return structural_findings is not None, structural_findings
+
+
 def _as_module_typing_coverage_dict(
     value: object,
 ) -> ModuleTypingCoverageDict | None:
@@ -167,7 +261,8 @@ def _normalized_optional_string_list(value: object) -> list[str] | None:
 
 
 def _is_canonical_cache_entry(value: object) -> TypeGuard[CacheEntry]:
-    return isinstance(value, dict) and _has_cache_entry_container_shape(value)
+    entry = _as_str_key_dict(value)
+    return entry is not None and _has_cache_entry_container_shape(entry)
 
 
 def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
@@ -256,6 +351,9 @@ def _decode_optional_cache_sections(
     function_relationship_facts_raw = _as_typed_function_relationship_facts_list(
         entry.get("function_relationship_facts", [])
     )
+    structural_findings_valid, typed_structural_findings = (
+        _decode_structural_findings_section(entry.get("structural_findings"))
+    )
     if (
         class_metrics_raw is None
         or module_deps_raw is None
@@ -267,6 +365,7 @@ def _decode_optional_cache_sections(
         or runtime_reachability_raw is None
         or security_surfaces_raw is None
         or function_relationship_facts_raw is None
+        or not structural_findings_valid
     ):
         return None
     typing_coverage_raw = _as_module_typing_coverage_dict(entry.get("typing_coverage"))
@@ -275,10 +374,6 @@ def _decode_optional_cache_sections(
     )
     api_surface_raw = _as_module_api_surface_dict(entry.get("api_surface"))
     source_stats = _as_source_stats_dict(entry.get("source_stats"))
-    structural_findings = entry.get("structural_findings")
-    typed_structural_findings = (
-        structural_findings if isinstance(structural_findings, list) else None
-    )
     return (
         class_metrics_raw,
         module_deps_raw,

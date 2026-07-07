@@ -1,13 +1,22 @@
+---
+title: "Terms of Use"
+audience: public
+doc_type: legal
+status: draft
+source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+---
+
 <!-- doc-scope: TERMS OF USE — legal content.
      owns: terms of use text.
-     does-not-own: MCP read-only contract (→ book/25), security model (→ book/21).
+     does-not-own: MCP read-only contract (→ concepts/mcp.md), security model (→ internal/).
      rule: cross-link to contracts, do not restate them. -->
 
 # Terms of Use
 
 These terms describe the intended operational and integration boundaries of
 CodeClone and its local integration surfaces, including the MCP server,
-VS Code extension, Codex plugin, and Claude Desktop bundle.
+VS Code extension, Cursor plugin, Claude Code plugin, Codex plugin, and
+Claude Desktop bundle.
 
 ## Local-first execution model
 

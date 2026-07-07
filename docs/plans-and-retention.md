@@ -1,6 +1,14 @@
+---
+title: "Plans and Retention"
+audience: public
+doc_type: legal
+status: draft
+source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+---
+
 <!-- doc-scope: PLANS, EDITIONS, AND DATA RETENTION.
      owns: Community/Team/Enterprise edition definitions, retention policy.
-     does-not-own: config keys (→ book/10), change controller internals (→ book/12).
+     does-not-own: config keys (→ reference/configuration.md), change controller internals (→ concepts/controlled-change.md).
      rule: cross-link to contracts, do not restate them. -->
 
 # Plans and Retention
@@ -20,22 +28,21 @@ marked **roadmap** below.
 change-control, memory, or integration capability is gated.
 
 - **Structural analysis & CI** — clones, complexity, coupling, cohesion, dead
-  code, dependency cycles, [Health Score](book/15-health-score.md), and
-  baseline-aware [quality gates](book/16-metrics-and-quality-gates.md).
-- **Report surfaces** — canonical JSON, HTML, Markdown, text, and
-  [SARIF](guide/integrations/sarif/export.md), plus the
-  [GitHub Action](getting-started.md#github-action) (gating, SARIF upload, PR comments).
+  code, dependency cycles, [Health Score](concepts/health-score.md), and
+  baseline-aware quality gates.
+- **Report surfaces** — canonical JSON, HTML, Markdown, text, and SARIF, plus
+  the GitHub Action (gating, SARIF upload, PR comments).
 - **Report-only signals** — Security Surfaces, Overloaded Modules, API-surface
   inventory with breaking-change detection, and external Coverage Join.
 - **Structural Change Controller** — intent → blast radius → bounded edit →
   patch verify → receipt, with Patch Trail and multi-agent coordination
-  ([change control](book/12-structural-change-controller/index.md)).
+  ([controlled change](concepts/controlled-change.md)).
 - **Live Implementation Context** — bounded structural, call-graph, and contract evidence.
 - **Engineering Memory** — typed evidence-linked facts, FTS + local `fastembed`
-  semantic search, Trajectory Memory, quality passports, anomaly detection, and
-  the [Experience Layer](book/13-engineering-memory/experience-layer.md).
+  semantic search, Trajectory Memory, quality passports, and anomaly detection
+  (see [Engineering Memory](concepts/engineering-memory.md)).
 - **Corpus Analytics** — offline clustering of change-control intents (`codeclone[analytics]`).
-- **33 MCP tools and native integrations** — VS Code, Cursor, Claude Code,
+- **38 MCP tools and native integrations** — VS Code, Cursor, Claude Code,
   Codex, and Claude Desktop on one canonical analysis.
 - **Platform Observability** — opt-in local runtime diagnostics.
 
@@ -73,7 +80,7 @@ and **configurable without an edition cap** — retention windows are plain
 The intent registry, audit trail, and Engineering Memory store data locally in
 SQLite. Retention windows are configured in `[tool.codeclone]` and are **not
 capped by edition** — full key reference in
-[Config and Defaults](book/10-config-and-defaults.md).
+[Configuration reference](reference/configuration.md).
 
 | Store                         | Key                              | Default |
 |-------------------------------|----------------------------------|---------|
@@ -119,8 +126,7 @@ retention and not repository quality history. It is disabled by default and
 local in every edition; operators own the lifecycle of
 `.codeclone/db/platform_observability.sqlite3`. The observer stores no raw
 MCP/prompt bodies and never contributes findings, gates, baselines, memory
-facts, or edit authorization. See
-[Platform Observability](book/26-platform-observability.md).
+facts, or edit authorization.
 
 ---
 
@@ -146,8 +152,8 @@ requirements:
 
 ## Related configuration
 
-See [Config and Defaults](book/10-config-and-defaults.md) and
-[Structural Change Controller — intent registry](book/12-structural-change-controller/index.md).
+See [Configuration reference](reference/configuration.md) and
+[Controlled change](concepts/controlled-change.md).
 
 ```toml
 [tool.codeclone]
@@ -166,5 +172,5 @@ embedding_provider = "fastembed"      # "diagnostic" or "fastembed" today; "api"
 allow_model_download = true
 ```
 
-Environment overrides:
-[Config and Defaults — environment variable overrides](book/10-config-and-defaults.md#environment-variable-overrides).
+See the [Configuration reference](reference/configuration.md) for environment
+variable overrides.

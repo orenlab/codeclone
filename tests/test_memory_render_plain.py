@@ -239,3 +239,33 @@ def test_memory_render_init_dry_run_skips_empty_count_maps(
         )
     out = capsys.readouterr().out
     assert "planned records" not in out
+
+
+class _PlainTextStub:
+    def __init__(self, text: str, style: str = "") -> None:
+        self.text = text
+        self.style = style
+
+
+def test_search_row_preserves_payload_objects_without_coercion() -> None:
+    from rich.text import Text as RichText
+
+    numpy = pytest.importorskip("numpy")
+    weight = numpy.float32(2.5)
+    payload: dict[str, object] = {"weight": weight}
+    record: dict[str, object] = {
+        "type": "risk_note",
+        "status": "active",
+        "statement": "note",
+        "payload": payload,
+    }
+
+    row = memory_render._search_row(
+        1,
+        record,
+        cast(type[RichText], _PlainTextStub),
+    )
+
+    assert row[0] == "1"
+    assert record["payload"] is payload
+    assert payload["weight"] is weight

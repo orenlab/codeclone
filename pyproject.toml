@@ -25,6 +25,7 @@ dependencies = [
     "pydantic>=2.13.4",
     "pygments>=2.20.0",
     "rich>=15.0.0",
+    "tomlkit>=0.13.2",
     "tomli>=2.0.1; python_version < '3.11'",
 ]
 
@@ -87,7 +88,7 @@ semantic-local = [
 analytics = [
     "hdbscan>=0.8.0",
     "scikit-learn>=1.5.0",
-    "lancedb>=0.33.0",
+    "lancedb>=0.34.0",
     "fastembed>=0.8.0,<0.9",
     "umap-learn>=0.5.6; python_version < '3.14'",
     # umap-learn → pynndescent → numba/llvmlite.
@@ -108,6 +109,11 @@ dev = [
     "mypy>=1.20.1",
     "ruff>=0.15.20",
     "pre-commit>=4.5.1",
+    "ty>=0.0.56",
+    "PyYAML>=6.0.2",
+    "jsonschema>=4.23.0",
+    "types-PyYAML>=6.0.12.20250915",
+    "types-jsonschema>=4.23.0.20250516",
 ]
 
 [project.scripts]
@@ -171,6 +177,9 @@ packages = [
     "codeclone.scanner",
     "codeclone.surfaces",
     "codeclone.surfaces.cli",
+    "codeclone.surfaces.cli.ui",
+    "codeclone.surfaces.cli.setup",
+    "codeclone.surfaces.cli.setup.engine",
     "codeclone.surfaces.mcp",
     "codeclone.surfaces.mcp.messages",
     "codeclone.surfaces.mcp.tools",
@@ -239,12 +248,12 @@ index_audit = true                       # project audit summaries when audit DB
 [tool.codeclone.memory.ingest]
 contract_constants_paths = ["codeclone/contracts/__init__.py"]
 document_link_paths = [
-    "docs/guide/mcp/README.md",
+    "docs/concepts/mcp.md",
     "AGENTS.md",
     "CLAUDE.md",
 ]
 mcp_tool_schema_snapshot_path = "tests/fixtures/contract_snapshots/mcp_tool_schemas.json"
-mcp_tool_count_doc_paths = ["docs/book/25-mcp-interface/index.md"]
+mcp_tool_count_doc_paths = ["docs/reference/mcp-tools.md"]
 
 [tool.coverage.report]
 show_missing = true

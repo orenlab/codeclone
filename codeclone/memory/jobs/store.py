@@ -12,7 +12,7 @@ import sqlite3
 import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import cast
+from typing import TypeVar
 
 from ...report.meta import current_report_timestamp_utc
 from ...utils.json_io import json_text
@@ -25,6 +25,31 @@ from .models import (
 )
 
 PROJECTION_BUNDLE_KIND: ProjectionJobKind = "projection_bundle"
+_LiteralT = TypeVar("_LiteralT", bound=str)
+
+_JOB_KIND_VALUES: tuple[ProjectionJobKind, ...] = ("projection_bundle",)
+_JOB_STATUS_VALUES: tuple[ProjectionJobStatus, ...] = (
+    "pending",
+    "running",
+    "done",
+    "failed",
+    "skipped",
+)
+_JOB_TRIGGER_VALUES: tuple[ProjectionJobTrigger, ...] = (
+    "auto",
+    "explicit",
+    "mcp_finish",
+    "cli",
+)
+_JOB_KINDS: Mapping[str, ProjectionJobKind] = {
+    value: value for value in _JOB_KIND_VALUES
+}
+_JOB_STATUSES: Mapping[str, ProjectionJobStatus] = {
+    value: value for value in _JOB_STATUS_VALUES
+}
+_JOB_TRIGGERS: Mapping[str, ProjectionJobTrigger] = {
+    value: value for value in _JOB_TRIGGER_VALUES
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,13 +73,43 @@ def _new_job_id() -> str:
     return f"projjob-{uuid.uuid4().hex}"
 
 
+def _literal_from_row(
+    row: sqlite3.Row,
+    column: str,
+    *,
+    field: str,
+    allowed: Mapping[str, _LiteralT],
+) -> _LiteralT:
+    value = row[column]
+    if isinstance(value, str):
+        literal = allowed.get(value)
+        if literal is not None:
+            return literal
+    raise ValueError(f"Invalid Engineering Memory projection job {field}: {value!r}")
+
+
 def _row_to_record(row: sqlite3.Row) -> ProjectionJobRecord:
     return ProjectionJobRecord(
         id=str(row["id"]),
         project_id=str(row["project_id"]),
-        job_kind=cast(ProjectionJobKind, row["job_kind"]),
-        status=cast(ProjectionJobStatus, row["status"]),
-        trigger=cast(ProjectionJobTrigger, row["trigger"]),
+        job_kind=_literal_from_row(
+            row,
+            "job_kind",
+            field="job_kind",
+            allowed=_JOB_KINDS,
+        ),
+        status=_literal_from_row(
+            row,
+            "status",
+            field="status",
+            allowed=_JOB_STATUSES,
+        ),
+        trigger=_literal_from_row(
+            row,
+            "trigger",
+            field="trigger",
+            allowed=_JOB_TRIGGERS,
+        ),
         requested_at_utc=str(row["requested_at_utc"]),
         started_at_utc=row["started_at_utc"],
         finished_at_utc=row["finished_at_utc"],

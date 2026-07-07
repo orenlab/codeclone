@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from ... import ui_messages as ui
 from ...contracts import ExitCode
 from ...observability.render_html import render_trace_html
 from ...observability.render_json import render_trace_json
@@ -57,7 +58,11 @@ def observability_main(argv: list[str]) -> int:
         return int(ExitCode.CONTRACT_ERROR)
 
     root = Path(args.root).resolve()
-    conn = open_observability_store_readonly(root)
+    try:
+        conn = open_observability_store_readonly(root)
+    except RuntimeError as exc:
+        print(ui.fmt_internal_error(exc))
+        return int(ExitCode.INTERNAL_ERROR)
     if conn is None:
         return _report_missing_store(root)
     try:

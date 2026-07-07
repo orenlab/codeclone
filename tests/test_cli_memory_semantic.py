@@ -9,6 +9,7 @@ import dataclasses
 import json
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -29,7 +30,32 @@ from codeclone.memory.semantic.models import (
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.surfaces.cli.memory import _render_semantic_text, memory_main
 from codeclone.surfaces.cli.memory_render import memory_console
+from tests._assertions import (
+    assert_contains_all,
+    assert_contains_none,
+    assert_mapping_entries,
+    strip_ansi,
+)
 from tests.memory_fixtures import make_module_record
+
+
+def _assert_nested_lane_metric(
+    payload: dict[str, object],
+    *,
+    lane: str,
+    key: str,
+    expected: object,
+) -> None:
+    lanes = cast(dict[str, object], payload["lanes"])
+    lane_payload = cast(dict[str, object], lanes[lane])
+    assert lane_payload[key] == expected
+
+
+def _stdout_json(capsys: pytest.CaptureFixture[str]) -> dict[str, object]:
+    return cast(
+        dict[str, object],
+        json.loads(strip_ansi(capsys.readouterr().out)),
+    )
 
 
 class _FakeSemanticIndex:
@@ -125,9 +151,9 @@ def test_semantic_status_reports_unavailable_by_default(
     code = memory_main(["semantic", "status", "--root", str(tmp_path)])
     out = capsys.readouterr().out.lower()
     assert code == 0
-    assert "semantic index" in out
+    assert_contains_all(out, "semantic index")
     # default config has semantic disabled -> status reason "disabled"
-    assert "disabled" in out
+    assert_contains_all(out, "disabled")
 
 
 def test_semantic_rebuild_fails_clear_without_backend(
@@ -136,7 +162,7 @@ def test_semantic_rebuild_fails_clear_without_backend(
     code = memory_main(["semantic", "rebuild", "--root", str(tmp_path)])
     out = capsys.readouterr().out.lower()
     assert code != 0
-    assert "semantic" in out
+    assert_contains_all(out, "semantic")
     assert "semantic-lancedb" in out or "disabled" in out
 
 
@@ -148,7 +174,7 @@ def test_semantic_search_fails_clear_without_backend(
     )
     out = capsys.readouterr().out.lower()
     assert code != 0
-    assert "unavailable" in out
+    assert_contains_all(out, "unavailable")
 
 
 def _seed_semantic_repo(
@@ -216,10 +242,10 @@ def test_memory_search_semantic_provider_unavailable_degrades_without_traceback(
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "semantic: off" in out
+    assert_contains_all(out, "semantic: off")
     assert "local_model embedding provider is not" in out.replace("\n", " ")
     assert "available yet" in out.replace("\n", " ")
-    assert "Traceback" not in out
+    assert_contains_none(out, "Traceback")
 
 
 def test_semantic_explicit_commands_fail_clear_when_provider_unavailable(
@@ -235,12 +261,12 @@ def test_semantic_explicit_commands_fail_clear_when_provider_unavailable(
         assert code != 0
         out = capsys.readouterr().out
         if command[1] == "rebuild":
-            assert "Semantic index rebuild unavailable" in out
+            assert_contains_all(out, "Semantic index rebuild unavailable")
         else:
-            assert "Semantic embedding provider unavailable" in out
+            assert_contains_all(out, "Semantic embedding provider unavailable")
         assert "local_model embedding provider is not" in out.replace("\n", " ")
         assert "available yet" in out.replace("\n", " ")
-        assert "Traceback" not in out
+        assert_contains_none(out, "Traceback")
 
 
 def test_semantic_status_reports_provider_unavailable(
@@ -252,8 +278,8 @@ def test_semantic_status_reports_provider_unavailable(
 
     assert code == 0
     out = capsys.readouterr().out
-    assert "semantic index: unavailable" in out
-    assert "provider: unavailable" in out
+    assert_contains_all(out, "semantic index: unavailable")
+    assert_contains_all(out, "provider: unavailable")
     assert "local_model embedding provider is not" in out.replace("\n", " ")
     assert "available yet" in out.replace("\n", " ")
 
@@ -289,7 +315,7 @@ def test_semantic_search_degrades_when_model_unavailable_at_embed(
     assert code != 0
     assert "unavailable" in out.lower()
     assert "model unavailable" in out.replace("\n", " ")
-    assert "Traceback" not in out
+    assert_contains_none(out, "Traceback")
 
 
 def test_semantic_search_hydrates_and_renders_json(
@@ -307,14 +333,19 @@ def test_semantic_search_hydrates_and_renders_json(
         ["semantic", "search", "recover restart", "--root", str(tmp_path), "--json"]
     )
     assert code == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["semantic"]["diagnostic"] is True
-    assert payload["results"]
-    top = payload["results"][0]
-    assert top["source"] == "memory"
-    assert top["kind"] == "contract_note"
-    assert top["subject_path"] == "codeclone/x.py"
-    assert "recover after MCP restart" in top["preview"]
+    payload = _stdout_json(capsys)
+    semantic = cast(dict[str, object], payload["semantic"])
+    assert semantic["diagnostic"] is True
+    results = cast(list[dict[str, object]], payload["results"])
+    assert results
+    top = results[0]
+    assert_mapping_entries(
+        top,
+        source="memory",
+        kind="contract_note",
+        subject_path="codeclone/x.py",
+    )
+    assert "recover after MCP restart" in cast(str, top["preview"])
 
 
 def test_memory_search_semantic_flag_blends_ranking(
@@ -331,8 +362,8 @@ def test_memory_search_semantic_flag_blends_ranking(
     code = memory_main(["search", "recover", "--root", str(tmp_path), "--semantic"])
     assert code == 0
     out = capsys.readouterr().out
-    assert "semantic: on" in out
-    assert "diagnostic" in out
+    assert_contains_all(out, "semantic: on")
+    assert_contains_all(out, "diagnostic")
 
 
 def test_semantic_search_text_renders_ranked_hits(
@@ -351,10 +382,10 @@ def test_semantic_search_text_renders_ranked_hits(
     )
     assert code == 0
     out = capsys.readouterr().out
-    assert "Semantic matches for: recover restart" in out
-    assert "score=" in out
-    assert "subject: codeclone/x.py" in out
-    assert "recover after MCP restart" in out
+    assert_contains_all(out, "Semantic matches for: recover restart")
+    assert_contains_all(out, "score=")
+    assert_contains_all(out, "subject: codeclone/x.py")
+    assert_contains_all(out, "recover after MCP restart")
 
 
 def test_semantic_status_shows_provider_when_index_built(
@@ -371,8 +402,8 @@ def test_semantic_status_shows_provider_when_index_built(
     code = memory_main(["semantic", "status", "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "semantic index: available" in out
-    assert "provider: diagnostic-hash" in out
+    assert_contains_all(out, "semantic index: available")
+    assert_contains_all(out, "provider: diagnostic-hash")
 
 
 def test_semantic_rebuild_requires_memory_database(
@@ -388,8 +419,8 @@ def test_semantic_rebuild_requires_memory_database(
     code = memory_main(["semantic", "rebuild", "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert code != 0
-    assert "Engineering memory database not found" in out
-    assert "codeclone memory init" in out
+    assert_contains_all(out, "Engineering memory database not found")
+    assert_contains_all(out, "codeclone memory init")
 
 
 def test_memory_coverage_rejects_invalid_scope_path(
@@ -427,7 +458,7 @@ def test_render_semantic_text_reports_no_matches(
     )
     out = capsys.readouterr().out
     assert code == 0
-    assert "(no matches)" in out
+    assert_contains_all(out, "(no matches)")
 
 
 def test_semantic_probe_skipped_when_disabled(
@@ -436,7 +467,7 @@ def test_semantic_probe_skipped_when_disabled(
     code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
     out = capsys.readouterr().out.lower()
     assert code != 0
-    assert "disabled" in out
+    assert_contains_all(out, "disabled")
 
 
 def test_semantic_probe_json_emits_payload(
@@ -472,9 +503,9 @@ def test_semantic_probe_json_emits_payload(
     )
     code = memory_main(["semantic", "probe", "--root", str(tmp_path), "--json"])
     assert code == 0
-    emitted = json.loads(capsys.readouterr().out)
+    emitted = _stdout_json(capsys)
     assert emitted["action"] == "probe_semantic_projections"
-    assert emitted["lanes"]["memory"]["documents"] == 1
+    _assert_nested_lane_metric(emitted, lane="memory", key="documents", expected=1)
 
 
 def test_semantic_probe_text_renders_lane_percentiles(
@@ -512,12 +543,12 @@ def test_semantic_probe_text_renders_lane_percentiles(
     code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert code == 0
-    assert "Semantic projection probe:" in out
-    assert "fastembed_tokenizer" in out
-    assert "memory: 2 documents" in out
-    assert "raw tokens p50/p95/max: 3/6/9" in out
-    assert "effective tokens p50/p95/max: 2/5/8" in out
-    assert "truncated: 1 (max_dropped=4)" in out
+    assert_contains_all(out, "Semantic projection probe:")
+    assert_contains_all(out, "fastembed_tokenizer")
+    assert_contains_all(out, "memory: 2 documents")
+    assert_contains_all(out, "raw tokens p50/p95/max: 3/6/9")
+    assert_contains_all(out, "effective tokens p50/p95/max: 2/5/8")
+    assert_contains_all(out, "truncated: 1 (max_dropped=4)")
 
 
 def test_semantic_probe_contract_error_suggests_memory_init(
@@ -536,8 +567,8 @@ def test_semantic_probe_contract_error_suggests_memory_init(
     code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
     out = capsys.readouterr().out
     assert code != 0
-    assert "database not found" in out
-    assert "codeclone memory init" in out
+    assert_contains_all(out, "database not found")
+    assert_contains_all(out, "codeclone memory init")
 
 
 def test_semantic_probe_invalid_payload_reports_unavailable(
@@ -553,4 +584,28 @@ def test_semantic_probe_invalid_payload_reports_unavailable(
     code = memory_main(["semantic", "probe", "--root", str(tmp_path)])
     out = capsys.readouterr().out.lower()
     assert code != 0
-    assert "invalid payload" in out
+    assert_contains_all(out, "invalid payload")
+
+
+def test_memory_retrieval_parse_filters_rejects_invalid_shapes() -> None:
+    from codeclone.memory.exceptions import MemoryContractError
+    from codeclone.memory.retrieval import service as retrieval_service
+
+    with pytest.raises(MemoryContractError, match="types must be a list"):
+        retrieval_service._parse_filters({"types": "not-a-list"})
+    with pytest.raises(MemoryContractError, match="statuses must be a list"):
+        retrieval_service._parse_filters({"statuses": 1})
+    with pytest.raises(MemoryContractError, match="confidences must be a list"):
+        retrieval_service._parse_filters({"confidences": {"bad": True}})
+    with pytest.raises(MemoryContractError, match="match_mode must be"):
+        retrieval_service._parse_filters({"match_mode": "sometimes"})
+    with pytest.raises(MemoryContractError, match="include_routine must be boolean"):
+        retrieval_service._parse_filters({"include_routine": "yes"})
+
+    with pytest.raises(MemoryContractError, match="lanes is invalid"):
+        retrieval_service._string_list({}, "lanes")
+    with pytest.raises(MemoryContractError, match="lanes is invalid"):
+        retrieval_service._string_list({"lanes": [1, 2]}, "lanes")
+
+    with pytest.raises(MemoryContractError, match="record_type"):
+        retrieval_service._parse_filters({"types": ["not-a-record-type"]})

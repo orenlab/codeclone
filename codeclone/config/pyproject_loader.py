@@ -261,7 +261,11 @@ def _validate_nested_ingest_table(
             "Invalid pyproject payload at "
             f"{config_path}: 'tool.codeclone.memory.ingest' must be object"
         )
-    return dict(ingest_obj)
+    return copy_str_key_table(
+        key="tool.codeclone.memory.ingest",
+        value=ingest_obj,
+        config_path=config_path,
+    )
 
 
 def _validate_nested_semantic_table(
@@ -277,7 +281,11 @@ def _validate_nested_semantic_table(
             "Invalid pyproject payload at "
             f"{config_path}: 'tool.codeclone.memory.semantic' must be object"
         )
-    return dict(semantic_obj)
+    return copy_str_key_table(
+        key="tool.codeclone.memory.semantic",
+        value=semantic_obj,
+        config_path=config_path,
+    )
 
 
 def normalize_path_config_value(
@@ -320,14 +328,38 @@ def _validated_string_list(*, key: str, value: object) -> tuple[str, ...]:
         raise ConfigValidationError(
             f"Invalid value type for tool.codeclone.{key}: expected list[str]"
         )
-    if not all(isinstance(item, str) for item in value):
-        raise ConfigValidationError(
-            f"Invalid value type for tool.codeclone.{key}: expected list[str]"
-        )
+    string_values: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise ConfigValidationError(
+                f"Invalid value type for tool.codeclone.{key}: expected list[str]"
+            )
+        string_values.append(item)
     try:
-        return normalize_golden_fixture_patterns(value)
+        return normalize_golden_fixture_patterns(string_values)
     except GoldenFixturePatternError as exc:
         raise ConfigValidationError(str(exc)) from exc
+
+
+def copy_str_key_table(
+    value: object,
+    *,
+    key: str,
+    config_path: Path | None = None,
+) -> dict[str, object]:
+    source = (
+        f"pyproject payload at {config_path}" if config_path else "pyproject payload"
+    )
+    if not isinstance(value, dict):
+        raise ConfigValidationError(f"Invalid {source}: '{key}' must be object")
+    result: dict[str, object] = {}
+    for item_key, item_value in value.items():
+        if not isinstance(item_key, str):
+            raise ConfigValidationError(
+                f"Invalid {source}: '{key}' must contain only string keys"
+            )
+        result[item_key] = item_value
+    return result
 
 
 def _load_toml(path: Path) -> object:

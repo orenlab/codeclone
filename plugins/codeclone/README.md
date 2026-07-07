@@ -28,11 +28,12 @@ directly, including `Coverage Join` facts and the optional `coverage` help topic
 | `skills/codeclone-implementation-context/` | Bounded `get_implementation_context` playbook                       |
 | `skills/codeclone-engineering-memory/`     | Engineering Memory retrieval and draft writes                       |
 | `skills/codeclone-platform-observability/` | Maintainer-only observer diagnostics (not for end-user repo review) |
+| `skills/codeclone-setup/`                  | CLI repository readiness (status, plan, apply, wizard)              |
 | `assets/`                                  | Plugin branding                                                     |
 
-Nine skills ship in the plugin (review, hotspots, production-triage, architecture-triage,
+Ten skills ship in the plugin (review, hotspots, production-triage, architecture-triage,
 blast-radius, change-control, engineering-memory, implementation-context,
-platform-observability).
+platform-observability, setup).
 
 `plugin.json` keeps the machine identifier as lowercase `codeclone`; the
 user-facing label stays in `interface.displayName` as `CodeClone`.
@@ -53,7 +54,7 @@ Recommended workspace-local setup:
 
 ```bash
 uv venv
-uv pip install --python .venv/bin/python "codeclone[mcp]"
+uv pip install --prerelease allow --python .venv/bin/python "codeclone[mcp]"
 .venv/bin/codeclone-mcp --help
 ```
 
@@ -62,7 +63,7 @@ If your workspace uses Poetry, install CodeClone into that Poetry environment.
 Global fallback:
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --help
 ```
 

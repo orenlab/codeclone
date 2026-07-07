@@ -12,7 +12,7 @@ import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Final
+from typing import Final, cast
 
 import orjson
 
@@ -660,6 +660,14 @@ def build_implementation_context(
         "failed_files": failed_files,
     }
     unavailable_facets = sorted(include_set - IMPLEMENTED_CONTEXT_FACETS)
+    budget_summary: dict[str, object] = {
+        "requested": budget,
+        "effective": entry_budget.limit,
+        "emitted": entry_budget.used,
+        "remaining": entry_budget.remaining,
+        "hard_cap": MAX_CONTEXT_TOTAL_ITEMS,
+        "safety": safety_summary,
+    }
     payload: dict[str, object] = {
         "status": (
             "safety_context_overflow"
@@ -674,14 +682,7 @@ def build_implementation_context(
         "subject": subject,
         "analysis": analysis,
         "structural_context": structural_context,
-        "budget_summary": {
-            "requested": budget,
-            "effective": entry_budget.limit,
-            "emitted": entry_budget.used,
-            "remaining": entry_budget.remaining,
-            "hard_cap": MAX_CONTEXT_TOTAL_ITEMS,
-            "safety": safety_summary,
-        },
+        "budget_summary": budget_summary,
         "dataflow": {
             "writers": {"status": "not_available", "tier": "dataflow"},
             "readers": {"status": "not_available", "tier": "dataflow"},
@@ -705,10 +706,8 @@ def build_implementation_context(
         payload["change_control"] = projected_change_control
     if unavailable_facets:
         payload["unavailable_facets"] = unavailable_facets
-    budget_summary = _as_mapping(payload["budget_summary"])
-    if isinstance(budget_summary, dict):
-        budget_summary["emitted"] = entry_budget.used
-        budget_summary["remaining"] = entry_budget.remaining
+    budget_summary["emitted"] = entry_budget.used
+    budget_summary["remaining"] = entry_budget.remaining
     _attach_projection_digest(
         payload,
         analysis,
@@ -873,18 +872,20 @@ def resolve_context_symbols(
     by_qualname: dict[str, list[dict[str, object]]] = {}
     for row in _unit_location_index(record):
         by_qualname.setdefault(str(row["qualname"]), []).append(row)
-    resolved = tuple(
-        {
-            "qualname": symbol,
-            "path": str(row["path"]),
-            "start_line": _as_int(row["start_line"]),
-            "end_line": _as_int(row.get("end_line")),
-            "tier": "structural",
-            "source": str(row["source"]),
-        }
-        for symbol in requested
-        for row in by_qualname.get(symbol, ())
-    )
+    resolved_rows: list[dict[str, object]] = []
+    for symbol in requested:
+        resolved_rows.extend(
+            {
+                "qualname": symbol,
+                "path": str(row["path"]),
+                "start_line": _as_int(row["start_line"]),
+                "end_line": _as_int(row.get("end_line")),
+                "tier": "structural",
+                "source": str(row["source"]),
+            }
+            for row in by_qualname.get(symbol, ())
+        )
+    resolved = tuple(resolved_rows)
     unresolved = tuple(symbol for symbol in requested if symbol not in by_qualname)
     return resolved, unresolved
 
@@ -1093,14 +1094,15 @@ def _append_related_relation(
             "path": path or None,
             "module": module,
             "source_kind": source_kind,
-            "relations": [],
+            "relations": list[dict[str, object]](),
             "relevance_rank": 3,
         },
     )
-    relations = row["relations"]
-    if not isinstance(relations, list):
+    relations_raw = row["relations"]
+    if not isinstance(relations_raw, list):
         return
-    normalized_relation = dict(relation)
+    relations = cast(list[dict[str, object]], relations_raw)
+    normalized_relation: dict[str, object] = dict(relation)
     if normalized_relation not in relations:
         relations.append(normalized_relation)
         relations.sort(

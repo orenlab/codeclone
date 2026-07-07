@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from collections.abc import Mapping, Sequence
-from typing import Final
+from collections.abc import Callable, Mapping, Sequence
+from typing import Final, TypeGuard
 
 import orjson
 
@@ -177,24 +177,24 @@ def decode_memory_continuation_cursor(cursor: str) -> dict[str, object]:
 def resolve_memory_continuation_request(
     cursor_payload: Mapping[str, object],
     *,
-    resolve_request: object | None = None,
+    resolve_request: Callable[[str], object] | None = None,
 ) -> dict[str, object] | None:
     """Resolve the full projection request from a decoded cursor payload."""
 
     version = str(cursor_payload.get("cursor_version", ""))
     if version == MEMORY_CONTINUATION_CURSOR_VERSION_LEGACY:
         request = cursor_payload.get("request")
-        return dict(request) if isinstance(request, Mapping) else None
+        return dict(request) if _is_object_mapping(request) else None
     request_digest = cursor_payload.get("request_digest")
     if not isinstance(request_digest, Mapping):
         return None
     digest_value = request_digest.get("value")
     if not isinstance(digest_value, str) or not digest_value.strip():
         return None
-    if not callable(resolve_request):
+    if resolve_request is None:
         return None
     resolved = resolve_request(digest_value)
-    return dict(resolved) if isinstance(resolved, Mapping) else None
+    return dict(resolved) if _is_object_mapping(resolved) else None
 
 
 def _validate_cursor_request_binding(payload: Mapping[str, object]) -> None:
@@ -286,6 +286,10 @@ def _encode_cursor(payload: Mapping[str, object]) -> str:
 def _padded_base64(value: str) -> bytes:
     padding = "=" * (-len(value) % 4)
     return f"{value}{padding}".encode("ascii")
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
 
 
 def _digest(payload: object) -> dict[str, str]:

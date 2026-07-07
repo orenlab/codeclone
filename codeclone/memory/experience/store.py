@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Callable, Sequence
-from typing import TypeVar
+from typing import TypeGuard, TypeVar
 
 from ...utils.iterutils import chunked
 from .models import (
@@ -302,9 +302,13 @@ def _row_to_evidence(row: sqlite3.Row) -> ExperienceEvidence:
     )
 
 
+def _is_experience_facet_kind(value: str) -> TypeGuard[ExperienceFacetKind]:
+    return value in ("agent_family", "analysis_profile", "intent_class")
+
+
 def _facet_kind(value: str) -> ExperienceFacetKind:
-    if value in ("agent_family", "analysis_profile", "intent_class"):
-        return value  # type: ignore[return-value]
+    if _is_experience_facet_kind(value):
+        return value
     msg = f"unknown experience facet kind: {value!r}"
     raise ValueError(msg)
 
@@ -339,9 +343,13 @@ def _row_to_experience(
     )
 
 
+def _is_experience_status(value: str) -> TypeGuard[ExperienceStatus]:
+    return value in ("active", "dormant")
+
+
 def _status(value: str) -> ExperienceStatus:
-    if value in ("active", "dormant"):
-        return value  # type: ignore[return-value]
+    if _is_experience_status(value):
+        return value
     msg = f"unknown experience status: {value!r}"
     raise ValueError(msg)
 

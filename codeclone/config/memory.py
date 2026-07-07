@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -57,7 +58,7 @@ from .memory_specs import (
     MEMORY_CONFIG_DEFAULTS,
     SEMANTIC_NESTED_TABLE_KEY,
 )
-from .pyproject_loader import load_pyproject_config
+from .pyproject_loader import copy_str_key_table, load_pyproject_config
 
 _VALID_BACKENDS = frozenset({"sqlite", "postgres"})
 _VALID_MCP_SYNC_POLICIES = frozenset(
@@ -232,6 +233,51 @@ def _memory_choice(value: object, *, key: str, valid: frozenset[str]) -> str:
     return raw
 
 
+def _is_memory_backend(value: str) -> TypeGuard[MemoryBackend]:
+    return value in _VALID_BACKENDS
+
+
+def _is_mcp_sync_policy(value: str) -> TypeGuard[MemoryMcpSyncPolicy]:
+    return value in _VALID_MCP_SYNC_POLICIES
+
+
+def _is_projection_rebuild_policy(
+    value: str,
+) -> TypeGuard[MemoryProjectionRebuildPolicy]:
+    return value in _VALID_PROJECTION_REBUILD_POLICIES
+
+
+def _memory_backend(value: object) -> MemoryBackend:
+    raw = _memory_choice(value, key="backend", valid=_VALID_BACKENDS)
+    if _is_memory_backend(raw):
+        return raw
+    raise AssertionError("unreachable validated memory backend")
+
+
+def _memory_mcp_sync_policy(value: object) -> MemoryMcpSyncPolicy:
+    raw = _memory_choice(
+        value,
+        key="mcp_sync_policy",
+        valid=_VALID_MCP_SYNC_POLICIES,
+    )
+    if _is_mcp_sync_policy(raw):
+        return raw
+    raise AssertionError("unreachable validated memory MCP sync policy")
+
+
+def _memory_projection_rebuild_policy(
+    value: object,
+) -> MemoryProjectionRebuildPolicy:
+    raw = _memory_choice(
+        value,
+        key="projection_rebuild_policy",
+        valid=_VALID_PROJECTION_REBUILD_POLICIES,
+    )
+    if _is_projection_rebuild_policy(raw):
+        return raw
+    raise AssertionError("unreachable validated memory projection rebuild policy")
+
+
 def _format_nested_memory_config_error(
     *,
     section: str,
@@ -248,7 +294,11 @@ def _format_nested_memory_config_error(
 
 
 def _resolve_ingest_config(raw: object) -> IngestConfig:
-    data: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+    data = (
+        copy_str_key_table(raw, key="tool.codeclone.memory.ingest")
+        if isinstance(raw, dict)
+        else {}
+    )
     try:
         return IngestConfig.model_validate(data)
     except ValidationError as exc:
@@ -258,7 +308,11 @@ def _resolve_ingest_config(raw: object) -> IngestConfig:
 
 
 def _resolve_semantic_config(raw: object, *, root_path: Path) -> SemanticConfig:
-    data: dict[str, object] = dict(raw) if isinstance(raw, dict) else {}
+    data = (
+        copy_str_key_table(raw, key="tool.codeclone.memory.semantic")
+        if isinstance(raw, dict)
+        else {}
+    )
     for env_var, field_name in _SEMANTIC_ENV_OVERRIDES.items():
         env_value = os.environ.get(env_var)
         if env_value is not None:
@@ -312,32 +366,19 @@ def resolve_memory_config(
     memory_obj = loaded.get("memory")
     merged: dict[str, object] = dict(MEMORY_CONFIG_DEFAULTS)
     if isinstance(memory_obj, dict):
-        merged.update(memory_obj)
+        merged.update(copy_str_key_table(memory_obj, key="tool.codeclone.memory"))
 
-    backend_raw = _memory_choice(
-        merged["backend"],
-        key="backend",
-        valid=_VALID_BACKENDS,
-    )
-
-    policy_raw = _memory_choice(
-        merged["mcp_sync_policy"],
-        key="mcp_sync_policy",
-        valid=_VALID_MCP_SYNC_POLICIES,
-    )
-
-    projection_policy_raw = _memory_choice(
-        merged["projection_rebuild_policy"],
-        key="projection_rebuild_policy",
-        valid=_VALID_PROJECTION_REBUILD_POLICIES,
-    )
+    backend = _memory_backend(merged["backend"])
+    mcp_sync_policy = _memory_mcp_sync_policy(merged["mcp_sync_policy"])
     env_projection_policy = os.environ.get(MEMORY_ENV_PROJECTION_REBUILD_POLICY)
-    if env_projection_policy is not None:
-        projection_policy_raw = _memory_choice(
-            env_projection_policy,
-            key="projection_rebuild_policy",
-            valid=_VALID_PROJECTION_REBUILD_POLICIES,
-        )
+    projection_policy_value: object = (
+        env_projection_policy
+        if env_projection_policy is not None
+        else merged["projection_rebuild_policy"]
+    )
+    projection_rebuild_policy = _memory_projection_rebuild_policy(
+        projection_policy_value
+    )
 
     env_db_path = os.environ.get(MEMORY_ENV_DB_PATH)
     db_path_raw: object = env_db_path if env_db_path is not None else merged["db_path"]
@@ -348,7 +389,7 @@ def resolve_memory_config(
     )
 
     return MemoryConfig(
-        backend=backend_raw,  # type: ignore[arg-type]
+        backend=backend,
         db_path=db_path_value,
         active_retention_days=_memory_int(
             merged["active_retention_days"], key="active_retention_days"
@@ -388,8 +429,8 @@ def resolve_memory_config(
             merged["git_hotspot_min_changes"],
             key="git_hotspot_min_changes",
         ),
-        mcp_sync_policy=policy_raw,  # type: ignore[arg-type]
-        projection_rebuild_policy=projection_policy_raw,  # type: ignore[arg-type]
+        mcp_sync_policy=mcp_sync_policy,
+        projection_rebuild_policy=projection_rebuild_policy,
         projection_rebuild_running_timeout_seconds=_memory_int(
             merged["projection_rebuild_running_timeout_seconds"],
             key="projection_rebuild_running_timeout_seconds",

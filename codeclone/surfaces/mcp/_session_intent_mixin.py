@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from fnmatch import fnmatchcase
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from ...audit import (
     EVENT_BLAST_RADIUS,
@@ -42,6 +43,8 @@ from ._intent import (
     normalize_expected_effects,
     normalize_intent_scope,
 )
+from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
+from ._session_finding_mixin import _MCPSessionFindingMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -79,6 +82,10 @@ from ._workspace_intents import (
 )
 from .messages import intent as intent_msgs
 
+if TYPE_CHECKING:
+    from ._session_finding_mixin import _StateLock
+    from ._workspace_hygiene import DirtySnapshot
+
 
 @dataclass(frozen=True, slots=True)
 class _RecoveryTarget:
@@ -96,6 +103,7 @@ class _RecoveryRun:
 class _MCPSessionIntentMixin:
     _runs: CodeCloneMCPRunStore
     _active_intents: dict[str, IntentRecord]
+    _state_lock: _StateLock
     _intent_sequence: int
     _agent_pid: int
     _agent_start_epoch: int
@@ -124,13 +132,16 @@ class _MCPSessionIntentMixin:
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
-        payload = super().get_blast_radius(
+        blast_radius_session = cast(_MCPSessionBlastRadiusMixin, super())
+        payload = blast_radius_session.get_blast_radius(
             files=files,
             run_id=record.run_id,
             depth=depth,
             include=include,
         )
-        normalized_payload = _helpers.coerce_object_dict(payload)
+        normalized_payload = _helpers.coerce_object_dict(
+            cast(Mapping[object, object], payload)
+        )
         self._renew_lease_for_run(record=record)
         self._audit_emit(
             root=record.root,
@@ -227,6 +238,7 @@ class _MCPSessionIntentMixin:
         expected_effects: Sequence[str] | None,
         ttl_seconds: int | None,
         on_conflict: str | None = None,
+        dirty_snapshot: DirtySnapshot | None = None,
     ) -> dict[str, object]:
         record = self._runs.get(run_id)
         try:
@@ -237,7 +249,8 @@ class _MCPSessionIntentMixin:
         description = str(intent or "").strip()
         if not description:
             raise MCPServiceContractError("action='declare' requires intent text.")
-        blast = self._blast_radius_result(
+        blast_radius_session = cast(_MCPSessionBlastRadiusMixin, self)
+        blast = blast_radius_session._blast_radius_result(
             record=record,
             files=normalized_scope.allowed_paths,
             depth="direct",
@@ -283,9 +296,7 @@ class _MCPSessionIntentMixin:
             intent=record_payload,
             ttl_seconds=ttl,
         )
-        from ._workspace_hygiene import collect_dirty_snapshot
-
-        dirty_snapshot = collect_dirty_snapshot(record.root)
+        dirty_snapshot = _dirty_snapshot_for_declare(record.root, dirty_snapshot)
         workspace_record = replace(
             workspace_record,
             dirty_snapshot=dirty_snapshot.to_payload(),
@@ -633,9 +644,15 @@ class _MCPSessionIntentMixin:
             )
             return payload
         actual = (
-            self._normalize_changed_paths(root_path=record.root, paths=changed_files)
+            cast(_MCPSessionFindingMixin, self)._normalize_changed_paths(
+                root_path=record.root,
+                paths=changed_files,
+            )
             if changed_files
-            else self._git_diff_paths(root_path=record.root, git_diff_ref=str(diff_ref))
+            else cast(_MCPSessionFindingMixin, self)._git_diff_paths(
+                root_path=record.root,
+                git_diff_ref=str(diff_ref),
+            )
         )
         check_result = self._intent_check_result(intent=active_intent, actual=actual)
         updated = replace(
@@ -912,7 +929,9 @@ class _MCPSessionIntentMixin:
         )
         return payload
 
-    def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
+    def _list_workspace_intents(
+        self, *, root: str | None, include_dirty_summary: bool = True
+    ) -> dict[str, object]:
         from ...config.intent_registry import intent_registry_summary
         from ._workspace_intents import list_workspace_intent_records_for_recovery
 
@@ -941,11 +960,16 @@ class _MCPSessionIntentMixin:
             "total_agents": len({item.agent_pid for item in records}),
             "own_pid": self._agent_pid,
             "own_start_epoch": self._agent_start_epoch,
-            "workspace_dirty_summary": _helpers.workspace_dirty_summary_payload(
-                root=root_path
-            ),
             **intent_registry_summary(root_path),
         }
+        if include_dirty_summary:
+            # Skipped on the start path: start never surfaces this summary and it
+            # is absent from the start-replay registry digest, so computing it
+            # there is a redundant git rev-parse + status. The public
+            # list_workspace route keeps the default True to preserve contract.
+            payload["workspace_dirty_summary"] = (
+                _helpers.workspace_dirty_summary_payload(root=root_path)
+            )
         if recovery_available:
             payload["recovery_next_step"] = intent_msgs.RECOVERY_LIST_NEXT_STEP
         return payload
@@ -1515,6 +1539,17 @@ class _MCPSessionIntentMixin:
             required_action=required_action,
             message=message,
         )
+
+
+def _dirty_snapshot_for_declare(
+    root: Path,
+    dirty_snapshot: DirtySnapshot | None,
+) -> DirtySnapshot:
+    if dirty_snapshot is not None:
+        return dirty_snapshot
+    from ._workspace_hygiene import collect_dirty_snapshot
+
+    return collect_dirty_snapshot(root)
 
 
 def _apply_blast_context(

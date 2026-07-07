@@ -324,6 +324,38 @@ def test_fastembed_provider_fails_clear_on_string_vector(
         embed_query(provider, "bad vector")
 
 
+def test_fastembed_provider_coerces_numpy_float32_vectors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Real fastembed TextEmbedding.embed() yields numpy float32 1-D arrays;
+    # iterating one produces numpy.float32 scalars, which are NOT Python
+    # float/int subclasses. The provider must still coerce them to Python
+    # floats instead of rejecting every real embedding as "non-numeric".
+    numpy = pytest.importorskip("numpy")
+    vector = numpy.asarray([0.5] * 384, dtype=numpy.float32)
+    provider, _created = _resolve_fastembed_provider(monkeypatch, vectors=[vector])
+
+    result = embed_query(provider, "numpy vector")
+
+    assert len(result) == 384
+    assert all(type(value) is float for value in result)
+    assert result == [0.5] * 384
+
+
+def test_fastembed_provider_rejects_non_real_vector_element(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A non-Real element *inside* an iterable vector (here a str) must be
+    # rejected cleanly as "non-numeric" rather than surfacing a bare ValueError
+    # from float("bad"). This pins the element-level numbers.Real branch, which
+    # the whole-vector str guard (vectors=["bad"], caught as "non-iterable")
+    # never reaches.
+    provider, _created = _resolve_fastembed_provider(monkeypatch, vectors=[["bad"]])
+
+    with pytest.raises(MemorySemanticUnavailableError, match="non-numeric"):
+        embed_query(provider, "bad element")
+
+
 def test_fastembed_provider_fails_clear_when_extra_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -785,6 +817,19 @@ def test_fastembed_tokenizer_helper_edge_paths() -> None:
 
     assert provider_mod._encoding_length(_Encoding()) == 3
     assert provider_mod._encoding_length(object()) == 0
+
+    class _StringIds:
+        def __init__(self) -> None:
+            self.ids = "abc"
+
+    class _BoolTokenIds:
+        def __init__(self) -> None:
+            self.ids = [1, True, 3]
+
+    assert provider_mod._encoding_token_ids(object()) == []
+    assert provider_mod._encoding_token_ids(_StringIds()) == []
+    assert provider_mod._encoding_token_ids(_BoolTokenIds()) == []
+    assert provider_mod._encoding_token_ids(_Encoding()) == [1, 2, 3]
 
 
 def test_fastembed_tokenizer_max_length_rejects_non_positive() -> None:

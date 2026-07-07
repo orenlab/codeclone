@@ -368,6 +368,44 @@ def test_upsert_skips_human_origin_record(tmp_path: Path) -> None:
         store.close()
 
 
+def test_sqlite_store_search_match_mode_and_literal_row_validation(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory import sqlite_store as sqlite_store_mod
+
+    root = tmp_path / "repo"
+    root.mkdir()
+    project = resolve_project_identity(root)
+    store = SqliteEngineeringMemoryStore(tmp_path / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        with pytest.raises(ValueError, match="search_match_mode"):
+            store.search_records(
+                project_id=project.id,
+                statement_query="fact",
+                match_mode="invalid",  # type: ignore[arg-type]
+            )
+    finally:
+        store.close()
+
+    with pytest.raises(ValueError, match="Invalid Engineering Memory record_type"):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.execute("CREATE TABLE memory_records (type TEXT)")
+        conn.execute(
+            "INSERT INTO memory_records (type) VALUES (?)",
+            ("not-a-real-type",),
+        )
+        row = conn.execute("SELECT type FROM memory_records").fetchone()
+        assert row is not None
+        sqlite_store_mod._literal_from_row(
+            row,
+            column="type",
+            field="record_type",
+            allowed=sqlite_store_mod._MEMORY_RECORD_TYPES,
+        )
+
+
 def test_open_sqlite_db_rejects_invalid_synchronous(tmp_path: Path) -> None:
     from codeclone.utils.sqlite_store import open_sqlite_db
 

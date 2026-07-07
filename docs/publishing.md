@@ -1,7 +1,15 @@
+---
+title: "Publishing the Docs Site"
+audience: public
+doc_type: runbook
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
+---
+
 <!-- doc-scope: DOCS-SITE BUILD AND PUBLISHING only.
      owns: Zensical build flow, docs.yml workflow, sample report generation,
        local preview commands, maintenance rules.
-     does-not-own: storefront sync (→ releasing.md), contract content (→ book/).
+     does-not-own: storefront sync (→ releasing.md), contract content (→ concepts/, reference/, internal/).
      rule: split from the former combined publishing page. Do not re-merge. -->
 
 # Publishing the Docs Site
@@ -15,7 +23,8 @@ remains the current repository code and CI workflow.
 
 !!! note "Scope"
     This page covers docs-site build and publishing mechanics. Public behavior
-    contracts still live in the book chapters and in the repository code.
+    contracts live in the `reference/` and `concepts/` pages and in the
+    repository code (the legacy `book/` tree has been removed).
     For integration distribution (storefront sync), see
     [Releasing & storefront sync](releasing.md).
 
@@ -31,18 +40,20 @@ remains the current repository code and CI workflow.
 
 The published site contains:
 
-- the documentation tree under `docs/`
-- the contract book under `docs/book/`
-- guide pages such as architecture narrative and integration pages
+- the public documentation tree (concepts, guides, integrations, reference,
+  and troubleshooting pages)
 - a live sample report for the current repository build under
   `Examples / Sample Report`
+
+Repository/agent-facing content lives in a separate, unpublished internal
+tree and is not part of the built site.
 
 ## Build flow
 
 The docs workflow (`.github/workflows/docs.yml`) follows this order:
 
 1. install project dependencies
-2. build the site with `zensical build --clean --strict`
+2. build the site with `uv run --with zensical==0.0.46 zensical build --clean --strict`
 3. generate a live sample report into `site/examples/report/live`
 4. upload the built site as a GitHub Pages artifact
 5. deploy on pushes to `main`
@@ -78,18 +89,14 @@ git. `site/` remains ignored.
 
 ## Local preview
 
-=== "Build the site"
+Run the same local preview sequence as the publishing workflow:
 
-    ```bash title="Validate the Zensical site"
-    uv run --with zensical==0.0.46 zensical build --clean --strict
-    ```
+```bash title="Build docs and generate the live sample report"
+uv run --with zensical==0.0.46 zensical build --clean --strict
+uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
+```
 
-=== "Build the site and sample report"
-
-    ```bash title="Generate the live sample report into site/"
-    uv run --with zensical==0.0.46 zensical build --clean --strict
-    uv run python scripts/build_docs_example_report.py --output-dir site/examples/report/live
-    ```
+For docs-only validation, run the first command alone.
 
 Then open:
 

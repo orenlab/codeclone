@@ -6,12 +6,20 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
+
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(text: str) -> str:
+    return _ANSI_ESCAPE_RE.sub("", text)
 
 
 def assert_contains_all(text: str, *needles: str) -> None:
+    normalized = strip_ansi(text)
     for needle in needles:
-        assert needle in text
+        assert needle in normalized
 
 
 def assert_contains_none(text: str, *needles: str) -> None:

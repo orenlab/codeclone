@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from typing import cast
 
@@ -28,6 +29,26 @@ def _rows(value: object) -> list[dict[str, object]]:
 
 def _texts(value: object) -> list[str]:
     return cast("list[str]", value)
+
+
+def _seed_future_observability_schema(root: Path) -> None:
+    path = observability_store_path(root)
+    path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO platform_meta(key, value)
+            VALUES('schema_version', '999.0');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _seed(tmp_path: Path) -> None:
@@ -117,6 +138,21 @@ def _seed(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_query_platform_observability_future_schema_returns_inert_envelope(
+    tmp_path: Path,
+) -> None:
+    _seed_future_observability_schema(tmp_path)
+
+    result = query_platform_observability(
+        root=tmp_path,
+        section="summary",
+    )
+
+    assert result["status"] == "incompatible_schema"
+    assert result["rows"] == []
+    assert "newer than this CodeClone build" in str(result["error"])
+
+
 def _seed_analysis_phases(tmp_path: Path) -> None:
     conn = open_observability_store(observability_store_path(tmp_path))
     try:
@@ -157,10 +193,14 @@ def _seed_analysis_phases(tmp_path: Path) -> None:
 def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(root=tmp_path, section="summary")
-    assert out["surface"] == "platform_observability"
-    assert out["user_facing"] is False
-    assert out["operations"] == 4
-    assert out["costly_noops"] == 1
+    expected_scalars = {
+        "surface": "platform_observability",
+        "status": "ok",
+        "user_facing": False,
+        "operations": 4,
+        "costly_noops": 1,
+    }
+    assert {key: out[key] for key in expected_scalars} == expected_scalars
     assert out["context_pressure_units"] == out["context_pressure_tokens"]
     kinds = {d["kind"] for d in _rows(out["top_diagnostics"])}
     assert {"memory", "db", "context"} <= kinds
@@ -211,6 +251,43 @@ def test_analysis_phase_cost_section_and_summary_routing(tmp_path: Path) -> None
     assert "analysis" in diagnostics
 
 
+def test_analysis_diagnostic_helper_branches() -> None:
+    from codeclone.observability.views import AggregatesView, AnalysisPhaseRow
+
+    assert query_mod._analysis_diagnostic(AggregatesView(operation_count=0)) is None
+    assert (
+        query_mod._analysis_diagnostic(
+            AggregatesView(
+                operation_count=1,
+                analysis_phases=(
+                    AnalysisPhaseRow(
+                        phase="unit_cfg",
+                        worker_elapsed_ms=1.0,
+                        share_permille=100,
+                        verdict="balanced",
+                    ),
+                ),
+            )
+        )
+        is None
+    )
+    heavy = query_mod._analysis_diagnostic(
+        AggregatesView(
+            operation_count=1,
+            analysis_phases=(
+                AnalysisPhaseRow(
+                    phase="unit_cfg",
+                    worker_elapsed_ms=2500.0,
+                    share_permille=833,
+                    verdict="phase_heavy",
+                ),
+            ),
+        )
+    )
+    assert heavy is not None
+    assert heavy["kind"] == "analysis"
+
+
 def test_summary_does_not_embed_raw_trace(tmp_path: Path) -> None:
     _seed(tmp_path)
     out = query_platform_observability(root=tmp_path, section="summary")
@@ -242,11 +319,83 @@ def test_detail_selectors_ignored_and_echoed(tmp_path: Path) -> None:
     assert out["ignored_parameters"] == ["operation_id", "span_id"]
 
 
+def test_operation_detail_projects_per_span_progression(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    out = query_platform_observability(
+        root=tmp_path,
+        section="operation_detail",
+        detail_level="full",
+        operation_id="J",
+    )
+    # Per-object detail sections support full and consume operation_id.
+    assert out["status"] == "ok"
+    assert out["detail_level"] == "full"
+    assert out["operation_id"] == "J"
+    assert "ignored_parameters" not in out
+    assert out["span_count"] == 2
+    spans = {cast("str", s["span_id"]): s for s in _rows(out["spans"])}
+    assert spans["r"]["name"] == "memory.semantic.rebuild"
+    assert spans["r"]["rss_delta_mb"] == 440.0
+    counters = cast("dict[str, int]", spans["r"]["counters"])
+    assert counters["db_queries"] == 1370
+
+
+def test_span_detail_projects_one_span_by_id(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    out = query_platform_observability(
+        root=tmp_path, section="span_detail", span_id="d"
+    )
+    assert out["status"] == "ok"
+    assert out["span_id"] == "d"
+    assert out["operation_id"] == "J"
+    counters = cast("dict[str, int]", out["counters"])
+    assert counters["experiences_distilled"] == 47
+
+
+def test_detail_sections_fail_closed_on_missing_or_unknown_selector(
+    tmp_path: Path,
+) -> None:
+    _seed(tmp_path)
+    missing = query_platform_observability(root=tmp_path, section="operation_detail")
+    assert missing["status"] == "invalid_selector"
+    missing_span = query_platform_observability(root=tmp_path, section="span_detail")
+    assert missing_span["status"] == "invalid_selector"
+    assert missing_span["error"] == "span_detail requires span_id"
+    not_found = query_platform_observability(
+        root=tmp_path, section="span_detail", span_id="nope"
+    )
+    assert not_found["status"] == "not_found"
+    missing_operation = query_platform_observability(
+        root=tmp_path,
+        section="operation_detail",
+        operation_id="missing-op",
+    )
+    assert missing_operation["status"] == "not_found"
+
+
+def test_aggregate_rows_expose_ids_for_drilldown(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    out = query_platform_observability(
+        root=tmp_path, section="slow_operations", detail_level="normal"
+    )
+    assert all("operation_id" in row for row in _rows(out["rows"]))
+
+
 def test_absent_store_is_inert_not_error(tmp_path: Path) -> None:
     out = query_platform_observability(root=tmp_path, section="summary")
     assert out["status"] in {"disabled", "no_store"}
     assert out["rows"] == []
     assert out["user_facing"] is False
+
+
+def test_empty_store_reports_empty_status(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    conn.close()
+
+    out = query_platform_observability(root=tmp_path, section="summary")
+
+    assert out["status"] == "empty"
+    assert out["operations"] == 0
 
 
 def test_disabled_vs_no_store_split(
@@ -273,7 +422,7 @@ def test_limit_is_clamped_and_floored(tmp_path: Path) -> None:
     big = query_platform_observability(
         root=tmp_path, section="db_cost", detail_level="normal", limit=10000
     )
-    assert any("clamped to 50" in w for w in _texts(big["warnings"]))
+    assert any("clamped to 100" in w for w in _texts(big["warnings"]))
     bad = query_platform_observability(root=tmp_path, section="db_cost", limit=0)
     assert any("invalid" in w for w in _texts(bad["warnings"]))
 
@@ -348,7 +497,7 @@ def test_projection_helpers_and_diagnostic_edges(
     )
 
     warnings: list[str] = []
-    assert query_mod._resolve_detail("verbose", warnings) == "compact"
+    assert query_mod._resolve_detail("verbose", "summary", warnings) == "compact"
     assert warnings
 
     sentinel = object()
@@ -359,7 +508,8 @@ def test_projection_helpers_and_diagnostic_edges(
         return sentinel
 
     monkeypatch.setattr(query_mod, "build_trace_view", _build_trace)
-    assert query_mod._build_trace(object(), "corr-1") is sentinel
+    conn = cast(sqlite3.Connection, object())
+    assert query_mod._build_trace(conn, "corr-1") is sentinel
     assert calls == [{"correlation_id": "corr-1"}]
 
     empty_child = OperationView(

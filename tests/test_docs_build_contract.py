@@ -9,6 +9,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from tests.docs_script_loader import load_script_module
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -16,7 +18,13 @@ _DOCS_ROOT = _REPO_ROOT / "docs"
 _LINT_SCRIPT = _REPO_ROOT / "scripts" / "lint_admonitions.py"
 
 
+def _require_docs_source() -> None:
+    if not (_DOCS_ROOT / "index.md").is_file():
+        pytest.skip("repo docs source tree is not present")
+
+
 def test_docs_admonition_indentation_is_valid() -> None:
+    _require_docs_source()
     lint = load_script_module(
         module_name="lint_admonitions",
         script_path=_LINT_SCRIPT,
@@ -29,6 +37,7 @@ def test_docs_admonition_indentation_is_valid() -> None:
 
 
 def test_docs_build_strict() -> None:
+    _require_docs_source()
     result = subprocess.run(
         [
             "uv",
@@ -49,6 +58,7 @@ def test_docs_build_strict() -> None:
 
 
 def test_sample_report_built_page_has_absolute_artifact_links() -> None:
+    _require_docs_source()
     site_root = _REPO_ROOT / "site"
     build = subprocess.run(
         [

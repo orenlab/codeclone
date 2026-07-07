@@ -921,7 +921,10 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _review_state: dict[str, OrderedDict[str, str | None]]
     _last_gate_results: dict[str, dict[str, object]]
     _spread_max_cache: dict[str, int]
-    _blast_radius_cache: dict[tuple[str, tuple[str, ...], str], BlastRadiusResult]
+    _blast_radius_cache: dict[
+        tuple[str, tuple[str, ...], str, tuple[str, ...], tuple[str, ...]],
+        BlastRadiusResult,
+    ]
     _context_projection_pages: dict[str, ContextProjectionArtifact]
     _memory_continuation_requests: dict[str, dict[str, object]]
     _active_intents: dict[str, IntentRecord]
@@ -1096,12 +1099,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 offset=offset,
                 limit=limit,
             )
-        payload = report_document.get(validated_section)
-        if not isinstance(payload, Mapping):
-            raise MCPServiceContractError(
-                f"Report section '{validated_section}' is not available in this run."
-            )
-        return dict(payload)
+        return dict(require_mapping_section(report_document, section=validated_section))
 
     def get_production_triage(
         self,
@@ -1122,12 +1120,17 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         )
         hotspot_limit = max(1, min(max_hotspots, 10))
         suggestion_limit = max(1, min(max_suggestions, 10))
-        production_hotspots = self._hotspot_rows(
+        production_hotspot_selection = self._hotspot_selection(
             record=record,
             kind="production_hotspots",
-            detail_level="summary",
             changed_paths=(),
             exclude_reviewed=False,
+            limit=hotspot_limit,
+        )
+        production_hotspots = self._decorate_hotspot_selection(
+            record=record,
+            selection=production_hotspot_selection,
+            detail_level="summary",
         )
         production_suggestions = [
             dict(row)
@@ -1156,11 +1159,10 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             },
             "top_hotspots": {
                 "kind": "production_hotspots",
-                "available": len(production_hotspots),
-                "returned": min(len(production_hotspots), hotspot_limit),
+                "available": production_hotspot_selection[1],
+                "returned": len(production_hotspots),
                 "items": [
-                    dict(_helpers._as_mapping(item))
-                    for item in production_hotspots[:hotspot_limit]
+                    dict(_helpers._as_mapping(item)) for item in production_hotspots
                 ],
             },
             "suggestions": {
@@ -1214,7 +1216,26 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             payload["anti_patterns"] = list(spec.anti_patterns)
         if validated_detail == "normal" and spec.warnings:
             payload["warnings"] = list(spec.warnings)
+        self._attach_help_topic_index(payload, topic=validated_topic)
         return payload
+
+    def _attach_help_topic_index(
+        self,
+        payload: dict[str, object],
+        *,
+        topic: HelpTopic,
+    ) -> None:
+        if topic != "overview":
+            return
+        payload["topics"] = [
+            {
+                "topic": topic_name,
+                "summary": topic_spec.summary,
+                "recommended_tools": list(topic_spec.recommended_tools),
+            }
+            for topic_name, topic_spec in _HELP_TOPIC_SPECS.items()
+            if topic_name != "overview"
+        ]
 
     def query_platform_observability(
         self,

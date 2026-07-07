@@ -13,7 +13,7 @@ import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Final, Literal, cast
+from typing import Final, Literal
 
 AuditSeverity = Literal["info", "warn", "error"]
 AuditPayloadMode = Literal["off", "compact", "full"]
@@ -21,6 +21,17 @@ AnalysisSource = Literal["mcp", "cli"]
 AuditSurface = Literal["mcp", "cli", "hook", "ide", "ci", "unknown"]
 
 AUDIT_EVENT_CORE_VERSION: Final = "2"
+_AUDIT_SURFACE_VALUES: tuple[AuditSurface, ...] = (
+    "mcp",
+    "cli",
+    "hook",
+    "ide",
+    "ci",
+    "unknown",
+)
+_AUDIT_SURFACE_BY_VALUE: Mapping[str, AuditSurface] = {
+    value: value for value in _AUDIT_SURFACE_VALUES
+}
 
 EVENT_INTENT_DECLARED = "intent.declared"
 EVENT_INTENT_QUEUED = "intent.queued"
@@ -175,12 +186,14 @@ def normalize_audit_surface(
     payload: Mapping[str, object] | None = None,
 ) -> AuditSurface:
     if isinstance(surface, str):
-        normalized = surface.strip().lower()
-        if normalized in KNOWN_AUDIT_SURFACES:
-            return cast(AuditSurface, normalized)
+        normalized = _AUDIT_SURFACE_BY_VALUE.get(surface.strip().lower())
+        if normalized is not None:
+            return normalized
     payload_source = _payload_source(payload)
-    if payload_source in {ANALYSIS_SOURCE_MCP, ANALYSIS_SOURCE_CLI}:
-        return payload_source
+    if payload_source == ANALYSIS_SOURCE_MCP:
+        return "mcp"
+    if payload_source == ANALYSIS_SOURCE_CLI:
+        return "cli"
     return "unknown"
 
 
@@ -646,7 +659,7 @@ def _patch_trail_event_core_facts(
 def _patch_trail_counts(payload: Mapping[str, object]) -> Mapping[str, object]:
     counts = payload.get("counts")
     if isinstance(counts, Mapping):
-        return counts
+        return _mapping(counts)
     return {
         "declared": len(_sequence(payload.get("declared_files"))),
         "changed": len(_sequence(payload.get("changed_files"))),
@@ -684,7 +697,7 @@ def _claim_event_core_facts(
     citations: list[dict[str, object]] = []
     for raw in _sequence(payload.get("validated_citations")):
         if isinstance(raw, Mapping):
-            entry = _validated_citation_entry(raw)
+            entry = _validated_citation_entry(_mapping(raw))
             if entry is not None:
                 citations.append(entry)
     if citations:
@@ -752,7 +765,9 @@ def _sequence_field_count(payload: Mapping[str, object], key: str) -> int:
 
 
 def _mapping(value: object) -> Mapping[str, object]:
-    return value if isinstance(value, Mapping) else {}
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if isinstance(key, str)}
 
 
 def _sequence(value: object) -> Sequence[object]:

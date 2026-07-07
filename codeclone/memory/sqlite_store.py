@@ -10,11 +10,34 @@ import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
-from typing import cast
+from typing import TypeVar
 
+from ..contracts import ENGINEERING_MEMORY_SCHEMA_VERSION
 from ..report.meta import current_report_timestamp_utc
 from ..utils.iterutils import chunked
-from .enums import LinkRelation
+from .enums import (
+    EVIDENCE_KIND_VALUES,
+    LINK_RELATION_VALUES,
+    MEMORY_CONFIDENCE_VALUES,
+    MEMORY_INGEST_SOURCE_VALUES,
+    MEMORY_ORIGIN_VALUES,
+    MEMORY_RECORD_TYPE_VALUES,
+    MEMORY_STATUS_VALUES,
+    SUBJECT_KIND_VALUES,
+    SUBJECT_RELATION_VALUES,
+    EvidenceKind,
+    LinkRelation,
+    MemoryConfidence,
+    MemoryIngestSource,
+    MemoryOrigin,
+    MemoryRecordType,
+    MemoryStatus,
+    SubjectKind,
+    SubjectRelation,
+    validate_memory_confidence,
+    validate_memory_record_type,
+    validate_memory_status,
+)
 from .experience.models import Experience
 from .locks import memory_init_lock
 from .models import (
@@ -32,6 +55,13 @@ from .models import (
     generate_memory_id,
     parse_payload_json,
     payload_json_text,
+    validate_ingestion_run,
+    validate_memory_evidence,
+    validate_memory_link,
+    validate_memory_project,
+    validate_memory_record,
+    validate_memory_revision,
+    validate_memory_subject,
 )
 from .schema import get_meta, open_memory_db, set_meta
 from .search_index import (
@@ -48,6 +78,51 @@ from .trajectory.models import (
 )
 
 _SQLITE_IN_QUERY_BATCH = 500
+_SqliteParam = str | int | float | bytes | None
+_LiteralT = TypeVar("_LiteralT", bound=str)
+
+_MEMORY_RECORD_TYPES: Mapping[str, MemoryRecordType] = {
+    value: value for value in MEMORY_RECORD_TYPE_VALUES
+}
+_MEMORY_STATUSES: Mapping[str, MemoryStatus] = {
+    value: value for value in MEMORY_STATUS_VALUES
+}
+_MEMORY_CONFIDENCES: Mapping[str, MemoryConfidence] = {
+    value: value for value in MEMORY_CONFIDENCE_VALUES
+}
+_MEMORY_ORIGINS: Mapping[str, MemoryOrigin] = {
+    value: value for value in MEMORY_ORIGIN_VALUES
+}
+_MEMORY_INGEST_SOURCES: Mapping[str, MemoryIngestSource] = {
+    value: value for value in MEMORY_INGEST_SOURCE_VALUES
+}
+_SUBJECT_KINDS: Mapping[str, SubjectKind] = {
+    value: value for value in SUBJECT_KIND_VALUES
+}
+_SUBJECT_RELATIONS: Mapping[str, SubjectRelation] = {
+    value: value for value in SUBJECT_RELATION_VALUES
+}
+_EVIDENCE_KINDS: Mapping[str, EvidenceKind] = {
+    value: value for value in EVIDENCE_KIND_VALUES
+}
+_LINK_RELATIONS: Mapping[str, LinkRelation] = {
+    value: value for value in LINK_RELATION_VALUES
+}
+
+
+def _literal_from_row(
+    row: sqlite3.Row,
+    column: str,
+    *,
+    field: str,
+    allowed: Mapping[str, _LiteralT],
+) -> _LiteralT:
+    value = row[column]
+    if isinstance(value, str):
+        literal = allowed.get(value)
+        if literal is not None:
+            return literal
+    raise ValueError(f"Invalid Engineering Memory {field}: {value!r}")
 
 
 class SqliteEngineeringMemoryStore:
@@ -62,6 +137,7 @@ class SqliteEngineeringMemoryStore:
         return self._db_path
 
     def initialize(self, project: MemoryProject) -> None:
+        project = validate_memory_project(project)
         now = current_report_timestamp_utc()
         self._conn.execute(
             """
@@ -287,6 +363,7 @@ class SqliteEngineeringMemoryStore:
         return self._conn
 
     def write_record(self, record: MemoryRecord) -> None:
+        record = validate_memory_record(record)
         self._insert_record(record)
         self._conn.commit()
 
@@ -312,6 +389,7 @@ class SqliteEngineeringMemoryStore:
     def upsert_record(
         self, record: MemoryRecord, *, commit: bool = True
     ) -> UpsertResult:
+        record = validate_memory_record(record)
         existing = self.find_by_identity_key(record.project_id, record.identity_key)
         now = current_report_timestamp_utc()
         if existing is not None and (
@@ -421,18 +499,26 @@ class SqliteEngineeringMemoryStore:
         )
 
     def find_record(self, record_id: str) -> MemoryRecord | None:
+        clauses = ["id=?"]
+        params: list[_SqliteParam] = [record_id]
+        _append_canonical_record_filters(clauses, params)
+        where = " AND ".join(clauses)
         row = self._conn.execute(
-            "SELECT * FROM memory_records WHERE id=?",
-            (record_id,),
+            f"SELECT * FROM memory_records WHERE {where}",
+            params,
         ).fetchone()
         if row is None:
             return None
         return _record_from_row(row)
 
     def find_by_identity_key(self, project_id: str, key: str) -> MemoryRecord | None:
+        clauses = ["project_id=?", "identity_key=?"]
+        params: list[_SqliteParam] = [project_id, key]
+        _append_canonical_record_filters(clauses, params)
+        where = " AND ".join(clauses)
         row = self._conn.execute(
-            "SELECT * FROM memory_records WHERE project_id=? AND identity_key=?",
-            (project_id, key),
+            f"SELECT * FROM memory_records WHERE {where}",
+            params,
         ).fetchone()
         if row is None:
             return None
@@ -440,7 +526,8 @@ class SqliteEngineeringMemoryStore:
 
     def query_records(self, query: MemoryQuery) -> Sequence[MemoryRecord]:
         clauses = ["project_id=?"]
-        params: list[object] = [query.project_id]
+        params: list[_SqliteParam] = [query.project_id]
+        _append_canonical_record_filters(clauses, params)
         if query.types:
             placeholders = ", ".join("?" for _ in query.types)
             clauses.append(f"type IN ({placeholders})")
@@ -484,9 +571,19 @@ class SqliteEngineeringMemoryStore:
             MemorySubject(
                 id=str(row["id"]),
                 memory_id=str(row["memory_id"]),
-                subject_kind=str(row["subject_kind"]),  # type: ignore[arg-type]
+                subject_kind=_literal_from_row(
+                    row,
+                    "subject_kind",
+                    field="subject_kind",
+                    allowed=_SUBJECT_KINDS,
+                ),
                 subject_key=str(row["subject_key"]),
-                relation=str(row["relation"]),  # type: ignore[arg-type]
+                relation=_literal_from_row(
+                    row,
+                    "relation",
+                    field="subject_relation",
+                    allowed=_SUBJECT_RELATIONS,
+                ),
             )
             for row in rows
         ]
@@ -517,9 +614,19 @@ class SqliteEngineeringMemoryStore:
                     MemorySubject(
                         id=str(row["id"]),
                         memory_id=memory_id,
-                        subject_kind=str(row["subject_kind"]),  # type: ignore[arg-type]
+                        subject_kind=_literal_from_row(
+                            row,
+                            "subject_kind",
+                            field="subject_kind",
+                            allowed=_SUBJECT_KINDS,
+                        ),
                         subject_key=str(row["subject_key"]),
-                        relation=str(row["relation"]),  # type: ignore[arg-type]
+                        relation=_literal_from_row(
+                            row,
+                            "relation",
+                            field="subject_relation",
+                            allowed=_SUBJECT_RELATIONS,
+                        ),
                     )
                 )
         return grouped
@@ -539,7 +646,12 @@ class SqliteEngineeringMemoryStore:
             MemoryEvidence(
                 id=str(row["id"]),
                 memory_id=str(row["memory_id"]),
-                evidence_kind=str(row["evidence_kind"]),  # type: ignore[arg-type]
+                evidence_kind=_literal_from_row(
+                    row,
+                    "evidence_kind",
+                    field="evidence_kind",
+                    allowed=_EVIDENCE_KINDS,
+                ),
                 ref=str(row["ref"]),
                 locator=str(row["locator"]) if row["locator"] is not None else None,
                 quote=str(row["quote"]) if row["quote"] is not None else None,
@@ -589,6 +701,14 @@ class SqliteEngineeringMemoryStore:
         limit: int = 100,
         match_mode: SearchMatchMode = "any",
     ) -> list[MemoryRecord]:
+        types = tuple(validate_memory_record_type(value) for value in types)
+        statuses = tuple(validate_memory_status(value) for value in statuses)
+        confidences = tuple(validate_memory_confidence(value) for value in confidences)
+        if match_mode != "any" and match_mode != "all":
+            raise ValueError(
+                "Invalid Engineering Memory search_match_mode: "
+                f"{match_mode!r}. Allowed values: 'any', 'all'."
+            )
         if self._fts_available():
             ranked = self._search_records_fts(
                 project_id=project_id,
@@ -689,7 +809,8 @@ class SqliteEngineeringMemoryStore:
             "memory_records_fts MATCH ?",
             "memory_records_fts.project_id = ?",
         ]
-        params: list[object] = [match_expr, project_id]
+        params: list[_SqliteParam] = [match_expr, project_id]
+        _append_canonical_record_filters(clauses, params, prefix="memory_records.")
         _append_search_filters(
             clauses,
             params,
@@ -730,7 +851,8 @@ class SqliteEngineeringMemoryStore:
         if not tokens:
             return []
         clauses = ["project_id=?"]
-        params: list[object] = [project_id]
+        params: list[_SqliteParam] = [project_id]
+        _append_canonical_record_filters(clauses, params)
         token_clauses: list[str] = []
         for token in tokens:
             token_clauses.append(
@@ -760,6 +882,7 @@ class SqliteEngineeringMemoryStore:
         return [_record_from_row(row) for row in rows]
 
     def write_subject(self, subject: MemorySubject, *, commit: bool = True) -> None:
+        subject = validate_memory_subject(subject)
         existing = self._conn.execute(
             """
             SELECT id FROM memory_subjects
@@ -813,6 +936,7 @@ class SqliteEngineeringMemoryStore:
         return removed
 
     def write_evidence(self, evidence: MemoryEvidence) -> None:
+        evidence = validate_memory_evidence(evidence)
         self._conn.execute(
             """
             INSERT OR REPLACE INTO memory_evidence(
@@ -833,6 +957,7 @@ class SqliteEngineeringMemoryStore:
         )
 
     def write_link(self, link: MemoryLink) -> None:
+        link = validate_memory_link(link)
         self._conn.execute(
             """
             INSERT OR REPLACE INTO memory_links(
@@ -884,7 +1009,12 @@ class SqliteEngineeringMemoryStore:
                 project_id=str(row["project_id"]),
                 from_memory_id=str(row["from_memory_id"]),
                 to_memory_id=str(row["to_memory_id"]),
-                relation=cast(LinkRelation, str(row["relation"])),
+                relation=_literal_from_row(
+                    row,
+                    "relation",
+                    field="link_relation",
+                    allowed=_LINK_RELATIONS,
+                ),
                 created_by=str(row["created_by"]),
                 created_at_utc=str(row["created_at_utc"]),
             )
@@ -892,6 +1022,7 @@ class SqliteEngineeringMemoryStore:
         ]
 
     def write_ingestion_run(self, run: IngestionRun) -> None:
+        run = validate_ingestion_run(run)
         self._conn.execute(
             """
             INSERT OR REPLACE INTO memory_ingestion_runs(
@@ -923,6 +1054,7 @@ class SqliteEngineeringMemoryStore:
         self._conn.commit()
 
     def write_revision(self, revision: MemoryRevision) -> None:
+        revision = validate_memory_revision(revision)
         self._conn.execute(
             """
             INSERT OR REPLACE INTO memory_revisions(
@@ -955,6 +1087,7 @@ class SqliteEngineeringMemoryStore:
         stale_reason: str | None,
         commit: bool,
     ) -> None:
+        status = validate_memory_status(status)
         now = current_report_timestamp_utc()
         self._conn.execute(
             """
@@ -999,20 +1132,20 @@ class SqliteEngineeringMemoryStore:
         statuses: tuple[str, ...] = (),
         limit: int = 10000,
     ) -> list[MemoryRecord]:
+        clauses = ["project_id=?"]
+        params: list[_SqliteParam] = [project_id]
+        _append_canonical_record_filters(clauses, params)
         if statuses:
+            statuses = tuple(validate_memory_status(status) for status in statuses)
             placeholders = ", ".join("?" for _ in statuses)
-            rows = self._conn.execute(
-                f"SELECT * FROM memory_records WHERE project_id=? "
-                f"AND status IN ({placeholders}) "
-                "ORDER BY updated_at_utc DESC, id ASC LIMIT ?",
-                (project_id, *statuses, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM memory_records WHERE project_id=? "
-                "ORDER BY updated_at_utc DESC, id ASC LIMIT ?",
-                (project_id, limit),
-            ).fetchall()
+            clauses.append(f"status IN ({placeholders})")
+            params.extend(statuses)
+        where = " AND ".join(clauses)
+        rows = self._conn.execute(
+            f"SELECT * FROM memory_records WHERE {where} "
+            "ORDER BY updated_at_utc DESC, id ASC LIMIT ?",
+            (*params, limit),
+        ).fetchall()
         return [_record_from_row(row) for row in rows]
 
     def update_record_status(
@@ -1025,6 +1158,7 @@ class SqliteEngineeringMemoryStore:
         stale_reason: str | None = None,
         commit: bool = True,
     ) -> None:
+        status = validate_memory_status(status)
         now = current_report_timestamp_utc()
         self._conn.execute(
             """
@@ -1040,6 +1174,7 @@ class SqliteEngineeringMemoryStore:
             self._conn.commit()
 
     def count_records_by_status(self, project_id: str, status: str) -> int:
+        status = validate_memory_status(status)
         row = self._conn.execute(
             "SELECT COUNT(*) FROM memory_records WHERE project_id=? AND status=?",
             (project_id, status),
@@ -1053,6 +1188,7 @@ class SqliteEngineeringMemoryStore:
         updated_before_utc: str,
         commit: bool = True,
     ) -> int:
+        status = validate_memory_status(status)
         rows = self._conn.execute(
             "SELECT id FROM memory_records WHERE status=? AND updated_at_utc < ?",
             (status, updated_before_utc),
@@ -1157,6 +1293,7 @@ class SqliteEngineeringMemoryStore:
             yield
 
     def _insert_record(self, record: MemoryRecord) -> None:
+        record = validate_memory_record(record)
         self._conn.execute(
             """
             INSERT INTO memory_records(
@@ -1214,7 +1351,7 @@ class SqliteEngineeringMemoryStore:
 
 def _append_in_filter(
     clauses: list[str],
-    params: list[object],
+    params: list[_SqliteParam],
     values: Sequence[str],
     column: str,
 ) -> None:
@@ -1225,9 +1362,34 @@ def _append_in_filter(
     params.extend(values)
 
 
+def _append_canonical_record_filters(
+    clauses: list[str],
+    params: list[_SqliteParam],
+    *,
+    prefix: str = "",
+) -> None:
+    clauses.append(f"{prefix}schema_version=?")
+    params.append(ENGINEERING_MEMORY_SCHEMA_VERSION)
+    _append_in_filter(clauses, params, MEMORY_RECORD_TYPE_VALUES, f"{prefix}type")
+    _append_in_filter(clauses, params, MEMORY_STATUS_VALUES, f"{prefix}status")
+    _append_in_filter(
+        clauses,
+        params,
+        MEMORY_CONFIDENCE_VALUES,
+        f"{prefix}confidence",
+    )
+    _append_in_filter(clauses, params, MEMORY_ORIGIN_VALUES, f"{prefix}origin")
+    _append_in_filter(
+        clauses,
+        params,
+        MEMORY_INGEST_SOURCE_VALUES,
+        f"{prefix}ingest_source",
+    )
+
+
 def _append_confidence_filter(
     clauses: list[str],
-    params: list[object],
+    params: list[_SqliteParam],
     confidences: Sequence[str],
     *,
     via_subquery: bool,
@@ -1248,7 +1410,7 @@ def _append_confidence_filter(
 
 def _append_search_filters(
     clauses: list[str],
-    params: list[object],
+    params: list[_SqliteParam],
     types: Sequence[str],
     statuses: Sequence[str],
     confidences: Sequence[str],
@@ -1281,66 +1443,101 @@ def _record_content_equal(left: MemoryRecord, right: MemoryRecord) -> bool:
 
 def _record_from_row(row: sqlite3.Row) -> MemoryRecord:
     payload = parse_payload_json(row["payload_json"])
-    return MemoryRecord(
-        id=str(row["id"]),
-        project_id=str(row["project_id"]),
-        identity_key=str(row["identity_key"]),
-        type=str(row["type"]),  # type: ignore[arg-type]
-        status=str(row["status"]),  # type: ignore[arg-type]
-        confidence=str(row["confidence"]),  # type: ignore[arg-type]
-        origin=str(row["origin"]),  # type: ignore[arg-type]
-        ingest_source=str(row["ingest_source"]),  # type: ignore[arg-type]
-        statement=str(row["statement"]),
-        summary=str(row["summary"]) if row["summary"] is not None else None,
-        payload=payload,
-        created_at_utc=str(row["created_at_utc"]),
-        updated_at_utc=str(row["updated_at_utc"]),
-        last_verified_at_utc=(
-            str(row["last_verified_at_utc"])
-            if row["last_verified_at_utc"] is not None
-            else None
-        ),
-        expires_at_utc=(
-            str(row["expires_at_utc"]) if row["expires_at_utc"] is not None else None
-        ),
-        created_by=str(row["created_by"]),
-        verified_by=str(row["verified_by"]) if row["verified_by"] is not None else None,
-        approved_by=str(row["approved_by"]) if row["approved_by"] is not None else None,
-        approved_at_utc=(
-            str(row["approved_at_utc"]) if row["approved_at_utc"] is not None else None
-        ),
-        report_digest=(
-            str(row["report_digest"]) if row["report_digest"] is not None else None
-        ),
-        code_fingerprint=(
-            str(row["code_fingerprint"])
-            if row["code_fingerprint"] is not None
-            else None
-        ),
-        stale_reason=(
-            str(row["stale_reason"]) if row["stale_reason"] is not None else None
-        ),
-        created_on_branch=(
-            str(row["created_on_branch"])
-            if row["created_on_branch"] is not None
-            else None
-        ),
-        created_at_commit=(
-            str(row["created_at_commit"])
-            if row["created_at_commit"] is not None
-            else None
-        ),
-        verified_on_branch=(
-            str(row["verified_on_branch"])
-            if row["verified_on_branch"] is not None
-            else None
-        ),
-        verified_at_commit=(
-            str(row["verified_at_commit"])
-            if row["verified_at_commit"] is not None
-            else None
-        ),
-        schema_version=str(row["schema_version"]),
+    return validate_memory_record(
+        MemoryRecord(
+            id=str(row["id"]),
+            project_id=str(row["project_id"]),
+            identity_key=str(row["identity_key"]),
+            type=_literal_from_row(
+                row,
+                "type",
+                field="record_type",
+                allowed=_MEMORY_RECORD_TYPES,
+            ),
+            status=_literal_from_row(
+                row,
+                "status",
+                field="record_status",
+                allowed=_MEMORY_STATUSES,
+            ),
+            confidence=_literal_from_row(
+                row,
+                "confidence",
+                field="record_confidence",
+                allowed=_MEMORY_CONFIDENCES,
+            ),
+            origin=_literal_from_row(
+                row,
+                "origin",
+                field="record_origin",
+                allowed=_MEMORY_ORIGINS,
+            ),
+            ingest_source=_literal_from_row(
+                row,
+                "ingest_source",
+                field="record_ingest_source",
+                allowed=_MEMORY_INGEST_SOURCES,
+            ),
+            statement=str(row["statement"]),
+            summary=str(row["summary"]) if row["summary"] is not None else None,
+            payload=payload,
+            created_at_utc=str(row["created_at_utc"]),
+            updated_at_utc=str(row["updated_at_utc"]),
+            last_verified_at_utc=(
+                str(row["last_verified_at_utc"])
+                if row["last_verified_at_utc"] is not None
+                else None
+            ),
+            expires_at_utc=(
+                str(row["expires_at_utc"])
+                if row["expires_at_utc"] is not None
+                else None
+            ),
+            created_by=str(row["created_by"]),
+            verified_by=(
+                str(row["verified_by"]) if row["verified_by"] is not None else None
+            ),
+            approved_by=(
+                str(row["approved_by"]) if row["approved_by"] is not None else None
+            ),
+            approved_at_utc=(
+                str(row["approved_at_utc"])
+                if row["approved_at_utc"] is not None
+                else None
+            ),
+            report_digest=(
+                str(row["report_digest"]) if row["report_digest"] is not None else None
+            ),
+            code_fingerprint=(
+                str(row["code_fingerprint"])
+                if row["code_fingerprint"] is not None
+                else None
+            ),
+            stale_reason=(
+                str(row["stale_reason"]) if row["stale_reason"] is not None else None
+            ),
+            created_on_branch=(
+                str(row["created_on_branch"])
+                if row["created_on_branch"] is not None
+                else None
+            ),
+            created_at_commit=(
+                str(row["created_at_commit"])
+                if row["created_at_commit"] is not None
+                else None
+            ),
+            verified_on_branch=(
+                str(row["verified_on_branch"])
+                if row["verified_on_branch"] is not None
+                else None
+            ),
+            verified_at_commit=(
+                str(row["verified_at_commit"])
+                if row["verified_at_commit"] is not None
+                else None
+            ),
+            schema_version=str(row["schema_version"]),
+        )
     )
 
 

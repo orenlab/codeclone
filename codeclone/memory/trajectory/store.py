@@ -32,9 +32,12 @@ from .models import (
     TRAJECTORY_PROJECTION_VERSION,
     Trajectory,
     TrajectoryEvidence,
+    TrajectoryLabel,
     TrajectoryListItem,
+    TrajectoryOutcome,
     TrajectoryProjectionResult,
     TrajectoryProjectionRun,
+    TrajectoryQualityTier,
     TrajectoryStep,
     TrajectorySubject,
 )
@@ -84,6 +87,92 @@ def _group_rows_by_trajectory_id(
         for row in rows:
             grouped.setdefault(str(row["trajectory_id"]), []).append(build(row))
     return grouped
+
+
+def _trajectory_outcome(value: object) -> TrajectoryOutcome:
+    match value:
+        case "accepted":
+            return "accepted"
+        case "accepted_with_external_changes":
+            return "accepted_with_external_changes"
+        case "violated":
+            return "violated"
+        case "blocked":
+            return "blocked"
+        case "abandoned":
+            return "abandoned"
+        case "partial":
+            return "partial"
+    raise ValueError(f"Invalid Engineering Memory trajectory outcome: {value!r}")
+
+
+def _trajectory_quality_tier(value: object) -> TrajectoryQualityTier:
+    match value:
+        case "corrected":
+            return "corrected"
+        case "verified":
+            return "verified"
+        case "incident":
+            return "incident"
+        case "partial":
+            return "partial"
+        case "routine":
+            return "routine"
+    raise ValueError(f"Invalid Engineering Memory trajectory quality_tier: {value!r}")
+
+
+def _trajectory_label(value: object) -> TrajectoryLabel:
+    match value:
+        case "analysis_observed":
+            return "analysis_observed"
+        case "baseline_abuse_detected":
+            return "baseline_abuse_detected"
+        case "change_control_workflow":
+            return "change_control_workflow"
+        case "claim_guard_failed":
+            return "claim_guard_failed"
+        case "claim_validated":
+            return "claim_validated"
+        case "external_changes_accepted":
+            return "external_changes_accepted"
+        case "foreign_conflict_seen":
+            return "foreign_conflict_seen"
+        case "hook_blocked":
+            return "hook_blocked"
+        case "memory_used":
+            return "memory_used"
+        case "patch_trail_recorded":
+            return "patch_trail_recorded"
+        case "queue_used":
+            return "queue_used"
+        case "receipt_issued":
+            return "receipt_issued"
+        case "recovered":
+            return "recovered"
+        case "scope_clean":
+            return "scope_clean"
+        case "scope_expanded":
+            return "scope_expanded"
+        case "verified_finish":
+            return "verified_finish"
+    raise ValueError(f"Invalid Engineering Memory trajectory label: {value!r}")
+
+
+def _labels_from_json(labels_json: str) -> tuple[TrajectoryLabel, ...]:
+    raw = orjson.loads(labels_json)
+    if not isinstance(raw, list):
+        raise ValueError(
+            "Invalid Engineering Memory trajectory labels_json: expected list"
+        )
+    return tuple(_trajectory_label(item) for item in raw)
+
+
+def _validate_trajectory_literals(trajectory: Trajectory) -> Trajectory:
+    _trajectory_outcome(trajectory.outcome)
+    _trajectory_quality_tier(trajectory.quality_tier)
+    for label in trajectory.labels:
+        _trajectory_label(label)
+    return trajectory
 
 
 def _project_and_upsert_workflow(
@@ -296,6 +385,7 @@ def rebuild_trajectories_incremental(
 
 
 def upsert_trajectory(conn: sqlite3.Connection, trajectory: Trajectory) -> str:
+    trajectory = _validate_trajectory_literals(trajectory)
     existing = conn.execute(
         "SELECT trajectory_digest FROM memory_trajectories WHERE id=?",
         (trajectory.id,),
@@ -495,8 +585,8 @@ def list_trajectories(
         TrajectoryListItem(
             id=str(row["id"]),
             workflow_id=str(row["workflow_id"]),
-            outcome=str(row["outcome"]),
-            quality_tier=str(row["quality_tier"]),
+            outcome=_trajectory_outcome(row["outcome"]),
+            quality_tier=_trajectory_quality_tier(row["quality_tier"]),
             quality_score=int(row["quality_score"]),
             event_count=int(row["event_count"]),
             started_at_utc=str(row["started_at_utc"]),
@@ -627,10 +717,10 @@ def _row_to_trajectory(
         first_run_id=_optional_text(row["first_run_id"]),
         last_run_id=_optional_text(row["last_run_id"]),
         report_digest=_optional_text(row["report_digest"]),
-        outcome=str(row["outcome"]),  # type: ignore[arg-type]
-        quality_tier=str(row["quality_tier"]),  # type: ignore[arg-type]
+        outcome=_trajectory_outcome(row["outcome"]),
+        quality_tier=_trajectory_quality_tier(row["quality_tier"]),
         quality_score=int(row["quality_score"]),
-        labels=tuple(orjson.loads(str(row["labels_json"]))),
+        labels=_labels_from_json(str(row["labels_json"])),
         summary=str(row["summary"]),
         trajectory_digest=str(row["trajectory_digest"]),
         source_event_stream_digest=str(row["source_event_stream_digest"]),

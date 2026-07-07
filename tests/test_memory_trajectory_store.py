@@ -108,6 +108,34 @@ def test_rebuild_trajectories_from_audit_is_idempotent(tmp_path: Path) -> None:
         assert store.latest_trajectory_projection_run(project_id=project.id) is not None
 
 
+def test_trajectory_store_rejects_corrupt_persisted_literals(
+    tmp_path: Path,
+) -> None:
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        _write_workflow_events(root, audit_db)
+        store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        )
+        trajectory_id = store.list_trajectories(project_id=project.id)[0].id
+
+        store._conn.execute(
+            "UPDATE memory_trajectories SET outcome=? WHERE id=?",
+            ("maybe", trajectory_id),
+        )
+        with pytest.raises(ValueError, match="trajectory outcome"):
+            store.find_trajectory(trajectory_id)
+
+        store._conn.execute(
+            "UPDATE memory_trajectories SET outcome=?, labels_json=? WHERE id=?",
+            ("accepted", '["unknown_label"]', trajectory_id),
+        )
+        with pytest.raises(ValueError, match="trajectory label"):
+            store.find_trajectory(trajectory_id)
+
+
 def test_find_trajectories_by_ids_batch_matches_single_path(tmp_path: Path) -> None:
     from codeclone.memory.trajectory import store as trajectory_store
 
@@ -367,3 +395,98 @@ def test_find_trajectory_patch_trails_for_lookup_run_filter_and_malformed(
         )
         assert len(by_intent) == 1
         assert by_intent[0].workflow_id == "intent:intent-test-001"
+
+
+def test_trajectory_literal_parsers_accept_known_values() -> None:
+    from codeclone.memory.trajectory import store as trajectory_store
+
+    for outcome in (
+        "accepted",
+        "accepted_with_external_changes",
+        "violated",
+        "blocked",
+        "abandoned",
+        "partial",
+    ):
+        assert trajectory_store._trajectory_outcome(outcome) == outcome
+
+    for tier in ("corrected", "verified", "incident", "partial", "routine"):
+        assert trajectory_store._trajectory_quality_tier(tier) == tier
+
+    for label in (
+        "analysis_observed",
+        "baseline_abuse_detected",
+        "change_control_workflow",
+        "claim_guard_failed",
+        "claim_validated",
+        "external_changes_accepted",
+        "foreign_conflict_seen",
+        "hook_blocked",
+        "memory_used",
+        "patch_trail_recorded",
+        "queue_used",
+        "receipt_issued",
+        "recovered",
+        "scope_clean",
+        "scope_expanded",
+        "verified_finish",
+    ):
+        assert trajectory_store._trajectory_label(label) == label
+
+    parsed = trajectory_store._labels_from_json('["scope_clean", "verified_finish"]')
+    assert parsed == ("scope_clean", "verified_finish")
+
+
+def test_trajectory_literal_parsers_reject_invalid_values() -> None:
+    from codeclone.memory.trajectory import store as trajectory_store
+
+    with pytest.raises(ValueError, match="trajectory outcome"):
+        trajectory_store._trajectory_outcome("not-an-outcome")
+    with pytest.raises(ValueError, match="quality_tier"):
+        trajectory_store._trajectory_quality_tier("not-a-tier")
+    with pytest.raises(ValueError, match="trajectory label"):
+        trajectory_store._trajectory_label("not-a-label")
+    with pytest.raises(ValueError, match="labels_json"):
+        trajectory_store._labels_from_json('{"not": "a-list"}')
+
+
+def test_trajectory_run_id_token_matching_handles_missing_values() -> None:
+    from codeclone.memory.trajectory import store as trajectory_store
+
+    assert trajectory_store._run_id_token_matches(None, "abc") is False
+    assert trajectory_store._run_id_token_matches("abc", "") is False
+    assert trajectory_store._run_id_token_matches("abcdef", "abc") is True
+    assert trajectory_store._run_id_token_matches("abc", "abcdef") is True
+
+
+def test_memory_schema_migrate_payload_and_text_helpers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.memory import schema_migrate as schema_migrate_mod
+
+    assert schema_migrate_mod._strict_payload_json(None) is None
+    assert schema_migrate_mod._strict_payload_json("") is None
+    assert schema_migrate_mod._strict_payload_json('{"ok": true}') == {"ok": True}
+
+    with pytest.raises(TypeError, match="payload_json must be text"):
+        schema_migrate_mod._strict_payload_json(123)
+    with pytest.raises(ValueError, match="must decode to an object"):
+        schema_migrate_mod._strict_payload_json("[]")
+
+    import orjson
+
+    monkeypatch.setattr(
+        orjson,
+        "loads",
+        lambda _value: {1: "x"},
+    )
+    monkeypatch.setattr(schema_migrate_mod, "orjson", orjson)
+    with pytest.raises(ValueError, match="keys must be strings"):
+        schema_migrate_mod._strict_payload_json('{"ignored": true}')
+
+    with pytest.raises(ValueError, match="name must be non-empty"):
+        schema_migrate_mod._required_text({"name": ""}, "name")
+
+    assert schema_migrate_mod._optional_text({"name": None}, "name") is None
+    with pytest.raises(ValueError, match="name must be text"):
+        schema_migrate_mod._optional_text({"name": 1}, "name")

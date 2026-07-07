@@ -10,6 +10,8 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from tests._assertions import assert_contains_all
+
 
 def run_cli(
     args: Iterable[str], cwd: Path | None = None
@@ -61,8 +63,7 @@ def f():
     result = run_cli([str(tmp_path)], cwd=tmp_path)
 
     assert result.returncode == 0
-    assert "Summary" in result.stdout
-    assert "func" in result.stdout
+    assert_contains_all(result.stdout, "Summary", "func")
 
 
 def test_cli_baseline_missing_warning(tmp_path: Path) -> None:
@@ -75,8 +76,7 @@ def test_cli_baseline_missing_warning(tmp_path: Path) -> None:
     result = run_cli([str(tmp_path), "--baseline", str(baseline_file), "--no-progress"])
 
     assert result.returncode == 0
-    assert "Baseline file not found at" in result.stdout
-    assert baseline_file.name in result.stdout
+    assert_contains_all(result.stdout, "Baseline file not found at", baseline_file.name)
 
 
 def test_cli_update_baseline(tmp_path: Path) -> None:
@@ -110,7 +110,7 @@ def f2():
     )
 
     assert result.returncode == 0
-    assert "Baseline updated" in result.stdout
+    assert_contains_all(result.stdout, "Baseline updated")
     assert baseline_file.exists()
     content = baseline_file.read_text()
     assert "functions" in content
@@ -130,4 +130,4 @@ def f2():
         ]
     )
     assert result2.returncode == 0
-    assert "0 new" in result2.stdout
+    assert_contains_all(result2.stdout, "0 new")

@@ -28,6 +28,7 @@ from ...domain.source_scope import (
 )
 from ...models import MetricsDiff
 from ...utils import coerce as _coerce
+from ...utils.payload_narrow import is_record_mapping
 from ...utils.repo_paths import (
     PathOutsideRepoError,
     RepoPathError,
@@ -67,7 +68,6 @@ from ._session_shared import (
     _disambiguated_clone_short_ids_payload,
     _disambiguated_short_finding_id_payload,
     _leaf_symbol_name_payload,
-    _load_report_document_payload,
     _suggestion_finding_id_payload,
     _summarize_metrics_diff,
 )
@@ -181,7 +181,7 @@ def _metrics_detail_family(value: str | None) -> MetricsDetailFamily | None:
 def _dict_rows(value: object) -> list[dict[str, object]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes, bytearray)):
         return []
-    return [dict(item) for item in value if isinstance(item, Mapping)]
+    return [dict(item) for item in value if is_record_mapping(item)]
 
 
 def _string_rows(value: object) -> list[str]:
@@ -633,6 +633,7 @@ def _build_cache(
         segment_min_loc=_as_int(args.segment_min_loc, DEFAULT_SEGMENT_MIN_LOC),
         segment_min_stmt=_as_int(args.segment_min_stmt, DEFAULT_SEGMENT_MIN_STMT),
         collect_api_surface=bool(getattr(args, "api_surface", False)),
+        write_enabled=False,
     )
     if policy != "off":
         cache.load()
@@ -652,10 +653,6 @@ def _metrics_computed(analysis_mode: AnalysisMode) -> tuple[str, ...]:
             "dead_code",
         )
     )
-
-
-def _load_report_document(report_json: str) -> dict[str, object]:
-    return _load_report_document_payload(report_json)
 
 
 def _report_digest(report_document: Mapping[str, object]) -> str:

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import TypeGuard
 
 from ...contracts import PATCH_TRAIL_SCHEMA_VERSION
 from ...utils.json_io import json_text
@@ -384,7 +385,11 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 
 
 def _mapping(value: object) -> dict[str, object]:
-    return dict(value) if isinstance(value, Mapping) else {}
+    return dict(value) if _is_object_mapping(value) else {}
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
 
 
 def _optional_str(value: object) -> str | None:

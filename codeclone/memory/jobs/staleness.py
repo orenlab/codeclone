@@ -18,6 +18,7 @@ from ...audit.reader import count_audit_event_core_gaps
 from ...audit.schema import open_audit_db_readonly
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig
+from ...utils.payload_narrow import is_payload_dict
 from ..models import MemoryProject
 from ..trajectory.models import TRAJECTORY_PROJECTION_VERSION
 from .store import canonical_stimulus_json, latest_done_projection_job
@@ -126,7 +127,7 @@ def parse_stimulus_json(raw: str | None) -> dict[str, object]:
         parsed = orjson.loads(raw)
     except orjson.JSONDecodeError:
         return {}
-    return dict(parsed) if isinstance(parsed, dict) else {}
+    return parsed if is_payload_dict(parsed) else {}
 
 
 def last_applied_stimulus(
@@ -139,8 +140,8 @@ def last_applied_stimulus(
         return None
     result = parse_stimulus_json(job.result_json)
     applied = result.get("applied_stimulus")
-    if isinstance(applied, dict):
-        return dict(applied)
+    if is_payload_dict(applied):
+        return applied
     return parse_stimulus_json(job.stimulus_json)
 
 

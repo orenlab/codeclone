@@ -38,7 +38,7 @@ it is not the public installation route.
 ### Install the MCP launcher
 
 ```bash
-uv tool install "codeclone[mcp]"
+uv tool install --prerelease allow "codeclone[mcp]"
 ```
 
 Verify:
@@ -62,12 +62,14 @@ codeclone-mcp --help
 | **Change Control**         | `/codeclone-change-control`         | Intent-first edit workflow: declare, context, edit, verify, clear                  |
 | **Engineering Memory**     | `/codeclone-engineering-memory`     | Scope memory before edits, search, draft `record_candidate`, finish proposals      |
 | **Platform Observability** | `/codeclone-platform-observability` | **Maintainer-only** — CodeClone runtime diagnostics (requires observer enable)     |
+| **Setup (CLI)**            | `/codeclone-setup`                  | Repository readiness via terminal (`status`, `plan`, `apply`, `wizard`) — not MCP  |
 
 ### Typical flow
 
-1. `/codeclone-production-triage` — understand the current state.
-2. `/codeclone-implementation-context` — bounded context around files you will touch.
-3. `/codeclone-change-control` — edit with full structural verification.
+1. Run `codeclone setup status` (or `/codeclone-setup`) when `[tool.codeclone]` is missing.
+2. `/codeclone-production-triage` — understand the current state.
+3. `/codeclone-implementation-context` — bounded context around files you will touch.
+4. `/codeclone-change-control` — edit with full structural verification.
 
 ---
 
@@ -89,9 +91,10 @@ Three rules ship in `rules/` (load via plugin discovery, not only manual symlink
 | `change-control-gate.mdc` | always     | Hard gate: `start` / `finish`, memory before finish when required |
 | `codeclone-python.mdc`    | `**/*.py`  | Analyze before structural edits; respect blast radius             |
 
-Chat skill ids use the `name:` field in each `SKILL.md` (folders `production-triage/`
-and `blast-radius/` differ from ids `codeclone-production-triage` and
-`codeclone-blast-radius`).
+Chat skill ids use the `name:` field in each `SKILL.md`. Current shipped folders
+and skill ids both use the `codeclone-*` names shown above; legacy local
+`production-triage/` and `blast-radius/` aliases are development leftovers and
+should not be documented as install paths.
 
 ---
 

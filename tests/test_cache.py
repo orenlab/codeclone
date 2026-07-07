@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Callable
@@ -81,13 +82,14 @@ from codeclone.cache.entries import (
     _unit_dict_from_model,
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
-from codeclone.cache.integrity import sign_cache_payload
+from codeclone.cache.integrity import canonical_json, sign_cache_payload
 from codeclone.cache.projection import (
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
 )
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
+from codeclone.config.observability import ObservabilityConfig
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
 from codeclone.core.discovery import _decode_cached_function_relationship_facts
@@ -103,6 +105,11 @@ from codeclone.models import (
     SecuritySurface,
     SegmentUnit,
     Unit,
+)
+from codeclone.observability import bootstrap, operation, shutdown
+from codeclone.observability.store.schema import (
+    observability_store_path,
+    open_observability_store,
 )
 from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
 
@@ -195,6 +202,91 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     assert entry["units"][0]["qualname"] == "mod:func"
     assert loaded.load_status == CacheStatus.OK
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, root=tmp_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
+    try:
+        with operation(name="test.cache_load", surface="test"):
+            loaded = Cache(cache_path, root=tmp_path)
+            loaded.load()
+    finally:
+        shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        rows = conn.execute(
+            "SELECT name, counters_json FROM platform_spans ORDER BY rowid"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    counters_by_name = {name: json.loads(counters or "{}") for name, counters in rows}
+    assert "cache.stat" in counters_by_name
+    assert "cache.read_json" in counters_by_name
+    assert "cache.validate_envelope" in counters_by_name
+    assert "cache.decode_entries" in counters_by_name
+    assert "cache.segment_projection" in counters_by_name
+    assert counters_by_name["cache.stat"]["cache_file_bytes"] > 0
+    assert counters_by_name["cache.read_json"]["cache_file_bytes"] > 0
+    assert counters_by_name["cache.decode_entries"] == {
+        "cache_entries": 1,
+        "decoded_entries": 1,
+    }
+
+
+def test_cache_release_loaded_entries_clears_clean_loaded_entries(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path)
+    loaded.load()
+    assert loaded.get_file_entry("x.py") is not None
+
+    assert loaded.release_loaded_entries() == 1
+    assert loaded.get_file_entry("x.py") is None
+    assert loaded.load_status == CacheStatus.OK
+    assert loaded.cache_schema_version == Cache._CACHE_VERSION
+
+
+def test_cache_release_loaded_entries_refuses_dirty_cache_by_default(
+    tmp_path: Path,
+) -> None:
+    cache = Cache(tmp_path / "cache.json")
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+
+    assert cache.release_loaded_entries() == 0
+    assert cache.get_file_entry("x.py") is not None
+
+
+def test_cache_read_only_mode_suppresses_entry_writes(tmp_path: Path) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    loaded = Cache(cache_path, write_enabled=False)
+    loaded.load()
+
+    loaded.put_file_entry("y.py", {"mtime_ns": 2, "size": 20}, [], [], [])
+    assert loaded.prune_file_entries([]) == 0
+    loaded.save()
+
+    assert loaded.get_file_entry("x.py") is not None
+    assert loaded.get_file_entry("y.py") is None
+    reloaded = Cache(cache_path)
+    reloaded.load()
+    assert reloaded.get_file_entry("x.py") is not None
+    assert reloaded.get_file_entry("y.py") is None
 
 
 def test_cache_roundtrip_preserves_function_relationship_facts(
@@ -1359,6 +1451,42 @@ def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> N
     loaded.load()
     assert loaded.load_warning is None
     assert loaded.get_file_entry("x.py") is not None
+
+
+def test_cache_signature_matches_legacy_string_digest_for_unicode_payload() -> None:
+    cache = Cache(Path("cache.json"))
+    payload = _analysis_payload(
+        cache,
+        files={
+            "unicodé.py": {
+                "st": [1, 10],
+                "rn": ["Ω", "é"],
+            }
+        },
+    )
+    legacy_digest = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+    assert sign_cache_payload(payload) == legacy_digest
+
+
+def test_cache_load_accepts_legacy_string_signed_unicode_payload(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path)
+    cache.put_file_entry("unicodé.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    raw = json.loads(cache_path.read_text("utf-8"))
+    payload = cast(dict[str, object], raw["payload"])
+    raw["sig"] = hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+    cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
+
+    loaded = Cache(cache_path)
+    loaded.load()
+
+    assert loaded.load_warning is None
+    assert loaded.get_file_entry("unicodé.py") is not None
 
 
 def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> None:
@@ -2883,3 +3011,108 @@ def test_integrity_read_json_document_forwards_max_bytes(tmp_path: Path) -> None
     path = tmp_path / "doc.json"
     path.write_text('{"ok": true}', encoding="utf-8")
     assert read_json_document(path, max_bytes=64) == {"ok": True}
+
+
+def test_canonicalize_helpers_reject_invalid_structural_shapes() -> None:
+    from codeclone.cache._canonicalize import (
+        _as_str_value_dict,
+        _as_structural_group_dict,
+        _as_structural_occurrence_dict,
+        _as_typed_structural_finding_list,
+        _as_typed_structural_occurrence_list,
+        _decode_structural_findings_section,
+    )
+
+    assert _as_str_value_dict({"key": 1}) is None
+    assert (
+        _as_structural_occurrence_dict({"qualname": "pkg.fn", "start": "x", "end": 1})
+        is None
+    )
+    assert (
+        _as_typed_structural_occurrence_list(
+            [{"qualname": "pkg.fn", "start": 1, "end": "x"}]
+        )
+        is None
+    )
+    assert _as_typed_structural_occurrence_list("not-a-list") is None
+    assert (
+        _as_structural_group_dict(
+            {
+                "finding_kind": "dup",
+                "finding_key": "k1",
+                "signature": {"kind": 1},
+                "items": [{"qualname": "pkg.fn", "start": 1, "end": 2}],
+            }
+        )
+        is None
+    )
+    assert _as_typed_structural_finding_list([{"finding_kind": "dup"}]) is None
+    ok, findings = _decode_structural_findings_section(None)
+    assert ok is True and findings is None
+    bad, findings = _decode_structural_findings_section([{"finding_kind": "dup"}])
+    assert bad is False and findings is None
+
+    assert _as_structural_occurrence_dict(None) is None
+    assert (
+        _as_structural_group_dict(
+            {
+                "finding_kind": "dup",
+                "finding_key": "k1",
+                "signature": {"kind": "sig"},
+                "items": [None],
+            }
+        )
+        is None
+    )
+    assert _as_typed_structural_finding_list([None]) is None
+
+
+def test_attach_optional_cache_sections_sets_relationship_facts() -> None:
+    base = cast(
+        CacheEntry,
+        {
+            "stat": {"mtime_ns": 1, "size": 1},
+            "units": [],
+            "blocks": [],
+            "segments": [],
+            "class_metrics": [],
+            "module_deps": [],
+            "dead_candidates": [],
+            "referenced_names": [],
+            "referenced_qualnames": [],
+            "import_names": [],
+            "class_names": [],
+        },
+    )
+    attached = _attach_optional_cache_sections(
+        base,
+        function_relationship_facts=[
+            {
+                "source_qualname": "pkg.mod:src",
+                "relationships": [
+                    {
+                        "relation_kind": "calls",
+                        "resolution_status": "resolved",
+                        "origin_lane": "analysis",
+                        "source_qualname": "pkg.mod:src",
+                        "target_qualname": "pkg.mod:tgt",
+                        "path": "pkg/mod.py",
+                        "line": 1,
+                        "expression": "tgt()",
+                        "resolution_rule": "direct",
+                    }
+                ],
+            }
+        ],
+        structural_findings=[
+            {
+                "finding_kind": "dup",
+                "finding_key": "k1",
+                "signature": {"kind": "sig"},
+                "items": [{"qualname": "pkg.mod:fn", "start": 1, "end": 2}],
+            }
+        ],
+    )
+    relationships = attached["function_relationship_facts"][0]["relationships"]
+    assert relationships[0]["relation_kind"] == "calls"
+    assert attached["structural_findings"][0]["finding_kind"] == "dup"

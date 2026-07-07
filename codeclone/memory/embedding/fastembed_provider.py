@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import importlib
+import numbers
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, cast
@@ -49,6 +50,18 @@ def _encoding_length(encoding: object) -> int:
     if isinstance(ids, list):
         return len(ids)
     return 0
+
+
+def _encoding_token_ids(encoding: object) -> list[int]:
+    ids = getattr(encoding, "ids", ())
+    if not isinstance(ids, Iterable) or isinstance(ids, str | bytes | bytearray):
+        return []
+    token_ids: list[int] = []
+    for token_id in ids:
+        if isinstance(token_id, bool) or not isinstance(token_id, int):
+            return []
+        token_ids.append(token_id)
+    return token_ids
 
 
 def _tokenizer_encode_ops(
@@ -285,7 +298,7 @@ class FastEmbedEmbeddingProvider:
                 _verify_chunk_passage_input(encode, text, model_max_tokens=max_length)
                 return (text,)
             content_encoding = encode(text, add_special_tokens=False)
-            content_ids = list(getattr(content_encoding, "ids", ()))
+            content_ids = _encoding_token_ids(content_encoding)
             payload_budget = _chunk_payload_token_budget(
                 encode,
                 model_max_tokens=max_length,
@@ -380,7 +393,19 @@ class FastEmbedEmbeddingProvider:
             raise MemorySemanticUnavailableError(
                 "fastembed returned a non-iterable embedding vector"
             )
-        return [float(value) for value in raw_vector]
+        vector: list[float] = []
+        for value in raw_vector:
+            # Real fastembed output is a numpy float32 array; iterating it yields
+            # numpy.float32 scalars, which are NOT Python `float`/`int` subclasses
+            # but ARE registered as numbers.Real. numbers.Real also excludes str
+            # (avoiding float("abc") surfacing a bare ValueError), while bool is
+            # excluded explicitly so True/False are not coerced to 1.0/0.0.
+            if isinstance(value, bool) or not isinstance(value, numbers.Real):
+                raise MemorySemanticUnavailableError(
+                    "fastembed returned a non-numeric embedding vector"
+                )
+            vector.append(float(value))
+        return vector
 
 
 __all__ = ["FastEmbedEmbeddingProvider", "known_model_max_tokens"]

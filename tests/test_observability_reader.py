@@ -503,3 +503,29 @@ def test_build_trace_view_on_empty_store_returns_empty_window(tmp_path: Path) ->
         read.close()
     assert trace.aggregates.operation_count == 0
     assert trace.operation_tree == ()
+
+
+def test_reader_counter_and_optional_float_helpers() -> None:
+    import sqlite3
+
+    from codeclone.observability.store.reader import _optional_float, _parse_counters
+
+    assert _parse_counters(None) == {}
+    assert _parse_counters(b"[]") == {}
+    assert _parse_counters(b'{"hits": 3, "bad": true, "ok": "4"}') == {
+        "hits": 3,
+        "ok": 4,
+    }
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute("SELECT NULL AS value").fetchone()
+        assert row is not None
+        assert _optional_float(row, "missing") is None
+        assert _optional_float(row, "value") is None
+        numeric = conn.execute("SELECT 1.5 AS value").fetchone()
+        assert numeric is not None
+        assert _optional_float(numeric, "value") == 1.5
+    finally:
+        conn.close()

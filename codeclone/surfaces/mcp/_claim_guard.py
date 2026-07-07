@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from typing import Final, Literal
 
 from ...utils import coerce as _coerce
+from ...utils.payload_narrow import is_record_mapping
 from .messages import claims as claim_msgs
 
 MAX_REVIEW_CLAIM_TEXT_CHARS: Final = 50_000
@@ -600,7 +601,7 @@ def _extract_qualnames_from_finding(
     qualnames: set[str] = set()
     _collect_qualname_fields(finding, qualnames)
     for item in _as_sequence(finding.get("items")):
-        if isinstance(item, Mapping):
+        if is_record_mapping(item):
             _collect_qualname_fields(item, qualnames)
     if finding_id.startswith("dead_code:"):
         _, _, remainder = finding_id.partition(":")

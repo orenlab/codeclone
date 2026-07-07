@@ -10,7 +10,7 @@
       srcset="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
     >
     <img
-      alt="CodeClone — Structural Change Controller for AI-assisted Python development"
+      alt="CodeClone — Deterministic Structural Change Controller for AI-assisted Python development"
       src="https://raw.githubusercontent.com/orenlab/codeclone/main/docs/assets/codeclone-wordmark.svg"
       width="280"
     >
@@ -33,11 +33,11 @@
 
 ---
 
-> [!NOTE]
-> This README documents the unreleased **CodeClone 2.1 alpha line**.
-> The basic analysis commands below work with the current stable release,
+> [!IMPORTANT]
+> Sections marked **`2.1 alpha`** require the
+> [CodeClone 2.1 prerelease](https://pypi.org/project/codeclone/#history).
+> Everything else works with the current stable release,
 > [CodeClone 2.0.2](https://github.com/orenlab/codeclone/tree/v2.0.2).
-> Agent change control and Engineering Memory require the 2.1 prerelease.
 
 ## What is CodeClone?
 
@@ -47,12 +47,44 @@ Before an agent edits code, CodeClone records the intended change, maps the stru
 explicit edit boundaries. After the edit, it compares the real patch with the declared scope, verifies structural
 regressions, and leaves an auditable review receipt.
 
-CodeClone makes silent scope expansion visible before it disappears inside an otherwise reasonable-looking diff.
+CodeClone does not generate or rewrite source files, and it does not ask an LLM to decide whether a structural change
+is safe. Every finding and every gate comes from deterministic repository facts shared across agents, human reviewers,
+IDEs, reports, and CI.
 
-CodeClone does not ask an LLM to decide whether a structural change is safe. It uses deterministic repository facts
-shared across agents, human reviewers, IDEs, reports, and CI.
+| Capability                                     | What it provides                                                                                             |
+|------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
+| **Canonical structural analysis**              | One deterministic report: clones, complexity, coupling, cohesion, dead code, API inventory, coverage joins   |
+| **Baseline-aware governance**                  | Records accepted legacy debt and separates it from regressions introduced by the current change              |
+| **One report, many surfaces**                  | CLI, HTML, JSON, Markdown, SARIF, MCP, IDE integrations, and GitHub Actions from one canonical payload       |
+| **Structural Change Controller** — `2.1 alpha` | Intent-first change control, blast radius, explicit edit boundaries, patch verification, and review receipts |
+| **Engineering Memory** — `2.1 alpha`           | Local, typed, evidence-linked project knowledge and reusable histories of prior controlled changes           |
+| **Agent coordination** — `2.1 alpha`           | Conflict-safe multi-agent intents, queues, recovery, and workspace hygiene                                   |
+
+CodeClone requires no hosted service or cloud account. Analysis state, controller state, Engineering Memory, and
+trajectories are stored locally.
+
+## Why intent comes before the diff
+
+Most review tools begin after the patch already exists. CodeClone begins earlier:
+
+```text
+task request
+  → declared intent
+  → structural blast radius
+  → explicit boundary
+  → actual patch
+  → deterministic verification
+```
+
+Agent scope expansion can look reasonable in the final diff. A narrow task may quietly spread into shared helpers,
+tests, configuration, public APIs, or unrelated modules.
+
+By the time that expansion reaches the final diff, it already looks intentional. CodeClone catches it at the declared
+boundary instead — by comparing what the agent said it would change with what it actually changed.
 
 ## Quick start
+
+Requires Python 3.10 or newer.
 
 ### 1. Analyze a repository
 
@@ -67,6 +99,24 @@ Prefer a browsable report? Generate the HTML view and open it:
 ```bash
 uvx codeclone@latest . --html --open-html-report
 ```
+
+<div align="center">
+  <picture>
+    <source
+      media="(prefers-color-scheme: dark)"
+      srcset="docs/assets/codeclone-html-sample-dark.png"
+    >
+    <source
+      media="(prefers-color-scheme: light)"
+      srcset="docs/assets/codeclone-html-sample.png"
+    >
+    <img
+      alt="CodeClone HTML report — structural health, clone findings, and review priorities"
+      src="docs/assets/codeclone-html-sample.png"
+      width="720"
+    >
+  </picture>
+</div>
 
 Once you use it regularly, install it as a local tool:
 
@@ -90,103 +140,10 @@ from findings that were already present, so agents and reviewers can focus on wh
 
 Updating the baseline is an explicit governance action. Do not regenerate it merely to make a failing check pass.
 
-### 3. Set up CodeClone for your AI agent (2.1 alpha)
+### 3. Connect your AI agent
 
-Install the prerelease MCP server:
-
-```bash
-uv tool install --prerelease allow "codeclone[mcp]"
-codeclone-mcp --transport stdio
-```
-
-Then wire it into your client:
-
-| Client         | Setup                                                                                                  |
-|----------------|--------------------------------------------------------------------------------------------------------|
-| VS Code        | [Extension setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)                |
-| Cursor         | [Plugin and skills](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
-| Claude Code    | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/)              |
-| Codex          | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)                    |
-| Claude Desktop | [Bundle setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)           |
-
-Every client uses the same MCP interface and the same canonical structural facts.
-
-## How the controlled-change workflow works
-
-For an agent, the normal workflow is:
-
-```text
-analyze → start → edit → finish
-```
-
-### Analyze
-
-CodeClone builds one canonical structural report for the repository and compares it with the accepted baseline.
-
-### Start
-
-`start_controlled_change`:
-
-- records the agent's intent;
-- maps structural blast radius;
-- separates editable paths from review context and do-not-touch boundaries;
-- exposes the regression budget relative to the accepted baseline;
-- returns the authoritative `edit_allowed` result.
-
-### Edit
-
-The agent writes the code. CodeClone does not generate or rewrite source files.
-
-Where the host supports hooks, integrations can stop edits unless `edit_allowed=true`.
-
-### Finish
-
-`finish_controlled_change`:
-
-- resolves the actual changed files;
-- checks declared scope against the real patch;
-- verifies structural changes;
-- validates optional review claims;
-- records Patch Trail evidence;
-- produces an auditable review receipt.
-
-The result is not an AI opinion about the patch. It is a deterministic comparison between declared intent, repository
-structure, the accepted baseline, and the actual change.
-
-[Read the Structural Change Controller guide](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
-
-## What you get
-
-| Capability                        | What it provides                                                                                                                    |
-|-----------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| **Structural Change Controller**  | Intent-first change control, blast radius, explicit edit boundaries, patch verification, and review receipts                        |
-| **Canonical structural analysis** | Clone detection, complexity, coupling, cohesion, dependency cycles, dead code, API inventory, coverage joins, and structural health |
-| **Baseline-aware governance**     | Records accepted legacy debt and separates it from regressions introduced by the current change                                     |
-| **Engineering Memory**            | Local, typed, evidence-linked project knowledge and reusable histories of prior controlled changes                                  |
-| **Agent coordination**            | Lease-bound intents, queues, conflicts, recovery, and workspace hygiene                                                             |
-| **One report, many surfaces**     | CLI, HTML, JSON, Markdown, SARIF, MCP, IDE integrations, and GitHub Actions from one canonical payload                              |
-
-CodeClone requires no hosted service or cloud account. Analysis state, controller state, Engineering Memory, and
-trajectories are stored locally.
-
-## Why intent comes before the diff
-
-Most review tools begin after the patch already exists. CodeClone begins earlier:
-
-```text
-task request
-  → declared intent
-  → structural blast radius
-  → explicit boundary
-  → actual patch
-  → deterministic verification
-```
-
-Agent scope expansion can look reasonable in the final diff. A narrow task may quietly spread into shared helpers,
-tests, configuration, public APIs, or unrelated modules.
-
-By the time that expansion reaches the final diff, it already looks intentional. CodeClone catches it at the declared
-boundary instead — by comparing what the agent said it would change with what it actually changed.
+Continue to [Agent change control](#agent-change-control--21-alpha) below to install the MCP control surface and wire
+CodeClone into Claude Code, Cursor, VS Code, Codex, or Claude Desktop.
 
 ## One canonical structural report
 
@@ -241,7 +198,86 @@ existing repository to be clean first.
 [Metrics and quality gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) ·
 [GitHub Action documentation](https://orenlab.github.io/codeclone/getting-started/#github-action)
 
-## Engineering Memory
+## How CodeClone differs
+
+Linters check style and correctness file by file. Clone detectors report duplication and stop there. Hosted review
+bots ask a model for an opinion about a finished diff.
+
+CodeClone combines CFG-based clone detection, multi-metric baseline governance, and a read-only MCP control surface in
+one local-first, open-source package — and applies them **before** the edit happens, not only after. Structural facts
+are computed deterministically, so the same input always produces the same verdict, in the terminal, in CI, and inside
+your agent's loop.
+
+## Agent change control — `2.1 alpha`
+
+### Install the MCP control surface
+
+```bash
+uv tool install --prerelease allow "codeclone[mcp]"
+codeclone-mcp --transport stdio
+```
+
+Before gating agents or CI, confirm `[tool.codeclone]` and local gitignore hygiene:
+
+```bash
+codeclone setup status
+codeclone setup plan
+codeclone setup apply   # or: codeclone setup wizard
+```
+
+See [Repository setup and readiness](https://orenlab.github.io/codeclone/guide/setup/readiness-and-apply/).
+
+### Wire it into your client
+
+| Client         | Setup                                                                                                  |
+|----------------|--------------------------------------------------------------------------------------------------------|
+| VS Code        | [Extension setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)                |
+| Cursor         | [Plugin and skills](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
+| Claude Code    | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/)              |
+| Codex          | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)                    |
+| Claude Desktop | [Bundle setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)           |
+
+Every client uses the same MCP interface and the same canonical structural facts.
+
+### The controlled-change workflow
+
+For an agent, the normal workflow is:
+
+```text
+analyze → start → edit → finish
+```
+
+**Analyze.** CodeClone builds one canonical structural report for the repository and compares it with the accepted
+baseline.
+
+**Start.** `start_controlled_change`:
+
+- records the agent's intent;
+- maps structural blast radius;
+- separates editable paths from review context and do-not-touch boundaries;
+- exposes the regression budget relative to the accepted baseline;
+- returns the authoritative `edit_allowed` result.
+
+**Edit.** The agent writes the code. CodeClone does not generate or rewrite source files. Where the host supports
+hooks, integrations can stop edits unless `edit_allowed=true`.
+
+**Finish.** `finish_controlled_change`:
+
+- resolves the actual changed files;
+- checks declared scope against the real patch;
+- verifies structural changes;
+- validates optional review claims;
+- records Patch Trail evidence;
+- produces an auditable review receipt.
+
+<!-- TODO: short example of a review receipt (trimmed JSON, ~10 lines) -->
+
+The result is not an AI opinion about the patch. It is a deterministic comparison between declared intent, repository
+structure, the accepted baseline, and the actual change.
+
+[Read the Structural Change Controller guide](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
+
+## Engineering Memory — `2.1 alpha`
 
 Engineering Memory gives agents durable, repository-specific context without treating model output as project truth.
 
@@ -260,8 +296,8 @@ codeclone memory init --root .
 codeclone memory search "baseline schema" --match all
 ```
 
-Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical report
-facts.
+Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical
+report facts.
 
 [Engineering Memory documentation](https://orenlab.github.io/codeclone/book/13-engineering-memory/) ·
 [Trajectories and Experiences](https://orenlab.github.io/codeclone/guide/memory/trajectories-and-experiences/)
@@ -277,7 +313,12 @@ facts.
 - `stdio` is the recommended transport for local clients.
 - Remote HTTP exposure requires explicit `--allow-remote`.
 
-## Development setup
+## Contributing
+
+Bug reports, feature discussions, and pull requests are welcome — start with
+[Issues](https://github.com/orenlab/codeclone/issues) or
+[Discussions](https://github.com/orenlab/codeclone/discussions), or join the
+[Discord](https://discord.com/invite/U72KmRvpUx).
 
 Run the repository version from source:
 
@@ -287,8 +328,6 @@ cd codeclone
 uv sync --all-extras
 uv run codeclone .
 ```
-
-CodeClone 2.1 requires Python 3.10 or newer.
 
 ## Documentation
 
@@ -322,10 +361,9 @@ See [LICENSES.md](https://github.com/orenlab/codeclone/blob/main/LICENSES.md) fo
 [tests-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/tests.yml?branch=main&style=flat-square&label=tests
 [benchmark-shield]: https://img.shields.io/github/actions/workflow/status/orenlab/codeclone/benchmark.yml?branch=main&style=flat-square&label=benchmark
 [discord-shield]: https://img.shields.io/badge/Discord-Join%20community-5865F2?style=flat-square&logo=discord&logoColor=white
-
 <!-- Links -->
 [pypi-link]: https://pypi.org/project/codeclone/
-[license-link]: #license
+[license-link]: https://github.com/orenlab/codeclone/blob/main/LICENSES.md
 [tests-link]: https://github.com/orenlab/codeclone/actions/workflows/tests.yml
 [benchmark-link]: https://github.com/orenlab/codeclone/actions/workflows/benchmark.yml
 [discord-link]: https://discord.com/invite/U72KmRvpUx

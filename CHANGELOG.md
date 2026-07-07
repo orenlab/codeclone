@@ -27,22 +27,34 @@ evidence, platform self-observability, and broader IDE/agent integration.
   tracking, and reviewed-state persistence.
 - **Native agent and IDE integrations** for VS Code, Claude Desktop, Claude Code, Codex, and Cursor, including
   governance, audit, memory, trajectory, and structural-review workflows.
+- **`codeclone setup`** — lazy-loaded CLI readiness surface (`status`, `doctor`, `plan`, `apply`, `wizard`) with
+  capability-aware snapshots, read-only diff preview, and bounded `pyproject.toml` / `.gitignore` merges (no MCP
+  intent, no baseline or report writes).
 - Expanded controller, memory, trajectory, analytics, semantic-search, observability, blast-radius, patch-verification,
-  and diagnostic CLI/MCP surfaces.
+  and diagnostic CLI/MCP surfaces. The default MCP server surface is now **38 tools** (**40** when VS Code enables the
+  IDE governance channel).
 - Reorganized documentation into a contract-focused 00–26 book with unified integration guidance and explicit edition
   tiers.
 - MCP schemas now include parameter descriptions, deterministic `next_tool` guidance, token-budget tracking, workspace
   hygiene warnings, and documentation-contract linting.
+- MCP response governance now advertises `context_governance` metadata for bounded agent replies. Workflow, memory, and
+  implementation-context responses preserve mandatory control facts inline, compact recoverable evidence under
+  `partial_enforce`, disclose omitted lanes, and expose exact drill-down through durable receipt, Patch Trail, blast
+  artifact, memory continuation, and implementation-context page retrieval.
 
 ### Contract changes
 
 - Cache schema advanced to **2.9** for the rebuildable per-function relationship-fact projection and to **2.10** for
   intra-module, class-method, and receiver-aware call resolution.
 - Engineering Memory schema advanced to **1.7** for trajectory and Patch Trail evidence.
+- Semantic index format advanced to **3** for LanceDB rows with `source_revision`; existing semantic sidecars should be
+  rebuilt.
 - Corpus Analytics store schema advanced to **1.2**.
 - Corpus Analytics JSON export schema advanced through **1.2** and **1.3**.
 - Corpus Analytics representation contract advanced to **3**.
 - Corpus Analytics control-plane contract introduced at **1.0**.
+- MCP response governance contract introduced at **1.0** with deterministic `utf8_bytes_div_4_v1` context-unit
+  estimation and explicit `observe` / `partial_enforce` modes.
 - `derived.module_map` and `derived.review_queue` remain report-only projections excluded from the integrity digest;
   they add no analysis pass, metrics family, or report schema bump.
 - Live Implementation Context relationship facts remain off the canonical report and do not change canonical report

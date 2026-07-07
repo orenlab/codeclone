@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from argparse import Namespace
 from collections.abc import Iterator
 from pathlib import Path
@@ -41,6 +44,7 @@ from codeclone.observability.store.schema import (
 )
 from codeclone.observability.store.writer import write_operation
 from codeclone.surfaces.cli.observability import observability_main
+from tests.test_observability_query import _seed_future_observability_schema
 
 
 @pytest.fixture(autouse=True)
@@ -137,8 +141,17 @@ def _analysis() -> AnalysisResult:
 class _FakeCache:
     load_warning: str | None = None
 
+    def __init__(self) -> None:
+        self.saved = False
+        self.release_calls: list[bool] = []
+
     def save(self) -> None:
+        self.saved = True
         return None
+
+    def release_loaded_entries(self, *, allow_dirty: bool = False) -> int:
+        self.release_calls.append(allow_dirty)
+        return 0
 
 
 def _run_observed_pipeline(
@@ -150,6 +163,27 @@ def _run_observed_pipeline(
         boot=_boot(tmp_path, args),
         cache=cast(Cache, _FakeCache()),
     )
+
+
+def test_cli_pipeline_releases_cache_after_save(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cache = _FakeCache()
+    monkeypatch.setattr(cli, "discover", lambda **_kw: _discovery(("a.py",)))
+    monkeypatch.setattr(cli, "process", lambda **_kw: _processing())
+    monkeypatch.setattr(cli, "analyze", lambda **_kw: _analysis())
+    args = Namespace(
+        quiet=True, no_progress=True, blast_radius=False, patch_verify=False
+    )
+
+    cli._run_analysis_stages(
+        args=args,
+        boot=_boot(tmp_path, args),
+        cache=cast(Cache, cache),
+    )
+
+    assert cache.saved is True
+    assert cache.release_calls == [False]
 
 
 def _read_span_rows(tmp_path: Path) -> tuple[list[Any], dict[str, object]]:
@@ -265,6 +299,55 @@ def test_cli_pipeline_cache_only_keeps_legacy_process_counters(
     }
 
 
+def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "sample.py").write_text("def add(a, b):\n    return a + b\n", "utf-8")
+    env = os.environ.copy()
+    env["CODECLONE_OBSERVABILITY_ENABLED"] = "1"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "codeclone.main",
+            str(repo),
+            "--quiet",
+            "--no-progress",
+            "--cache-path",
+            str(repo / ".codeclone" / "test-cache.json"),
+        ],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    conn = open_observability_store(observability_store_path(repo))
+    try:
+        rows = conn.execute(
+            "SELECT s.name, s.operation_id FROM platform_spans s "
+            "JOIN platform_operations o ON o.operation_id=s.operation_id "
+            "WHERE o.name='cli.analyze'"
+        ).fetchall()
+    finally:
+        conn.close()
+
+    names = {row[0] for row in rows}
+    assert {
+        "pipeline.baseline",
+        "pipeline.cache_load",
+        "pipeline.bootstrap",
+        "pipeline.discover",
+        "pipeline.process",
+        "pipeline.analyze",
+        "pipeline.report",
+    } <= names
+    assert len({row[1] for row in rows}) == 1
+
+
 def test_observability_cli_help_and_stdout_trace(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -351,3 +434,17 @@ def test_observability_cli_missing_store_and_file_outputs(
     assert html_path.is_file()
     assert f"Wrote {json_path}" in out
     assert f"Wrote {html_path}" in out
+
+
+def test_observability_cli_future_schema_reports_internal_error(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _seed_future_observability_schema(tmp_path)
+
+    code = observability_main(["trace", "--root", str(tmp_path)])
+    out = capsys.readouterr().out
+
+    assert code == int(ExitCode.INTERNAL_ERROR)
+    assert "INTERNAL ERROR" in out
+    assert "newer than this CodeClone build" in out

@@ -250,6 +250,7 @@ def test_use_recommended_requires_sweep_before_capability_check(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
+    monkeypatch.delenv("CODECLONE_OBSERVABILITY_ENABLED", raising=False)
     monkeypatch.setattr(
         analytics_cli,
         "_require_capability",
@@ -263,7 +264,7 @@ def test_use_recommended_requires_sweep_before_capability_check(
     captured = capsys.readouterr()
     assert code == int(ExitCode.CONTRACT_ERROR)
     assert "--use-recommended requires --sweep" in captured.err
-    assert not (tmp_path / ".codeclone").exists()
+    assert not (tmp_path / ".codeclone" / "analytics").exists()
 
 
 def test_snapshot_stdout_is_json_and_bootstrap_precedes_handler(

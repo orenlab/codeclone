@@ -23,6 +23,7 @@ def _canonical_integrity_payload(
     canonical_meta = {
         str(key): value for key, value in meta.items() if str(key) != "runtime"
     }
+    canonical_inventory = _canonical_inventory(inventory)
 
     def _strip_noncanonical(value: object) -> object:
         if isinstance(value, Mapping):
@@ -41,10 +42,34 @@ def _canonical_integrity_payload(
     return {
         "report_schema_version": report_schema_version,
         "meta": canonical_meta,
-        "inventory": inventory,
+        "inventory": canonical_inventory,
         "findings": _strip_noncanonical(findings),
         "metrics": metrics,
     }
+
+
+def _canonical_inventory(inventory: Mapping[str, object]) -> dict[str, object]:
+    """Return inventory facts without local cache execution provenance."""
+
+    canonical: dict[str, object] = {}
+    for key, value in inventory.items():
+        key_text = str(key)
+        if key_text == "cache":
+            continue
+        if key_text == "files" and isinstance(value, Mapping):
+            canonical[key_text] = {
+                str(file_key): file_value
+                for file_key, file_value in value.items()
+                if str(file_key)
+                not in {
+                    "analyzed",
+                    "cached",
+                    "source_io_skipped",
+                }
+            }
+            continue
+        canonical[key_text] = value
+    return canonical
 
 
 def _build_integrity_payload(
@@ -69,7 +94,7 @@ def _build_integrity_payload(
     payload_sha = sha256(canonical_json).hexdigest()
     return {
         "canonicalization": {
-            "version": "1",
+            "version": "2",
             "scope": "canonical_only",
             "sections": [
                 "report_schema_version",
@@ -77,6 +102,14 @@ def _build_integrity_payload(
                 "inventory",
                 "findings",
                 "metrics",
+            ],
+            "excluded": [
+                "meta.runtime",
+                "inventory.cache",
+                "inventory.files.analyzed",
+                "inventory.files.cached",
+                "inventory.files.source_io_skipped",
+                "findings.*.display_facts",
             ],
         },
         "digest": {

@@ -2224,6 +2224,39 @@ def orphan():
     assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
 
 
+def test_runtime_reachability_rejects_invalid_router_methods_and_cast_factory() -> None:
+    source = """
+from typing import cast
+from starlette.routing import Router
+
+router = Router()
+
+def _short_cast():
+    return cast(object)
+
+def _invalid_factory(*args, **kwargs):
+    return router.not_a_route(*args, **kwargs)
+
+@router.not_a_route("/bad")
+def invalid_direct(request):
+    return request
+
+@_short_cast()
+def short_cast_handler(request):
+    return request
+
+@_invalid_factory("/factory-bad")
+def invalid_factory_handler(request):
+    return request
+"""
+
+    facts = _runtime_reachability_from_source(source)
+    by_target = {fact.target_qualname: fact for fact in facts}
+    assert "pkg.mod:invalid_direct" not in by_target
+    assert "pkg.mod:short_cast_handler" not in by_target
+    assert "pkg.mod:invalid_factory_handler" not in by_target
+
+
 def test_runtime_reachability_covers_starlette_click_group_and_celery_aliases() -> None:
     source = """
 import click

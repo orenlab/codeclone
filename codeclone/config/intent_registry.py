@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
+from typing import Final, TypeGuard
 
 from ..utils.repo_paths import (
     PathOutsideRepoError,
@@ -24,7 +24,7 @@ from .intent_registry_defaults import (
     MIN_INTENT_REGISTRY_RETENTION_DAYS,
     IntentRegistryBackend,
 )
-from .pyproject_loader import _load_toml
+from .pyproject_loader import _load_toml, copy_str_key_table
 
 INTENT_REGISTRY_BACKENDS: Final[frozenset[str]] = frozenset({"file", "sqlite"})
 _VALID_DB_SUFFIXES: Final[frozenset[str]] = frozenset({".sqlite3", ".db"})
@@ -77,7 +77,9 @@ def resolve_intent_registry_backend(
         raise IntentRegistryConfigError(
             f"intent_registry_backend must be one of: {expected}"
         )
-    return backend  # type: ignore[return-value]
+    if _is_intent_registry_backend(backend):
+        return backend
+    raise AssertionError("unreachable validated intent registry backend")
 
 
 def resolve_intent_registry_db_path(*, root_path: Path, value: object) -> Path:
@@ -109,6 +111,10 @@ def resolve_intent_registry_db_path(*, root_path: Path, value: object) -> Path:
         raise IntentRegistryConfigError(f"invalid intent_registry_path: {exc}") from exc
 
 
+def _is_intent_registry_backend(value: str) -> TypeGuard[IntentRegistryBackend]:
+    return value in INTENT_REGISTRY_BACKENDS
+
+
 def resolve_intent_registry_config(root: Path) -> IntentRegistryConfig:
     root_path = root.resolve()
     config_path = root_path / "pyproject.toml"
@@ -123,7 +129,10 @@ def resolve_intent_registry_config(root: Path) -> IntentRegistryConfig:
             if isinstance(tool, dict):
                 section = tool.get("codeclone")
                 if isinstance(section, dict):
-                    config = dict(section)
+                    config = copy_str_key_table(
+                        section,
+                        key="tool.codeclone",
+                    )
     backend = resolve_intent_registry_backend(
         config.get("intent_registry_backend"),
         env_value=os.environ.get("CODECLONE_INTENT_REGISTRY_BACKEND"),

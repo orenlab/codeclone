@@ -22,6 +22,7 @@ CODEX_PLUGIN_SKILL_NAMES: Final[tuple[str, ...]] = (
     "codeclone-platform-observability",
     "codeclone-production-triage",
     "codeclone-review",
+    "codeclone-setup",
 )
 
 CODEX_CURSOR_SYNC_SKILL_NAMES: Final[tuple[str, ...]] = CODEX_PLUGIN_SKILL_NAMES
@@ -130,6 +131,10 @@ def assert_plugin_skills_match_codex(
         assert plugin_text == codex_text, skill_name
 
 
+def repo_docs_source_available(root: Path) -> bool:
+    return (root / "docs" / "index.md").is_file()
+
+
 def assert_repo_doc_paths_exist(root: Path, *relative_paths: str) -> None:
     for relative in relative_paths:
         assert (root / relative).is_file(), relative
@@ -148,14 +153,15 @@ def assert_codex_plugin_readme_contract(readme_text: str) -> None:
         "prefers a workspace `.venv`",
         "current Poetry environment",
         "without relying on `sh -lc`",
-        'uv tool install "codeclone[mcp]"',
+        'uv tool install --prerelease allow "codeclone[mcp]"',
         "codeclone-change-control",
+        "codeclone-setup",
         "codeclone-architecture-triage",
         "codeclone-implementation-context",
         "codeclone-production-triage",
         "codeclone-architecture-triage",
         "codeclone-blast-radius",
-        "Nine skills ship in the plugin",
+        "Ten skills ship in the plugin",
         "Structural Change Controller for AI-assisted Python",
     )
 
@@ -167,5 +173,5 @@ def assert_claude_code_plugin_readme_contract(readme_text: str) -> None:
         readme_text,
         "claude plugin marketplace add orenlab/codeclone-claude-code",
         "claude plugin install codeclone@orenlab-codeclone",
-        'uv tool install "codeclone[mcp]"',
+        'uv tool install --prerelease allow "codeclone[mcp]"',
     )

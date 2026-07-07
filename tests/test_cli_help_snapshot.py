@@ -17,6 +17,12 @@ def test_cli_help_snapshot() -> None:
     root_dir = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["PYTHONPATH"] = str(root_dir) + os.pathsep + env.get("PYTHONPATH", "")
+    # The help banner mascot renders Unicode when stdout can encode it and ASCII
+    # otherwise (see ui.mascot.mascot_use_unicode), so without pinning the
+    # environment this snapshot would depend on the runner's stdout encoding.
+    # NO_COLOR forces the deterministic ASCII frame that the committed golden
+    # captures, keeping the contract stable across encodings and CI runners.
+    env["NO_COLOR"] = "1"
     result = subprocess.run(
         [sys.executable, "-m", "codeclone.main", "--help"],
         capture_output=True,

@@ -177,7 +177,7 @@ def _encode_dead_candidates(entry: CacheEntry, wire: dict[str, object]) -> None:
     if dead_candidates:
         encoded_dead_candidates: list[list[object]] = []
         for candidate in dead_candidates:
-            encoded = [
+            encoded: list[object] = [
                 candidate["qualname"],
                 candidate["local_name"],
                 candidate["start_line"],

@@ -841,7 +841,7 @@ class CodeCloneController {
         primary.fallback = (await looksLikeCodeCloneRepo(folder.uri.fsPath))
             ? normalizedLaunchSpec({
                 command: "uv",
-                args: ["run", "codeclone-mcp"],
+                args: ["run", "codeclone-mcp", ...governanceArgs],
                 cwd: folder.uri.fsPath,
                 source: "uvFallback",
             })

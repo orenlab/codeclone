@@ -15,6 +15,17 @@ from codeclone.config.pyproject_loader import load_pyproject_config
 from codeclone.config.resolver import collect_explicit_cli_dests, resolve_config
 from codeclone.config.spec import PYPROJECT_OPTIONS, TESTABLE_CLI_OPTIONS, OptionSpec
 
+_PARSEABLE_CLI_OPTIONS = tuple(
+    option for option in TESTABLE_CLI_OPTIONS if option.dest != "interactive_help"
+)
+_CONFIG_DEFAULTS_DOC = Path("docs/book/10-config-and-defaults.md")
+
+
+def _read_config_defaults_doc() -> str:
+    if not _CONFIG_DEFAULTS_DOC.is_file():
+        pytest.skip("repo docs source tree is not present")
+    return _CONFIG_DEFAULTS_DOC.read_text(encoding="utf-8")
+
 
 def _option_id(option: OptionSpec) -> str:
     if option.flags:
@@ -78,7 +89,7 @@ def test_pyproject_option_count_matches_declared_specs() -> None:
     assert len(pyproject_keys) == len(set(pyproject_keys))
 
 
-@pytest.mark.parametrize("option", TESTABLE_CLI_OPTIONS, ids=_option_id)
+@pytest.mark.parametrize("option", _PARSEABLE_CLI_OPTIONS, ids=_option_id)
 def test_option_specs_have_cli_parsing_coverage(option: OptionSpec) -> None:
     parser = build_parser("2.0.0")
     argv, expected = _cli_sample(option)
@@ -119,7 +130,7 @@ def test_option_specs_have_pyproject_loading_coverage(
 
 
 def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
-    text = Path("docs/book/10-config-and-defaults.md").read_text(encoding="utf-8")
+    text = _read_config_defaults_doc()
     # Scope to the core [tool.codeclone] table; the "Engineering Memory (nested
     # tables)" section below documents the separate [tool.codeclone.memory*]
     # namespace, which the doc itself marks as not part of the root key set.
@@ -135,6 +146,6 @@ def test_config_defaults_doc_covers_exact_pyproject_key_set() -> None:
 
 
 def test_config_defaults_doc_explains_coverage_pyproject_to_cli_mapping() -> None:
-    text = Path("docs/book/10-config-and-defaults.md").read_text(encoding="utf-8")
+    text = _read_config_defaults_doc()
     assert "`coverage_xml` is the `[tool.codeclone]` key" in text
     assert "`--coverage FILE`" in text

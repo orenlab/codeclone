@@ -12,10 +12,11 @@ from unittest.mock import patch
 
 import pytest
 
+import codeclone.surfaces.cli.memory_analysis as memory_analysis_mod
 from codeclone.contracts import DEFAULT_JSON_REPORT_PATH
 from codeclone.memory.report_trust import CachedReportTrust
+from codeclone.surfaces.cli.console import _rich_progress_symbols
 from codeclone.surfaces.cli.memory_analysis import (
-    _rich_progress_symbols,
     load_report_for_memory_init,
     run_memory_analysis_report,
 )
@@ -107,9 +108,11 @@ def test_load_report_without_cached_file_runs_fresh(tmp_path: Path) -> None:
     fresh.assert_called_once_with(root_path=root)
 
 
-def test_rich_progress_symbols_exports_types() -> None:
+def test_memory_analysis_reuses_console_rich_progress_symbols() -> None:
     symbols = _rich_progress_symbols()
     assert len(symbols) == 5
+    assert memory_analysis_mod._rich_progress_symbols is _rich_progress_symbols
+    assert symbols == _rich_progress_symbols()
 
 
 def test_run_memory_analysis_report_raises_when_document_missing(

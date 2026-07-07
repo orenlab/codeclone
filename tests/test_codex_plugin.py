@@ -7,12 +7,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.assertion_helpers import assert_all_contained
 from tests.plugin_test_helpers import (
     assert_codex_manifest_interface,
     assert_codex_plugin_readme_contract,
     assert_repo_doc_paths_exist,
     load_json,
+    repo_docs_source_available,
 )
 
 
@@ -118,6 +121,7 @@ def test_codex_plugin_skill_exists() -> None:
     architecture_triage_skill_path = (
         plugin_root / "skills" / "codeclone-architecture-triage" / "SKILL.md"
     )
+    setup_skill_path = plugin_root / "skills" / "codeclone-setup" / "SKILL.md"
     skill_text = skill_path.read_text(encoding="utf-8")
     hotspot_skill_text = hotspot_skill_path.read_text(encoding="utf-8")
     change_control_skill_text = change_control_skill_path.read_text(encoding="utf-8")
@@ -137,6 +141,7 @@ def test_codex_plugin_skill_exists() -> None:
     architecture_triage_skill_text = architecture_triage_skill_path.read_text(
         encoding="utf-8"
     )
+    setup_skill_text = setup_skill_path.read_text(encoding="utf-8")
     manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
     assert isinstance(manifest, dict)
 
@@ -282,6 +287,18 @@ def test_codex_plugin_skill_exists() -> None:
             "responsibility overload has no B",
         ),
     )
+    assert_all_contained(
+        setup_skill_text,
+        *(
+            "name: codeclone-setup",
+            "CLI-only",
+            "codeclone setup status",
+            "codeclone setup plan",
+            "codeclone setup apply",
+            "codeclone setup wizard",
+            "not MCP",
+        ),
+    )
 
     assert "Use MCP tools only." in manifest["instructions"]
     assert "help(topic=change_control" in manifest["instructions"]
@@ -298,8 +315,11 @@ def test_codex_plugin_readme_and_docs_exist() -> None:
     plugin_root = root / "plugins" / "codeclone"
     readme_text = (plugin_root / "README.md").read_text(encoding="utf-8")
     assert_codex_plugin_readme_contract(readme_text)
+    if not repo_docs_source_available(root):
+        pytest.skip("repo docs source tree is not present")
     assert_repo_doc_paths_exist(
         root,
-        "docs/guide/integrations/codex/setup.md",
+        "docs/integrations/codex.md",
+        "docs/guides/setup-project.md",
         "docs/terms-of-use.md",
     )

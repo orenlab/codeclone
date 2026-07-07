@@ -206,10 +206,10 @@ At the time this document was updated, the main contracts were:
 | Baseline schema        |   `2.1` | `codeclone/baseline/`             |
 | Baseline fingerprint   |     `1` | `codeclone/contracts/__init__.py` |
 | Analysis cache         |  `2.10` | `codeclone/cache/`                |
-| Canonical report       |  `2.11` | `codeclone/report/document/`      |
+| Canonical report       |  `2.12` | `codeclone/report/document/`      |
 | Metrics baseline       |   `1.2` | `codeclone/baseline/`             |
 | Engineering Memory     |   `1.7` | `codeclone/memory/`               |
-| Semantic index format  |     `2` | `codeclone/memory/semantic/`      |
+| Semantic index format  |     `3` | `codeclone/memory/semantic/`      |
 | Platform Observability |   `1.1` | `codeclone/observability/`        |
 
 Any schema shape or semantic change requires version review, tests, and

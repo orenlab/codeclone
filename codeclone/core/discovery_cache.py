@@ -130,19 +130,26 @@ def _dead_candidate_kind(value: object) -> _DeadCandidateKind | None:
 
 def _security_surface_category(value: object) -> SecuritySurfaceCategory | None:
     match value:
-        case (
-            "archive_extraction"
-            | "crypto_transport"
-            | "database_boundary"
-            | "deserialization"
-            | "dynamic_execution"
-            | "dynamic_loading"
-            | "filesystem_mutation"
-            | "identity_token"
-            | "network_boundary"
-            | "process_boundary"
-        ):
-            return value
+        case "archive_extraction":
+            return "archive_extraction"
+        case "crypto_transport":
+            return "crypto_transport"
+        case "database_boundary":
+            return "database_boundary"
+        case "deserialization":
+            return "deserialization"
+        case "dynamic_execution":
+            return "dynamic_execution"
+        case "dynamic_loading":
+            return "dynamic_loading"
+        case "filesystem_mutation":
+            return "filesystem_mutation"
+        case "identity_token":
+            return "identity_token"
+        case "network_boundary":
+            return "network_boundary"
+        case "process_boundary":
+            return "process_boundary"
         case _:
             return None
 
@@ -151,8 +158,12 @@ def _security_surface_location_scope(
     value: object,
 ) -> SecuritySurfaceLocationScope | None:
     match value:
-        case "module" | "class" | "callable":
-            return value
+        case "module":
+            return "module"
+        case "class":
+            return "class"
+        case "callable":
+            return "callable"
         case _:
             return None
 
@@ -161,8 +172,12 @@ def _security_surface_classification_mode(
     value: object,
 ) -> SecuritySurfaceClassificationMode | None:
     match value:
-        case "exact_builtin" | "exact_call" | "exact_import":
-            return value
+        case "exact_builtin":
+            return "exact_builtin"
+        case "exact_call":
+            return "exact_call"
+        case "exact_import":
+            return "exact_import"
         case _:
             return None
 
@@ -171,8 +186,12 @@ def _security_surface_evidence_kind(
     value: object,
 ) -> SecuritySurfaceEvidenceKind | None:
     match value:
-        case "builtin" | "call" | "import":
-            return value
+        case "builtin":
+            return "builtin"
+        case "call":
+            return "call"
+        case "import":
+            return "import"
         case _:
             return None
 
@@ -181,20 +200,28 @@ def _runtime_reachability_framework(
     value: object,
 ) -> RuntimeReachabilityFramework | None:
     match value:
-        case (
-            "aiogram"
-            | "aiohttp"
-            | "celery"
-            | "click"
-            | "dependency_injector"
-            | "django"
-            | "fastapi"
-            | "flask"
-            | "sqlalchemy"
-            | "starlette"
-            | "typer"
-        ):
-            return value
+        case "aiogram":
+            return "aiogram"
+        case "aiohttp":
+            return "aiohttp"
+        case "celery":
+            return "celery"
+        case "click":
+            return "click"
+        case "dependency_injector":
+            return "dependency_injector"
+        case "django":
+            return "django"
+        case "fastapi":
+            return "fastapi"
+        case "flask":
+            return "flask"
+        case "sqlalchemy":
+            return "sqlalchemy"
+        case "starlette":
+            return "starlette"
+        case "typer":
+            return "typer"
         case _:
             return None
 
@@ -203,15 +230,18 @@ def _runtime_reachability_edge_kind(
     value: object,
 ) -> RuntimeReachabilityEdgeKind | None:
     match value:
-        case (
-            "declares_dependency"
-            | "provides"
-            | "registers_command"
-            | "registers_handler"
-            | "registers_task"
-            | "runtime_hook"
-        ):
-            return value
+        case "declares_dependency":
+            return "declares_dependency"
+        case "provides":
+            return "provides"
+        case "registers_command":
+            return "registers_command"
+        case "registers_handler":
+            return "registers_handler"
+        case "registers_task":
+            return "registers_task"
+        case "runtime_hook":
+            return "runtime_hook"
         case _:
             return None
 
@@ -220,8 +250,12 @@ def _runtime_reachability_confidence(
     value: object,
 ) -> RuntimeReachabilityConfidence | None:
     match value:
-        case "high" | "medium" | "low":
-            return value
+        case "high":
+            return "high"
+        case "medium":
+            return "medium"
+        case "low":
+            return "low"
         case _:
             return None
 
@@ -230,8 +264,12 @@ def _runtime_reachability_target_kind(
     value: object,
 ) -> RuntimeReachabilityTargetKind | None:
     match value:
-        case "function" | "class" | "method":
-            return value
+        case "function":
+            return "function"
+        case "class":
+            return "class"
+        case "method":
+            return "method"
         case _:
             return None
 

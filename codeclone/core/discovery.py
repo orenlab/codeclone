@@ -7,8 +7,13 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import cast
 
+from ..cache._validators import _is_relationship_record_dict
+from ..cache.entries import (
+    _as_relationship_kind,
+    _as_relationship_origin_lane,
+    _as_relationship_resolution_status,
+)
 from ..cache.store import Cache, file_stat_signature
 from ..models import (
     ClassMetrics,
@@ -19,10 +24,7 @@ from ..models import (
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
-    RelationshipKind,
-    RelationshipOriginLane,
     RelationshipRecord,
-    RelationshipResolutionStatus,
     RuntimeReachabilityFact,
     SecuritySurface,
     StructuralFindingGroup,
@@ -47,6 +49,27 @@ from .discovery_cache import (
 from .discovery_cache import usable_cached_source_stats as _usable_cached_source_stats
 
 
+def _decode_cached_relationship_record(value: object) -> RelationshipRecord | None:
+    if not _is_relationship_record_dict(value):
+        return None
+    relation_kind = _as_relationship_kind(value["relation_kind"])
+    resolution_status = _as_relationship_resolution_status(value["resolution_status"])
+    origin_lane = _as_relationship_origin_lane(value["origin_lane"])
+    if relation_kind is None or resolution_status is None or origin_lane is None:
+        return None
+    return RelationshipRecord(
+        relation_kind=relation_kind,
+        resolution_status=resolution_status,
+        origin_lane=origin_lane,
+        source_qualname=value["source_qualname"],
+        target_qualname=value["target_qualname"],
+        path=value["path"],
+        line=value["line"],
+        expression=value["expression"],
+        resolution_rule=value["resolution_rule"],
+    )
+
+
 def _decode_cached_function_relationship_facts(
     rows: Sequence[Mapping[str, object]],
 ) -> list[FunctionRelationshipFacts]:
@@ -63,21 +86,10 @@ def _decode_cached_function_relationship_facts(
         if not isinstance(relationships, list) or not isinstance(source_qualname, str):
             continue
         records = tuple(
-            RelationshipRecord(
-                relation_kind=cast(RelationshipKind, record["relation_kind"]),
-                resolution_status=cast(
-                    RelationshipResolutionStatus, record["resolution_status"]
-                ),
-                origin_lane=cast(RelationshipOriginLane, record["origin_lane"]),
-                source_qualname=str(record["source_qualname"]),
-                target_qualname=cast("str | None", record["target_qualname"]),
-                path=str(record["path"]),
-                line=cast(int, record["line"]),
-                expression=cast("str | None", record["expression"]),
-                resolution_rule=cast("str | None", record["resolution_rule"]),
-            )
-            for record in relationships
-            if isinstance(record, Mapping)
+            record
+            for raw_record in relationships
+            if (record := _decode_cached_relationship_record(raw_record)) is not None
+            and record.source_qualname == source_qualname
         )
         facts.append(
             FunctionRelationshipFacts(

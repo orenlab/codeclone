@@ -11,24 +11,44 @@ import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
+from typing import TypeVar
 
 from ..contracts import (
     ActiveSelectionResult,
     ClusterAssignmentRecord,
     ClusteringRunRecord,
+    ClusteringRunStatus,
     ClusterSummaryRecord,
     CorpusItemRecord,
+    CorpusLane,
     CorpusSnapshotRecord,
     EmbeddingGenerationRecord,
     EmbeddingItemRecord,
     ProfileAssessmentRecord,
     ProfileBatchRecord,
     ProfileBatchRunRecord,
+    ProfileBatchStatus,
     ProfileManifestSnapshotRecord,
     RunSelectionRecord,
 )
 from ..exceptions import AnalyticsStoreError
 from ..schema import open_analytics_db, open_analytics_db_readonly
+
+_LiteralT = TypeVar("_LiteralT", bound=str)
+
+_CORPUS_LANES: dict[str, CorpusLane] = {"intent": "intent"}
+_CLUSTERING_RUN_STATUSES: dict[str, ClusteringRunStatus] = {
+    "pending": "pending",
+    "running": "running",
+    "completed": "completed",
+    "failed": "failed",
+}
+_PROFILE_BATCH_STATUSES: dict[str, ProfileBatchStatus] = {
+    "running": "running",
+    "completed": "completed",
+    "completed_partial": "completed_partial",
+    "failed": "failed",
+}
 
 
 class SqliteCorpusAnalyticsStore:
@@ -51,6 +71,7 @@ class SqliteCorpusAnalyticsStore:
         snapshot: CorpusSnapshotRecord,
         items: Sequence[CorpusItemRecord],
     ) -> None:
+        _validate_snapshot_literals(snapshot)
         self._conn.execute(
             """
             INSERT INTO corpus_snapshots (
@@ -197,6 +218,7 @@ class SqliteCorpusAnalyticsStore:
         return tuple(_embedding_item_from_row(row) for row in rows)
 
     def insert_clustering_run(self, run: ClusteringRunRecord) -> None:
+        run = _validate_clustering_run_literals(run)
         self._conn.execute(
             """
             INSERT INTO clustering_runs (
@@ -225,6 +247,7 @@ class SqliteCorpusAnalyticsStore:
         )
 
     def update_clustering_run(self, run: ClusteringRunRecord) -> None:
+        run = _validate_clustering_run_literals(run)
         self._conn.execute(
             """
             UPDATE clustering_runs SET
@@ -352,6 +375,7 @@ class SqliteCorpusAnalyticsStore:
         return _profile_manifest_snapshot_from_row(row) if row is not None else None
 
     def insert_profile_batch(self, record: ProfileBatchRecord) -> None:
+        record = _validate_profile_batch_literals(record)
         self._conn.execute(
             """
             INSERT INTO profile_batches (
@@ -368,6 +392,7 @@ class SqliteCorpusAnalyticsStore:
         )
 
     def finalize_profile_batch(self, record: ProfileBatchRecord) -> None:
+        record = _validate_profile_batch_literals(record)
         cursor = self._conn.execute(
             """
             UPDATE profile_batches SET
@@ -773,10 +798,62 @@ class SqliteCorpusAnalyticsStore:
         self._conn.close()
 
 
+def _literal_value(
+    value: object,
+    *,
+    field: str,
+    allowed: dict[str, _LiteralT],
+) -> _LiteralT:
+    if isinstance(value, str):
+        literal = allowed.get(value)
+        if literal is not None:
+            return literal
+    raise AnalyticsStoreError(f"Invalid corpus analytics {field}: {value!r}")
+
+
+def _literal_from_row(
+    row: sqlite3.Row,
+    column: str,
+    *,
+    field: str,
+    allowed: dict[str, _LiteralT],
+) -> _LiteralT:
+    return _literal_value(row[column], field=field, allowed=allowed)
+
+
+def _validate_snapshot_literals(
+    snapshot: CorpusSnapshotRecord,
+) -> CorpusSnapshotRecord:
+    _literal_value(snapshot.lane, field="lane", allowed=_CORPUS_LANES)
+    return snapshot
+
+
+def _validate_clustering_run_literals(
+    run: ClusteringRunRecord,
+) -> ClusteringRunRecord:
+    _literal_value(
+        run.status,
+        field="clustering_run.status",
+        allowed=_CLUSTERING_RUN_STATUSES,
+    )
+    return run
+
+
+def _validate_profile_batch_literals(
+    batch: ProfileBatchRecord,
+) -> ProfileBatchRecord:
+    _literal_value(
+        batch.status,
+        field="profile_batch.status",
+        allowed=_PROFILE_BATCH_STATUSES,
+    )
+    return batch
+
+
 def _snapshot_from_row(row: sqlite3.Row) -> CorpusSnapshotRecord:
     return CorpusSnapshotRecord(
         snapshot_id=str(row["snapshot_id"]),
-        lane=str(row["lane"]),  # type: ignore[arg-type]
+        lane=_literal_from_row(row, "lane", field="lane", allowed=_CORPUS_LANES),
         representation_kind=str(row["representation_kind"]),
         representation_version=str(row["representation_version"]),
         source_stores_json=str(row["source_stores_json"]),
@@ -845,7 +922,12 @@ def _run_from_row(row: sqlite3.Row) -> ClusteringRunRecord:
         run_digest=str(row["run_digest"]),
         recommended_by_heuristic=bool(int(row["recommended_by_heuristic"])),
         selected_by_maintainer=bool(int(row["selected_by_maintainer"])),
-        status=str(row["status"]),  # type: ignore[arg-type]
+        status=_literal_from_row(
+            row,
+            "status",
+            field="clustering_run.status",
+            allowed=_CLUSTERING_RUN_STATUSES,
+        ),
         created_at_utc=str(row["created_at_utc"]),
         finished_at_utc=_optional_str(row["finished_at_utc"]),
         error_message=_optional_str(row["error_message"]),
@@ -921,7 +1003,12 @@ def _profile_batch_from_row(row: sqlite3.Row) -> ProfileBatchRecord:
         candidate_space_digest=str(row["candidate_space_digest"]),
         started_at_utc=str(row["started_at_utc"]),
         finished_at_utc=_optional_str(row["finished_at_utc"]),
-        status=str(row["status"]),  # type: ignore[arg-type]
+        status=_literal_from_row(
+            row,
+            "status",
+            field="profile_batch.status",
+            allowed=_PROFILE_BATCH_STATUSES,
+        ),
         candidate_count_planned=int(row["candidate_count_planned"]),
         candidate_count_succeeded=int(row["candidate_count_succeeded"]),
         candidate_count_failed=int(row["candidate_count_failed"]),

@@ -17,6 +17,8 @@ from benchmarks.run_benchmark import (
     RunMeasurement,
     Scenario,
     _comparison_metrics,
+    _load_benchmark_payload,
+    _require_json_object,
     _run_cli_once,
     _scenario_profile,
     _timing_regressions,
@@ -297,6 +299,27 @@ def test_benchmark_inventory_validation_rejects_invalid_samples(
             scenario=scenario,
             measurement=measurement,
         )
+
+
+def test_load_benchmark_payload_accepts_json_object(tmp_path: Path) -> None:
+    path = tmp_path / "bench.json"
+    path.write_text('{"scenarios": []}', encoding="utf-8")
+
+    assert _load_benchmark_payload(path) == {"scenarios": []}
+
+
+def test_load_benchmark_payload_rejects_non_object(tmp_path: Path) -> None:
+    path = tmp_path / "bench.json"
+    path.write_text("[1, 2]", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="not an object"):
+        _load_benchmark_payload(path)
+
+
+def test_require_json_object_preserves_mapping_identity() -> None:
+    payload: dict[str, object] = {"median": 1.5}
+
+    assert _require_json_object(payload, message="expected object") is payload
 
 
 def test_benchmark_timing_regressions_accept_within_tolerance() -> None:

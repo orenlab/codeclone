@@ -6,15 +6,23 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Literal
 
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import SEMANTIC_INDEX_FORMAT_VERSION
 from ...observability import is_observability_enabled, record_counter, span
 from ..embedding import embed_query
-from ..enums import LinkRelation, MemoryConfidence, MemoryRecordType, MemoryStatus
+from ..enums import (
+    LinkRelation,
+    MemoryConfidence,
+    MemoryRecordType,
+    MemoryStatus,
+    validate_memory_confidence,
+    validate_memory_record_type,
+    validate_memory_status,
+)
 from ..exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ..experience.models import Experience
 from ..models import MemoryEvidence, MemoryQuery, MemoryRecord, MemorySubject
@@ -829,7 +837,7 @@ def get_memory_projection_page(
     project_id: str,
     cursor: str,
     page_size: int = DEFAULT_MEMORY_CONTINUATION_PAGE_SIZE,
-    resolve_request: object | None = None,
+    resolve_request: Callable[[str], object] | None = None,
 ) -> dict[str, object]:
     """Return a digest-bound continuation page for a memory retrieval lane."""
 
@@ -1010,9 +1018,14 @@ def _memory_retrieval_continuation(
 
 def _string_list(payload: Mapping[str, object], key: str) -> list[str]:
     value = payload.get(key)
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    if not isinstance(value, list):
         raise MemoryContractError(f"memory continuation request {key} is invalid")
-    return list(value)
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise MemoryContractError(f"memory continuation request {key} is invalid")
+        result.append(item)
+    return result
 
 
 def _load_patch_trails_for_trajectories(
@@ -1021,6 +1034,16 @@ def _load_patch_trails_for_trajectories(
     trajectory_ids: Sequence[str],
 ) -> dict[str, dict[str, object]]:
     return store.load_trajectory_patch_trails(trajectory_ids)
+
+
+_MEMORY_FILTER_KEYS = (
+    "types",
+    "statuses",
+    "confidences",
+    "match_mode",
+    "include_routine",
+)
+_MEMORY_FILTER_KEY_SET = frozenset(_MEMORY_FILTER_KEYS)
 
 
 def _parse_filters(
@@ -1039,22 +1062,52 @@ def _parse_filters(
     include_routine = False
     if filters is None:
         return (), (), (), match_mode, include_routine
+    unknown = sorted(str(key) for key in filters if key not in _MEMORY_FILTER_KEY_SET)
+    if unknown:
+        raise MemoryContractError(
+            f"Unknown memory filter key(s): {', '.join(unknown)}. "
+            f"Allowed keys: {', '.join(_MEMORY_FILTER_KEYS)}."
+        )
     raw_types = filters.get("types")
     if isinstance(raw_types, list):
-        types.extend(cast(MemoryRecordType, str(item)) for item in raw_types)
+        try:
+            types.extend(validate_memory_record_type(item) for item in raw_types)
+        except ValueError as exc:
+            raise MemoryContractError(str(exc)) from exc
+    elif raw_types is not None:
+        raise MemoryContractError("memory filter types must be a list of strings.")
     raw_statuses = filters.get("statuses")
     if isinstance(raw_statuses, list):
-        statuses.extend(cast(MemoryStatus, str(item)) for item in raw_statuses)
+        try:
+            statuses.extend(validate_memory_status(item) for item in raw_statuses)
+        except ValueError as exc:
+            raise MemoryContractError(str(exc)) from exc
+    elif raw_statuses is not None:
+        raise MemoryContractError("memory filter statuses must be a list of strings.")
     raw_confidences = filters.get("confidences")
     if isinstance(raw_confidences, list):
-        confidences.extend(
-            cast(MemoryConfidence, str(item)) for item in raw_confidences
+        try:
+            confidences.extend(
+                validate_memory_confidence(item) for item in raw_confidences
+            )
+        except ValueError as exc:
+            raise MemoryContractError(str(exc)) from exc
+    elif raw_confidences is not None:
+        raise MemoryContractError(
+            "memory filter confidences must be a list of strings."
         )
     raw_match = filters.get("match_mode")
-    if raw_match in {"all", "any"}:
-        match_mode = cast(SearchMatchMode, raw_match)
-    if bool(filters.get("include_routine")):
-        include_routine = True
+    if raw_match == "all":
+        match_mode = "all"
+    elif raw_match == "any":
+        match_mode = "any"
+    elif raw_match is not None:
+        raise MemoryContractError("memory filter match_mode must be 'any' or 'all'.")
+    raw_include_routine = filters.get("include_routine")
+    if isinstance(raw_include_routine, bool):
+        include_routine = raw_include_routine
+    elif raw_include_routine is not None:
+        raise MemoryContractError("memory filter include_routine must be boolean.")
     return (
         tuple(types),
         tuple(statuses),

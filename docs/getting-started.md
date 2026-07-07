@@ -1,286 +1,187 @@
-<!-- doc-scope: SOLE OWNER of install, first-run, CI setup, and MCP registration.
-     owns: install snippets, first-run walkthrough, CI pipeline, MCP quick-start.
-     does-not-own: contract details (→ book/), architecture (→ guide/explanation/how-it-works.md),
-       MCP tool reference (→ guide/mcp/README.md).
-     rule: other pages link HERE for install — never duplicate install blocks. -->
+---
+title: "Getting started"
+audience: public
+doc_type: guide
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
+---
 
-# Getting Started
+# Getting started
 
-Install CodeClone, run your first analysis, set up CI gating, and connect
-an MCP client — in that order.
+CodeClone is a deterministic structural change controller for Python. It analyzes your code before and after changes, detects structural regressions, and enforces quality gates to catch issues early.
 
 ## Install
 
-=== "uv (recommended)"
+CodeClone 2.1 is currently available as a prerelease. To install it:
 
-    ```bash
-    uv tool install codeclone
-    ```
+**Using uv:**
+```bash
+uv tool install --prerelease allow codeclone
+```
 
-=== "pip"
+**Using pip:**
+```bash
+pip install --pre codeclone
+```
 
-    ```bash
-    pip install codeclone
-    ```
+Verify the installation:
+```bash
+codeclone --version
+```
 
-=== "Run without installing"
+## Run the first analysis
 
-    ```bash
-    uvx codeclone@latest .
-    ```
-
-To use the MCP server (AI agents, IDE extensions), install the `mcp` extra:
+Navigate to your Python project and run:
 
 ```bash
-uv tool install "codeclone[mcp]"
-# or
-pip install "codeclone[mcp]"
+codeclone
 ```
 
-!!! tip "Install the in-development 2.1 prerelease"
-    The 2.1 line ships as alpha/beta prereleases. A plain install resolves the
-    latest **stable** release; add a prerelease flag to get 2.1:
+CodeClone scans your project structure, detects code clones, complexity violations, and dependency issues. By default, it analyzes the current directory and generates reports in `.codeclone/`.
 
-    ```bash
-    uv tool install --prerelease allow "codeclone[mcp]"   # uv
-    pip install --pre "codeclone[mcp]"                     # pip
-    ```
+**Common first-run options:**
 
-## First Run
+| Option | Purpose |
+|--------|---------|
+| `codeclone --help` | Show all available flags |
+| `codeclone --processes 8` | Use parallel workers (default: 4) |
+| `codeclone --min-loc 5` | Lower minimum lines for clone detection |
+| `codeclone --no-progress` | Suppress progress output (useful in CI) |
+
+For CI/CD integration, use CI mode:
 
 ```bash
-codeclone .
+codeclone --ci
 ```
 
-This analyzes the current directory and prints a summary to stdout.
-For an HTML report:
+This disables color, limits output, and applies fail-on-new clone detection.
+
+## Read the first report
+
+After analysis completes, open the HTML report:
 
 ```bash
-codeclone . --html --open-html-report
+codeclone --html
+open .codeclone/report.html
 ```
 
-Other formats — all rendered from one canonical JSON report:
+Or generate other formats:
 
 ```bash
-codeclone . --json       # JSON
-codeclone . --md         # Markdown
-codeclone . --sarif      # SARIF (IDE / Code Scanning)
-codeclone . --text       # plain text
+codeclone --json      # Canonical JSON report
+codeclone --md        # Markdown summary
+codeclone --sarif     # SARIF 2.1.0 format
 ```
 
-### Changed-scope review
+The report shows:
+- **Clone groups**: duplicate code segments and their locations
+- **Complexity metrics**: cyclomatic complexity and coupling scores
+- **Dead code**: unreachable functions
+- **Health score**: overall code quality summary
 
-Analyze only files changed relative to a branch:
+## Start a controlled change
+
+There are two distinct ways to guard edits, and it's worth keeping them separate:
+
+- **CLI patch verification** (`--patch-verify`) — a one-shot check. It runs analysis, compares your working tree against the trusted baseline budget, reports baseline-relative regressions and gate status, then exits. It does **not** declare an intent or gate whether you may edit.
+- **MCP controlled change** (`start_controlled_change` / `finish_controlled_change`) — the intent-first workflow used by agents and IDE integrations. It declares scope, gates edit permission, and verifies the patch at finish.
+
+For a quick local check of the current working tree:
 
 ```bash
-codeclone . --changed-only --diff-against main
+codeclone --patch-verify
 ```
 
-Or from a recent commit:
+```mermaid
+graph LR
+    A["Run analysis"] --> B["Declare intent"]
+    B --> C["Edit code"]
+    C --> D["Run analysis again"]
+    D --> E["Verify and finish"]
+    E --> F["Done"]
+    style A fill:#e1f5ff
+    style B fill:#fff3e0
+    style C fill:#fce4ec
+    style D fill:#e1f5ff
+    style E fill:#c8e6c9
+    style F fill:#c8e6c9
+```
+
+The MCP controlled-change workflow ensures:
+1. Your changes stay within declared scope
+2. No structural regressions are introduced
+3. Quality gates pass
+4. All changes are audited
+
+When using CodeClone's MCP service (for Claude Code, Cursor, or Codex integration), the workflow is:
+
+1. `analyze_repository` — establish a baseline run
+2. `start_controlled_change` — declare scope, get intent ID, gate edit permission
+3. Edit your code within scope
+4. `analyze_repository` again — after-run for structural verification
+5. `finish_controlled_change` — verify, produce a receipt, and clear the intent
+
+## Verify and finish
+
+After editing, verify your changes don't introduce regressions:
 
 ```bash
-codeclone . --paths-from-git-diff HEAD~1
+codeclone --patch-verify --strictness ci
 ```
 
-## CI Setup
+**Strictness levels:**
+- `ci` — strict gating in CI environment (default)
+- `strict` — all gates enabled
+- `relaxed` — report warnings without failing
 
-### 1. Create a baseline
+The verification checks:
+- No new clone groups (unless baseline allows)
+- No new complexity violations
+- No uncovered hotspots
+- No dead code regressions
 
+If verification passes, your changes are safe to commit.
+
+## Troubleshooting
+
+**Q: Why did analysis report a baseline error?**
+A baseline mismatch means your `codeclone.baseline.json` was created with a different version or is corrupted. Regenerate it:
 ```bash
-codeclone . --update-baseline
+codeclone --update-baseline
 ```
 
-By default this writes `codeclone.baseline.json`, the unified clone and metrics
-baseline. Commit it to the repository — it becomes the contract CI enforces.
-If you use `--metrics-baseline` to redirect metric state, commit that file too.
-
-### 2. Run in CI
-
+**Q: How do I ignore specific findings?**
+Use baseline-aware gating. After reviewing a finding, update your baseline:
 ```bash
-codeclone . --ci
+codeclone --update-baseline
 ```
 
-`--ci` equals `--fail-on-new --no-color --quiet`. When a trusted metrics
-baseline is present, CI mode also enables `--fail-on-new-metrics`.
+Findings present in the baseline are not flagged as new.
 
-Baseline governance: new clones and metric regressions fail the build;
-accepted legacy debt passes. CI sees only what changed.
-
-### 3. Quality gates
-
-Add thresholds for stricter enforcement:
-
+**Q: Can I lower the minimum clone size?**
+Yes, adjust the thresholds:
 ```bash
-codeclone . --fail-complexity 20 --fail-coupling 10 --fail-cohesion 4
-codeclone . --fail-cycles --fail-dead-code --fail-health 60
-codeclone . --fail-on-typing-regression --fail-on-docstring-regression
-codeclone . --coverage coverage.xml --fail-on-untested-hotspots
+codeclone --min-loc 5 --min-stmt 3
 ```
 
-See [Metrics and quality gates](book/16-metrics-and-quality-gates.md) for the
-full gate reference.
+Lower values catch more clones but may report trivial duplicates.
 
-### GitHub Action
-
-```yaml
-- uses: orenlab/codeclone/.github/actions/codeclone@v2
-  with:
-    fail-on-new: "true"
-    sarif: "true"
-    pr-comment: "true"
-```
-
-Runs gating, generates reports, uploads SARIF to Code Scanning, and posts a
-PR summary comment.
-[Action docs](https://github.com/orenlab/codeclone/blob/main/.github/actions/codeclone/README.md)
-
-### Pre-commit hook
-
-```yaml
-repos:
-  - repo: local
-    hooks:
-      - id: codeclone
-        name: CodeClone
-        entry: codeclone
-        language: system
-        pass_filenames: false
-        args: [ ".", "--ci" ]
-        types: [ python ]
-```
-
-### Exit codes
-
-| Code | Meaning                                             |
-|------|-----------------------------------------------------|
-| `0`  | Success                                             |
-| `2`  | Contract error — untrusted baseline, invalid config |
-| `3`  | Gating failure — new clones or threshold exceeded   |
-| `5`  | Internal error                                      |
-
-Contract errors (`2`) take precedence over gating failures (`3`).
-See [Exit codes](book/09-exit-codes.md).
-
-## MCP Setup
-
-The MCP server exposes **33 tools** for agent clients over the same canonical
-pipeline (35 when VS Code starts the server with `--ide-governance-channel` for
-session stats and audit insights).
-
-### Start the server
-
+**Q: How do I see which files changed?**
+Use `--changed-only` with a Git ref:
 ```bash
-codeclone-mcp --transport stdio            # local clients (IDE, agents)
-# HTTP: set CODECLONE_MCP_AUTH_TOKEN (≥32 chars) before start — required for streamable-http
-codeclone-mcp --transport streamable-http   # remote / HTTP clients
+codeclone --changed-only --diff-against main
 ```
 
-!!! warning
-    Analysis tools require an **absolute** repository root.
-    Relative roots like `.` are rejected.
+**Q: What exit codes mean?**
+- `0` — success
+- `2` — contract error (invalid baseline, incompatible version)
+- `3` — gating failure (new clones, threshold violations)
+- `5` — internal error
 
-### Connect a client
-
-=== "VS Code"
-
-    Install from the
-    [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=orenlab.codeclone).
-    The extension connects to `codeclone-mcp` automatically.
-
-    See [VS Code extension guide](guide/integrations/vscode/setup.md).
-
-=== "Claude Desktop"
-
-    Use the pre-built bundle in
-    [`extensions/claude-desktop-codeclone/`](https://github.com/orenlab/codeclone/tree/main/extensions/claude-desktop-codeclone).
-
-    See [Claude Desktop guide](guide/integrations/claude-desktop/setup.md).
-
-=== "Claude Code"
-
-    ```bash
-    claude plugin marketplace add orenlab/codeclone-claude-code
-    claude plugin install codeclone@orenlab-codeclone
-    ```
-
-    The marketplace repository is
-    [orenlab/codeclone-claude-code](https://github.com/orenlab/codeclone-claude-code).
-
-    See [Claude Code plugin guide](guide/integrations/claude-code/setup.md).
-
-=== "Codex"
-
-    ```bash
-    codex plugin marketplace add orenlab/codeclone-codex
-    codex plugin add codeclone@orenlab-codeclone
-    ```
-
-    The marketplace repository is
-    [orenlab/codeclone-codex](https://github.com/orenlab/codeclone-codex).
-
-    See [Codex plugin guide](guide/integrations/codex/setup.md).
-
-=== "Cursor"
-
-    In Cursor, open **Dashboard → Settings → Plugins → Team Marketplaces**,
-    choose **Add Marketplace → Import from Repo**, and enter:
-
-    ```text
-    https://github.com/orenlab/codeclone-cursor
-    ```
-
-    Then install **CodeClone** from the imported marketplace.
-
-    See [Cursor plugin guide](guide/integrations/cursor/install-and-skills.md).
-
-=== "Manual registration"
-
-    ```bash
-    # Codex
-    codex mcp add codeclone -- codeclone-mcp --transport stdio
-
-    # Any MCP client
-    codeclone-mcp --transport stdio
-    ```
-
-### Change controller (AI agents)
-
-When an AI agent edits code, the MCP change controller governs the structural
-boundary:
-
-1. **Declare intent** — scope, files, and purpose
-2. **Map blast radius** — reverse imports, clone cohorts, do-not-touch
-3. **Check patch contract** — pre-edit budget, post-edit verification
-4. **Generate receipt** — auditable artifact
-5. **Validate claims** — cross-check review text against report
-
-See [Structural Change Controller](book/12-structural-change-controller/index.md).
-
-## Configuration
-
-CodeClone loads project configuration from `pyproject.toml`:
-
-```toml
-[tool.codeclone]
-baseline = "codeclone.baseline.json"
-min_loc = 10
-min_stmt = 6
-block_min_loc = 20
-block_min_stmt = 8
+**Q: Can I integrate with CI?**
+Yes. CodeClone supports multiple CI systems and output formats:
+```bash
+codeclone --ci --sarif report.sarif
 ```
 
-Precedence: CLI flags > `pyproject.toml` > built-in defaults.
-
-See [Config and defaults](book/10-config-and-defaults.md).
-
-## Next Steps
-
-- [Your first governed edit](start/first-governed-edit.md) — the full declare → edit → verify cycle
-- [Architecture narrative](guide/explanation/how-it-works.md) — how the pipeline works
-- [Baseline contract](book/07-baseline.md) — trust model and schema
-- [MCP interface contract](book/25-mcp-interface/index.md) — tool surface and guarantees
-- [Engineering Memory recipes](guide/mcp/workflows/memory-recipes.md) — scoped context and governed drafts
-- [Trajectories and Experiences](guide/memory/trajectories-and-experiences.md) — workflow evidence and recurring
-  patterns
-- [Platform Observability](guide/observability/diagnostics.md) — diagnose CodeClone's own runtime
-- [Report contract](book/05-report.md) — canonical JSON schema
+See the CI documentation for integration guides.

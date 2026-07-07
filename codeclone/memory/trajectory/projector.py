@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Iterable, Mapping, Sequence
+from typing import TypeGuard
 
 import orjson
 
@@ -420,7 +421,7 @@ def _path_subjects_from_cores(
     untouched: set[str] = set()
     for core in cores:
         facts = core.get("facts")
-        if not isinstance(facts, Mapping):
+        if not _is_object_mapping(facts):
             continue
         about.update(_facts_path_list(facts, "scope_paths"))
         about.update(_facts_path_list(facts, "declared_scope_paths"))
@@ -443,6 +444,10 @@ def _facts_path_list(facts: Mapping[str, object], key: str) -> tuple[str, ...]:
         if isinstance(item, str) and (text := item.strip())
     ]
     return tuple(sorted(set(paths)))
+
+
+def _is_object_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
 
 
 def _summary(

@@ -16,7 +16,7 @@ import time
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, Protocol, TypeVar, cast
 
 from ... import __version__
 from ...config.observability import resolve_observability_config
@@ -154,6 +154,7 @@ from .messages.params import (
     PatchModeParam,
     PatchTrailDetailParam,
     PatchTrailDigestParam,
+    PatchTrailRetrievalFormatParam,
     PathFilterParam,
     PrFormatParam,
     ProcessesParam,
@@ -193,7 +194,7 @@ from .session import (
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
-    from mcp.types import ToolAnnotations
+    from mcp.types import Annotations, Icon, ToolAnnotations
 
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8000
@@ -210,12 +211,18 @@ class MCPDependencyError(RuntimeError):
 MCPCallable = TypeVar("MCPCallable", bound=Callable[..., object])
 
 
+class _SignatureBearingToolWrapper(Protocol):
+    __signature__: inspect.Signature
+
+    def __call__(self, *args: object, **kwargs: object) -> object: ...
+
+
 def _observability_session_id() -> str:
     """Stable per-process id grouping every operation from this MCP server."""
     return f"mcp:{os.getpid()}:{int(time.time())}"
 
 
-def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
+def _instrument_tool(func: MCPCallable) -> MCPCallable:
     """Wrap a registered MCP tool so each call records an observability operation
     with request/response payload sizes (bytes + context-unit estimates).
 
@@ -246,7 +253,10 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
             with span(name=f"mcp.{tool_name}"):
                 result = func(*args, **kwargs)
             if payload_capture_enabled() and isinstance(result, Mapping):
-                response_bytes, response_context_units = measure_payload(result)
+                response_payload = cast("Mapping[str, object]", result)
+                response_bytes, response_context_units = measure_payload(
+                    response_payload
+                )
                 op.set_response(
                     response_bytes=response_bytes,
                     response_tokens=response_context_units,
@@ -255,10 +265,9 @@ def _instrument_tool(func: Callable[..., object]) -> Callable[..., object]:
 
     # eval_str resolves the tool's string annotations (PEP 563) into real types
     # so FastMCP/Pydantic build the same input schema as the unwrapped handler.
-    wrapper.__signature__ = inspect.signature(  # type: ignore[attr-defined]
-        func, eval_str=True
-    )
-    return wrapper
+    signature_wrapper = cast("_SignatureBearingToolWrapper", wrapper)
+    signature_wrapper.__signature__ = inspect.signature(func, eval_str=True)
+    return cast("MCPCallable", signature_wrapper)
 
 
 def _load_mcp_runtime() -> tuple[
@@ -381,8 +390,25 @@ def build_mcp_server(
     # clientInfo (name/version) for workspace intent agent_label fields.
     service._fastmcp = mcp
 
-    def tool(*args: object, **kwargs: object) -> Callable[[MCPCallable], MCPCallable]:
-        decorator = mcp.tool(*args, **kwargs)  # type: ignore[arg-type]
+    def tool(
+        name: str | None = None,
+        *,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: ToolAnnotations | None = None,
+        icons: list[Icon] | None = None,
+        meta: dict[str, object] | None = None,
+        structured_output: bool | None = None,
+    ) -> Callable[[MCPCallable], MCPCallable]:
+        decorator = mcp.tool(
+            name=name,
+            title=title,
+            description=description,
+            annotations=annotations,
+            icons=icons,
+            meta=meta,
+            structured_output=structured_output,
+        )
 
         def register(func: MCPCallable) -> MCPCallable:
             decorator(_instrument_tool(func))
@@ -391,10 +417,26 @@ def build_mcp_server(
         return register
 
     def resource(
-        *args: object,
-        **kwargs: object,
+        uri: str,
+        *,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        mime_type: str | None = None,
+        icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, object] | None = None,
     ) -> Callable[[MCPCallable], MCPCallable]:
-        decorator = mcp.resource(*args, **kwargs)  # type: ignore[arg-type]
+        decorator = mcp.resource(
+            uri,
+            name=name,
+            title=title,
+            description=description,
+            mime_type=mime_type,
+            icons=icons,
+            annotations=annotations,
+            meta=meta,
+        )
 
         def register(func: MCPCallable) -> MCPCallable:
             decorator(func)
@@ -857,11 +899,13 @@ def build_mcp_server(
         root: RootParam,
         run_id: RunIdParam = None,
         patch_trail_digest: PatchTrailDigestParam = None,
+        format: PatchTrailRetrievalFormatParam = "structured",
     ) -> dict[str, object]:
         return service.get_patch_trail(
             root=root,
             run_id=run_id,
             patch_trail_digest=patch_trail_digest,
+            format=format,
         )
 
     @tool(

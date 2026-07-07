@@ -11,7 +11,8 @@ import hmac
 from collections.abc import Mapping
 from pathlib import Path
 
-from ..utils.json_io import json_text as _json_text
+import orjson
+
 from ..utils.json_io import read_json_document as _read_json_document
 from ..utils.json_io import (
     write_json_document_atomically as _write_json_document_atomically,
@@ -27,24 +28,28 @@ def as_int_or_none(value: object) -> int | None:
 
 
 def as_object_list(value: object) -> list[object] | None:
-    return value if isinstance(value, list) else None
+    if not isinstance(value, list):
+        return None
+    return list(value)
 
 
 def as_str_dict(value: object) -> dict[str, object] | None:
     if not isinstance(value, dict):
         return None
-    if not all(isinstance(key, str) for key in value):
-        return None
-    return value
+    result: dict[str, object] = {}
+    for raw_key, item in value.items():
+        if not isinstance(raw_key, str):
+            return None
+        result[raw_key] = item
+    return result
 
 
 def canonical_json(data: object) -> str:
-    return _json_text(data, sort_keys=True)
+    return _canonical_json_bytes(data).decode("utf-8")
 
 
 def sign_cache_payload(data: Mapping[str, object]) -> str:
-    canonical = canonical_json(data)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return hashlib.sha256(_canonical_json_bytes(data)).hexdigest()
 
 
 def verify_cache_payload_signature(
@@ -52,6 +57,10 @@ def verify_cache_payload_signature(
     signature: str,
 ) -> bool:
     return hmac.compare_digest(signature, sign_cache_payload(payload))
+
+
+def _canonical_json_bytes(data: object) -> bytes:
+    return orjson.dumps(data, option=orjson.OPT_SORT_KEYS)
 
 
 def read_json_document(path: Path, *, max_bytes: int | None = None) -> object:

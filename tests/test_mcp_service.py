@@ -12,14 +12,15 @@ import json
 import os
 import sqlite3
 import subprocess
-from collections import OrderedDict
+from argparse import Namespace
+from collections import OrderedDict, UserDict
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -32,6 +33,7 @@ import codeclone.surfaces.mcp._intent as mcp_intent_mod
 import codeclone.surfaces.mcp._patch_contract as mcp_patch_contract_mod
 import codeclone.surfaces.mcp._review_receipt as mcp_review_receipt_mod
 import codeclone.surfaces.mcp._session_baseline as mcp_baseline_mod
+import codeclone.surfaces.mcp._session_blast_radius_mixin as mcp_blast_session_mod
 import codeclone.surfaces.mcp._session_context_mixin as mcp_context_session_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
@@ -553,8 +555,9 @@ class _RecordingAuditWriter:
     def __init__(self) -> None:
         self.events: list[AuditEvent] = []
 
-    def emit(self, event: AuditEvent) -> None:
+    def emit(self, event: AuditEvent) -> int:
         self.events.append(event)
+        return len(self.events)
 
     def close(self) -> None:
         return None
@@ -647,6 +650,25 @@ def _payload_dicts(
     keys: tuple[str, ...],
 ) -> tuple[dict[str, object], ...]:
     return tuple(cast("dict[str, object]", payload[key]) for key in keys)
+
+
+def _install_decorate_counter(
+    service: CodeCloneMCPService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[str]:
+    decorated_ids: list[str] = []
+    original_decorate = service._decorate_finding
+
+    def counting_decorate(
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        **kwargs: Any,
+    ) -> dict[str, object]:
+        decorated_ids.append(str(finding.get("id", "")))
+        return original_decorate(record, finding, **kwargs)
+
+    monkeypatch.setattr(service, "_decorate_finding", counting_decorate)
+    return decorated_ids
 
 
 def _two_clone_fixture_roots(tmp_path: Path) -> tuple[Path, Path]:
@@ -876,6 +898,25 @@ def _analyze_quality_repository(
         )
     )
     return service, summary
+
+
+def _analyze_multi_clone_repository(root: Path) -> CodeCloneMCPService:
+    _write_clone_fixture(root)
+    _write_clone_variant_fixture(
+        root,
+        relative_dir="pkg_extra",
+        module_name="more_dup.py",
+        seed=20,
+    )
+    service = CodeCloneMCPService(history_limit=4)
+    service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(root),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    return service
 
 
 def _file_registry(payload: dict[str, object]) -> dict[str, object]:
@@ -2485,17 +2526,52 @@ def test_mcp_session_audit_emit_swallows_writer_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = mcp_session_mod.MCPSession(history_limit=4)
+    counters: list[tuple[str, int]] = []
 
     def raise_writer(_root: Path) -> _RecordingAuditWriter:
         raise RuntimeError("audit unavailable")
 
     monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    monkeypatch.setattr(
+        "codeclone.observability.record_counter",
+        lambda key, value=1: counters.append((key, value)),
+    )
 
-    service._audit_emit(
-        root=tmp_path,
-        event_type="intent.declared",
-        severity="warn",
-        payload={"status": "active"},
+    assert (
+        service._audit_emit(
+            root=tmp_path,
+            event_type="intent.declared",
+            severity="warn",
+            payload={"status": "active"},
+        )
+        is None
+    )
+    assert counters == [("audit.emit_dropped", 1)]
+
+
+def test_mcp_session_audit_emit_swallows_counter_errors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = mcp_session_mod.MCPSession(history_limit=4)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    def raise_counter(_key: str, _value: int = 1) -> None:
+        raise RuntimeError("observability unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    monkeypatch.setattr("codeclone.observability.record_counter", raise_counter)
+
+    assert (
+        service._audit_emit(
+            root=tmp_path,
+            event_type="intent.declared",
+            severity="warn",
+            payload={"status": "active"},
+        )
+        is None
     )
 
 
@@ -2635,11 +2711,11 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
         "doc_links": [
             {
                 "title": "MCP interface contract",
-                "url": "https://orenlab.github.io/codeclone/book/25-mcp-interface/",
+                "url": "https://orenlab.github.io/codeclone/concepts/mcp/",
             },
             {
                 "title": "MCP usage guide",
-                "url": "https://orenlab.github.io/codeclone/guide/mcp/",
+                "url": "https://orenlab.github.io/codeclone/guides/agent-safe-change/",
             },
         ],
         "anti_patterns": [
@@ -2668,6 +2744,76 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
     ]
 
 
+def test_mcp_context_governance_adds_top_level_continuation_pointer() -> None:
+    payload = mcp_context_governance_mod.attach_memory_retrieval_context_governance(
+        {
+            "records": [{"id": "mem-1"}],
+            "continuation": {
+                "lanes": {
+                    "records": {
+                        "page": {
+                            "cursor": "cursor-records-1",
+                            "next_offset": 1,
+                        }
+                    }
+                }
+            },
+        },
+        detail_level="compact",
+        max_records=20,
+        evidence_omitted={
+            "records": {
+                "total": 3,
+                "shown": 1,
+                "omitted": 2,
+                "reason": "response_budget",
+                "drill_down": {
+                    "tool": "get_memory_projection_page",
+                    "cursor_path": "continuation.lanes.records.page.cursor",
+                    "snapshot_identity": "memory projection cursor",
+                },
+            }
+        },
+    )
+
+    continuation = cast("dict[str, object]", payload["_continuation"])
+    lanes = cast("list[dict[str, object]]", continuation["lanes"])
+
+    assert continuation["required"] is True
+    assert lanes == [
+        {
+            "lane": "records",
+            "reason": "response_budget",
+            "shown": 1,
+            "total": 3,
+            "omitted": 2,
+            "tool": "get_memory_projection_page",
+            "cursor_path": "continuation.lanes.records.page.cursor",
+            "snapshot_identity": "memory projection cursor",
+            "cursor": "cursor-records-1",
+        }
+    ]
+
+
+def test_mcp_service_help_overview_returns_topic_index() -> None:
+    service = CodeCloneMCPService(history_limit=4)
+
+    overview = service.get_help(topic="overview", detail="normal")
+    topics = cast("list[dict[str, object]]", overview["topics"])
+
+    assert overview["topic"] == "overview"
+    assert overview["detail"] == "normal"
+    assert "index" in str(overview["warnings"])
+    assert "get_production_triage" in cast(
+        "list[str]",
+        overview["recommended_tools"],
+    )
+    assert "overview" not in {str(item["topic"]) for item in topics}
+    assert {"workflow", "engineering_memory", "implementation_context"}.issubset(
+        {str(item["topic"]) for item in topics}
+    )
+
+
 def test_mcp_service_help_covers_analysis_profiles() -> None:
     service = CodeCloneMCPService(history_limit=4)
 
@@ -2681,15 +2827,15 @@ def test_mcp_service_help_covers_analysis_profiles() -> None:
     assert compact["doc_links"] == [
         {
             "title": "Config and defaults",
-            "url": "https://orenlab.github.io/codeclone/book/10-config-and-defaults/",
+            "url": "https://orenlab.github.io/codeclone/reference/configuration/",
         },
         {
             "title": "Core pipeline",
-            "url": "https://orenlab.github.io/codeclone/book/03-core-pipeline/",
+            "url": "https://orenlab.github.io/codeclone/concepts/structural-analysis/",
         },
         {
             "title": "MCP interface contract",
-            "url": "https://orenlab.github.io/codeclone/book/25-mcp-interface/",
+            "url": "https://orenlab.github.io/codeclone/concepts/mcp/",
         },
     ]
     assert normal["topic"] == "analysis_profile"
@@ -3127,15 +3273,29 @@ def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
     assert findings_total >= 1
     first = cast("list[dict[str, object]]", findings["items"])[0]
     assert str(first["id"]).startswith("fn:")
+    assert first["id"] == first["short_id"]
+    assert str(first["canonical_id"]).startswith("clone:function:")
+    assert first["html_anchor"] == f"finding-{first['canonical_id']}"
+    assert first["novelty"] in {"new", "known"}
     assert first["kind"] == "function_clone"
 
     finding = service.get_finding(finding_id=str(first["id"]))
     assert finding["id"] == first["id"]
+    assert finding["short_id"] == first["id"]
+    assert finding["canonical_id"] == first["canonical_id"]
+    assert finding["html_anchor"] == f"finding-{finding['canonical_id']}"
     assert "remediation" in finding
 
     hotspots = service.list_hotspots(kind="highest_spread")
     assert hotspots["run_id"] == summary["run_id"]
     assert cast(int, hotspots["total"]) >= 1
+
+    filtered_hotspots = service.list_hotspots(
+        kind="highest_spread",
+        changed_paths=["does/not/exist.py"],
+    )
+    assert filtered_hotspots["total"] == 0
+    assert filtered_hotspots["empty_reason"] == "changed_paths_filter_excluded_all"
 
 
 def test_mcp_service_hotspot_resources_and_triage_are_production_first(
@@ -3892,6 +4052,76 @@ def test_mcp_service_list_findings_detail_levels_slim_and_full_payloads(
     )
 
 
+def test_mcp_service_list_findings_decorates_only_requested_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, summary = _analyze_quality_repository(tmp_path)
+    run_id = str(summary["run_id"])
+    baseline = service.list_findings(run_id=run_id, family="all", limit=50)
+    assert cast(int, baseline["total"]) > 1
+
+    decorated_ids = _install_decorate_counter(service, monkeypatch)
+
+    payload = service.list_findings(
+        run_id=run_id,
+        family="all",
+        detail_level="summary",
+        limit=1,
+    )
+
+    assert payload["returned"] == 1
+    assert cast(int, payload["total"]) == cast(int, baseline["total"])
+    assert len(decorated_ids) == 1
+
+
+def test_mcp_service_list_hotspots_decorates_only_requested_page(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _analyze_multi_clone_repository(tmp_path)
+    baseline = service.list_hotspots(kind="highest_priority", limit=50)
+    assert cast(int, baseline["total"]) > 1
+
+    decorated_ids = _install_decorate_counter(service, monkeypatch)
+
+    payload = service.list_hotspots(kind="highest_priority", limit=1)
+
+    assert payload["returned"] == 1
+    assert cast(int, payload["total"]) == cast(int, baseline["total"])
+    assert len(decorated_ids) == 1
+
+
+def test_mcp_service_production_triage_decorates_only_returned_hotspots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = _analyze_multi_clone_repository(tmp_path)
+    baseline = service.get_production_triage(max_hotspots=10)
+    baseline_hotspots = _mapping_child(baseline, "top_hotspots")
+    assert cast(int, baseline_hotspots["available"]) > 1
+
+    decorated_ids: list[str] = []
+    original_decorate = service._decorate_finding
+
+    def counting_decorate(
+        record: MCPRunRecord,
+        finding: Mapping[str, object],
+        **kwargs: Any,
+    ) -> dict[str, object]:
+        decorated_ids.append(str(finding.get("id", "")))
+        return original_decorate(record, finding, **kwargs)
+
+    monkeypatch.setattr(service, "_decorate_finding", counting_decorate)
+
+    payload = service.get_production_triage(max_hotspots=1)
+    top_hotspots = _mapping_child(payload, "top_hotspots")
+
+    assert top_hotspots["returned"] == 1
+    assert top_hotspots["available"] == baseline_hotspots["available"]
+    assert len(decorated_ids) == 1
+
+
 def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
     first_root, second_root = _two_clone_fixture_roots(tmp_path)
     service = CodeCloneMCPService(history_limit=1)
@@ -3935,8 +4165,19 @@ def test_mcp_service_reports_contract_errors_for_resources_and_findings(
 
     with pytest.raises(MCPServiceContractError):
         service.get_report_section(section=cast("object", "unknown"))
-    with pytest.raises(MCPFindingNotFoundError):
-        service.get_finding(run_id=run_id, finding_id="missing")
+    missing = service.get_finding(run_id=run_id, finding_id="missing")
+    assert missing == {
+        "status": "not_found",
+        "run_id": run_id,
+        "finding_id": "missing",
+        "detail_level": "normal",
+        "accepted_id_forms": ["short_id", "canonical_id"],
+        "next_tool": "list_hotspots",
+        "message": (
+            "Finding id was not found in this MCP run. Use list_hotspots, "
+            "list_findings, or a focused check_* tool to obtain current ids."
+        ),
+    }
     with pytest.raises(MCPServiceContractError):
         service.read_resource("bad://resource")
     with pytest.raises(MCPServiceContractError):
@@ -4059,10 +4300,6 @@ def test_mcp_service_root_and_helper_contract_errors(
             )
         )
 
-    with pytest.raises(MCPServiceError):
-        mcp_helpers_mod._load_report_document("{")
-    with pytest.raises(MCPServiceError):
-        mcp_helpers_mod._load_report_document("[]")
     with pytest.raises(MCPServiceError):
         mcp_helpers_mod._report_digest({})
 
@@ -4249,6 +4486,90 @@ def test_mcp_service_rejects_refresh_cache_policy_in_read_only_mode(
                 cache_policy=cast("CachePolicy", "refresh"),
             )
         )
+
+
+def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
+    args = Namespace(
+        max_cache_size_mb=64,
+        min_loc=10,
+        min_stmt=6,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+        api_surface=False,
+    )
+
+    cache = mcp_helpers_mod._build_cache(
+        root_path=tmp_path,
+        args=args,
+        cache_path=tmp_path / "cache.json",
+        policy="off",
+    )
+    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.save()
+
+    assert cache.get_file_entry("x.py") is None
+    assert not (tmp_path / "cache.json").exists()
+
+
+def test_mcp_analyze_releases_cache_before_report_without_json_roundtrip(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import codeclone.core.reporting as core_reporting_mod
+
+    _write_clone_fixture(tmp_path)
+    events: list[str] = []
+    original_release = Cache.release_loaded_entries
+    original_report = cast(Any, mcp_session_mod).report
+
+    def _record_release(self: Cache, *, allow_dirty: bool = False) -> int:
+        events.append("release")
+        return original_release(self, allow_dirty=allow_dirty)
+
+    def _record_report(**kwargs: Any) -> object:
+        events.append("report")
+        return original_report(**kwargs)
+
+    forbidden_report_json = Mock(
+        side_effect=AssertionError(
+            "MCP analyze_repository must not serialize report JSON"
+        )
+    )
+    forbidden_report_load = Mock(
+        side_effect=AssertionError("MCP analyze_repository must not parse report JSON")
+    )
+
+    monkeypatch.setattr(Cache, "release_loaded_entries", _record_release)
+    monkeypatch.setattr(mcp_session_mod, "report", _record_report)
+    monkeypatch.setattr(
+        core_reporting_mod,
+        "render_json_report_document",
+        forbidden_report_json,
+    )
+    monkeypatch.setattr(
+        mcp_shared_mod,
+        "_load_report_document_payload",
+        forbidden_report_load,
+    )
+
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+
+    assert summary["run_id"]
+    assert events == ["release", "report"]
+    assert forbidden_report_json.call_count == 0
+    assert forbidden_report_load.call_count == 0
+    assert service.get_report_section(section="all")["report_schema_version"] == (
+        REPORT_SCHEMA_VERSION
+    )
 
 
 def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> None:
@@ -4580,7 +4901,7 @@ def test_mcp_service_short_finding_ids_remain_unique_for_overlapping_clones(
         assert resolved["id"] == finding_id
 
 
-def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
+def test_mcp_service_reports_missing_report_document(tmp_path: Path) -> None:
     _write_clone_fixture(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
     service_module = cast(
@@ -4597,12 +4918,13 @@ def test_mcp_service_reports_missing_json_artifact(tmp_path: Path) -> None:
             md=artifacts.md,
             sarif=artifacts.sarif,
             text=artifacts.text,
+            report_document=None,
         )
 
     monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(mcp_session_mod, "report", _fake_report)
     try:
-        with pytest.raises(MCPServiceError):
+        with pytest.raises(MCPServiceError, match="canonical report document"):
             service.analyze_repository(
                 MCPAnalysisRequest(
                     root=str(tmp_path),
@@ -4897,6 +5219,65 @@ def test_mcp_service_get_blast_radius_uses_cache_and_include_filter(
         service.get_blast_radius(files=())
     with pytest.raises(MCPServiceContractError, match="Invalid value for depth"):
         service.get_blast_radius(files=("pkg/a.py",), depth="full")
+
+
+def test_mcp_service_blast_radius_cache_keys_intent_scope(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    with patch(
+        "codeclone.surfaces.mcp._session_blast_radius_mixin.compute_blast_radius",
+        wraps=mcp_blast_radius_mod.compute_blast_radius,
+    ) as compute:
+        first = service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=("pkg/z.py", "pkg/c.py", "pkg/c.py"),
+            allowed_scope=("pkg/b.py", "pkg/a.py"),
+        )
+        second = service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=("pkg/c.py", "pkg/z.py"),
+            allowed_scope=("pkg/a.py", "pkg/b.py", "pkg/a.py"),
+        )
+        third = service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=("pkg/c.py", "pkg/z.py"),
+            allowed_scope=("pkg/a.py",),
+        )
+
+    assert first is second
+    assert third is not first
+    assert compute.call_count == 2
+    assert len(service._blast_radius_cache) == 2
+
+
+def test_mcp_service_blast_radius_cache_is_bounded(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(mcp_blast_session_mod, "MAX_BLAST_RADIUS_CACHE_ENTRIES", 2)
+    service = CodeCloneMCPService(history_limit=2)
+    record = _blast_radius_run_record(tmp_path)
+    service._runs.register(record)
+
+    for index in range(3):
+        service._blast_radius_result(
+            record=record,
+            files=("pkg/a.py",),
+            depth="direct",
+            forbidden_patterns=(f"pkg/forbidden_{index}.py",),
+        )
+
+    assert len(service._blast_radius_cache) == 2
 
 
 def test_mcp_service_manage_change_intent_lifecycle(tmp_path: Path) -> None:
@@ -7555,6 +7936,32 @@ def test_mcp_service_create_review_receipt_minimal_and_deterministic(
         service.create_review_receipt(run_id="receipt12", format="yaml")
 
 
+def test_mcp_service_create_review_receipt_does_not_claim_lookup_when_audit_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _patch_contract_run_record(
+        tmp_path,
+        run_id="receiptfail123456",
+        digest="receipt-fail-digest",
+        include_regression=False,
+        complexity=6,
+        health=92,
+    )
+    service._runs.register(record)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    markdown = service.create_review_receipt(run_id="receiptfail")
+
+    assert "## CodeClone Agent Review Receipt" in str(markdown["content"])
+    assert "receipt_retrieval" not in markdown
+    assert markdown["receipt_retrieval_unavailable"] == "audit_write_failed"
+
+
 def test_mcp_service_create_review_receipt_full_post_edit_workflow(
     tmp_path: Path,
 ) -> None:
@@ -8250,7 +8657,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
     ).startswith("design:coupling:")
 
-    original_session_get = service.session.get_finding
+    original_service_get = service.session._service_get_finding
     original_runs_get = service._runs.get
     original_resolve = service.session._resolve_canonical_finding_id
     monkeypatch.setattr(
@@ -8260,7 +8667,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     )
     monkeypatch.setattr(
         service.session,
-        "get_finding",
+        "_service_get_finding",
         lambda **kwargs: {"id": "no-remediation"},
     )
     monkeypatch.setattr(service._runs, "get", lambda run_id=None: record)
@@ -8270,7 +8677,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     )
     assert no_guidance["status"] == "no_guidance"
     assert no_guidance["remediation"] is None
-    monkeypatch.setattr(service.session, "get_finding", original_session_get)
+    monkeypatch.setattr(service.session, "_service_get_finding", original_service_get)
     monkeypatch.setattr(
         service.session, "_resolve_canonical_finding_id", original_resolve
     )
@@ -9556,14 +9963,25 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
         "_base_findings",
         lambda _record: [{"id": "design:cohesion:pkg.mod:Other"}],
     )
-    with pytest.raises(MCPFindingNotFoundError, match="missing-finding"[:8]):
-        service.get_finding(
-            run_id="missing-finding", finding_id="design:cohesion:Runner"
-        )
+    missing_finding = service.get_finding(
+        run_id="missing-finding",
+        finding_id="design:cohesion:Runner",
+    )
+    assert {
+        "status": missing_finding["status"],
+        "run_id": missing_finding["run_id"],
+        "finding_id": missing_finding["finding_id"],
+        "canonical_id": missing_finding["canonical_id"],
+    } == {
+        "status": "not_found",
+        "run_id": "missing-",
+        "finding_id": "design:cohesion:Runner",
+        "canonical_id": "design:cohesion:pkg.mod:Runner",
+    }
 
     monkeypatch.setattr(
         service.session,
-        "get_finding",
+        "_service_get_finding",
         lambda **_kwargs: {"id": "design:cohesion:pkg.mod:Runner"},
     )
     no_guidance = service.get_remediation(
@@ -10522,6 +10940,59 @@ def test_mcp_workflow_start_replays_identical_request(tmp_path: Path) -> None:
     _assert_start_context_governance(replay, enforced=False)
 
 
+def test_mcp_workflow_start_reuses_dirty_snapshot_for_replay_and_declare(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _init_git_readme(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    _register_docs_patch_run(service, tmp_path)
+    snapshot = mcp_workspace_hygiene_mod.DirtySnapshot(
+        git_available=True,
+        captured_at_utc="2026-06-14T00:00:00Z",
+        entries=(
+            mcp_workspace_hygiene_mod.DirtySnapshotEntry(
+                path="README.md",
+                status_xy=" M",
+                digest="a" * 64,
+                digest_status="ok",
+            ),
+        ),
+    )
+    calls: list[Path] = []
+
+    def _collect_dirty_snapshot(root: Path) -> mcp_workspace_hygiene_mod.DirtySnapshot:
+        calls.append(root)
+        return snapshot
+
+    monkeypatch.setattr(
+        mcp_workspace_hygiene_mod,
+        "collect_dirty_snapshot",
+        _collect_dirty_snapshot,
+    )
+
+    started = service.start_controlled_change(
+        root=str(tmp_path),
+        scope={"allowed_files": ["README.md"]},
+        intent="update readme",
+    )
+
+    assert calls == [tmp_path.resolve()]
+    dirty_summary = cast("dict[str, object]", started["dirty_snapshot"])
+    assert dirty_summary["paths_count"] == 1
+    persisted = mcp_workspace_intents_mod.find_workspace_intent(
+        root=tmp_path,
+        intent_id=str(started["intent_id"]),
+        apply_lazy_close=False,
+    )
+    assert persisted is not None
+    assert persisted.dirty_snapshot == snapshot.to_payload()
+    replay_entry = next(iter(service._start_replay_cache.values()))
+    assert replay_entry[
+        "workspace_state_digest"
+    ] == workflow_mod._start_workspace_state_digest_from_snapshot(snapshot)
+
+
 def test_mcp_workflow_start_replay_rejects_workspace_drift(tmp_path: Path) -> None:
     _init_git_readme(tmp_path)
     service = CodeCloneMCPService(history_limit=4)
@@ -10707,7 +11178,6 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
     assert cast("dict[str, object]", cleared["summary"])["receipt"] == "created"
     receipt_payload = cast("dict[str, object]", cleared["receipt"])
     receipt_digest = cast("dict[str, object]", receipt_payload["receipt_digest"])
-    retrieval = cast("dict[str, object]", receipt_payload["receipt_retrieval"])
     assert {
         "format": receipt_payload["format"],
         "top_receipt_version": receipt_payload["receipt_version"],
@@ -10716,7 +11186,8 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "has_content": isinstance(receipt_payload["content"], str),
         # The duplicate nested typed receipt is omitted by default.
         "has_nested_typed": "receipt" in receipt_payload,
-        "retrieval_tool": retrieval["tool"],
+        "has_retrieval": "receipt_retrieval" in receipt_payload,
+        "retrieval_unavailable": receipt_payload["receipt_retrieval_unavailable"],
     } == {
         "format": "markdown",
         "top_receipt_version": "1",
@@ -10724,11 +11195,9 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "digest_kind": "receipt_v1",
         "has_content": True,
         "has_nested_typed": False,
-        "retrieval_tool": "get_review_receipt",
+        "has_retrieval": False,
+        "retrieval_unavailable": "audit_write_failed",
     }
-    # The drill-down pointer carries the canonical digest for fetching the omitted
-    # typed receipt; reachability is exercised in test_review_receipt_retrieval.
-    assert retrieval["receipt_digest"] == receipt_digest["value"]
     context_governance = cast("dict[str, object]", cleared["context_governance"])
     assert {
         "contract_version": context_governance["contract_version"],
@@ -10762,12 +11231,15 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         "digest_kind": response_digest["kind"],
         "receipt_retrieval_blocked": "receipt_retrieval_unavailable"
         in enforcement_blocked["response_budget"],
+        "patch_trail_retrieval_blocked": "patch_trail_retrieval_unavailable"
+        in enforcement_blocked["response_budget"],
     } == {
         "tool": "finish_controlled_change",
         "budget_scope": "whole_response",
         "evidence_policy": "response_budget_with_durable_artifact_lookup",
         "digest_kind": "finish_projection_v1",
-        "receipt_retrieval_blocked": False,
+        "receipt_retrieval_blocked": True,
+        "patch_trail_retrieval_blocked": True,
     }
     assert (
         cast("dict[str, object]", context_governance["capabilities"])[
@@ -10776,6 +11248,34 @@ def test_mcp_workflow_finish_controlled_change_evidence_and_docs_path(
         is True
     )
     assert isinstance(context_governance["estimated"], int)
+
+
+def test_mcp_workflow_finish_keeps_evidence_inline_when_audit_lookup_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, intent_id = _seed_docs_intent(tmp_path)
+
+    def raise_writer(_root: Path) -> _RecordingAuditWriter:
+        raise RuntimeError("audit unavailable")
+
+    monkeypatch.setattr(service, "_audit_writer_for_root", raise_writer)
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["README.md"],
+    )
+
+    assert finished["status"] == "accepted"
+    receipt = cast("dict[str, object]", finished["receipt"])
+    assert "receipt_retrieval" not in receipt
+    assert receipt["receipt_retrieval_unavailable"] == "audit_write_failed"
+    assert isinstance(receipt["content"], str)
+
+    patch_trail = cast("dict[str, object]", finished["patch_trail"])
+    assert patch_trail["retrieval_unavailable"] == "audit_write_failed"
+    assert "retrieval" not in patch_trail
+    evidence = cast("dict[str, object]", patch_trail["evidence"])
+    assert "patch_trail_audit_sequence" not in evidence
 
 
 def test_mcp_workflow_finish_python_structural_and_receipt_edges(
@@ -11013,6 +11513,55 @@ def test_mcp_workflow_helper_messages_and_validators() -> None:
         claims_text_present=True,
     )
     assert summary["claims"] == "skipped_not_recommended"
+
+
+def test_mcp_patch_changed_file_evidence_prefers_explicit_changed_files(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    calls: list[str] = []
+
+    def normalize_changed_paths(**kwargs: object) -> tuple[str, ...]:
+        calls.append("changed_files")
+        assert kwargs["root_path"] == tmp_path
+        assert kwargs["paths"] == ["pkg/a.py"]
+        return ("pkg/a.py",)
+
+    def git_diff_paths(**kwargs: object) -> tuple[str, ...]:
+        calls.append("diff_ref")
+        assert kwargs["root_path"] == tmp_path
+        assert kwargs["git_diff_ref"] == "HEAD~1"
+        return ("pkg/from_diff.py",)
+
+    monkeypatch.setattr(service, "_normalize_changed_paths", normalize_changed_paths)
+    monkeypatch.setattr(service, "_git_diff_paths", git_diff_paths)
+
+    assert service._patch_changed_file_evidence(
+        root_path=tmp_path,
+        changed_files=["pkg/a.py"],
+        diff_ref="HEAD~1",
+    ) == ("pkg/a.py",)
+    assert calls == ["changed_files"]
+
+    calls.clear()
+    assert service._patch_changed_file_evidence(
+        root_path=tmp_path,
+        changed_files=None,
+        diff_ref="HEAD~1",
+    ) == ("pkg/from_diff.py",)
+    assert calls == ["diff_ref"]
+
+    calls.clear()
+    assert (
+        service._patch_changed_file_evidence(
+            root_path=tmp_path,
+            changed_files=None,
+            diff_ref=None,
+        )
+        is None
+    )
+    assert calls == []
 
 
 def test_mcp_finish_response_budget_omits_retrievable_advisory_lanes() -> None:
@@ -11568,6 +12117,14 @@ def test_mcp_intent_renew_and_workflow_helper_edges(tmp_path: Path) -> None:
         {"blocked_by": [{"ownership": "foreign_active"}]},
     )["concurrent_intents"] == [{"ownership": "foreign_active"}]
     assert workflow_mod._as_conflict_list("not-a-list") == []
+    conflict = {"ownership": "foreign_active", "count": 1}
+    assert workflow_mod._as_conflict_list([conflict]) == [
+        {"ownership": "foreign_active", "count": 1}
+    ]
+    user_mapping = UserDict({1: "numeric-key", "scope": "docs"})
+    assert workflow_mod._as_conflict_list([user_mapping]) == [
+        {"1": "numeric-key", "scope": "docs"}
+    ]
     with pytest.raises(MCPServiceContractError):
         workflow_mod._validated_dirty_scope_policy("invalid")
     dirty_hygiene = WorkspaceHygieneResult(
@@ -11873,6 +12430,24 @@ def test_mcp_list_workspace_includes_dirty_summary(
     assert "README.md" in cast("list[str]", summary["dirty_paths_sample"])
 
 
+def test_mcp_list_workspace_intents_can_skip_dirty_summary(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
+    service = CodeCloneMCPService(history_limit=2)
+    default_payload = service._list_workspace_intents(root=str(tmp_path))
+    assert "workspace_dirty_summary" in default_payload
+    skipped_payload = service._list_workspace_intents(
+        root=str(tmp_path), include_dirty_summary=False
+    )
+    assert "workspace_dirty_summary" not in skipped_payload
+    # Skipping the summary must not perturb the registry-identity fields the
+    # start-replay digest hashes.
+    for key in ("workspace_intents", "own_pid", "own_start_epoch"):
+        assert skipped_payload[key] == default_payload[key]
+
+
 def test_mcp_verify_rejects_identical_before_after_run(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     _after, declared = _seed_patch_contract_intent(service, tmp_path, before_health=85)
@@ -12137,6 +12712,164 @@ def test_measure_payload_ignores_invalid_context_governance_estimate() -> None:
     assert tokens > 17
 
 
+def test_measure_payload_ignores_mismatched_context_governance_contract() -> None:
+    from codeclone.surfaces.mcp._context_governance import (
+        CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+        CONTEXT_GOVERNANCE_ESTIMATOR,
+    )
+    from codeclone.surfaces.mcp.payloads import measure_payload
+
+    _baseline_byte_size, _baseline_tokens = measure_payload({"items": list(range(4))})
+    _wrong_version_byte_size, wrong_version_tokens = measure_payload(
+        {
+            "items": list(range(4)),
+            "context_governance": {
+                "contract_version": "0.0",
+                "estimator": CONTEXT_GOVERNANCE_ESTIMATOR,
+                "estimated": 3,
+            },
+        }
+    )
+    _wrong_estimator_byte_size, wrong_estimator_tokens = measure_payload(
+        {
+            "items": list(range(4)),
+            "context_governance": {
+                "contract_version": CONTEXT_GOVERNANCE_CONTRACT_VERSION,
+                "estimator": "legacy-estimator",
+                "estimated": 3,
+            },
+        }
+    )
+
+    assert wrong_version_tokens != 3
+    assert wrong_estimator_tokens != 3
+    assert wrong_version_tokens > 0
+    assert wrong_estimator_tokens > 0
+
+
+def test_hotspot_empty_reason_reports_no_findings_in_run(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    record = _dummy_run_record(tmp_path, "run-empty")
+    reason = service._hotspot_empty_reason(
+        record=record,
+        kind="most_actionable",
+        detail_level="summary",
+        changed_paths=(),
+        exclude_reviewed=False,
+    )
+    assert reason == "no_findings_in_run"
+
+
+def test_list_hotspots_reports_all_items_reviewed_empty_reason(
+    tmp_path: Path,
+) -> None:
+    _write_clone_fixture(tmp_path)
+    service = CodeCloneMCPService(history_limit=2)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+        )
+    )
+    hotspots_before = service.list_hotspots(
+        kind="highest_spread",
+        run_id=summary["run_id"],
+        exclude_reviewed=False,
+    )
+    for item in cast("list[dict[str, object]]", hotspots_before["items"]):
+        service.mark_finding_reviewed(
+            finding_id=str(item["id"]),
+            run_id=summary["run_id"],
+        )
+    hotspots = service.list_hotspots(
+        kind="highest_spread",
+        run_id=summary["run_id"],
+        exclude_reviewed=True,
+    )
+    assert hotspots["total"] == 0
+    assert hotspots["empty_reason"] == "all_items_reviewed"
+
+
+def test_hotspot_empty_reason_reports_kind_specific_paths(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    base_document: dict[str, object] = {
+        "findings": {
+            "groups": {
+                "clones": {
+                    "functions": [
+                        {
+                            "id": "clone:function:g1",
+                            "locations": [{"path": "pkg/dup.py"}],
+                        }
+                    ],
+                    "blocks": [],
+                    "segments": [],
+                }
+            }
+        },
+        "derived": {"hotlists": {}},
+    }
+    record = replace(
+        _dummy_run_record(tmp_path, "hotspot-empty-reasons"),
+        report_document=base_document,
+    )
+    service._runs.register(record)
+
+    assert (
+        service._hotspot_empty_reason(
+            record=record,
+            kind="highest_priority",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "no_ranked_findings"
+    )
+    assert (
+        service._hotspot_empty_reason(
+            record=record,
+            kind="highest_spread",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "no_spread_hotspots"
+    )
+    assert (
+        service._hotspot_empty_reason(
+            record=record,
+            kind="most_actionable",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "no_items_above_actionability_threshold"
+    )
+
+    filtered_record = replace(
+        record,
+        report_document={
+            **base_document,
+            "derived": {
+                "hotlists": {
+                    "highest_spread_ids": ["clone:function:missing"],
+                }
+            },
+        },
+    )
+    assert (
+        service._hotspot_empty_reason(
+            record=filtered_record,
+            kind="highest_spread",
+            detail_level="summary",
+            changed_paths=(),
+            exclude_reviewed=False,
+        )
+        == "hotlist_items_filtered_or_unavailable"
+    )
+
+
 def test_mcp_payload_paginate_and_finding_resolution() -> None:
     from codeclone.surfaces.mcp.payloads import (
         PageWindow,
@@ -12212,10 +12945,15 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
     service._spread_max_cache[stale.run_id] = 1
     from codeclone.analysis.blast_radius import BlastRadiusResult
 
-    service._blast_radius_cache[(stale.run_id, ("README.md",), "direct")] = cast(
-        "BlastRadiusResult",
-        {},
-    )
+    service._blast_radius_cache[
+        (
+            stale.run_id,
+            ("README.md",),
+            "direct",
+            (),
+            (),
+        )
+    ] = cast("BlastRadiusResult", {})
 
     service._runs.clear()
     service._prune_session_state()
@@ -12615,6 +13353,20 @@ def test_get_report_section_module_map_paginates_graph_lanes(tmp_path: Path) -> 
     )
 
 
+def test_get_report_section_module_map_requires_derived_payload(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(
+        replace(
+            _dummy_run_record(tmp_path, "empty-derived-run"),
+            report_document={"derived": {}},
+        )
+    )
+    with pytest.raises(MCPServiceContractError, match=r"module_map.*not available"):
+        service.get_report_section(run_id="empty-derived-run", section="module_map")
+
+
 def test_get_report_section_module_map_clones_only_returns_shell(
     tmp_path: Path,
 ) -> None:
@@ -12983,6 +13735,18 @@ def test_workflow_start_blast_and_finish_governance_helper_branches(
     )
     assert direct_omitted["omitted"] == 2
     assert workflow_mod._start_blast_omission_row("lane", "not-a-mapping") is None
+    omission_row = workflow_mod._start_blast_omission_row(
+        "direct_dependents",
+        {"total": "2", "shown": 0, "truncated": True, "retrieval": {}},
+    )
+    assert omission_row is not None
+    assert omission_row[1]["omitted"] == 2
+    truncated_only = workflow_mod._start_blast_omission_row(
+        "review_context",
+        {"total": 2, "shown": 2, "truncated": True, "retrieval": {}},
+    )
+    assert truncated_only is not None
+    assert truncated_only[1]["omitted"] == 0
 
     assert workflow_mod._start_non_negative_int(True) == 0
     assert workflow_mod._start_non_negative_int("12") == 12
@@ -13084,26 +13848,152 @@ def test_workflow_start_blast_and_finish_governance_helper_branches(
     assert (
         workflow_mod._patch_trail_retrievable(
             {
-                "patch_trail_digest": "trail" * 16,
-                "retrieval": {"tool": "get_patch_trail"},
+                "patch_trail": {
+                    "patch_trail_digest": "trail" * 16,
+                    "retrieval": {"tool": "get_patch_trail"},
+                }
             }
-        )
-        is False
-    )
-    assert (
-        workflow_mod._patch_trail_retrievable(
-            {"patch_trail_digest": "   ", "evidence": {}}
         )
         is False
     )
     assert (
         workflow_mod._patch_trail_retrievable(
             {
-                "patch_trail_digest": "trail" * 16,
-                "evidence": "bad",
+                "patch_trail": {
+                    "patch_trail_digest": "   ",
+                    "evidence": {},
+                }
             }
         )
         is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {
+                "patch_trail": {
+                    "patch_trail_digest": "trail" * 16,
+                    "evidence": "bad",
+                }
+            }
+        )
+        is False
+    )
+    assert (
+        workflow_mod._patch_trail_retrievable(
+            {
+                "patch_trail": {
+                    "patch_trail_digest": "trail" * 16,
+                    "evidence": {"patch_trail_audit_sequence": 3},
+                }
+            }
+        )
+        is True
+    )
+
+    blocker_payload = {
+        "receipt": {
+            "content": "body",
+            "receipt_retrieval": {"tool": "other"},
+        },
+        "patch_trail": {
+            "patch_trail_digest": "trail" * 16,
+            "evidence": {},
+        },
+    }
+    assert workflow_mod._finish_retrieval_blockers(blocker_payload) == [
+        "receipt_retrieval_unavailable",
+        "patch_trail_retrieval_unavailable",
+    ]
+    shrink_payload: dict[str, object] = {
+        "receipt": {"content": "body"},
+        "patch_trail": {
+            "patch_trail_digest": "trail" * 16,
+            "evidence": {"patch_trail_audit_sequence": 4},
+            "schema_version": "1",
+        },
+    }
+    workflow_mod._shrink_finish_lane(shrink_payload, "receipt_content")
+    assert "content" not in cast("dict[str, object]", shrink_payload["receipt"])
+    workflow_mod._shrink_finish_lane(shrink_payload, "patch_trail")
+    compact_trail = cast("dict[str, object]", shrink_payload["patch_trail"])
+    retrieval = cast("dict[str, object]", compact_trail["retrieval"])
+    assert retrieval["tool"] == "get_patch_trail"
+    assert (
+        workflow_mod._next_reducible_finish_lane(
+            {
+                "receipt": {
+                    "content": "body",
+                    "receipt_retrieval": {
+                        "tool": "get_review_receipt",
+                        "receipt_digest": "r" * 64,
+                    },
+                    "receipt_digest": {"value": "r" * 64},
+                }
+            }
+        )
+        == "receipt_content"
+    )
+    governed_finish = workflow_mod._attach_finish_governance(
+        {
+            **blocker_payload,
+            "context_governance": {
+                "enforcement_blocked": {"response_budget": []},
+            },
+        },
+        evidence_omitted=None,
+    )
+    enforcement_blocked = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", governed_finish["context_governance"])[
+            "enforcement_blocked"
+        ],
+    )
+    assert "patch_trail_retrieval_unavailable" in cast(
+        "list[str]", enforcement_blocked["response_budget"]
+    )
+    omitted = workflow_mod._finish_governance_omitted(
+        {
+            "receipt": {
+                "run_id": "run12345",
+                "content": "body",
+                "receipt_digest": {"value": "r" * 64},
+            },
+            "patch_trail": {
+                "patch_trail_digest": "t" * 64,
+                "schema_version": "1",
+            },
+        },
+        response_budget_lanes={"receipt_content", "patch_trail"},
+    )
+    assert omitted is not None
+    assert "receipt.content" in omitted
+    assert "patch_trail" in omitted
+
+    no_receipt_dict: dict[str, object] = {"receipt": "bad"}
+    workflow_mod._shrink_finish_lane(no_receipt_dict, "receipt_content")
+    workflow_mod._shrink_finish_lane({"patch_trail": "bad"}, "patch_trail")
+    compact_without_audit = workflow_mod._compact_patch_trail_reference(
+        {
+            "patch_trail_digest": "trail" * 16,
+            "schema_version": "1",
+            "evidence": {},
+        }
+    )
+    assert "patch_trail_audit_sequence" not in cast(
+        "dict[str, object]", compact_without_audit["retrieval"]
+    )
+    assert (
+        workflow_mod._receipt_digest_value(
+            {"receipt_retrieval": {"receipt_digest": "d" * 64}}
+        )
+        == "d" * 64
+    )
+    assert (
+        workflow_mod._finish_governance_omitted(
+            {"receipt": {"content": "only"}},
+            response_budget_lanes={"receipt_content"},
+        )
+        is None
     )
     assert workflow_mod._receipt_content_omission({"receipt": {"content": "x"}}) is None
     assert workflow_mod._patch_trail_omission({"patch_trail": {}}) is None
@@ -13200,6 +14090,22 @@ def test_memory_patch_trail_lookup_branches(
         def close(self) -> None:
             self.closed = True
 
+    def install_lookup_store(
+        responses: list[tuple[list[dict[str, object]], int]],
+    ) -> None:
+        monkeypatch.setattr(
+            audit_mod,
+            "open_memory_db_readonly",
+            lambda _db: _LookupStore(responses=responses),
+        )
+        monkeypatch.setattr(
+            audit_mod,
+            "find_trajectory_patch_trails_for_lookup",
+            lambda conn, **kwargs: conn.find_trajectory_patch_trails_for_lookup(
+                **kwargs
+            ),
+        )
+
     ok_row: dict[str, object] = {
         "payload": {
             "schema_version": "1",
@@ -13210,11 +14116,7 @@ def test_memory_patch_trail_lookup_branches(
         "run_id": "run12345",
         "created_at_utc": "2026-01-01T00:00:00Z",
     }
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([ok_row], 0)]),
-    )
+    install_lookup_store([([ok_row], 0)])
     status, count, artifact = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
         run_id="run12345",
@@ -13224,11 +14126,7 @@ def test_memory_patch_trail_lookup_branches(
     assert count == 1
     assert artifact is not None
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([ok_row, ok_row], 0)]),
-    )
+    install_lookup_store([([ok_row, ok_row], 0)])
     ambiguous = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
         run_id="run12345",
@@ -13236,15 +14134,11 @@ def test_memory_patch_trail_lookup_branches(
     )
     assert ambiguous[:2] == ("ambiguous", 2)
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(
-            responses=[
-                ([], 0),
-                ([{"payload": {}, "patch_trail_digest": "e" * 64}], 0),
-            ]
-        ),
+    install_lookup_store(
+        [
+            ([], 0),
+            ([{"payload": {}, "patch_trail_digest": "e" * 64}], 0),
+        ]
     )
     mismatch = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
@@ -13253,11 +14147,7 @@ def test_memory_patch_trail_lookup_branches(
     )
     assert mismatch[0] == "digest_mismatch"
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([], 2)]),
-    )
+    install_lookup_store([([], 2)])
     malformed = audit_mod._memory_patch_trail_lookup(
         root_path=tmp_path,
         run_id=None,
@@ -13265,11 +14155,7 @@ def test_memory_patch_trail_lookup_branches(
     )
     assert malformed == ("malformed_stored_patch_trail", 0, None)
 
-    monkeypatch.setattr(
-        audit_mod,
-        "SqliteEngineeringMemoryStore",
-        lambda _db: _LookupStore(responses=[([], 0)]),
-    )
+    install_lookup_store([([], 0)])
     empty_root = tmp_path / "no-memory-root"
     empty_root.mkdir()
     assert audit_mod._memory_patch_trail_lookup(
@@ -13752,3 +14638,38 @@ def test_include_record_in_hook_cleanup_recoverable_prefix_and_unknown_ownership
         )
         is False
     )
+
+
+def test_context_governance_helper_edges() -> None:
+    with pytest.raises(ValueError, match="digest kind"):
+        mcp_context_governance_mod.context_governance_digest("  ", {"ok": True})
+
+    assert (
+        mcp_context_governance_mod._continuation_lane(
+            {"cursor": "lane-1"},
+            lane="memory.records",
+            omission="not-a-mapping",
+        )
+        is None
+    )
+
+    lane = mcp_context_governance_mod._continuation_lane(
+        {"nested": {"cursor": "lane-2"}},
+        lane="memory.records",
+        omission={
+            "reason": "response_budget",
+            "shown": 0,
+            "total": 3,
+            "drill_down": {"cursor_path": "nested.cursor"},
+        },
+    )
+    assert lane is not None
+    assert lane["cursor"] == "lane-2"
+
+    assert mcp_context_governance_mod._resolve_dotted_path({}, "..bad") is None
+    assert (
+        mcp_context_governance_mod._resolve_dotted_path({"items": []}, "items.id")
+        is None
+    )
+
+    assert mcp_context_governance_mod._continuation_payload({}, {}) is None

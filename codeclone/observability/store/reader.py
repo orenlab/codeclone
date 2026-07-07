@@ -17,7 +17,6 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import cast
 
 import orjson
 
@@ -26,6 +25,7 @@ from ...analysis.phase_ledger import (
     PHASE_VOLUME_COUNTER_SUFFIXES,
 )
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+from ...utils.sqlite_store import open_sqlite_db_readonly
 from ..db_fingerprint import describe_fingerprint
 from ..views import (
     AgentTokenRow,
@@ -44,7 +44,7 @@ from ..views import (
     WaterfallGroup,
     WaterfallRow,
 )
-from .schema import observability_store_path
+from .schema import observability_store_path, validate_observability_schema
 
 _DEFAULT_WINDOW = 20
 
@@ -69,7 +69,7 @@ def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
     path = observability_store_path(root)
     if not path.is_file():
         return None
-    conn = sqlite3.connect(str(path))
+    conn = open_sqlite_db_readonly(path, validate_schema=validate_observability_schema)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -82,13 +82,20 @@ def _percentile(values: list[float], q: float) -> float:
     return ordered[min(index, len(ordered) - 1)]
 
 
-def _parse_counters(raw: object) -> dict[str, int]:
+def _parse_counters(
+    raw: str | bytes | bytearray | memoryview | None,
+) -> dict[str, int]:
     if not raw:
         return {}
-    parsed = orjson.loads(cast("str", raw))
-    return (
-        {str(k): int(v) for k, v in parsed.items()} if isinstance(parsed, dict) else {}
-    )
+    parsed = orjson.loads(raw)
+    if not isinstance(parsed, dict):
+        return {}
+    counters: dict[str, int] = {}
+    for key, value in parsed.items():
+        if isinstance(value, bool) or not isinstance(value, str | int | float):
+            continue
+        counters[str(key)] = int(value)
+    return counters
 
 
 def _optional_float(row: sqlite3.Row, key: str) -> float | None:

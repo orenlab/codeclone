@@ -14,6 +14,7 @@ from ...memory.display import format_memory_record_line
 from ...memory.models import MemoryRecord
 from ...memory.status_report import MemoryStatusReport
 from ...memory.vacuum import VacuumReport
+from ...utils.payload_narrow import is_record_mapping
 from .console import make_query_console, rich_panel_symbols, supports_rich_console
 from .types import PrinterLike
 
@@ -28,16 +29,22 @@ else:
     _MemoryRowBuilder = Callable[[int, object, object], Sequence[object]]
 
 
+def _record_table_columns(
+    *specs: tuple[str, _ColumnKwargs],
+) -> Sequence[tuple[str, _ColumnKwargs]]:
+    return specs
+
+
 def _table_add_column(
     table: object,
     title: str,
     kwargs: _ColumnKwargs,
 ) -> None:
-    table.add_column(title, **kwargs)  # type: ignore[attr-defined]
+    getattr(table, "add_column")(title, **kwargs)  # noqa: B009
 
 
 def _table_add_row(table: object, cells: Sequence[object]) -> None:
-    table.add_row(*cells)  # type: ignore[attr-defined]
+    getattr(table, "add_row")(*cells)  # noqa: B009
 
 
 def memory_console() -> PrinterLike:
@@ -59,7 +66,7 @@ def render_search_results(
                 f"[dim]{_count_label(len(records), 'result')}[/dim]"
             ),
             records=records,
-            columns=(
+            columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
                 ("Type", {"style": "cyan", "no_wrap": True}),
                 ("Status", {"no_wrap": True}),
@@ -88,7 +95,7 @@ def render_path_results(
                 f"[dim]{_count_label(len(records), 'record')}[/dim]"
             ),
             records=mapped,
-            columns=(
+            columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
                 ("Type", {"style": "cyan", "no_wrap": True}),
                 ("Status", {"no_wrap": True}),
@@ -166,7 +173,7 @@ def render_stale_records(
             subtitle=f"[dim]{_count_label(len(records), 'record')}[/dim]",
             border_style="yellow",
             records=records,
-            columns=(
+            columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
                 ("Type", {"style": "cyan", "no_wrap": True}),
                 ("Reason", {"style": "yellow", "no_wrap": True}),
@@ -223,7 +230,7 @@ def render_draft_candidates(
             subtitle=f"[dim]{_count_label(len(records), 'draft')}[/dim]",
             border_style="magenta",
             records=records,
-            columns=(
+            columns=_record_table_columns(
                 ("#", {"style": "dim", "justify": "right", "no_wrap": True}),
                 ("ID", {"style": "dim", "no_wrap": True}),
                 ("Type", {"style": "cyan", "no_wrap": True}),
@@ -304,7 +311,7 @@ def _search_row(
     item: object,
     text_cls: type[RichText],
 ) -> Sequence[object]:
-    mapping = item if isinstance(item, Mapping) else {}
+    mapping: Mapping[str, object] = item if is_record_mapping(item) else {}
     record_type = str(mapping.get("type", "?"))
     status = str(mapping.get("status", "?"))
     return (
@@ -320,7 +327,7 @@ def _stale_row(
     item: object,
     _text_cls: type[RichText],
 ) -> Sequence[object]:
-    mapping = item if isinstance(item, Mapping) else {}
+    mapping: Mapping[str, object] = item if is_record_mapping(item) else {}
     return (
         str(index),
         str(mapping.get("type", "?")),

@@ -22,6 +22,7 @@ from ..contracts import (
     EmbeddingItemRecord,
 )
 from ..exceptions import AnalyticsWorkflowError
+from ..mapping import copy_str_key_mapping
 from ..report.interpret import (
     INTERPRETATION_CONTRACT_VERSION,
     build_profile_summary,
@@ -186,8 +187,7 @@ def _single_export_sweep_candidates(
             snapshot=snapshot,
             run=candidate,
         )
-        run_payload = projection.get("run")
-        result.append(dict(run_payload) if isinstance(run_payload, Mapping) else {})
+        result.append(_str_key_mapping(projection.get("run")))
     return result
 
 
@@ -205,6 +205,10 @@ def _full_projection_payload(
         "noise_items": projection["noise_items"],
         "items": [_item_dict(item) for item in store.list_items(snapshot.snapshot_id)],
     }
+
+
+def _str_key_mapping(value: object) -> dict[str, object]:
+    return copy_str_key_mapping(value)
 
 
 def _snapshot_dict(snapshot: CorpusSnapshotRecord) -> dict[str, object]:

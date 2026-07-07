@@ -1920,6 +1920,26 @@ def test_derived_module_branches() -> None:
         "code/a.py"
     )
 
+    from codeclone.report.document.derived import _finding_review_summary
+
+    singular = _finding_review_summary(
+        {
+            "count": 1,
+            "spread": {"files": 1, "functions": 1},
+            "source_scope": {"dominant_kind": "production"},
+        }
+    )
+    plural = _finding_review_summary(
+        {
+            "count": 3,
+            "spread": {"files": 2, "functions": 4},
+            "source_scope": {"dominant_kind": "tests"},
+        }
+    )
+    assert "occurrence" in singular and "occurrences" not in singular
+    assert "functions" in plural and "files" in plural
+    assert plural.endswith("tests")
+
 
 def test_overview_module_branches() -> None:
     suggestion = Suggestion(

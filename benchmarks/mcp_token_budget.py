@@ -71,7 +71,7 @@ def _analyze_repository_small() -> dict[str, object]:
         "run_id": "abc12345",
         "focus": "repository",
         "version": "2.1.0a1",
-        "schema": "2.11",
+        "schema": "2.12",
         "mode": "full",
         "baseline": {
             "loaded": True,
@@ -200,7 +200,7 @@ def _review_receipt() -> dict[str, object]:
             "verdict": "clean",
             "provenance": {
                 "digest": "a" * 64,
-                "schema_version": "2.11",
+                "schema_version": "2.12",
                 "baseline_trust": "ok",
                 "run_id": "abc12345",
                 "root": "/repo",

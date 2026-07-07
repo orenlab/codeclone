@@ -212,3 +212,104 @@ HELP_DEBUG = (
     "Print debug details for internal errors, including traceback and\n"
     "environment information."
 )
+HELP_INTERACTIVE = (
+    "Open the guided CodeClone product tour.\n"
+    "Use together with --help in an interactive terminal."
+)
+HELP_MASCOT_TAGLINE = (
+    "Run `codeclone --help --interactive-help` for a guided product tour."
+)
+HELP_TOUR_STEP_INTRO_TITLE = "CodeClone product tour"
+HELP_TOUR_STEP_INTRO_BODY = (
+    "CodeClone is a deterministic Structural Change Controller for AI-assisted\n"
+    "Python development. It starts before a diff exists: declare intent, map the\n"
+    "structural blast radius, bound the edit, verify the patch, and leave an\n"
+    "auditable receipt. Docs: https://orenlab.github.io/codeclone/"
+)
+HELP_TOUR_STEP_PIPELINE_TITLE = "One analysis, many projections"
+HELP_TOUR_STEP_PIPELINE_BODY = (
+    "The pipeline scans files, parses Python, normalizes structural facts,\n"
+    "builds fingerprints, derives clones and metrics, then emits one canonical\n"
+    "report. CLI, HTML, JSON, SARIF, MCP, and IDE clients project the same facts.\n"
+    "First run: `codeclone .`; HTML: `codeclone . --html --open-html-report`."
+)
+HELP_TOUR_STEP_CLONES_TITLE = "Fingerprinting structural clones"
+HELP_TOUR_STEP_CLONES_BODY = (
+    "Function, block, and segment clones are grouped from normalized AST facts.\n"
+    "Fingerprints stay stable across renames. NEW vs KNOWN is baseline-relative,\n"
+    "not a patch-local proof by itself.\n"
+    "Tune sensitivity with `--min-loc`, `--min-stmt`, and pyproject thresholds."
+)
+HELP_TOUR_STEP_CACHE_TITLE = "Reusing structural facts"
+HELP_TOUR_STEP_CACHE_BODY = (
+    "The integrity-checked cache under `.codeclone/cache.json` speeds repeat runs.\n"
+    "Cache is optimization only, never analysis truth. Reports record whether\n"
+    "cache was used; profile mismatch or invalid cache is ignored safely."
+)
+HELP_TOUR_STEP_DEPENDENCIES_TITLE = "Following dependency pressure"
+HELP_TOUR_STEP_DEPENDENCIES_BODY = (
+    "Module graphs surface cycles, coupling hotspots, and likely blast-radius\n"
+    "neighbors before a change. Query a focused impact view with\n"
+    "`codeclone --blast-radius path/to/file.py` after a normal analysis run."
+)
+HELP_TOUR_STEP_METRICS_TITLE = "Measuring project health"
+HELP_TOUR_STEP_METRICS_BODY = (
+    "Metrics cover cyclomatic complexity, class coupling/cohesion, dead code,\n"
+    "dependency cycles, typing/docstring adoption, and a composite health score.\n"
+    "Gate with `--fail-complexity`, `--fail-dead-code`, `--fail-health`, and more."
+)
+HELP_TOUR_STEP_REPORTS_TITLE = "Publishing the same evidence"
+HELP_TOUR_STEP_REPORTS_BODY = (
+    "The canonical report powers HTML triage, JSON, Markdown, SARIF 2.1, and text.\n"
+    "Export SARIF for GitHub code scanning. Browse the public sample report from\n"
+    "the documentation site. Default HTML path: `.codeclone/report.html`."
+)
+HELP_TOUR_STEP_BASELINE_TITLE = "Baseline-aware CI gating"
+HELP_TOUR_STEP_BASELINE_BODY = (
+    "`codeclone . --ci` fails on NEW clone findings vs a trusted baseline.\n"
+    "The metrics baseline can track API breaks and typing/docstring regressions.\n"
+    "The GitHub Action and `codeclone setup wizard` help align repository hygiene."
+)
+HELP_TOUR_STEP_CONTROLLER_TITLE = "Governed change control"
+HELP_TOUR_STEP_CONTROLLER_BODY = (
+    "For AI-assisted work, the controller starts before the diff: declare intent,\n"
+    "inspect blast radius, retrieve scoped memory, verify the patch, and leave a\n"
+    "receipt. MCP workflow: `start_controlled_change` and `finish_controlled_change`."
+)
+HELP_TOUR_STEP_MEMORY_TITLE = "Engineering Memory"
+HELP_TOUR_STEP_MEMORY_BODY = (
+    "Local evidence-linked memory: scoped retrieval, trajectories, Patch Trail,\n"
+    "and Experience patterns. Agents propose drafts; humans approve in VS Code.\n"
+    "Memory guides, but never grants edit permission."
+)
+HELP_TOUR_STEP_INTEGRATIONS_TITLE = "IDE and agent clients"
+HELP_TOUR_STEP_INTEGRATIONS_BODY = (
+    "Native surfaces: VS Code extension, Cursor/Codex/Claude Code plugins,\n"
+    "Claude Desktop bundle, and GitHub Action. They all use the same local\n"
+    "`codeclone-mcp` server and the same canonical analysis facts.\n"
+    'Install MCP support with `pip install "codeclone[mcp]"`.'
+)
+HELP_TOUR_STEP_SUCCESS_TITLE = "Project health  91 / A"
+HELP_TOUR_STEP_SUCCESS_BODY = (
+    "A typical clean run ends with health grade, inventory summary, and report path.\n"
+    "Explore `--patch-verify` for budget checks and `--session-stats` for workspace\n"
+    "coordination when multiple agents share a repo."
+)
+HELP_TOUR_STEP_REGRESSION_TITLE = "2 new structural regressions"
+HELP_TOUR_STEP_REGRESSION_BODY = (
+    "When CI or `--ci` sees NEW clones or metric regressions, the run should stop\n"
+    "for review. Inspect HTML or JSON, fix the issue, or update the baseline only\n"
+    "after deliberate human inspection."
+)
+HELP_TOUR_STEP_BLOCKED_TITLE = "STOP: do-not-touch boundary"
+HELP_TOUR_STEP_BLOCKED_BODY = (
+    "The controller blocks edits on baselines, generated reports, and `.codeclone/`\n"
+    "state unless explicitly scoped. `do_not_touch` is a hard boundary; expand\n"
+    "scope deliberately via a fresh intent. Never bypass it silently."
+)
+HELP_TOUR_STEP_NEXT_TITLE = "Ready when you are"
+HELP_TOUR_STEP_NEXT_BODY = (
+    "Run `codeclone .`, open the documentation site, wire MCP where needed, try\n"
+    "`codeclone setup wizard`, and use `codeclone --help` for the complete flag\n"
+    "reference."
+)

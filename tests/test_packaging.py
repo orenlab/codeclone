@@ -51,3 +51,17 @@ def test_setuptools_packages_match_codeclone_subpackages() -> None:
         "Remove stale setuptools entries (no matching codeclone package dir): "
         + ", ".join(orphan)
     )
+
+
+def test_setuptools_packages_are_codeclone_only() -> None:
+    """Internal maintainer tooling must not ship as a top-level wheel package."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    declared = _load_setuptools_packages(repo_root)
+    non_codeclone = sorted(
+        package for package in declared if not package.startswith("codeclone")
+    )
+    assert non_codeclone == [], (
+        "Remove non-codeclone packages from [tool.setuptools].packages: "
+        + ", ".join(non_codeclone)
+    )

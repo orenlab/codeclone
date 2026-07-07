@@ -11,6 +11,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 
 def _load_docs_report_namespace() -> dict[str, object]:
     script_path = (
@@ -37,10 +39,11 @@ def test_sample_report_markdown_links_match_zensical_site_url() -> None:
     assert callable(read_site_url)
     assert callable(published_artifact_href)
     repo_root = Path(__file__).resolve().parents[1]
+    report_path = repo_root / "docs" / "examples" / "report.md"
+    if not report_path.is_file():
+        pytest.skip("repo docs source tree is not present")
     site_url = read_site_url(repo_root)
-    report_md = (repo_root / "docs" / "examples" / "report.md").read_text(
-        encoding="utf-8"
-    )
+    report_md = report_path.read_text(encoding="utf-8")
     artifact_names = module["_ARTIFACT_NAMES"]
     assert isinstance(artifact_names, tuple)
     for artifact in artifact_names:

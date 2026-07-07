@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -369,3 +370,39 @@ def test_pyproject_loader_rejects_symlinks_and_invalid_ingest_table(
             ingest_obj="not-a-table",
             config_path=tmp_path / "pyproject.toml",
         )
+
+
+def test_pyproject_loader_analytics_and_object_table_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.pyproject_loader import (
+        ConfigValidationError,
+        _open_toml_file_no_follow,
+        _validate_nested_analytics_table,
+        copy_str_key_table,
+    )
+
+    config_path = tmp_path / "pyproject.toml"
+    config_path.write_text("[tool.codeclone]\n", encoding="utf-8")
+
+    with pytest.raises(ConfigValidationError, match=r"analytics.*must be object"):
+        _validate_nested_analytics_table(
+            analytics_obj="bad",
+            root_path=tmp_path,
+            config_path=config_path,
+        )
+
+    with pytest.raises(ConfigValidationError, match="'memory' must be object"):
+        copy_str_key_table("bad", key="memory", config_path=config_path)
+
+    with pytest.raises(ConfigValidationError, match="must contain only string keys"):
+        copy_str_key_table({1: "x"}, key="memory", config_path=config_path)
+
+    monkeypatch.setattr(
+        loader_mod,
+        "sys",
+        SimpleNamespace(platform="win32", version_info=sys.version_info),
+    )
+    with _open_toml_file_no_follow(config_path) as handle:
+        assert handle.read(1)

@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
+from ...observability import record_counter, span
 from ._workspace_intent_lifecycle import (
     WorkspaceIntentStatus,
     is_terminal_workspace_intent_status,
@@ -274,65 +275,78 @@ def collect_dirty_paths(
     scoped_paths: Sequence[str] | None = None,
 ) -> DirtyPathsResult:
     """Collect repo-relative dirty paths from the git working tree."""
-    if not _git_available(root):
-        return DirtyPathsResult(git_available=False, dirty_paths=())
-    try:
-        completed = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return DirtyPathsResult(git_available=False, dirty_paths=())
-    dirty = _dirty_paths_from_porcelain(completed.stdout)
-    if scoped_paths is not None:
-        scope_set = {_normalize_path(path) for path in scoped_paths if path.strip()}
-        dirty = tuple(sorted(path for path in dirty if _path_in_scope(path, scope_set)))
-    return DirtyPathsResult(git_available=True, dirty_paths=dirty)
+    with span(name="hygiene.collect_dirty_paths") as dirty_paths_span:
+        if not _git_available(root):
+            return DirtyPathsResult(git_available=False, dirty_paths=())
+        try:
+            with span(name="hygiene.git.status", reason="dirty_paths"):
+                completed = subprocess.run(
+                    ["git", "status", "--porcelain"],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return DirtyPathsResult(git_available=False, dirty_paths=())
+        dirty = _dirty_paths_from_porcelain(completed.stdout)
+        if scoped_paths is not None:
+            scope_set = {_normalize_path(path) for path in scoped_paths if path.strip()}
+            dirty = tuple(
+                sorted(path for path in dirty if _path_in_scope(path, scope_set))
+            )
+        dirty_paths_span.set_counter("dirty_paths", len(dirty))
+        return DirtyPathsResult(git_available=True, dirty_paths=dirty)
 
 
 def collect_dirty_snapshot(root: Path) -> DirtySnapshot:
     """Collect full git dirty state with stable per-path digests when available."""
-    captured_at = format_utc(utc_now())
-    if not _git_available(root):
+    with span(name="hygiene.collect_dirty_snapshot") as snapshot_span:
+        captured_at = format_utc(utc_now())
+        if not _git_available(root):
+            return DirtySnapshot(
+                git_available=False,
+                captured_at_utc=captured_at,
+                entries=(),
+            )
+        try:
+            with span(name="hygiene.git.status", reason="dirty_snapshot"):
+                completed = subprocess.run(
+                    ["git", "status", "--porcelain=v1"],
+                    cwd=root,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+            return DirtySnapshot(
+                git_available=False,
+                captured_at_utc=captured_at,
+                entries=(),
+            )
+        raw_entries = _dirty_entries_from_porcelain(completed.stdout)
+        with span(name="hygiene.dirty_entry_digests") as digest_span:
+            entries = tuple(
+                DirtySnapshotEntry(
+                    path=path,
+                    status_xy=status_xy,
+                    digest=digest,
+                    digest_status=digest_status,
+                )
+                for path, status_xy in raw_entries
+                for digest, digest_status in (
+                    _dirty_entry_digest(root, path, status_xy),
+                )
+            )
+            digest_span.set_counter("dirty_entries", len(entries))
+        snapshot_span.set_counter("dirty_paths", len(entries))
         return DirtySnapshot(
-            git_available=False,
+            git_available=True,
             captured_at_utc=captured_at,
-            entries=(),
+            entries=tuple(sorted(entries, key=lambda entry: entry.path)),
         )
-    try:
-        completed = subprocess.run(
-            ["git", "status", "--porcelain=v1"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return DirtySnapshot(
-            git_available=False,
-            captured_at_utc=captured_at,
-            entries=(),
-        )
-    entries = tuple(
-        DirtySnapshotEntry(
-            path=path,
-            status_xy=status_xy,
-            digest=digest,
-            digest_status=digest_status,
-        )
-        for path, status_xy in _dirty_entries_from_porcelain(completed.stdout)
-        for digest, digest_status in (_dirty_entry_digest(root, path, status_xy),)
-    )
-    return DirtySnapshot(
-        git_available=True,
-        captured_at_utc=captured_at,
-        entries=tuple(sorted(entries, key=lambda entry: entry.path)),
-    )
 
 
 def dirty_snapshot_from_payload(payload: object) -> DirtySnapshot | None:
@@ -395,6 +409,30 @@ def workspace_dirty_summary(*, root: Path) -> dict[str, object]:
     }
 
 
+def dirty_summary_from_snapshot(snapshot: DirtySnapshot | None) -> dict[str, object]:
+    """Repo-level dirty summary derived from an existing finish snapshot.
+
+    Same shape as workspace_dirty_summary, reusing the single finish-time
+    snapshot instead of a redundant git read. A missing or git-unavailable
+    snapshot yields the identical degraded envelope.
+    """
+    if snapshot is None or not snapshot.git_available:
+        return {
+            "git_available": False,
+            "dirty_paths_count": 0,
+            "dirty_paths_sample": [],
+            "sample_truncated": False,
+        }
+    paths = snapshot.paths
+    sample, truncated = _bounded_sample(paths)
+    return {
+        "git_available": True,
+        "dirty_paths_count": len(paths),
+        "dirty_paths_sample": list(sample),
+        "sample_truncated": truncated,
+    }
+
+
 def _declared_scope_sets(
     allowed_files: Sequence[str],
     allowed_related: Sequence[str] | None,
@@ -443,6 +481,36 @@ def _iter_foreign_intent_scope_matches(
             yield record, ownership.value, matched
 
 
+def _scoped_dirty_result(
+    root: Path,
+    *,
+    evaluation_scope: set[str],
+    dirty_snapshot: DirtySnapshot | None,
+) -> DirtyPathsResult:
+    """Scoped dirty paths, reusing a precomputed snapshot when available.
+
+    When the caller already collected the full workspace-state snapshot (the
+    start path does this for the workspace_state digest), derive the scoped
+    paths from it instead of a second ``git status``+``rev-parse``. The result
+    is identical to ``collect_dirty_paths(root, scoped_paths=...)`` because both
+    come from the same porcelain parse: ``snapshot.paths`` is the sorted,
+    deduped, rename-split path set, then filtered by the same scope predicate.
+    """
+    if dirty_snapshot is None:
+        return collect_dirty_paths(
+            root,
+            scoped_paths=tuple(sorted(evaluation_scope)) if evaluation_scope else None,
+        )
+    if not dirty_snapshot.git_available:
+        return DirtyPathsResult(git_available=False, dirty_paths=())
+    paths = dirty_snapshot.paths
+    if evaluation_scope:
+        paths = tuple(
+            sorted(path for path in paths if _path_in_scope(path, evaluation_scope))
+        )
+    return DirtyPathsResult(git_available=True, dirty_paths=paths)
+
+
 def evaluate_scoped_hygiene(
     *,
     root: Path,
@@ -452,15 +520,22 @@ def evaluate_scoped_hygiene(
     own_pid: int,
     own_start_epoch: int,
     own_intent_id: str | None = None,
+    dirty_snapshot: DirtySnapshot | None = None,
 ) -> WorkspaceHygieneResult:
-    """Evaluate scoped hygiene for start/finish workflow responses."""
+    """Evaluate scoped hygiene for start/finish workflow responses.
+
+    ``dirty_snapshot`` lets the start path reuse the workspace-state snapshot it
+    already collected, avoiding a redundant scoped ``git status`` read. When it
+    is None the scoped paths are read fresh, preserving the standalone contract.
+    """
     blocking_scope, _, evaluation_scope = _declared_scope_sets(
         allowed_files,
         allowed_related,
     )
-    dirty_result = collect_dirty_paths(
+    dirty_result = _scoped_dirty_result(
         root,
-        scoped_paths=tuple(sorted(evaluation_scope)) if evaluation_scope else None,
+        evaluation_scope=evaluation_scope,
+        dirty_snapshot=dirty_snapshot,
     )
     if not dirty_result.git_available:
         return WorkspaceHygieneResult(
@@ -517,26 +592,38 @@ def finish_hygiene_check(
     strict_finish: bool | None = None,
 ) -> WorkspaceHygieneResult:
     """Finish-time hygiene gate against declared scope and git evidence."""
-    hygiene = evaluate_scoped_hygiene(
-        root=root,
-        allowed_files=allowed_files,
-        allowed_related=allowed_related,
+    # Single finish-time tree read: this snapshot is the sole source of truth for
+    # finish workspace state. Git availability, the blocking-scope edit gate, and
+    # foreign overlaps are all derived from it (blocking scope is a subset of the
+    # full tree), replacing a redundant scoped read; the repo-level
+    # workspace_dirty_summary is likewise derived from this snapshot by the caller.
+    current_snapshot = collect_dirty_snapshot(root)
+    blocking_scope, related_scope, declared_scope = _declared_scope_sets(
+        allowed_files,
+        allowed_related,
+    )
+    if not current_snapshot.git_available:
+        return WorkspaceHygieneResult(
+            git_available=False,
+            dirty_paths=(),
+            dirty_paths_in_scope=(),
+            dirty_paths_outside_scope=(),
+            foreign_dirty_overlaps=(),
+            blocks_edit=False,
+        )
+    all_dirty_paths = current_snapshot.paths
+    dirty_in_blocking = tuple(
+        sorted(path for path in all_dirty_paths if _path_in_scope(path, blocking_scope))
+    )
+    foreign_dirty_overlaps = _foreign_dirty_overlaps(
+        dirty_paths=dirty_in_blocking,
         store=store,
         own_pid=own_pid,
         own_start_epoch=own_start_epoch,
         own_intent_id=own_intent_id,
     )
-    if not hygiene.git_available:
-        return hygiene
-    current_snapshot = collect_dirty_snapshot(root)
-    if not current_snapshot.git_available:
-        return hygiene
-    all_dirty_paths = current_snapshot.paths
+    blocks_edit = bool(dirty_in_blocking)
     evidence = {_normalize_path(path) for path in resolved_files if path.strip()}
-    blocking_scope, related_scope, declared_scope = _declared_scope_sets(
-        allowed_files,
-        allowed_related,
-    )
     dirty_in_declared = tuple(
         sorted(path for path in all_dirty_paths if _path_in_scope(path, declared_scope))
     )
@@ -588,17 +675,17 @@ def finish_hygiene_check(
     # dirty_paths_outside_scope and the attribution detail).
     finish_block_reason = _finish_block_reason(
         unacknowledged=unacknowledged,
-        foreign_dirty_overlaps=hygiene.foreign_dirty_overlaps,
+        foreign_dirty_overlaps=foreign_dirty_overlaps,
         unattributed_unscoped=unattributed_unscoped,
         strict_finish=strict_finish,
     )
     return WorkspaceHygieneResult(
-        git_available=hygiene.git_available,
+        git_available=True,
         dirty_paths=all_dirty_paths,
         dirty_paths_in_scope=dirty_in_declared,
         dirty_paths_outside_scope=dirty_outside_declared,
-        foreign_dirty_overlaps=hygiene.foreign_dirty_overlaps,
-        blocks_edit=hygiene.blocks_edit,
+        foreign_dirty_overlaps=foreign_dirty_overlaps,
+        blocks_edit=blocks_edit,
         unacknowledged_dirty_in_scope=unacknowledged,
         # Legacy alias retained for one contract cycle. These paths are
         # unattributed, not proven to be owned by the current agent.
@@ -888,8 +975,25 @@ def _dirty_entry_digest(
     """Return a stable digest for the dirty content, or mark it unavailable."""
     if status_xy == "??":
         return _untracked_file_digest(root, path)
-    cached = _git_diff_bytes(root, ["diff", "--cached", "--binary", "--", path])
-    worktree = _git_diff_bytes(root, ["diff", "--binary", "--", path])
+    # Porcelain XY already tells which side is guaranteed empty: X==' ' means the
+    # index matches HEAD (`git diff --cached` empty) and Y==' ' means the worktree
+    # matches the index (`git diff` empty). Skipping the guaranteed-empty side and
+    # substituting b"" is byte-identical to invoking git — which would return b"" —
+    # so the digest formula is unchanged while the common WIP case (unstaged edits)
+    # drops from two subprocess per path to one. Non-' ' codes (incl. unmerged UU)
+    # fall through to the diff to preserve the exact previous bytes.
+    index_status = status_xy[0]
+    worktree_status = status_xy[1]
+    cached = (
+        _git_diff_bytes(root, ["diff", "--cached", "--binary", "--", path])
+        if index_status != " "
+        else b""
+    )
+    worktree = (
+        _git_diff_bytes(root, ["diff", "--binary", "--", path])
+        if worktree_status != " "
+        else b""
+    )
     if cached is None or worktree is None:
         return None, "unavailable"
     digest = hashlib.sha256()
@@ -904,6 +1008,7 @@ def _dirty_entry_digest(
 
 
 def _git_diff_bytes(root: Path, args: Sequence[str]) -> bytes | None:
+    record_counter("git_diff_invocations")
     try:
         completed = subprocess.run(
             ["git", *args],
@@ -923,6 +1028,7 @@ def _git_diff_bytes(root: Path, args: Sequence[str]) -> bytes | None:
 
 
 def _untracked_file_digest(root: Path, path: str) -> tuple[str | None, str]:
+    record_counter("untracked_file_reads")
     target = (root / path).resolve()
     try:
         target.relative_to(root.resolve())
@@ -945,14 +1051,15 @@ def _untracked_file_digest(root: Path, path: str) -> tuple[str | None, str]:
 
 def _git_available(root: Path) -> bool:
     try:
-        completed = subprocess.run(
-            ["git", "rev-parse", "--is-inside-work-tree"],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
+        with span(name="hygiene.git.rev_parse"):
+            completed = subprocess.run(
+                ["git", "rev-parse", "--is-inside-work-tree"],
+                cwd=root,
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return False
     return completed.stdout.strip().lower() == "true"
@@ -1015,6 +1122,7 @@ __all__ = [
     "collect_dirty_paths",
     "collect_dirty_snapshot",
     "dirty_snapshot_from_payload",
+    "dirty_summary_from_snapshot",
     "evaluate_scoped_hygiene",
     "finish_hygiene_check",
     "hygiene_blocks_start_edit",

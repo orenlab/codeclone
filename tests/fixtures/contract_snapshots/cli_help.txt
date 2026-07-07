@@ -1,3 +1,8 @@
+  o
+ /|\  Deterministic structural change control.  CodeClone · Structural Change Controller
+o o o
+Run `codeclone --help --interactive-help` for a guided product tour.
+
 usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--processes PROCESSES] [--changed-only | --no-changed-only]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
@@ -32,10 +37,10 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--open-html-report | --no-open-html-report] [--no-progress]
                  [--progress] [--no-color] [--color] [--quiet | --no-quiet]
                  [--verbose | --no-verbose] [--debug | --no-debug] [-h]
-                 [--version]
+                 [--interactive-help] [--version]
                  [root]
 
-Structural code quality analysis for Python.
+Deterministic Structural Change Controller for AI-assisted Python development.
 
 Target:
   root                  Project root directory to scan.
@@ -197,6 +202,8 @@ Output and UI:
 
 General:
   -h, --help            Show this help message and exit.
+  --interactive-help    Open the guided CodeClone product tour.
+                        Use together with --help in an interactive terminal.
   --version             Print the CodeClone version and exit.
 
 Exit codes:

@@ -17,7 +17,10 @@ from codeclone.observability.models import (
     ProfileSample,
     SpanRecord,
 )
-from codeclone.observability.store.reader import build_trace_view
+from codeclone.observability.store.reader import (
+    build_trace_view,
+    open_observability_store_readonly,
+)
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
@@ -67,6 +70,98 @@ def test_store_records_schema_version(tmp_path: Path) -> None:
         assert row[0] == PLATFORM_OBSERVABILITY_SCHEMA_VERSION
     finally:
         conn.close()
+
+
+def test_store_uses_standard_sqlite_pragmas(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 5000
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0].lower() == "wal"
+    finally:
+        conn.close()
+
+
+def test_store_rejects_future_schema_without_overwriting_meta(
+    tmp_path: Path,
+) -> None:
+    path = observability_store_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO platform_meta(key, value)
+            VALUES('schema_version', '999.0');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match="newer than this CodeClone build"):
+        open_observability_store(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        row = conn.execute(
+            "SELECT value FROM platform_meta WHERE key='schema_version'"
+        ).fetchone()
+        assert row == ("999.0",)
+    finally:
+        conn.close()
+
+
+def test_store_rejects_malformed_schema_version(tmp_path: Path) -> None:
+    path = observability_store_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO platform_meta(key, value)
+            VALUES('schema_version', 'not-a-version');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(
+        RuntimeError,
+        match="Unsupported Platform Observability schema version",
+    ):
+        open_observability_store(path)
+
+
+def test_readonly_store_rejects_future_schema(tmp_path: Path) -> None:
+    path = observability_store_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE platform_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+            INSERT INTO platform_meta(key, value)
+            VALUES('schema_version', '999.0');
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    with pytest.raises(RuntimeError, match="newer than this CodeClone build"):
+        open_observability_store_readonly(tmp_path)
 
 
 def test_write_operation_persists_op_and_spans(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.memory.sqlite_store as memory_sqlite_store
 from codeclone.audit import (
     DEFAULT_AUDIT_PATH,
     EVENT_PATCH_TRAIL_COMPUTED,
@@ -215,6 +216,7 @@ def test_get_patch_trail_structured_post_clear(tmp_path: Path) -> None:
 
 def test_get_patch_trail_falls_back_to_memory_trajectory_store(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "repo"
     root.mkdir()
@@ -264,6 +266,11 @@ def test_get_patch_trail_falls_back_to_memory_trajectory_store(
         store.commit()
     finally:
         store.close()
+
+    def fail_writable_open(_path: Path) -> sqlite3.Connection:
+        raise AssertionError("patch-trail retrieval must use read-only memory access")
+
+    monkeypatch.setattr(memory_sqlite_store, "open_memory_db", fail_writable_open)
 
     service = CodeCloneMCPService(history_limit=4)
     out = service.get_patch_trail(

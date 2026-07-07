@@ -172,9 +172,10 @@ VALIDATE_REVIEW_CLAIMS: Final = (
 )
 
 HELP: Final = (
-    "Bounded workflow/contract guidance with doc links. compact adds "
-    "anti_patterns; normal adds warnings. Topics: workflow, analysis_profile, "
-    "suppressions, baseline, coverage, latest_runs, review_state, "
+    "Bounded workflow/contract guidance with doc links. topic=overview returns "
+    "a compact topic index. compact adds anti_patterns; normal adds warnings. "
+    "Topics: overview, workflow, analysis_profile, suppressions, baseline, "
+    "coverage, latest_runs, review_state, "
     "changed_scope, change_control, trust_boundaries, engineering_memory, "
     "implementation_context, verification_profiles, observability."
 )
@@ -219,7 +220,7 @@ GET_FINDING: Final = (
     "Return a single canonical finding group by short or full id. "
     "Normal detail is the default. Use this after list_hotspots, "
     "list_findings, or check_* instead of requesting larger lists at "
-    "higher detail."
+    "higher detail. Unknown ids return a structured status=not_found response."
 )
 
 GET_REMEDIATION: Final = (
@@ -233,7 +234,9 @@ GET_REMEDIATION: Final = (
 LIST_HOTSPOTS: Final = (
     "Return one of the derived CodeClone hotlists for the latest or "
     "specified MCP run, using compact summary cards by default. Prefer "
-    "this for first-pass triage before broader list_findings calls."
+    "this for first-pass triage before broader list_findings calls. Empty "
+    "hotlists include empty_reason so agents know whether a filter or the "
+    "derived hotlist itself removed all entries."
 )
 
 COMPARE_RUNS: Final = (

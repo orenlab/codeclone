@@ -13,6 +13,7 @@ from typing import cast
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...memory.embedding import resolve_embedding_provider
+from ...memory.enums import MemoryRecordType, validate_memory_record_type
 from ...memory.exceptions import (
     MemoryCapacityError,
     MemoryContractError,
@@ -44,6 +45,7 @@ from ...memory.semantic import (
     resolve_semantic_index,
 )
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
+from ...utils.payload_narrow import is_payload_dict, is_record_mapping
 from . import _session_helpers as _helpers
 from ._context_governance import (
     DEFAULT_RESPONSE_CONTEXT_UNIT_LIMIT,
@@ -52,6 +54,7 @@ from ._context_governance import (
     attach_passive_context_governance,
 )
 from ._intent import IntentRecord
+from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
@@ -69,6 +72,10 @@ _MEMORY_RESPONSE_REDUCTION_ORDER: tuple[str, ...] = (
     "trajectories",
     "records",
 )
+
+
+def _blast_session(session: _MCPSessionMemoryMixin) -> _MCPSessionBlastRadiusMixin:
+    return cast(_MCPSessionBlastRadiusMixin, session)
 
 
 class _MCPSessionMemoryMixin:
@@ -241,7 +248,7 @@ class _MCPSessionMemoryMixin:
         *,
         root: str,
         action: str,
-        record_type: str | None = None,
+        record_type: MemoryRecordType | None = None,
         statement: str | None = None,
         subject_path: str | None = None,
         text: str | None = None,
@@ -444,7 +451,7 @@ class _MCPSessionMemoryMixin:
         *,
         project: MemoryProject,
         config: MemoryConfig,
-        record_type: str | None,
+        record_type: MemoryRecordType | None,
         statement: str | None,
         subject_path: str | None,
     ) -> dict[str, object]:
@@ -454,10 +461,14 @@ class _MCPSessionMemoryMixin:
             raise MCPServiceContractError(
                 "record_candidate requires record_type and statement."
             )
+        try:
+            canonical_type = validate_memory_record_type(record_type)
+        except ValueError as exc:
+            raise MCPServiceContractError(str(exc)) from exc
         record = record_candidate(
             store,
             project=project,
-            record_type=record_type,  # type: ignore[arg-type]
+            record_type=canonical_type,
             statement=statement,
             subject_path=subject_path,
             max_candidates=config.max_candidates,
@@ -739,7 +750,7 @@ class _MCPSessionMemoryMixin:
         if record.root.resolve() != root_path.resolve():
             return frozenset()
         try:
-            result = self._blast_radius_result(
+            result = _blast_session(self)._blast_radius_result(
                 record=record,
                 files=list(scope_paths),
                 depth="direct",
@@ -755,13 +766,14 @@ class _MCPSessionMemoryMixin:
         published = dict(payload)
         internal = published.pop("_memory_projection_request", None)
         project_id = published.get("project_id")
-        if isinstance(project_id, str) and isinstance(internal, Mapping):
-            digest = memory_projection_request_digest(internal)
+        if isinstance(project_id, str) and is_record_mapping(internal):
+            internal_mapping = internal
+            digest = memory_projection_request_digest(internal_mapping)
             digest_value = digest.get("value")
-            if isinstance(digest_value, str):
+            if isinstance(digest_value, str) and is_payload_dict(internal_mapping):
                 self._memory_continuation_requests[
                     self._memory_continuation_request_key(project_id, digest_value)
-                ] = dict(internal)
+                ] = dict(internal_mapping)
         return published
 
     def _resolve_memory_continuation_request(
@@ -904,7 +916,7 @@ def _memory_lane_items(
     for lane, _count_key in _MEMORY_RESPONSE_LANES:
         value = payload.get(lane)
         items = value if isinstance(value, list) else []
-        lanes[lane] = [dict(item) for item in items if isinstance(item, Mapping)]
+        lanes[lane] = [dict(item) for item in items if is_payload_dict(item)]
     return lanes
 
 
@@ -1009,7 +1021,7 @@ def _memory_continuation_lanes(
     return {
         str(lane): dict(lane_payload)
         for lane, lane_payload in lanes.items()
-        if isinstance(lane_payload, Mapping)
+        if is_payload_dict(lane_payload)
     }
 
 

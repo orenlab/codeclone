@@ -48,7 +48,7 @@ from codeclone.core._types import (
 from codeclone.core.reporting import GatingResult
 from codeclone.core.worker import process_file
 from codeclone.models import HealthScore, ProjectMetrics
-from tests._assertions import assert_contains_all
+from tests._assertions import assert_contains_all, assert_contains_none
 
 
 class _RecordingPrinter:
@@ -623,8 +623,8 @@ def test_cli_version_flag_no_side_effects(
     assert exc.value.code == 0
     out = capsys.readouterr().out
     assert __version__ in out
-    assert "Scanning root" not in out
-    assert "Architectural duplication detector" not in out
+    assert_contains_none(out, "Scanning root")
+    assert_contains_none(out, "Architectural duplication detector")
 
 
 def test_cli_help_text_consistency(
@@ -639,7 +639,11 @@ def test_cli_help_text_consistency(
         "usage: codeclone ",
         "[--version]",
         "[-h]",
-        "Structural code quality analysis for Python.",
+        "--interactive-help",
+        (
+            "Deterministic Structural Change Controller for AI-assisted "
+            "Python development."
+        ),
         "Target:",
         "Analysis:",
         "--changed-only",
@@ -681,7 +685,7 @@ def test_cli_help_text_consistency(
     )
     for expected in expected_parts:
         assert expected in out
-    assert "\x1b[" not in out
+    assert_contains_none(out, "\x1b[")
 
 
 def test_report_path_origins_distinguish_bare_and_explicit_flags() -> None:
@@ -785,13 +789,13 @@ def test_cli_internal_error_marker(
         cli.main()
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
-    assert "Unexpected exception." in out
-    assert "Reason: RuntimeError: boom" in out
-    assert "Next steps:" in out
-    assert "Re-run with --debug to include a traceback." in out
-    assert f"{ISSUES_URL}/new?template=bug_report.yml" in out
-    assert "Traceback:" not in out
+    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "Unexpected exception.")
+    assert_contains_all(out, "Reason: RuntimeError: boom")
+    assert_contains_all(out, "Next steps:")
+    assert_contains_all(out, "Re-run with --debug to include a traceback.")
+    assert_contains_all(out, f"{ISSUES_URL}/new?template=bug_report.yml")
+    assert_contains_none(out, "Traceback:")
 
 
 def test_cli_internal_error_debug_flag_includes_traceback(
@@ -806,10 +810,10 @@ def test_cli_internal_error_debug_flag_includes_traceback(
         cli.main()
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
-    assert "DEBUG DETAILS" in out
-    assert "Traceback:" in out
-    assert "Command: codeclone --debug" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "DEBUG DETAILS")
+    assert_contains_all(out, "Traceback:")
+    assert_contains_all(out, "Command: codeclone --debug")
 
 
 def test_cli_internal_error_debug_env_includes_traceback(
@@ -825,9 +829,9 @@ def test_cli_internal_error_debug_env_includes_traceback(
         cli.main()
     assert exc.value.code == 5
     out = capsys.readouterr().out
-    assert "INTERNAL ERROR:" in out
-    assert "DEBUG DETAILS" in out
-    assert "Traceback:" in out
+    assert_contains_all(out, "INTERNAL ERROR:")
+    assert_contains_all(out, "DEBUG DETAILS")
+    assert_contains_all(out, "Traceback:")
 
 
 def test_argument_parser_contract_error_marker_for_invalid_args(
@@ -1468,7 +1472,7 @@ def test_print_summary_invariant_warning(
         new_clones_count=0,
     )
     out = capsys.readouterr().out
-    assert "Summary accounting mismatch" in out
+    assert_contains_all(out, "Summary accounting mismatch")
 
 
 def test_compact_summary_labels_use_machine_scannable_keys() -> None:
@@ -1718,10 +1722,10 @@ def test_print_changed_scope_uses_dedicated_block(
         ),
     )
     out = capsys.readouterr().out
-    assert "Changed Scope" in out
-    assert "Paths" in out
-    assert "Findings" in out
-    assert "from git diff" in out
+    assert_contains_all(out, "Changed Scope")
+    assert_contains_all(out, "Paths")
+    assert_contains_all(out, "Findings")
+    assert_contains_all(out, "from git diff")
 
 
 def test_print_changed_scope_uses_compact_line_in_quiet_mode(
@@ -1768,9 +1772,9 @@ def test_print_metrics_in_quiet_mode_includes_overloaded_modules(
         ),
     )
     out = capsys.readouterr().out
-    assert "overloaded_modules=3" in out
-    assert "Adoption" not in out
-    assert "Public API" not in out
+    assert_contains_all(out, "overloaded_modules=3")
+    assert_contains_none(out, "Adoption")
+    assert_contains_none(out, "Public API")
 
 
 def test_print_metrics_in_quiet_mode_includes_security_surfaces(
@@ -2027,6 +2031,87 @@ def test_configure_metrics_mode_forces_api_surface_for_api_break_gate() -> None:
     cli_runtime._configure_metrics_mode(args=args, metrics_baseline_exists=True)
 
     assert args.api_surface is True
+
+
+def test_prepare_metrics_mode_and_ui_invokes_hooks_and_skips_banner_when_quiet(
+    tmp_path: Path,
+) -> None:
+    calls: list[tuple[str, object]] = []
+
+    def _configure_metrics_mode(
+        *,
+        args: object,
+        metrics_baseline_exists: bool,
+    ) -> None:
+        calls.append(("configure", metrics_baseline_exists))
+
+    def _print_banner(*, root: Path) -> None:
+        calls.append(("banner", root))
+
+    args = Namespace(
+        update_baseline=False,
+        skip_metrics=False,
+        update_metrics_baseline=False,
+        quiet=False,
+        no_progress=False,
+    )
+    baseline_path = tmp_path / "codeclone.baseline.json"
+
+    cli_runtime.prepare_metrics_mode_and_ui(
+        args=args,
+        root_path=tmp_path,
+        baseline_path=baseline_path,
+        baseline_exists=False,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=False,
+        configure_metrics_mode=_configure_metrics_mode,
+        print_banner=_print_banner,
+    )
+
+    assert calls == [("configure", False), ("banner", tmp_path)]
+    assert args.no_progress is False
+
+    args.quiet = True
+    calls.clear()
+    cli_runtime.prepare_metrics_mode_and_ui(
+        args=args,
+        root_path=tmp_path,
+        baseline_path=baseline_path,
+        baseline_exists=False,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=False,
+        configure_metrics_mode=_configure_metrics_mode,
+        print_banner=_print_banner,
+    )
+
+    assert calls == [("configure", False)]
+    assert args.no_progress is True
+
+
+def test_prepare_metrics_mode_and_ui_skips_optional_hooks_when_none(
+    tmp_path: Path,
+) -> None:
+    args = Namespace(
+        update_baseline=False,
+        skip_metrics=False,
+        update_metrics_baseline=False,
+        quiet=False,
+        no_progress=False,
+    )
+    baseline_path = tmp_path / "codeclone.baseline.json"
+
+    cli_runtime.prepare_metrics_mode_and_ui(
+        args=args,
+        root_path=tmp_path,
+        baseline_path=baseline_path,
+        baseline_exists=False,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=False,
+        configure_metrics_mode=None,
+        print_banner=None,
+    )
+
+    assert args.no_progress is False
 
 
 def test_probe_metrics_baseline_section_for_non_object_payload(tmp_path: Path) -> None:
@@ -2799,3 +2884,54 @@ def test_print_verbose_clone_hashes_prints_sorted_values() -> None:
         "      - a-hash",
         "      - b-hash",
     ]
+
+
+def test_resolve_intent_registry_db_path_maps_repo_path_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.intent_registry import (
+        IntentRegistryConfigError,
+        resolve_intent_registry_db_path,
+    )
+    from codeclone.utils.repo_paths import RepoPathError
+
+    def _raise_repo_path_error(*_args: object, **_kwargs: object) -> Path:
+        raise RepoPathError("invalid segment")
+
+    monkeypatch.setattr(
+        "codeclone.config.intent_registry.resolve_under_repo_root",
+        _raise_repo_path_error,
+    )
+    with pytest.raises(IntentRegistryConfigError, match="invalid intent_registry_path"):
+        resolve_intent_registry_db_path(
+            root_path=tmp_path,
+            value=".codeclone/db/intents.sqlite3",
+        )
+
+
+def test_resolve_memory_state_path_maps_repo_path_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.config.memory import _resolve_memory_state_path
+    from codeclone.utils.repo_paths import RepoPathError
+
+    root = tmp_path / "repo"
+    root.mkdir()
+
+    def _raise_repo_path_error(*_args: object, **_kwargs: object) -> Path:
+        raise RepoPathError("invalid segment")
+
+    monkeypatch.setattr(
+        "codeclone.config.memory.resolve_under_repo_root",
+        _raise_repo_path_error,
+    )
+    with pytest.raises(
+        ValueError, match=r"Invalid tool\.codeclone\.memory\.semantic\.index_path"
+    ):
+        _resolve_memory_state_path(
+            key="memory.semantic.index_path",
+            value=".codeclone/memory/semantic_index.lance",
+            root_path=root,
+        )

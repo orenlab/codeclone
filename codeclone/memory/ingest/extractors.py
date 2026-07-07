@@ -19,6 +19,7 @@ from ...config.memory import IngestConfig
 from ...report.meta import current_report_timestamp_utc
 from ...utils.coerce import as_mapping, as_sequence
 from ..display import format_document_link_statement
+from ..enums import MemoryConfidence
 from ..identity import make_identity_key
 from ..models import (
     MemoryEvidence,
@@ -136,7 +137,7 @@ def _append_path_risk_note(
     discriminator: str,
     statement: str,
     payload: Mapping[str, object],
-    confidence: str,
+    confidence: MemoryConfidence,
 ) -> None:
     identity = make_identity_key(
         type="risk_note",
@@ -152,7 +153,7 @@ def _append_path_risk_note(
             identity_key=identity,
             type="risk_note",
             status="active",
-            confidence=confidence,  # type: ignore[arg-type]
+            confidence=confidence,
             origin="system",
             ingest_source="analysis",
             statement=statement,

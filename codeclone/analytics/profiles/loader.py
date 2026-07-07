@@ -11,7 +11,7 @@ import re
 from dataclasses import asdict
 from importlib.resources import files
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal
 
 from pydantic import (
     BaseModel,
@@ -104,10 +104,7 @@ class _SearchSpaceModel(BaseModel):
     ) -> tuple[Literal["eom", "leaf"], ...]:
         if not value:
             raise ValueError("cluster_selection_method must not be empty")
-        return cast(
-            "tuple[Literal['eom', 'leaf'], ...]",
-            tuple(sorted(set(value))),
-        )
+        return tuple(sorted(set(value)))
 
 
 class _SuitabilityModel(BaseModel):
