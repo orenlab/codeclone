@@ -481,6 +481,36 @@ def _iter_foreign_intent_scope_matches(
             yield record, ownership.value, matched
 
 
+def _scoped_dirty_result(
+    root: Path,
+    *,
+    evaluation_scope: set[str],
+    dirty_snapshot: DirtySnapshot | None,
+) -> DirtyPathsResult:
+    """Scoped dirty paths, reusing a precomputed snapshot when available.
+
+    When the caller already collected the full workspace-state snapshot (the
+    start path does this for the workspace_state digest), derive the scoped
+    paths from it instead of a second ``git status``+``rev-parse``. The result
+    is identical to ``collect_dirty_paths(root, scoped_paths=...)`` because both
+    come from the same porcelain parse: ``snapshot.paths`` is the sorted,
+    deduped, rename-split path set, then filtered by the same scope predicate.
+    """
+    if dirty_snapshot is None:
+        return collect_dirty_paths(
+            root,
+            scoped_paths=tuple(sorted(evaluation_scope)) if evaluation_scope else None,
+        )
+    if not dirty_snapshot.git_available:
+        return DirtyPathsResult(git_available=False, dirty_paths=())
+    paths = dirty_snapshot.paths
+    if evaluation_scope:
+        paths = tuple(
+            sorted(path for path in paths if _path_in_scope(path, evaluation_scope))
+        )
+    return DirtyPathsResult(git_available=True, dirty_paths=paths)
+
+
 def evaluate_scoped_hygiene(
     *,
     root: Path,
@@ -490,15 +520,22 @@ def evaluate_scoped_hygiene(
     own_pid: int,
     own_start_epoch: int,
     own_intent_id: str | None = None,
+    dirty_snapshot: DirtySnapshot | None = None,
 ) -> WorkspaceHygieneResult:
-    """Evaluate scoped hygiene for start/finish workflow responses."""
+    """Evaluate scoped hygiene for start/finish workflow responses.
+
+    ``dirty_snapshot`` lets the start path reuse the workspace-state snapshot it
+    already collected, avoiding a redundant scoped ``git status`` read. When it
+    is None the scoped paths are read fresh, preserving the standalone contract.
+    """
     blocking_scope, _, evaluation_scope = _declared_scope_sets(
         allowed_files,
         allowed_related,
     )
-    dirty_result = collect_dirty_paths(
+    dirty_result = _scoped_dirty_result(
         root,
-        scoped_paths=tuple(sorted(evaluation_scope)) if evaluation_scope else None,
+        evaluation_scope=evaluation_scope,
+        dirty_snapshot=dirty_snapshot,
     )
     if not dirty_result.git_available:
         return WorkspaceHygieneResult(
@@ -938,8 +975,25 @@ def _dirty_entry_digest(
     """Return a stable digest for the dirty content, or mark it unavailable."""
     if status_xy == "??":
         return _untracked_file_digest(root, path)
-    cached = _git_diff_bytes(root, ["diff", "--cached", "--binary", "--", path])
-    worktree = _git_diff_bytes(root, ["diff", "--binary", "--", path])
+    # Porcelain XY already tells which side is guaranteed empty: X==' ' means the
+    # index matches HEAD (`git diff --cached` empty) and Y==' ' means the worktree
+    # matches the index (`git diff` empty). Skipping the guaranteed-empty side and
+    # substituting b"" is byte-identical to invoking git — which would return b"" —
+    # so the digest formula is unchanged while the common WIP case (unstaged edits)
+    # drops from two subprocess per path to one. Non-' ' codes (incl. unmerged UU)
+    # fall through to the diff to preserve the exact previous bytes.
+    index_status = status_xy[0]
+    worktree_status = status_xy[1]
+    cached = (
+        _git_diff_bytes(root, ["diff", "--cached", "--binary", "--", path])
+        if index_status != " "
+        else b""
+    )
+    worktree = (
+        _git_diff_bytes(root, ["diff", "--binary", "--", path])
+        if worktree_status != " "
+        else b""
+    )
     if cached is None or worktree is None:
         return None, "unavailable"
     digest = hashlib.sha256()

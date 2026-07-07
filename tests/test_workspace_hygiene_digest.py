@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -162,6 +163,57 @@ def test_dirty_entry_digest_and_git_diff_bytes_edge_branches(
         lambda *args, **kwargs: SimpleNamespace(stdout=object()),
     )
     assert _git_diff_bytes(tmp_path, ["diff", "--", "a.py"]) is None
+
+
+def test_dirty_entry_digest_status_aware_skip_is_byte_identical(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Contract lock: skipping the guaranteed-empty diff side (by porcelain XY)
+    # must produce byte-identical digests, because real git returns b"" for the
+    # clean side. The guaranteed-empty side must not be invoked at all.
+    calls: list[list[str]] = []
+
+    def _fake_diff(_root: Path, args: list[str]) -> bytes:
+        calls.append(list(args))
+        return b"CACHED" if "--cached" in args else b"WORKTREE"
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.mcp._workspace_hygiene._git_diff_bytes",
+        _fake_diff,
+    )
+
+    def _expected(status_xy: str, path: str, cached: bytes, worktree: bytes) -> str:
+        digest = hashlib.sha256()
+        digest.update(status_xy.encode("utf-8", "surrogateescape"))
+        digest.update(b"\0")
+        digest.update(path.encode("utf-8", "surrogateescape"))
+        digest.update(b"\0cached\0")
+        digest.update(cached)
+        digest.update(b"\0worktree\0")
+        digest.update(worktree)
+        return digest.hexdigest()
+
+    # Unstaged-only (" M"): X==' ' skips the cached side -> substitute b"".
+    calls.clear()
+    digest, status = _dirty_entry_digest(tmp_path, "pkg/a.py", " M")
+    assert status == "ok"
+    assert not any("--cached" in call for call in calls)
+    assert digest == _expected(" M", "pkg/a.py", b"", b"WORKTREE")
+
+    # Staged-only ("M "): Y==' ' skips the worktree side -> substitute b"".
+    calls.clear()
+    digest, status = _dirty_entry_digest(tmp_path, "pkg/a.py", "M ")
+    assert status == "ok"
+    assert calls and all("--cached" in call for call in calls)
+    assert digest == _expected("M ", "pkg/a.py", b"CACHED", b"")
+
+    # Both sides dirty ("MM"): neither side is skipped.
+    calls.clear()
+    digest, status = _dirty_entry_digest(tmp_path, "pkg/a.py", "MM")
+    assert status == "ok"
+    assert len(calls) == 2
+    assert digest == _expected("MM", "pkg/a.py", b"CACHED", b"WORKTREE")
 
 
 def test_untracked_digest_handles_missing_and_open_errors(

@@ -721,6 +721,94 @@ def test_evaluate_scoped_hygiene_marks_dirty_in_blocking_scope(tmp_path: Path) -
     assert hygiene.blocks_edit is True
 
 
+def test_evaluate_scoped_hygiene_reuses_snapshot_without_git(tmp_path: Path) -> None:
+    # When a snapshot is supplied, scoped paths are derived from it and no extra
+    # git read (collect_dirty_paths) is issued.
+    store = get_workspace_intent_store(tmp_path)
+    snapshot = DirtySnapshot(
+        git_available=True,
+        captured_at_utc="x",
+        entries=(
+            DirtySnapshotEntry(
+                path="pkg/a.py",
+                status_xy=" M",
+                digest="a" * 64,
+                digest_status="ok",
+            ),
+            DirtySnapshotEntry(
+                path="tests/test_a.py",
+                status_xy=" M",
+                digest="b" * 64,
+                digest_status="ok",
+            ),
+        ),
+    )
+
+    def _fail_dirty_paths(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("must not read git when a snapshot is supplied")
+
+    with patch.object(hygiene_mod, "collect_dirty_paths", _fail_dirty_paths):
+        hygiene = evaluate_scoped_hygiene(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=["tests/test_a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+            dirty_snapshot=snapshot,
+        )
+    # Both dirty paths are within the evaluation scope (blocking plus related);
+    # the related-only path surfaces as outside the blocking scope.
+    assert hygiene.dirty_paths == ("pkg/a.py", "tests/test_a.py")
+    assert hygiene.dirty_paths_in_scope == ("pkg/a.py",)
+    assert hygiene.dirty_paths_outside_scope == ("tests/test_a.py",)
+    assert hygiene.blocks_edit is True
+
+
+def test_evaluate_scoped_hygiene_snapshot_matches_fresh_read(tmp_path: Path) -> None:
+    # Snapshot-derived scoped paths must equal a fresh scoped git read.
+    store = get_workspace_intent_store(tmp_path)
+    porcelain = " M pkg/a.py\n M pkg/b.py\n M tests/test_a.py\n"
+    with _mock_git_porcelain(porcelain):
+        fresh = evaluate_scoped_hygiene(
+            root=tmp_path,
+            allowed_files=["pkg/a.py"],
+            allowed_related=["tests/test_a.py"],
+            store=store,
+            own_pid=22222,
+            own_start_epoch=400,
+        )
+        snapshot = collect_dirty_snapshot(tmp_path)
+    reused = evaluate_scoped_hygiene(
+        root=tmp_path,
+        allowed_files=["pkg/a.py"],
+        allowed_related=["tests/test_a.py"],
+        store=store,
+        own_pid=22222,
+        own_start_epoch=400,
+        dirty_snapshot=snapshot,
+    )
+    assert reused.dirty_paths == fresh.dirty_paths
+    assert reused.dirty_paths_in_scope == fresh.dirty_paths_in_scope
+    assert reused.dirty_paths_outside_scope == fresh.dirty_paths_outside_scope
+    assert reused.blocks_edit == fresh.blocks_edit
+
+
+def test_evaluate_scoped_hygiene_snapshot_git_unavailable(tmp_path: Path) -> None:
+    store = get_workspace_intent_store(tmp_path)
+    snapshot = DirtySnapshot(git_available=False, captured_at_utc="x", entries=())
+    hygiene = evaluate_scoped_hygiene(
+        root=tmp_path,
+        allowed_files=["pkg/a.py"],
+        store=store,
+        own_pid=22222,
+        own_start_epoch=400,
+        dirty_snapshot=snapshot,
+    )
+    assert hygiene.git_available is False
+    assert hygiene.blocks_edit is False
+
+
 def test_finish_hygiene_check_returns_early_when_git_unavailable(
     tmp_path: Path,
 ) -> None:

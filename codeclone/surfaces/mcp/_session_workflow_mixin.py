@@ -261,6 +261,8 @@ class _MCPSessionWorkflowMixin:
         from ._workspace_hygiene import evaluate_scoped_hygiene
         from ._workspace_intent_store import get_workspace_intent_store
 
+        # Reuse the workspace-state snapshot already collected above instead of a
+        # second scoped git status+rev-parse; scoped paths are derived from it.
         hygiene = evaluate_scoped_hygiene(
             root=root_path,
             allowed_files=active_intent.scope.allowed_files,
@@ -269,6 +271,7 @@ class _MCPSessionWorkflowMixin:
             own_pid=self._agent_pid,
             own_start_epoch=self._agent_start_epoch,
             own_intent_id=intent_id,
+            dirty_snapshot=workspace_state_snapshot,
         )
 
         # 5. Blast radius (full payload, not just declare's subset)
