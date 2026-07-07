@@ -929,7 +929,9 @@ class _MCPSessionIntentMixin:
         )
         return payload
 
-    def _list_workspace_intents(self, *, root: str | None) -> dict[str, object]:
+    def _list_workspace_intents(
+        self, *, root: str | None, include_dirty_summary: bool = True
+    ) -> dict[str, object]:
         from ...config.intent_registry import intent_registry_summary
         from ._workspace_intents import list_workspace_intent_records_for_recovery
 
@@ -958,11 +960,16 @@ class _MCPSessionIntentMixin:
             "total_agents": len({item.agent_pid for item in records}),
             "own_pid": self._agent_pid,
             "own_start_epoch": self._agent_start_epoch,
-            "workspace_dirty_summary": _helpers.workspace_dirty_summary_payload(
-                root=root_path
-            ),
             **intent_registry_summary(root_path),
         }
+        if include_dirty_summary:
+            # Skipped on the start path: start never surfaces this summary and it
+            # is absent from the start-replay registry digest, so computing it
+            # there is a redundant git rev-parse + status. The public
+            # list_workspace route keeps the default True to preserve contract.
+            payload["workspace_dirty_summary"] = (
+                _helpers.workspace_dirty_summary_payload(root=root_path)
+            )
         if recovery_available:
             payload["recovery_next_step"] = intent_msgs.RECOVERY_LIST_NEXT_STEP
         return payload

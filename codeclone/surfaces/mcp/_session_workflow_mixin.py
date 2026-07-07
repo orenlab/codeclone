@@ -164,7 +164,11 @@ class _MCPSessionWorkflowMixin:
         )
 
         # 1. Workspace check (lazy close inside list_workspace)
-        workspace_before = intent_session._list_workspace_intents(root=root)
+        # Dirty summary is unused on the start path (not surfaced, not in the
+        # start-replay registry digest); skip its redundant git rev-parse+status.
+        workspace_before = intent_session._list_workspace_intents(
+            root=root, include_dirty_summary=False
+        )
 
         # 2. Root-aware run resolution (not _runs.get(None) — multi-repo safe)
         record = self._latest_run_for_root(root_path)
@@ -215,7 +219,9 @@ class _MCPSessionWorkflowMixin:
 
         # Queued: no blast radius or budget
         if declare_status == IntentStatus.QUEUED.value:
-            workspace_after = intent_session._list_workspace_intents(root=root)
+            workspace_after = intent_session._list_workspace_intents(
+                root=root, include_dirty_summary=False
+            )
             queued_payload: dict[str, object] = {
                 "intent_id": intent_id,
                 "status": "queued",
@@ -241,7 +247,9 @@ class _MCPSessionWorkflowMixin:
             )
 
         # 4. Fresh workspace snapshot after declare
-        workspace_after = intent_session._list_workspace_intents(root=root)
+        workspace_after = intent_session._list_workspace_intents(
+            root=root, include_dirty_summary=False
+        )
 
         with self._state_lock:
             active_intent = self._active_intents.get(intent_id)

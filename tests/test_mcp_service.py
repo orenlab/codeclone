@@ -12430,6 +12430,24 @@ def test_mcp_list_workspace_includes_dirty_summary(
     assert "README.md" in cast("list[str]", summary["dirty_paths_sample"])
 
 
+def test_mcp_list_workspace_intents_can_skip_dirty_summary(
+    tmp_path: Path,
+) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    (tmp_path / "README.md").write_text("hello\n", encoding="utf-8")
+    service = CodeCloneMCPService(history_limit=2)
+    default_payload = service._list_workspace_intents(root=str(tmp_path))
+    assert "workspace_dirty_summary" in default_payload
+    skipped_payload = service._list_workspace_intents(
+        root=str(tmp_path), include_dirty_summary=False
+    )
+    assert "workspace_dirty_summary" not in skipped_payload
+    # Skipping the summary must not perturb the registry-identity fields the
+    # start-replay digest hashes.
+    for key in ("workspace_intents", "own_pid", "own_start_epoch"):
+        assert skipped_payload[key] == default_payload[key]
+
+
 def test_mcp_verify_rejects_identical_before_after_run(tmp_path: Path) -> None:
     service = CodeCloneMCPService(history_limit=4)
     _after, declared = _seed_patch_contract_intent(service, tmp_path, before_health=85)
