@@ -57,13 +57,13 @@ failing your build until you opt in.
 | `memory.semantic.enabled` | bool | `false` | Enable semantic search |
 | `memory.semantic.backend` | str | `lancedb` | Vector database backend |
 | `memory.semantic.embedding_model` | str | `BAAI/bge-small-en-v1.5` | fastembed embedding model identifier |
-| `memory.semantic.embedding_provider` | str | `diagnostic` | Embedding provider (`diagnostic` or `fastembed`) |
+| `memory.semantic.embedding_provider` | str | `diagnostic` | Embedding provider (`diagnostic`, `fastembed`, `local_model`, `api`) |
 | `memory.semantic.embedding_cache_dir` | str | `.codeclone/memory/fastembed` | Cached embeddings directory |
 | `memory.semantic.index_path` | str | `.codeclone/memory/semantic_index.lance` | Semantic index path |
 | `memory.semantic.dimension` | int | `256` | Embedding vector dimension (fastembed provider uses `384`) |
 | `memory.semantic.max_results` | int | `20` | Maximum search results |
 | `memory.semantic.index_audit` | bool | `true` | Audit index operations |
-| `memory.projection_rebuild_policy` | str | `off` | Rebuild strategy when stale (`off`, `enqueue_when_stale`, …) |
+| `memory.projection_rebuild_policy` | str | `off` | Rebuild strategy when stale (`off`, `enqueue_when_stale`) |
 | `memory.projection_rebuild_timeout_seconds` | int | `1800` | Worker timeout (seconds) |
 
 ## Defaults

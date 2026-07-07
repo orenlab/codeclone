@@ -44,7 +44,8 @@ sections:
 `agent_context` · `mcp_tool_matrix` · `correlated_chains` · `costly_noops` ·
 `pipeline` · `analysis_phase_cost`
 
-`detail_level` accepts `compact` or `normal`; `limit` clamps to `[1, 50]`. The
+`detail_level` accepts `compact`, `normal`, or `full` (aggregate sections
+downgrade `full` to `normal`); `limit` clamps to `[1, 100]`. The
 branded HTML cockpit remains the human-facing everything-view.
 
 For the maintainer-only skill, see `codeclone-platform-observability`; in an MCP
