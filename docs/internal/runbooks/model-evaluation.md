@@ -3,7 +3,7 @@ title: "Runbook: model evaluation"
 audience: internal
 doc_type: runbook
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -92,7 +92,7 @@ Dependency penalties apply after dimensional scoring:
 
 ## Verification
 
-1. **Unit test coverage**: All dimension scorers tested in `tests/test_health.py` with synthetic modules.
+1. **Unit test coverage**: Dimension scorers and health constants are exercised in `tests/test_report.py` and `tests/test_defaults_contract.py` (there is no dedicated `tests/test_health.py`).
 2. **Contract schema**: Verify `REPORT_SCHEMA_VERSION` matches deployed report version (current: 2.12).
 3. **Threshold alignment**: Confirm that `DEFAULT_HEALTH_THRESHOLD` (60) is intentional; lower thresholds increase sensitive findings.
 4. **Weight audit**: Ensure `HEALTH_WEIGHTS` sum to 1.0 before deployment.
@@ -105,7 +105,7 @@ uv run pre-commit run --all-files
 
 Full test suite:
 ```bash
-uv run pytest -q tests/test_health.py tests/test_report.py
+uv run pytest -q tests/test_report.py tests/test_defaults_contract.py
 ```
 
 ## Evidence index
@@ -117,5 +117,5 @@ uv run pytest -q tests/test_health.py tests/test_report.py
 | Depth penalty formula (4 points per level) | Supported | `codeclone/contracts/__init__.py` |
 | Report schema version 2.12 | Supported | `codeclone/contracts/__init__.py` |
 | Risk thresholds for complexity, cohesion, coupling | Supported | `codeclone/contracts/__init__.py` |
-| Unit test coverage for health calculation | Path only | `tests/test_health.py` (location verified; no specific test names provided in context) |
+| Unit test coverage for health calculation | Path only | `tests/test_report.py`, `tests/test_defaults_contract.py` |
 | Mermaid dependency graph | Supported | Derived from contract structure |

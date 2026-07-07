@@ -2,8 +2,8 @@
 title: "Exit codes"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -32,7 +32,7 @@ Exit codes are deterministic: the same input always produces the same code.
 
 | Code | Meaning | Cause | Action |
 |------|---------|-------|--------|
-| **0** | Success | No structural findings, no gate violations, no errors | Patch is approved |
+| **0** | Success | No gate violations and no errors. Findings may still be present — exit `0` means nothing enabled gated on them, not that the report is empty | Run succeeded; review findings if any |
 | **2** | Contract error | Untrusted/invalid baseline, invalid output configuration, incompatible versions, unreadable sources in CI/gating mode | Fix configuration or baseline before proceeding |
 | **3** | Gating failure | New clones, threshold violations, or metrics quality gate failures | Address findings or adjust thresholds before merge |
 | **5** | Internal error | Unexpected exception | Report the error with `--debug` output |

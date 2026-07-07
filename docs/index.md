@@ -2,8 +2,8 @@
 title: "CodeClone documentation"
 audience: public
 doc_type: landing
-status: draft
-source_commit: "582228177b2f57d9b9823ff1da9b6a0620f1297f"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # CodeClone
@@ -26,14 +26,19 @@ This workflow prevents silent scope creep, catches architectural violations earl
 
 ## Where to start
 
-CodeClone integrates into your development environment through MCP (Model Context Protocol). If you are using Claude Code or Claude Desktop with CodeClone enabled:
+CodeClone integrates into your development environment through MCP (Model Context Protocol) and works with Claude Code, Claude Desktop, Cursor, Codex, and VS Code:
 
 - Start with the change-control workflow when making edits to Python code or governance config
 - Use analysis commands to understand code health, architecture coupling, and test coverage
 - Reference the Engineering Memory store to review past decisions and avoid repeating mistakes
-- Consult skill documentation for specialized workflows (e.g., release audits, security reviews)
 
-*Documentation gap: specific CLI commands, configuration keys, and skill names are not available in this overview context. See the full documentation for command reference and configuration details.*
+New here? Jump to:
+
+- [Getting started](getting-started.md) — install and run your first analysis
+- [Configuration reference](reference/configuration.md) — every `[tool.codeclone]` key and default
+- [CLI reference](reference/cli.md) and [Exit codes](reference/exit-codes.md)
+- [MCP tools reference](reference/mcp-tools.md) — the 38 MCP tools
+- [Controlled change](concepts/controlled-change.md) — the intent-first edit workflow
 
 ## Key concepts
 

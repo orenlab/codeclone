@@ -3,7 +3,7 @@ title: "Agent guide: documentation changes"
 audience: internal
 doc_type: agent_guide
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -70,8 +70,8 @@ Before finishing a page:
 Run the Zensical build locally to catch broken links:
 
 ```bash
-# Building docs triggers link validation across inventory
-cd docs && make build  # or equivalent in this repo
+# Building docs triggers link validation across inventory (strict mode fails on broken links)
+uv run --with zensical==0.0.46 zensical build --clean --strict
 ```
 
 ## Evidence index

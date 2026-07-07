@@ -2,8 +2,8 @@
 title: "MCP tools reference"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## Overview
@@ -43,8 +43,8 @@ graph LR
 **`analyze_repository(root, cache_policy)`**
 Run a deterministic CodeClone analysis on the repository at `root` and register the result as the latest MCP session run. Returns metrics, findings, and artifact locations. Use as the first step in any workflow. Cache policy accepts `reuse` (default, uses cache if fresh) or `off` (ignore cache).
 
-**`analyze_changed_paths(root, paths_or_ref, cache_policy)`**
-Analyze only changed files from an explicit list or git diff reference. Faster than full analysis for PR-style review. Response includes a `next_tool` hint suggesting which inspection tool to use.
+**`analyze_changed_paths(root, changed_paths | git_diff_ref, cache_policy)`**
+Analyze only changed files from an explicit `changed_paths` list or a `git_diff_ref` revision (mutually exclusive). Faster than full analysis for PR-style review. Response includes a `next_tool` hint suggesting which inspection tool to use.
 
 ### Inspection Tools
 
@@ -54,11 +54,11 @@ Return a compact snapshot of a stored run (latest or specified by 8-char short i
 **`get_report_section(section, family, limit, ...)`**
 Retrieve one canonical report section by name. Common sections: `inventory` (file registry), `findings` (grouped by family when specified), `metrics_detail` (with pagination). Prefer this over retrieving the full report.
 
-**`get_implementation_context(root, paths_or_module, include_edges, ...)`**
-Return deterministic, bounded implementation context for explicit repo-relative paths or module:symbol qualnames from an existing run. Projects module dependencies, API surfaces, callers, blast radius, cache origin, and workspace freshness. Does not authorize edits or re-analyze.
+**`get_implementation_context(root, paths, symbols, include, ...)`**
+Return deterministic, bounded implementation context for explicit repo-relative `paths` or `module:symbol` qualnames (via `symbols`) from an existing run. Projects module dependencies, API surfaces, callers, blast radius, cache origin, and workspace freshness. Does not authorize edits or re-analyze.
 
-**`get_implementation_context_page(run_id, projection_digest, facet_page)`**
-Fetch an exact implementation-context facet page (e.g., `public_surface`, `callers`, `trajectories`) from the session-local projection artifact. Requires the digest returned by `get_implementation_context`.
+**`get_implementation_context_page(root, run_id, context_projection_digest, facet, ...)`**
+Fetch an exact implementation-context facet page (e.g., `public_surface`, `callers`, `trajectories`) from the session-local projection artifact. Requires the `context_projection_digest` returned by `get_implementation_context`.
 
 ### Change Control Tools
 

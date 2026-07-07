@@ -2,15 +2,15 @@
 title: "Run the first analysis"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Run the first analysis
 
 ## What it is
 
-CodeClone's **analysis** scans your Python repository for code structure patterns: duplicated logic (clones), complexity metrics, dependency cycles, and dead code. The analysis produces a baseline cache file and structured reports you can review on the command line, in HTML, or via JSON.
+CodeClone's **analysis** scans your Python repository for code structure patterns: duplicated logic (clones), complexity metrics, dependency cycles, and dead code. Each run produces structured reports you can review on the command line, in HTML, or via JSON, plus an incremental cache (`.codeclone/cache.json`) that speeds up re-runs. The *baseline* (`codeclone.baseline.json`) is a separate, explicitly created snapshot — see below — not the same thing as the cache.
 
 ## When to use it
 

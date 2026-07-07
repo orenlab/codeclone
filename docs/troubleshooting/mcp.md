@@ -2,8 +2,8 @@
 title: "MCP troubleshooting"
 audience: public
 doc_type: troubleshooting
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -39,7 +39,7 @@ Analysis caches within the MCP session. Calling `analyze_repository` again on th
 | Task | Tool | Notes |
 |------|------|-------|
 | Full analysis | `analyze_repository(root="/path")` | Requires absolute root; MCP rejects relative paths like '.' |
-| PR-style review | `analyze_changed_paths(root="/path", diff_ref="...")` | Analyzes only changed files; includes `next_tool` hints |
+| PR-style review | `analyze_changed_paths(root="/path", git_diff_ref="...")` | Analyzes only changed files; includes `next_tool` hints |
 | View results | `get_production_triage(run_id=...)` | Production hotspots first; preferred for noisy repos |
 | Summary | `get_run_summary(run_id=...)` | Compact snapshot of health, cache freshness, findings |
 | Explore scope | `get_implementation_context(root="/path", paths=[...])` | Bounded module, call graph, and blast-radius context |

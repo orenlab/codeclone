@@ -3,7 +3,7 @@ title: "Contract: version and constant registry"
 audience: internal
 doc_type: contract
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -21,8 +21,9 @@ Version constants bind artifact semantics to reader code. A mismatch between rea
 |----------|-------|-------|-----------|
 | `BASELINE_SCHEMA_VERSION` | `"2.1"` | baseline.json structure | Defines JSON schema for baseline artifacts. Bump only when baseline dict structure changes. |
 | `BASELINE_FINGERPRINT_VERSION` | `"1"` | fingerprint algorithm | Never change without explicit `BASELINE_FINGERPRINT_VERSION` review. Alters cloning semantics. |
-| `CACHE_VERSION` | `"2.10"` | analysis cache format | Invalidates `.codeclone/.cache/` on mismatch. Bump on cache layout or serialization change. |
+| `CACHE_VERSION` | `"2.10"` | analysis cache format | Invalidates `.codeclone/cache.json` on mismatch. Bump on cache layout or serialization change. |
 | `REPORT_SCHEMA_VERSION` | `"2.12"` | report artifact JSON | Governs report.json, report.sarif structure. Bump on schema shape change. |
+| `METRICS_BASELINE_SCHEMA_VERSION` | `"1.2"` | metrics baseline JSON | Structure of the metrics baseline artifact used for regression gating. |
 | `PATCH_TRAIL_SCHEMA_VERSION` | `"1"` | audit trail encoding | Controls patch_trail.json serialization in intent workspaces. |
 | `AUDIT_PROJECTION_VERSION` | `"audit-v1"` | audit event marshaling | Semantic versioning for audit fact format. |
 | `MEMORY_PROJECTION_VERSION` | `"memory-v1"` | engineering memory events | Semantic versioning for memory projection codec. |
@@ -186,7 +187,7 @@ The test suite **must** verify:
 
 Run verification:
 ```bash
-uv run pytest -q tests/test_contracts.py
+uv run pytest -q tests/test_defaults_contract.py
 ```
 
 If the constant registry is edited, rerun the full test suite:
@@ -205,7 +206,7 @@ uv run pytest -q
 | Evidence | Location | Status | Notes |
 |----------|----------|--------|-------|
 | Constant registry | `codeclone/contracts/__init__.py` | Source of truth | All constants defined here. |
-| Test suite | `tests/test_contracts.py` | Verification | Validates constant values and invariants. |
+| Test suite | `tests/test_defaults_contract.py` | Verification | Validates constant values and invariants. |
 | Schema versions | BASELINE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION, CACHE_VERSION | Current artifact specs | Tied to reader/writer code. |
-| Risk thresholds | COMPLEXITY_RISK_*, COUPLING_RISK_*, COHESION_RISK_* | Finding classification | Must be ordered; tested in test_contracts.py. |
+| Risk thresholds | COMPLEXITY_RISK_*, COUPLING_RISK_*, COHESION_RISK_* | Finding classification | Must be ordered; tested in test_defaults_contract.py. |
 | Health model | HEALTH_WEIGHTS, HEALTH_DEPENDENCY_* | Scoring algorithm | Weights must sum to 1.0. |

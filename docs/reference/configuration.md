@@ -2,8 +2,8 @@
 title: "Configuration reference"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Configuration reference
@@ -17,56 +17,58 @@ Configuration is stored in `pyproject.toml`:
 ```toml
 [tool.codeclone]
 baseline = "codeclone.baseline.json"
-audit_enabled = true
-fail_health = 80
+audit_enabled = true   # opt in; disabled by default
+fail_health = 60       # gate on health; disabled by default
 ```
 
-All configuration keys are optional. Unset keys use their defaults.
+All configuration keys are optional. Unset keys use their defaults. Most gates
+and the audit trail are **disabled by default** — CodeClone reports without
+failing your build until you opt in.
 
 ## Keys
 
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
 | `baseline` | str | `codeclone.baseline.json` | Path to baseline snapshot file |
-| `audit_enabled` | bool | `true` | Enable audit trail collection |
+| `audit_enabled` | bool | `false` | Enable audit trail collection |
 | `audit_path` | str | `.codeclone/db/audit.sqlite3` | SQLite database for audit events |
-| `audit_payloads` | str | `full` | Payload detail level: `full` or `summary` |
+| `audit_payloads` | str | `compact` | Payload detail level: `off`, `compact`, or `full` |
 | `audit_retention_days` | int | `30` | Retain audit records (days) |
-| `fail_cycles` | bool | `true` | Exit nonzero on dependency cycles |
-| `fail_dead_code` | bool | `true` | Exit nonzero on dead code |
-| `fail_health` | int | `80` | Exit nonzero if health < threshold (0–100) |
-| `fail_on_new` | bool | `true` | Exit nonzero on new findings |
-| `fail_on_new_metrics` | int | `true` | Exit nonzero on regression in metrics |
-| `min_loc` | int | `6` | Minimum lines of code per block |
-| `min_stmt` | int | `4` | Minimum statements per block |
-| `min_typing_coverage` | int | `99` | Minimum type annotation coverage (%) |
-| `intent_registry_backend` | str | `sqlite` | Intent storage backend |
+| `fail_cycles` | bool | `false` | Exit nonzero on dependency cycles |
+| `fail_dead_code` | bool | `false` | Exit nonzero on dead code |
+| `fail_health` | int | `-1` (disabled) | Exit nonzero if health < threshold (0–100); bare `--fail-health` applies `60` |
+| `fail_on_new` | bool | `false` | Exit nonzero on new findings |
+| `fail_on_new_metrics` | bool | `false` | Exit nonzero on regression in metrics |
+| `min_loc` | int | `10` | Minimum lines of code per block |
+| `min_stmt` | int | `6` | Minimum statements per block |
+| `min_typing_coverage` | int | `-1` (disabled) | Minimum type annotation coverage (%) |
+| `intent_registry_backend` | str | `file` | Intent storage backend (`file` or `sqlite`) |
 | `intent_registry_path` | str | `.codeclone/db/intents.sqlite3` | Intent registry database path |
-| `intent_registry_retention_days` | int | `30` | Retain intent records (days) |
-| `api_surface` | bool | `true` | Expose API surface (MCP, CLI) |
-| `golden_fixture_paths` | list | `["tests/fixtures/golden_*"]` | Paths to golden test fixtures |
+| `intent_registry_retention_days` | int | `14` | Retain intent records (days) |
+| `api_surface` | bool | `false` | Compute API surface metrics |
+| `golden_fixture_paths` | list | `[]` | Paths to golden test fixtures |
 
 ### Memory and semantic configuration
 
 | Key | Type | Default | Purpose |
 |-----|------|---------|---------|
-| `memory.ingest.contract_constants_paths` | list | `["codeclone/contracts/__init__.py"]` | Contract constant sources |
-| `memory.ingest.document_link_paths` | list | `["docs/guide/mcp/README.md", "AGENTS.md", "CLAUDE.md"]` | Documentation sources |
-| `memory.semantic.enabled` | bool | `true` | Enable semantic search |
+| `memory.ingest.contract_constants_paths` | list | `[]` | Contract constant sources |
+| `memory.ingest.document_link_paths` | list | `[]` | Documentation sources |
+| `memory.semantic.enabled` | bool | `false` | Enable semantic search |
 | `memory.semantic.backend` | str | `lancedb` | Vector database backend |
-| `memory.semantic.embedding_model` | str | `BAAI/bge-small-en-v1.5` | Embedding model identifier |
-| `memory.semantic.embedding_provider` | str | `fastembed` | Embedding provider |
+| `memory.semantic.embedding_model` | str | `BAAI/bge-small-en-v1.5` | fastembed embedding model identifier |
+| `memory.semantic.embedding_provider` | str | `diagnostic` | Embedding provider (`diagnostic` or `fastembed`) |
 | `memory.semantic.embedding_cache_dir` | str | `.codeclone/memory/fastembed` | Cached embeddings directory |
 | `memory.semantic.index_path` | str | `.codeclone/memory/semantic_index.lance` | Semantic index path |
-| `memory.semantic.dimension` | int | `384` | Embedding vector dimension |
+| `memory.semantic.dimension` | int | `256` | Embedding vector dimension (fastembed provider uses `384`) |
 | `memory.semantic.max_results` | int | `20` | Maximum search results |
 | `memory.semantic.index_audit` | bool | `true` | Audit index operations |
-| `memory.projection_rebuild_policy` | str | `enqueue_when_stale` | Rebuild strategy when stale |
+| `memory.projection_rebuild_policy` | str | `off` | Rebuild strategy when stale (`off`, `enqueue_when_stale`, …) |
 | `memory.projection_rebuild_timeout_seconds` | int | `1800` | Worker timeout (seconds) |
 
 ## Defaults
 
-CodeClone applies defaults at resolution time. Unset keys use their compiled defaults. For example, a missing `fail_health` threshold defaults to `80`.
+CodeClone applies defaults at resolution time. Unset keys use their compiled defaults. Quality gates are opt-in: an unset `fail_health` leaves the health gate **disabled** (`-1`), and passing a bare `--fail-health` (no value) applies the built-in threshold of `60`.
 
 ```mermaid
 graph TD

@@ -2,8 +2,8 @@
 title: "Memory record types"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -110,4 +110,4 @@ query_engineering_memory(root="/path/to/repo", mode="for_path", path="codeclone/
 - **Write your first record**: Use `manage_engineering_memory` with `record_type="change_rationale"` the next time you make a non-trivial edit.
 - **Query memory before editing**: Call `get_relevant_memory(scope=[...])` to see what prior agents learned in that scope.
 - **Read contradiction notes**: If `get_relevant_memory` flags a contradiction, investigate and record clarification or resolution.
-- **See also**: Engineering Memory concepts in docs/concepts/engineering-memory.md; MCP help: `manage_engineering_memory(help=True)`.
+- **See also**: [Engineering Memory concepts](../concepts/engineering-memory.md); MCP help: `help(topic="engineering_memory")`.

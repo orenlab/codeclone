@@ -2,8 +2,8 @@
 title: "Agent-safe change workflow"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Agent-safe change workflow
@@ -78,7 +78,7 @@ One active intent per MCP session. Calling `start_controlled_change` again evict
 
 ## Next steps
 
-- Read the change control reference for detailed tool semantics and response shapes
-- Review engineering memory governance to understand decision tracking and stale-note handling
-- For multi-agent coordination, consult the queue/promote workflow in intent-registry documentation
+- Read [Controlled change](../concepts/controlled-change.md) and the [MCP tools reference](../reference/mcp-tools.md) for detailed tool semantics and response shapes
+- Review [Engineering Memory](../concepts/engineering-memory.md) to understand decision tracking and stale-note handling
+- For multi-agent coordination, consult the queue/promote workflow described in [Controlled change](../concepts/controlled-change.md)
 - Use `help(topic="change_control")` within the MCP client for immediate workflow guidance

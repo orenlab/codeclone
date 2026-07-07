@@ -2,8 +2,8 @@
 title: "VS Code extension"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -57,7 +57,7 @@ graph LR
 | `Show Blast Radius` | `CodeClone: Show Blast Radius` | Editor title menu | Render concentric SVG diagram of file impact. |
 | `Copy Blast Radius Brief` | `CodeClone: Copy Blast Radius Brief` | Editor title menu | Copy structured Markdown summary to clipboard. |
 | `Next / Previous Hotspot` | Command palette | Active file | Step through findings in editor. |
-| `Mark Finding Reviewed` | Command palette | Active finding | Session-local marker (ephemeral, not persisted). |
+| `Mark Reviewed` | `CodeClone: Mark Reviewed` | Active finding | Session-local marker (ephemeral, not persisted). |
 | `Show Remediation` | Command palette | Finding detail | Full remediation text in Markdown webview. |
 | `Open Setup Help` | Overview → help icon | Setup | Launcher diagnostic guide. |
 

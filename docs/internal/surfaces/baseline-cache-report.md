@@ -3,7 +3,7 @@ title: "Baseline, cache and report identity"
 audience: internal
 doc_type: surface
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -119,10 +119,10 @@ Three tools expose baseline, cache, and report identity:
 
 **Recovery:** Recompute baseline at new fingerprint version:
 ```bash
-codeclone --analyze --baseline-write
+codeclone . --update-baseline
 ```
 
-**Prevention:** Baseline updates require explicit `--baseline-write` flag; accidental snapshot is not possible.
+**Prevention:** Baseline updates require the explicit `--update-baseline` flag; accidental snapshot is not possible.
 
 ---
 
@@ -134,8 +134,8 @@ codeclone --analyze --baseline-write
 
 **Recovery:** Cache is ephemeral and rebuilds on next full run. For immediate clarity:
 ```bash
-rm -rf .codeclone/
-codeclone --analyze
+rm -f .codeclone/cache.json
+codeclone .
 ```
 
 **Prevention:** Cache key includes analysis tool version; breaking changes to analysis logic increment CACHE_VERSION.
@@ -156,14 +156,14 @@ codeclone --analyze
 
 ### Cache corruption or corruption recovery
 
-**Condition:** Cache directory `.codeclone/` is partially deleted or truncated.
+**Condition:** Cache file `.codeclone/cache.json` is partially deleted or truncated.
 
 **Effect:** Projection load fails; `get_run_summary` and `get_report_section` fail with file-not-found.
 
 **Recovery:** Delete cache and reanalyze:
 ```bash
-rm -rf .codeclone/
-codeclone --analyze
+rm -f .codeclone/cache.json
+codeclone .
 ```
 
 **Prevention:** Cache is not persistent storage; treat `.codeclone/` as build artifact. Do not commit to version control.
@@ -178,7 +178,7 @@ codeclone --analyze
 
 **Recovery:** Update baseline with current valid state:
 ```bash
-codeclone --analyze --baseline-write
+codeclone . --update-baseline
 git add codeclone.baseline.json
 git commit -m "chore: update baseline"
 ```

@@ -57,6 +57,8 @@ nav = [
         { "JSON output contracts" = "reference/json-output.md" },
         { "Exit codes" = "reference/exit-codes.md" },
         { "Setup command reference" = "reference/setup.md" },
+        { "Inline suppressions" = "reference/suppressions.md" },
+        { "Platform observability" = "reference/observability.md" },
     ] },
     { "Troubleshooting" = [
         { "Overview" = "troubleshooting/index.md" },

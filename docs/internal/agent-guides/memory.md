@@ -3,7 +3,7 @@ title: "Agent guide: Engineering Memory changes"
 audience: internal
 doc_type: agent_guide
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -40,7 +40,7 @@ Agents cannot call `approve`, `reject`, or `archive` — those require human app
 graph LR
   A["Agent edits code"] -->|finishes, marks incident| B["manage_engineering_memory<br/>record_candidate"]
   B -->|writes| C["MemoryRecord<br/>codeclone/memory/models.py"]
-  C -->|stored in| D["memory.db<br/>codeclone/memory/schema.py"]
+  C -->|stored in| D[".codeclone/memory/engineering_memory.sqlite3<br/>codeclone/memory/schema.py"]
   D -->|projected by| E["memory-v1 projection<br/>codeclone/memory/projections/"]
   E -->|indexed for retrieval| F["Semantic index<br/>codeclone/memory/semantic/"]
   F -->|served to agent| G["get_relevant_memory<br/>ranked results"]

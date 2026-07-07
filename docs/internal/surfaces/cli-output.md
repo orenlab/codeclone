@@ -3,13 +3,13 @@ title: "CLI output contracts"
 audience: internal
 doc_type: surface
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
 ## Purpose
 
-This document specifies the output contracts for CodeClone's command-line interface (CLI). It defines what the user sees on stdout, stderr, and in report files across all CLI entrypoints (bare analysis, `setup`, `memory`, `observability`), how output is routed based on flags, and failure modes when output conditions are violated.
+This document specifies the output contracts for CodeClone's command-line interface (CLI). It defines what the user sees on stdout, stderr, and in report files across all CLI entrypoints (bare analysis, `setup`, `analytics`, `memory`, `observability`), how output is routed based on flags, and failure modes when output conditions are violated.
 
 ## Contracts
 
@@ -24,11 +24,13 @@ This document specifies the output contracts for CodeClone's command-line interf
 
 ### Top-level subcommands
 
-CodeClone has exactly four top-level subcommands:
+CodeClone has exactly four top-level subcommands (dispatched in `codeclone/surfaces/cli/workflow.py`):
 - `codeclone setup [action]` — readiness, configuration planning, and initialization
+- `codeclone analytics [subcommand]` — corpus analytics (snapshot, embed, cluster, build, profiles, …)
 - `codeclone memory [subcommand]` — engineering memory lifecycle (init, status, search, approval, trajectories, etc.)
 - `codeclone observability [action]` — MCP and workspace observability (diagnostics, tracing, span export)
-- Bare invocation: `codeclone [root]` — runs analysis (no "analyze" or "check" subcommand)
+
+Plus the bare invocation: `codeclone [root]` — runs analysis (there is no "analyze" or "check" subcommand).
 
 ### Report output routing
 

@@ -2,15 +2,51 @@
 title: "Claude integration"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
 
-CodeClone integrates with Claude (via MCP) to provide deterministic change control and structural governance during AI-assisted development. The MCP server exposes 21 tools across two primary surfaces: **MCP workflow** (analysis, findings, reporting) and **change control** (intent declaration, blast radius, verification).
+CodeClone integrates with Claude (via MCP) to provide deterministic change control and structural governance during AI-assisted development. The MCP server exposes 38 tools spanning analysis, inspection, triage, change control, engineering memory, and audit/receipts. See the [MCP tools reference](../reference/mcp-tools.md) for the full catalog.
 
 When Claude edits your code, CodeClone's MCP tools track changes against a declared scope, compute impact zones (blast radius), and verify that edits conform to your repository's structural contracts.
+
+## Install
+
+CodeClone ships a **Claude Code plugin** that wires up the MCP server and bundles change-control skills.
+
+1. Install the CodeClone MCP runtime:
+
+   ```bash
+   uv tool install --prerelease allow "codeclone[mcp]"
+   ```
+
+2. Add the marketplace and install the plugin from Claude Code:
+
+   ```text
+   /plugin marketplace add orenlab/codeclone-claude-code
+   /plugin install codeclone
+   ```
+
+The plugin launches the server with `python3 ${CLAUDE_PLUGIN_ROOT}/scripts/launch_mcp.py` (transport `stdio`). No manual `.mcp.json` editing is required.
+
+## Bundled skills
+
+The plugin registers ten skills that route to the right CodeClone workflow:
+
+| Skill | Purpose |
+|-------|---------|
+| `codeclone-change-control` | Mandatory edit gate: `start`/`finish` controlled change |
+| `codeclone-review` | Structural review of a repository or changed files |
+| `codeclone-production-triage` | Fast production-first triage and next action |
+| `codeclone-architecture-triage` | Rank demonstrated architectural problems |
+| `codeclone-blast-radius` | Inspect dependents and risk before editing |
+| `codeclone-implementation-context` | Bound the implementation frontier before broad search |
+| `codeclone-hotspots` | Quick health / top-risk snapshot |
+| `codeclone-engineering-memory` | Retrieve and preserve evidence-linked memory |
+| `codeclone-setup` | Probe and configure repository readiness |
+| `codeclone-platform-observability` | Maintainer-only runtime diagnostics |
 
 ## When to use it
 

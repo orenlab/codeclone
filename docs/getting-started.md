@@ -2,8 +2,8 @@
 title: "Getting started"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Getting started
@@ -81,13 +81,16 @@ The report shows:
 
 ## Start a controlled change
 
-The change-control workflow ensures your edits don't introduce regressions. Before editing, declare your intent:
+There are two distinct ways to guard edits, and it's worth keeping them separate:
+
+- **CLI patch verification** (`--patch-verify`) — a one-shot check. It runs analysis, compares your working tree against the trusted baseline budget, reports baseline-relative regressions and gate status, then exits. It does **not** declare an intent or gate whether you may edit.
+- **MCP controlled change** (`start_controlled_change` / `finish_controlled_change`) — the intent-first workflow used by agents and IDE integrations. It declares scope, gates edit permission, and verifies the patch at finish.
+
+For a quick local check of the current working tree:
 
 ```bash
 codeclone --patch-verify
 ```
-
-This baseline-aware mode verifies your current working tree against the trusted baseline.
 
 ```mermaid
 graph LR
@@ -104,18 +107,19 @@ graph LR
     style F fill:#c8e6c9
 ```
 
-The controlled change workflow ensures:
+The MCP controlled-change workflow ensures:
 1. Your changes stay within declared scope
 2. No structural regressions are introduced
 3. Quality gates pass
 4. All changes are audited
 
-When using CodeClone's MCP service (for Claude Code integration), the workflow is:
+When using CodeClone's MCP service (for Claude Code, Cursor, or Codex integration), the workflow is:
 
-1. `start_controlled_change` — declare scope, get intent ID
-2. Edit your code
-3. Run analysis on modified code
-4. `finish_controlled_change` — verify and clear intent
+1. `analyze_repository` — establish a baseline run
+2. `start_controlled_change` — declare scope, get intent ID, gate edit permission
+3. Edit your code within scope
+4. `analyze_repository` again — after-run for structural verification
+5. `finish_controlled_change` — verify, produce a receipt, and clear the intent
 
 ## Verify and finish
 

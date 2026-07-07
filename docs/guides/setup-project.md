@@ -2,20 +2,18 @@
 title: "Set up a project"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
 
-`codeclone setup apply` mutates your project filesystem to initialize CodeClone governance. It:
+`codeclone setup apply` initializes CodeClone governance configuration. When you confirm, it writes exactly two files:
 
-- Installs a baseline snapshot of your code's structural metrics
-- Creates governance configuration files
-- Sets up intent tracking and audit logging
-- Prepares the project for controlled change workflows
+- Merges the `[tool.codeclone]` section into your `pyproject.toml`
+- Appends CodeClone cache/state paths to `.gitignore`
 
-Setup is **read-only** until you explicitly confirm changes.
+It does **not** create a baseline snapshot, audit database, or intent registry — those artifacts are produced later, on demand, by analysis (`codeclone . --update-baseline`) and controlled-change runs. `setup status`, `setup doctor`, and `setup plan` are read-only; only `setup apply` writes, and only after explicit confirmation.
 
 ## When to use it
 
@@ -35,7 +33,7 @@ sequenceDiagram
   User->>setup plan: codeclone setup plan
   User->>preview: Review output
   User->>setup apply: codeclone setup apply --yes --plan-id <id>
-  setup apply->>filesystem: Write baseline, config, audit DB
+  setup apply->>filesystem: Merge [tool.codeclone] into pyproject.toml + append .gitignore
   setup apply-->>User: status=accepted
 ```
 
@@ -69,7 +67,7 @@ sequenceDiagram
 
 After `setup apply` succeeds:
 
-1. Commit the generated baseline and configuration
-2. Review the audit log at `.codeclone/db/audit.sqlite3` to verify what was written
+1. Review and commit the updated `pyproject.toml` and `.gitignore`
+2. Generate your baseline: `codeclone . --update-baseline`, then commit `codeclone.baseline.json`
 3. Run `codeclone .` to confirm the baseline is correct
 4. Begin using controlled-change workflows for code modifications

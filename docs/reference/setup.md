@@ -2,15 +2,15 @@
 title: "Setup command reference"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
 
 `codeclone setup` is a readiness controller that probes your repository for CodeClone installation, configuration, and runtime dependencies. It generates a deterministic plan of recommended actions and applies them when confirmed.
 
-The setup commands do not modify your code. They configure CodeClone's own state: baseline, cache location, audit trail, and pyproject.toml tooling sections.
+The setup commands do not modify your code. `setup apply` writes only two files: it merges the `[tool.codeclone]` section into your `pyproject.toml` and appends CodeClone cache paths to `.gitignore`. It does not create a baseline, cache, or audit/intent database — those artifacts are produced later by analysis and controlled-change runs.
 
 ## When to use it
 
@@ -50,7 +50,7 @@ codeclone setup apply --yes --root /path/to/repo
 
 | Command | Purpose | Output | Notes |
 |---------|---------|--------|-------|
-| `status` | Probe readiness across five maturity axes | Table of capabilities, readiness states | Default if no command given; read-only |
+| `status` | Probe readiness across 14 capabilities (4 groups), each scored on installation/configuration/runtime axes | Table of capabilities, readiness states | Default if no command given; read-only |
 | `doctor` | Detailed diagnostics for each capability | Status table + per-capability evidence panels | Verbose; for troubleshooting |
 | `plan` | Compute configuration actions without writing | Actions list with deterministic plan ID | Preview mode; no files changed |
 | `apply` | Execute ready actions from current plan | Applied actions and result status | Requires confirmation (TTY) or `--yes` |

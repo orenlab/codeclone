@@ -2,8 +2,8 @@
 title: "Installation troubleshooting"
 audience: public
 doc_type: troubleshooting
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Installation troubleshooting
@@ -53,9 +53,9 @@ Verify installation with:
 codeclone --version
 ```
 
-For MCP server usage, ensure the server is discoverable:
+For MCP server usage, confirm the bundled `codeclone-mcp` entry point is on your PATH:
 ```bash
-codeclone mcp list
+codeclone-mcp --help
 ```
 
 ## Common mistakes
@@ -93,10 +93,10 @@ uv tool install --prerelease allow codeclone  # Explicitly allow prerelease
 
 **Check:**
 ```bash
-codeclone mcp list  # Lists available tools
+codeclone-mcp --help  # Confirms the bundled MCP server binary is installed
 ```
 
-If nothing appears, ensure CodeClone was installed successfully and your PATH is set correctly.
+If the command is not found, ensure CodeClone was installed successfully and your PATH is set correctly. `codeclone-mcp` starts the server (default transport `stdio`); MCP clients launch it for you — you do not run it manually to "list tools".
 
 ### Mistake 4: Wrong directory for CLI invocation
 

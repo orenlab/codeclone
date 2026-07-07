@@ -2,8 +2,8 @@
 title: "Engineering Memory workflow"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -52,6 +52,6 @@ graph LR
 
 ## Next steps
 
-- Read the concepts guide: "docs/concepts/engineering-memory.md"
+- Read the Engineering Memory concepts guide: `docs/concepts/engineering-memory.md`
 - Review tests: `tests/test_cli_memory_*.py` for CLI workflow, `tests/test_mcp_memory_*.py` for MCP integration
 - For detailed mode reference: `query_engineering_memory(mode=...)` help in codeclone CLI

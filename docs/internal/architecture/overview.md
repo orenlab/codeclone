@@ -3,7 +3,7 @@ title: "Internal architecture overview"
 audience: internal
 doc_type: architecture
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -39,7 +39,7 @@ graph TB
     end
 
     subgraph "MCP Surface"
-        MCP[18 tools<br/>read-only + intent coordination]
+        MCP[38 tools<br/>read-only + intent coordination]
     end
 
     A --> B
@@ -69,12 +69,12 @@ The four core tiers:
 | Surface | Packages | Contract | Tests |
 |---------|----------|----------|-------|
 | **Change control** | `codeclone.budget`, `codeclone.controller_insights`, `codeclone.surfaces.mcp`, `codeclone.workspace_intent` | `start_controlled_change`, `finish_controlled_change`, `manage_change_intent` | `test_mcp_service.py`, `test_controller_insights.py` |
-| **MCP workflow** | `codeclone.surfaces.mcp` | 18 tools: analyze, help, context, memory, artifact retrieval | `test_mcp_*.py` (24 test files) |
-| **Engineering Memory** | `codeclone.memory` | `get_relevant_memory`, `manage_engineering_memory`, commit-anchored semantics | `test_cli_memory_*.py`, `test_memory_*.py` (34 test files) |
+| **MCP workflow** | `codeclone.surfaces.mcp` | 38 tools: analyze, help, context, memory, artifact retrieval | `test_mcp_*.py` |
+| **Engineering Memory** | `codeclone.memory` | `get_relevant_memory`, `manage_engineering_memory`, commit-anchored semantics | `test_cli_memory_*.py`, `test_memory_*.py` |
 | **Baseline, cache, report** | `codeclone.baseline`, `codeclone.cache`, `codeclone.report` | Immutable fingerprints, deterministic ordering, version pinning | `test_baseline.py`, `test_cache.py`, `test_analytics_reporting.py` |
 
-**MCP tools (18):**
-analyze_repository, analyze_changed_paths, help, get_run_summary, get_report_section, get_implementation_context, get_implementation_context_page, start_controlled_change, finish_controlled_change, get_relevant_memory, manage_engineering_memory, manage_change_intent, list_findings, check_patch_contract, get_production_triage, clear_session_runs, compare_runs, create_review_receipt, generate_pr_summary, get_blast_artifact.
+**MCP tools (38):**
+analyze_changed_paths, analyze_repository, check_clones, check_cohesion, check_complexity, check_coupling, check_dead_code, check_patch_contract, clear_session_runs, compare_runs, create_review_receipt, evaluate_gates, finish_controlled_change, generate_pr_summary, get_blast_artifact, get_blast_radius, get_finding, get_implementation_context, get_implementation_context_page, get_memory_projection_page, get_patch_trail, get_production_triage, get_relevant_memory, get_remediation, get_report_section, get_review_receipt, get_run_summary, help, list_findings, list_hotspots, list_reviewed_findings, manage_change_intent, manage_engineering_memory, mark_finding_reviewed, query_engineering_memory, query_platform_observability, start_controlled_change, validate_review_claims. (Source of truth: `tests/fixtures/contract_snapshots/mcp_tool_schemas.json`.)
 
 ## Data flows
 
@@ -85,8 +85,8 @@ analyze_repository, analyze_changed_paths, help, get_run_summary, get_report_sec
 3. **Post-edit**: `analyze_repository` (after-run; required for Python structural changes) → `manage_engineering_memory` (record incidents/decisions if needed) → `finish_controlled_change` (scope check, patch contract verification, intent clearance)
 
 **Critical invariants:**
-- One active intent per session; new `start` evicts the prior intent without recovery.
-- Session-local change intents are not persisted to `manage_change_intent` registry; intent eviction on restart is not recoverable.
+- One active intent per MCP session; starting a new `start_controlled_change` before finishing evicts the prior in-session intent.
+- Change intents **are** persisted to the intent registry (default `file` backend, `.codeclone/db/intents.sqlite3` for the `sqlite` backend). `manage_change_intent(action="recover")` can recover an intent whose owning process died; in-memory analysis runs, by contrast, are session-local and lost on server restart.
 - `finish_controlled_change` reconciles pre-edit dirty snapshot against post-edit git tree and after-run evidence. Missing evidence → `unverified`. Scope violation → `violated`. Foreign concurrent edits → `foreign_dirty_overlap`.
 
 ### Memory flow

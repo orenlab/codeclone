@@ -3,7 +3,7 @@ title: "Contract: CLI stdout/stderr and color"
 audience: internal
 doc_type: contract
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -52,9 +52,9 @@ Color is stripped when:
 - Complete: all keys present even if null/empty
 - Deterministic field order per the schema definition
 
-Field order (abbreviated):
+Top-level key order (from `codeclone/report/document/builder.py`):
 ```
-report_version, timestamp, project, metadata, summary, findings[], gating[], metrics, coverage, […]
+report_schema_version, meta, inventory, findings, metrics, derived, integrity
 ```
 
 Exit with code 2 if JSON writing fails (IO error, permission denied, path invalid, disk full).
@@ -130,11 +130,10 @@ graph LR
 ```
 
 **Key modules**:
-- `codeclone.surfaces.cli.main` — entrypoint, OutputConfig construction, exit code dispatch
+- `codeclone.surfaces.cli.workflow` — entrypoint (`main`), argument dispatch, exit code handling
 - `codeclone.surfaces.cli.ui.progress_presenter` — progress frames, mascot, live rendering
-- `codeclone.surfaces.cli.ui.formatters` — ANSI color application, summary text
-- `codeclone.surfaces.cli.reports.*` — JSON/HTML/MD/SARIF/text renderers
-- `codeclone.surfaces.cli.color_scheme` — palette, TTY detection, color enable/disable
+- `codeclone.surfaces.cli.summary` / `codeclone.surfaces.cli.console` — summary text and console/TTY handling
+- `codeclone.surfaces.cli.reports_output` — orchestrates report writing; renderers live in `codeclone.report.renderers.*` (json/markdown/sarif/text) and `codeclone.report.html`
 
 **Critical invariants**:
 1. Color codes are applied via a single `ColorScheme` instance; no raw ANSI literals in output paths.

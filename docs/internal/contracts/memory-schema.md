@@ -3,7 +3,7 @@ title: "Contract: memory schema and quarantine"
 audience: internal
 doc_type: contract
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -16,7 +16,7 @@ Engineering Memory SQLite storage enforces durability, provenance, and staleness
 | Contract | Enforcement | Risk |
 |----------|-------------|------|
 | **Synchronous=FULL** | Memory store fsync's every commit; intent/audit stores use NORMAL (loss-tolerable ephemeral state). Confusing the two databases voids durability guarantees. | Unclean process exit + power loss = silent record loss if write path uses wrong database handle. |
-| **Commit-anchored provenance** | `MemoryRecord.anchor_commit_sha` must be populated at write time; staleness drifts vs. anchor, never vs. disk inventory. Staleness rules: if linked subject file deleted and `subject_path` is Python (`.py`), mark stale with `linked_path_missing`; non-Python subjects ignored (docs, config files not in report inventory). | Subject inventory is incomplete (report only lists `.py` files). Applying `linked_path_missing` to `.md` or `.toml` subjects causes false stale markers and data loss under vacuum. |
+| **Commit-anchored provenance** | `MemoryRecord.created_at_commit` is populated at write time (and `verified_at_commit` on re-verification); staleness drifts vs. these commit anchors, never vs. disk inventory. Staleness rules: if linked subject file deleted and `subject_path` is Python (`.py`), mark stale with `linked_path_missing`; non-Python subjects ignored (docs, config files not in report inventory). | Subject inventory is incomplete (report only lists `.py` files). Applying `linked_path_missing` to `.md` or `.toml` subjects causes false stale markers and data loss under vacuum. |
 | **No inventory-anchored vacuum** | Vacuum rules must never delete records based on subject absence from disk inventory alone. Deletion requires explicit evidence: stale markers, superseded trajectories, or archival intent. | Vacuum deletes valid memory for subjects outside canonical report scope (README, config files, vendor packages) → knowledge loss. |
 | **Schema migration gates** | New column additions use `_add_column_if_missing()`; schema version bumps co-change version constant in tests and version docs. Missing the test bump masks migration failures in CI. | Inconsistent version state across tests, code, and docs; silent failures in migration. |
 | **Embedding-vector coercion** | Guard on `numbers.Real` (excluding `bool`), never `isinstance(str \| int \| float)`. Real fastembed outputs numpy.float32 scalars, not Python float subclasses. | Coercion guards fail on numpy types; embeddings silently dropped or truncated. |
@@ -25,7 +25,7 @@ Engineering Memory SQLite storage enforces durability, provenance, and staleness
 
 ```mermaid
 graph LR
-    A[MemoryRecord write<br/>at scope X] --> B["anchor_commit_sha<br/>populated"]
+    A[MemoryRecord write<br/>at scope X] --> B["created_at_commit<br/>populated"]
     B --> C["MemoryStore<br/>synchronous=FULL"]
     C --> D["Fsync'd to disk"]
     E[Staleness engine<br/>drift vs anchor] --> F{"Subject .py?"}

@@ -3,7 +3,7 @@ title: "Audit events and receipts"
 audience: internal
 doc_type: surface
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -43,7 +43,7 @@ graph LR
   A["start_controlled_change"] -->|emit| B["SqliteAuditWriter<br/>_session_audit_artifact_mixin"]
   C["analyze_repository"] -->|emit| B
   D["finish_controlled_change"] -->|emit| B
-  B -->|store| E[".codeclone/audit/<br/>events/*.jsonl"]
+  B -->|store| E[".codeclone/db/<br/>audit.sqlite3"]
   E -->|read| F["get_blast_artifact<br/>get_patch_trail<br/>get_review_receipt"]
   D -->|propose| G["Engineering Memory<br/>record_candidate"]
   H["create_review_receipt"] -->|read| B
@@ -86,18 +86,20 @@ graph LR
 
 **Manual verification:**
 
+There is no `codeclone audit` CLI subcommand. The audit trail is a SQLite database at `.codeclone/db/audit.sqlite3`. Inspect it through the MCP tools that read the audit store, or via the CLI display flags:
+
 ```bash
-# Inspect audit records
-uv run codeclone audit list --root <repo>
+# CLI: surface the controller audit trail inline (human / JSON)
+uv run codeclone . --audit
+uv run codeclone . --audit-json
+```
 
-# Fetch a blast artifact by run_id
-uv run codeclone audit get-blast-artifact --run-id <id> --output json
-
-# Fetch a patch trail by digest
-uv run codeclone audit get-patch-trail --digest <sha256> --output markdown
-
-# Generate a review receipt
-uv run codeclone audit create-receipt --intent-id <id> --reviewed-findings <findings.json>
+```text
+# MCP tools (read the audit store):
+get_blast_artifact(run_id=..., blast_artifact_id=...)
+get_patch_trail(run_id=..., patch_trail_digest=...)
+get_review_receipt(run_id=..., receipt_digest=...)
+create_review_receipt(intent_id=..., run_id=...)
 ```
 
 **Contract validation:**

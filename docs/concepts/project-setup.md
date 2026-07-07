@@ -2,19 +2,19 @@
 title: "Project setup"
 audience: public
 doc_type: concept
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
 
-Project setup is the process of preparing a repository for CodeClone governance. The `setup` command discovers project structure, evaluates readiness across nine dimensions (R1–R9), and plans a small set of filesystem mutations that initialize CodeClone's workspace and audit trail.
+Project setup is the process of preparing a repository for CodeClone governance. The `setup` command discovers project structure, evaluates readiness across **14 capabilities** (grouped into core analysis, governed agent workflows, project knowledge, and team & release), each scored on installation, configuration, and runtime axes, and plans a small set of filesystem changes: it merges the `[tool.codeclone]` section into `pyproject.toml` and appends CodeClone cache paths to `.gitignore`.
 
 Setup is read-only until a plan is explicitly applied and confirmed — discovering and planning never write to disk on their own.
 
 ## Why it exists
 
-Change control, Engineering Memory, and the audit trail all need some on-disk state to work: a workspace intent registry, an audit database, governance config in `pyproject.toml`. Creating that by hand is error-prone and easy to get subtly wrong (wrong gitignore entry, stale config key). Setup exists to make that bootstrap a single, safe, reviewable operation — plan first, then apply — rather than a set of manual file edits.
+Change control, Engineering Memory, and the audit trail all need governance config in `pyproject.toml` (and appropriate `.gitignore` entries) to be wired up correctly. Their databases — the workspace intent registry, the audit trail, the memory store — are created lazily at runtime the first time each feature runs; setup does **not** create them. Writing the config by hand is error-prone and easy to get subtly wrong (wrong gitignore entry, stale config key). Setup exists to make that bootstrap a single, safe, reviewable operation — plan first, then apply — rather than a set of manual file edits.
 
 ## How it fits together
 
@@ -23,17 +23,17 @@ Setup unlocks the rest of CodeClone's governance surface; nothing else requires 
 | Capability | Requires setup? |
 |------------|-------------------|
 | Plain `codeclone .` analysis | No |
-| [Controlled change](controlled-change.md) intent tracking | Yes — needs the workspace/audit state setup creates |
-| [Engineering Memory](engineering-memory.md) | Yes — needs its backend initialized |
+| [Controlled change](controlled-change.md) intent tracking | Yes — needs the governance config setup writes (the intent/audit databases are created on first use) |
+| [Engineering Memory](engineering-memory.md) | Yes — needs its config wired up (the store is initialized on first use) |
 | CI gating on a baseline | No — a baseline can be created without running setup |
 
 ```mermaid
 graph LR
-    A["setup plan"] --> B["R1-R9 readiness"]
+    A["setup plan"] --> B["capability readiness (14 capabilities)"]
     B -->|pass| C["setup apply"]
     B -->|fail| D["fix environment/config"]
     D --> A
-    C --> E[".codeclone/ workspace initialized"]
+    C --> E["pyproject.toml + .gitignore updated"]
     E --> F["Controlled change + Engineering Memory available"]
 ```
 

@@ -2,8 +2,8 @@
 title: "JSON output contracts"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -42,13 +42,14 @@ Run analysis and generate JSON in one step:
 codeclone . --json [FILE]
 ```
 
-If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is valid JSON and contains:
-- Top-level keys: `version`, `repo_root`, `summary`, `findings`, `metrics`, `dependencies`
-- Schema version contract in `version` (matches `REPORT_SCHEMA_VERSION`)
-- `summary` includes health score, total clones, new clones relative to baseline
-- `findings[]` list with type, location, risk, baseline novelty, suggestion
-- `metrics` object with complexity, coupling, cohesion per scope
-- `dependencies` graph for cycle detection and depth analysis
+If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is valid JSON and contains these top-level keys:
+- `report_schema_version` — schema version string (matches `REPORT_SCHEMA_VERSION`, currently `2.12`)
+- `meta` — run metadata: `codeclone_version`, `project_name`, `scan_root`, `python_version`, `analysis_mode`, `analysis_thresholds`, `analysis_profile`, `baseline`, `cache`, `runtime`
+- `inventory` — scanned inventory: `files`, `code` counts, and `file_registry`
+- `findings` — object with `summary` and `groups[]`; each group carries type, locations, risk, and `novelty` (`new` / `known`)
+- `metrics` — object with `summary` and per-family `families` (complexity, coupling, cohesion, …)
+- `derived` — `suggestions`, `overview`, `hotlists`, `module_map`, `review_queue`
+- `integrity` — deterministic `canonicalization` and content `digest`
 
 ## Key commands
 
@@ -56,7 +57,7 @@ If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is 
 |---------|--------|--------|
 | `codeclone . --json` | Analyze and write to default path | `.codeclone/report.json` |
 | `codeclone . --json FILE` | Analyze and write to custom path | `FILE` |
-| `codeclone . --json --baseline FILE` | Compare against baseline | JSON with `is_new`, `baseline_novelty` per finding |
+| `codeclone . --json --baseline FILE` | Compare against baseline | JSON with `novelty` (`new` / `known`) per finding group |
 | `codeclone . --json --ci` | Preset for CI (quiet, color off) | `.codeclone/report.json` |
 | `codeclone . --json --fail-on-new --ci` | Gate: fail if any new findings | Exit code 3 if violated |
 
@@ -64,9 +65,9 @@ If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is 
 
 1. **Assuming JSON is human-readable**: JSON is not designed for grep or manual review. Pipe to `jq` for filtering, or use `--md`/`--text` for human audiences.
 
-2. **Ignoring schema version**: Always validate `report.version` matches your parser's supported schema. Breaking changes in CodeClone 3.0+ may shift field names.
+2. **Ignoring schema version**: Always validate `report_schema_version` matches your parser's supported schema. Breaking changes in a future major release may shift field names.
 
-3. **Not comparing against baseline**: Novelty (`is_new`, `baseline_novelty`) requires `--baseline FILE`. Without it, all findings appear novel. Always ground CI gates in baseline-aware decisions.
+3. **Not comparing against baseline**: The `novelty` field requires `--baseline FILE`. Without it, all findings appear novel. Always ground CI gates in baseline-aware decisions.
 
 4. **Parsing incomplete JSON during analysis**: JSON is written atomically after analysis completes. Do not attempt to parse `.codeclone/report.json` while `codeclone` is still running.
 
@@ -74,6 +75,6 @@ If FILE is omitted, CodeClone writes to `.codeclone/report.json`. The report is 
 
 ## Next steps
 
-- **Integrate with CI**: Read `docs/guides/development.md` for baseline and gate setup in GitHub Actions, GitLab CI, or other platforms.
-- **Script analysis**: Use `jq` to extract and filter findings: `jq '.findings[] | select(.risk == "high") | .location' report.json`
+- **Integrate with CI**: Read [Development guide](../guides/development.md) for baseline and gate setup in GitHub Actions, GitLab CI, or other platforms.
+- **Script analysis**: Use `jq` to extract and filter finding groups: `jq '.findings.groups[] | select(.novelty == "new")' report.json`
 - **Audit trail**: Combine JSON output with `--audit-json` to inspect the controller workspace history and decision logs.

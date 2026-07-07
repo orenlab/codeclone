@@ -2,8 +2,8 @@
 title: "Report reference"
 audience: public
 doc_type: reference
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Report reference
@@ -56,14 +56,14 @@ All flags are bare command options: `codeclone . --json my-report.json` (not a "
 
 **Generate JSON for CI:**
 ```bash
-codeclone . --json report.json && jq '.metrics.health_score' report.json
+codeclone . --json report.json && jq '.metrics.summary.health.score' report.json
 ```
 
 **Compare against baseline:**
 ```bash
 codeclone . --json current.json
 # Baseline is `codeclone.baseline.json` (auto-loaded)
-# Integrity report includes baseline_fresh, fingerprint_matches in JSON
+# meta.baseline records loaded/status/fingerprint_version; meta.cache records freshness
 ```
 
 **Export for IDE:**
@@ -74,7 +74,7 @@ codeclone . --sarif findings.sarif
 
 ## Common mistakes
 
-- **Forgetting the filepath**: `codeclone . --json` outputs to stdout (not stored). Always pass a filepath.
+- **Assuming `--json` prints to stdout**: `codeclone . --json` (no path) writes to the default file `.codeclone/report.json`; it does not stream to stdout. Pass an explicit path to override the location.
 - **Stale baseline**: Moving `codeclone.baseline.json` or regenerating without review breaks integrity. Baseline is a contract—commit it.
 - **Ignoring health weights**: Health score balances 7 dimensions (clones 25%, complexity 20%, cohesion 15%, coupling 10%, coverage 10%, dead code 10%, dependencies 10%). A single high spike does not drive score alone.
 - **Cache staleness**: If cache is stale (reported in integrity), re-run analysis. Cache is not refreshed automatically.

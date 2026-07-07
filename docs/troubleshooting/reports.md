@@ -2,8 +2,8 @@
 title: "Report troubleshooting"
 audience: public
 doc_type: troubleshooting
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
@@ -33,7 +33,7 @@ graph LR
 Analysis produces three artifacts:
 1. **Report** (`.codeclone/report.<ext>`) — findings, metrics, integrity data
 2. **Baseline** (`codeclone.baseline.json`) — snapshot for regression detection
-3. **Cache** (`.codeclone/*.cache`) — incremental state to speed up re-runs
+3. **Cache** (`.codeclone/cache.json`) — incremental state to speed up re-runs
 
 ## Key commands
 
@@ -63,7 +63,7 @@ Each flag defaults to `.codeclone/report.<ext>` unless you provide a path argume
 
 **Mistake 4:** Forgetting report format applies to output only.
 - **Reality:** Analysis is the same; format (JSON, HTML, text) doesn't change what findings you get.
-- **Check:** If findings differ between formats, the cache is stale—re-run without `--cache`.
+- **Check:** If findings differ between formats, the cache may be stale—delete `.codeclone/cache.json` and re-run for a clean analysis.
 
 ## Next steps
 

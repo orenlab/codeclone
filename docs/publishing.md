@@ -2,8 +2,8 @@
 title: "Publishing the Docs Site"
 audience: public
 doc_type: runbook
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 <!-- doc-scope: DOCS-SITE BUILD AND PUBLISHING only.
@@ -23,7 +23,8 @@ remains the current repository code and CI workflow.
 
 !!! note "Scope"
     This page covers docs-site build and publishing mechanics. Public behavior
-    contracts still live in the book chapters and in the repository code.
+    contracts live in the `reference/` and `concepts/` pages and in the
+    repository code (the legacy `book/` tree has been removed).
     For integration distribution (storefront sync), see
     [Releasing & storefront sync](releasing.md).
 

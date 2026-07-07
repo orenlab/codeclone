@@ -2,13 +2,13 @@
 title: "Codex integration"
 audience: public
 doc_type: guide
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 ## What it is
 
-Codex is CodeClone's MCP (Model Context Protocol) integration layer for Claude agents. It provides deterministic workflow tools—`start_controlled_change`, `finish_controlled_change`, and supporting utilities—that enable AI-assisted code changes with structural verification and scope governance.
+CodeClone integrates with **OpenAI Codex** (the Codex CLI/agent) via MCP (Model Context Protocol). It provides deterministic workflow tools—`start_controlled_change`, `finish_controlled_change`, and supporting utilities—that enable AI-assisted code changes with structural verification and scope governance. The Codex plugin launches the server with `python3 ./scripts/launch_mcp`.
 
 The integration works alongside CodeClone's baseline analysis (`analyze_repository`) to deliver:
 - Pre-edit intent declaration with blast-radius budgets
@@ -22,7 +22,7 @@ Use Codex integration when:
 
 | Scenario | Solution |
 |----------|----------|
-| Claude agent is editing your repository | Call `start_controlled_change` before edits; `finish_controlled_change` after |
+| A Codex agent is editing your repository | Call `start_controlled_change` before edits; `finish_controlled_change` after |
 | Multiple agents work on overlapping scopes | Use `manage_change_intent` to queue and promote intents |
 | You need proof of scope boundaries | `get_blast_radius` and `get_patch_trail` provide forensic trails |
 | Verifying patch health before merge | `check_patch_contract` validates structural and governance rules |
@@ -60,7 +60,7 @@ result = analyze_repository(root="/abs/path/to/repo")
 # Step 2: Declare change intent with scope
 response = start_controlled_change(
     root="/abs/path/to/repo",
-    scope={"paths": ["src/module.py", "tests/"]},
+    scope={"allowed_files": ["src/module.py", "tests/"]},
     intent="Fix concurrency bug in worker queue"
 )
 
@@ -78,12 +78,11 @@ elif response.status == "queued":
 ### During edit: Inspect blast radius and context
 
 ```python
-# Query structural dependents before editing
+# Query structural dependents before editing (uses the latest run)
 blast = get_blast_radius(
-    root="/abs/path/to/repo",
-    changed_files=["src/module.py"]
+    files=["src/module.py"]
 )
-# Review blast.do_not_touch_paths and blast.direct_dependents
+# Review blast.do_not_touch and blast.direct_dependents
 
 # Get implementation context for precise code facts
 context = get_implementation_context(
@@ -122,8 +121,7 @@ elif finish_response.status == "violated":
 # Generate a deterministic review receipt
 receipt = create_review_receipt(
     intent_id="intent-<id>",
-    run_id="<before-run-id>",
-    decision="approved"
+    run_id="<before-run-id>"
 )
 
 # Fetch durably stored patch trail

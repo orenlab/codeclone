@@ -3,7 +3,7 @@ title: "IDE integrations"
 audience: internal
 doc_type: surface
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -33,7 +33,7 @@ graph LR
     A["VS Code Extension<br/>vscode-codeclone"] -->|"launch MCP, send<br/>runtime context"| B["MCP Session<br/>codeclone-mcp"]
     C["JetBrains Plugin<br/>jetbrains-codeclone"] -->|"launch via<br/>McpLauncher"| B
     B -->|"analyze_repository<br/>finish_controlled_change"| D["CodeClone Core<br/>Analysis & Control"]
-    A -->|"query_engineering_memory<br/>list patches"| E["Memory Store<br/>.codeclone/memory.db"]
+    A -->|"query_engineering_memory<br/>list patches"| E["Memory Store<br/>.codeclone/memory/engineering_memory.sqlite3"]
     C -->|"patch-trail, memory<br/>bulk-governance"| E
     D -->|"write audit trail,<br/>intents"| E
 ```
@@ -50,7 +50,7 @@ graph LR
 | JetBrains plugin fails to connect MCP on Dock launch | GUI PATH lacks `~/.local/bin` and `uv`; spawnEnvironment omits augmentation | McpLauncher must augment spawnEnvironment with user shell PATH or resolve tool absolute path before spawn |
 | VS Code `analyze_repository` fails with "path not found" | Coverage XML path is absolute workspace path; core expects repo-relative | runtime.js must normalize coverage.xml to repo-relative; use `allow_repo_absolute=true` only when caller explicitly permits |
 | Memory bulk-governance shows no stale records in UI | MCP status payload includes `records_by_status.stale`, but memoryController only dispatches `memoryDraft` | memoryController.js must handle all keys in `records_by_status`: `active`, `draft`, `stale` |
-| Extension crashes when memory DB is missing | `.codeclone/memory.db` not initialized | Bootstrap memory with `manage_engineering_memory(action="refresh_from_run")` on first connect or on missing-DB error |
+| Extension crashes when memory DB is missing | `.codeclone/memory/engineering_memory.sqlite3` not initialized | Bootstrap memory with `manage_engineering_memory(action="refresh_from_run")` on first connect or on missing-DB error |
 | Race condition on concurrent IDE analysis | Two IDE instances spawn overlapping `analyze_repository` calls | Defer second IDE to same CodeClone server process via IPC coordination or implement intent-conflict queuing |
 
 ## Verification

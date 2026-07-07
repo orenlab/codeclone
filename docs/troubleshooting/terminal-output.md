@@ -2,8 +2,8 @@
 title: "Terminal output troubleshooting"
 audience: public
 doc_type: troubleshooting
-status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+status: published
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 ---
 
 # Terminal output troubleshooting
@@ -49,7 +49,7 @@ graph LR
 
 **Mistake:** Running in CI with colors and progress enabled.
 - Result: ANSI codes pollute logs, progress spinners hang the output.
-- Fix: Use `--ci` preset (equivalent to `--fail-on-new --no-color --quiet`) or pass `--no-progress --no-color` explicitly.
+- Fix: Use the `--ci` preset (equivalent to `--fail-on-new --no-color --quiet`; when a trusted metrics baseline is available it also enables metrics-regression gating) or pass `--no-progress --no-color` explicitly.
 
 **Mistake:** Expecting Unicode progress bar in non-UTF8 terminals.
 - Result: Progress spinner displays as garbage characters.

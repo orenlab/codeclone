@@ -3,7 +3,7 @@ title: "Contract: MCP tool semantics"
 audience: internal
 doc_type: contract
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 source_packet: codeclone_mcp_module_map
 ---
 
@@ -96,8 +96,8 @@ Memory-aware tools require `get_relevant_memory` after `start_controlled_change`
 
 ### Missing evidence
 
-- **Condition**: In-scope files edited during start snapshot but not reported in finish `changed_files`.
-- **Response**: `status: violated`, `finish_block_reason: missing_evidence`.
+- **Condition**: In-scope files edited during start snapshot but not reported in finish `changed_files` (under-reported in-scope dirty).
+- **Response**: `status: unverified`, `reason: workspace_hygiene`, `finish_block_reason: missing_evidence`. (The intent stays active — this is a hygiene block, not a scope `violated`.)
 - **Recovery**: Re-run `analyze_repository`, list all in-scope changed files, and call `finish_controlled_change(changed_files=[...])` with complete evidence.
 
 ### Context page mismatch
