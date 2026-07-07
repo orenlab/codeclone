@@ -2711,11 +2711,11 @@ def test_mcp_service_help_returns_bounded_semantic_guidance() -> None:
         "doc_links": [
             {
                 "title": "MCP interface contract",
-                "url": "https://orenlab.github.io/codeclone/book/25-mcp-interface/",
+                "url": "https://orenlab.github.io/codeclone/concepts/mcp/",
             },
             {
                 "title": "MCP usage guide",
-                "url": "https://orenlab.github.io/codeclone/guide/mcp/",
+                "url": "https://orenlab.github.io/codeclone/guides/agent-safe-change/",
             },
         ],
         "anti_patterns": [
@@ -2827,15 +2827,15 @@ def test_mcp_service_help_covers_analysis_profiles() -> None:
     assert compact["doc_links"] == [
         {
             "title": "Config and defaults",
-            "url": "https://orenlab.github.io/codeclone/book/10-config-and-defaults/",
+            "url": "https://orenlab.github.io/codeclone/reference/configuration/",
         },
         {
             "title": "Core pipeline",
-            "url": "https://orenlab.github.io/codeclone/book/03-core-pipeline/",
+            "url": "https://orenlab.github.io/codeclone/concepts/structural-analysis/",
         },
         {
             "title": "MCP interface contract",
-            "url": "https://orenlab.github.io/codeclone/book/25-mcp-interface/",
+            "url": "https://orenlab.github.io/codeclone/concepts/mcp/",
         },
     ]
     assert normal["topic"] == "analysis_profile"
