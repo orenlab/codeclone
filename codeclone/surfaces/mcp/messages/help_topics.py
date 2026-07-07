@@ -704,7 +704,7 @@ HELP_TOPIC_SPECS: Final[dict[str, MCPHelpTopicSpec]] = {
             (
                 "detail_level compact|normal; full is reserved for future "
                 "by-id detail sections and downgrades to normal here. limit "
-                "clamps to [1, 50]."
+                "clamps to [1, 100]."
             ),
             (
                 "Anti-inference: this is CodeClone's runtime, not the user "
