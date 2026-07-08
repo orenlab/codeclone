@@ -1074,13 +1074,7 @@
   {
     "input_schema": {
       "properties": {
-        "focus": {
-          "default": "all",
-          "description": "all, clones, structural, or metrics comparison focus.",
-          "title": "Focus",
-          "type": "string"
-        },
-        "run_id_after": {
+        "after_run_id": {
           "anyOf": [
             {
               "type": "string"
@@ -1091,16 +1085,22 @@
           ],
           "default": null,
           "description": "8-char or full run id; latest run when omitted.",
-          "title": "Run Id After"
+          "title": "After Run Id"
         },
-        "run_id_before": {
+        "before_run_id": {
           "description": "8-char or full run id from analyze response.",
-          "title": "Run Id Before",
+          "title": "Before Run Id",
+          "type": "string"
+        },
+        "focus": {
+          "default": "all",
+          "description": "all, clones, structural, or metrics comparison focus.",
+          "title": "Focus",
           "type": "string"
         }
       },
       "required": [
-        "run_id_before"
+        "before_run_id"
       ],
       "title": "compare_runsArguments",
       "type": "object"

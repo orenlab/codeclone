@@ -699,8 +699,8 @@ def test_mcp_server_tool_roundtrip_and_resources(tmp_path: Path) -> None:
             server.call_tool(
                 "compare_runs",
                 {
-                    "run_id_before": run_id,
-                    "run_id_after": changed_run_id,
+                    "before_run_id": run_id,
+                    "after_run_id": changed_run_id,
                     "focus": "all",
                 },
             )

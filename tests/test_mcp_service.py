@@ -3423,8 +3423,8 @@ def test_mcp_service_changed_runs_remediation_and_review_flow(tmp_path: Path) ->
     assert cast(int, changed["total"]) >= 1
 
     comparison = service.compare_runs(
-        run_id_before=str(before["run_id"]),
-        run_id_after=str(after["run_id"]),
+        before_run_id=str(before["run_id"]),
+        after_run_id=str(after["run_id"]),
         focus="clones",
     )
     _assert_comparable_comparison(comparison, verdict="regressed")
@@ -6952,8 +6952,8 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
 
     def incomparable_compare(
         *,
-        run_id_before: str,
-        run_id_after: str | None = None,
+        before_run_id: str,
+        after_run_id: str | None = None,
         focus: str = "all",
     ) -> dict[str, object]:
         return {
@@ -6961,7 +6961,7 @@ def test_mcp_patch_contract_verify_incomparable_and_expired_edges(
             "regressions": [],
             "improvements": [],
             "health_delta": None,
-            "verdict": f"{run_id_before}:{run_id_after}:{focus}",
+            "verdict": f"{before_run_id}:{after_run_id}:{focus}",
         }
 
     monkeypatch.setattr(service, "compare_runs", incomparable_compare)
@@ -8325,8 +8325,8 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
     before_record = service._runs.get(str(before["run_id"]))
 
     comparison = service.compare_runs(
-        run_id_before=str(before["run_id"]),
-        run_id_after=str(after["run_id"]),
+        before_run_id=str(before["run_id"]),
+        after_run_id=str(after["run_id"]),
         focus="clones",
     )
     _assert_comparable_comparison(comparison, verdict="improved")
@@ -8482,8 +8482,8 @@ def test_mcp_service_compare_runs_marks_different_roots_incomparable(
     after_record = service._runs.get(str(after["run_id"]))
 
     comparison = service.compare_runs(
-        run_id_before=str(before["run_id"]),
-        run_id_after=str(after["run_id"]),
+        before_run_id=str(before["run_id"]),
+        after_run_id=str(after["run_id"]),
         focus="all",
     )
 
@@ -8587,8 +8587,8 @@ def test_mcp_service_compare_runs_marks_different_settings_incomparable(
     )
 
     comparison = service.compare_runs(
-        run_id_before=str(before["run_id"]),
-        run_id_after=str(after["run_id"]),
+        before_run_id=str(before["run_id"]),
+        after_run_id=str(after["run_id"]),
         focus="all",
     )
 

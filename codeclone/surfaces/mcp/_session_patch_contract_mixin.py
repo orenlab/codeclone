@@ -720,8 +720,8 @@ class _MCPSessionPatchContractMixin:
     ) -> dict[str, object]:
         """Full structural verification path (before + after runs)."""
         compare_payload = _state_session(self).compare_runs(
-            run_id_before=before.run_id,
-            run_id_after=after.run_id,
+            before_run_id=before.run_id,
+            after_run_id=after.run_id,
             focus="all",
         )
         if not bool(compare_payload.get("comparable")):

@@ -1144,13 +1144,13 @@ def build_mcp_server(
         structured_output=True,
     )
     def compare_runs(
-        run_id_before: RunIdRequiredParam,
-        run_id_after: RunIdParam = None,
+        before_run_id: RunIdRequiredParam,
+        after_run_id: RunIdParam = None,
         focus: CompareFocusParam = "all",
     ) -> dict[str, object]:
         return service.compare_runs(
-            run_id_before=run_id_before,
-            run_id_after=run_id_after,
+            before_run_id=before_run_id,
+            after_run_id=after_run_id,
             focus=focus,
         )
 
