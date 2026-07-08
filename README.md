@@ -162,8 +162,8 @@ The report covers:
 codeclone . --json --html --md --sarif --text
 ```
 
-[How CodeClone works](https://orenlab.github.io/codeclone/guide/explanation/how-it-works/) ·
-[Canonical report contract](https://orenlab.github.io/codeclone/book/05-report/)
+[How CodeClone works](https://orenlab.github.io/codeclone/concepts/structural-analysis/) ·
+[Canonical report contract](https://orenlab.github.io/codeclone/reference/reports/)
 
 ## Baseline-aware governance and CI
 
@@ -194,9 +194,9 @@ Use CodeClone in GitHub Actions:
 CI can reject newly introduced clones, metric regressions, API breaks, and coverage regressions without requiring the
 existing repository to be clean first.
 
-[Baseline contract](https://orenlab.github.io/codeclone/book/07-baseline/) ·
-[Metrics and quality gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) ·
-[GitHub Action documentation](https://orenlab.github.io/codeclone/getting-started/#github-action)
+[Baseline contract](https://orenlab.github.io/codeclone/concepts/reports/) ·
+[Metrics and quality gates](https://orenlab.github.io/codeclone/guides/ci-integration/) ·
+[GitHub Action documentation](https://orenlab.github.io/codeclone/guides/ci-integration/)
 
 ## How CodeClone differs
 
@@ -225,17 +225,17 @@ codeclone setup plan
 codeclone setup apply   # or: codeclone setup wizard
 ```
 
-See [Repository setup and readiness](https://orenlab.github.io/codeclone/guide/setup/readiness-and-apply/).
+See [Repository setup and readiness](https://orenlab.github.io/codeclone/guides/setup-project/).
 
 ### Wire it into your client
 
-| Client         | Setup                                                                                                  |
-|----------------|--------------------------------------------------------------------------------------------------------|
-| VS Code        | [Extension setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)                |
-| Cursor         | [Plugin and skills](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
-| Claude Code    | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/)              |
-| Codex          | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)                    |
-| Claude Desktop | [Bundle setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)           |
+| Client         | Setup                                                                         |
+|----------------|-------------------------------------------------------------------------------|
+| VS Code        | [Extension setup](https://orenlab.github.io/codeclone/integrations/vscode/)   |
+| Cursor         | [Plugin and skills](https://orenlab.github.io/codeclone/integrations/cursor/) |
+| Claude Code    | [Plugin setup](https://orenlab.github.io/codeclone/integrations/claude/)      |
+| Codex          | [Plugin setup](https://orenlab.github.io/codeclone/integrations/codex/)       |
+| Claude Desktop | [Bundle setup](https://orenlab.github.io/codeclone/integrations/claude/)      |
 
 Every client uses the same MCP interface and the same canonical structural facts.
 
@@ -275,7 +275,7 @@ hooks, integrations can stop edits unless `edit_allowed=true`.
 The result is not an AI opinion about the patch. It is a deterministic comparison between declared intent, repository
 structure, the accepted baseline, and the actual change.
 
-[Read the Structural Change Controller guide](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
+[Read the Structural Change Controller guide](https://orenlab.github.io/codeclone/concepts/controlled-change/)
 
 ## Engineering Memory — `2.1 alpha`
 
@@ -299,8 +299,8 @@ codeclone memory search "baseline schema" --match all
 Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical
 report facts.
 
-[Engineering Memory documentation](https://orenlab.github.io/codeclone/book/13-engineering-memory/) ·
-[Trajectories and Experiences](https://orenlab.github.io/codeclone/guide/memory/trajectories-and-experiences/)
+[Engineering Memory documentation](https://orenlab.github.io/codeclone/concepts/engineering-memory/) ·
+[Trajectories and Experiences](https://orenlab.github.io/codeclone/guides/engineering-memory-workflow/)
 
 ## Trust boundaries
 
@@ -334,10 +334,10 @@ uv run codeclone .
 **[orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)**
 
 - [Getting started](https://orenlab.github.io/codeclone/getting-started/)
-- [Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
-- [Engineering Memory](https://orenlab.github.io/codeclone/book/13-engineering-memory/)
-- [MCP usage](https://orenlab.github.io/codeclone/guide/mcp/)
-- [Configuration reference](https://orenlab.github.io/codeclone/book/10-config-and-defaults/)
+- [Structural Change Controller](https://orenlab.github.io/codeclone/concepts/controlled-change/)
+- [Engineering Memory](https://orenlab.github.io/codeclone/concepts/engineering-memory/)
+- [MCP usage](https://orenlab.github.io/codeclone/concepts/mcp/)
+- [Configuration reference](https://orenlab.github.io/codeclone/reference/configuration/)
 
 ## License
 
