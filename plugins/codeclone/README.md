@@ -114,6 +114,6 @@ own runtime via `query_platform_observability` after explicit
 
 ## Links
 
-- [Codex plugin guide](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
+- [Codex plugin guide](https://orenlab.github.io/codeclone/integrations/codex/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/concepts/mcp/)
 - [Privacy Policy](https://orenlab.github.io/codeclone/privacy-policy/)

@@ -7,7 +7,7 @@
     "email": "pytelemonbot@mail.ru",
     "url": "https://github.com/orenlab"
   },
-  "homepage": "https://orenlab.github.io/codeclone/guide/integrations/codex/setup/",
+  "homepage": "https://orenlab.github.io/codeclone/integrations/codex/",
   "repository": "https://github.com/orenlab/codeclone",
   "license": "MPL-2.0",
   "keywords": [
@@ -33,7 +33,7 @@
       "Skills",
       "Read-only"
     ],
-    "websiteURL": "https://orenlab.github.io/codeclone/guide/integrations/codex/setup/",
+    "websiteURL": "https://orenlab.github.io/codeclone/integrations/codex/",
     "privacyPolicyURL": "https://orenlab.github.io/codeclone/privacy-policy/",
     "termsOfServiceURL": "https://orenlab.github.io/codeclone/terms-of-use/",
     "defaultPrompt": [
