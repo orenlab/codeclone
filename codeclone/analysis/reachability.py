@@ -18,6 +18,13 @@ from ..models import (
     RuntimeReachabilityTargetKind,
 )
 from .ast_helpers import ast_node_end_line, ast_node_start_line
+from .phase_ledger import (
+    INERT_PHASE_LEDGER,
+    SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US,
+    SUBPHASE_MODULE_PASSES_REACHABILITY_BINDING_US,
+    SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US,
+    PhaseLedger,
+)
 
 _RuntimeObjectKind = str
 
@@ -1303,11 +1310,26 @@ def collect_runtime_reachability(
     module_name: str,
     filepath: str,
     collector: _qualnames.QualnameCollector,
+    phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
 ) -> tuple[RuntimeReachabilityFact, ...]:
     alias_visitor = _ImportAliasVisitor()
-    alias_visitor.visit(tree)
+
+    def _alias_pass() -> None:
+        alias_visitor.visit(tree)
+
+    phase_ledger.run_subphase_us(
+        SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US,
+        _alias_pass,
+    )
     binding_visitor = _RuntimeBindingVisitor(alias_visitor.aliases)
-    binding_visitor.visit(tree)
+
+    def _binding_pass() -> None:
+        binding_visitor.visit(tree)
+
+    phase_ledger.run_subphase_us(
+        SUBPHASE_MODULE_PASSES_REACHABILITY_BINDING_US,
+        _binding_pass,
+    )
     visitor = _RuntimeReachabilityVisitor(
         module_name=module_name,
         filepath=filepath,
@@ -1317,7 +1339,14 @@ def collect_runtime_reachability(
         included_routers=binding_visitor.included_routers,
         route_decorator_factories=binding_visitor.route_decorator_factories,
     )
-    visitor.visit(tree)
+
+    def _reachability_pass() -> None:
+        visitor.visit(tree)
+
+    phase_ledger.run_subphase_us(
+        SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US,
+        _reachability_pass,
+    )
     return tuple(
         sorted(
             visitor.facts,

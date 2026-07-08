@@ -89,6 +89,48 @@ def test_phase_snapshot_merge_is_deterministic() -> None:
     assert merged.volumes == (("files_timed", 2), ("units_seen", 4))
 
 
+def test_phase_ledger_records_subphase_us_only_when_active(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ticks = iter((1_000, 4_000))
+    monkeypatch.setattr(phase_mod, "perf_counter_ns", lambda: next(ticks))
+
+    inert = PhaseLedger(active=False)
+    assert inert.run_subphase_us("subphase_module_passes_adoption_us", lambda: 7) == 7
+    assert inert.snapshot().subphase_us == ()
+
+    ledger = PhaseLedger(active=True)
+    assert (
+        ledger.run_subphase_us(
+            "subphase_module_passes_adoption_us",
+            lambda: "ok",
+        )
+        == "ok"
+    )
+    assert ledger.snapshot().subphase_us == (("subphase_module_passes_adoption_us", 3),)
+
+
+def test_phase_snapshot_merge_merges_subphase_us() -> None:
+    left = PhaseSnapshot(
+        totals=PhaseTotals(),
+        volumes=(),
+        subphase_us=(("subphase_module_passes_adoption_us", 10),),
+    )
+    right = PhaseSnapshot(
+        totals=PhaseTotals(),
+        volumes=(),
+        subphase_us=(
+            ("subphase_module_passes_adoption_us", 5),
+            ("subphase_module_passes_security_us", 7),
+        ),
+    )
+    merged = left.merge(right)
+    assert merged.subphase_us == (
+        ("subphase_module_passes_adoption_us", 15),
+        ("subphase_module_passes_security_us", 7),
+    )
+
+
 def test_phase_ledger_rejects_raw_string_keys() -> None:
     ledger = PhaseLedger(active=True)
     with pytest.raises(TypeError):
