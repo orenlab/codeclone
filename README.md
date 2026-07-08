@@ -51,14 +51,14 @@ CodeClone does not generate or rewrite source files, and it does not ask an LLM 
 is safe. Every finding and every gate comes from deterministic repository facts shared across agents, human reviewers,
 IDEs, reports, and CI.
 
-| Capability                                     | What it provides                                                                                             |
-|------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
-| **Canonical structural analysis**              | One deterministic report: clones, complexity, coupling, cohesion, dead code, API inventory, coverage joins   |
-| **Baseline-aware governance**                  | Records accepted legacy debt and separates it from regressions introduced by the current change              |
-| **One report, many surfaces**                  | CLI, HTML, JSON, Markdown, SARIF, MCP, IDE integrations, and GitHub Actions from one canonical payload       |
-| **Structural Change Controller** — `2.1 alpha` | Intent-first change control, blast radius, explicit edit boundaries, patch verification, and review receipts |
-| **Engineering Memory** — `2.1 alpha`           | Local, typed, evidence-linked project knowledge and reusable histories of prior controlled changes           |
-| **Agent coordination** — `2.1 alpha`           | Conflict-safe multi-agent intents, queues, recovery, and workspace hygiene                                   |
+| Capability                                     | What it provides                                                                                                       |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| **Canonical structural analysis**              | One deterministic report: clones, complexity, coupling, cohesion, dead code, module map, API inventory, coverage joins |
+| **Baseline-aware governance**                  | Records accepted legacy debt and separates it from regressions introduced by the current change                        |
+| **One report, many surfaces**                  | CLI, HTML, JSON, Markdown, SARIF, MCP, IDE integrations, and GitHub Actions from one canonical payload                 |
+| **Structural Change Controller** — `2.1 alpha` | Intent-first change control, blast radius, explicit edit boundaries, patch verification, and review receipts           |
+| **Engineering Memory** — `2.1 alpha`           | Local, typed, evidence-linked project knowledge and reusable histories of prior controlled changes                     |
+| **Agent coordination** — `2.1 alpha`           | Conflict-safe multi-agent intents, queues, recovery, and workspace hygiene                                             |
 
 CodeClone requires no hosted service or cloud account. Analysis state, controller state, Engineering Memory, and
 trajectories are stored locally.
@@ -151,12 +151,13 @@ CodeClone runs one deterministic analysis and renders the same canonical report 
 
 The report covers:
 
-- function, block, and segment clones;
-- clone drift and duplicated branch families;
-- complexity, coupling, cohesion, dependency cycles, and dead code;
-- public API inventory and baseline-aware API break detection;
-- external coverage joined with structural hotspots;
-- deterministic structural health and review priorities.
+- Function, block, and segment clones;
+- Clone drift and duplicated branch families;
+- Complexity, coupling, cohesion, dependency cycles, and dead code;
+- **Module Map** — a package/module dependency graph with cycle, hub, overloaded-module, and unwind-candidate views;
+- Public API inventory and baseline-aware API break detection;
+- External coverage joined with structural hotspots;
+- Deterministic structural health, review priorities, and a guided, prioritized finding-review queue.
 
 ```bash
 codeclone . --json --html --md --sarif --text
@@ -259,7 +260,9 @@ baseline.
 - returns the authoritative `edit_allowed` result.
 
 **Edit.** The agent writes the code. CodeClone does not generate or rewrite source files. Where the host supports
-hooks, integrations can stop edits unless `edit_allowed=true`.
+hooks, integrations can stop edits unless `edit_allowed=true`. While editing, `get_implementation_context` serves
+bounded structural, call-graph, and contract context from the same analysis run, so the agent does not rediscover the
+repository through broad searches.
 
 **Finish.** `finish_controlled_change`:
 

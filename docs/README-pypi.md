@@ -66,8 +66,9 @@ change introduced.
   patch verification, and review receipts.
 - **Baseline-aware governance** — records accepted legacy debt and separates it from regressions introduced by the
   current change.
-- **One canonical report** — clones, complexity, coupling, cohesion, dead code, dependency cycles, public API
-  inventory, and coverage joins, rendered through CLI, HTML, JSON, Markdown, SARIF, and CI from one payload.
+- **One canonical report** — clones, complexity, coupling, cohesion, dead code, dependency cycles, a package/module
+  dependency map (Module Map), public API inventory, coverage joins, and a guided finding-review queue, rendered
+  through CLI, HTML, JSON, Markdown, SARIF, and CI from one payload.
 - **Engineering Memory** — `2.1 alpha`: local, typed, evidence-linked project knowledge and reusable histories of prior
   controlled changes.
 - **Agent coordination** — `2.1 alpha`: conflict-safe multi-agent intents, queues, recovery, and workspace hygiene.
