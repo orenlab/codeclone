@@ -109,7 +109,7 @@ npm run pack     # build .mcpb
 
 ## Links
 
-- [Claude Desktop bundle guide](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
-- [Change controller docs](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
+- [Claude Desktop bundle guide](https://orenlab.github.io/codeclone/integrations/claude/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/concepts/mcp/)
+- [Change controller docs](https://orenlab.github.io/codeclone/concepts/controlled-change/)
 - [Issues](https://github.com/orenlab/codeclone/issues)
