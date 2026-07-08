@@ -522,37 +522,64 @@ def _function_parameter_names(node: _qualnames.FunctionNode) -> set[str]:
     return names
 
 
-def _caller_local_bindings(node: _qualnames.FunctionNode) -> frozenset[str]:
+def _accumulate_caller_binding_from_scope_node(
+    scope_node: ast.AST,
+    *,
+    bound_names: set[str],
+    global_names: set[str],
+    nonlocal_names: set[str],
+) -> None:
+    if isinstance(scope_node, ast.Name) and isinstance(
+        scope_node.ctx, ast.Store | ast.Del
+    ):
+        bound_names.add(scope_node.id)
+    elif isinstance(scope_node, ast.Import):
+        bound_names.update(
+            alias.asname or alias.name.split(".", 1)[0] for alias in scope_node.names
+        )
+    elif isinstance(scope_node, ast.ImportFrom):
+        bound_names.update(
+            alias.asname or alias.name
+            for alias in scope_node.names
+            if alias.name != "*"
+        )
+    elif isinstance(scope_node, ast.Global):
+        global_names.update(scope_node.names)
+    elif isinstance(scope_node, ast.Nonlocal):
+        nonlocal_names.update(scope_node.names)
+    else:
+        declaration_name = _scope_declaration_binding_name(scope_node)
+        if declaration_name is not None:
+            bound_names.add(declaration_name)
+
+
+def _walk_relationship_function_scope(
+    node: _qualnames.FunctionNode,
+) -> tuple[frozenset[str], tuple[ast.AST, ...]]:
+    """Single DFS over a function body for caller bindings and scope nodes."""
     bound_names = _function_parameter_names(node)
     global_names: set[str] = set()
     nonlocal_names: set[str] = set()
-    for scope_node in _iter_relationship_scope_nodes(node.body):
-        if isinstance(scope_node, ast.Name) and isinstance(
-            scope_node.ctx, ast.Store | ast.Del
+    scope_nodes: list[ast.AST] = []
+    stack: list[ast.AST] = list(reversed(node.body))
+    while stack:
+        scope_node = stack.pop()
+        scope_nodes.append(scope_node)
+        _accumulate_caller_binding_from_scope_node(
+            scope_node,
+            bound_names=bound_names,
+            global_names=global_names,
+            nonlocal_names=nonlocal_names,
+        )
+        if isinstance(
+            scope_node,
+            ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Lambda,
         ):
-            bound_names.add(scope_node.id)
-        elif isinstance(scope_node, ast.Import):
-            bound_names.update(
-                alias.asname or alias.name.split(".", 1)[0]
-                for alias in scope_node.names
-            )
-        elif isinstance(scope_node, ast.ImportFrom):
-            bound_names.update(
-                alias.asname or alias.name
-                for alias in scope_node.names
-                if alias.name != "*"
-            )
-        elif isinstance(scope_node, ast.Global):
-            global_names.update(scope_node.names)
-        elif isinstance(scope_node, ast.Nonlocal):
-            nonlocal_names.update(scope_node.names)
-        else:
-            declaration_name = _scope_declaration_binding_name(scope_node)
-            if declaration_name is not None:
-                bound_names.add(declaration_name)
+            continue
+        stack.extend(reversed(list(ast.iter_child_nodes(scope_node))))
     bound_names.difference_update(global_names)
     bound_names.difference_update(nonlocal_names)
-    return frozenset(sorted(bound_names))
+    return frozenset(sorted(bound_names)), tuple(scope_nodes)
 
 
 def _first_parameter_name(node: _qualnames.FunctionNode) -> str | None:
@@ -731,7 +758,7 @@ def _collect_function_relationship_facts(
     facts: list[FunctionRelationshipFacts] = []
     for local_name, function_node in collector.units:
         source_qualname = f"{module_name}:{local_name}"
-        caller_bindings = _caller_local_bindings(function_node)
+        caller_bindings, scope_nodes = _walk_relationship_function_scope(function_node)
         # The enclosing class of a method is the qualname segment before its own
         # name; top-level functions have none. The receiver (self/cls) is the
         # first parameter, but only for non-static methods — a staticmethod's
@@ -745,7 +772,6 @@ def _collect_function_relationship_facts(
             and "staticmethod" not in _decorator_simple_names(function_node)
             else None
         )
-        scope_nodes = tuple(_iter_relationship_scope_nodes(function_node.body))
         calls = tuple(node for node in scope_nodes if isinstance(node, ast.Call))
         call_function_node_ids = {
             id(descendant) for call in calls for descendant in ast.walk(call.func)
