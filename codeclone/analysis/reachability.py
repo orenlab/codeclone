@@ -411,18 +411,36 @@ class _ImportAliasVisitor(ast.NodeVisitor):
 class _RuntimeBindingVisitor(ast.NodeVisitor):
     __slots__ = (
         "_aliases",
+        "_handler_nodes",
         "_scope_depth",
         "included_routers",
         "objects",
         "route_decorator_factories",
     )
 
-    def __init__(self, aliases: dict[str, str]) -> None:
+    def __init__(
+        self,
+        aliases: dict[str, str],
+        *,
+        handler_nodes: list[ast.AST] | None = None,
+    ) -> None:
         self._aliases = aliases
+        self._handler_nodes = handler_nodes
         self._scope_depth = 0
         self.objects: dict[str, _RuntimeObjectKind] = {}
         self.included_routers: set[str] = set()
         self.route_decorator_factories: dict[str, _RouteDecoratorFactory] = {}
+
+    def visit(self, node: ast.AST) -> None:
+        if isinstance(node, ast.If) and _is_type_checking_guard(node.test):
+            return
+        handler_nodes = self._handler_nodes
+        if handler_nodes is not None and isinstance(
+            node,
+            ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.Assign,
+        ):
+            handler_nodes.append(node)
+        super().visit(node)
 
     def visit_If(self, node: ast.If) -> None:
         if _is_type_checking_guard(node.test):
@@ -720,29 +738,40 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
             return
         self.generic_visit(node)
 
+    def _apply_handler_node(self, node: ast.AST) -> None:
+        match node:
+            case ast.FunctionDef() | ast.AsyncFunctionDef():
+                self._handle_callable(node)
+            case ast.ClassDef():
+                self._handle_dependency_injector_container(node)
+                self._handle_starlette_base_http_middleware(node)
+                self._handle_sqlalchemy_type_decorator(node)
+                self._handle_pydantic_generate_json_schema(node)
+                self._handle_starlette_route_subclass(node)
+                self._handle_framework_application_subclass(node)
+            case ast.Assign():
+                if any(
+                    isinstance(target, ast.Name) and target.id == "urlpatterns"
+                    for target in node.targets
+                ):
+                    self._handle_django_urlpatterns(node.value)
+            case _:
+                return
+
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._handle_callable(node)
+        self._apply_handler_node(node)
         self.generic_visit(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        self._handle_callable(node)
+        self._apply_handler_node(node)
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
-        self._handle_dependency_injector_container(node)
-        self._handle_starlette_base_http_middleware(node)
-        self._handle_sqlalchemy_type_decorator(node)
-        self._handle_pydantic_generate_json_schema(node)
-        self._handle_starlette_route_subclass(node)
-        self._handle_framework_application_subclass(node)
+        self._apply_handler_node(node)
         self.generic_visit(node)
 
     def visit_Assign(self, node: ast.Assign) -> None:
-        if any(
-            isinstance(target, ast.Name) and target.id == "urlpatterns"
-            for target in node.targets
-        ):
-            self._handle_django_urlpatterns(node.value)
+        self._apply_handler_node(node)
         self.generic_visit(node)
 
     def _handle_callable(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
@@ -1321,7 +1350,11 @@ def collect_runtime_reachability(
         SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US,
         _alias_pass,
     )
-    binding_visitor = _RuntimeBindingVisitor(alias_visitor.aliases)
+    handler_nodes: list[ast.AST] = []
+    binding_visitor = _RuntimeBindingVisitor(
+        alias_visitor.aliases,
+        handler_nodes=handler_nodes,
+    )
 
     def _binding_pass() -> None:
         binding_visitor.visit(tree)
@@ -1339,9 +1372,11 @@ def collect_runtime_reachability(
         included_routers=binding_visitor.included_routers,
         route_decorator_factories=binding_visitor.route_decorator_factories,
     )
+    apply_handler_node = visitor._apply_handler_node
 
     def _reachability_pass() -> None:
-        visitor.visit(tree)
+        for node in handler_nodes:
+            apply_handler_node(node)
 
     phase_ledger.run_subphase_us(
         SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US,
