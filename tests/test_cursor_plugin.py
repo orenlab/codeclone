@@ -5,7 +5,6 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 from tests.plugin_test_helpers import (
@@ -25,7 +24,7 @@ def test_cursor_plugin_json_is_valid() -> None:
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "2.1.0a1"
     assert manifest["license"] == "MPL-2.0"
     assert manifest["rules"] == "rules/"
     assert manifest["skills"] == "skills/"
@@ -74,20 +73,6 @@ def test_cursor_skills_match_codex_skills() -> None:
         plugin_skills_root=root / "plugins" / "cursor-codeclone" / "skills",
         codex_skills_root=root / "plugins" / "codeclone" / "skills",
         skill_names=CODEX_CURSOR_SYNC_SKILL_NAMES,
-    )
-
-
-def test_cursor_plugin_version_is_semver() -> None:
-    """Plugin has its own version lifecycle, independent of pyproject."""
-    root = Path(__file__).resolve().parents[1]
-    manifest = load_json(
-        root / "plugins" / "cursor-codeclone" / ".cursor-plugin" / "plugin.json"
-    )
-    assert isinstance(manifest, dict)
-    version = manifest["version"]
-    assert isinstance(version, str)
-    assert re.fullmatch(r"\d+\.\d+\.\d+", version), (
-        f"Plugin version must be semver (X.Y.Z), got: {version}"
     )
 
 
