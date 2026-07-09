@@ -133,6 +133,7 @@ packages = [
     "codeclone.analytics.export",
     "codeclone.analytics.metrics",
     "codeclone.analytics.profiles",
+    "codeclone.analytics.profiles.manifests",
     "codeclone.analytics.report",
     "codeclone.analytics.report.messages",
     "codeclone.analytics.store",
@@ -190,7 +191,7 @@ packages = [
 
 [tool.setuptools.package-data]
 codeclone = ["py.typed"]
-"codeclone.analytics.profiles" = ["manifests/*.json"]
+"codeclone.analytics.profiles.manifests" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
