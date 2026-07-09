@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.1.0a1] - Unreleased
+## [2.1.0a1] - 2026-07-09
 
 CodeClone 2.1 introduces intent-first structural change control, persistent engineering context, agent workflow
 evidence, platform self-observability, and broader IDE/agent integration.
