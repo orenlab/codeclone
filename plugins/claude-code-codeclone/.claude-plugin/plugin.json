@@ -1,12 +1,13 @@
 {
   "name": "codeclone",
+  "version": "2.1.0a1",
   "description": "Structural Change Controller for AI-assisted Python development over local codeclone-mcp.",
   "author": {
     "name": "Den Rozhnovskiy",
     "email": "pytelemonbot@mail.ru",
     "url": "https://github.com/orenlab"
   },
-  "homepage": "https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/",
+  "homepage": "https://orenlab.github.io/codeclone/integrations/claude/",
   "repository": "https://github.com/orenlab/codeclone-claude-code",
   "license": "MPL-2.0",
   "keywords": [

@@ -51,14 +51,15 @@ CodeClone does not generate or rewrite source files, and it does not ask an LLM 
 is safe. Every finding and every gate comes from deterministic repository facts shared across agents, human reviewers,
 IDEs, reports, and CI.
 
-| Capability                                     | What it provides                                                                                             |
-|------------------------------------------------|--------------------------------------------------------------------------------------------------------------|
-| **Canonical structural analysis**              | One deterministic report: clones, complexity, coupling, cohesion, dead code, API inventory, coverage joins   |
-| **Baseline-aware governance**                  | Records accepted legacy debt and separates it from regressions introduced by the current change              |
-| **One report, many surfaces**                  | CLI, HTML, JSON, Markdown, SARIF, MCP, IDE integrations, and GitHub Actions from one canonical payload       |
-| **Structural Change Controller** — `2.1 alpha` | Intent-first change control, blast radius, explicit edit boundaries, patch verification, and review receipts |
-| **Engineering Memory** — `2.1 alpha`           | Local, typed, evidence-linked project knowledge and reusable histories of prior controlled changes           |
-| **Agent coordination** — `2.1 alpha`           | Conflict-safe multi-agent intents, queues, recovery, and workspace hygiene                                   |
+| Capability                                      | What it provides                                                                                                       |
+|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
+| **Canonical structural analysis**               | One deterministic report: clones, complexity, coupling, cohesion, dead code, module map, API inventory, coverage joins |
+| **Baseline-aware governance**                   | Records accepted legacy debt and separates it from regressions introduced by the current change                        |
+| **One report, many surfaces**                   | CLI, HTML, JSON, Markdown, SARIF, MCP, IDE integrations, and GitHub Actions from one canonical payload                 |
+| **Structural Change Controller** — `2.1 alpha`  | Intent-first change control, blast radius, explicit edit boundaries, patch verification, and review receipts           |
+| **Live Implementation Context** — `2.1 alpha`   | Real-time structural and call-graph context served from the current analysis run — no stale index to maintain          |
+| **Engineering Memory** — `2.1 alpha`            | Local, typed, evidence-linked project knowledge and reusable histories of prior controlled changes                     |
+| **Agent coordination** — `2.1 alpha`            | Conflict-safe multi-agent intents, queues, recovery, and workspace hygiene                                             |
 
 CodeClone requires no hosted service or cloud account. Analysis state, controller state, Engineering Memory, and
 trajectories are stored locally.
@@ -140,7 +141,7 @@ from findings that were already present, so agents and reviewers can focus on wh
 
 Updating the baseline is an explicit governance action. Do not regenerate it merely to make a failing check pass.
 
-### 3. Connect your AI agent
+### 3. Connect your AI agent — `2.1 alpha`
 
 Continue to [Agent change control](#agent-change-control--21-alpha) below to install the MCP control surface and wire
 CodeClone into Claude Code, Cursor, VS Code, Codex, or Claude Desktop.
@@ -154,6 +155,8 @@ The report covers:
 - function, block, and segment clones;
 - clone drift and duplicated branch families;
 - complexity, coupling, cohesion, dependency cycles, and dead code;
+- **Module Map** — a package/module dependency graph with cycle, hub, overloaded-module, and unwind-candidate views;
+- **Guided Finding Review** — a prioritized review queue with shared finding cards, filters, and progress tracking;
 - public API inventory and baseline-aware API break detection;
 - external coverage joined with structural hotspots;
 - deterministic structural health and review priorities.
@@ -162,8 +165,8 @@ The report covers:
 codeclone . --json --html --md --sarif --text
 ```
 
-[How CodeClone works](https://orenlab.github.io/codeclone/guide/explanation/how-it-works/) ·
-[Canonical report contract](https://orenlab.github.io/codeclone/book/05-report/)
+[How CodeClone works](https://orenlab.github.io/codeclone/concepts/structural-analysis/) ·
+[Canonical report contract](https://orenlab.github.io/codeclone/reference/reports/)
 
 ## Baseline-aware governance and CI
 
@@ -194,9 +197,8 @@ Use CodeClone in GitHub Actions:
 CI can reject newly introduced clones, metric regressions, API breaks, and coverage regressions without requiring the
 existing repository to be clean first.
 
-[Baseline contract](https://orenlab.github.io/codeclone/book/07-baseline/) ·
-[Metrics and quality gates](https://orenlab.github.io/codeclone/book/16-metrics-and-quality-gates/) ·
-[GitHub Action documentation](https://orenlab.github.io/codeclone/getting-started/#github-action)
+[Baseline contract](https://orenlab.github.io/codeclone/concepts/reports/) ·
+[CI integration and quality gates](https://orenlab.github.io/codeclone/guides/ci-integration/)
 
 ## How CodeClone differs
 
@@ -217,6 +219,10 @@ uv tool install --prerelease allow "codeclone[mcp]"
 codeclone-mcp --transport stdio
 ```
 
+The server exposes **38 MCP tools** covering analysis, change control, blast radius, memory, and diagnostics. Responses
+are built for agent loops: deterministic `next_tool` guidance, token-budget-aware payloads, and replies that keep
+mandatory control facts inline while linking full evidence for drill-down.
+
 Before gating agents or CI, confirm `[tool.codeclone]` and local gitignore hygiene:
 
 ```bash
@@ -225,17 +231,17 @@ codeclone setup plan
 codeclone setup apply   # or: codeclone setup wizard
 ```
 
-See [Repository setup and readiness](https://orenlab.github.io/codeclone/guide/setup/readiness-and-apply/).
+See [Repository setup and readiness](https://orenlab.github.io/codeclone/guides/setup-project/).
 
 ### Wire it into your client
 
-| Client         | Setup                                                                                                  |
-|----------------|--------------------------------------------------------------------------------------------------------|
-| VS Code        | [Extension setup](https://orenlab.github.io/codeclone/guide/integrations/vscode/setup/)                |
-| Cursor         | [Plugin and skills](https://orenlab.github.io/codeclone/guide/integrations/cursor/install-and-skills/) |
-| Claude Code    | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/)              |
-| Codex          | [Plugin setup](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)                    |
-| Claude Desktop | [Bundle setup](https://orenlab.github.io/codeclone/guide/integrations/claude-desktop/setup/)           |
+| Client         | Setup                                                                         |
+|----------------|-------------------------------------------------------------------------------|
+| VS Code        | [Extension setup](https://orenlab.github.io/codeclone/integrations/vscode/)   |
+| Cursor         | [Plugin and skills](https://orenlab.github.io/codeclone/integrations/cursor/) |
+| Claude Code    | [Plugin setup](https://orenlab.github.io/codeclone/integrations/claude/)      |
+| Codex          | [Plugin setup](https://orenlab.github.io/codeclone/integrations/codex/)       |
+| Claude Desktop | [Bundle setup](https://orenlab.github.io/codeclone/integrations/claude/)      |
 
 Every client uses the same MCP interface and the same canonical structural facts.
 
@@ -259,7 +265,9 @@ baseline.
 - returns the authoritative `edit_allowed` result.
 
 **Edit.** The agent writes the code. CodeClone does not generate or rewrite source files. Where the host supports
-hooks, integrations can stop edits unless `edit_allowed=true`.
+hooks, integrations can stop edits unless `edit_allowed=true`. While editing, the agent stays oriented through
+[Live Implementation Context](#live-implementation-context) instead of rediscovering the repository with broad
+searches.
 
 **Finish.** `finish_controlled_change`:
 
@@ -272,10 +280,30 @@ hooks, integrations can stop edits unless `edit_allowed=true`.
 
 <!-- TODO: short example of a review receipt (trimmed JSON, ~10 lines) -->
 
-The result is not an AI opinion about the patch. It is a deterministic comparison between declared intent, repository
-structure, the accepted baseline, and the actual change.
+If the patch crosses the declared boundary or introduces regressions beyond the budget, verification fails — and the
+receipt records exactly where and why. The result is not an AI opinion about the patch. It is a deterministic
+comparison between declared intent, repository structure, the accepted baseline, and the actual change.
 
-[Read the Structural Change Controller guide](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
+[Read the Structural Change Controller guide](https://orenlab.github.io/codeclone/concepts/controlled-change/)
+
+### Live Implementation Context
+
+`get_implementation_context` serves the agent bounded, task-scoped context directly from the current analysis run:
+
+- structural context and call relationships for the declared edit scope;
+- contract-oriented truth maps and test anchors;
+- freshness signals and active intent boundaries.
+
+There is no separate vector database drifting behind the code, and no watcher daemon re-indexing the tree. Context
+comes from the same analysis that produces findings and gates — so what the agent reads is what the verifier will
+check. Context is read-only: it informs edits but never authorizes them.
+
+### Also in the 2.1 line
+
+- **Platform Observability** — development-time tracing of CLI, MCP, analysis phases, database activity, and payload
+  pressure, so you can see what CodeClone itself is doing and what it costs.
+- **Corpus Analytics** — offline intent clustering and interpretability over recorded controlled changes, with
+  versioned profiles and inspectable JSON/HTML outputs.
 
 ## Engineering Memory — `2.1 alpha`
 
@@ -296,11 +324,14 @@ codeclone memory init --root .
 codeclone memory search "baseline schema" --match all
 ```
 
+Retrieval is hybrid — FTS5/BM25 lexical search, optional LanceDB vector search, and Reciprocal Rank Fusion combining
+the two — with fully reproducible ranking.
+
 Memory can guide an agent. It cannot authorize edits, override blast radius, change a gate, or replace canonical
 report facts.
 
-[Engineering Memory documentation](https://orenlab.github.io/codeclone/book/13-engineering-memory/) ·
-[Trajectories and Experiences](https://orenlab.github.io/codeclone/guide/memory/trajectories-and-experiences/)
+[Engineering Memory documentation](https://orenlab.github.io/codeclone/concepts/engineering-memory/) ·
+[Trajectories and Experiences](https://orenlab.github.io/codeclone/guides/engineering-memory-workflow/)
 
 ## Trust boundaries
 
@@ -309,7 +340,7 @@ report facts.
 - Read-only analysis commands do not modify source code or project governance state.
 - Baseline updates are explicit user-approved governance actions.
 - Controller and memory operations write only to their explicit local state stores.
-- Memory and trajectory evidence remain advisory.
+- Memory, trajectory, and implementation-context evidence remain advisory.
 - `stdio` is the recommended transport for local clients.
 - Remote HTTP exposure requires explicit `--allow-remote`.
 
@@ -334,10 +365,10 @@ uv run codeclone .
 **[orenlab.github.io/codeclone](https://orenlab.github.io/codeclone/)**
 
 - [Getting started](https://orenlab.github.io/codeclone/getting-started/)
-- [Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
-- [Engineering Memory](https://orenlab.github.io/codeclone/book/13-engineering-memory/)
-- [MCP usage](https://orenlab.github.io/codeclone/guide/mcp/)
-- [Configuration reference](https://orenlab.github.io/codeclone/book/10-config-and-defaults/)
+- [Structural Change Controller](https://orenlab.github.io/codeclone/concepts/controlled-change/)
+- [Engineering Memory](https://orenlab.github.io/codeclone/concepts/engineering-memory/)
+- [MCP usage](https://orenlab.github.io/codeclone/concepts/mcp/)
+- [Configuration reference](https://orenlab.github.io/codeclone/reference/configuration/)
 
 ## License
 

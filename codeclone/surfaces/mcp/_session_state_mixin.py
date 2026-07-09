@@ -829,8 +829,8 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
     def compare_runs(
         self,
         *,
-        run_id_before: str,
-        run_id_after: str | None = None,
+        before_run_id: str,
+        after_run_id: str | None = None,
         focus: ComparisonFocus = "all",
     ) -> dict[str, object]:
         validated_focus = _helpers._validate_choice(
@@ -838,8 +838,8 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
             focus,
             _VALID_COMPARISON_FOCUS,
         )
-        before = self._runs.get(run_id_before)
-        after = self._runs.get(run_id_after)
+        before = self._runs.get(before_run_id)
+        after = self._runs.get(after_run_id)
         before_findings = self._comparison_index(before, focus=validated_focus)
         after_findings = self._comparison_index(after, focus=validated_focus)
         before_ids = set(before_findings)
@@ -1294,8 +1294,8 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         resolved: list[dict[str, object]] = []
         if previous is not None:
             compare_payload = self.compare_runs(
-                run_id_before=previous.run_id,
-                run_id_after=record.run_id,
+                before_run_id=previous.run_id,
+                after_run_id=record.run_id,
                 focus="all",
             )
             resolved = _helpers._dict_rows(compare_payload.get("improvements"))

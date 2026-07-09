@@ -2566,7 +2566,7 @@ def outer():
     inner = outer.body[1]
     assert isinstance(inner, ast.FunctionDef)
 
-    bindings = module_walk_mod._caller_local_bindings(inner)
+    bindings, _scope_nodes = module_walk_mod._walk_relationship_function_scope(inner)
 
     assert {
         "posonly",

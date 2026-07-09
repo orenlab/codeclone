@@ -12,12 +12,46 @@ from typing import cast
 from codeclone.config.pyproject_loader import _load_toml
 
 
+def _package_name(repo_root: Path, package_dir: Path) -> str:
+    return ".".join(package_dir.relative_to(repo_root).parts)
+
+
+def _is_data_only_namespace_package(package_dir: Path) -> bool:
+    """True for PEP 420 data dirs (no ``__init__.py``, non-Python payload files).
+
+    Setuptools treats such directories as importable packages and requires them in
+    ``[tool.setuptools].packages`` when using an explicit package list.
+    """
+
+    if not package_dir.is_dir() or (package_dir / "__init__.py").exists():
+        return False
+    if package_dir.name.startswith(".") or package_dir.name == "__pycache__":
+        return False
+    return any(
+        child.is_file() and not child.name.startswith(".") and child.suffix != ".py"
+        for child in package_dir.iterdir()
+    )
+
+
 def _discover_codeclone_packages(repo_root: Path) -> set[str]:
+    """Discover regular packages plus nested data-only namespace dirs from the tree.
+
+    Discovery is filesystem-based so missing ``pyproject.toml`` entries fail the
+    test; do not derive expected packages from package-data alone.
+    """
+
     codeclone_root = repo_root / "codeclone"
     packages: set[str] = set()
+    regular_package_dirs: list[Path] = []
     for init_path in codeclone_root.rglob("__init__.py"):
-        relative = init_path.parent.relative_to(repo_root)
-        packages.add(".".join(relative.parts))
+        package_dir = init_path.parent
+        packages.add(_package_name(repo_root, package_dir))
+        regular_package_dirs.append(package_dir)
+    # Data-only namespace packages live as children of a regular package.
+    for package_dir in regular_package_dirs:
+        for child in package_dir.iterdir():
+            if _is_data_only_namespace_package(child):
+                packages.add(_package_name(repo_root, child))
     return packages
 
 

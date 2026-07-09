@@ -13,8 +13,10 @@ import pytest
 from tests.plugin_test_helpers import (
     CODEX_CLAUDE_SYNC_SKILL_NAMES,
     assert_claude_code_plugin_readme_contract,
+    assert_plugin_manifest_version_license_homepage,
     assert_plugin_skills_match_codex,
     assert_repo_doc_paths_exist,
+    codeclone_package_version,
     load_json,
     repo_docs_source_available,
 )
@@ -25,17 +27,17 @@ def test_claude_code_plugin_manifest_and_mcp_config() -> None:
     plugin_root = root / "plugins" / "claude-code-codeclone"
     manifest = load_json(plugin_root / ".claude-plugin" / "plugin.json")
     mcp_config = load_json(plugin_root / ".mcp.json")
+    package_version = codeclone_package_version(root)
 
     assert isinstance(manifest, dict)
     assert isinstance(mcp_config, dict)
     assert manifest["name"] == "codeclone"
-    assert manifest["license"] == "MPL-2.0"
-    assert (
-        manifest["homepage"]
-        == "https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/"
+    assert_plugin_manifest_version_license_homepage(
+        manifest,
+        package_version=package_version,
+        homepage="https://orenlab.github.io/codeclone/integrations/claude/",
     )
     assert manifest["repository"] == "https://github.com/orenlab/codeclone-claude-code"
-    assert "version" not in manifest
 
     server = mcp_config["mcpServers"]["codeclone"]
     assert server == {

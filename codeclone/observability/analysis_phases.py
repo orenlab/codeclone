@@ -30,5 +30,8 @@ def apply_pipeline_process_phase_counters(
     for key in PHASE_VOLUME_COUNTER_SUFFIXES:
         span.set_counter(key, volumes.get(key, 0))
 
+    for key, value in phase_snapshot.subphase_us:
+        span.set_counter(key, value)
+
 
 __all__ = ["apply_pipeline_process_phase_counters"]

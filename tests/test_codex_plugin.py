@@ -13,17 +13,12 @@ from tests.assertion_helpers import assert_all_contained
 from tests.plugin_test_helpers import (
     assert_codex_manifest_interface,
     assert_codex_plugin_readme_contract,
+    assert_plugin_manifest_version_license_homepage,
     assert_repo_doc_paths_exist,
+    codeclone_package_version,
     load_json,
     repo_docs_source_available,
 )
-
-
-def _codeclone_package_version(root: Path) -> str:
-    for line in (root / "pyproject.toml").read_text(encoding="utf-8").splitlines():
-        if line.startswith("version = "):
-            return line.split("=", 1)[1].strip().strip('"')
-    raise AssertionError("pyproject.toml version not found")
 
 
 def test_codex_plugin_manifest_is_consistent() -> None:
@@ -31,18 +26,17 @@ def test_codex_plugin_manifest_is_consistent() -> None:
     plugin_root = root / "plugins" / "codeclone"
     manifest = load_json(plugin_root / ".codex-plugin" / "plugin.json")
     marketplace = load_json(root / ".agents" / "plugins" / "marketplace.json")
-    package_version = _codeclone_package_version(root)
+    package_version = codeclone_package_version(root)
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == plugin_root.name
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == package_version
     assert manifest["skills"] == "./skills/"
     assert manifest["mcpServers"] == "./.mcp.json"
-    assert manifest["license"] == "MPL-2.0"
-    assert (
-        manifest["homepage"]
-        == "https://orenlab.github.io/codeclone/guide/integrations/codex/setup/"
+    assert_plugin_manifest_version_license_homepage(
+        manifest,
+        package_version=package_version,
+        homepage="https://orenlab.github.io/codeclone/integrations/codex/",
     )
     assert isinstance(marketplace, dict)
     assert marketplace["plugins"][0]["name"] == manifest["name"]

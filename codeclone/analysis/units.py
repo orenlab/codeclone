@@ -48,6 +48,8 @@ from .normalizer import NormalizationConfig, stmt_hashes
 from .parser import PARSE_TIMEOUT_SECONDS, _parse_with_limits
 from .phase_ledger import (
     INERT_PHASE_LEDGER,
+    SUBPHASE_MODULE_PASSES_ADOPTION_US,
+    SUBPHASE_MODULE_PASSES_SECURITY_US,
     AnalysisPhaseKey,
     AnalysisVolumeKey,
     PhaseLedger,
@@ -349,12 +351,15 @@ def extract_units_and_stats_from_source(
         )
     )
     with phase_ledger.phase(AnalysisPhaseKey.MODULE_PASSES):
-        typing_coverage, docstring_coverage = collect_module_adoption(
-            tree=tree,
-            module_name=module_name,
-            filepath=filepath,
-            collector=collector,
-            imported_names=import_names,
+        typing_coverage, docstring_coverage = phase_ledger.run_subphase_us(
+            SUBPHASE_MODULE_PASSES_ADOPTION_US,
+            lambda: collect_module_adoption(
+                tree=tree,
+                module_name=module_name,
+                filepath=filepath,
+                collector=collector,
+                imported_names=import_names,
+            ),
         )
         api_surface = None
         if collect_api_surface:
@@ -366,16 +371,20 @@ def extract_units_and_stats_from_source(
                 imported_names=import_names,
                 include_private_modules=api_include_private_modules,
             )
-        security_surfaces = collect_security_surfaces(
-            tree=tree,
-            module_name=module_name,
-            filepath=filepath,
+        security_surfaces = phase_ledger.run_subphase_us(
+            SUBPHASE_MODULE_PASSES_SECURITY_US,
+            lambda: collect_security_surfaces(
+                tree=tree,
+                module_name=module_name,
+                filepath=filepath,
+            ),
         )
         runtime_reachability = collect_runtime_reachability(
             tree=tree,
             module_name=module_name,
             filepath=filepath,
             collector=collector,
+            phase_ledger=phase_ledger,
         )
 
     return (

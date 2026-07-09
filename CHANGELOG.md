@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.1.0a1] - Unreleased
+## [2.1.0a1] - 2026-07-09
 
 CodeClone 2.1 introduces intent-first structural change control, persistent engineering context, agent workflow
 evidence, platform self-observability, and broader IDE/agent integration.
@@ -29,12 +29,12 @@ evidence, platform self-observability, and broader IDE/agent integration.
   governance, audit, memory, trajectory, and structural-review workflows.
 - **`codeclone setup`** — lazy-loaded CLI readiness surface (`status`, `doctor`, `plan`, `apply`, `wizard`) with
   capability-aware snapshots, read-only diff preview, and bounded `pyproject.toml` / `.gitignore` merges (no MCP
-  intent, no baseline or report writes).
+  intent, no baseline or report writes). The CLI also gains a guided `--help` tour.
 - Expanded controller, memory, trajectory, analytics, semantic-search, observability, blast-radius, patch-verification,
   and diagnostic CLI/MCP surfaces. The default MCP server surface is now **38 tools** (**40** when VS Code enables the
   IDE governance channel).
-- Reorganized documentation into a contract-focused 00–26 book with unified integration guidance and explicit edition
-  tiers.
+- Reorganized documentation into a task-oriented site (concepts, guides, reference, integrations) with unified
+  integration guidance and explicit edition tiers.
 - MCP schemas now include parameter descriptions, deterministic `next_tool` guidance, token-budget tracking, workspace
   hygiene warnings, and documentation-contract linting.
 - MCP response governance now advertises `context_governance` metadata for bounded agent replies. Workflow, memory, and
@@ -55,6 +55,7 @@ evidence, platform self-observability, and broader IDE/agent integration.
 - Corpus Analytics control-plane contract introduced at **1.0**.
 - MCP response governance contract introduced at **1.0** with deterministic `utf8_bytes_div_4_v1` context-unit
   estimation and explicit `observe` / `partial_enforce` modes.
+- `compare_runs` parameters are unified to `before_run_id` / `after_run_id`.
 - `derived.module_map` and `derived.review_queue` remain report-only projections excluded from the integrity digest;
   they add no analysis pass, metrics family, or report schema bump.
 - Live Implementation Context relationship facts remain off the canonical report and do not change canonical report
@@ -68,13 +69,19 @@ evidence, platform self-observability, and broader IDE/agent integration.
 - LCOM4 excludes Protocol methods and Pydantic validation/serialization hooks; `computed_field` remains included.
 - Repository coverage is enforced at **>=99%**.
 
+### Performance
+
+- Relationship facts are collected during the primary module walk instead of a second traversal (cold-cache
+  `phase_relationship` −28%), and reachability facts replay captured handler nodes instead of a third full AST pass.
+- MCP hot paths are bounded: findings are paged before decoration, hotspot and intent-scoped blast projections are
+  capped, analysis no longer round-trips through the report, and cache loads retain less transient memory.
+
 ### Fixed
 
-- Engineering Memory writes are durable and batch ingestion is atomic.
+- Engineering Memory writes are durable, batch ingestion is atomic, and memory/trajectory/Patch Trail lifecycle
+  handling avoids premature staleness, duplicate projections, stale workflow rows, and broken evidence links.
 - Best-effort audit and memory-proposal failures are now observable instead of silently swallowed.
 - Implementation-context misses return a compact actionable payload instead of empty scaffolding.
-- Memory, trajectory, and Patch Trail lifecycle handling now avoids premature staleness, duplicate projections, stale
-  workflow rows, and broken evidence links.
 - Workspace hygiene, intent attribution, continuation of owned work, queue handling, and recoverable-intent behavior
   were corrected.
 - Patch verification now rejects identical before/after runs where required, surfaces health regressions, and warns on

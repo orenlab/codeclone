@@ -45,7 +45,7 @@
     },
     {
       "name": "compare_runs",
-      "signature": "(self, *, run_id_before: 'str', run_id_after: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
+      "signature": "(self, *, before_run_id: 'str', after_run_id: 'str | None' = None, focus: 'ComparisonFocus' = 'all') -> 'dict[str, object]'"
     },
     {
       "name": "create_review_receipt",

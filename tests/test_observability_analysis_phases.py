@@ -65,7 +65,7 @@ def test_apply_pipeline_process_phase_counters_closed_key_set() -> None:
 
     apply_pipeline_process_phase_counters(span, phase_snapshot=snapshot)  # type: ignore[arg-type]
 
-    assert frozenset(span.counters) == frozenset(
+    assert frozenset(span.counters) >= frozenset(
         (*PHASE_US_COUNTER_SUFFIXES, *PHASE_VOLUME_COUNTER_SUFFIXES)
     )
     assert span.counters["phase_parse_us"] == 1500
@@ -73,6 +73,23 @@ def test_apply_pipeline_process_phase_counters_closed_key_set() -> None:
     assert span.counters["files_timed"] == 2
     assert span.counters["units_eligible"] == 5
     assert span.counters["blocks_emitted"] == 0
+
+
+def test_apply_pipeline_process_phase_counters_emits_subphase_us() -> None:
+    snapshot = PhaseSnapshot(
+        totals=PhaseTotals(),
+        volumes=(),
+        subphase_us=(
+            ("subphase_module_passes_adoption_us", 11),
+            ("subphase_module_passes_security_us", 22),
+        ),
+    )
+    span = _FakeSpan()
+
+    apply_pipeline_process_phase_counters(span, phase_snapshot=snapshot)  # type: ignore[arg-type]
+
+    assert span.counters["subphase_module_passes_adoption_us"] == 11
+    assert span.counters["subphase_module_passes_security_us"] == 22
 
 
 def test_extract_units_records_phase_snapshot_data() -> None:

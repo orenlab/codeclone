@@ -413,8 +413,8 @@ class _MCPSessionReviewReceiptMixin:
                 "verdict": "not_available",
             }
         compare_payload = _state_session(self).compare_runs(
-            run_id_before=previous.run_id,
-            run_id_after=record.run_id,
+            before_run_id=previous.run_id,
+            after_run_id=record.run_id,
             focus="all",
         )
         return {

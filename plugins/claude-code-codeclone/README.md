@@ -76,6 +76,6 @@ claude plugin validate plugins/claude-code-codeclone
 
 ## Documentation
 
-- [Claude Code setup](https://orenlab.github.io/codeclone/guide/integrations/claude-code/setup/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
-- [Structural Change Controller](https://orenlab.github.io/codeclone/book/12-structural-change-controller/)
+- [Claude Code setup](https://orenlab.github.io/codeclone/integrations/claude/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/concepts/mcp/)
+- [Structural Change Controller](https://orenlab.github.io/codeclone/concepts/controlled-change/)

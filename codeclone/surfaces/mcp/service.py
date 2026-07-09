@@ -327,8 +327,8 @@ def _apply_public_method_signatures() -> None:
             _kwonly("detail_level", "DetailLevel", "summary"),
         ),
         "compare_runs": (
-            _kwonly("run_id_before", "str"),
-            _kwonly("run_id_after", "str | None", None),
+            _kwonly("before_run_id", "str"),
+            _kwonly("after_run_id", "str | None", None),
             _kwonly("focus", "ComparisonFocus", "all"),
         ),
         "generate_pr_summary": (

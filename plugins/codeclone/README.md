@@ -96,12 +96,19 @@ single-metric queries, pre-merge sanity checks, coverage/adoption/API snapshots.
 **codeclone-production-triage** — production-first baseline snapshot: health,
 counts, top production hotspots, regressions vs baseline, recommended next action.
 
+**codeclone-architecture-triage** — ranked demonstrated architecture problems
+from the Module Map plus targeted impact context; read-only.
+
 **codeclone-blast-radius** — read-only blast-only inspection before editing
 specific files; use `codeclone-implementation-context` for the bundled projection.
 
 **codeclone-change-control** — intent-first workflow for repository edits:
 workspace intent check, blast radius, patch contract verification, claim guard,
 and review receipt.
+
+**codeclone-implementation-context** — bounded structural, call-graph, contract,
+and change-control evidence from one stored run via `get_implementation_context`;
+use it before broad grep-style exploration.
 
 **codeclone-engineering-memory** — ranked scope context before edits, FTS search,
 optional semantic blend (`semantic=true` on `mode=search` when the server index
@@ -112,8 +119,11 @@ IDE Memory views or CLI `--i-know-what-im-doing`.
 own runtime via `query_platform_observability` after explicit
 `CODECLONE_OBSERVABILITY_ENABLED=1`. Not for end-user repository review.
 
+**codeclone-setup** — repository readiness through the terminal (`codeclone
+setup status | plan | apply | wizard`), not MCP.
+
 ## Links
 
-- [Codex plugin guide](https://orenlab.github.io/codeclone/guide/integrations/codex/setup/)
-- [MCP usage guide](https://orenlab.github.io/codeclone/guide/mcp/)
+- [Codex plugin guide](https://orenlab.github.io/codeclone/integrations/codex/)
+- [MCP usage guide](https://orenlab.github.io/codeclone/concepts/mcp/)
 - [Privacy Policy](https://orenlab.github.io/codeclone/privacy-policy/)

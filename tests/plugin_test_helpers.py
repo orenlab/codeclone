@@ -34,6 +34,24 @@ def load_json(path: Path) -> object:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def codeclone_package_version(root: Path) -> str:
+    for line in (root / "pyproject.toml").read_text(encoding="utf-8").splitlines():
+        if line.startswith("version = "):
+            return line.split("=", 1)[1].strip().strip('"')
+    raise AssertionError("pyproject.toml version not found")
+
+
+def assert_plugin_manifest_version_license_homepage(
+    manifest: dict[str, object],
+    *,
+    package_version: str,
+    homepage: str,
+) -> None:
+    assert manifest["version"] == package_version
+    assert manifest["license"] == "MPL-2.0"
+    assert manifest["homepage"] == homepage
+
+
 def parse_frontmatter(text: str) -> dict[str, str]:
     match = re.match(r"^---\n(?P<body>.*?)\n---\n", text, re.DOTALL)
     assert match is not None

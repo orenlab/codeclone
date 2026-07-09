@@ -6,11 +6,14 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from enum import Enum
 from time import perf_counter_ns
 from types import TracebackType
-from typing import Literal
+from typing import Final, Literal, TypeVar
+
+_T = TypeVar("_T")
 
 
 class AnalysisPhaseKey(str, Enum):
@@ -44,6 +47,25 @@ PHASE_US_COUNTER_SUFFIXES: tuple[str, ...] = tuple(
 )
 PHASE_VOLUME_COUNTER_SUFFIXES: tuple[str, ...] = tuple(
     key.value for key in AnalysisVolumeKey
+)
+
+SUBPHASE_MODULE_PASSES_ADOPTION_US: Final = "subphase_module_passes_adoption_us"
+SUBPHASE_MODULE_PASSES_SECURITY_US: Final = "subphase_module_passes_security_us"
+SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US: Final = (
+    "subphase_module_passes_reachability_alias_us"
+)
+SUBPHASE_MODULE_PASSES_REACHABILITY_BINDING_US: Final = (
+    "subphase_module_passes_reachability_binding_us"
+)
+SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US: Final = (
+    "subphase_module_passes_reachability_visit_us"
+)
+MODULE_PASSES_SUBPHASE_US_COUNTER_SUFFIXES: tuple[str, ...] = (
+    SUBPHASE_MODULE_PASSES_ADOPTION_US,
+    SUBPHASE_MODULE_PASSES_SECURITY_US,
+    SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US,
+    SUBPHASE_MODULE_PASSES_REACHABILITY_BINDING_US,
+    SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US,
 )
 
 
@@ -83,6 +105,7 @@ class PhaseTotals:
 class PhaseSnapshot:
     totals: PhaseTotals
     volumes: tuple[tuple[str, int], ...]
+    subphase_us: tuple[tuple[str, int], ...] = ()
 
     @classmethod
     def empty(cls) -> PhaseSnapshot:
@@ -92,13 +115,20 @@ class PhaseSnapshot:
         merged_volumes = self.volume_map()
         for key, value in other.volumes:
             merged_volumes[key] = merged_volumes.get(key, 0) + value
+        merged_subphase = self.subphase_us_map()
+        for key, value in other.subphase_us:
+            merged_subphase[key] = merged_subphase.get(key, 0) + value
         return PhaseSnapshot(
             totals=self.totals.merge(other.totals),
             volumes=tuple(sorted(merged_volumes.items())),
+            subphase_us=tuple(sorted(merged_subphase.items())),
         )
 
     def volume_map(self) -> dict[str, int]:
         return dict(self.volumes)
+
+    def subphase_us_map(self) -> dict[str, int]:
+        return dict(self.subphase_us)
 
 
 class _InertPhaseContext:
@@ -144,12 +174,13 @@ class _ActivePhaseContext:
 
 
 class PhaseLedger:
-    __slots__ = ("_active", "_totals", "_volumes")
+    __slots__ = ("_active", "_subphase_us", "_totals", "_volumes")
 
     def __init__(self, *, active: bool) -> None:
         self._active = active
         self._totals: dict[AnalysisPhaseKey, int] = {}
         self._volumes: dict[AnalysisVolumeKey, int] = {}
+        self._subphase_us: dict[str, int] = {}
 
     @property
     def active(self) -> bool:
@@ -169,6 +200,20 @@ class PhaseLedger:
             return
         self._volumes[key] = self._volumes.get(key, 0) + value
 
+    def add_subphase_us(self, key: str, elapsed_ns: int) -> None:
+        if not self._active:
+            return
+        self._subphase_us[key] = self._subphase_us.get(key, 0) + (elapsed_ns // 1000)
+
+    def run_subphase_us(self, key: str, fn: Callable[[], _T]) -> _T:
+        if not self._active:
+            return fn()
+        started_ns = perf_counter_ns()
+        try:
+            return fn()
+        finally:
+            self.add_subphase_us(key, perf_counter_ns() - started_ns)
+
     def snapshot(self) -> PhaseSnapshot:
         totals = PhaseTotals(
             **{f"{key.value}_ns": self._totals.get(key, 0) for key in AnalysisPhaseKey}
@@ -178,6 +223,7 @@ class PhaseLedger:
             volumes=tuple(
                 sorted((key.value, value) for key, value in self._volumes.items())
             ),
+            subphase_us=tuple(sorted(self._subphase_us.items())),
         )
 
     def _add_elapsed(self, key: AnalysisPhaseKey, elapsed_ns: int) -> None:
@@ -189,8 +235,14 @@ INERT_PHASE_LEDGER = PhaseLedger(active=False)
 
 __all__ = [
     "INERT_PHASE_LEDGER",
+    "MODULE_PASSES_SUBPHASE_US_COUNTER_SUFFIXES",
     "PHASE_US_COUNTER_SUFFIXES",
     "PHASE_VOLUME_COUNTER_SUFFIXES",
+    "SUBPHASE_MODULE_PASSES_ADOPTION_US",
+    "SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US",
+    "SUBPHASE_MODULE_PASSES_REACHABILITY_BINDING_US",
+    "SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US",
+    "SUBPHASE_MODULE_PASSES_SECURITY_US",
     "AnalysisPhaseKey",
     "AnalysisVolumeKey",
     "PhaseLedger",
