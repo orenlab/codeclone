@@ -9,6 +9,11 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from ... import ui_messages as ui
+from ...budget.patch_contract import (
+    VALID_STRICTNESS_PROFILES,
+    StrictnessProfile,
+    budgets_for_strictness,
+)
 from ...contracts import ExitCode
 from ...core._types import AnalysisResult
 from ...report.gates.evaluator import (
@@ -19,11 +24,6 @@ from ...report.gates.evaluator import (
     gate_state_from_project_metrics,
 )
 from ...utils.coerce import as_int as _as_int
-from ..mcp._patch_contract import (
-    VALID_STRICTNESS_PROFILES,
-    StrictnessProfile,
-    budgets_for_strictness,
-)
 from .baseline_state import CloneBaselineState
 from .post_run import DiffContext
 from .types import CLIArgsLike, PrinterLike

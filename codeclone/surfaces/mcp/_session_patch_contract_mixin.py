@@ -18,12 +18,7 @@ from ...audit import (
     EVENT_PATCH_VERIFIED,
     EVENT_PATCH_VIOLATED,
 )
-from ...utils.coerce import as_int as _coerce_int
-from ...utils.coerce import as_mapping as _as_mapping
-from ...utils.coerce import as_sequence as _as_sequence
-from . import _session_helpers as _helpers
-from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
-from ._patch_contract import (
+from ...budget.patch_contract import (
     VALID_PATCH_CONTRACT_MODES,
     VALID_STRICTNESS_PROFILES,
     PatchBudgets,
@@ -34,6 +29,11 @@ from ._patch_contract import (
     budgets_for_strictness,
     detect_baseline_abuse,
 )
+from ...utils.coerce import as_int as _coerce_int
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
+from . import _session_helpers as _helpers
+from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_intent_mixin import _MCPSessionIntentMixin
 from ._session_shared import (

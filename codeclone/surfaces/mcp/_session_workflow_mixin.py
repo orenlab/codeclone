@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Final, cast
 
 from ...audit.events import EVENT_BLAST_ARTIFACT_CREATED, EVENT_PATCH_TRAIL_COMPUTED
+from ...budget.patch_contract import PatchContractStatus
 from ...memory.trajectory.patch_trail import compute_patch_trail
 from . import _session_helpers as _helpers
 from ._blast_radius import (
@@ -49,7 +50,6 @@ from ._intent import (
     normalize_expected_effects,
     normalize_intent_scope,
 )
-from ._patch_contract import PatchContractStatus
 from ._patch_trail_bridge import build_patch_trail_inputs
 from ._session_blast_radius_mixin import _MCPSessionBlastRadiusMixin
 from ._session_claim_guard_mixin import _MCPSessionClaimGuardMixin
