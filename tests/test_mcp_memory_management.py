@@ -13,13 +13,17 @@ from typing import Any, cast
 
 import pytest
 
+import codeclone.memory.finish_workflow as finish_workflow
 import codeclone.surfaces.mcp._session_memory_mixin as mcp_memory_mixin_mod
+from codeclone.memory.coverage import ScopeCoverageReport
 from codeclone.memory.exceptions import MemoryCapacityError, MemoryContractError
+from codeclone.memory.finish_workflow import FinishMemoryWorkflowResult
 from codeclone.memory.governance import record_candidate
 from codeclone.memory.ide_governance import (
     IDE_GOVERNANCE_PROTOCOL_VERSION,
     compute_governance_proof,
 )
+from codeclone.memory.staleness import StalenessReport
 from codeclone.surfaces.mcp._session_shared import (
     MCPRunNotFoundError,
     MCPServiceContractError,
@@ -206,6 +210,58 @@ def test_mcp_finish_propose_memory_happy_path(tmp_path: Path) -> None:
         assert "memory_candidates" in payload
         assert "memory_staleness" in payload
         assert "memory_coverage_delta" in payload
+
+
+def test_mcp_finish_propose_memory_delegates_with_payload_parity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        before = ScopeCoverageReport(("pkg/mod.py",), 0, 1, 0, ("pkg/mod.py",))
+        after = ScopeCoverageReport(("pkg/mod.py",), 1, 1, 100, ())
+        candidates: list[dict[str, object]] = [{"id": "mem-1", "status": "draft"}]
+        staleness = StalenessReport(1, 0, 0, {"scope_changed": 1})
+        delta: dict[str, object] = {
+            "scope_coverage_before": 0,
+            "scope_coverage_after": 100,
+            "new_uncovered_paths": ["pkg/mod.py"],
+        }
+
+        def _execute(*args: Any, **kwargs: Any) -> FinishMemoryWorkflowResult:
+            assert kwargs["changed_paths"] == ("pkg/mod.py",)
+            assert kwargs["claims_text"] == "claim"
+            assert kwargs["review_text"] == "review"
+            assert kwargs["verification_profile"] == "python_structural"
+            return FinishMemoryWorkflowResult(
+                candidates=candidates,
+                staleness=staleness,
+                coverage_before=before,
+                coverage_after=after,
+                coverage_delta=delta,
+            )
+
+        monkeypatch.setattr(
+            finish_workflow,
+            "execute_finish_memory_workflow",
+            _execute,
+        )
+        payload = service.finish_propose_memory(
+            root_path=root,
+            changed_files=("pkg/mod.py",),
+            claims_text="claim",
+            review_text="review",
+            verification_profile="python_structural",
+        )
+
+        assert payload == {
+            "memory_candidates": candidates,
+            "memory_staleness": {
+                "records_marked_stale": 1,
+                "reasons": {"scope_changed": 1},
+            },
+            "memory_coverage_delta": delta,
+        }
 
 
 def test_mcp_memory_run_record_rejects_foreign_root(

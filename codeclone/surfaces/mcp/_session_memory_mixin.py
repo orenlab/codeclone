@@ -630,21 +630,14 @@ class _MCPSessionMemoryMixin:
         review_text: str | None,
         verification_profile: str | None,
     ) -> dict[str, object]:
-        from ...memory.coverage import compute_scope_coverage, coverage_delta
-        from ...memory.ingest.receipts import propose_memory_from_changed_paths
-        from ...memory.staleness import apply_scope_staleness
+        from ...memory.finish_workflow import execute_finish_memory_workflow
 
         try:
             store, _db_path, config, project = self._open_memory_store(root_path)
         except MCPServiceContractError:
             return {}
         try:
-            before = compute_scope_coverage(
-                store,
-                project_id=project.id,
-                scope_paths=changed_files,
-            )
-            candidates = propose_memory_from_changed_paths(
+            workflow = execute_finish_memory_workflow(
                 store,
                 project=project,
                 changed_paths=changed_files,
@@ -654,24 +647,13 @@ class _MCPSessionMemoryMixin:
                 max_candidates=config.max_candidates,
                 max_statement_chars=config.max_statement_chars,
             )
-            stale_report = apply_scope_staleness(
-                store,
-                project_id=project.id,
-                changed_paths=changed_files,
-            )
-            after = compute_scope_coverage(
-                store,
-                project_id=project.id,
-                scope_paths=changed_files,
-            )
-            delta = coverage_delta(before, after)
             return {
-                "memory_candidates": candidates,
+                "memory_candidates": workflow.candidates,
                 "memory_staleness": {
-                    "records_marked_stale": stale_report.records_marked_stale,
-                    "reasons": stale_report.reasons,
+                    "records_marked_stale": workflow.staleness.records_marked_stale,
+                    "reasons": workflow.staleness.reasons,
                 },
-                "memory_coverage_delta": delta,
+                "memory_coverage_delta": workflow.coverage_delta,
             }
         finally:
             store.close()
