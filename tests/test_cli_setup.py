@@ -60,6 +60,7 @@ _DISCOVER_SOURCE = (
     _REPO_ROOT / "codeclone" / "surfaces" / "cli" / "setup" / "engine" / "discover.py"
 )
 _WORKFLOW_SOURCE = _REPO_ROOT / "codeclone" / "surfaces" / "cli" / "workflow.py"
+_SUBCOMMANDS_SOURCE = _REPO_ROOT / "codeclone" / "surfaces" / "cli" / "subcommands.py"
 
 _OPTIONAL_MODULES = frozenset(
     {
@@ -188,9 +189,12 @@ def test_lazy_load_positive_path(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "codeclone.surfaces.cli.setup" in sys.modules
 
 
-def test_workflow_has_single_deferred_setup_import() -> None:
-    text = _WORKFLOW_SOURCE.read_text(encoding="utf-8")
+def test_subcommand_dispatch_has_single_deferred_setup_import() -> None:
+    text = _SUBCOMMANDS_SOURCE.read_text(encoding="utf-8")
     assert text.count("from .setup import setup_main") == 1
+    assert "from .setup import setup_main" not in _WORKFLOW_SOURCE.read_text(
+        encoding="utf-8"
+    )
 
 
 def test_discover_does_not_import_mcp_surface() -> None:

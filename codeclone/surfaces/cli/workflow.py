@@ -38,6 +38,7 @@ from ...report.html import build_html_report
 from . import baseline_state as cli_baseline_state
 from . import changed_scope as cli_changed_scope
 from . import console as cli_console
+from . import controller_queries as cli_controller_queries
 from . import execution as cli_execution
 from . import post_run as cli_post_run
 from . import report_meta as cli_meta_mod
@@ -48,7 +49,7 @@ from . import state as cli_state
 from . import summary as cli_summary
 from . import tips as cli_tips
 from .attrs import bool_attr
-from .patch_verify import VALID_STRICTNESS_PROFILES
+from .subcommands import dispatch_subcommand
 from .types import CLIArgsLike, StatusConsole, require_status_console
 
 _CLI_SESSION_START_EPOCH = int(time.time())
@@ -187,13 +188,7 @@ LEGACY_CACHE_PATH = cli_state.LEGACY_CACHE_PATH
 
 
 def _controller_query_mode(args: object) -> bool:
-    return (
-        bool_attr(args, "blast_radius")
-        or bool_attr(args, "patch_verify")
-        or bool_attr(args, "session_stats")
-        or bool_attr(args, "audit")
-        or bool_attr(args, "audit_json")
-    )
+    return cli_controller_queries.controller_query_mode(args)
 
 
 def _validate_controller_query_flags(
@@ -202,47 +197,12 @@ def _validate_controller_query_flags(
     report_outputs_requested: bool = False,
     strictness_explicit: bool = False,
 ) -> None:
-    printer = _console()
-    blast_radius = bool_attr(args, "blast_radius")
-    patch_verify = bool_attr(args, "patch_verify")
-    strictness = str(getattr(args, "strictness", "ci") or "ci")
-    if strictness not in VALID_STRICTNESS_PROFILES:
-        expected = ", ".join(sorted(VALID_STRICTNESS_PROFILES))
-        printer.print(
-            ui.fmt_contract_error(
-                f"Invalid --strictness value: {strictness!r}. Expected {expected}."
-            )
-        )
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    if strictness_explicit and not patch_verify:
-        printer.print(ui.fmt_contract_error(ui.ERR_STRICTNESS_PATCH_VERIFY_ONLY))
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    session_stats = bool_attr(args, "session_stats")
-    audit = bool_attr(args, "audit")
-    if session_stats and (blast_radius or patch_verify or audit):
-        printer.print(ui.fmt_contract_error(ui.ERR_SESSION_STATS_COMBINED))
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    if audit and (blast_radius or patch_verify):
-        printer.print(ui.fmt_contract_error(ui.ERR_AUDIT_COMBINED))
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    if blast_radius and patch_verify:
-        printer.print(ui.fmt_contract_error(ui.ERR_BLAST_PATCH_BOTH))
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    if not (blast_radius or patch_verify or session_stats or audit):
-        return
-    if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
-        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_NO_BASELINE_UPDATE))
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    if (
-        bool_attr(args, "changed_only")
-        or getattr(args, "diff_against", None)
-        or getattr(args, "paths_from_git_diff", None)
-    ):
-        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_NO_CHANGED_SCOPE))
-        sys.exit(ExitCode.CONTRACT_ERROR)
-    if report_outputs_requested:
-        printer.print(ui.fmt_contract_error(ui.ERR_CONTROLLER_TERMINAL_ONLY))
-        sys.exit(ExitCode.CONTRACT_ERROR)
+    cli_controller_queries.validate_controller_query_flags(
+        args=args,
+        printer=_console(),
+        report_outputs_requested=report_outputs_requested,
+        strictness_explicit=strictness_explicit,
+    )
 
 
 def _run_controller_query(
@@ -254,28 +214,14 @@ def _run_controller_query(
     diff_context: cli_post_run.DiffContext,
     baseline_state: cli_baseline_state.CloneBaselineState,
 ) -> int | None:
-    if bool_attr(args, "blast_radius"):
-        from .blast_radius import render_blast_radius
-
-        return render_blast_radius(
-            console=_console(),
-            report_document=report_document,
-            files=tuple(getattr(args, "blast_radius", ()) or ()),
-            root_path=root_path,
-            quiet=args.quiet,
-        )
-    if not bool_attr(args, "patch_verify"):
-        return None
-    from .patch_verify import render_patch_verify
-
-    return render_patch_verify(
-        console=_console(),
+    return cli_controller_queries.run_post_analysis_controller_query(
         args=args,
-        strictness=str(getattr(args, "strictness", "ci") or "ci"),
-        analysis=analysis_result,
+        report_document=report_document,
+        root_path=root_path,
+        analysis_result=analysis_result,
         diff_context=diff_context,
         baseline_state=baseline_state,
-        quiet=args.quiet,
+        console_factory=_console,
     )
 
 
@@ -286,40 +232,16 @@ def _controller_query_console(args: CLIArgsLike) -> StatusConsole:
     )
 
 
-def _dispatch_session_stats(args: CLIArgsLike, root_path: Path) -> int:
-    from .session_stats import render_session_stats
-
-    return render_session_stats(
-        console=_controller_query_console(args),
-        root_path=root_path,
-        quiet=args.quiet,
-    )
-
-
-def _dispatch_audit(args: CLIArgsLike, root_path: Path) -> int:
-    from .audit import render_audit
-
-    audit_json = bool_attr(args, "audit_json")
-    return render_audit(
-        console=_controller_query_console(args),
-        root_path=root_path,
-        audit_enabled=bool(getattr(args, "audit_enabled", False)),
-        audit_path=str(getattr(args, "audit_path", "")),
-        quiet=args.quiet,
-        json_summary=audit_json,
-    )
-
-
 def _run_pre_analysis_controller_query(
     *,
     args: CLIArgsLike,
     root_path: Path,
 ) -> int | None:
-    if bool_attr(args, "session_stats"):
-        return _dispatch_session_stats(args, root_path)
-    if bool_attr(args, "audit") or bool_attr(args, "audit_json"):
-        return _dispatch_audit(args, root_path)
-    return None
+    return cli_controller_queries.run_pre_analysis_controller_query(
+        args=args,
+        root_path=root_path,
+        query_console_factory=_controller_query_console,
+    )
 
 
 def print_banner(*, root: Path | None = None) -> None:
@@ -819,22 +741,7 @@ def _report_digest_from_document(report_document: dict[str, object]) -> str:
 
 
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
-        from .setup import setup_main
-
-        raise SystemExit(setup_main(sys.argv[2:]))
-    if len(sys.argv) > 1 and sys.argv[1] == "analytics":
-        from .analytics import analytics_main
-
-        raise SystemExit(analytics_main(sys.argv[2:]))
-    if len(sys.argv) > 1 and sys.argv[1] == "memory":
-        from .memory import memory_main
-
-        raise SystemExit(memory_main(sys.argv[2:]))
-    if len(sys.argv) > 1 and sys.argv[1] == "observability":
-        from .observability import observability_main
-
-        raise SystemExit(observability_main(sys.argv[2:]))
+    dispatch_subcommand(sys.argv)
     try:
         _main_impl()
     except SystemExit:
