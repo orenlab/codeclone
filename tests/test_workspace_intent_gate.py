@@ -34,8 +34,8 @@ from tests.workspace_intent_gate_helpers import (
     write_workspace_record,
 )
 
-_PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
-_PID_LIVENESS = "codeclone.surfaces.mcp._workspace_intent_pid.agent_pid_liveness"
+_PID_ALIVE = "codeclone.workspace_intent.lifecycle.is_pid_alive"
+_PID_LIVENESS = "codeclone.workspace_intent.lifecycle.pid_liveness"
 
 
 def _write_record(root: Path, record: workspace_intents.WorkspaceIntentRecord) -> None:

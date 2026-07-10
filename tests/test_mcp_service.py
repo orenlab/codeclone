@@ -14592,7 +14592,7 @@ def test_include_record_in_hook_cleanup_recoverable_prefix_and_unknown_ownership
         report_digest="digest-a",
     )
     monkeypatch.setattr(
-        workspace_intents,
+        gate_mod,
         "classify_intent_ownership",
         lambda *_args, **_kwargs: workspace_intents.IntentOwnership.RECOVERABLE,
     )
@@ -14623,7 +14623,7 @@ def test_include_record_in_hook_cleanup_recoverable_prefix_and_unknown_ownership
         pass
 
     monkeypatch.setattr(
-        workspace_intents,
+        gate_mod,
         "classify_intent_ownership",
         lambda *_args, **_kwargs: _UnknownOwnership(),
     )

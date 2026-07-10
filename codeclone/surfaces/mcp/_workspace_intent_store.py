@@ -20,13 +20,13 @@ from ...config.intent_registry import (
 )
 from ...report.meta import current_report_timestamp_utc
 from ...utils.json_io import write_json_document_atomically
-from ._workspace_intent_contract import WorkspaceIntentRecord
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.contract import WorkspaceIntentRecord
+from ...workspace_intent.lifecycle import (
     WorkspaceIntentStatus,
     gc_status_for_reason,
     is_terminal_workspace_intent_status,
 )
-from ._workspace_intent_models import (
+from ...workspace_intent.models import (
     WorkspaceIntentRowModel,
     parse_workspace_document,
     parse_workspace_document_json,
@@ -34,7 +34,7 @@ from ._workspace_intent_models import (
     signed_payload_dict_from_record,
     signed_payload_json_from_record,
 )
-from ._workspace_intent_paths import (
+from ...workspace_intent.paths import (
     intent_path,
     is_safe_intent_id,
     read_payload,
@@ -44,8 +44,8 @@ from ._workspace_intent_paths import (
     safe_remove_own_intent,
     unlink,
 )
+from ...workspace_intent.schema import open_intent_registry_db
 from ._workspace_intent_registry_lock import workspace_registry_lock
-from ._workspace_intent_schema import open_intent_registry_db
 from ._workspace_intent_staleness import gc_removal_reason
 
 _STORE_CACHE: dict[

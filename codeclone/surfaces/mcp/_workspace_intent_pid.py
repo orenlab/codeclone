@@ -8,13 +8,13 @@
 
 from __future__ import annotations
 
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     PidLiveness,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     is_pid_alive as _lifecycle_is_pid_alive,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     pid_liveness as _lifecycle_pid_liveness,
 )
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
-from enum import Enum
 from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -17,7 +16,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ._workspace_intent_store import WorkspaceIntentStore
 
-from ._workspace_intent_contract import (
+from ...workspace_intent.contract import (
     DEFAULT_LEASE_SECONDS,
     DEFAULT_TTL_SECONDS,
     LEGACY_REGISTRY_VERSION,
@@ -31,37 +30,45 @@ from ._workspace_intent_contract import (
     compute_scope_digest,
     verify_intent_integrity,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     PidLiveness,
     WorkspaceIntentStatus,
     utc_now,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     lease_expiry as _lease_expiry,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     parse_utc as _parse_utc,
 )
-from ._workspace_intent_paths import (
+from ...workspace_intent.ownership import (
+    IntentOwnership,
+)
+from ...workspace_intent.ownership import (
+    classify_intent_ownership as _classify_intent_ownership,
+)
+from ...workspace_intent.paths import (
     intent_filename,
     intent_path,
     registry_dir,
-    safe_remove_own_intent,
 )
-from ._workspace_intent_paths import (
+from ...workspace_intent.paths import (
     is_safe_intent_id as _is_safe_intent_id,
 )
-from ._workspace_intent_paths import (
+from ...workspace_intent.paths import (
     is_safe_intent_path as _is_safe_intent_path,
+)
+from ...workspace_intent.paths import (
+    record_sort_key as _record_sort_key,
+)
+from ...workspace_intent.paths import (
+    unlink as _unlink,
 )
 from ._workspace_intent_paths import (
     read_payload as _read_payload,
 )
 from ._workspace_intent_paths import (
-    record_sort_key as _record_sort_key,
-)
-from ._workspace_intent_paths import (
-    unlink as _unlink,
+    safe_remove_own_intent as safe_remove_own_intent,
 )
 from ._workspace_intent_staleness import (
     stale_reason,
@@ -69,15 +76,6 @@ from ._workspace_intent_staleness import (
 from ._workspace_intent_staleness import (
     ttl_expired as _ttl_expired,
 )
-
-
-class IntentOwnership(str, Enum):
-    OWN_ACTIVE = "own_active"
-    OWN_STALE = "own_stale"
-    FOREIGN_ACTIVE = "foreign_active"
-    FOREIGN_STALE = "foreign_stale"
-    RECOVERABLE = "recoverable"
-    EXPIRED = "expired"
 
 
 def _is_pid_alive(pid: int) -> bool:
@@ -99,7 +97,7 @@ def is_stale(record: WorkspaceIntentRecord) -> bool:
 
 
 def signed_payload(record: WorkspaceIntentRecord) -> dict[str, object]:
-    from ._workspace_intent_models import signed_payload_dict_from_record
+    from ...workspace_intent.models import signed_payload_dict_from_record
 
     return signed_payload_dict_from_record(record)
 
@@ -150,20 +148,12 @@ def classify_intent_ownership(
     own_start_epoch: int,
     now: datetime,
 ) -> IntentOwnership:
-    expires = _parse_utc(record.expires_at_utc)
-    if expires is None or expires <= now:
-        return IntentOwnership.EXPIRED
-
-    is_own = record.agent_pid == own_pid and record.agent_start_epoch == own_start_epoch
-    lease_expiry = _lease_expiry(record)
-    lease_valid = lease_expiry is not None and lease_expiry > now
-    if is_own:
-        return IntentOwnership.OWN_ACTIVE if lease_valid else IntentOwnership.OWN_STALE
-    liveness = _pid_liveness(record.agent_pid)
-    if liveness == PidLiveness.DEAD:
-        return IntentOwnership.RECOVERABLE
-    return (
-        IntentOwnership.FOREIGN_ACTIVE if lease_valid else IntentOwnership.FOREIGN_STALE
+    return _classify_intent_ownership(
+        record,
+        own_pid=own_pid,
+        own_start_epoch=own_start_epoch,
+        now=now,
+        pid_liveness=_pid_liveness,
     )
 
 
@@ -224,7 +214,10 @@ def expires_at(*, declared_at: datetime, ttl_seconds: int) -> str:
 
 
 def validate_workspace_record(data: object) -> WorkspaceIntentRecord | None:
-    from ._workspace_intent_models import parse_workspace_document, record_from_document
+    from ...workspace_intent.models import (
+        parse_workspace_document,
+        record_from_document,
+    )
 
     document = parse_workspace_document(data)
     if document is None:

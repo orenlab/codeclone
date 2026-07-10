@@ -8,16 +8,16 @@
 
 from __future__ import annotations
 
-from ._workspace_intent_contract import WorkspaceIntentRecord
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.contract import WorkspaceIntentRecord
+from ...workspace_intent.lifecycle import (
     PidLiveness,
     WorkspaceIntentStatus,
     utc_now,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     is_lease_expired as _is_lease_expired,
 )
-from ._workspace_intent_lifecycle import (
+from ...workspace_intent.lifecycle import (
     parse_utc as _parse_utc,
 )
 

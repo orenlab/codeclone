@@ -27,24 +27,21 @@ from codeclone.config.intent_registry import (
     IntentRegistryConfigError,
     resolve_intent_registry_config,
 )
-from codeclone.surfaces.mcp import _workspace_intents as workspace_intents
-from codeclone.surfaces.mcp._workspace_intent_contract import WorkspaceIntentRecord
-from codeclone.surfaces.mcp._workspace_intent_lifecycle import (
+from codeclone.workspace_intent import lifecycle as intent_lifecycle
+from codeclone.workspace_intent import reader as intent_reader
+from codeclone.workspace_intent.contract import WorkspaceIntentRecord
+from codeclone.workspace_intent.lifecycle import (
+    PidLiveness,
     WorkspaceIntentStatus,
     is_terminal_workspace_intent_status,
     utc_now,
 )
-from codeclone.surfaces.mcp._workspace_intent_models import (
-    parse_workspace_document,
-    parse_workspace_document_json,
-    record_from_document,
+from codeclone.workspace_intent.ownership import (
+    IntentOwnership,
+    classify_intent_ownership,
 )
-from codeclone.surfaces.mcp._workspace_intent_paths import (
-    read_payload,
-    record_sort_key,
-    registry_files,
-)
-from codeclone.surfaces.mcp._workspace_intent_schema import (
+from codeclone.workspace_intent.paths import record_sort_key
+from codeclone.workspace_intent.schema import (
     IntentRegistrySchemaError,
     open_intent_registry_db_readonly,
 )
@@ -64,6 +61,7 @@ class WorkspaceIntentRegistryUnavailable(RuntimeError):
 HOOK_AUTHORIZE_FOREIGN_ENV = "CODECLONE_HOOK_AUTHORIZE_FOREIGN"
 _TRUTHY_HOOK_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSY_HOOK_VALUES = frozenset({"0", "false", "no", "off"})
+_DEFAULT_IS_PID_ALIVE = intent_lifecycle.is_pid_alive
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,26 +199,27 @@ def _include_record_in_hook_cleanup(
     include_foreign: bool,
     now: datetime,
 ) -> bool:
-    ownership = workspace_intents.classify_intent_ownership(
+    ownership = classify_intent_ownership(
         record,
         own_pid=own_pid,
         own_start_epoch=own_start_epoch,
         now=now,
+        pid_liveness=_pid_liveness,
     )
     if include_foreign:
-        return ownership != workspace_intents.IntentOwnership.EXPIRED
+        return ownership != IntentOwnership.EXPIRED
     if ownership in {
-        workspace_intents.IntentOwnership.FOREIGN_ACTIVE,
-        workspace_intents.IntentOwnership.FOREIGN_STALE,
-        workspace_intents.IntentOwnership.EXPIRED,
+        IntentOwnership.FOREIGN_ACTIVE,
+        IntentOwnership.FOREIGN_STALE,
+        IntentOwnership.EXPIRED,
     }:
         return False
     if ownership in {
-        workspace_intents.IntentOwnership.OWN_ACTIVE,
-        workspace_intents.IntentOwnership.OWN_STALE,
+        IntentOwnership.OWN_ACTIVE,
+        IntentOwnership.OWN_STALE,
     }:
         return True
-    if ownership == workspace_intents.IntentOwnership.RECOVERABLE:
+    if ownership == IntentOwnership.RECOVERABLE:
         if recoverable_agent_label_prefix is None:
             return False
         return record.agent_label.startswith(recoverable_agent_label_prefix)
@@ -274,13 +273,14 @@ def _decision_from_records(
     ignored_count = 0
     for record in sorted(records, key=record_sort_key):
         if not is_terminal_workspace_intent_status(record.status):
-            ownership = workspace_intents.classify_intent_ownership(
+            ownership = classify_intent_ownership(
                 record,
                 own_pid=0,
                 own_start_epoch=0,
                 now=current_time,
+                pid_liveness=_pid_liveness,
             )
-            liveness = workspace_intents._pid_liveness(record.agent_pid)
+            liveness = _pid_liveness(record.agent_pid)
             if record.status == WorkspaceIntentStatus.QUEUED.value:
                 queued = queued or record
                 continue
@@ -325,15 +325,15 @@ def _decision_from_records(
 
 
 def _ownership_authorizes_hook(
-    ownership: workspace_intents.IntentOwnership,
+    ownership: IntentOwnership,
     *,
-    liveness: workspace_intents.PidLiveness,
+    liveness: PidLiveness,
 ) -> bool:
-    if liveness != workspace_intents.PidLiveness.ALIVE:
+    if liveness != PidLiveness.ALIVE:
         return False
-    if ownership == workspace_intents.IntentOwnership.OWN_ACTIVE:
+    if ownership == IntentOwnership.OWN_ACTIVE:
         return True
-    if ownership == workspace_intents.IntentOwnership.FOREIGN_ACTIVE:
+    if ownership == IntentOwnership.FOREIGN_ACTIVE:
         return _hook_authorizes_foreign_active()
     return False
 
@@ -352,6 +352,16 @@ def _hook_authorizes_foreign_active() -> bool:
     return normalized in _TRUTHY_HOOK_VALUES
 
 
+def _pid_liveness(pid: int) -> PidLiveness:
+    if intent_lifecycle.is_pid_alive is not _DEFAULT_IS_PID_ALIVE:
+        return (
+            PidLiveness.ALIVE
+            if intent_lifecycle.is_pid_alive(pid)
+            else PidLiveness.DEAD
+        )
+    return intent_lifecycle.pid_liveness(pid)
+
+
 def _load_registry_records_read_only(
     root: Path,
     config: IntentRegistryConfig,
@@ -364,47 +374,17 @@ def _load_registry_records_read_only(
 
 
 def _load_file_records(root: Path) -> tuple[WorkspaceIntentRecord, ...]:
-    records: list[WorkspaceIntentRecord] = []
-    for path in registry_files(root):
-        payload = read_payload(path)
-        record = _record_from_payload(payload)
-        if record is not None:
-            records.append(record)
-    return tuple(sorted(records, key=record_sort_key))
+    return intent_reader.load_file_records(root)
 
 
 def _load_sqlite_records(db_path: Path) -> tuple[WorkspaceIntentRecord, ...]:
-    if not db_path.is_file():
-        return ()
-    conn = open_intent_registry_db_readonly(db_path)
-    try:
-        rows = conn.execute(
-            """
-            SELECT payload_json
-            FROM workspace_intents
-            ORDER BY declared_at_utc, agent_pid, intent_id
-            """
-        ).fetchall()
-    finally:
-        conn.close()
-    records = [
-        record
-        for record in (_record_from_payload(row[0]) for row in rows)
-        if record is not None
-    ]
-    return tuple(sorted(records, key=record_sort_key))
+    return intent_reader.load_sqlite_records(
+        db_path,
+        open_readonly=open_intent_registry_db_readonly,
+    )
 
 
-def _record_from_payload(payload: object) -> WorkspaceIntentRecord | None:
-    if isinstance(payload, str):
-        document = parse_workspace_document_json(payload)
-    elif isinstance(payload, Mapping):
-        document = parse_workspace_document(payload)
-    else:
-        return None
-    if document is None:
-        return None
-    return record_from_document(document)
+_record_from_payload = intent_reader.record_from_payload
 
 
 def _display_registry_path(root: Path, registry_path: Path) -> str:
