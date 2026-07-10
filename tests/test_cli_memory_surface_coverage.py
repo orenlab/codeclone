@@ -286,7 +286,7 @@ def test_search_semantic_advisory_when_provider_unavailable(
     with cli_memory_repo(tmp_path) as (root, _project, _store):
         root_arg = str(root.resolve())
         monkeypatch.setattr(
-            "codeclone.surfaces.cli.memory.resolve_embedding_provider",
+            "codeclone.memory.application.resolve_embedding_provider",
             lambda _cfg: (_ for _ in ()).throw(
                 __import__(
                     "codeclone.memory.exceptions",
@@ -295,7 +295,7 @@ def test_search_semantic_advisory_when_provider_unavailable(
             ),
         )
         monkeypatch.setattr(
-            "codeclone.surfaces.cli.memory.query_engineering_memory",
+            "codeclone.memory.application.query_engineering_memory",
             lambda *_args, **_kwargs: {
                 "payload": {"records": []},
                 "semantic": {"used": False, "reason": "provider missing"},

@@ -16,6 +16,11 @@ from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
 from ...contracts import ExitCode
+from ...memory.application import (
+    MemoryApplicationContext,
+    execute_memory_query,
+    resolve_memory_application_context,
+)
 from ...memory.embedding import EmbeddingProvider, resolve_embedding_provider
 from ...memory.exceptions import MemoryContractError, MemorySemanticUnavailableError
 from ...memory.governance import approve_record, archive_record, reject_record
@@ -32,6 +37,7 @@ from ...memory.project import resolve_memory_db_path, resolve_project_identity
 from ...memory.retrieval import query_engineering_memory, query_records_for_repo_path
 from ...memory.retrieval.semantic import semantic_search
 from ...memory.semantic import (
+    close_semantic_index,
     execute_semantic_index_rebuild,
     resolve_semantic_index,
 )
@@ -591,32 +597,26 @@ def _run_search(
     except FileNotFoundError as exc:
         console.print(f"Engineering memory database not found: {exc}")
         return int(ExitCode.CONTRACT_ERROR)
-    semantic = bool(args.semantic)
-    index = resolve_semantic_index(config.semantic) if semantic else None
-    provider: EmbeddingProvider | None = None
-    semantic_reason: str | None = None
-    if semantic:
-        try:
-            provider = resolve_embedding_provider(config.semantic)
-        except MemorySemanticUnavailableError as exc:
-            semantic_reason = str(exc)
     try:
-        result = query_engineering_memory(
+        context = MemoryApplicationContext(
+            config=config,
+            db_path=store.db_path,
+            project=project,
+        )
+        result = execute_memory_query(
             store,
-            project_id=project.id,
+            context=context,
             root_path=root_path,
-            backend=config.backend,
-            db_path=resolve_memory_db_path(root_path, config),
             mode="search",
             query=str(args.query),
             filters={"match_mode": str(args.match)},
             max_results=max(1, int(args.limit)),
             include_stale=not bool(args.active_only),
-            semantic=semantic,
-            semantic_index=index,
-            embedding_provider=provider,
-            provider_label=config.semantic.embedding_provider,
-            semantic_reason=semantic_reason,
+            semantic=bool(args.semantic),
+            query_executor=query_engineering_memory,
+            semantic_index_resolver=resolve_semantic_index,
+            embedding_provider_resolver=resolve_embedding_provider,
+            semantic_index_closer=close_semantic_index,
         )
     finally:
         store.close()
@@ -647,12 +647,19 @@ def _print_semantic_advisory(console: PrinterLike, semantic: object) -> None:
 def _open_store(
     root_path: Path,
 ) -> tuple[SqliteEngineeringMemoryStore, MemoryConfig, MemoryProject]:
-    config = resolve_memory_config(root_path)
-    db_path = resolve_memory_db_path(root_path, config)
-    if not db_path.exists():
-        raise FileNotFoundError(str(db_path))
-    project = resolve_project_identity(root_path)
-    return SqliteEngineeringMemoryStore(db_path), config, project
+    context = resolve_memory_application_context(
+        root_path,
+        config_resolver=resolve_memory_config,
+        db_path_resolver=resolve_memory_db_path,
+        project_resolver=resolve_project_identity,
+    )
+    if not context.db_path.exists():
+        raise FileNotFoundError(str(context.db_path))
+    return (
+        SqliteEngineeringMemoryStore(context.db_path),
+        context.config,
+        context.project,
+    )
 
 
 def _run_stale(

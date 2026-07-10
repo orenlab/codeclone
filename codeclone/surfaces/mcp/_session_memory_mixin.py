@@ -12,12 +12,16 @@ from typing import cast
 
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
+from ...memory.application import (
+    MemoryApplicationContext,
+    execute_memory_query,
+    resolve_memory_application_context,
+)
 from ...memory.embedding import resolve_embedding_provider
 from ...memory.enums import MemoryRecordType, validate_memory_record_type
 from ...memory.exceptions import (
     MemoryCapacityError,
     MemoryContractError,
-    MemorySemanticUnavailableError,
 )
 from ...memory.ide_governance import (
     IdeGovernanceSessionState,
@@ -162,26 +166,20 @@ class _MCPSessionMemoryMixin:
     ) -> dict[str, object]:
         root_path = _helpers._resolve_root(root)
         store, db_path, config, project = self._open_memory_store(root_path)
-        index = resolve_semantic_index(config.semantic) if semantic else None
-        provider = None
-        semantic_reason = None
-        if semantic:
-            try:
-                provider = resolve_embedding_provider(config.semantic)
-            except MemorySemanticUnavailableError as exc:
-                semantic_reason = str(exc)
         audit_path = (
             resolve_audit_path(root_path=root_path, value=DEFAULT_AUDIT_PATH)
             if semantic
             else None
         )
         try:
-            return query_engineering_memory(
+            return execute_memory_query(
                 store,
-                project_id=project.id,
+                context=MemoryApplicationContext(
+                    config=config,
+                    db_path=db_path,
+                    project=project,
+                ),
                 root_path=root_path,
-                backend=config.backend,
-                db_path=db_path,
                 mode=mode,
                 record_id=record_id,
                 path=path,
@@ -194,16 +192,15 @@ class _MCPSessionMemoryMixin:
                 include_drafts=include_drafts,
                 detail_level=detail_level,
                 semantic=semantic,
-                semantic_index=index,
-                embedding_provider=provider,
-                provider_label=config.semantic.embedding_provider,
-                semantic_reason=semantic_reason,
                 audit_db_path=audit_path,
+                query_executor=query_engineering_memory,
+                semantic_index_resolver=resolve_semantic_index,
+                embedding_provider_resolver=resolve_embedding_provider,
+                semantic_index_closer=close_semantic_index,
             )
         except MemoryContractError as exc:
             raise MCPServiceContractError(str(exc)) from exc
         finally:
-            close_semantic_index(index)
             store.close()
 
     def get_memory_projection_page(
@@ -674,18 +671,26 @@ class _MCPSessionMemoryMixin:
         self,
         root_path: Path,
     ) -> tuple[SqliteEngineeringMemoryStore, Path, MemoryConfig, MemoryProject]:
-        config = resolve_memory_config(root_path)
-        db_path = resolve_memory_db_path(root_path, config)
-        if not db_path.exists():
+        context = resolve_memory_application_context(
+            root_path,
+            config_resolver=resolve_memory_config,
+            db_path_resolver=resolve_memory_db_path,
+            project_resolver=resolve_project_identity,
+        )
+        if not context.db_path.exists():
             self._maybe_auto_sync_memory(root_path)
-        if not db_path.exists():
+        if not context.db_path.exists():
             raise MCPServiceContractError(
                 "Engineering memory database not found. "
                 "Call manage_engineering_memory(action='refresh_from_run') after "
                 "analyze_repository, or run `codeclone memory init`."
             )
-        project = resolve_project_identity(root_path)
-        return SqliteEngineeringMemoryStore(db_path), db_path, config, project
+        return (
+            SqliteEngineeringMemoryStore(context.db_path),
+            context.db_path,
+            context.config,
+            context.project,
+        )
 
     def _resolve_memory_scope_paths(
         self,
