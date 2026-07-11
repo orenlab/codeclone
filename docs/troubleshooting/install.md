@@ -12,7 +12,7 @@ source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
 
 CodeClone is distributed via PyPI and installed through Python package managers. This guide covers common installation issues, version selection, and resolution steps for both stable releases and prerelease versions.
 
-CodeClone 2.1 is available as an alpha prerelease (`2.1.0a1`). The stable release series uses standard semantic versioning.
+CodeClone 2.1 is available as an alpha prerelease (`2.1.0a2`). The stable release series uses standard semantic versioning.
 
 ## When to use it
 

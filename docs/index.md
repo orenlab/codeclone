@@ -67,7 +67,7 @@ CodeClone integrates with:
 - **Repository**: https://github.com/orenlab/codeclone
 - **Issues**: https://github.com/orenlab/codeclone/issues
 - **Documentation**: https://orenlab.github.io/codeclone/
-- **Version**: 2.1.0a1
+- **Version**: 2.1.0a2
 
 For full architecture, contract specifications, and the agent playbook, see `AGENTS.md` in the repository.
 

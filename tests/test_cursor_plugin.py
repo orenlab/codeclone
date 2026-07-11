@@ -24,7 +24,7 @@ def test_cursor_plugin_json_is_valid() -> None:
 
     assert isinstance(manifest, dict)
     assert manifest["name"] == "codeclone"
-    assert manifest["version"] == "2.1.0a1"
+    assert manifest["version"] == "2.1.0a2"
     assert manifest["license"] == "MPL-2.0"
     assert manifest["rules"] == "rules/"
     assert manifest["skills"] == "skills/"

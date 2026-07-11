@@ -1,6 +1,6 @@
 {
   "name": "@orenlab/codeclone-claude-desktop",
-  "version": "2.1.0a1",
+  "version": "2.1.0a2",
   "private": true,
   "description": "Structural Change Controller for AI-assisted Python development — Claude Desktop MCP bundle.",
   "license": "MPL-2.0",

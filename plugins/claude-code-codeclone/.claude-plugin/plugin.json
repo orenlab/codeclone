@@ -1,6 +1,6 @@
 {
   "name": "codeclone",
-  "version": "2.1.0a1",
+  "version": "2.1.0a2",
   "description": "Structural Change Controller for AI-assisted Python development over local codeclone-mcp.",
   "author": {
     "name": "Den Rozhnovskiy",

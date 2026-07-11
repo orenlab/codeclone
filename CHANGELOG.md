@@ -1,5 +1,16 @@
 # Changelog
 
+## [2.1.0a2] - Unreleased
+
+Architecture-focused alpha follow-up: shared controller contracts and surface-neutral helpers between CLI and MCP, with no intended public behavior change.
+
+### Changed
+
+- Workspace intent read contracts, models, lifecycle, and path helpers moved from MCP internals to `codeclone/workspace_intent/*` for shared CLI and MCP use.
+- Patch budget and patch-contract logic consolidated under `codeclone/budget/*`, removing MCP-only duplication.
+- Engineering Memory application and finish-proposal workflows shared between CLI and MCP via `codeclone/memory/application.py` and `codeclone/memory/finish_workflow.py`.
+- CLI controller queries and subcommand routing isolated from `workflow.py` into dedicated modules.
+
 ## [2.1.0a1] - 2026-07-09
 
 CodeClone 2.1 introduces intent-first structural change control, persistent engineering context, agent workflow

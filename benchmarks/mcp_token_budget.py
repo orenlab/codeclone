@@ -70,7 +70,7 @@ def _analyze_repository_small() -> dict[str, object]:
     return {
         "run_id": "abc12345",
         "focus": "repository",
-        "version": "2.1.0a1",
+        "version": "2.1.0a2",
         "schema": "2.12",
         "mode": "full",
         "baseline": {
