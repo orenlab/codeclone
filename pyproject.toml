@@ -107,13 +107,14 @@ dev = [
     "build>=1.4.3",
     "twine>=6.2.0",
     "mypy>=2.1.0",
-    "ruff>=0.15.20",
+    "ruff>=0.15.21",
     "pre-commit>=4.5.1",
-    "ty>=0.0.57",
+    "ty>=0.0.58",
     "PyYAML>=6.0.2",
     "jsonschema>=4.23.0",
     "types-PyYAML>=6.0.12.20250915",
     "types-jsonschema>=4.23.0.20250516",
+    "ckdn[mcp]>=1.0.0; python_version > '3.11'",
 ]
 
 [project.scripts]
