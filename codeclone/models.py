@@ -10,6 +10,57 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 
+DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
+DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
+DEFAULT_OBSERVABILITY_MAX_SPANS = 100
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObservabilityConfig:
+    enabled: bool
+    persist: bool = True
+    profile: bool = False
+    capture_payload_sizes: bool = True
+    retention_days: int = DEFAULT_OBSERVABILITY_RETENTION_DAYS
+    max_operations_per_process: int = DEFAULT_OBSERVABILITY_MAX_OPERATIONS
+    max_spans_per_operation: int = DEFAULT_OBSERVABILITY_MAX_SPANS
+
+    def __post_init__(self) -> None:
+        bounded = (
+            self.retention_days,
+            self.max_operations_per_process,
+            self.max_spans_per_operation,
+        )
+        if any(value <= 0 for value in bounded):
+            raise ValueError("observability retention and caps must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class StageCounterSnapshot:
+    """Deterministic, mergeable worker counters applied by a parent stage."""
+
+    counters: tuple[tuple[str, int], ...] = ()
+
+    def __post_init__(self) -> None:
+        normalized = tuple(sorted(self.counters))
+        keys = tuple(key for key, _value in normalized)
+        if len(keys) != len(set(keys)):
+            raise ValueError("stage counter snapshot keys must be unique")
+        object.__setattr__(self, "counters", normalized)
+
+    def merge(self, other: StageCounterSnapshot) -> StageCounterSnapshot:
+        merged = dict(self.counters)
+        for key, value in other.counters:
+            merged[key] = merged.get(key, 0) + value
+        return StageCounterSnapshot(tuple(merged.items()))
+
+
+@dataclass(frozen=True, slots=True)
+class ObserverCounterSemantics:
+    stored_version: str | None
+    current_version: int
+    mixed_semantics: bool
+
 
 @dataclass(frozen=True, slots=True)
 class Unit:

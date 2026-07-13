@@ -203,20 +203,27 @@ def test_analytics_schema_rejects_orphan_embedding_metadata(tmp_path: Path) -> N
     ],
 )
 def test_schema_module_import_does_not_load_observability(module_name: str) -> None:
-    for name in list(sys.modules):
-        if name == "codeclone.observability" or name.startswith(
-            "codeclone.observability."
-        ):
-            sys.modules.pop(name, None)
+    observability_modules = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "codeclone.observability"
+        or name.startswith("codeclone.observability.")
+    }
+    for name in observability_modules:
+        sys.modules.pop(name, None)
 
     import importlib
 
-    importlib.import_module(module_name)
+    try:
+        importlib.import_module(module_name)
 
-    assert not any(
-        name == "codeclone.observability" or name.startswith("codeclone.observability.")
-        for name in sys.modules
-    )
+        assert not any(
+            name == "codeclone.observability"
+            or name.startswith("codeclone.observability.")
+            for name in sys.modules
+        )
+    finally:
+        sys.modules.update(observability_modules)
 
 
 @pytest.mark.parametrize(
@@ -233,7 +240,7 @@ def test_domain_openers_attach_observability(
     tmp_path: Path,
     opener: object,
 ) -> None:
-    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.models import ObservabilityConfig
     from codeclone.observability import (
         bootstrap,
         counting_connection_factory,
@@ -273,7 +280,7 @@ def test_domain_openers_attach_observability(
 def test_intent_readonly_opener_attaches_observability(
     tmp_path: Path,
 ) -> None:
-    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.models import ObservabilityConfig
     from codeclone.observability import (
         bootstrap,
         counting_connection_factory,

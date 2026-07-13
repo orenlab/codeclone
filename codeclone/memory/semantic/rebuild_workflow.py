@@ -77,6 +77,12 @@ RebuildSemanticIndexPayload = (
     | RebuildSemanticIndexUnavailablePayload
 )
 
+_SOURCE_COUNTER_KEYS = {
+    "audit": "lane_audit",
+    "memory": "lane_memory",
+    "trajectory": "lane_trajectory",
+}
+
 
 def build_semantic_index_sources(
     *,
@@ -147,7 +153,11 @@ def _apply_rebuild_counters(
     rebuild_span.set_counter("embedding_batch_size", batch_size)
     rebuild_span.set_counter("embedding_max_padded_tokens", max_padded_tokens)
     for lane, count in sorted(report.by_source.items()):
-        rebuild_span.set_counter(f"lane_{lane}", count)
+        try:
+            counter_key = _SOURCE_COUNTER_KEYS[lane]
+        except KeyError as exc:
+            raise MemoryContractError(f"unknown semantic source lane {lane!r}") from exc
+        rebuild_span.set_counter(counter_key, count)
 
 
 def execute_semantic_index_rebuild(

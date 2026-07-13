@@ -13,8 +13,8 @@ from unittest.mock import patch
 import pytest
 
 from codeclone.config.memory import resolve_memory_config
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.semantic.rebuild_workflow import execute_semantic_index_rebuild
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import shutdown
 from codeclone.observability.store.schema import (
     observability_store_path,

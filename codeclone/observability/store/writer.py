@@ -7,12 +7,15 @@
 """Bounded, batched observability writer.
 
 A whole operation — its row plus every span — is persisted in a single sqlite
-transaction. We do NOT copy the audit per-emit commit-per-row pattern.
+transaction. We do NOT copy the audit per-emit commit-per-row pattern. An
+operation still in memory is intentionally lost on SIGKILL; telemetry is
+non-authoritative and incremental flush is outside this contract.
 """
 
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 from ...utils.json_io import json_text
 from ..models import OperationRecord, ProfileSample, SpanRecord
@@ -111,4 +114,34 @@ def write_operation(conn: sqlite3.Connection, operation: OperationRecord) -> Non
             conn.executemany(_SPAN_SQL, [_span_row(span) for span in operation.spans])
 
 
-__all__ = ["write_operation"]
+def run_retention_gc(
+    conn: sqlite3.Connection,
+    *,
+    retention_days: int,
+    now: datetime | None = None,
+) -> int:
+    """Delete expired operations and their spans in stable oldest-first order."""
+    current = now if now is not None else datetime.now(timezone.utc)
+    cutoff = current - timedelta(days=retention_days)
+    cutoff_text = cutoff.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    rows = conn.execute(
+        "SELECT operation_id FROM platform_operations "
+        "WHERE started_at_utc < ? ORDER BY started_at_utc, operation_id",
+        (cutoff_text,),
+    ).fetchall()
+    operation_ids = [(str(row[0]),) for row in rows]
+    if not operation_ids:
+        return 0
+    with conn:
+        conn.executemany(
+            "DELETE FROM platform_spans WHERE operation_id=?",
+            operation_ids,
+        )
+        conn.executemany(
+            "DELETE FROM platform_operations WHERE operation_id=?",
+            operation_ids,
+        )
+    return len(operation_ids)
+
+
+__all__ = ["run_retention_gc", "write_operation"]

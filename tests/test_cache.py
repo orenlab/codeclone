@@ -89,7 +89,6 @@ from codeclone.cache.projection import (
 )
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
 from codeclone.core.discovery import _decode_cached_function_relationship_facts
@@ -99,6 +98,7 @@ from codeclone.models import (
     FileMetrics,
     FunctionRelationshipFacts,
     ModuleApiSurface,
+    ObservabilityConfig,
     PublicSymbol,
     RelationshipRecord,
     RuntimeReachabilityFact,

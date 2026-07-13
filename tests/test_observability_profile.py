@@ -14,7 +14,7 @@ import pytest
 # Profiling requires the optional codeclone[perf] extra (psutil).
 pytest.importorskip("psutil")
 
-from codeclone.config.observability import ObservabilityConfig
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import bootstrap, operation, shutdown, span
 from codeclone.observability.profile import (
     build_profile_sample,
@@ -59,7 +59,7 @@ def test_build_profile_sample_computes_delta_from_baseline() -> None:
 
 def test_profile_true_populates_resource_snapshot(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True, profile=True), root=tmp_path)
-    with operation(name="job", surface="cli"), span(name="stage"):
+    with operation(name="job", surface="cli"), span(name="pipeline.process"):
         pass
     shutdown()
 
@@ -86,7 +86,7 @@ def test_profile_true_populates_resource_snapshot(tmp_path: Path) -> None:
 
 def test_profile_false_leaves_columns_null(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True, profile=False), root=tmp_path)
-    with operation(name="job", surface="cli"), span(name="stage"):
+    with operation(name="job", surface="cli"), span(name="pipeline.process"):
         pass
     shutdown()
 

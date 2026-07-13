@@ -17,8 +17,8 @@ import pytest
 
 import codeclone.memory.jobs.spawn as spawn
 import codeclone.memory.jobs.worker as worker
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.models import MemoryProject
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import (
     bootstrap,
     counting_connection_factory,
@@ -306,7 +306,7 @@ def test_counting_connection_executescript_counts_one_statement(
     try:
         with (
             operation(name="memory.projection.job", surface="memory"),
-            span(name="memory.schema.migrate"),
+            span(name="memory.identity.migrate"),
         ):
             factory = counting_connection_factory()
             assert factory is not None
@@ -320,7 +320,7 @@ def test_counting_connection_executescript_counts_one_statement(
     try:
         row = obs.execute(
             "SELECT counters_json FROM platform_spans "
-            "WHERE name='memory.schema.migrate'"
+            "WHERE name='memory.identity.migrate'"
         ).fetchone()
     finally:
         obs.close()
@@ -336,7 +336,7 @@ def test_counting_connection_executemany_counts_one_statement_over_many_rows(
     try:
         with (
             operation(name="memory.projection.job", surface="memory"),
-            span(name="memory.batch.write"),
+            span(name="memory.semantic.embed"),
         ):
             factory = counting_connection_factory()
             assert factory is not None
@@ -350,7 +350,8 @@ def test_counting_connection_executemany_counts_one_statement_over_many_rows(
     obs = open_observability_store(observability_store_path(tmp_path))
     try:
         row = obs.execute(
-            "SELECT counters_json FROM platform_spans WHERE name='memory.batch.write'"
+            "SELECT counters_json FROM platform_spans "
+            "WHERE name='memory.semantic.embed'"
         ).fetchone()
     finally:
         obs.close()

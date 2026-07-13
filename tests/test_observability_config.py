@@ -11,10 +11,10 @@ import sys
 import pytest
 
 from codeclone.config.observability import (
-    ObservabilityConfig,
     ObservabilityConfigError,
     resolve_observability_config,
 )
+from codeclone.models import ObservabilityConfig
 
 
 def _resolve(**env: str) -> ObservabilityConfig:
@@ -32,6 +32,34 @@ def test_enabled_via_env_defaults() -> None:
     # Payload sizing is ON by default when enabled (byte+token sizes matter).
     assert cfg.capture_payload_sizes is True
     assert cfg.profile is False
+    assert cfg.retention_days == 7
+    assert cfg.max_operations_per_process == 2000
+    assert cfg.max_spans_per_operation == 100
+
+
+def test_retention_and_caps_resolve_from_env() -> None:
+    cfg = _resolve(
+        CODECLONE_OBSERVABILITY_ENABLED="1",
+        CODECLONE_OBSERVABILITY_RETENTION_DAYS="3",
+        CODECLONE_OBSERVABILITY_MAX_OPERATIONS_PER_PROCESS="9",
+        CODECLONE_OBSERVABILITY_MAX_SPANS_PER_OPERATION="4",
+    )
+    assert cfg.retention_days == 3
+    assert cfg.max_operations_per_process == 9
+    assert cfg.max_spans_per_operation == 4
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [
+        ("CODECLONE_OBSERVABILITY_RETENTION_DAYS", "0"),
+        ("CODECLONE_OBSERVABILITY_MAX_OPERATIONS_PER_PROCESS", "bad"),
+        ("CODECLONE_OBSERVABILITY_MAX_SPANS_PER_OPERATION", "-1"),
+    ],
+)
+def test_retention_and_caps_reject_invalid_values(key: str, value: str) -> None:
+    with pytest.raises(ObservabilityConfigError, match="positive integer"):
+        _resolve(CODECLONE_OBSERVABILITY_ENABLED="1", **{key: value})
 
 
 def test_explicit_off_wins_over_force() -> None:

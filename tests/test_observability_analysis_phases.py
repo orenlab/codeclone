@@ -19,8 +19,10 @@ from codeclone.analysis.phase_ledger import (
 )
 from codeclone.analysis.units import extract_units_and_stats_from_source
 from codeclone.core._types import ProcessingResult
+from codeclone.models import StageCounterSnapshot
 from codeclone.observability.analysis_phases import (
     apply_pipeline_process_phase_counters,
+    apply_stage_counters,
 )
 
 
@@ -63,7 +65,7 @@ def test_apply_pipeline_process_phase_counters_closed_key_set() -> None:
     )
     span = _FakeSpan()
 
-    apply_pipeline_process_phase_counters(span, phase_snapshot=snapshot)  # type: ignore[arg-type]
+    apply_pipeline_process_phase_counters(span, phase_snapshot=snapshot)
 
     assert frozenset(span.counters) >= frozenset(
         (*PHASE_US_COUNTER_SUFFIXES, *PHASE_VOLUME_COUNTER_SUFFIXES)
@@ -86,10 +88,24 @@ def test_apply_pipeline_process_phase_counters_emits_subphase_us() -> None:
     )
     span = _FakeSpan()
 
-    apply_pipeline_process_phase_counters(span, phase_snapshot=snapshot)  # type: ignore[arg-type]
+    apply_pipeline_process_phase_counters(span, phase_snapshot=snapshot)
 
     assert span.counters["subphase_module_passes_adoption_us"] == 11
     assert span.counters["subphase_module_passes_security_us"] == 22
+
+
+def test_stage_counter_snapshot_merges_and_applies_once() -> None:
+    left = StageCounterSnapshot((("files_analyzed", 2), ("failed_files", 1)))
+    right = StageCounterSnapshot((("files_analyzed", 3), ("cache_hits", 4)))
+    span = _FakeSpan()
+
+    apply_stage_counters(span, left.merge(right))
+
+    assert span.counters == {
+        "cache_hits": 4,
+        "failed_files": 1,
+        "files_analyzed": 5,
+    }
 
 
 def test_extract_units_records_phase_snapshot_data() -> None:

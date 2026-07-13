@@ -10,7 +10,9 @@
 ``operation``/``span`` yield a cheap inert handle and return immediately — no
 clock, no id, no contextvar, no store import (the near-zero-overhead contract).
 When enabled, spans accumulate on their operation and the whole operation is
-flushed in a single transaction on exit.
+flushed in a single transaction on exit. A process terminated by SIGKILL can
+therefore lose its active operation; this is an accepted property of
+non-authoritative diagnostics, not a streaming-durability guarantee.
 """
 
 from __future__ import annotations
@@ -21,14 +23,21 @@ import uuid
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
+from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from ..config.observability import ObservabilityConfig, resolve_observability_config
+from ..config.observability import resolve_observability_config
+from ..models import ObservabilityConfig
 from .db_fingerprint import fingerprint_sql
 from .models import OperationRecord, ProfileSample, SpanRecord
 from .reason_kind import ReasonKind
+from .vocabulary import (
+    DB_COUNTER_VERSION,
+    validate_counter_key,
+    validate_span_name,
+)
 
 if TYPE_CHECKING:
     from sqlite3 import _Parameters as _SqlParams
@@ -65,6 +74,7 @@ class OperationHandle:
         parent_operation_id: str | None,
         session_id: str | None,
         repo_root_digest: str | None,
+        max_spans_per_operation: int,
     ) -> None:
         self.operation_id = operation_id
         self.correlation_id = correlation_id
@@ -74,6 +84,7 @@ class OperationHandle:
         self._parent_operation_id = parent_operation_id
         self._session_id = session_id
         self._repo_root_digest = repo_root_digest
+        self._max_spans_per_operation = max_spans_per_operation
         self._status = "ok"
         self._error_kind: str | None = None
         self._request_bytes: int | None = None
@@ -81,6 +92,16 @@ class OperationHandle:
         self._request_tokens: int | None = None
         self._response_tokens: int | None = None
         self._spans: list[SpanRecord] = []
+
+    def _append_span(self, record: SpanRecord) -> None:
+        if len(self._spans) < self._max_spans_per_operation:
+            self._spans.append(record)
+            return
+        validate_counter_key("spans_dropped")
+        final = self._spans[-1]
+        counters = dict(final.counters)
+        counters["spans_dropped"] = counters.get("spans_dropped", 0) + 1
+        self._spans[-1] = replace(final, counters=counters)
 
     # Wired by the 29.9 MCP registrar (per-tool request/response payload sizes).
     def set_request(
@@ -154,9 +175,11 @@ class SpanHandle:
     # the 29.DB query-trace hook (record_db_query). set_reason_kind stays
     # forward-declared until a caller needs post-hoc reason classification.
     def add_counter(self, key: str, value: int = 1) -> None:
+        validate_counter_key(key)
         self._counters[key] = self._counters.get(key, 0) + value
 
     def set_counter(self, key: str, value: int) -> None:
+        validate_counter_key(key)
         self._counters[key] = value
 
     # Wired by the 29.DB query-trace hook (record_db_query): accumulate the
@@ -206,6 +229,7 @@ def _inert_operation() -> OperationHandle:
         parent_operation_id=None,
         session_id=None,
         repo_root_digest=None,
+        max_spans_per_operation=1,
     )
 
 
@@ -234,30 +258,48 @@ class _ActiveRuntime:
         self.session_id: str | None = None
         self._root = root
         self._conn: object | None = None
+        self._persisted_operations = 0
+        if self.config.persist and self._root is not None:
+            self._open_store()
 
     def bind_root(self, root: Path) -> None:
         # First rooted call wins: an MCP server bootstraps root-less, then binds
         # the store to the root of the first tool that carries one.
         if self._root is None:
             self._root = root
+            if self.config.persist:
+                self._open_store()
 
     def persist(self, record: OperationRecord) -> None:
         # Persisted to the per-root store; a root-less enabled session simply
         # drops the record (no in-memory ring in the MVP).
-        if self.config.persist and self._root is not None:
+        if (
+            self.config.persist
+            and self._root is not None
+            and self._persisted_operations < self.config.max_operations_per_process
+        ):
             self._write(record)
+            self._persisted_operations += 1
 
-    def _write(self, record: OperationRecord) -> None:
+    def _open_store(self) -> sqlite3.Connection:
         from .store.schema import observability_store_path, open_observability_store
-        from .store.writer import write_operation
+        from .store.writer import run_retention_gc
 
         if self._conn is None:
             assert self._root is not None
             self._conn = open_observability_store(observability_store_path(self._root))
-        import sqlite3
-
+            assert isinstance(self._conn, sqlite3.Connection)
+            run_retention_gc(
+                self._conn,
+                retention_days=self.config.retention_days,
+            )
         assert isinstance(self._conn, sqlite3.Connection)
-        write_operation(self._conn, record)
+        return self._conn
+
+    def _write(self, record: OperationRecord) -> None:
+        from .store.writer import write_operation
+
+        write_operation(self._open_store(), record)
 
     def close(self) -> None:
         if self._conn is not None:
@@ -371,6 +413,7 @@ def operation(
         parent_operation_id=parent_operation_id,
         session_id=session_id or runtime.session_id,
         repo_root_digest=repo_root_digest,
+        max_spans_per_operation=runtime.config.max_spans_per_operation,
     )
     token = _CURRENT_OP.set(handle)
     baseline = _profile_baseline()
@@ -399,6 +442,7 @@ def span(
     reason_kind: ReasonKind | None = None,
     dedupe_key: str | None = None,
 ) -> Iterator[SpanHandle]:
+    validate_span_name(name)
     runtime = _RUNTIME
     parent_op = _CURRENT_OP.get()
     if not _ENABLED or runtime is None or parent_op is None:
@@ -426,7 +470,7 @@ def span(
     finally:
         duration_ms = (time.perf_counter() - start) * 1000.0
         _CURRENT_SPAN.reset(token)
-        parent_op._spans.append(
+        parent_op._append_span(
             handle._to_record(
                 duration_ms=duration_ms, profile=_profile_sample(baseline)
             )
@@ -444,6 +488,7 @@ def record_elapsed_span(
     finished before instrumentation could wrap it (e.g. a worker's cold-start).
     No-op when disabled or outside an operation.
     """
+    validate_span_name(name)
     parent_op = _CURRENT_OP.get()
     if not _ENABLED or parent_op is None:
         return
@@ -457,10 +502,11 @@ def record_elapsed_span(
         reason=None,
         dedupe_key=None,
     )
-    parent_op._spans.append(handle._to_record(duration_ms=duration_ms))
+    parent_op._append_span(handle._to_record(duration_ms=duration_ms))
 
 
 _DB_WRITE_KINDS = frozenset({"insert", "update", "delete", "replace"})
+
 
 # Counter-semantics version. v1 counted db_queries/db_writes per *row*:
 # sqlite3.set_trace_callback fires once per executemany row, so a single batched
@@ -469,9 +515,6 @@ _DB_WRITE_KINDS = frozenset({"insert", "update", "delete", "replace"})
 # *statements* — db_queries/db_writes are execute/executemany calls and db_rows
 # is the row volume. Bump on any counter-meaning change; old observer DBs carry
 # the previous semantics and are disposable (delete to avoid mixed history).
-DB_COUNTER_VERSION = 2
-
-
 def _classify_sql(sql: str) -> str:
     stripped = sql.lstrip()
     if not stripped:
@@ -513,6 +556,7 @@ def record_counter(key: str, value: int = 1) -> None:
     counters — e.g. retrieval lane hits emitted by the memory query path.
     Performance telemetry only — never audit or contract truth.
     """
+    validate_counter_key(key)
     span_handle = _CURRENT_SPAN.get()
     if span_handle is None:
         return

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -20,12 +21,14 @@ from codeclone.observability.models import (
 from codeclone.observability.store.reader import (
     build_trace_view,
     open_observability_store_readonly,
+    read_counter_semantics,
 )
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
 )
-from codeclone.observability.store.writer import write_operation
+from codeclone.observability.store.writer import run_retention_gc, write_operation
+from codeclone.observability.vocabulary import DB_COUNTER_VERSION
 
 
 def _op(
@@ -68,6 +71,84 @@ def test_store_records_schema_version(tmp_path: Path) -> None:
             "SELECT value FROM platform_meta WHERE key='schema_version'"
         ).fetchone()
         assert row[0] == PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+        counter_row = conn.execute(
+            "SELECT value FROM platform_meta WHERE key='db_counter_version'"
+        ).fetchone()
+        assert counter_row == (str(DB_COUNTER_VERSION),)
+    finally:
+        conn.close()
+
+
+def test_reader_marks_counter_version_mismatch_as_mixed(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(conn, _op("A", correlation_id="A"))
+        conn.execute(
+            "UPDATE platform_meta SET value='1' WHERE key='db_counter_version'"
+        )
+        conn.commit()
+        semantics = read_counter_semantics(conn)
+    finally:
+        conn.close()
+    assert semantics.stored_version == "1"
+    assert semantics.current_version == DB_COUNTER_VERSION
+    assert semantics.mixed_semantics is True
+
+
+def test_legacy_rows_without_counter_version_are_not_relabelled_current(
+    tmp_path: Path,
+) -> None:
+    path = observability_store_path(tmp_path)
+    conn = open_observability_store(path)
+    try:
+        write_operation(conn, _op("A", correlation_id="A"))
+        conn.execute("DELETE FROM platform_meta WHERE key='db_counter_version'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    conn = open_observability_store(path)
+    try:
+        semantics = read_counter_semantics(conn)
+    finally:
+        conn.close()
+    assert semantics.stored_version == "legacy"
+    assert semantics.mixed_semantics is True
+
+
+def test_retention_gc_deletes_expired_operations_and_spans(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        old = _op(
+            "old",
+            correlation_id="old",
+            spans=(_span("old-span", operation_id="old"),),
+        )
+        current = _op("current", correlation_id="current")
+        write_operation(conn, old)
+        write_operation(conn, current)
+        conn.execute(
+            "UPDATE platform_operations SET started_at_utc=? WHERE operation_id='old'",
+            ("2026-01-01T00:00:00Z",),
+        )
+        conn.execute(
+            "UPDATE platform_operations SET started_at_utc=? "
+            "WHERE operation_id='current'",
+            ("2026-07-12T00:00:00Z",),
+        )
+        conn.commit()
+
+        deleted = run_retention_gc(
+            conn,
+            retention_days=7,
+            now=datetime(2026, 7, 13, tzinfo=timezone.utc),
+        )
+
+        assert deleted == 1
+        assert conn.execute(
+            "SELECT operation_id FROM platform_operations"
+        ).fetchall() == [("current",)]
+        assert conn.execute("SELECT COUNT(*) FROM platform_spans").fetchone()[0] == 0
     finally:
         conn.close()
 
@@ -230,7 +311,7 @@ def test_profile_columns_persist(tmp_path: Path) -> None:
 
 
 def test_observability_span_error_and_sql_classification(tmp_path: Path) -> None:
-    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.models import ObservabilityConfig
     from codeclone.observability import (
         bootstrap,
         operation,
@@ -249,11 +330,11 @@ def test_observability_span_error_and_sql_classification(tmp_path: Path) -> None
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     with operation(name="job", surface="cli"):
         record_elapsed_span(
-            "cold-start",
+            "memory.projection.worker_bootstrap",
             started_at_utc="2026-01-01T00:00:00Z",
             duration_ms=12.5,
         )
-        with pytest.raises(RuntimeError, match="boom"), span(name="failing-stage"):
+        with pytest.raises(RuntimeError, match="boom"), span(name="pipeline.process"):
             raise RuntimeError("boom")
     shutdown()
 
@@ -261,11 +342,11 @@ def test_observability_span_error_and_sql_classification(tmp_path: Path) -> None
     try:
         span_row = conn.execute(
             "SELECT status FROM platform_spans WHERE name=?",
-            ("failing-stage",),
+            ("pipeline.process",),
         ).fetchone()
         elapsed_row = conn.execute(
             "SELECT name FROM platform_spans WHERE name=?",
-            ("cold-start",),
+            ("memory.projection.worker_bootstrap",),
         ).fetchone()
     finally:
         conn.close()

@@ -12,7 +12,6 @@ from pathlib import Path
 import pytest
 
 from codeclone.config.memory import MemoryConfig, resolve_memory_config
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.jobs import compute_projection_stimulus
 from codeclone.memory.jobs import workflow as jobs_workflow
 from codeclone.memory.jobs.spawn import SpawnWorkerResult
@@ -25,6 +24,7 @@ from codeclone.memory.jobs.workflow import execute_enqueue_projection_rebuild
 from codeclone.memory.models import MemoryProject
 from codeclone.memory.project import resolve_memory_db_path
 from codeclone.memory.schema import open_memory_db
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import (
     bootstrap,
     current_operation_context,
