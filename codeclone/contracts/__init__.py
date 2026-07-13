@@ -11,6 +11,7 @@ from typing import Final
 
 BASELINE_SCHEMA_VERSION: Final = "2.1"
 BASELINE_FINGERPRINT_VERSION: Final = "1"
+WIRE_VERSION: Final = "1"
 
 CACHE_VERSION: Final = "2.10"
 REPORT_SCHEMA_VERSION: Final = "2.12"
@@ -203,6 +204,7 @@ __all__ = [
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",
+    "WIRE_VERSION",
     "ExitCode",
     "cli_help_epilog",
 ]
