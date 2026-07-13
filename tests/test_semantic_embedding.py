@@ -720,8 +720,8 @@ def test_embed_documents_records_observability_counter(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from codeclone.config.observability import ObservabilityConfig
     from codeclone.memory.embedding import embed_documents, embed_query
+    from codeclone.models import ObservabilityConfig
     from codeclone.observability import bootstrap, shutdown
 
     provider = DeterministicHashEmbeddingProvider(dimension=8)
@@ -785,7 +785,7 @@ def test_fastembed_embed_records_infer_counters_when_observability_enabled(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from codeclone.config.observability import ObservabilityConfig
+    from codeclone.models import ObservabilityConfig
     from codeclone.observability import bootstrap, shutdown
 
     provider, _created = _resolve_fastembed_provider(monkeypatch)

@@ -43,9 +43,9 @@ from codeclone.analytics.workflow import (
     select_cluster_run,
 )
 from codeclone.config.analytics import AnalyticsConfig, resolve_analytics_config
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.contracts import CORPUS_EXPORT_SCHEMA_VERSION
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import bootstrap, operation, shutdown
 from codeclone.observability.store.schema import (
     observability_store_path,

@@ -14,10 +14,10 @@ import orjson
 import pytest
 
 from codeclone.config.memory import MemoryConfig, resolve_memory_config
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.memory.jobs import worker as worker_module
 from codeclone.memory.jobs import workflow as workflow_module
 from codeclone.memory.jobs.worker import run_projection_job
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import bootstrap, is_observability_enabled, shutdown
 from codeclone.observability.store.schema import (
     observability_store_path,

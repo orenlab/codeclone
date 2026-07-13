@@ -636,8 +636,8 @@ def test_execute_worker_reuses_existing_observability_runtime(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from codeclone.config.observability import ObservabilityConfig
     from codeclone.memory.jobs import workflow
+    from codeclone.models import ObservabilityConfig
     from codeclone.observability import bootstrap, shutdown
 
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):

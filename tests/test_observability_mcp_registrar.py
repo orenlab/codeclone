@@ -13,7 +13,7 @@ from pathlib import Path
 import orjson
 import pytest
 
-from codeclone.config.observability import ObservabilityConfig
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import bootstrap, record_db_query, shutdown
 from codeclone.observability.store.schema import (
     observability_store_path,
@@ -32,11 +32,11 @@ def _reset_runtime() -> Iterator[None]:
     shutdown()
 
 
-def _sample_tool(root: str, limit: int = 5) -> dict[str, object]:
+def get_run_summary(root: str, limit: int = 5) -> dict[str, object]:
     return {"root": root, "limit": limit, "items": list(range(limit))}
 
 
-def _governed_tool(root: str) -> dict[str, object]:
+def get_relevant_memory(root: str) -> dict[str, object]:
     return {
         "root": root,
         "items": list(range(100)),
@@ -51,7 +51,7 @@ def _governed_tool(root: str) -> dict[str, object]:
 
 def test_registrar_records_operation_with_payload_sizes(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True), session_id="mcp-test")
-    wrapped = _instrument_tool(_sample_tool)
+    wrapped = _instrument_tool(get_run_summary)
     try:
         result = wrapped(root=str(tmp_path), limit=3)
     finally:
@@ -67,7 +67,7 @@ def test_registrar_records_operation_with_payload_sizes(tmp_path: Path) -> None:
     finally:
         conn.close()
     assert row[0] == "mcp"
-    assert row[1] == "mcp._sample_tool"
+    assert row[1] == "mcp.get_run_summary"
     assert row[2] == "mcp-test"
     # Payload sizes captured on both directions (bytes + context units).
     assert row[3] > 0
@@ -82,7 +82,7 @@ def test_registrar_uses_context_governance_estimate_for_response_tokens(
     tmp_path: Path,
 ) -> None:
     bootstrap(ObservabilityConfig(enabled=True), session_id="mcp-test")
-    wrapped = _instrument_tool(_governed_tool)
+    wrapped = _instrument_tool(get_relevant_memory)
     try:
         wrapped(root=str(tmp_path))
     finally:
@@ -92,7 +92,7 @@ def test_registrar_uses_context_governance_estimate_for_response_tokens(
     try:
         row = conn.execute(
             "SELECT response_bytes, response_tokens FROM platform_operations "
-            "WHERE name = 'mcp._governed_tool'"
+            "WHERE name = 'mcp.get_relevant_memory'"
         ).fetchone()
     finally:
         conn.close()
@@ -103,13 +103,13 @@ def test_registrar_uses_context_governance_estimate_for_response_tokens(
 def test_registrar_attributes_db_queries_to_a_span(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True), session_id="mcp-test")
 
-    def _db_tool(root: str) -> dict[str, object]:
+    def check_patch_contract(root: str) -> dict[str, object]:
         # Emulate the sqlite trace callback firing during the handler's DB work.
         record_db_query("SELECT 1")
         record_db_query("INSERT INTO t (x) VALUES (1)")
         return {"root": root}
 
-    wrapped = _instrument_tool(_db_tool)
+    wrapped = _instrument_tool(check_patch_contract)
     try:
         wrapped(root=str(tmp_path))
     finally:
@@ -120,7 +120,7 @@ def test_registrar_attributes_db_queries_to_a_span(tmp_path: Path) -> None:
         rows = conn.execute(
             "SELECT s.counters_json FROM platform_spans s "
             "JOIN platform_operations o ON o.operation_id = s.operation_id "
-            "WHERE o.name = 'mcp._db_tool'"
+            "WHERE o.name = 'mcp.check_patch_contract'"
         ).fetchall()
     finally:
         conn.close()
@@ -132,16 +132,18 @@ def test_registrar_attributes_db_queries_to_a_span(tmp_path: Path) -> None:
 
 
 def test_registrar_preserves_signature() -> None:
-    wrapped = _instrument_tool(_sample_tool)
+    wrapped = _instrument_tool(get_run_summary)
     # The wrapper exposes the same (resolved) parameters as the original so
     # FastMCP builds an identical input schema.
-    assert inspect.signature(wrapped) == inspect.signature(_sample_tool, eval_str=True)
-    assert getattr(wrapped, "__name__", "") == "_sample_tool"
+    assert inspect.signature(wrapped) == inspect.signature(
+        get_run_summary, eval_str=True
+    )
+    assert getattr(wrapped, "__name__", "") == "get_run_summary"
 
 
 def test_registrar_inert_when_disabled(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=False))
-    wrapped = _instrument_tool(_sample_tool)
+    wrapped = _instrument_tool(get_run_summary)
     result = wrapped(root=str(tmp_path), limit=2)
     assert result == {"root": str(tmp_path), "limit": 2, "items": [0, 1]}
     assert not observability_store_path(tmp_path).exists()

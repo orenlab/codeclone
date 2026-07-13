@@ -17,32 +17,22 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
 from importlib.util import find_spec
 
+from ..models import (
+    DEFAULT_OBSERVABILITY_MAX_OPERATIONS,
+    DEFAULT_OBSERVABILITY_MAX_SPANS,
+    DEFAULT_OBSERVABILITY_RETENTION_DAYS,
+    ObservabilityConfig,
+)
 from ..utils.ci import is_ci_environment
 
 _TRUE = frozenset({"1", "true", "yes", "on"})
 _FALSE = frozenset({"0", "false", "no", "off"})
 
-DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
-DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
-DEFAULT_OBSERVABILITY_MAX_SPANS = 100
-
 
 class ObservabilityConfigError(ValueError):
     """Invalid observability configuration (profile without [perf], reserved key)."""
-
-
-@dataclass(frozen=True, slots=True)
-class ObservabilityConfig:
-    enabled: bool
-    persist: bool = True
-    profile: bool = False
-    capture_payload_sizes: bool = True
-    retention_days: int = DEFAULT_OBSERVABILITY_RETENTION_DAYS
-    max_operations_per_process: int = DEFAULT_OBSERVABILITY_MAX_OPERATIONS
-    max_spans_per_operation: int = DEFAULT_OBSERVABILITY_MAX_SPANS
 
 
 _DISABLED = ObservabilityConfig(enabled=False)
@@ -55,6 +45,23 @@ def _env_flag(environ: Mapping[str, str], key: str, *, default: bool = False) ->
     if raw in _FALSE:
         return False
     return default
+
+
+def _positive_env_int(environ: Mapping[str, str], key: str, *, default: int) -> int:
+    raw = environ.get(key)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ObservabilityConfigError(
+            f"observability {key} must be a positive integer"
+        ) from exc
+    if value <= 0:
+        raise ObservabilityConfigError(
+            f"observability {key} must be a positive integer"
+        )
+    return value
 
 
 def resolve_observability_config(
@@ -91,11 +98,25 @@ def resolve_observability_config(
         capture_payload_sizes=_env_flag(
             env, "CODECLONE_OBSERVABILITY_CAPTURE_PAYLOAD_SIZES", default=True
         ),
+        retention_days=_positive_env_int(
+            env,
+            "CODECLONE_OBSERVABILITY_RETENTION_DAYS",
+            default=DEFAULT_OBSERVABILITY_RETENTION_DAYS,
+        ),
+        max_operations_per_process=_positive_env_int(
+            env,
+            "CODECLONE_OBSERVABILITY_MAX_OPERATIONS_PER_PROCESS",
+            default=DEFAULT_OBSERVABILITY_MAX_OPERATIONS,
+        ),
+        max_spans_per_operation=_positive_env_int(
+            env,
+            "CODECLONE_OBSERVABILITY_MAX_SPANS_PER_OPERATION",
+            default=DEFAULT_OBSERVABILITY_MAX_SPANS,
+        ),
     )
 
 
 __all__ = [
-    "ObservabilityConfig",
     "ObservabilityConfigError",
     "resolve_observability_config",
 ]

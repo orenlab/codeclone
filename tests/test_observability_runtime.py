@@ -14,7 +14,7 @@ from pathlib import Path
 import orjson
 import pytest
 
-from codeclone.config.observability import ObservabilityConfig
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import (
     bootstrap,
     is_observability_enabled,
@@ -23,10 +23,12 @@ from codeclone.observability import (
     shutdown,
     span,
 )
+from codeclone.observability.models import OperationRecord
 from codeclone.observability.store.schema import (
     observability_store_path,
     open_observability_store,
 )
+from codeclone.observability.store.writer import write_operation
 
 
 @pytest.fixture(autouse=True)
@@ -47,9 +49,9 @@ def test_disabled_is_inert_and_imports_no_store() -> None:
     with operation(name="x", surface="cli") as op:
         op.set_request(request_bytes=5, request_tokens=1)
         op.set_response(response_bytes=10, response_tokens=2)
-        with span(name="s", reason_kind="content_changed") as sp:
+        with span(name="pipeline.process", reason_kind="content_changed") as sp:
             sp.add_counter("embedded", 3)
-            sp.set_counter("skipped", 0)
+            sp.set_counter("skipped_unchanged", 0)
             sp.set_reason_kind("model_changed")
 
     importlib.import_module("codeclone.analysis.units")
@@ -63,9 +65,12 @@ def test_enabled_persists_operation_and_nested_spans(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path, session_id="sess1")
     with operation(name="finish", surface="mcp") as op:
         op.set_response(response_bytes=820, response_tokens=120)
-        with span(name="semantic.reindex", reason_kind="schema_version_changed") as sp:
+        with span(
+            name="memory.semantic.rebuild",
+            reason_kind="schema_version_changed",
+        ) as sp:
             sp.set_counter("embedded", 1423)
-            with span(name="inner"):
+            with span(name="memory.semantic.embed"):
                 pass
     shutdown()
 
@@ -79,17 +84,20 @@ def test_enabled_persists_operation_and_nested_spans(tmp_path: Path) -> None:
             "SELECT name, span_id, parent_span_id, reason_kind FROM platform_spans"
         ).fetchall()
         by_name = {row[0]: row for row in rows}
-        assert set(by_name) == {"semantic.reindex", "inner"}
-        assert by_name["semantic.reindex"][3] == "schema_version_changed"
+        assert set(by_name) == {"memory.semantic.rebuild", "memory.semantic.embed"}
+        assert by_name["memory.semantic.rebuild"][3] == "schema_version_changed"
         # Nested span links to its parent span.
-        assert by_name["inner"][2] == by_name["semantic.reindex"][1]
+        assert (
+            by_name["memory.semantic.embed"][2]
+            == (by_name["memory.semantic.rebuild"][1])
+        )
     finally:
         conn.close()
 
 
 def test_record_counter_attributes_to_active_span(tmp_path: Path) -> None:
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
-    with operation(name="search", surface="mcp"), span(name="root"):
+    with operation(name="search", surface="mcp"), span(name="retrieval.embed_query"):
         record_counter("retrieval.fts_hits", 3)
         record_counter("retrieval.fts_hits", 2)  # accumulates onto the same key
         record_counter("retrieval.vector_memory_hits")  # default value 1
@@ -100,7 +108,8 @@ def test_record_counter_attributes_to_active_span(tmp_path: Path) -> None:
     conn = open_observability_store(observability_store_path(tmp_path))
     try:
         (counters_json,) = conn.execute(
-            "SELECT counters_json FROM platform_spans WHERE name='root'"
+            "SELECT counters_json FROM platform_spans "
+            "WHERE name='retrieval.embed_query'"
         ).fetchone()
     finally:
         conn.close()
@@ -147,13 +156,12 @@ def test_operation_records_error_status(tmp_path: Path) -> None:
 
 
 def test_record_elapsed_span_is_noop_without_active_operation(tmp_path: Path) -> None:
-    from codeclone.config.observability import ObservabilityConfig
     from codeclone.observability import bootstrap, record_elapsed_span, shutdown
 
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
     try:
         record_elapsed_span(
-            "orphan-span",
+            "memory.projection.worker_bootstrap",
             started_at_utc="2026-01-01T00:00:00Z",
             duration_ms=1.0,
         )
@@ -170,7 +178,7 @@ def test_runtime_optional_payload_root_and_empty_sql_edges(tmp_path: Path) -> No
         op.set_request(request_tokens=2)
         op.set_response(response_bytes=3)
         op.set_response(response_tokens=4)
-        with span(name="db"):
+        with span(name="pipeline.process"):
             runtime.record_db_query("")
 
     first_root = tmp_path / "first"
@@ -191,6 +199,86 @@ def test_runtime_optional_payload_root_and_empty_sql_edges(tmp_path: Path) -> No
         ObservabilityConfig(enabled=True),
         root=tmp_path,
     )
+    active.close()
     active._conn = object()
     active.close()
     assert active._conn is None
+
+
+def test_span_cap_records_dropped_count_on_final_retained_span(
+    tmp_path: Path,
+) -> None:
+    bootstrap(
+        ObservabilityConfig(enabled=True, max_spans_per_operation=2),
+        root=tmp_path,
+    )
+    with operation(name="capped", surface="cli"):
+        with span(name="pipeline.discover"):
+            pass
+        with span(name="pipeline.process"):
+            pass
+        with span(name="pipeline.analyze"):
+            pass
+    shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        rows = conn.execute(
+            "SELECT name, counters_json FROM platform_spans "
+            "ORDER BY started_at_utc, span_id"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 2
+    dropped = sum(orjson.loads(row[1] or b"{}").get("spans_dropped", 0) for row in rows)
+    assert dropped == 1
+
+
+def test_process_operation_write_cap_is_enforced(tmp_path: Path) -> None:
+    bootstrap(
+        ObservabilityConfig(enabled=True, max_operations_per_process=2),
+        root=tmp_path,
+    )
+    for name in ("one", "two", "three"):
+        with operation(name=name, surface="cli"):
+            pass
+    shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM platform_operations").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 2
+
+
+def test_bootstrap_runs_retention_gc(tmp_path: Path) -> None:
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        write_operation(
+            conn,
+            OperationRecord(
+                operation_id="expired",
+                correlation_id="expired",
+                surface="cli",
+                name="expired",
+                started_at_utc="2000-01-01T00:00:00Z",
+                duration_ms=1.0,
+                status="ok",
+            ),
+        )
+    finally:
+        conn.close()
+
+    bootstrap(
+        ObservabilityConfig(enabled=True, retention_days=1),
+        root=tmp_path,
+    )
+    shutdown()
+
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM platform_operations").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 0

@@ -27,7 +27,6 @@ from codeclone.analysis.phase_ledger import (
     PhaseTotals,
 )
 from codeclone.cache.store import Cache
-from codeclone.config.observability import ObservabilityConfig
 from codeclone.contracts import ExitCode
 from codeclone.core._types import (
     AnalysisResult,
@@ -36,6 +35,7 @@ from codeclone.core._types import (
     OutputPaths,
     ProcessingResult,
 )
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import bootstrap, operation, shutdown
 from codeclone.observability.models import OperationRecord
 from codeclone.observability.store.schema import (
@@ -44,6 +44,7 @@ from codeclone.observability.store.schema import (
 )
 from codeclone.observability.store.writer import write_operation
 from codeclone.surfaces.cli.observability import observability_main
+from tests.observability_equality import assert_observability_subprocess_equality
 from tests.test_observability_query import _seed_future_observability_schema
 
 
@@ -346,6 +347,44 @@ def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
         "pipeline.report",
     } <= names
     assert len({row[1] for row in rows}) == 1
+
+
+def test_cli_report_bytes_equal_with_observability_off_and_on(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "sample.py").write_text(
+        "def add(a: int, b: int) -> int:\n    return a + b\n",
+        "utf-8",
+    )
+
+    report = repo / "report.json"
+    driver = (
+        "from codeclone.surfaces.cli import workflow; "
+        "workflow.cli_meta_mod._current_report_timestamp_utc = "
+        "lambda: '2026-07-13T00:00:00Z'; "
+        "workflow.main()"
+    )
+    base_command = (
+        sys.executable,
+        "-c",
+        driver,
+        ".",
+        "--quiet",
+        "--no-progress",
+        "--json",
+        str(report),
+    )
+    assert_observability_subprocess_equality(
+        disabled_command=base_command,
+        enabled_command=base_command,
+        disabled_cwd=repo,
+        enabled_cwd=repo,
+        disabled_artifacts={"report_json": report},
+        enabled_artifacts={"report_json": report},
+        reset_paths=(repo / ".codeclone" / "cache.json",),
+    )
+
+    assert observability_store_path(repo).is_file()
 
 
 def test_observability_cli_help_and_stdout_trace(

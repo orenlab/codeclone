@@ -18,9 +18,12 @@ from pathlib import Path
 
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
 from ...utils.sqlite_store import get_meta_value, open_sqlite_db
+from ..vocabulary import DB_COUNTER_VERSION
 
 _OBSERVABILITY_DB_RELATIVE = ".codeclone/db/platform_observability.sqlite3"
 _SCHEMA_META_KEY = "schema_version"
+_COUNTER_VERSION_META_KEY = "db_counter_version"
+_LEGACY_COUNTER_VERSION = "legacy"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS platform_meta (
@@ -172,7 +175,31 @@ def create_observability_schema(conn: sqlite3.Connection) -> None:
         "INSERT OR REPLACE INTO platform_meta(key, value) VALUES('schema_version', ?)",
         (PLATFORM_OBSERVABILITY_SCHEMA_VERSION,),
     )
+    stored_counter_version = get_meta_value(
+        conn,
+        meta_table="platform_meta",
+        key=_COUNTER_VERSION_META_KEY,
+    )
+    if stored_counter_version is None:
+        has_operations = conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM platform_operations LIMIT 1)"
+        ).fetchone()[0]
+        counter_version = (
+            _LEGACY_COUNTER_VERSION if has_operations else str(DB_COUNTER_VERSION)
+        )
+        conn.execute(
+            "INSERT INTO platform_meta(key, value) VALUES(?, ?)",
+            (_COUNTER_VERSION_META_KEY, counter_version),
+        )
     conn.commit()
+
+
+def read_db_counter_version(conn: sqlite3.Connection) -> str | None:
+    return get_meta_value(
+        conn,
+        meta_table="platform_meta",
+        key=_COUNTER_VERSION_META_KEY,
+    )
 
 
 def open_observability_store(path: Path) -> sqlite3.Connection:
@@ -184,5 +211,6 @@ __all__ = [
     "create_observability_schema",
     "observability_store_path",
     "open_observability_store",
+    "read_db_counter_version",
     "validate_observability_schema",
 ]

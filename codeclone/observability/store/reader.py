@@ -25,6 +25,7 @@ from ...analysis.phase_ledger import (
     PHASE_VOLUME_COUNTER_SUFFIXES,
 )
 from ...contracts import PLATFORM_OBSERVABILITY_SCHEMA_VERSION
+from ...models import ObserverCounterSemantics
 from ...utils.sqlite_store import open_sqlite_db_readonly
 from ..db_fingerprint import describe_fingerprint
 from ..views import (
@@ -44,7 +45,12 @@ from ..views import (
     WaterfallGroup,
     WaterfallRow,
 )
-from .schema import observability_store_path, validate_observability_schema
+from ..vocabulary import DB_COUNTER_VERSION
+from .schema import (
+    observability_store_path,
+    read_db_counter_version,
+    validate_observability_schema,
+)
 
 _DEFAULT_WINDOW = 20
 
@@ -72,6 +78,21 @@ def open_observability_store_readonly(root: Path) -> sqlite3.Connection | None:
     conn = open_sqlite_db_readonly(path, validate_schema=validate_observability_schema)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+def read_counter_semantics(conn: sqlite3.Connection) -> ObserverCounterSemantics:
+    stored_version = read_db_counter_version(conn)
+    has_operations = bool(
+        conn.execute(
+            "SELECT EXISTS(SELECT 1 FROM platform_operations LIMIT 1)"
+        ).fetchone()[0]
+    )
+    mixed = has_operations and stored_version != str(DB_COUNTER_VERSION)
+    return ObserverCounterSemantics(
+        stored_version=stored_version,
+        current_version=DB_COUNTER_VERSION,
+        mixed_semantics=mixed,
+    )
 
 
 def _percentile(values: list[float], q: float) -> float:
@@ -769,4 +790,8 @@ def build_trace_view(
     )
 
 
-__all__ = ["build_trace_view", "open_observability_store_readonly"]
+__all__ = [
+    "build_trace_view",
+    "open_observability_store_readonly",
+    "read_counter_semantics",
+]

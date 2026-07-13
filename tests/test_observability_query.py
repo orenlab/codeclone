@@ -12,7 +12,7 @@ from typing import cast
 
 import pytest
 
-from codeclone.config.observability import ObservabilityConfig
+from codeclone.models import ObservabilityConfig
 from codeclone.observability import query as query_mod
 from codeclone.observability.models import OperationRecord, ProfileSample, SpanRecord
 from codeclone.observability.query import query_platform_observability
@@ -213,6 +213,34 @@ def test_summary_returns_envelope_diagnostics_and_routing(tmp_path: Path) -> Non
     assert "returned context units" in context_messages[0]
     routed = {r["section"] for r in _rows(out["recommended_next_sections"])}
     assert {"db_cost", "agent_context", "costly_noops"} <= routed
+    assert out["mixed_semantics"] is False
+    assert out["counter_semantics"] == {
+        "stored_version": "2",
+        "current_version": 2,
+        "status": "current",
+    }
+
+
+def test_query_surfaces_mixed_counter_semantics_warning(tmp_path: Path) -> None:
+    _seed(tmp_path)
+    conn = open_observability_store(observability_store_path(tmp_path))
+    try:
+        conn.execute(
+            "UPDATE platform_meta SET value='1' WHERE key='db_counter_version'"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    out = query_platform_observability(root=tmp_path, section="db_cost")
+
+    assert out["mixed_semantics"] is True
+    assert out["counter_semantics"] == {
+        "stored_version": "1",
+        "current_version": 2,
+        "status": "mixed",
+    }
+    assert any("mixed_semantics" in warning for warning in _texts(out["warnings"]))
 
 
 def test_analysis_phase_cost_section_and_summary_routing(tmp_path: Path) -> None:
@@ -402,14 +430,18 @@ def test_disabled_vs_no_store_split(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
-        query_mod, "resolve_observability_config", lambda: ObservabilityConfig(True)
+        query_mod,
+        "resolve_observability_config",
+        lambda: ObservabilityConfig(enabled=True),
     )
     assert (
         query_platform_observability(root=tmp_path, section="db_cost")["status"]
         == "no_store"
     )
     monkeypatch.setattr(
-        query_mod, "resolve_observability_config", lambda: ObservabilityConfig(False)
+        query_mod,
+        "resolve_observability_config",
+        lambda: ObservabilityConfig(enabled=False),
     )
     assert (
         query_platform_observability(root=tmp_path, section="db_cost")["status"]

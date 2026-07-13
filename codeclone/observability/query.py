@@ -23,7 +23,11 @@ from pathlib import Path
 
 from ..config.observability import resolve_observability_config
 from .runtime import DB_COUNTER_VERSION
-from .store.reader import build_trace_view, open_observability_store_readonly
+from .store.reader import (
+    build_trace_view,
+    open_observability_store_readonly,
+    read_counter_semantics,
+)
 from .views import AggregatesView, OperationView, SpanView, TraceView
 
 _DETAIL_LEVELS = ("compact", "normal", "full")
@@ -619,9 +623,22 @@ def query_platform_observability(
         response["rows"] = []
         return _finalize(response, warnings)
     try:
+        counter_semantics = read_counter_semantics(conn)
         trace = _build_trace(conn, window)
     finally:
         conn.close()
+
+    response["mixed_semantics"] = counter_semantics.mixed_semantics
+    response["counter_semantics"] = {
+        "stored_version": counter_semantics.stored_version,
+        "current_version": counter_semantics.current_version,
+        "status": "mixed" if counter_semantics.mixed_semantics else "current",
+    }
+    if counter_semantics.mixed_semantics:
+        warnings.append(
+            "stored DB counter semantics do not match this build; "
+            "affected aggregates are mixed_semantics"
+        )
 
     agg = trace.aggregates
     _apply_aggregate_status(response, section=section, agg=agg)
