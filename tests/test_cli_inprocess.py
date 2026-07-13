@@ -1727,7 +1727,7 @@ def test_cli_reports_include_audit_metadata_integrity_failed(
     tampered = json.loads(baseline_path.read_text("utf-8"))
     clones = tampered["clones"]
     assert isinstance(clones, dict)
-    clones["functions"] = [f"{'a' * 40}|0-19"]
+    clones["functions"] = [f"{'a' * 64}|0-19"]
     baseline_path.write_text(json.dumps(tampered), "utf-8")
 
     payload = _run_json_report(

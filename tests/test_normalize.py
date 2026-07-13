@@ -5,23 +5,20 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 
 import ast
-from typing import Any, cast
 
 import pytest
 
 import codeclone.analysis.normalizer as normalize_mod
-from codeclone.analysis.normalizer import (
-    NormalizationConfig,
-    normalized_ast_dump_from_list,
-    stmt_hashes,
-)
+from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.analysis.wire import emit_wire, emit_wire_seq
+from codeclone.blocks import stmt_hashes
 from codeclone.meta_markers import CFG_META_PREFIX
 from tests._assertions import assert_contains_all
 from tests._ast_helpers import fix_missing_single_function
 
 
 def normalized_ast_dump(node: ast.AST, cfg: NormalizationConfig) -> str:
-    return normalized_ast_dump_from_list([node], cfg)
+    return emit_wire(node, cfg)
 
 
 def _normalized_dump(source: str, cfg: NormalizationConfig) -> str:
@@ -160,14 +157,15 @@ def test_normalization_equivalent_shapes(src1: str, src2: str) -> None:
 
 def test_normalization_augassign_target_without_ctx() -> None:
     node = ast.AugAssign(
-        target=cast(Any, ast.Constant(value=1)),
+        target=ast.Name(id="x", ctx=ast.Store()),
         op=ast.Add(),
         value=ast.Constant(value=2),
     )
+    object.__setattr__(node, "target", ast.Constant(value=1))
     node.lineno = 1
     node.col_offset = 0
     cfg = NormalizationConfig()
-    dump = normalized_ast_dump_from_list([node], cfg)
+    dump = emit_wire_seq([node], cfg)
     assert "Assign" in dump
 
 
@@ -435,7 +433,8 @@ def f(x: int, /, y: int, *, z: int, **k: int) -> int:
     )
     node = ast.parse(src).body[0]
     dump = normalized_ast_dump(node, cfg)
-    assert_contains_all(dump, "my_attr", "123", "doc", "id='x'", "id='int'")
+    assert_contains_all(dump, "my_attr", "123", "id=x", "id=int")
+    assert "doc" not in dump
 
 
 @pytest.mark.parametrize(

@@ -1039,8 +1039,8 @@ def test_metrics_baseline_embedded_clone_payload_and_schema_resolution(
             "payload_sha256": "a" * 64,
         },
         "clones": {
-            "functions": ["a" * 40 + "|0-19"],
-            "blocks": ["|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])],
+            "functions": ["a" * 64 + "|0-19"],
+            "blocks": ["|".join(["a" * 64, "b" * 64, "c" * 64, "d" * 64])],
         },
     }
     meta_obj, clones_obj = mb_validate._require_embedded_clone_baseline_payload(

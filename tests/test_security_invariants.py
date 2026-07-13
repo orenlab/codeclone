@@ -361,8 +361,8 @@ def test_baseline_verify_integrity_rejects_tampered_clone_payload(
     from codeclone.baseline import Baseline
     from codeclone.contracts.errors import BaselineValidationError
 
-    func_id = f"{'a' * 40}|0-19"
-    block_id = "|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])
+    func_id = f"{'a' * 64}|0-19"
+    block_id = "|".join(["a" * 64, "b" * 64, "c" * 64, "d" * 64])
     payload = clone_baseline_mod._baseline_payload(
         functions={func_id},
         blocks={block_id},
@@ -382,7 +382,7 @@ def test_baseline_verify_integrity_rejects_tampered_clone_payload(
 
     clones = payload["clones"]
     assert isinstance(clones, dict)
-    clones["functions"] = [func_id, f"{'b' * 40}|20-39"]
+    clones["functions"] = [func_id, f"{'b' * 64}|20-39"]
     baseline_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
     tampered = Baseline(baseline_path)
     tampered.load()

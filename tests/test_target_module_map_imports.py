@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import importlib.util
 
+import codeclone.analysis as analysis_pkg
 from codeclone import baseline as baseline_pkg
 from codeclone.analysis import _module_walk as analysis_module_walk
 from codeclone.analysis import parser as analysis_parser
@@ -16,9 +17,8 @@ from codeclone.analysis.cfg import CFGBuilder
 from codeclone.analysis.cfg import CFGBuilder as AnalysisCFGBuilder
 from codeclone.analysis.cfg_model import CFG as AnalysisCFG
 from codeclone.analysis.cfg_model import Block as AnalysisBlock
-from codeclone.analysis.fingerprint import bucket_loc, sha1
+from codeclone.analysis.fingerprint import bucket_loc
 from codeclone.analysis.fingerprint import bucket_loc as analysis_bucket_loc
-from codeclone.analysis.fingerprint import sha1 as analysis_sha1
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.normalizer import (
     NormalizationConfig as AnalysisNormalizationConfig,
@@ -41,8 +41,10 @@ def test_analysis_canonical_imports_are_stable() -> None:
     assert AnalysisCFG.__module__ == "codeclone.analysis.cfg_model"
     assert AnalysisBlock.__module__ == "codeclone.analysis.cfg_model"
     assert NormalizationConfig is AnalysisNormalizationConfig
-    assert sha1 is analysis_sha1
     assert bucket_loc is analysis_bucket_loc
+    assert not hasattr(analysis_pkg, "sha1")
+    assert not hasattr(analysis_pkg, "AstNormalizer")
+    assert not hasattr(analysis_pkg, "stmt_hashes")
 
 
 def test_baseline_canonical_imports_match_compat_packages() -> None:

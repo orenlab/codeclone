@@ -25,7 +25,7 @@ def build_cfg_from_source(source: str) -> CFG:
         "Expected first top-level statement to be a function"
     )
 
-    return CFGBuilder().build(func_node.name, func_node)
+    return CFGBuilder().build(func_node.name, func_node, NormalizationConfig())
 
 
 def cfg_to_str(cfg: CFG) -> str:
@@ -473,7 +473,7 @@ def test_cfg_try_handler_linking() -> None:
     func = ast.parse(dedent(code)).body[0]
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
     builder = CFGBuilder()
-    cfg = builder.build("f", func)
+    cfg = builder.build("f", func, NormalizationConfig())
 
     handler_blocks = [
         b
@@ -534,7 +534,7 @@ def test_cfg_try_body_breaks_after_termination() -> None:
     """
     func = ast.parse(dedent(code)).body[0]
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = CFGBuilder().build("f", func)
+    cfg = CFGBuilder().build("f", func, NormalizationConfig())
     assert any(
         any(isinstance(stmt, ast.Return) for stmt in block.statements)
         for block in cfg.blocks
@@ -570,7 +570,7 @@ def test_cfg_try_star() -> None:
         pytest.skip("TryStar not supported")
 
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = CFGBuilder().build("f", func)
+    cfg = CFGBuilder().build("f", func, NormalizationConfig())
     assert len(cfg.blocks) >= 3
 
 
@@ -614,7 +614,7 @@ def test_cfg_match_pattern() -> None:
 
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
     builder = CFGBuilder()
-    cfg = builder.build("f", func)
+    cfg = builder.build("f", func, NormalizationConfig())
 
     patterns_found = []
     for block in cfg.blocks:
@@ -850,5 +850,5 @@ def test_cfg_match_with_empty_cases_ast() -> None:
         decorator_list=[],
     )
     func = fix_missing_single_function(fn)
-    cfg = CFGBuilder().build("f", func)
+    cfg = CFGBuilder().build("f", func, NormalizationConfig())
     assert len(cfg.blocks) >= 3
