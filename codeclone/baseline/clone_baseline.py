@@ -39,8 +39,8 @@ _META_REQUIRED_KEYS = {
     "payload_sha256",
 }
 _CLONES_REQUIRED_KEYS = {"functions", "blocks"}
-_FUNCTION_ID_RE = re.compile(r"^[0-9a-f]{40}\|(?:\d+-\d+|\d+\+)$")
-_BLOCK_ID_RE = re.compile(r"^[0-9a-f]{40}\|[0-9a-f]{40}\|[0-9a-f]{40}\|[0-9a-f]{40}$")
+_FUNCTION_ID_RE = re.compile(r"^[0-9a-f]{64}\|(?:\d+-\d+|\d+\+)$")
+_BLOCK_ID_RE = re.compile(r"^[0-9a-f]{64}\|[0-9a-f]{64}\|[0-9a-f]{64}\|[0-9a-f]{64}$")
 
 
 class Baseline:

@@ -56,7 +56,11 @@ from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaseline
 from codeclone.cache.entries import FileStat
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.config.pyproject_loader import ConfigValidationError
-from codeclone.contracts import BASELINE_SCHEMA_VERSION, REPORT_SCHEMA_VERSION
+from codeclone.contracts import (
+    BASELINE_FINGERPRINT_VERSION,
+    BASELINE_SCHEMA_VERSION,
+    REPORT_SCHEMA_VERSION,
+)
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
@@ -2634,7 +2638,7 @@ def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
     baseline = Baseline(tmp_path / "codeclone.baseline.json")
     baseline.generator = "codeclone"
     baseline.schema_version = "2.0"
-    baseline.fingerprint_version = "1"
+    baseline.fingerprint_version = BASELINE_FINGERPRINT_VERSION
     baseline.python_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
     baseline.created_at = "2026-04-07T00:00:00Z"
     baseline.save()

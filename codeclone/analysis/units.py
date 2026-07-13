@@ -9,11 +9,11 @@ from __future__ import annotations
 import ast
 from collections.abc import Callable
 from functools import partial
-from hashlib import sha1 as _sha1
+from hashlib import sha256 as _sha256
 from typing import TypeVar
 
 from .. import qualnames as _qualnames
-from ..blocks import extract_blocks, extract_segments
+from ..blocks import extract_blocks, extract_segments, stmt_hashes
 from ..contracts import (
     DEFAULT_BLOCK_MIN_LOC,
     DEFAULT_BLOCK_MIN_STMT,
@@ -44,7 +44,7 @@ from ._module_walk import (
 )
 from .class_metrics import _class_metrics_for_node, _node_line_span
 from .fingerprint import _cfg_fingerprint_and_complexity, bucket_loc
-from .normalizer import NormalizationConfig, stmt_hashes
+from .normalizer import NormalizationConfig
 from .parser import PARSE_TIMEOUT_SECONDS, _parse_with_limits
 from .phase_ledger import (
     INERT_PHASE_LEDGER,
@@ -77,7 +77,7 @@ def _raw_source_hash_for_range(
 ) -> str:
     window = "".join(source_lines[start_line - 1 : end_line]).strip()
     no_space = "".join(window.split())
-    return _sha1(no_space.encode("utf-8")).hexdigest()
+    return _sha256(b"ccfp2:raw\x00" + no_space.encode("utf-8")).hexdigest()
 
 
 def _eligible_unit_shape(

@@ -6,17 +6,14 @@
 from __future__ import annotations
 
 from .cfg import CFG, CFGBuilder
-from .fingerprint import bucket_loc, sha1
-from .normalizer import AstNormalizer, NormalizationConfig, stmt_hashes
+from .fingerprint import bucket_loc
+from .normalizer import NormalizationConfig
 from .units import extract_units_and_stats_from_source
 
 __all__ = [
     "CFG",
-    "AstNormalizer",
     "CFGBuilder",
     "NormalizationConfig",
     "bucket_loc",
     "extract_units_and_stats_from_source",
-    "sha1",
-    "stmt_hashes",
 ]

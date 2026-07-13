@@ -10,7 +10,7 @@ from enum import IntEnum
 from typing import Final
 
 BASELINE_SCHEMA_VERSION: Final = "2.1"
-BASELINE_FINGERPRINT_VERSION: Final = "1"
+BASELINE_FINGERPRINT_VERSION: Final = "2"
 WIRE_VERSION: Final = "1"
 
 CACHE_VERSION: Final = "2.10"

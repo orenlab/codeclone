@@ -24,19 +24,19 @@ def _python_tag() -> str:
 
 
 def _func_id() -> str:
-    return f"{'a' * 40}|0-19"
+    return f"{'a' * 64}|0-19"
 
 
 def _func_id_alt() -> str:
-    return f"{'b' * 40}|20-39"
+    return f"{'b' * 64}|20-39"
 
 
 def _block_id() -> str:
-    return "|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])
+    return "|".join(["a" * 64, "b" * 64, "c" * 64, "d" * 64])
 
 
 def _block_id_alt() -> str:
-    return "|".join(["b" * 40, "c" * 40, "d" * 40, "e" * 40])
+    return "|".join(["b" * 64, "c" * 64, "d" * 64, "e" * 64])
 
 
 def _trusted_payload(
@@ -357,7 +357,7 @@ def test_baseline_id_lists_must_be_sorted_and_unique(tmp_path: Path) -> None:
     payload = _trusted_payload()
     clones = payload["clones"]
     assert isinstance(clones, dict)
-    clones["functions"] = [f"{'b' * 40}|0-19", _func_id()]
+    clones["functions"] = [f"{'b' * 64}|0-19", _func_id()]
     _write_payload(baseline_path, payload)
     with pytest.raises(BaselineValidationError, match="sorted and unique") as exc2:
         baseline.load()
@@ -429,7 +429,7 @@ def test_baseline_verify_accepts_previous_minor_in_current_major(
 
 def test_baseline_verify_fingerprint_mismatch(tmp_path: Path) -> None:
     baseline_path = tmp_path / "baseline.json"
-    _write_payload(baseline_path, _trusted_payload(fingerprint_version="2"))
+    _write_payload(baseline_path, _trusted_payload(fingerprint_version="1"))
     baseline = Baseline(baseline_path)
     baseline.load()
     with pytest.raises(
@@ -470,7 +470,7 @@ def test_baseline_verify_integrity_mismatch(tmp_path: Path) -> None:
     assert isinstance(payload, dict)
     clones = payload["clones"]
     assert isinstance(clones, dict)
-    clones["functions"] = [_func_id(), f"{'b' * 40}|0-19"]
+    clones["functions"] = [_func_id(), f"{'b' * 64}|0-19"]
     _write_payload(baseline_path, payload)
     baseline = Baseline(baseline_path)
     baseline.load()
@@ -550,7 +550,7 @@ def test_baseline_payload_fields_contract_invariant(tmp_path: Path) -> None:
     payload_mutators: list[Callable[[Baseline], None]] = [
         lambda b: b.functions.add(_func_id_alt()),
         lambda b: b.blocks.add(_block_id_alt()),
-        lambda b: setattr(b, "fingerprint_version", "2"),
+        lambda b: setattr(b, "fingerprint_version", "1"),
         lambda b: setattr(b, "python_tag", "cp399"),
     ]
     for mutate in payload_mutators:
@@ -579,13 +579,13 @@ def test_baseline_payload_fields_contract_invariant(tmp_path: Path) -> None:
 
 def test_baseline_hash_canonical_determinism() -> None:
     hash_a = baseline_trust_mod._compute_payload_sha256(
-        functions={"a" * 40 + "|0-19", "b" * 40 + "|0-19"},
+        functions={"a" * 64 + "|0-19", "b" * 64 + "|0-19"},
         blocks={_block_id()},
         fingerprint_version="1",
         python_tag="cp313",
     )
     hash_b = baseline_trust_mod._compute_payload_sha256(
-        functions={"b" * 40 + "|0-19", "a" * 40 + "|0-19"},
+        functions={"b" * 64 + "|0-19", "a" * 64 + "|0-19"},
         blocks={_block_id()},
         fingerprint_version="1",
         python_tag="cp313",
@@ -698,10 +698,10 @@ def test_baseline_load_whitespace_and_key_order_do_not_break_integrity(
 
 def test_baseline_save_sorts_clone_lists_deterministically(tmp_path: Path) -> None:
     baseline_path = tmp_path / "baseline.json"
-    func_a = f"{'a' * 40}|0-19"
-    func_b = f"{'b' * 40}|0-19"
-    block_a = "|".join(["a" * 40, "b" * 40, "c" * 40, "d" * 40])
-    block_b = "|".join(["b" * 40, "c" * 40, "d" * 40, "e" * 40])
+    func_a = f"{'a' * 64}|0-19"
+    func_b = f"{'b' * 64}|0-19"
+    block_a = "|".join(["a" * 64, "b" * 64, "c" * 64, "d" * 64])
+    block_b = "|".join(["b" * 64, "c" * 64, "d" * 64, "e" * 64])
     baseline = Baseline(baseline_path)
     baseline.functions = {func_b, func_a}
     baseline.blocks = {block_b, block_a}
@@ -716,7 +716,7 @@ def test_baseline_save_sorts_clone_lists_deterministically(tmp_path: Path) -> No
 
 def test_baseline_from_groups_defaults() -> None:
     baseline = Baseline.from_groups(
-        {"a" * 40 + "|0-19": []},
+        {"a" * 64 + "|0-19": []},
         {_block_id(): []},
         path="baseline.json",
     )

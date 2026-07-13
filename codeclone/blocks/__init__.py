@@ -6,10 +6,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import hashlib
+from typing import TYPE_CHECKING, Final
 
-from ..analysis.fingerprint import sha1
-from ..analysis.normalizer import stmt_hashes
+from ..analysis.wire import emit_wire
 from ..models import BlockUnit, SegmentUnit
 
 if TYPE_CHECKING:
@@ -19,6 +19,19 @@ if TYPE_CHECKING:
     from ..analysis.normalizer import NormalizationConfig
 
 __all__ = ["BlockUnit", "SegmentUnit", "extract_blocks", "extract_segments"]
+
+_STMT_DOMAIN: Final = b"ccfp2:stmt\x00"
+_SEG_DOMAIN: Final = b"ccfp2:seg\x00"
+_SEGSIG_DOMAIN: Final = b"ccfp2:segsig\x00"
+
+
+def stmt_hashes(statements: Sequence[ast.stmt], cfg: NormalizationConfig) -> list[str]:
+    return [
+        hashlib.sha256(
+            _STMT_DOMAIN + emit_wire(statement, cfg).encode("utf-8")
+        ).hexdigest()
+        for statement in statements
+    ]
 
 
 def extract_blocks(
@@ -111,8 +124,12 @@ def extract_segments(
             continue
 
         window = stmt_hash_rows[i : i + window_size]
-        segment_hash = sha1("|".join(window))
-        segment_sig = sha1("|".join(sorted(window)))
+        segment_hash = hashlib.sha256(
+            _SEG_DOMAIN + "|".join(window).encode("utf-8")
+        ).hexdigest()
+        segment_sig = hashlib.sha256(
+            _SEGSIG_DOMAIN + "|".join(sorted(window)).encode("utf-8")
+        ).hexdigest()
 
         segments.append(
             SegmentUnit(

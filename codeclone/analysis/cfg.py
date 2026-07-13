@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import ast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, TypeVar
 
 from ..meta_markers import CFG_META_PREFIX
 from .cfg_model import CFG, Block
+from .normalizer import NormalizationConfig
+from .wire import emit_wire
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -66,20 +68,23 @@ def _try_star_parts(
 
 
 class CFGBuilder:
-    __slots__ = ("_loop_stack", "cfg", "current")
+    __slots__ = ("_loop_stack", "cfg", "current", "normalization_config")
 
     def __init__(self) -> None:
         self.cfg: CFG
         self.current: Block
+        self.normalization_config: NormalizationConfig
         self._loop_stack: list[_LoopContext] = []
 
     def build(
         self,
         qualname: str,
         node: ast.FunctionDef | ast.AsyncFunctionDef,
+        normalization_config: NormalizationConfig,
     ) -> CFG:
         self.cfg = CFG(qualname)
         self.current = self.cfg.entry
+        self.normalization_config = normalization_config
 
         self._visit_statements(node.body)
 
@@ -128,6 +133,7 @@ class CFGBuilder:
 
             case ast.Try():
                 self._visit_try(
+                    kind=type(stmt).__name__,
                     body=stmt.body,
                     handlers=stmt.handlers,
                     orelse=stmt.orelse,
@@ -145,6 +151,7 @@ class CFGBuilder:
                 if try_star_parts is not None:
                     body, handlers, orelse, finalbody = try_star_parts
                     self._visit_try(
+                        kind=type(stmt).__name__,
                         body=body,
                         handlers=handlers,
                         orelse=orelse,
@@ -299,6 +306,7 @@ class CFGBuilder:
     def _visit_try(
         self,
         *,
+        kind: str,
         body: list[ast.stmt],
         handlers: list[ast.ExceptHandler],
         orelse: list[ast.stmt],
@@ -307,6 +315,7 @@ class CFGBuilder:
         try_entry = self.cfg.create_block()
         self.current.add_successor(try_entry)
         self.current = try_entry
+        self.current.statements.append(_meta_expr(f"TRY_KIND:{kind}"))
 
         handler_test_blocks = [self.cfg.create_block() for _ in handlers]
         handler_body_blocks = [self.cfg.create_block() for _ in handlers]
@@ -318,7 +327,12 @@ class CFGBuilder:
         ):
             test_block.statements.append(_meta_expr(f"TRY_HANDLER_INDEX:{idx}"))
             if handler.type is not None:
-                type_repr = ast.dump(handler.type, annotate_fields=False)
+                symbol_config = replace(
+                    self.normalization_config,
+                    normalize_attributes=False,
+                    normalize_names=False,
+                )
+                type_repr = emit_wire(handler.type, symbol_config)
                 test_block.statements.append(
                     _meta_expr(f"TRY_HANDLER_TYPE:{type_repr}")
                 )
@@ -385,7 +399,7 @@ class CFGBuilder:
             case_test_block.statements.append(_meta_expr(f"MATCH_CASE_INDEX:{idx}"))
 
             # Record pattern structure
-            pattern_repr = ast.dump(case_.pattern, annotate_fields=False)
+            pattern_repr = emit_wire(case_.pattern, self.normalization_config)
             case_test_block.statements.append(
                 _meta_expr(f"MATCH_PATTERN:{pattern_repr}")
             )
