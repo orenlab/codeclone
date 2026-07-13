@@ -30,52 +30,22 @@ def _annotation_name(node: ast.AST) -> str | None:
     return None
 
 
-def compute_cbo(
-    class_node: ast.ClassDef,
+def _resolve_cbo(
+    couplings: frozenset[str],
     *,
+    class_name: str,
     module_import_names: set[str],
     module_class_names: set[str],
 ) -> tuple[int, tuple[str, ...]]:
-    """
-    Conservative deterministic CBO approximation.
-
-    We count unique external symbols referenced by class bases, annotations,
-    constructor calls and non-self attributes.
-    """
-    couplings: set[str] = set()
-
-    def _add_annotation_coupling(node: ast.AST | None) -> None:
-        if node is None:
-            return
-        candidate = _annotation_name(node)
-        if candidate:
-            couplings.add(candidate)
-
-    for base in class_node.bases:
-        _add_annotation_coupling(base)
-
-    for node in ast.walk(class_node):
-        if isinstance(node, ast.Name):
-            couplings.add(node.id)
-        elif isinstance(node, ast.Attribute):
-            if not (
-                isinstance(node.value, ast.Name) and node.value.id in {"self", "cls"}
-            ):
-                couplings.add(node.attr)
-        elif isinstance(node, ast.Call):
-            _add_annotation_coupling(node.func)
-        elif isinstance(node, (ast.AnnAssign, ast.arg)):
-            _add_annotation_coupling(node.annotation)
-
     filtered = {
         name
         for name in couplings
         if name
         and name not in _BUILTIN_NAMES
-        and name not in {"self", "cls", class_node.name}
+        and name not in {"self", "cls", class_name}
         and (
             name in module_import_names
-            or (name in module_class_names and name != class_node.name)
+            or (name in module_class_names and name != class_name)
         )
     }
     resolved = tuple(sorted(filtered))

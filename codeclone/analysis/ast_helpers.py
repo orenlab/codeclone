@@ -9,6 +9,16 @@ from __future__ import annotations
 import ast
 
 
+def is_type_checking_guard(test: ast.AST) -> bool:
+    match test:
+        case ast.Name(id="TYPE_CHECKING"):
+            return True
+        case ast.Attribute(value=ast.Name(id="typing"), attr="TYPE_CHECKING"):
+            return True
+        case _:
+            return False
+
+
 def ast_node_start_line(node: ast.AST) -> int | None:
     line = getattr(node, "lineno", None)
     if isinstance(line, int) and line > 0:

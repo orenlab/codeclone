@@ -19,13 +19,14 @@ from codeclone.contracts import (
 from codeclone.metrics import complexity as complexity_mod
 from codeclone.metrics import coupling as coupling_mod
 from codeclone.metrics import health as health_mod
-from codeclone.metrics.cohesion import cohesion_risk, compute_lcom4
+from codeclone.metrics.class_facts import collect_class_walk_facts
+from codeclone.metrics.cohesion import _resolve_lcom4, cohesion_risk
 from codeclone.metrics.complexity import (
     cyclomatic_complexity,
     nesting_depth,
     risk_level,
 )
-from codeclone.metrics.coupling import compute_cbo, coupling_risk
+from codeclone.metrics.coupling import _resolve_cbo, coupling_risk
 from codeclone.metrics.dead_code import find_suppressed_unused, find_unused
 from codeclone.metrics.dependencies import (
     _internal_roots,
@@ -39,7 +40,7 @@ from codeclone.metrics.dependencies import (
     select_dependency_graph_nodes,
 )
 from codeclone.metrics.health import HealthInputs, compute_health
-from codeclone.models import DeadCandidate, DeadItem, ModuleDep
+from codeclone.models import ClassWalkFacts, DeadCandidate, DeadItem, ModuleDep
 from codeclone.paths import is_test_filepath
 
 
@@ -55,6 +56,23 @@ def _parse_named_node(
         ):
             return node
     raise AssertionError(f"top-level node {name!r} not found")
+
+
+def _class_walk_facts(
+    class_node: ast.ClassDef,
+    *,
+    ignored_methods: frozenset[str] = frozenset(),
+) -> ClassWalkFacts:
+    method_names = frozenset(
+        node.name
+        for node in class_node.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+        and node.name not in ignored_methods
+    )
+    return collect_class_walk_facts(
+        class_node,
+        analyzed_method_names=method_names,
+    )
 
 
 def test_dependency_internal_roots_and_target_guards() -> None:
@@ -195,7 +213,7 @@ def test_annotation_name_variants() -> None:
     assert coupling_mod._annotation_name(ast.Constant(value=1)) is None
 
 
-def test_compute_cbo_filters_builtins_and_self_references() -> None:
+def test_resolve_cbo_filters_builtins_and_self_references() -> None:
     class_node = _parse_named_node(
         """
 from ext import External, Helper
@@ -216,8 +234,10 @@ class Sample(External):
         "Sample",
     )
     assert isinstance(class_node, ast.ClassDef)
-    cbo, resolved = compute_cbo(
-        class_node,
+    facts = _class_walk_facts(class_node)
+    cbo, resolved = _resolve_cbo(
+        facts.couplings,
+        class_name=class_node.name,
         module_import_names={"External", "Helper"},
         module_class_names={"Sample", "Local"},
     )
@@ -225,7 +245,7 @@ class Sample(External):
     assert resolved == ("External", "Helper", "Local")
 
 
-def test_compute_cbo_handles_non_symbolic_variants() -> None:
+def test_resolve_cbo_handles_non_symbolic_variants() -> None:
     synthetic = ast.ClassDef(
         name="Sample",
         bases=[ast.Constant(value=1)],
@@ -233,8 +253,10 @@ def test_compute_cbo_handles_non_symbolic_variants() -> None:
         body=[ast.Pass()],
         decorator_list=[],
     )
-    cbo, resolved = compute_cbo(
-        synthetic,
+    facts = _class_walk_facts(synthetic)
+    cbo, resolved = _resolve_cbo(
+        facts.couplings,
+        class_name=synthetic.name,
         module_import_names=set(),
         module_class_names={"Sample"},
     )
@@ -250,8 +272,10 @@ class DynamicCalls:
         "DynamicCalls",
     )
     assert isinstance(class_node, ast.ClassDef)
-    cbo_dynamic, resolved_dynamic = compute_cbo(
-        class_node,
+    dynamic_facts = _class_walk_facts(class_node)
+    cbo_dynamic, resolved_dynamic = _resolve_cbo(
+        dynamic_facts.couplings,
+        class_name=class_node.name,
         module_import_names={"External"},
         module_class_names={"DynamicCalls"},
     )
@@ -265,7 +289,7 @@ def test_coupling_risk_boundaries() -> None:
     assert coupling_risk(11) == "high"
 
 
-def test_compute_lcom4_for_empty_and_partially_connected_class() -> None:
+def test_resolve_lcom4_for_empty_and_partially_connected_class() -> None:
     cases = (
         (
             """
@@ -325,10 +349,10 @@ class Triangle:
     for source, name, expected in cases:
         class_node = _parse_named_node(source, name)
         assert isinstance(class_node, ast.ClassDef)
-        assert compute_lcom4(class_node) == expected
+        assert _resolve_lcom4(_class_walk_facts(class_node)) == expected
 
 
-def test_compute_lcom4_ignores_unknown_self_calls() -> None:
+def test_resolve_lcom4_ignores_unknown_self_calls() -> None:
     class_node = _parse_named_node(
         """
 class UnknownCall:
@@ -341,10 +365,10 @@ class UnknownCall:
         "UnknownCall",
     )
     assert isinstance(class_node, ast.ClassDef)
-    assert compute_lcom4(class_node) == (2, 2, 1)
+    assert _resolve_lcom4(_class_walk_facts(class_node)) == (2, 2, 1)
 
 
-def test_compute_lcom4_honors_ignored_methods() -> None:
+def test_resolve_lcom4_honors_ignored_methods() -> None:
     class_node = _parse_named_node(
         """
 class Mixed:
@@ -361,18 +385,66 @@ class Mixed:
         "Mixed",
     )
     assert isinstance(class_node, ast.ClassDef)
-    assert compute_lcom4(class_node) == (2, 3, 2)
-    assert compute_lcom4(class_node, ignored_methods=frozenset({"isolated"})) == (
+    assert _resolve_lcom4(_class_walk_facts(class_node)) == (2, 3, 2)
+    assert _resolve_lcom4(
+        _class_walk_facts(class_node, ignored_methods=frozenset({"isolated"}))
+    ) == (
         1,
         3,
         2,
     )
-    assert compute_lcom4(
-        class_node,
-        ignored_methods=frozenset(
-            {"connected_left", "connected_right", "isolated"},
-        ),
+    assert _resolve_lcom4(
+        _class_walk_facts(
+            class_node,
+            ignored_methods=frozenset(
+                {"connected_left", "connected_right", "isolated"},
+            ),
+        )
     ) == (1, 3, 0)
+
+
+def test_class_walk_fuses_partitioned_coupling_and_cohesion_facts() -> None:
+    class_node = _parse_named_node(
+        """
+@decorate(External)
+class Fused(Base, metaclass=Factory):
+    field: Helper
+
+    class Nested:
+        def nested(self) -> None:
+            self.nested_only = Local()
+
+    def left(self, value: Input) -> None:
+        self.shared = value
+        self.right()
+
+    def right(self) -> None:
+        self.shared = Output()
+        cls.external()
+""".strip(),
+        "Fused",
+    )
+    assert isinstance(class_node, ast.ClassDef)
+
+    facts = _class_walk_facts(class_node)
+
+    assert facts.all_method_count == 2
+    assert facts.method_to_attrs == {
+        "left": {"right", "shared"},
+        "right": {"shared"},
+    }
+    assert facts.method_calls == {"left": {"right"}, "right": set()}
+    assert {
+        "Base",
+        "External",
+        "Factory",
+        "Helper",
+        "Input",
+        "Local",
+        "Output",
+        "decorate",
+        "external",
+    } <= facts.couplings
 
 
 def test_cohesion_risk_boundaries() -> None:

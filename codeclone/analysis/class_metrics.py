@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import ast
 
-from ..metrics.cohesion import cohesion_risk, compute_lcom4
-from ..metrics.coupling import compute_cbo, coupling_risk
+from ..metrics.class_facts import _class_methods, collect_class_walk_facts
+from ..metrics.cohesion import _resolve_lcom4, cohesion_risk
+from ..metrics.coupling import _resolve_cbo, coupling_risk
 from ..models import ClassMetrics
 
 
@@ -35,15 +36,21 @@ def _class_metrics_for_node(
     if span is None:
         return None
     start, end = span
-    cbo, coupled_classes = compute_cbo(
+    facts = collect_class_walk_facts(
         class_node,
+        analyzed_method_names=frozenset(
+            method.name
+            for method in _class_methods(class_node)
+            if method.name not in cohesion_ignored_methods
+        ),
+    )
+    cbo, coupled_classes = _resolve_cbo(
+        facts.couplings,
+        class_name=class_node.name,
         module_import_names=module_import_names,
         module_class_names=module_class_names,
     )
-    lcom4, method_count, instance_var_count = compute_lcom4(
-        class_node,
-        ignored_methods=cohesion_ignored_methods,
-    )
+    lcom4, method_count, instance_var_count = _resolve_lcom4(facts)
     return ClassMetrics(
         qualname=f"{module_name}:{class_qualname}",
         filepath=filepath,

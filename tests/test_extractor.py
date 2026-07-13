@@ -5,17 +5,22 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 
 import ast
+import dataclasses
+import hashlib
+import json
 import os
 import signal
 import sys
 import tokenize
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import cast
 
 import pytest
 
 import codeclone.analysis._module_walk as module_walk_mod
+import codeclone.analysis.ast_helpers as ast_helpers_mod
 import codeclone.analysis.parser as parser_mod
 import codeclone.analysis.reachability as reachability_mod
 import codeclone.analysis.units as units_mod
@@ -34,6 +39,31 @@ from codeclone.models import (
     Unit,
 )
 from codeclone.qualnames import FunctionNode, QualnameCollector
+
+_DETECT_FUSION_CORPUS_FILES = (
+    "tests/fixtures/analytics/helpers.py",
+    "tests/fixtures/golden_project/alpha.py",
+    "tests/fixtures/golden_project/beta.py",
+    "tests/fixtures/golden_v2/clone_metrics_cycle/pkg/a.py",
+    "tests/fixtures/golden_v2/clone_metrics_cycle/pkg/app.py",
+    "tests/fixtures/golden_v2/clone_metrics_cycle/pkg/b.py",
+    "tests/fixtures/golden_v2/pyproject_defaults/pkg/one.py",
+    "tests/fixtures/golden_v2/pyproject_defaults/pkg/two.py",
+    "tests/fixtures/golden_v2/test_only_usage/pkg/consumer.py",
+    "tests/fixtures/golden_v2/test_only_usage/pkg/core.py",
+    "tests/fixtures/golden_v2/test_only_usage/pkg/main.py",
+    "tests/fixtures/golden_v2/test_only_usage/pkg/tests/fixture_core.py",
+    "tests/fixtures/semantic_authority/compatibility_checkers.py",
+    "tests/fixtures/semantic_authority/dual_artifact_writers.py",
+    "tests/fixtures/semantic_authority/module_identity_producers.py",
+    "tests/fixtures/semantic_authority/volatile_run_identity.py",
+    "tests/fixtures/wire_corpus/core_syntax.py",
+    "tests/fixtures/wire_corpus/modern_syntax.py",
+    "tests/fixtures/wire_corpus/pattern_syntax.py",
+)
+_DETECT_FUSION_CORPUS_DIGEST = (
+    "ebfb095c72d8404b7cf61e2ed1f87624be7def247dd188971b1a8bea52c326b6"
+)
 
 
 def extract_units_from_source(
@@ -170,6 +200,43 @@ def _runtime_reachability_from_source(
         min_stmt=1,
     )
     return file_metrics.runtime_reachability
+
+
+def test_detect_fusion_preserves_fixture_corpus_outputs() -> None:
+    root = Path(__file__).parent.parent
+    payload: dict[str, object] = {}
+    for filepath in _DETECT_FUSION_CORPUS_FILES:
+        source = (root / filepath).read_text(encoding="utf-8")
+        module_path = filepath.removesuffix(".py")
+        if module_path.endswith("/__init__"):
+            module_path = module_path[: -len("/__init__")]
+        _, _, _, _, metrics, _ = units_mod.extract_units_and_stats_from_source(
+            source=source,
+            filepath=filepath,
+            module_name=module_path.replace("/", "."),
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+        )
+        payload[filepath] = {
+            "runtime_reachability": [
+                dataclasses.asdict(item) for item in metrics.runtime_reachability
+            ],
+            "class_metrics": [
+                dataclasses.asdict(item) for item in metrics.class_metrics
+            ],
+            "security_surfaces": [
+                dataclasses.asdict(item) for item in metrics.security_surfaces
+            ],
+        }
+    canonical = json.dumps(
+        payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+
+    assert hashlib.sha256(canonical).hexdigest() == _DETECT_FUSION_CORPUS_DIGEST
 
 
 def test_extracts_function_unit() -> None:
@@ -1572,14 +1639,14 @@ target = loader()[name]
     typing_guarded_if = cast(ast.If, tree.body[1])
     subscript_value = cast(ast.Assign, tree.body[2]).value
 
-    assert reachability_mod._is_type_checking_guard(guarded_if.test) is True
-    assert reachability_mod._is_type_checking_guard(typing_guarded_if.test) is True
+    assert ast_helpers_mod.is_type_checking_guard(guarded_if.test) is True
+    assert ast_helpers_mod.is_type_checking_guard(typing_guarded_if.test) is True
     assert reachability_mod._dotted_name(subscript_value) == "loader"
     assert reachability_mod._resolve_symbol(ast.Constant(value=1), {}) is None
 
 
 def test_runtime_binding_collect_first_arg_object_requires_args() -> None:
-    visitor = reachability_mod._RuntimeBindingVisitor(aliases={})
+    visitor = reachability_mod._RuntimeBindingVisitor()
     visitor.objects["app"] = "aiohttp_app"
     stmt = ast.parse("app.add_routes()").body[0]
     assert isinstance(stmt, ast.Expr)
@@ -1587,6 +1654,25 @@ def test_runtime_binding_collect_first_arg_object_requires_args() -> None:
     assert isinstance(call, ast.Call)
     visitor._collect_runtime_registration(call)
     assert visitor.included_routers == set()
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_confidence"),
+    (
+        pytest.param("import_before_use.py", "high", id="import_before_use"),
+        pytest.param("use_before_import.py", "medium", id="use_before_import"),
+    ),
+)
+def test_runtime_binding_resolves_only_preceding_imports(
+    fixture_name: str,
+    expected_confidence: str,
+) -> None:
+    fixture = Path(__file__).parent / "fixtures" / "detect_fusion" / fixture_name
+    facts = _runtime_reachability_from_source(fixture.read_text(encoding="utf-8"))
+
+    assert [(fact.target_qualname, fact.confidence) for fact in facts] == [
+        ("pkg.mod:view", expected_confidence)
+    ]
 
 
 def test_runtime_reachability_internal_guards_stay_safe() -> None:
