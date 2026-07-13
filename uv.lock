@@ -397,11 +397,11 @@ wheels = [
 
 [[package]]
 name = "ckdn"
-version = "1.0.0"
+version = "1.1.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1e/ed/e926c468899c474ad579fe0e6565549d8e39f1f2a1ca47507356ee6c5a07/ckdn-1.0.0.tar.gz", hash = "sha256:eeed315254b9c46af514047b67e3d8024f543de96c4e736d4fde4ae472b90fd2", size = 196926, upload-time = "2026-07-10T19:23:13.583Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/33/ec/c9d42792b4b37f9b766a8c7f307d1c87971f13ee2bd7b27019240c42c028/ckdn-1.1.1.tar.gz", hash = "sha256:d3bd24bd9ac7818dddba09f2c01a9d60af6a2e2216d5d661f4fafdea3cca2b7e", size = 218884, upload-time = "2026-07-13T14:12:25.807Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/5e/8efb320af86557c3bf4d8683bd10bfa1a93bdfeb4e6a5eb5cdc6e0130a3c/ckdn-1.0.0-py3-none-any.whl", hash = "sha256:975a8f4cc87cd6b2d8f51a0f9de8e103c9a45581d0a6ab9ce93f978ece361e57", size = 62693, upload-time = "2026-07-10T19:23:12.274Z" },
+    { url = "https://files.pythonhosted.org/packages/ae/a7/be69a9a559b45b6688b18c8832f9ca96a95211c0b2a3767e0755bb116b29/ckdn-1.1.1-py3-none-any.whl", hash = "sha256:a77e25c31d3ad286c867b3bdc5f4d95ca333e6799beb91906c1df9c6b0ff816a", size = 73000, upload-time = "2026-07-13T14:12:24.226Z" },
 ]
 
 [package.optional-dependencies]
