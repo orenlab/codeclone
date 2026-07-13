@@ -26,11 +26,19 @@ def _resolve_import(module_name: str, node: ast.ImportFrom) -> str:
 
 
 def _iter_local_imports(module_name: str, source: str) -> list[str]:
+    return [
+        import_name
+        for import_name, _line in _iter_import_edges(module_name, source)
+        if import_name.startswith("codeclone")
+    ]
+
+
+def _iter_import_edges(module_name: str, source: str) -> list[tuple[str, int]]:
     tree = ast.parse(source)
-    imports: list[str] = []
+    imports: list[tuple[str, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            imports.extend(alias.name for alias in node.names)
+            imports.extend((alias.name, node.lineno) for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
-            imports.append(_resolve_import(module_name, node))
-    return [name for name in imports if name.startswith("codeclone")]
+            imports.append((_resolve_import(module_name, node), node.lineno))
+    return imports
