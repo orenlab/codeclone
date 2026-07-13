@@ -17,10 +17,13 @@ from ..models import (
     RuntimeReachabilityFramework,
     RuntimeReachabilityTargetKind,
 )
-from .ast_helpers import ast_node_end_line, ast_node_start_line
+from .ast_helpers import (
+    ast_node_end_line,
+    ast_node_start_line,
+    is_type_checking_guard,
+)
 from .phase_ledger import (
     INERT_PHASE_LEDGER,
-    SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US,
     SUBPHASE_MODULE_PASSES_REACHABILITY_BINDING_US,
     SUBPHASE_MODULE_PASSES_REACHABILITY_VISIT_US,
     PhaseLedger,
@@ -331,16 +334,6 @@ def _route_registration_for_runtime_object(
     )
 
 
-def _is_type_checking_guard(test: ast.AST) -> bool:
-    match test:
-        case ast.Name(id="TYPE_CHECKING"):
-            return True
-        case ast.Attribute(value=ast.Name(id="typing"), attr="TYPE_CHECKING"):
-            return True
-        case _:
-            return False
-
-
 def _dotted_name(node: ast.AST) -> str | None:
     match node:
         case ast.Name(id=name):
@@ -382,32 +375,6 @@ def _provider_symbol_name(symbol: str) -> str:
     return symbol.rsplit(".", 1)[-1]
 
 
-class _ImportAliasVisitor(ast.NodeVisitor):
-    __slots__ = ("aliases",)
-
-    def __init__(self) -> None:
-        self.aliases: dict[str, str] = {}
-
-    def visit_If(self, node: ast.If) -> None:
-        if _is_type_checking_guard(node.test):
-            return
-        self.generic_visit(node)
-
-    def visit_Import(self, node: ast.Import) -> None:
-        for alias in node.names:
-            local_name = alias.asname or alias.name.split(".", 1)[0]
-            self.aliases[local_name] = alias.name
-
-    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-        if node.module is None:
-            return
-        for alias in node.names:
-            if alias.name == "*":
-                continue
-            local_name = alias.asname or alias.name
-            self.aliases[local_name] = f"{node.module}.{alias.name}"
-
-
 class _RuntimeBindingVisitor(ast.NodeVisitor):
     __slots__ = (
         "_aliases",
@@ -420,11 +387,10 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
 
     def __init__(
         self,
-        aliases: dict[str, str],
         *,
         handler_nodes: list[ast.AST] | None = None,
     ) -> None:
-        self._aliases = aliases
+        self._aliases: dict[str, str] = {}
         self._handler_nodes = handler_nodes
         self._scope_depth = 0
         self.objects: dict[str, _RuntimeObjectKind] = {}
@@ -432,7 +398,7 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
         self.route_decorator_factories: dict[str, _RouteDecoratorFactory] = {}
 
     def visit(self, node: ast.AST) -> None:
-        if isinstance(node, ast.If) and _is_type_checking_guard(node.test):
+        if isinstance(node, ast.If) and is_type_checking_guard(node.test):
             return
         handler_nodes = self._handler_nodes
         if handler_nodes is not None and isinstance(
@@ -443,9 +409,23 @@ class _RuntimeBindingVisitor(ast.NodeVisitor):
         super().visit(node)
 
     def visit_If(self, node: ast.If) -> None:
-        if _is_type_checking_guard(node.test):
+        if is_type_checking_guard(node.test):
             return
         self.generic_visit(node)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            local_name = alias.asname or alias.name.split(".", 1)[0]
+            self._aliases[local_name] = alias.name
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module is None:
+            return
+        for alias in node.names:
+            if alias.name == "*":
+                continue
+            local_name = alias.asname or alias.name
+            self._aliases[local_name] = f"{node.module}.{alias.name}"
 
     def visit_Assign(self, node: ast.Assign) -> None:
         kind = self._runtime_object_kind(node.value)
@@ -734,7 +714,7 @@ class _RuntimeReachabilityVisitor(ast.NodeVisitor):
             self._targets_by_name.setdefault(local_name, target)
 
     def visit_If(self, node: ast.If) -> None:
-        if _is_type_checking_guard(node.test):
+        if is_type_checking_guard(node.test):
             return
         self.generic_visit(node)
 
@@ -1341,18 +1321,8 @@ def collect_runtime_reachability(
     collector: _qualnames.QualnameCollector,
     phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
 ) -> tuple[RuntimeReachabilityFact, ...]:
-    alias_visitor = _ImportAliasVisitor()
-
-    def _alias_pass() -> None:
-        alias_visitor.visit(tree)
-
-    phase_ledger.run_subphase_us(
-        SUBPHASE_MODULE_PASSES_REACHABILITY_ALIAS_US,
-        _alias_pass,
-    )
     handler_nodes: list[ast.AST] = []
     binding_visitor = _RuntimeBindingVisitor(
-        alias_visitor.aliases,
         handler_nodes=handler_nodes,
     )
 
@@ -1367,7 +1337,7 @@ def collect_runtime_reachability(
         module_name=module_name,
         filepath=filepath,
         collector=collector,
-        aliases=alias_visitor.aliases,
+        aliases=binding_visitor._aliases,
         runtime_objects=binding_visitor.objects,
         included_routers=binding_visitor.included_routers,
         route_decorator_factories=binding_visitor.route_decorator_factories,

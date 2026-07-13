@@ -16,7 +16,11 @@ from ..models import (
     SecuritySurfaceEvidenceKind,
     SecuritySurfaceLocationScope,
 )
-from .ast_helpers import ast_node_end_line, ast_node_start_line
+from .ast_helpers import (
+    ast_node_end_line,
+    ast_node_start_line,
+    is_type_checking_guard,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,16 +162,6 @@ _CALL_RULES: tuple[_CallRule, ...] = (
         prefix_match=True,
     ),
 )
-
-
-def _is_type_checking_guard(test: ast.AST) -> bool:
-    match test:
-        case ast.Name(id="TYPE_CHECKING"):
-            return True
-        case ast.Attribute(value=ast.Name(id="typing"), attr="TYPE_CHECKING"):
-            return True
-        case _:
-            return False
 
 
 def _matches_import_prefix(imported_name: str, module_prefix: str) -> bool:
@@ -363,7 +357,7 @@ class _SecuritySurfaceVisitor(ast.NodeVisitor):
                 )
 
     def visit_If(self, node: ast.If) -> None:
-        if _is_type_checking_guard(node.test):
+        if is_type_checking_guard(node.test):
             for child in node.orelse:
                 self.visit(child)
             return

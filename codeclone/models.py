@@ -89,6 +89,14 @@ class SourceStats:
 
 
 @dataclass(frozen=True, slots=True)
+class ClassWalkFacts:
+    couplings: frozenset[str]
+    method_to_attrs: dict[str, set[str]]
+    method_calls: dict[str, set[str]]
+    all_method_count: int
+
+
+@dataclass(frozen=True, slots=True)
 class ClassMetrics:
     qualname: str
     filepath: str
