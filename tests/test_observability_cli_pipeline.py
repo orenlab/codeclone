@@ -338,6 +338,7 @@ def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
 
     names = {row[0] for row in rows}
     assert {
+        "config.resolve",
         "pipeline.baseline",
         "pipeline.cache_load",
         "pipeline.bootstrap",
@@ -347,6 +348,51 @@ def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
         "pipeline.report",
     } <= names
     assert len({row[1] for row in rows}) == 1
+
+    conn = open_observability_store(observability_store_path(repo))
+    try:
+        config_rows = conn.execute(
+            "SELECT counters_json FROM platform_spans WHERE name='config.resolve'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(config_rows) == 1
+    assert orjson.loads(config_rows[0][0]) == {
+        "config_autodetect_used": 1,
+        "config_configured_roots": 1,
+    }
+
+
+def test_cli_config_validation_failure_is_counted_once(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "sample.py").write_text("VALUE = 1\n", "utf-8")
+    (repo / "pyproject.toml").write_text(
+        '[tool.codeclone]\nbaseline_scope_id = "NOT-A-CANONICAL-UUID"\n',
+        "utf-8",
+    )
+    env = os.environ.copy()
+    env["CODECLONE_OBSERVABILITY_ENABLED"] = "1"
+
+    result = subprocess.run(
+        [sys.executable, "-m", "codeclone.main", str(repo), "--quiet"],
+        cwd=repo,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == int(ExitCode.CONTRACT_ERROR)
+    conn = open_observability_store(observability_store_path(repo))
+    try:
+        rows = conn.execute(
+            "SELECT counters_json FROM platform_spans WHERE name='config.resolve'"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    assert orjson.loads(rows[0][0]) == {"config_validation_failures": 1}
 
 
 def test_cli_report_bytes_equal_with_observability_off_and_on(tmp_path: Path) -> None:

@@ -13,7 +13,8 @@ import pytest
 from codeclone.config.argparse_builder import build_parser
 from codeclone.config.pyproject_loader import load_pyproject_config
 from codeclone.config.resolver import collect_explicit_cli_dests, resolve_config
-from codeclone.config.spec import PYPROJECT_OPTIONS, TESTABLE_CLI_OPTIONS, OptionSpec
+from codeclone.config.spec import PYPROJECT_OPTIONS, TESTABLE_CLI_OPTIONS
+from codeclone.models import OptionSpec
 
 _PARSEABLE_CLI_OPTIONS = tuple(
     option for option in TESTABLE_CLI_OPTIONS if option.dest != "interactive_help"
@@ -59,10 +60,15 @@ def _pyproject_sample(option: OptionSpec, root_path: Path) -> tuple[str, object]
     if expected_type is int:
         return ("7", 7)
     if expected_type is str:
+        if option.pyproject_key == "baseline_scope_id":
+            value = "12345678-1234-4abc-8def-1234567890ab"
+            return (f'"{value}"', value)
         raw_value = "reports/output.json" if option.path_value else "sample-value"
         expected = str(root_path / raw_value) if option.path_value else raw_value
         return (f'"{raw_value}"', expected)
     if expected_type is list:
+        if option.pyproject_key == "source_roots":
+            return ('["src", "packages/nested", "src"]', ("packages/nested", "src"))
         return ('["./tests/fixtures/golden_*"]', ("tests/fixtures/golden_*",))
     raise AssertionError(f"Unsupported sample type for {option.pyproject_key}")
 

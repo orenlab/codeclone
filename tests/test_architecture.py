@@ -46,6 +46,7 @@ _RING_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("codeclone.ui_messages", "r4"),
     ("codeclone.main", "r4"),
     ("codeclone.__init__", "r4"),
+    ("codeclone.contracts.compatibility", "r2"),
     ("codeclone.contracts", "r0"),
     ("codeclone.utils", "r1"),
     ("codeclone.api", "r3"),

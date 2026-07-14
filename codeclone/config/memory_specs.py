@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from typing import Final
 
+from ..models import ConfigKeySpec
 from .memory_defaults import (
     DEFAULT_MEMORY_ACTIVE_RETENTION_DAYS,
     DEFAULT_MEMORY_ARCHIVED_RETENTION_DAYS,
@@ -37,7 +38,6 @@ from .memory_defaults import (
     DEFAULT_MEMORY_TRAJECTORY_EXPORT_MAX_RECORD_BYTES,
     DEFAULT_MEMORY_TRAJECTORY_RETENTION_DAYS,
 )
-from .spec import ConfigKeySpec
 
 MEMORY_CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = {
     "backend": ConfigKeySpec(expected_type=str),

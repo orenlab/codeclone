@@ -9,10 +9,124 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, field_validator
 
 DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
 DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
 DEFAULT_OBSERVABILITY_MAX_SPANS = 100
+
+ConfigCliKind = Literal[
+    "positional",
+    "value",
+    "optional_path",
+    "bool_optional",
+    "store_true",
+    "store_false",
+    "help",
+    "version",
+]
+CompatibilityPolicyKind = Literal[
+    "exact",
+    "supported_versions",
+    "ordered_migration",
+]
+CompatibilityStatus = Literal[
+    "compatible",
+    "incompatible",
+    "migration_required",
+    "unknown_contract",
+]
+
+CONFIG_VALUE_UNSET = object()
+
+
+@dataclass(frozen=True, slots=True)
+class ConfigKeySpec:
+    expected_type: type[object]
+    allow_none: bool = False
+    expected_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OptionSpec:
+    dest: str
+    group: str | None
+    cli_kind: ConfigCliKind | None = None
+    flags: tuple[str, ...] = ()
+    default: object = CONFIG_VALUE_UNSET
+    value_type: type[object] | None = None
+    const: object | None = None
+    nargs: str | int | None = None
+    metavar: str | None = None
+    help_text: str | None = None
+    pyproject_key: str | None = None
+    config_spec: ConfigKeySpec | None = None
+    path_value: bool = False
+
+    @property
+    def has_default(self) -> bool:
+        return self.default is not CONFIG_VALUE_UNSET
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedConfig:
+    values: dict[str, object]
+    explicit_cli_dests: frozenset[str]
+    pyproject_values: dict[str, object]
+
+
+class FoundationConfigInput(BaseModel):
+    """Strict TOML-boundary model; never passed into analysis code."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    source_roots: tuple[str, ...] | None = None
+    baseline_scope_id: str | None = None
+    project_label: str | None = None
+
+    @field_validator("baseline_scope_id")
+    @classmethod
+    def _canonical_uuid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            parsed = UUID(value)
+        except ValueError as exc:
+            raise ValueError("baseline_scope_id must be a canonical UUID") from exc
+        if str(parsed) != value:
+            raise ValueError("baseline_scope_id must be a canonical UUID")
+        return value
+
+
+@dataclass(frozen=True, slots=True)
+class FoundationConfig:
+    source_roots: tuple[str, ...] | None
+    baseline_scope_id: str | None
+    project_label: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibilityPolicy:
+    kind: CompatibilityPolicyKind
+    supported: frozenset[str] = frozenset()
+
+
+@dataclass(frozen=True, slots=True)
+class ContractVerdict:
+    contract: str
+    required: str
+    actual: str | None
+    status: CompatibilityStatus
+    compatible: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CompatibilityVerdict:
+    status: CompatibilityStatus
+    compatible: bool
+    per_contract: tuple[ContractVerdict, ...]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
