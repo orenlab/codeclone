@@ -165,6 +165,7 @@ packages = [
     "codeclone.observability",
     "codeclone.observability.store",
     "codeclone.paths",
+    "codeclone.paths.module_identity",
     "codeclone.qualnames",
     "codeclone.report",
     "codeclone.report.document",
