@@ -1061,7 +1061,20 @@ def _discover_with_single_cached_entry(
         output_paths=OutputPaths(),
         cache_path=tmp_path / "cache.json",
     )
-    monkeypatch.setattr(core_discovery, "iter_py_files", lambda _root: [filepath])
+
+    def _discover_python_files(
+        _root: str,
+        *,
+        hard_excludes: tuple[str, ...],
+        max_files: int,
+    ) -> tuple[tuple[str, ...], int]:
+        del hard_excludes, max_files
+        return (filepath,), 0
+
+    monkeypatch.setattr(
+        "codeclone.paths.module_identity.inventory.discover_python_files",
+        _discover_python_files,
+    )
     monkeypatch.setattr(core_discovery, "file_stat_signature", lambda _path: stat)
     return discover(boot=boot, cache=cast(Cache, _FakeCache()))
 
