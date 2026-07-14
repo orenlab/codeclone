@@ -13,7 +13,12 @@ import pytest
 
 import codeclone.scanner as scanner
 from codeclone.contracts.errors import ValidationError
-from codeclone.scanner import iter_py_files, module_name_from_path
+from codeclone.scanner import (
+    HARD_SAFETY_EXCLUDES,
+    discover_python_files,
+    iter_py_files,
+    module_name_from_path,
+)
 
 
 def _symlink_or_skip(
@@ -55,6 +60,25 @@ def test_iter_py_files_excludes(tmp_path: Path) -> None:
     files = list(iter_py_files(str(tmp_path)))
     assert str(good) in files
     assert str(skip) not in files
+
+
+def test_discovery_facts_leave_analysis_excludes_to_inventory(tmp_path: Path) -> None:
+    analyzed = tmp_path / "pkg" / "good.py"
+    analyzed.parent.mkdir()
+    analyzed.write_text("x = 1\n", "utf-8")
+    ordinary_excluded = tmp_path / "migrations" / "old.py"
+    ordinary_excluded.parent.mkdir()
+    ordinary_excluded.write_text("x = 2\n", "utf-8")
+    hard_excluded = tmp_path / ".git" / "hidden.py"
+    hard_excluded.parent.mkdir()
+    hard_excluded.write_text("x = 3\n", "utf-8")
+
+    paths, hard_count = discover_python_files(
+        str(tmp_path), hard_excludes=HARD_SAFETY_EXCLUDES
+    )
+
+    assert paths == (str(ordinary_excluded), str(analyzed))
+    assert hard_count == 1
 
 
 def test_iter_py_files_excludes_node_modules(tmp_path: Path) -> None:

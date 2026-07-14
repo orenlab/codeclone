@@ -25,6 +25,7 @@ from ..models import (
     SecuritySurface,
     StructuralFindingGroup,
 )
+from ..observability import record_counter
 from ._types import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_RUNTIME_PROCESSES,
@@ -43,7 +44,7 @@ from ._types import (
     _should_collect_structural_findings,
     _unit_to_group_item,
 )
-from .worker import _invoke_process_file
+from .worker import _install_module_registry, _invoke_process_file
 
 
 def _parallel_min_files(processes: int) -> int:
@@ -74,6 +75,7 @@ def process(
 ) -> ProcessingResult:
     files_to_process = discovery.files_to_process
     if not files_to_process:
+        record_counter("registry_worker_installs", 0)
         return ProcessingResult(
             units=discovery.cached_units,
             blocks=discovery.cached_blocks,
@@ -267,6 +269,8 @@ def process(
             source_read_failures.append(failure)
 
     def _run_sequential(files: Sequence[str]) -> None:
+        if discovery.module_registry is not None:
+            _install_module_registry(discovery.module_registry)
         for filepath in files:
             _accept_result(
                 _invoke_process_file(
@@ -290,7 +294,20 @@ def process(
 
     if _should_use_parallel(len(files_to_process), processes):
         try:
-            with ProcessPoolExecutor(max_workers=processes) as executor:
+            if discovery.module_registry is None:
+                executor_context = ProcessPoolExecutor(max_workers=processes)
+            else:
+                try:
+                    executor_context = ProcessPoolExecutor(
+                        max_workers=processes,
+                        initializer=_install_module_registry,
+                        initargs=(discovery.module_registry,),
+                    )
+                except TypeError as exc:
+                    raise RuntimeError(
+                        "process backend does not support registry initialization"
+                    ) from exc
+            with executor_context as executor:
                 for idx in range(0, len(files_to_process), batch_size):
                     batch = files_to_process[idx : idx + batch_size]
                     futures = [
@@ -327,12 +344,24 @@ def process(
                                 on_worker_error(str(exc))
                         if on_advance is not None:
                             on_advance()
+            record_counter(
+                "registry_worker_installs",
+                processes if discovery.module_registry is not None else 0,
+            )
         except (OSError, RuntimeError, PermissionError) as exc:
             if on_parallel_fallback is not None:
                 on_parallel_fallback(exc)
             _run_sequential(files_to_process)
+            record_counter(
+                "registry_worker_installs",
+                1 if discovery.module_registry is not None else 0,
+            )
     else:
         _run_sequential(files_to_process)
+        record_counter(
+            "registry_worker_installs",
+            1 if discovery.module_registry is not None else 0,
+        )
 
     volumes = batch_snapshot.volume_map()
     phase_snapshot = batch_snapshot if volumes.get("files_timed", 0) > 0 else None

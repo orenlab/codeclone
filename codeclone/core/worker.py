@@ -25,8 +25,18 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
 )
+from ..models import ModuleRegistryHandle
 from ..scanner import module_name_from_path, resolved_path_under_root
 from ._types import MAX_FILE_SIZE, FileProcessResult
+
+_WORKER_MODULE_REGISTRY: ModuleRegistryHandle | None = None
+
+
+def _install_module_registry(registry: ModuleRegistryHandle) -> None:
+    """Install one immutable registry in a worker process before file tasks."""
+
+    global _WORKER_MODULE_REGISTRY
+    _WORKER_MODULE_REGISTRY = registry
 
 
 def process_file(

@@ -30,6 +30,10 @@ DEFAULT_EXCLUDES = (
     ".tox",
 )
 
+HARD_SAFETY_EXCLUDES = tuple(
+    name for name in DEFAULT_EXCLUDES if name not in {"migrations", "alembic"}
+)
+
 SENSITIVE_DIRS = {
     "/etc",
     "/sys",
@@ -130,6 +134,27 @@ def iter_py_files(
     *,
     max_files: int = 100_000,
 ) -> Iterable[str]:
+    candidates, _hard_excluded = discover_python_files(
+        root,
+        hard_excludes=excludes,
+        max_files=max_files,
+    )
+    yield from candidates
+
+
+def discover_python_files(
+    root: str,
+    *,
+    hard_excludes: tuple[str, ...] = HARD_SAFETY_EXCLUDES,
+    max_files: int = 100_000,
+) -> tuple[tuple[str, ...], int]:
+    """Return raw safe Python-file facts from exactly one filesystem walk.
+
+    The caller owns analysis filtering. The second result counts hard-pruned
+    directories and escaping/unresolvable Python symlinks without traversing
+    excluded trees.
+    """
+
     try:
         rootp = Path(root).resolve(strict=True)
     except (OSError, RuntimeError) as e:
@@ -140,22 +165,25 @@ def iter_py_files(
 
     _ensure_not_sensitive_root(rootp=rootp, root_arg=root)
 
-    excludes_set = set(excludes)
+    excludes_set = set(hard_excludes)
 
     # Keep legacy behavior only when the requested root directory itself is excluded
     # (e.g. scanning "<repo>/__pycache__"). Parent directories must not suppress
     # scanning, otherwise valid roots like ".../build/project" become empty.
     if rootp.name in excludes_set:
-        return
+        return (), 1
 
     # Collect and filter first, then sort for deterministic output.
     candidates: list[str] = []
+    hard_excluded = 0
     for dirpath, dirnames, filenames in os.walk(
         rootp,
         topdown=True,
         followlinks=False,
     ):
-        dirnames[:] = [name for name in dirnames if name not in excludes_set]
+        retained_dirnames = [name for name in dirnames if name not in excludes_set]
+        hard_excluded += len(dirnames) - len(retained_dirnames)
+        dirnames[:] = retained_dirnames
         for filename in filenames:
             candidate = _walk_file_candidate(
                 dirpath=dirpath,
@@ -164,6 +192,8 @@ def iter_py_files(
                 rootp=rootp,
             )
             if candidate is None:
+                if filename.endswith(".py"):
+                    hard_excluded += 1
                 continue
             candidates.append(candidate)
             if len(candidates) > max_files:
@@ -172,7 +202,7 @@ def iter_py_files(
                     "Use more specific root or increase limit."
                 )
 
-    yield from sorted(candidates)
+    return tuple(sorted(candidates)), hard_excluded
 
 
 def module_name_from_path(root: str, filepath: str) -> str:

@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal, TypedDict
 from uuid import UUID
@@ -42,6 +42,8 @@ ImportMountOrigin = Literal["explicit", "conventional_src", "root"]
 ModuleIdentityStrategy = ImportMountOrigin
 PythonModuleOrigin = Literal["import_mount"]
 PythonModuleNodeKind = Literal["module_file", "regular_package"]
+ModuleInternality = Literal["analyzed", "known_internal_not_analyzed"]
+PackagePrefixNodeKind = Literal["namespace_package", "synthetic_prefix"]
 AnalysisMountOrigin = Literal["analysis_only"]
 PortablePathIssueKind = Literal[
     "ascii_control",
@@ -217,6 +219,90 @@ class ModuleIdentityBuildResult:
     manifest_digest: str
     identities: tuple[ResolvedSourceIdentity, ...]
     portability: PortablePathVerdict
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleInventoryEntry:
+    identity: ResolvedSourceIdentity
+    analyzed: bool
+    internality: ModuleInternality
+
+    def __post_init__(self) -> None:
+        expected = "analyzed" if self.analyzed else "known_internal_not_analyzed"
+        if self.internality != expected:
+            raise ValueError("module inventory internality must match analyzed state")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PackagePrefix:
+    module: str
+    node_kind: PackagePrefixNodeKind
+    mount_paths: tuple[str, ...]
+    contributing_paths: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.module:
+            raise ValueError("package prefix requires a non-empty module")
+        if self.mount_paths != tuple(sorted(set(self.mount_paths))):
+            raise ValueError("package prefix mount paths must be sorted and unique")
+        if self.contributing_paths != tuple(sorted(set(self.contributing_paths))):
+            raise ValueError(
+                "package prefix contributing paths must be sorted and unique"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DigestObject:
+    domain: Literal["codeclone.module-registry.v1"]
+    algorithm: Literal["sha256"]
+    value: str
+
+    def __post_init__(self) -> None:
+        if len(self.value) != 64 or any(
+            character not in "0123456789abcdef" for character in self.value
+        ):
+            raise ValueError("sha256 digest values must be 64 lowercase hex characters")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleInventoryIndex(Mapping[str, ModuleInventoryEntry]):
+    """Picklable immutable registry index with deterministic key order."""
+
+    rows: tuple[tuple[str, ModuleInventoryEntry], ...]
+
+    def __post_init__(self) -> None:
+        keys = tuple(key for key, _entry in self.rows)
+        if keys != tuple(sorted(set(keys))):
+            raise ValueError("module inventory index keys must be sorted and unique")
+
+    def __getitem__(self, key: str) -> ModuleInventoryEntry:
+        low = 0
+        high = len(self.rows)
+        while low < high:
+            middle = (low + high) // 2
+            row_key, entry = self.rows[middle]
+            if row_key < key:
+                low = middle + 1
+            elif row_key > key:
+                high = middle
+            else:
+                return entry
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _entry in self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleRegistryHandle:
+    manifest: ModuleIdentityManifest
+    entries_by_path: ModuleInventoryIndex
+    entries_by_module: ModuleInventoryIndex
+    package_prefixes: tuple[PackagePrefix, ...]
+    digest: DigestObject
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
