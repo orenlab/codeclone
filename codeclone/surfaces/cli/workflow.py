@@ -370,44 +370,59 @@ def _main_impl() -> None:
     args = ap.parse_args()
 
     root_path = _resolve_existing_root_path(args=args, printer=_console())
-    pyproject_config = _load_pyproject_config_or_exit(
-        root_path=root_path,
-        load_pyproject_config_fn=load_pyproject_config,
-        printer=_console(),
-    )
-    apply_pyproject_config_overrides(
-        args=args,
-        config_values=pyproject_config,
-        explicit_cli_dests=explicit_cli_dests,
-    )
-    _validate_controller_query_flags(
-        args=args,
-        strictness_explicit=strictness_explicit,
-    )
-    _configure_runtime_flags(args)
-    _configure_runtime_console(args)
-    pre_analysis_query_exit = _run_pre_analysis_controller_query(
-        args=args,
-        root_path=root_path,
-    )
-    if pre_analysis_query_exit is not None:
-        sys.exit(pre_analysis_query_exit)
-    git_diff_ref = _validate_changed_scope_args(args=args)
-    changed_paths = (
-        _git_diff_changed_paths(root_path=root_path, git_diff_ref=git_diff_ref)
-        if git_diff_ref is not None
-        else ()
-    )
-    _validate_numeric_args_or_exit(
-        args=args,
-        validate_numeric_args_fn=_validate_numeric_args,
-        printer=_console(),
-    )
     # Freeze the env-resolved observability decision for this CLI process (default
-    # OFF) before baseline/cache work so the whole cli.analyze operation is
+    # OFF) before config/baseline/cache work so the whole cli.analyze operation is
     # measured; span()/operation() are inert when disabled.
     start_observability(resolve_observability_config(), root=root_path)
     with operation(name="cli.analyze", surface="cli"):
+        with span(name="config.resolve") as config_span:
+            try:
+                pyproject_config = _load_pyproject_config_or_exit(
+                    root_path=root_path,
+                    load_pyproject_config_fn=load_pyproject_config,
+                    printer=_console(),
+                )
+                apply_pyproject_config_overrides(
+                    args=args,
+                    config_values=pyproject_config,
+                    explicit_cli_dests=explicit_cli_dests,
+                    root_path=root_path,
+                )
+            except SystemExit:
+                config_span.add_counter("config_validation_failures")
+                raise
+            source_roots = getattr(args, "source_roots", ())
+            configured_root_count = (
+                len(source_roots) if isinstance(source_roots, tuple) else 0
+            )
+            config_span.set_counter("config_configured_roots", configured_root_count)
+            config_span.set_counter(
+                "config_autodetect_used",
+                int(pyproject_config.get("source_roots") is None),
+            )
+        _validate_controller_query_flags(
+            args=args,
+            strictness_explicit=strictness_explicit,
+        )
+        _configure_runtime_flags(args)
+        _configure_runtime_console(args)
+        pre_analysis_query_exit = _run_pre_analysis_controller_query(
+            args=args,
+            root_path=root_path,
+        )
+        if pre_analysis_query_exit is not None:
+            sys.exit(pre_analysis_query_exit)
+        git_diff_ref = _validate_changed_scope_args(args=args)
+        changed_paths = (
+            _git_diff_changed_paths(root_path=root_path, git_diff_ref=git_diff_ref)
+            if git_diff_ref is not None
+            else ()
+        )
+        _validate_numeric_args_or_exit(
+            args=args,
+            validate_numeric_args_fn=_validate_numeric_args,
+            printer=_console(),
+        )
         with span(name="pipeline.baseline"):
             baseline_inputs = _resolve_baseline_inputs(
                 ap=ap,

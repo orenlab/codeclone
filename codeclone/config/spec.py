@@ -5,8 +5,9 @@
 # Copyright (c) 2026 Den Rozhnovskiy
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Final, Literal
+from typing import Final
+
+import codeclone.models as domain_models
 
 from .. import ui_messages as ui
 from ..audit.validation import (
@@ -44,54 +45,15 @@ from .intent_registry_defaults import (
     DEFAULT_INTENT_REGISTRY_RETENTION_DAYS,
 )
 
-CliKind = Literal[
-    "positional",
-    "value",
-    "optional_path",
-    "bool_optional",
-    "store_true",
-    "store_false",
-    "help",
-    "version",
-]
-
-_UNSET: Final[object] = object()
+_UNSET: Final[object] = domain_models.CONFIG_VALUE_UNSET
 _INFER_PYPROJECT_KEY: Final[object] = object()
-
-
-@dataclass(frozen=True, slots=True)
-class ConfigKeySpec:
-    expected_type: type[object]
-    allow_none: bool = False
-    expected_name: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class OptionSpec:
-    dest: str
-    group: str | None
-    cli_kind: CliKind | None = None
-    flags: tuple[str, ...] = ()
-    default: object = _UNSET
-    value_type: type[object] | None = None
-    const: object | None = None
-    nargs: str | int | None = None
-    metavar: str | None = None
-    help_text: str | None = None
-    pyproject_key: str | None = None
-    config_spec: ConfigKeySpec | None = None
-    path_value: bool = False
-
-    @property
-    def has_default(self) -> bool:
-        return self.default is not _UNSET
 
 
 def _option(
     *,
     dest: str,
     group: str | None,
-    cli_kind: CliKind | None = None,
+    cli_kind: domain_models.ConfigCliKind | None = None,
     flags: tuple[str, ...] = (),
     default: object = _UNSET,
     value_type: type[object] | None = None,
@@ -104,9 +66,9 @@ def _option(
     expected_name: str | None = None,
     pyproject_key: object = _INFER_PYPROJECT_KEY,
     path_value: bool = False,
-) -> OptionSpec:
+) -> domain_models.OptionSpec:
     config_spec = (
-        ConfigKeySpec(
+        domain_models.ConfigKeySpec(
             expected_type=pyproject_type,
             allow_none=allow_none,
             expected_name=expected_name,
@@ -123,7 +85,7 @@ def _option(
         resolved_pyproject_key = pyproject_key
     else:
         raise TypeError("pyproject_key must be str | None when pyproject_type is set")
-    return OptionSpec(
+    return domain_models.OptionSpec(
         dest=dest,
         group=group,
         cli_kind=cli_kind,
@@ -151,7 +113,7 @@ ARGUMENT_GROUP_TITLES: Final[tuple[str, ...]] = (
     "General",
 )
 
-OPTIONS: Final[tuple[OptionSpec, ...]] = (
+OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
     _option(
         dest="root",
         group="Target",
@@ -210,6 +172,28 @@ OPTIONS: Final[tuple[OptionSpec, ...]] = (
         default=(),
         pyproject_type=list,
         expected_name="list[str]",
+    ),
+    _option(
+        dest="source_roots",
+        group="Analysis",
+        default=None,
+        pyproject_type=list,
+        allow_none=True,
+        expected_name="list[str]",
+    ),
+    _option(
+        dest="baseline_scope_id",
+        group="Analysis",
+        default=None,
+        pyproject_type=str,
+        allow_none=True,
+    ),
+    _option(
+        dest="project_label",
+        group="Analysis",
+        default=None,
+        pyproject_type=str,
+        allow_none=True,
     ),
     _option(
         dest="processes",
@@ -832,8 +816,8 @@ def _build_defaults_by_dest() -> dict[str, object]:
     return defaults
 
 
-def _build_pyproject_specs() -> dict[str, ConfigKeySpec]:
-    config_specs: dict[str, ConfigKeySpec] = {}
+def _build_pyproject_specs() -> dict[str, domain_models.ConfigKeySpec]:
+    config_specs: dict[str, domain_models.ConfigKeySpec] = {}
     for spec in OPTIONS:
         if spec.pyproject_key is None or spec.config_spec is None:
             continue
@@ -849,18 +833,20 @@ def _build_pyproject_specs() -> dict[str, ConfigKeySpec]:
 
 
 DEFAULTS_BY_DEST: Final[dict[str, object]] = _build_defaults_by_dest()
-CONFIG_KEY_SPECS: Final[dict[str, ConfigKeySpec]] = _build_pyproject_specs()
+CONFIG_KEY_SPECS: Final[dict[str, domain_models.ConfigKeySpec]] = (
+    _build_pyproject_specs()
+)
 PATH_CONFIG_KEYS: Final[frozenset[str]] = frozenset(
     spec.pyproject_key
     for spec in OPTIONS
     if spec.pyproject_key is not None and spec.path_value
 )
-TESTABLE_CLI_OPTIONS: Final[tuple[OptionSpec, ...]] = tuple(
+TESTABLE_CLI_OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = tuple(
     spec
     for spec in OPTIONS
     if spec.cli_kind is not None and spec.cli_kind not in {"help", "version"}
 )
-PYPROJECT_OPTIONS: Final[tuple[OptionSpec, ...]] = tuple(
+PYPROJECT_OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = tuple(
     spec for spec in OPTIONS if spec.pyproject_key is not None and spec.config_spec
 )
 
@@ -888,6 +874,4 @@ __all__ = [
     "PATH_CONFIG_KEYS",
     "PYPROJECT_OPTIONS",
     "TESTABLE_CLI_OPTIONS",
-    "ConfigKeySpec",
-    "OptionSpec",
 ]

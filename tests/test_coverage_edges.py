@@ -21,7 +21,6 @@ import codeclone.report.gates.evaluator as evaluator_mod
 import codeclone.surfaces.cli.console as cli_console_mod
 import codeclone.surfaces.cli.state as cli_state_mod
 from codeclone.analysis.normalizer import NormalizationConfig
-from codeclone.config.spec import OptionSpec
 from codeclone.contracts.errors import ParseError
 from codeclone.report.gates.evaluator import MetricGateConfig
 from codeclone.utils.git_diff import validate_git_diff_ref
@@ -113,7 +112,7 @@ def test_validate_git_diff_ref_rejects_empty_value() -> None:
 def test_add_option_rejects_unsupported_cli_kind() -> None:
     parser = argparse.ArgumentParser()
     group = parser.add_argument_group("Example")
-    option = OptionSpec(
+    option = spec_mod._option(
         dest="broken",
         group="Example",
         cli_kind=cast(Any, "broken-kind"),

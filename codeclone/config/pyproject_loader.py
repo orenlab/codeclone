@@ -15,6 +15,7 @@ from ..findings.clones.golden_fixtures import (
     GoldenFixturePatternError,
     normalize_golden_fixture_patterns,
 )
+from ..models import ConfigKeySpec, FoundationConfig, FoundationConfigInput
 from .analytics_specs import (
     ANALYTICS_NESTED_TABLE_KEY,
     ANALYTICS_PATH_CONFIG_KEYS,
@@ -26,7 +27,8 @@ from .memory_specs import (
     MEMORY_PATH_CONFIG_KEYS,
     SEMANTIC_NESTED_TABLE_KEY,
 )
-from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS, ConfigKeySpec
+from .resolver import normalize_source_roots
+from .spec import CONFIG_KEY_SPECS, PATH_CONFIG_KEYS
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Set
@@ -158,6 +160,8 @@ def load_pyproject_config(
             path_config_keys=path_config_keys,
         )
 
+    _apply_foundation_config_boundary(validated)
+
     memory_obj = codeclone_obj.get(MEMORY_NESTED_TABLE_KEY)
     if memory_obj is not None:
         validated[MEMORY_NESTED_TABLE_KEY] = _validate_nested_memory_table(
@@ -173,6 +177,35 @@ def load_pyproject_config(
             config_path=config_path,
         )
     return validated
+
+
+def _apply_foundation_config_boundary(validated: dict[str, object]) -> None:
+    foundation_keys = ("source_roots", "baseline_scope_id", "project_label")
+    foundation_payload = {
+        key: validated[key] for key in foundation_keys if key in validated
+    }
+    try:
+        boundary = FoundationConfigInput.model_validate(foundation_payload)
+    except ValueError as exc:
+        raise ConfigValidationError(
+            f"Invalid value for tool.codeclone foundation configuration: {exc}"
+        ) from exc
+    foundation = FoundationConfig(
+        source_roots=boundary.source_roots,
+        baseline_scope_id=boundary.baseline_scope_id,
+        project_label=boundary.project_label,
+    )
+    if "source_roots" in validated and foundation.source_roots is not None:
+        try:
+            validated["source_roots"] = normalize_source_roots(foundation.source_roots)
+        except ValueError as exc:
+            raise ConfigValidationError(
+                f"Invalid value for tool.codeclone.source_roots: {exc}"
+            ) from exc
+    if "baseline_scope_id" in validated:
+        validated["baseline_scope_id"] = foundation.baseline_scope_id
+    if "project_label" in validated:
+        validated["project_label"] = foundation.project_label
 
 
 def _validate_nested_analytics_table(
@@ -335,10 +368,12 @@ def _validated_string_list(*, key: str, value: object) -> tuple[str, ...]:
                 f"Invalid value type for tool.codeclone.{key}: expected list[str]"
             )
         string_values.append(item)
-    try:
-        return normalize_golden_fixture_patterns(string_values)
-    except GoldenFixturePatternError as exc:
-        raise ConfigValidationError(str(exc)) from exc
+    if key == "golden_fixture_paths":
+        try:
+            return normalize_golden_fixture_patterns(string_values)
+        except GoldenFixturePatternError as exc:
+            raise ConfigValidationError(str(exc)) from exc
+    return tuple(string_values)
 
 
 def copy_str_key_table(

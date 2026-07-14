@@ -12,7 +12,8 @@ from typing import NoReturn, Protocol, TypeVar, overload
 
 from .. import ui_messages as ui
 from ..contracts import ExitCode, cli_help_epilog
-from .spec import ARGUMENT_GROUP_TITLES, DEFAULTS_BY_DEST, OPTIONS, OptionSpec
+from ..models import OptionSpec
+from .spec import ARGUMENT_GROUP_TITLES, DEFAULTS_BY_DEST, OPTIONS
 
 _NamespaceT = TypeVar("_NamespaceT")
 

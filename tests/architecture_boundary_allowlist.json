@@ -1,7 +1,7 @@
 {
   "counts": {
     "model_store:base_model_definition": 20,
-    "model_store:dataclass_definition": 284,
+    "model_store:dataclass_definition": 281,
     "model_store:pydantic_dependency": 9,
     "production_import:r1->r2": 2,
     "production_import:r1->r2p": 5,
@@ -132,9 +132,6 @@
       "codeclone.config.intent_registry::IntentRegistryConfig",
       "codeclone.config.memory::MemoryConfig",
       "codeclone.config.pyproject_writer::PyprojectWriteResult",
-      "codeclone.config.resolver::ResolvedConfig",
-      "codeclone.config.spec::ConfigKeySpec",
-      "codeclone.config.spec::OptionSpec",
       "codeclone.controller_insights.session_stats::AgentSnapshot",
       "codeclone.controller_insights.session_stats::IntentSnapshot",
       "codeclone.controller_insights.session_stats::SessionSnapshot",

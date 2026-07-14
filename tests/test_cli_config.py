@@ -16,8 +16,8 @@ import pytest
 
 import codeclone.config.pyproject_loader as loader_mod
 import codeclone.config.resolver as resolver_mod
-import codeclone.config.spec as spec_mod
 from codeclone.config.pyproject_loader import ConfigValidationError
+from codeclone.models import ConfigKeySpec
 
 
 def _write_pyproject(path: Path, content: str) -> None:
@@ -170,6 +170,140 @@ def test_apply_pyproject_config_overrides_respects_explicit_cli_flags() -> None:
     assert args.quiet is False
 
 
+def test_source_roots_resolve_by_precedence_and_stable_depth_order(
+    tmp_path: Path,
+) -> None:
+    args = argparse.Namespace(source_roots=("cli",), baseline_scope_id=None)
+    resolved = resolver_mod.resolve_config(
+        args=args,
+        config_values={
+            "source_roots": ("src", "packages/nested", "src", "packages"),
+        },
+        explicit_cli_dests=set(),
+        root_path=tmp_path,
+    )
+    assert resolved.values["source_roots"] == (
+        "packages/nested",
+        "packages",
+        "src",
+    )
+
+    cli_wins = resolver_mod.resolve_config(
+        args=args,
+        config_values={"source_roots": ("src",)},
+        explicit_cli_dests={"source_roots"},
+        root_path=tmp_path,
+    )
+    assert cli_wins.values["source_roots"] == ("cli",)
+
+
+def test_source_roots_conventional_detection_is_fail_closed(tmp_path: Path) -> None:
+    args = argparse.Namespace(source_roots=None, baseline_scope_id=None)
+    assert resolver_mod.resolve_config(
+        args=args,
+        config_values={},
+        explicit_cli_dests=set(),
+        root_path=tmp_path,
+    ).values["source_roots"] == (".",)
+
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "package.py").write_text("VALUE = 1\n", "utf-8")
+    assert resolver_mod.resolve_config(
+        args=args,
+        config_values={},
+        explicit_cli_dests=set(),
+        root_path=tmp_path,
+    ).values["source_roots"] == ("src",)
+
+    (src / "__init__.py").write_text("", "utf-8")
+    assert resolver_mod.resolve_config(
+        args=args,
+        config_values={},
+        explicit_cli_dests=set(),
+        root_path=tmp_path,
+    ).values["source_roots"] == (".",)
+
+
+def test_explicit_empty_source_roots_disable_autodetection(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    (src / "package.py").write_text("VALUE = 1\n", "utf-8")
+    args = argparse.Namespace(source_roots=None, baseline_scope_id=None)
+
+    resolved = resolver_mod.resolve_config(
+        args=args,
+        config_values={"source_roots": ()},
+        explicit_cli_dests=set(),
+        root_path=tmp_path,
+    )
+
+    assert resolved.values["source_roots"] == (".",)
+
+
+@pytest.mark.parametrize(
+    "scope_id",
+    [
+        "12345678-1234-4ABC-8DEF-1234567890AB",
+        "1234567812344abc8def1234567890ab",
+        "not-a-uuid",
+    ],
+)
+def test_baseline_scope_id_rejects_noncanonical_values(
+    tmp_path: Path,
+    scope_id: str,
+) -> None:
+    _write_pyproject(
+        tmp_path / "pyproject.toml",
+        f'[tool.codeclone]\nbaseline_scope_id = "{scope_id}"\n',
+    )
+
+    with pytest.raises(ConfigValidationError, match="canonical UUID"):
+        loader_mod.load_pyproject_config(tmp_path)
+
+
+def test_foundation_config_loads_canonical_values_without_generating_scope(
+    tmp_path: Path,
+) -> None:
+    scope_id = "12345678-1234-4abc-8def-1234567890ab"
+    _write_pyproject(
+        tmp_path / "pyproject.toml",
+        "\n".join(
+            [
+                "[tool.codeclone]",
+                'source_roots = ["src", "packages/nested", "src"]',
+                f'baseline_scope_id = "{scope_id}"',
+                'project_label = "Example"',
+            ]
+        ),
+    )
+
+    loaded = loader_mod.load_pyproject_config(tmp_path)
+
+    assert loaded == {
+        "baseline_scope_id": scope_id,
+        "project_label": "Example",
+        "source_roots": ("packages/nested", "src"),
+    }
+    assert "baseline_scope_id" not in loader_mod.load_pyproject_config(
+        tmp_path / "missing"
+    )
+
+
+@pytest.mark.parametrize("source_root", ["/absolute", "../outside", "win\\path"])
+def test_source_roots_reject_nonportable_paths(
+    tmp_path: Path,
+    source_root: str,
+) -> None:
+    _write_pyproject(
+        tmp_path / "pyproject.toml",
+        f"[tool.codeclone]\nsource_roots = ['{source_root}']\n",
+    )
+
+    with pytest.raises(ConfigValidationError, match="repo-relative POSIX"):
+        loader_mod.load_pyproject_config(tmp_path)
+
+
 @pytest.mark.parametrize(
     ("key", "value", "expected"),
     [
@@ -224,7 +358,7 @@ def test_validate_config_value_unsupported_spec_raises(
     monkeypatch.setitem(
         loader_mod.CONFIG_KEY_SPECS,
         "_unsupported",
-        spec_mod.ConfigKeySpec(tuple),
+        ConfigKeySpec(tuple),
     )
     with pytest.raises(ConfigValidationError, match="Unsupported config key spec"):
         loader_mod.validate_config_value(key="_unsupported", value=("x",))

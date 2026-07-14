@@ -2,3 +2,7 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at https://mozilla.org/MPL/2.0/.
 # SPDX-License-Identifier: MPL-2.0
+
+from .resolver import detect_source_roots, normalize_source_roots, resolve_config
+
+__all__ = ["detect_source_roots", "normalize_source_roots", "resolve_config"]
