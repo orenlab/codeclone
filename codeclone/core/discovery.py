@@ -29,7 +29,7 @@ from ..models import (
     SecuritySurface,
     StructuralFindingGroup,
 )
-from ..scanner import iter_py_files
+from ..paths.module_identity.inventory import build_module_registry
 from ._types import (
     BootstrapResult,
     DiscoveryResult,
@@ -158,7 +158,24 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     cached_lines = cached_functions = cached_methods = cached_classes = 0
     all_file_paths: list[str] = []
 
-    for filepath in iter_py_files(str(boot.root)):
+    raw_source_roots = getattr(boot.args, "source_roots", (".",))
+    source_roots = (
+        raw_source_roots
+        if isinstance(raw_source_roots, tuple)
+        and all(isinstance(value, str) for value in raw_source_roots)
+        else (".",)
+    )
+    module_registry = build_module_registry(
+        root=boot.root,
+        source_roots=source_roots,
+    )
+    analyzed_paths = tuple(
+        str(boot.root / entry.identity.file.path)
+        for entry in module_registry.entries_by_path.values()
+        if entry.analyzed
+    )
+
+    for filepath in analyzed_paths:
         files_found += 1
         all_file_paths.append(filepath)
         try:
@@ -289,6 +306,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         ),
         files_to_process=tuple(files_to_process),
         skipped_warnings=tuple(sorted(skipped_warnings)),
+        module_registry=module_registry,
         cached_structural_findings=tuple(cached_sf),
         cached_function_relationship_facts=tuple(
             sorted(cached_relationship_facts, key=lambda facts: facts.source_qualname)

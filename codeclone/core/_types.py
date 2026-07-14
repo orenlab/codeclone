@@ -31,6 +31,7 @@ from ..models import (
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
+    ModuleRegistryHandle,
     ModuleTypingCoverage,
     ProjectMetrics,
     RuntimeReachabilityFact,
@@ -87,6 +88,7 @@ class DiscoveryResult:
     cached_referenced_names: frozenset[str]
     files_to_process: tuple[str, ...]
     skipped_warnings: tuple[str, ...]
+    module_registry: ModuleRegistryHandle | None = None
     cached_runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     cached_security_surfaces: tuple[SecuritySurface, ...] = ()
     cached_referenced_qualnames: frozenset[str] = frozenset()
