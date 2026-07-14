@@ -38,6 +38,19 @@ CompatibilityStatus = Literal[
     "migration_required",
     "unknown_contract",
 ]
+ImportMountOrigin = Literal["explicit", "conventional_src", "root"]
+ModuleIdentityStrategy = ImportMountOrigin
+PythonModuleOrigin = Literal["import_mount"]
+PythonModuleNodeKind = Literal["module_file", "regular_package"]
+AnalysisMountOrigin = Literal["analysis_only"]
+PortablePathIssueKind = Literal[
+    "ascii_control",
+    "case_collision",
+    "nfc_collision",
+    "trailing_dot_or_space",
+    "windows_device",
+    "windows_forbidden_byte",
+]
 
 CONFIG_VALUE_UNSET = object()
 
@@ -127,6 +140,83 @@ class CompatibilityVerdict:
     status: CompatibilityStatus
     compatible: bool
     per_contract: tuple[ContractVerdict, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ImportMount:
+    path: str
+    module_prefix: str
+    origin: ImportMountOrigin
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FileIdentity:
+    path: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PythonModuleIdentity:
+    module: str
+    package: str
+    is_package: bool
+    mount_path: str
+    origin: PythonModuleOrigin
+    node_kind: PythonModuleNodeKind
+
+    def __post_init__(self) -> None:
+        if not self.module:
+            raise ValueError("python module identity requires a module name")
+        if self.is_package != (self.node_kind == "regular_package"):
+            raise ValueError("package flag and node kind must describe one state")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResolvedSourceIdentity:
+    file: FileIdentity
+    python_module: PythonModuleIdentity | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PortablePathIssue:
+    kind: PortablePathIssueKind
+    paths: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PortablePathVerdict:
+    eligible: bool
+    normalized_paths: tuple[str, ...]
+    issues: tuple[PortablePathIssue, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AnalysisMount:
+    path: str
+    origin: AnalysisMountOrigin = "analysis_only"
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class PathNormalizationPolicy:
+    path_form: Literal["posix_nfc"] = "posix_nfc"
+    case_sensitive: Literal[True] = True
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleIdentityManifest:
+    module_identity_version: str
+    strategy: ModuleIdentityStrategy
+    import_mounts: tuple[ImportMount, ...]
+    analysis_mount: AnalysisMount
+    normalization: PathNormalizationPolicy
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleIdentityBuildResult:
+    manifest: ModuleIdentityManifest
+    manifest_json: str
+    manifest_digest: str
+    identities: tuple[ResolvedSourceIdentity, ...]
+    portability: PortablePathVerdict
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
