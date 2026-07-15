@@ -17,6 +17,11 @@ from unittest.mock import patch
 
 import pytest
 
+from codeclone.api.workspace import (
+    WorkspaceDirtyEntryDTO,
+    WorkspaceDirtyPathsDTO,
+    WorkspaceDirtySnapshotDTO,
+)
 from codeclone.surfaces.mcp import _workspace_hygiene as hygiene_mod
 from codeclone.surfaces.mcp._workspace_hygiene import (
     DIRTY_SCOPE_POLICY_CONTINUE_OWN_WIP,
@@ -44,8 +49,6 @@ from codeclone.surfaces.mcp._workspace_intents import (
 )
 from tests.test_workspace_intents import _record
 
-_GIT_RUN = "codeclone.surfaces.mcp._workspace_hygiene.subprocess.run"
-
 
 @contextmanager
 def _mock_git_porcelain(
@@ -54,22 +57,44 @@ def _mock_git_porcelain(
     git_available: bool = True,
     git_side_effect: BaseException | None = None,
 ) -> Iterator[None]:
-    git_run_patch = (
-        patch(_GIT_RUN, side_effect=git_side_effect)
-        if git_side_effect is not None
-        else patch(
-            _GIT_RUN,
-            return_value=subprocess.CompletedProcess(
-                args=["git"],
-                returncode=0,
-                stdout=porcelain,
-                stderr="",
-            ),
-        )
+    available = git_available and git_side_effect is None
+    rows: dict[str, str] = {}
+    for line in porcelain.splitlines():
+        if len(line) < 3 or not line[3:].strip():
+            continue
+        status_xy = line[:2]
+        raw_path = line[3:].strip()
+        paths = raw_path.split(" -> ", 1) if " -> " in raw_path else (raw_path,)
+        for path in paths:
+            rows[path] = status_xy
+    path_projection = WorkspaceDirtyPathsDTO(
+        git_available=available,
+        dirty_paths=tuple(sorted(rows)) if available else (),
+    )
+    snapshot_projection = WorkspaceDirtySnapshotDTO(
+        git_available=available,
+        captured_at_utc="2026-01-01T00:00:00Z",
+        entries=tuple(
+            WorkspaceDirtyEntryDTO(
+                path=path,
+                status_xy=rows[path],
+                digest="0" * 64,
+                digest_status="ok",
+            )
+            for path in sorted(rows)
+        ),
     )
     with (
-        patch.object(hygiene_mod, "_git_available", return_value=git_available),
-        git_run_patch,
+        patch.object(
+            hygiene_mod,
+            "collect_workspace_dirty_paths",
+            return_value=path_projection,
+        ),
+        patch.object(
+            hygiene_mod,
+            "collect_workspace_dirty_snapshot",
+            return_value=snapshot_projection,
+        ),
     ):
         yield
 
@@ -145,7 +170,7 @@ def test_workspace_hygiene_to_payload_summary_omits_per_path_detail() -> None:
 
 
 def test_collect_dirty_paths_when_git_unavailable(tmp_path: Path) -> None:
-    with patch.object(hygiene_mod, "_git_available", return_value=False):
+    with _mock_git_porcelain("", git_available=False):
         result = collect_dirty_paths(tmp_path)
     assert result.git_available is False
     assert result.dirty_paths == ()
@@ -180,7 +205,7 @@ def test_collect_dirty_snapshot_roundtrip() -> None:
 
 
 def test_workspace_dirty_summary_without_git(tmp_path: Path) -> None:
-    with patch.object(hygiene_mod, "_git_available", return_value=False):
+    with _mock_git_porcelain("", git_available=False):
         summary = workspace_dirty_summary(root=tmp_path)
     assert summary["git_available"] is False
     assert summary["dirty_paths_count"] == 0
@@ -204,7 +229,7 @@ def test_workspace_dirty_summary_truncates_sample() -> None:
 
 def test_evaluate_scoped_hygiene_without_git(tmp_path: Path) -> None:
     store = get_workspace_intent_store(tmp_path)
-    with patch.object(hygiene_mod, "_git_available", return_value=False):
+    with _mock_git_porcelain("", git_available=False):
         hygiene = evaluate_scoped_hygiene(
             root=tmp_path,
             allowed_files=["pkg/a.py"],
@@ -577,13 +602,6 @@ def test_finish_hygiene_check_blocks_on_foreign_overlap(
     assert len(hygiene.foreign_dirty_overlaps) == 1
 
 
-def test_dirty_paths_from_porcelain_skips_short_and_parses_renames() -> None:
-    dirty = hygiene_mod._dirty_paths_from_porcelain(
-        "ab\n   \n M pkg/a.py\nR  pkg/old.py -> pkg/new.py\n"
-    )
-    assert dirty == ("pkg/a.py", "pkg/new.py", "pkg/old.py")
-
-
 def test_normalize_path_rejects_traversal() -> None:
     with pytest.raises(ValueError, match="path traversal"):
         hygiene_mod._normalize_path("../etc/passwd")
@@ -813,7 +831,7 @@ def test_finish_hygiene_check_returns_early_when_git_unavailable(
     tmp_path: Path,
 ) -> None:
     store = get_workspace_intent_store(tmp_path)
-    with patch.object(hygiene_mod, "_git_available", return_value=False):
+    with _mock_git_porcelain("", git_available=False):
         hygiene = finish_hygiene_check(
             root=tmp_path,
             allowed_files=["pkg/a.py"],

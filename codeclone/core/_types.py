@@ -24,6 +24,7 @@ from ..models import (
     ClassMetrics,
     CoverageJoinResult,
     DeadCandidate,
+    DigestObject,
     FileMetrics,
     FunctionRelationshipFacts,
     GroupItem,
@@ -109,6 +110,7 @@ class DiscoveryResult:
 class FileProcessResult:
     filepath: str
     success: bool
+    source_content_digest: DigestObject | None
     error: str | None = None
     units: list[Unit] | None = None
     blocks: list[BlockUnit] | None = None
@@ -126,6 +128,10 @@ class FileProcessResult:
         compare=False,
         repr=False,
     )
+
+    def __post_init__(self) -> None:
+        if self.success and self.source_content_digest is None:
+            raise ValueError("successful file processing requires a source digest")
 
 
 @dataclass(frozen=True, slots=True)

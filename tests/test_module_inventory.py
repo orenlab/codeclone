@@ -25,6 +25,7 @@ import codeclone.core.worker as worker_module
 import codeclone.paths.module_identity.inventory as inventory_module
 import codeclone.paths.module_identity.manifest as manifest_module
 from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.cache.reuse import source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.core._types import (
     BootstrapResult,
@@ -346,6 +347,7 @@ def _successful_worker(
     return FileProcessResult(
         filepath=filepath,
         success=True,
+        source_content_digest=source_content_digest(Path(filepath).read_bytes()),
         units=[],
         blocks=[],
         segments=[],

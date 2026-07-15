@@ -8,15 +8,17 @@
 
 from __future__ import annotations
 
-import hashlib
 import os
-import subprocess
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final
 
-from ...observability import record_counter, span
+from ...api.workspace import (
+    collect_workspace_dirty_paths,
+    collect_workspace_dirty_snapshot,
+)
+from ...observability import span
 from ._workspace_intent_lifecycle import (
     WorkspaceIntentStatus,
     is_terminal_workspace_intent_status,
@@ -27,7 +29,6 @@ from ._workspace_intents import (
     WorkspaceIntentRecord,
     _scope_all_sets,
     classify_intent_ownership,
-    format_utc,
     utc_now,
 )
 
@@ -276,21 +277,10 @@ def collect_dirty_paths(
 ) -> DirtyPathsResult:
     """Collect repo-relative dirty paths from the git working tree."""
     with span(name="hygiene.collect_dirty_paths") as dirty_paths_span:
-        if not _git_available(root):
+        projection = collect_workspace_dirty_paths(root=root)
+        if not projection.git_available:
             return DirtyPathsResult(git_available=False, dirty_paths=())
-        try:
-            with span(name="hygiene.git.status", reason="dirty_paths"):
-                completed = subprocess.run(
-                    ["git", "status", "--porcelain"],
-                    cwd=root,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return DirtyPathsResult(git_available=False, dirty_paths=())
-        dirty = _dirty_paths_from_porcelain(completed.stdout)
+        dirty = projection.dirty_paths
         if scoped_paths is not None:
             scope_set = {_normalize_path(path) for path in scoped_paths if path.strip()}
             dirty = tuple(
@@ -303,48 +293,28 @@ def collect_dirty_paths(
 def collect_dirty_snapshot(root: Path) -> DirtySnapshot:
     """Collect full git dirty state with stable per-path digests when available."""
     with span(name="hygiene.collect_dirty_snapshot") as snapshot_span:
-        captured_at = format_utc(utc_now())
-        if not _git_available(root):
+        projection = collect_workspace_dirty_snapshot(root=root)
+        if not projection.git_available:
             return DirtySnapshot(
                 git_available=False,
-                captured_at_utc=captured_at,
+                captured_at_utc=projection.captured_at_utc,
                 entries=(),
             )
-        try:
-            with span(name="hygiene.git.status", reason="dirty_snapshot"):
-                completed = subprocess.run(
-                    ["git", "status", "--porcelain=v1"],
-                    cwd=root,
-                    check=True,
-                    capture_output=True,
-                    text=True,
-                    timeout=30,
-                )
-        except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-            return DirtySnapshot(
-                git_available=False,
-                captured_at_utc=captured_at,
-                entries=(),
-            )
-        raw_entries = _dirty_entries_from_porcelain(completed.stdout)
         with span(name="hygiene.dirty_entry_digests") as digest_span:
             entries = tuple(
                 DirtySnapshotEntry(
-                    path=path,
-                    status_xy=status_xy,
-                    digest=digest,
-                    digest_status=digest_status,
+                    path=entry.path,
+                    status_xy=entry.status_xy,
+                    digest=entry.digest,
+                    digest_status=entry.digest_status,
                 )
-                for path, status_xy in raw_entries
-                for digest, digest_status in (
-                    _dirty_entry_digest(root, path, status_xy),
-                )
+                for entry in projection.entries
             )
             digest_span.set_counter("dirty_entries", len(entries))
         snapshot_span.set_counter("dirty_paths", len(entries))
         return DirtySnapshot(
             git_available=True,
-            captured_at_utc=captured_at,
+            captured_at_utc=projection.captured_at_utc,
             entries=tuple(sorted(entries, key=lambda entry: entry.path)),
         )
 
@@ -930,139 +900,6 @@ def _foreign_dirty_overlaps(
             for path in matched
         )
     return tuple(sorted(overlaps, key=lambda item: (item.path, item.foreign_intent_id)))
-
-
-def _dirty_paths_from_porcelain(output: str) -> tuple[str, ...]:
-    paths: set[str] = set()
-    for line in output.splitlines():
-        if len(line) < 3:
-            continue
-        entry = line[3:].strip()
-        if not entry:
-            continue
-        if " -> " in entry:
-            old_path, new_path = entry.split(" -> ", 1)
-            paths.add(_normalize_path(old_path))
-            paths.add(_normalize_path(new_path))
-            continue
-        paths.add(_normalize_path(entry))
-    return tuple(sorted(paths))
-
-
-def _dirty_entries_from_porcelain(output: str) -> tuple[tuple[str, str], ...]:
-    entries: dict[str, str] = {}
-    for line in output.splitlines():
-        if len(line) < 3:
-            continue
-        status_xy = line[:2]
-        entry = line[3:].strip()
-        if not entry:
-            continue
-        if " -> " in entry:
-            old_path, new_path = entry.split(" -> ", 1)
-            entries[_normalize_path(old_path)] = status_xy
-            entries[_normalize_path(new_path)] = status_xy
-            continue
-        entries[_normalize_path(entry)] = status_xy
-    return tuple(sorted(entries.items()))
-
-
-def _dirty_entry_digest(
-    root: Path,
-    path: str,
-    status_xy: str,
-) -> tuple[str | None, str]:
-    """Return a stable digest for the dirty content, or mark it unavailable."""
-    if status_xy == "??":
-        return _untracked_file_digest(root, path)
-    # Porcelain XY already tells which side is guaranteed empty: X==' ' means the
-    # index matches HEAD (`git diff --cached` empty) and Y==' ' means the worktree
-    # matches the index (`git diff` empty). Skipping the guaranteed-empty side and
-    # substituting b"" is byte-identical to invoking git — which would return b"" —
-    # so the digest formula is unchanged while the common WIP case (unstaged edits)
-    # drops from two subprocess per path to one. Non-' ' codes (incl. unmerged UU)
-    # fall through to the diff to preserve the exact previous bytes.
-    index_status = status_xy[0]
-    worktree_status = status_xy[1]
-    cached = (
-        _git_diff_bytes(root, ["diff", "--cached", "--binary", "--", path])
-        if index_status != " "
-        else b""
-    )
-    worktree = (
-        _git_diff_bytes(root, ["diff", "--binary", "--", path])
-        if worktree_status != " "
-        else b""
-    )
-    if cached is None or worktree is None:
-        return None, "unavailable"
-    digest = hashlib.sha256()
-    digest.update(status_xy.encode("utf-8", "surrogateescape"))
-    digest.update(b"\0")
-    digest.update(path.encode("utf-8", "surrogateescape"))
-    digest.update(b"\0cached\0")
-    digest.update(cached)
-    digest.update(b"\0worktree\0")
-    digest.update(worktree)
-    return digest.hexdigest(), "ok"
-
-
-def _git_diff_bytes(root: Path, args: Sequence[str]) -> bytes | None:
-    record_counter("git_diff_invocations")
-    try:
-        completed = subprocess.run(
-            ["git", *args],
-            cwd=root,
-            check=True,
-            capture_output=True,
-            timeout=30,
-        )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return None
-    stdout = completed.stdout
-    if isinstance(stdout, bytes):
-        return stdout
-    if isinstance(stdout, str):
-        return stdout.encode("utf-8", "surrogateescape")
-    return None
-
-
-def _untracked_file_digest(root: Path, path: str) -> tuple[str | None, str]:
-    record_counter("untracked_file_reads")
-    target = (root / path).resolve()
-    try:
-        target.relative_to(root.resolve())
-    except ValueError:
-        return None, "unavailable"
-    if not target.is_file():
-        return None, "unavailable"
-    digest = hashlib.sha256()
-    digest.update(b"untracked\0")
-    digest.update(path.encode("utf-8", "surrogateescape"))
-    digest.update(b"\0")
-    try:
-        with target.open("rb") as handle:
-            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-                digest.update(chunk)
-    except OSError:
-        return None, "unavailable"
-    return digest.hexdigest(), "ok"
-
-
-def _git_available(root: Path) -> bool:
-    try:
-        with span(name="hygiene.git.rev_parse"):
-            completed = subprocess.run(
-                ["git", "rev-parse", "--is-inside-work-tree"],
-                cwd=root,
-                check=True,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
-        return False
-    return completed.stdout.strip().lower() == "true"
 
 
 def _normalize_path(path: str) -> str:

@@ -356,7 +356,20 @@ def _encode_structural_findings(entry: CacheEntry, wire: dict[str, object]) -> N
 
 
 def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
+    source_digest = entry["source_content_digest"]
+    git_blob = entry["git_blob_id_at_write"]
     wire: dict[str, object] = {
+        "cb": entry["cache_content_binding_version"],
+        "sd": [
+            source_digest.domain,
+            source_digest.algorithm,
+            source_digest.value,
+        ],
+        "gb": (
+            [git_blob.object_format, git_blob.object_id]
+            if git_blob is not None
+            else None
+        ),
         "st": [entry["stat"]["mtime_ns"], entry["stat"]["size"]],
     }
     _encode_source_stats(entry, wire)

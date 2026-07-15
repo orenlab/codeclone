@@ -20,6 +20,7 @@ from codeclone.cache.entries import (
     PublicSymbolDict,
     SecuritySurfaceDict,
 )
+from codeclone.cache.reuse import source_content_digest
 from codeclone.core._types import (
     _as_sorted_str_tuple,
     _class_metric_sort_key,
@@ -785,6 +786,9 @@ def test_build_overloaded_modules_payload_skips_unknown_units_and_external_deps(
 
 def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],
@@ -807,6 +811,9 @@ def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:
 
 def test_load_cached_metrics_preserves_coupled_classes() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],
@@ -837,6 +844,9 @@ def test_load_cached_metrics_preserves_coupled_classes() -> None:
 
 def test_load_cached_metrics_preserves_dead_candidate_suppressions() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],
@@ -966,6 +976,9 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
     None
 ):
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],
@@ -1126,6 +1139,9 @@ def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtere
     assert _security_surface_from_cache_row(invalid_row) is None
 
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],
@@ -1339,6 +1355,9 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
     )
 
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],

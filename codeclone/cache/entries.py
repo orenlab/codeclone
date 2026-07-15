@@ -15,8 +15,10 @@ from ..models import (
     BlockUnit,
     ClassMetrics,
     DeadCandidate,
+    DigestObject,
     FunctionGroupItem,
     FunctionRelationshipFacts,
+    GitBlobIdentity,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
@@ -191,6 +193,9 @@ class StructuralFindingGroupDict(TypedDict):
 
 
 class _FileEntryBase(TypedDict):
+    cache_content_binding_version: Literal["1"]
+    source_content_digest: DigestObject
+    git_blob_id_at_write: GitBlobIdentity | None
     stat: FileStat
     units: list[UnitDict]
     blocks: list[BlockDict]

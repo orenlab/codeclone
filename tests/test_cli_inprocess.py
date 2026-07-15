@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sys
@@ -37,7 +38,7 @@ from codeclone.contracts import (
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import FileProcessResult as CliFileProcessResult
 from codeclone.core.parallelism import _parallel_min_files
-from codeclone.models import Unit
+from codeclone.models import DigestObject, Unit
 from codeclone.report.gates.reasons import parse_metric_reason_entry
 from tests._assertions import (
     assert_contains_all,
@@ -59,6 +60,21 @@ from tests._report_access import (
 )
 from tests._report_access import (
     report_structural_groups as _report_structural_groups,
+)
+
+
+def _source_content_digest(path: Path) -> DigestObject:
+    return DigestObject(
+        domain="codeclone.source-content.v1",
+        algorithm="sha256",
+        value=hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+
+
+_EMPTY_SOURCE_CONTENT_DIGEST = DigestObject(
+    domain="codeclone.source-content.v1",
+    algorithm="sha256",
+    value=hashlib.sha256(b"").hexdigest(),
 )
 
 
@@ -104,8 +120,16 @@ class _DummyExecutor(_FalseExitContext):
 
 
 class _FailingExecutor(_FalseExitContext):
-    def __init__(self, max_workers: int | None = None) -> None:
+    def __init__(
+        self,
+        max_workers: int | None = None,
+        *,
+        initializer: Callable[..., object] | None = None,
+        initargs: tuple[object, ...] = (),
+    ) -> None:
         self.max_workers = max_workers
+        self.initializer = initializer
+        self.initargs = initargs
 
     def __enter__(self) -> _FailingExecutor:
         raise PermissionError("nope")
@@ -520,6 +544,9 @@ def _capture_cache_path_for_args(
         def load(self) -> None:
             return None
 
+        def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
         def get_file_entry(self, _fp: str) -> None:
             return None
 
@@ -531,6 +558,8 @@ def _capture_cache_path_for_args(
             _blocks: object,
             _segments: object,
             *,
+            source_content_digest: object,
+            source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
         ) -> None:
@@ -719,8 +748,18 @@ def _source_read_error_result(filepath: str) -> CliFileProcessResult:
     return CliFileProcessResult(
         filepath=filepath,
         success=False,
+        source_content_digest=None,
         error="Cannot read file: [Errno 13] Permission denied",
         error_kind="source_read_error",
+    )
+
+
+def _failed_process_result(filepath: str) -> CliFileProcessResult:
+    return CliFileProcessResult(
+        filepath=filepath,
+        success=False,
+        source_content_digest=None,
+        error="bad",
     )
 
 
@@ -811,6 +850,9 @@ def test_cli_default_cache_dir_per_root(
         def load(self) -> None:
             return None
 
+        def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
         def get_file_entry(self, _fp: str) -> None:
             return None
 
@@ -822,6 +864,8 @@ def test_cli_default_cache_dir_per_root(
             _blocks: object,
             _segments: object,
             *,
+            source_content_digest: object,
+            source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
         ) -> None:
@@ -1014,6 +1058,9 @@ def test_cli_no_legacy_warning_when_paths_match(
         def load(self) -> None:
             return None
 
+        def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
         def get_file_entry(self, _fp: str) -> None:
             return None
 
@@ -1025,6 +1072,8 @@ def test_cli_no_legacy_warning_when_paths_match(
             _blocks: object,
             _segments: object,
             *,
+            source_content_digest: object,
+            source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
         ) -> None:
@@ -1066,6 +1115,9 @@ def test_cli_cache_status_string_fallback(
         def load(self) -> None:
             return None
 
+        def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
         def get_file_entry(self, _fp: str) -> None:
             return None
 
@@ -1077,6 +1129,8 @@ def test_cli_cache_status_string_fallback(
             _blocks: object,
             _segments: object,
             *,
+            source_content_digest: object,
+            source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
         ) -> None:
@@ -2035,7 +2089,14 @@ def test_cli_reports_cache_used_false_on_warning(
     expected_schema_version: object,
 ) -> None:
     src, cache_path, cache = _prepare_single_source_cache(tmp_path)
-    cache.put_file_entry(str(src), {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.put_file_entry(
+        str(src),
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_source_content_digest(src),
+    )
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
     mutator(data)
@@ -3146,7 +3207,14 @@ def test_cli_cache_warning(
     _write_default_source(tmp_path)
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 1}, [], [], [])
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 1},
+        [],
+        [],
+        [],
+        source_content_digest=_EMPTY_SOURCE_CONTENT_DIGEST,
+    )
     cache.save()
     data = json.loads(cache_path.read_text("utf-8"))
     data["sig"] = "bad"
@@ -3285,6 +3353,7 @@ def test_cli_discovery_cache_hit(
         ],
         [],
         [],
+        source_content_digest=_source_content_digest(src_resolved),
     )
     cache.save()
 
@@ -3570,6 +3639,7 @@ def test_cli_ci_discovery_cache_hit(
         [],
         [],
         [],
+        source_content_digest=_source_content_digest(src),
     )
     cache.save()
     baseline = tmp_path / "baseline.json"
@@ -3991,7 +4061,7 @@ def test_cli_failed_files_report(
     def _bad_process(
         _fp: str, *_args: object, **_kwargs: object
     ) -> CliFileProcessResult:
-        return CliFileProcessResult(filepath=_fp, success=False, error="bad")
+        return _failed_process_result(_fp)
 
     monkeypatch.setattr(core_worker, "process_file", _bad_process)
     _patch_parallel(monkeypatch)
@@ -4012,7 +4082,7 @@ def test_cli_failed_files_report_single(
     def _bad_process(
         _fp: str, *_args: object, **_kwargs: object
     ) -> CliFileProcessResult:
-        return CliFileProcessResult(filepath=_fp, success=False, error="bad")
+        return _failed_process_result(_fp)
 
     monkeypatch.setattr(core_worker, "process_file", _bad_process)
     _patch_parallel(monkeypatch)

@@ -15,11 +15,14 @@ from typing import Literal
 
 import pytest
 
+import codeclone.core.discovery as core_discovery
 import codeclone.core.parallelism as core_parallelism
 import codeclone.core.pipeline as core_pipeline
 import codeclone.core.worker as core_worker
 from codeclone.analysis.normalizer import NormalizationConfig
+from codeclone.analysis.phase_ledger import INERT_PHASE_LEDGER, PhaseLedger
 from codeclone.cache.entries import CacheEntry, SourceStatsDict
+from codeclone.cache.reuse import source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.core._types import (
     DEFAULT_RUNTIME_PROCESSES,
@@ -112,6 +115,7 @@ def _ok_result(filepath: str) -> FileProcessResult:
     return FileProcessResult(
         filepath=filepath,
         success=True,
+        source_content_digest=source_content_digest(Path(filepath).read_bytes()),
         units=[],
         blocks=[],
         segments=[],
@@ -121,6 +125,53 @@ def _ok_result(filepath: str) -> FileProcessResult:
         classes=0,
         stat=file_stat_signature(filepath),
     )
+
+
+def test_successful_file_result_requires_source_digest() -> None:
+    with pytest.raises(ValueError, match="requires a source digest"):
+        FileProcessResult(
+            filepath="module.py",
+            success=True,
+            source_content_digest=None,
+        )
+
+
+def test_worker_hashes_and_decodes_one_source_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "module.py"
+    raw_source = b"def example():\n    return 1\n"
+    source.write_bytes(raw_source)
+    core_worker._install_module_registry(build_module_registry(root=tmp_path))
+    real_read_bytes = Path.read_bytes
+    reads = 0
+
+    def _counted_read_bytes(path: Path) -> bytes:
+        nonlocal reads
+        if path.resolve() == source.resolve():
+            reads += 1
+        return real_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", _counted_read_bytes)
+    result = core_worker.process_file(
+        str(source),
+        str(tmp_path),
+        NormalizationConfig(),
+        1,
+        1,
+        collect_structural_findings=False,
+        collect_api_surface=False,
+        api_include_private_modules=False,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+    )
+
+    assert result.success is True
+    assert result.source_content_digest == source_content_digest(raw_source)
+    assert reads == 1
 
 
 def _stub_process_file(
@@ -135,10 +186,13 @@ def _stub_process_file(
         min_loc: int,
         min_stmt: int,
         collect_structural_findings: bool = True,
+        collect_api_surface: bool = False,
+        api_include_private_modules: bool = False,
         block_min_loc: int = 20,
         block_min_stmt: int = 8,
         segment_min_loc: int = 20,
         segment_min_stmt: int = 10,
+        phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
     ) -> FileProcessResult:
         if expected_root is not None:
             assert root == expected_root
@@ -147,6 +201,9 @@ def _stub_process_file(
         assert min_loc == 1
         assert min_stmt == 1
         assert collect_structural_findings is False
+        assert collect_api_surface is False
+        assert api_include_private_modules is False
+        assert phase_ledger is INERT_PHASE_LEDGER
         return _ok_result(filepath)
 
     return _process_file
@@ -189,6 +246,49 @@ class _ObservedAnalysisSpan:
         self.counters[key] = value
 
 
+def test_cache_content_identity_stage_is_wrapped_once_and_passive(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "module.py"
+    source.write_text("def example():\n    return 1\n", "utf-8")
+    boot = _build_boot(tmp_path, processes=1)
+    unobserved = core_discovery.discover(
+        boot=boot,
+        cache=Cache(tmp_path / "unobserved-discovery.json", root=tmp_path),
+    )
+    recorded: list[_ObservedAnalysisSpan] = []
+
+    @contextmanager
+    def _recording_span(*, name: str) -> Iterator[_ObservedAnalysisSpan]:
+        observed = _ObservedAnalysisSpan(name)
+        recorded.append(observed)
+        yield observed
+
+    monkeypatch.setattr(core_discovery, "span", _recording_span)
+    observed = core_discovery.discover(
+        boot=boot,
+        cache=Cache(tmp_path / "observed-discovery.json", root=tmp_path),
+    )
+
+    assert observed == unobserved
+    assert [observed_span.name for observed_span in recorded] == [
+        "cache.content_identity"
+    ]
+    assert set(recorded[0].counters) == {
+        "cache_content_decision_blob_hit",
+        "cache_content_decision_digest_hit",
+        "cache_content_decision_digest_miss",
+        "cache_content_decision_dirty",
+        "cache_content_decision_git_unavailable",
+        "cache_content_decision_index_ambiguous",
+        "cache_content_decision_racy",
+        "cache_content_decision_untracked",
+        "cache_content_digest_verify_cost_us",
+        "cache_stat_fast_reject",
+    }
+
+
 def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -225,10 +325,32 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         cfg: NormalizationConfig,
         min_loc: int,
         min_stmt: int,
+        collect_structural_findings: bool = True,
+        collect_api_surface: bool = False,
+        api_include_private_modules: bool = False,
+        block_min_loc: int = 20,
+        block_min_stmt: int = 8,
+        segment_min_loc: int = 20,
+        segment_min_stmt: int = 10,
+        phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
     ) -> FileProcessResult:
         nonlocal process_calls
         process_calls += 1
-        return real_process_file(filepath, root, cfg, min_loc, min_stmt)
+        return real_process_file(
+            filepath,
+            root,
+            cfg,
+            min_loc,
+            min_stmt,
+            collect_structural_findings=collect_structural_findings,
+            collect_api_surface=collect_api_surface,
+            api_include_private_modules=api_include_private_modules,
+            block_min_loc=block_min_loc,
+            block_min_stmt=block_min_stmt,
+            segment_min_loc=segment_min_loc,
+            segment_min_stmt=segment_min_stmt,
+            phase_ledger=phase_ledger,
+        )
 
     monkeypatch.setattr(core_parallelism, "span", _recording_span)
     monkeypatch.setattr(core_worker, "process_file", _counted_process_file)
@@ -372,13 +494,12 @@ def test_process_small_batch_skips_parallel_executor(
     assert result.files_skipped == 0
 
 
-def test_invoke_process_file_caches_signature_lookup(
+def test_invoke_process_file_passes_full_contract_without_introspection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     process_file = _stub_process_file(expected_root=str(tmp_path))
     monkeypatch.setattr(core_worker, "process_file", process_file)
-    core_worker._supported_process_file_kwarg_names.cache_clear()
 
     for idx in range(2):
         filepath = tmp_path / f"cached_{idx}.py"
@@ -398,11 +519,6 @@ def test_invoke_process_file_caches_signature_lookup(
             segment_min_stmt=10,
         )
         assert result.success is True
-
-    cache_info = core_worker._supported_process_file_kwarg_names.cache_info()
-    assert cache_info.misses == 1
-    assert cache_info.hits == 1
-    core_worker._supported_process_file_kwarg_names.cache_clear()
 
 
 def test_process_parallel_failure_large_batch_invokes_fallback_callback(
@@ -444,12 +560,12 @@ def test_process_parallel_executor_analyzes_real_files(tmp_path: Path) -> None:
     assert cache.get_file_entry(filepaths[0]) is not None
 
 
-def test_process_cache_put_file_entry_fallback_without_source_stats_support(
+def test_process_cache_put_file_entry_receives_required_binding_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     filepath, boot, discovery = _build_single_file_process_case(tmp_path)
 
-    class _LegacyCache:
+    class _RecordingCache:
         def __init__(self) -> None:
             self.calls = 0
 
@@ -461,6 +577,8 @@ def test_process_cache_put_file_entry_fallback_without_source_stats_support(
             _blocks: object,
             _segments: object,
             *,
+            source_content_digest: object,
+            source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
         ) -> None:
@@ -469,7 +587,7 @@ def test_process_cache_put_file_entry_fallback_without_source_stats_support(
         def save(self) -> None:
             return None
 
-    cache = _LegacyCache()
+    cache = _RecordingCache()
     monkeypatch.setattr(
         core_worker,
         "process_file",
@@ -525,6 +643,7 @@ def test_process_cache_put_file_entry_type_error_is_raised(
             _blocks: object,
             _segments: object,
             *,
+            source_content_digest: object,
             source_stats: object | None = None,
             file_metrics: object | None = None,
             structural_findings: object | None = None,
@@ -556,6 +675,9 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         "classes": 1,
     }
     base_entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": source_content_digest(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [],
         "blocks": [],

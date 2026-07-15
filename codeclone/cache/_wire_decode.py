@@ -6,7 +6,14 @@
 
 from __future__ import annotations
 
-from ..models import BlockGroupItem, FunctionGroupItem, SegmentGroupItem
+from ..models import (
+    BlockGroupItem,
+    DigestObject,
+    FunctionGroupItem,
+    GitBlobIdentity,
+    GitObjectFormat,
+    SegmentGroupItem,
+)
 from ._canonicalize import _attach_optional_cache_sections
 from ._wire_helpers import (
     _decode_optional_wire_coupled_classes,
@@ -84,6 +91,55 @@ def _decode_wire_stat(obj: dict[str, object]) -> FileStat | None:
     return FileStat(mtime_ns=mtime_ns, size=size)
 
 
+def _decode_content_binding(
+    obj: dict[str, object],
+) -> tuple[DigestObject, GitBlobIdentity | None] | None:
+    if obj.get("cb") != "1" or "gb" not in obj:
+        return None
+    source_digest_row = _as_list(obj.get("sd"))
+    if source_digest_row is None or len(source_digest_row) != 3:
+        return None
+    domain = _as_str(source_digest_row[0])
+    algorithm = _as_str(source_digest_row[1])
+    value = _as_str(source_digest_row[2])
+    if domain != "codeclone.source-content.v1" or algorithm != "sha256":
+        return None
+    try:
+        source_digest = DigestObject(
+            domain="codeclone.source-content.v1",
+            algorithm="sha256",
+            value=value or "",
+        )
+    except ValueError:
+        return None
+
+    raw_blob = obj.get("gb")
+    if raw_blob is None:
+        return source_digest, None
+    blob_row = _as_list(raw_blob)
+    if blob_row is None or len(blob_row) != 2:
+        return None
+    object_format = _as_str(blob_row[0])
+    object_id = _as_str(blob_row[1])
+    if object_id is None:
+        return None
+    normalized_object_format: GitObjectFormat
+    if object_format == "sha1":
+        normalized_object_format = "sha1"
+    elif object_format == "sha256":
+        normalized_object_format = "sha256"
+    else:
+        return None
+    try:
+        blob = GitBlobIdentity(
+            object_format=normalized_object_format,
+            object_id=object_id,
+        )
+    except ValueError:
+        return None
+    return source_digest, blob
+
+
 def _decode_optional_wire_source_stats(
     *,
     obj: dict[str, object],
@@ -111,8 +167,10 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         return None
 
     stat = _decode_wire_stat(obj)
-    if stat is None:
+    content_binding = _decode_content_binding(obj)
+    if stat is None or content_binding is None:
         return None
+    source_content_digest, git_blob_id_at_write = content_binding
     source_stats = _decode_optional_wire_source_stats(obj=obj)
     file_sections = _decode_wire_file_sections(obj=obj, filepath=filepath)
     if file_sections is None:
@@ -174,6 +232,9 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
 
     return _attach_optional_cache_sections(
         CacheEntry(
+            cache_content_binding_version="1",
+            source_content_digest=source_content_digest,
+            git_blob_id_at_write=git_blob_id_at_write,
             stat=stat,
             units=units,
             blocks=blocks,

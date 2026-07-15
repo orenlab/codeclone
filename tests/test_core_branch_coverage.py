@@ -27,6 +27,7 @@ from codeclone.cache._canonicalize import (
 )
 from codeclone.cache._validators import _is_dead_candidate_dict
 from codeclone.cache._wire_decode import (
+    _decode_content_binding,
     _decode_wire_file_entry,
     _decode_wire_structural_findings_optional,
     _decode_wire_structural_group,
@@ -63,14 +64,32 @@ from codeclone.findings.clones.grouping import build_segment_groups
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
+    ContentIdentityVerdict,
     DeadCandidate,
+    DigestObject,
     FileMetrics,
+    FoundationConfigInput,
+    GitBlobIdentity,
+    GitContentSnapshot,
+    GitDirtyEntry,
+    GitIndexEntryInput,
+    GitStatusEntryInput,
+    GitTrackedContent,
+    GitWorkspaceSnapshot,
     ModuleDep,
     SegmentUnit,
 )
 from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
 from tests._ast_metrics_helpers import module_registry_context
+
+
+def _source_digest_fixture(raw_source: bytes) -> DigestObject:
+    return DigestObject(
+        domain="codeclone.source-content.v1",
+        algorithm="sha256",
+        value=sha256(raw_source).hexdigest(),
+    )
 
 
 def _dead_candidate(
@@ -153,6 +172,250 @@ def test_cache_risk_and_shape_helpers() -> None:
             }
         )
         is True
+    )
+
+
+def _minimal_bound_cache_entry() -> dict[str, object]:
+    return {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _source_digest_fixture(b"source"),
+        "git_blob_id_at_write": None,
+        "stat": {"mtime_ns": 1, "size": 6},
+        "units": [],
+        "blocks": [],
+        "segments": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    [
+        ("stat", None),
+        ("units", ()),
+        ("blocks", ()),
+        ("segments", ()),
+        ("cache_content_binding_version", "0"),
+        ("source_content_digest", "invalid"),
+        ("git_blob_id_at_write", "invalid"),
+        ("source_stats", {"lines": -1}),
+        ("class_metrics", ()),
+        ("typing_coverage", {}),
+        ("docstring_coverage", {}),
+        ("api_surface", {}),
+    ],
+)
+def test_bound_cache_entry_shape_rejects_each_invalid_section(
+    field: str,
+    invalid_value: object,
+) -> None:
+    entry = _minimal_bound_cache_entry()
+    entry[field] = invalid_value
+    assert _has_cache_entry_container_shape(entry) is False
+
+
+@pytest.mark.parametrize(
+    "wire",
+    [
+        {},
+        {"cb": "0", "gb": None},
+        {"cb": "1", "gb": None, "sd": []},
+        {"cb": "1", "gb": None, "sd": ["wrong", "sha256", "0" * 64]},
+        {
+            "cb": "1",
+            "gb": None,
+            "sd": ["codeclone.source-content.v1", "wrong", "0" * 64],
+        },
+        {
+            "cb": "1",
+            "gb": None,
+            "sd": ["codeclone.source-content.v1", "sha256", "bad"],
+        },
+        {
+            "cb": "1",
+            "gb": "bad",
+            "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+        },
+        {
+            "cb": "1",
+            "gb": ["sha1"],
+            "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+        },
+        {
+            "cb": "1",
+            "gb": ["wrong", "1" * 40],
+            "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+        },
+        {
+            "cb": "1",
+            "gb": ["sha1", "bad"],
+            "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+        },
+    ],
+)
+def test_content_binding_wire_rejects_invalid_contracts(
+    wire: dict[str, object],
+) -> None:
+    assert _decode_content_binding(wire) is None
+
+
+def test_content_binding_wire_accepts_both_git_object_formats() -> None:
+    digest_row = ["codeclone.source-content.v1", "sha256", "0" * 64]
+    without_blob = _decode_content_binding({"cb": "1", "sd": digest_row, "gb": None})
+    sha1 = _decode_content_binding(
+        {"cb": "1", "sd": digest_row, "gb": ["sha1", "1" * 40]}
+    )
+    sha256_blob = _decode_content_binding(
+        {"cb": "1", "sd": digest_row, "gb": ["sha256", "2" * 64]}
+    )
+
+    assert without_blob is not None and without_blob[1] is None
+    assert sha1 is not None and sha1[1] == GitBlobIdentity(
+        object_format="sha1", object_id="1" * 40
+    )
+    assert sha256_blob is not None and sha256_blob[1] == GitBlobIdentity(
+        object_format="sha256", object_id="2" * 64
+    )
+
+
+def test_content_identity_models_reject_impossible_states(tmp_path: Path) -> None:
+    assert (
+        FoundationConfigInput.model_validate(
+            {"baseline_scope_id": None}
+        ).baseline_scope_id
+        is None
+    )
+    with pytest.raises(ValueError, match="exactly two characters"):
+        GitStatusEntryInput.model_validate({"status_xy": "?", "path": "module.py"})
+    with pytest.raises(ValueError, match="path must be non-empty"):
+        GitStatusEntryInput.model_validate({"status_xy": "??", "path": ""})
+    with pytest.raises(ValueError, match="exactly one character"):
+        GitIndexEntryInput.model_validate(
+            {
+                "tag": "HH",
+                "mode": "100644",
+                "object_id": "1" * 40,
+                "stage": 0,
+                "path": "module.py",
+                "mtime_ns": 1,
+                "size": 1,
+                "flags": 0,
+            }
+        )
+    with pytest.raises(ValueError, match="text fields must be non-empty"):
+        GitIndexEntryInput.model_validate(
+            {
+                "tag": "H",
+                "mode": "",
+                "object_id": "1" * 40,
+                "stage": 0,
+                "path": "module.py",
+                "mtime_ns": 1,
+                "size": 1,
+                "flags": 0,
+            }
+        )
+    with pytest.raises(ValueError, match="sha256 digest"):
+        DigestObject(
+            domain="codeclone.source-content.v1",
+            algorithm="sha256",
+            value="not-a-digest",
+        )
+    with pytest.raises(ValueError, match="git object id"):
+        GitBlobIdentity(object_format="sha1", object_id="0" * 64)
+    with pytest.raises(ValueError, match="sorted and unique"):
+        GitWorkspaceSnapshot(
+            git_available=True,
+            entries=(
+                GitDirtyEntry(
+                    path="z.py", status_xy="??", digest=None, digest_status="ok"
+                ),
+                GitDirtyEntry(
+                    path="a.py", status_xy="??", digest=None, digest_status="ok"
+                ),
+            ),
+        )
+    with pytest.raises(ValueError, match="unavailable git snapshot"):
+        GitContentSnapshot(
+            root=str(tmp_path),
+            git_available=False,
+            object_format="sha1",
+            tracked=(),
+            dirty_paths=frozenset(),
+            untracked_paths=frozenset(),
+            index_ambiguous_paths=frozenset(),
+            racy_paths=frozenset(),
+        )
+    digest = _source_digest_fixture(b"source")
+    with pytest.raises(ValueError, match="sorted and unique"):
+        GitContentSnapshot(
+            root=str(tmp_path),
+            git_available=True,
+            object_format="sha1",
+            tracked=(
+                GitTrackedContent(
+                    path="z.py",
+                    blob=GitBlobIdentity(
+                        object_format="sha1",
+                        object_id="1" * 40,
+                    ),
+                    source_content_digest=digest,
+                ),
+                GitTrackedContent(
+                    path="a.py",
+                    blob=GitBlobIdentity(
+                        object_format="sha1",
+                        object_id="2" * 40,
+                    ),
+                    source_content_digest=digest,
+                ),
+            ),
+            dirty_paths=frozenset(),
+            untracked_paths=frozenset(),
+            index_ambiguous_paths=frozenset(),
+            racy_paths=frozenset(),
+        )
+
+
+def test_content_snapshot_binary_lookup_and_external_path(tmp_path: Path) -> None:
+    digest = _source_digest_fixture(b"source")
+    first = GitTrackedContent(
+        path="a.py",
+        blob=GitBlobIdentity(object_format="sha1", object_id="1" * 40),
+        source_content_digest=digest,
+    )
+    last = GitTrackedContent(
+        path="z.py",
+        blob=GitBlobIdentity(object_format="sha1", object_id="2" * 40),
+        source_content_digest=digest,
+    )
+    snapshot = GitContentSnapshot(
+        root=str(tmp_path),
+        git_available=True,
+        object_format="sha1",
+        tracked=(first, last),
+        dirty_paths=frozenset(),
+        untracked_paths=frozenset(),
+        index_ambiguous_paths=frozenset(),
+        racy_paths=frozenset(),
+    )
+
+    assert snapshot.tracked_content("a.py") == first
+    assert snapshot.tracked_content("z.py") == last
+    assert snapshot.tracked_content("m.py") is None
+    assert snapshot.repository_path(tmp_path.parent / "outside.py") is None
+    assert snapshot.tracked_content(tmp_path.parent / "outside.py") is None
+    assert snapshot.fallback_reason(tmp_path.parent / "outside.py") == (
+        "index_ambiguous"
+    )
+
+
+def test_cached_relationship_decoders_ignore_non_records() -> None:
+    assert core_discovery._decode_cached_relationship_record({}) is None
+    assert (
+        core_discovery._decode_cached_function_relationship_facts(
+            [{"source_qualname": 1, "relationships": []}]
+        )
+        == []
     )
 
 
@@ -267,6 +530,9 @@ def test_cache_get_file_entry_canonicalization_paths(tmp_path: Path) -> None:
     assert filepath not in cache._canonical_runtime_paths
 
     cast(dict[str, object], cache.data["files"])[filepath] = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _source_digest_fixture(b"source"),
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 1},
         "units": [
             {
@@ -361,6 +627,7 @@ def test_cache_get_file_entry_canonicalization_paths(tmp_path: Path) -> None:
         [],
         [BlockUnit("bh", filepath, "q", 1, 2, 2)],
         [SegmentUnit("sh", "ss", filepath, "q", 1, 2, 2)],
+        source_content_digest=_source_digest_fixture(b"source"),
         file_metrics=file_metrics,
     )
 
@@ -369,6 +636,9 @@ def test_cache_encode_wire_file_entry_includes_rq() -> None:
     entry = cast(
         CacheEntry,
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _source_digest_fixture(b"source"),
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 1},
             "units": [],
             "blocks": [],
@@ -1058,9 +1328,18 @@ def _discover_with_single_cached_entry(
     source.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(source)
     stat = {"mtime_ns": 1, "size": 1}
-    cache_entry = {"stat": stat, **cached_entry}
+    cache_entry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _source_digest_fixture(source.read_bytes()),
+        "git_blob_id_at_write": None,
+        "stat": stat,
+        **cached_entry,
+    }
 
     class _FakeCache:
+        def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
         def get_file_entry(self, _path: str) -> dict[str, object]:
             return cache_entry
 
@@ -1105,6 +1384,7 @@ def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
         [],
         [],
         [],
+        source_content_digest=_source_digest_fixture(live.read_bytes()),
         source_stats=SourceStatsDict(lines=2, functions=1, methods=0, classes=0),
     )
     cache.put_file_entry(
@@ -1113,6 +1393,7 @@ def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
         [],
         [],
         [],
+        source_content_digest=_source_digest_fixture(b"stale"),
         source_stats=SourceStatsDict(lines=0, functions=0, methods=0, classes=0),
     )
     cache.save()
@@ -1255,6 +1536,73 @@ def test_pipeline_discover_cache_admission_branches(
         assert len(discovered.cached_module_deps) == 1
         assert len(discovered.cached_dead_candidates) == 1
         assert "used_name" in discovered.cached_referenced_names
+
+
+@pytest.mark.parametrize(
+    "verdict",
+    [
+        ContentIdentityVerdict(
+            hit=False,
+            reason="blob_hit",
+            git_fallback_reason=None,
+            digest_verify_cost_us=0,
+            stat_fast_reject=False,
+        ),
+        ContentIdentityVerdict(
+            hit=False,
+            reason="digest_hit",
+            git_fallback_reason="dirty",
+            digest_verify_cost_us=1,
+            stat_fast_reject=False,
+        ),
+        ContentIdentityVerdict(
+            hit=False,
+            reason="digest_miss",
+            git_fallback_reason="git_unavailable",
+            digest_verify_cost_us=2,
+            stat_fast_reject=False,
+        ),
+        ContentIdentityVerdict(
+            hit=False,
+            reason="digest_miss",
+            git_fallback_reason="index_ambiguous",
+            digest_verify_cost_us=3,
+            stat_fast_reject=False,
+        ),
+        ContentIdentityVerdict(
+            hit=False,
+            reason="digest_miss",
+            git_fallback_reason="racy",
+            digest_verify_cost_us=4,
+            stat_fast_reject=False,
+        ),
+        ContentIdentityVerdict(
+            hit=False,
+            reason="digest_miss",
+            git_fallback_reason="untracked",
+            digest_verify_cost_us=5,
+            stat_fast_reject=True,
+        ),
+    ],
+)
+def test_discover_records_each_content_identity_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    verdict: ContentIdentityVerdict,
+) -> None:
+    monkeypatch.setattr(
+        core_discovery,
+        "prove_cached_source_identity",
+        lambda **_kwargs: verdict,
+    )
+    discovered = _discover_with_single_cached_entry(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        cached_entry={},
+    )
+
+    assert discovered.cache_hits == 0
+    assert tuple(Path(path).name for path in discovered.files_to_process) == ("a.py",)
 
 
 def test_pipeline_cached_source_stats_helper_invalid_shapes() -> None:
@@ -1447,15 +1795,3 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
 
     cli._run_analysis_stages(args=args, boot=boot, cache=cast(Cache, _BadCache()))
     cli.print_banner(root=None)
-
-
-def test_worker_signature_cache_handles_uninspectable_callable() -> None:
-    from codeclone.core import worker as core_worker
-
-    core_worker._supported_process_file_kwarg_names.cache_clear()
-
-    def _broken(*_args: object, **_kwargs: object) -> object:
-        return None
-
-    assert core_worker._supported_process_file_kwarg_names(_broken) is None
-    core_worker._supported_process_file_kwarg_names.cache_clear()

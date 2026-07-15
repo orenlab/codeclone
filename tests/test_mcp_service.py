@@ -62,7 +62,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
-from codeclone.models import MetricsDiff
+from codeclone.models import DigestObject, MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     CachePolicy,
@@ -4510,7 +4510,18 @@ def test_mcp_build_cache_suppresses_cache_entry_writes(tmp_path: Path) -> None:
         cache_path=tmp_path / "cache.json",
         policy="off",
     )
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=DigestObject(
+            domain="codeclone.source-content.v1",
+            algorithm="sha256",
+            value="0" * 64,
+        ),
+    )
     cache.save()
 
     assert cache.get_file_entry("x.py") is None

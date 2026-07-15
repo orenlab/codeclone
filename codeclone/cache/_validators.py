@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TypeGuard
 
+from ..models import DigestObject, GitBlobIdentity
 from .entries import (
     ApiParamSpecDict,
     BlockDict,
@@ -37,6 +38,18 @@ def _is_file_stat_dict(value: object) -> TypeGuard[FileStat]:
     if not isinstance(value, dict):
         return False
     return isinstance(value.get("mtime_ns"), int) and isinstance(value.get("size"), int)
+
+
+def _is_source_content_digest(value: object) -> TypeGuard[DigestObject]:
+    return (
+        isinstance(value, DigestObject)
+        and value.domain == "codeclone.source-content.v1"
+        and value.algorithm == "sha256"
+    )
+
+
+def _is_git_blob_identity(value: object) -> TypeGuard[GitBlobIdentity]:
+    return isinstance(value, GitBlobIdentity)
 
 
 def _is_source_stats_dict(value: object) -> TypeGuard[SourceStatsDict]:
@@ -338,6 +351,7 @@ __all__ = [
     "_is_dead_candidate_dict",
     "_is_file_stat_dict",
     "_is_function_relationship_facts_dict",
+    "_is_git_blob_identity",
     "_is_module_api_surface_dict",
     "_is_module_dep_dict",
     "_is_module_docstring_coverage_dict",
@@ -347,6 +361,7 @@ __all__ = [
     "_is_runtime_reachability_fact_dict",
     "_is_security_surface_dict",
     "_is_segment_dict",
+    "_is_source_content_digest",
     "_is_source_stats_dict",
     "_is_string_list",
     "_is_unit_dict",
