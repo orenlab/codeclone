@@ -24,6 +24,7 @@ from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ParseError
 from codeclone.report.gates.evaluator import MetricGateConfig
 from codeclone.utils.git_diff import validate_git_diff_ref
+from tests._ast_metrics_helpers import module_registry_context
 
 
 def _report_document() -> dict[str, object]:
@@ -73,11 +74,16 @@ def test_extract_units_rejects_non_module_ast_root(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(units_mod, "_parse_with_limits", lambda *_args: ast.Pass())
+    identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )
     with pytest.raises(ParseError, match="expected module AST root"):
         units_mod.extract_units_and_stats_from_source(
             source="pass\n",
             filepath="pkg/mod.py",
-            module_name="pkg.mod",
+            identity=identity,
+            registry=registry,
             cfg=NormalizationConfig(),
             min_loc=1,
             min_stmt=1,

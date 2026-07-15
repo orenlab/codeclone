@@ -36,9 +36,15 @@ from codeclone.models import (
     ModuleDep,
     RuntimeReachabilityFact,
     SegmentUnit,
+    SourceStats,
+    StructuralFindingGroup,
     Unit,
 )
 from codeclone.qualnames import FunctionNode, QualnameCollector
+from tests._ast_metrics_helpers import (
+    build_test_module_registry,
+    module_registry_context,
+)
 
 _DETECT_FUSION_CORPUS_FILES = (
     "tests/fixtures/analytics/helpers.py",
@@ -66,6 +72,47 @@ _DETECT_FUSION_CORPUS_DIGEST = (
 )
 
 
+def _extract_source(
+    *,
+    source: str,
+    filepath: str,
+    module_name: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+    block_min_loc: int = 20,
+    block_min_stmt: int = 8,
+    segment_min_loc: int = 20,
+    segment_min_stmt: int = 10,
+    collect_structural_findings: bool = True,
+) -> tuple[
+    list[Unit],
+    list[BlockUnit],
+    list[SegmentUnit],
+    SourceStats,
+    FileMetrics,
+    list[StructuralFindingGroup],
+]:
+    identity, registry = module_registry_context(
+        filepath=filepath,
+        module_name=module_name,
+    )
+    return units_mod.extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        identity=identity,
+        registry=registry,
+        cfg=cfg,
+        min_loc=min_loc,
+        min_stmt=min_stmt,
+        block_min_loc=block_min_loc,
+        block_min_stmt=block_min_stmt,
+        segment_min_loc=segment_min_loc,
+        segment_min_stmt=segment_min_stmt,
+        collect_structural_findings=collect_structural_findings,
+    )
+
+
 def extract_units_from_source(
     *,
     source: str,
@@ -83,19 +130,17 @@ def extract_units_from_source(
     list[BlockUnit],
     list[SegmentUnit],
 ]:
-    units, blocks, segments, _source_stats, _file_metrics, _sf = (
-        units_mod.extract_units_and_stats_from_source(
-            source=source,
-            filepath=filepath,
-            module_name=module_name,
-            cfg=cfg,
-            min_loc=min_loc,
-            min_stmt=min_stmt,
-            block_min_loc=block_min_loc,
-            block_min_stmt=block_min_stmt,
-            segment_min_loc=segment_min_loc,
-            segment_min_stmt=segment_min_stmt,
-        )
+    units, blocks, segments, _source_stats, _file_metrics, _sf = _extract_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=cfg,
+        min_loc=min_loc,
+        min_stmt=min_stmt,
+        block_min_loc=block_min_loc,
+        block_min_stmt=block_min_stmt,
+        segment_min_loc=segment_min_loc,
+        segment_min_stmt=segment_min_stmt,
     )
     return units, blocks, segments
 
@@ -112,13 +157,22 @@ def _parse_tree_and_collector(
 def _collect_module_walk(
     source: str,
     *,
-    module_name: str = "pkg.mod",
+    filepath: str | None = None,
+    module_name: str | None = "pkg.mod",
     collect_referenced_names: bool = True,
 ) -> tuple[ast.Module, QualnameCollector, module_walk_mod._ModuleWalkResult]:
+    if filepath is None:
+        assert module_name is not None
+        filepath = f"{module_name.replace('.', '/')}.py"
+    identity, registry = module_registry_context(
+        filepath=filepath,
+        module_name=module_name,
+    )
     tree, collector = _parse_tree_and_collector(source)
     walk = module_walk_mod._collect_module_walk_data(
         tree=tree,
-        module_name=module_name,
+        source=identity,
+        registry=registry,
         collector=collector,
         collect_referenced_names=collect_referenced_names,
     )
@@ -131,7 +185,7 @@ def _dead_qualnames_from_source(
     filepath: str = "pkg/mod.py",
     module_name: str = "pkg.mod",
 ) -> tuple[str, ...]:
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath=filepath,
         module_name=module_name,
@@ -154,7 +208,7 @@ def _file_metrics_from_source(
     filepath: str,
     module_name: str,
 ) -> FileMetrics:
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath=filepath,
         module_name=module_name,
@@ -191,7 +245,7 @@ def _runtime_reachability_from_source(
     filepath: str = "pkg/mod.py",
     module_name: str = "pkg.mod",
 ) -> tuple[RuntimeReachabilityFact, ...]:
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath=filepath,
         module_name=module_name,
@@ -210,7 +264,7 @@ def test_detect_fusion_preserves_fixture_corpus_outputs() -> None:
         module_path = filepath.removesuffix(".py")
         if module_path.endswith("/__init__"):
             module_path = module_path[: -len("/__init__")]
-        _, _, _, _, metrics, _ = units_mod.extract_units_and_stats_from_source(
+        _, _, _, _, metrics, _ = _extract_source(
             source=source,
             filepath=filepath,
             module_name=module_path.replace("/", "."),
@@ -563,16 +617,14 @@ def foo(x):
         return value
     return a + b + c + d + e
 """
-    _units, _blocks, _segments, _source_stats, _file_metrics, sf = (
-        units_mod.extract_units_and_stats_from_source(
-            source=src,
-            filepath="x.py",
-            module_name="mod",
-            cfg=NormalizationConfig(),
-            min_loc=1,
-            min_stmt=1,
-            collect_structural_findings=False,
-        )
+    _units, _blocks, _segments, _source_stats, _file_metrics, sf = _extract_source(
+        source=src,
+        filepath="x.py",
+        module_name="mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+        collect_structural_findings=False,
     )
     assert sf == []
 
@@ -790,27 +842,237 @@ def test_parse_limits_restore_failure_is_ignored(
         pass
 
 
-def test_resolve_import_target_absolute_and_relative() -> None:
+def test_resolve_import_observation_absolute_and_relative() -> None:
+    identity, registry = module_registry_context(
+        filepath="root/mod/sub.py",
+        module_name="root.mod.sub",
+    )
     absolute = ast.ImportFrom(module="pkg.util", names=[], level=0)
     assert (
-        module_walk_mod._resolve_import_target("root.mod.sub", absolute) == "pkg.util"
+        module_walk_mod.resolve_import_observation(
+            identity, absolute, registry
+        ).resolved_target
+        == "pkg.util"
     )
 
     relative = ast.ImportFrom(module="helpers", names=[], level=1)
     assert (
-        module_walk_mod._resolve_import_target("root.mod.sub", relative)
+        module_walk_mod.resolve_import_observation(
+            identity, relative, registry
+        ).resolved_target
         == "root.mod.helpers"
     )
 
     relative_no_module = ast.ImportFrom(module=None, names=[], level=2)
     assert (
-        module_walk_mod._resolve_import_target("root.mod.sub", relative_no_module)
+        module_walk_mod.resolve_import_observation(
+            identity, relative_no_module, registry
+        ).resolved_target
         == "root"
     )
 
 
+@pytest.mark.parametrize(
+    (
+        "filepath",
+        "module_name",
+        "level",
+        "requested_module",
+        "requested_names",
+        "inventory_modules",
+        "expected_targets",
+        "expected_resolutions",
+    ),
+    (
+        (
+            "pkg/__init__.py",
+            "pkg",
+            1,
+            None,
+            ("x",),
+            ("pkg.x",),
+            ("pkg", "pkg.x"),
+            ("analyzed", "analyzed"),
+        ),
+        (
+            "pkg/__init__.py",
+            "pkg",
+            1,
+            "sibling",
+            ("value",),
+            ("pkg.sibling",),
+            ("pkg.sibling",),
+            ("analyzed",),
+        ),
+        (
+            "pkg/mod.py",
+            "pkg.mod",
+            1,
+            None,
+            ("x",),
+            ("pkg.x",),
+            ("pkg", "pkg.x"),
+            ("external", "analyzed"),
+        ),
+        (
+            "pkg/mod.py",
+            "pkg.mod",
+            1,
+            "sibling",
+            ("value",),
+            ("pkg.sibling",),
+            ("pkg.sibling",),
+            ("analyzed",),
+        ),
+        (
+            "pkg/mod.py",
+            "pkg.mod",
+            2,
+            None,
+            ("outside",),
+            (),
+            (None,),
+            ("unresolved_relative",),
+        ),
+        (
+            "scripts/tool.py",
+            None,
+            1,
+            "sibling",
+            ("value",),
+            (),
+            (None,),
+            ("unresolved_relative",),
+        ),
+        (
+            "tool.py",
+            "tool",
+            1,
+            None,
+            ("sibling",),
+            (),
+            (None,),
+            ("unresolved_relative",),
+        ),
+    ),
+)
+def test_relative_import_decision_table(
+    filepath: str,
+    module_name: str | None,
+    level: int,
+    requested_module: str | None,
+    requested_names: tuple[str, ...],
+    inventory_modules: tuple[str, ...],
+    expected_targets: tuple[str | None, ...],
+    expected_resolutions: tuple[str, ...],
+) -> None:
+    identity, registry = module_registry_context(
+        filepath=filepath,
+        module_name=module_name,
+        inventory_modules=inventory_modules,
+    )
+    node = ast.ImportFrom(
+        module=requested_module,
+        names=[ast.alias(name=name) for name in requested_names],
+        level=level,
+    )
+
+    observations = module_walk_mod._import_from_observations(
+        identity,
+        node,
+        registry,
+    )
+
+    assert tuple(item.resolved_target for item in observations) == expected_targets
+    assert tuple(item.resolution for item in observations) == expected_resolutions
+
+
+def test_import_resolution_distinguishes_excluded_internal_target() -> None:
+    identity, registry = module_registry_context(
+        filepath="pkg/live.py",
+        module_name="pkg.live",
+        known_internal_modules=("migrations.old",),
+    )
+    observation = module_walk_mod.resolve_import_observation(
+        identity,
+        ast.ImportFrom(
+            module="migrations.old",
+            names=[ast.alias(name="upgrade")],
+            level=0,
+        ),
+        registry,
+    )
+
+    assert observation.resolution == "known_internal_not_analyzed"
+    assert observation.resolved_target == "migrations.old"
+
+
+def test_non_importable_source_dependencies_remain_path_keyed() -> None:
+    _tree, _collector, walk = _collect_module_walk(
+        "from .sibling import value",
+        filepath="scripts/not-a-module.py",
+        module_name=None,
+    )
+
+    assert walk.module_deps[0].source == "scripts/not-a-module.py"
+    assert walk.module_deps[0].target == ""
+    assert walk.module_deps[0].resolution == "unresolved_relative"
+
+
+def test_flat_and_src_relative_fixture_graphs_match_identity_golden() -> None:
+    fixture_root = Path("tests/fixtures/module_identity/relative")
+
+    def _dependency_rows(
+        root: Path,
+        *,
+        source_roots: tuple[str, ...],
+    ) -> list[dict[str, object]]:
+        registry = build_test_module_registry(
+            root=root,
+            source_roots=source_roots,
+        )
+        rows: list[dict[str, object]] = []
+        for relative_path, entry in registry.entries_by_path.items():
+            tree = ast.parse((root / relative_path).read_text("utf-8"))
+            collector = QualnameCollector()
+            collector.visit(tree)
+            walk = module_walk_mod._collect_module_walk_data(
+                tree=tree,
+                source=entry.identity,
+                registry=registry,
+                collector=collector,
+                collect_referenced_names=True,
+            )
+            rows.extend(
+                {
+                    "inventory_expansion": dep.inventory_expansion,
+                    "resolution": dep.resolution,
+                    "source": dep.source,
+                    "target": dep.target,
+                }
+                for dep in walk.module_deps
+            )
+        return sorted(
+            rows,
+            key=lambda row: (
+                str(row["source"]),
+                str(row["target"]),
+                bool(row["inventory_expansion"]),
+            ),
+        )
+
+    expected = json.loads(
+        (fixture_root / "golden_dependencies.json").read_text("utf-8")
+    )
+    flat = _dependency_rows(fixture_root / "flat", source_roots=(".",))
+    src = _dependency_rows(fixture_root / "src_layout", source_roots=("src",))
+
+    assert flat == expected
+    assert src == expected
+
+
 def test_collect_module_walk_data_imports_and_references() -> None:
-    tree = ast.parse(
+    _tree, _collector, walk = _collect_module_walk(
         """
 import os as operating_system
 import json
@@ -820,15 +1082,8 @@ from .. import parent
 value = obj.attr
 foo()
 obj.method()
-""".strip()
-    )
-    collector = QualnameCollector()
-    collector.visit(tree)
-    walk = module_walk_mod._collect_module_walk_data(
-        tree=tree,
+""".strip(),
         module_name="root.mod.sub",
-        collector=collector,
-        collect_referenced_names=True,
     )
     assert walk.import_names == frozenset({"operating_system", "json", "root"})
     assert walk.module_deps == (
@@ -837,84 +1092,104 @@ obj.method()
             target="json",
             import_type="import",
             line=2,
+            requested_module="json",
+            candidate_targets=("json",),
         ),
         ModuleDep(
             source="root.mod.sub",
             target="os",
             import_type="import",
             line=1,
+            requested_module="os",
+            candidate_targets=("os",),
         ),
         ModuleDep(
             source="root.mod.sub",
             target="root",
             import_type="from_import",
             line=4,
+            level=2,
+            requested_names=("parent",),
+            candidate_targets=("root",),
         ),
         ModuleDep(
             source="root.mod.sub",
             target="root.mod.pkg",
             import_type="from_import",
             line=3,
+            level=1,
+            requested_module="pkg",
+            requested_names=("utils",),
+            candidate_targets=("root.mod.pkg",),
         ),
     )
     assert walk.referenced_names == frozenset({"obj", "attr", "foo", "method"})
 
 
 def test_collect_module_walk_data_edge_branches() -> None:
-    tree = ast.parse("from .... import parent")
-    collector = QualnameCollector()
-    collector.visit(tree)
-    walk = module_walk_mod._collect_module_walk_data(
-        tree=tree,
+    _tree, _collector, walk = _collect_module_walk(
+        "from .... import parent",
         module_name="pkg.mod",
-        collector=collector,
-        collect_referenced_names=True,
     )
     assert walk.import_names == frozenset()
-    assert walk.module_deps == ()
+    assert walk.module_deps == (
+        ModuleDep(
+            source="pkg.mod",
+            target="",
+            import_type="from_import",
+            line=1,
+            resolution="unresolved_relative",
+            level=4,
+            requested_names=("parent",),
+        ),
+    )
     assert walk.referenced_names == frozenset()
 
-    lambda_call_tree = ast.parse("(lambda x: x)(1)")
-    lambda_collector = QualnameCollector()
-    lambda_collector.visit(lambda_call_tree)
-    lambda_walk = module_walk_mod._collect_module_walk_data(
-        tree=lambda_call_tree,
+    _lambda_tree, _lambda_collector, lambda_walk = _collect_module_walk(
+        "(lambda x: x)(1)",
         module_name="pkg.mod",
-        collector=lambda_collector,
-        collect_referenced_names=True,
     )
     assert lambda_walk.referenced_names == frozenset({"x"})
 
 
 def test_collect_module_walk_data_without_referenced_name_collection() -> None:
-    tree = ast.parse(
+    _tree, _collector, walk = _collect_module_walk(
         """
 import os as operating_system
 from .pkg import utils
 from .... import parent
-""".strip()
-    )
-    collector = QualnameCollector()
-    collector.visit(tree)
-    walk = module_walk_mod._collect_module_walk_data(
-        tree=tree,
+""".strip(),
         module_name="root.mod.sub",
-        collector=collector,
         collect_referenced_names=False,
     )
     assert walk.import_names == frozenset({"operating_system", "root"})
     assert walk.module_deps == (
         ModuleDep(
             source="root.mod.sub",
+            target="",
+            import_type="from_import",
+            line=3,
+            resolution="unresolved_relative",
+            level=4,
+            requested_names=("parent",),
+        ),
+        ModuleDep(
+            source="root.mod.sub",
             target="os",
             import_type="import",
             line=1,
+            requested_module="os",
+            candidate_targets=("os",),
         ),
         ModuleDep(
             source="root.mod.sub",
             target="root.mod.pkg",
             import_type="from_import",
             line=2,
+            level=1,
+            requested_module="pkg",
+            requested_names=("utils",),
+            candidate_targets=("root.mod.pkg",),
         ),
     )
     assert walk.referenced_names == frozenset()
@@ -922,13 +1197,18 @@ from .... import parent
 
 def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
     state = module_walk_mod._ModuleWalkState()
+    identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )
     import_node = cast(
         ast.Import,
         ast.parse("import typing_extensions as te").body[0],
     )
     module_walk_mod._collect_import_node(
         node=import_node,
-        module_name="pkg.mod",
+        source=identity,
+        registry=registry,
         state=state,
         collect_referenced_names=False,
     )
@@ -942,7 +1222,8 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
     )
     module_walk_mod._collect_import_from_node(
         node=import_from_node,
-        module_name="pkg.mod",
+        source=identity,
+        registry=registry,
         state=state,
         collect_referenced_names=True,
     )
@@ -956,7 +1237,8 @@ def test_module_walk_helpers_cover_import_and_reference_branches() -> None:
     )
     module_walk_mod._collect_import_from_node(
         node=unresolved_import,
-        module_name="pkg.mod",
+        source=identity,
+        registry=registry,
         state=state,
         collect_referenced_names=True,
     )
@@ -982,8 +1264,7 @@ def test_dotted_expr_protocol_detection_and_runtime_candidate_edges() -> None:
         is None
     )
 
-    tree = ast.parse(
-        """
+    protocol_source = """
 import typing_extensions as te
 
 class A(te.Protocol):
@@ -992,14 +1273,9 @@ class A(te.Protocol):
 class B(te.Protocol[int]):
     pass
 """.strip()
-    )
-    collector = QualnameCollector()
-    collector.visit(tree)
-    walk = module_walk_mod._collect_module_walk_data(
-        tree=tree,
+    tree, _collector, walk = _collect_module_walk(
+        protocol_source,
         module_name="pkg.mod",
-        collector=collector,
-        collect_referenced_names=True,
     )
     protocol_symbol_aliases = walk.protocol_symbol_aliases
     protocol_module_aliases = walk.protocol_module_aliases
@@ -1067,18 +1343,24 @@ dynamic = factory().attr
 """
     tree, collector = _parse_tree_and_collector(src)
     state = module_walk_mod._ModuleWalkState()
+    identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             module_walk_mod._collect_import_node(
                 node=node,
-                module_name="pkg.mod",
+                source=identity,
+                registry=registry,
                 state=state,
                 collect_referenced_names=True,
             )
         elif isinstance(node, ast.ImportFrom):
             module_walk_mod._collect_import_from_node(
                 node=node,
-                module_name="pkg.mod",
+                source=identity,
+                registry=registry,
                 state=state,
                 collect_referenced_names=True,
             )
@@ -1208,7 +1490,7 @@ from pkg.mod import live
 
 live()
 """
-    _, _, _, _, test_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, test_metrics, _ = _extract_source(
         source=src,
         filepath="pkg/tests/test_usage.py",
         module_name="pkg.tests.test_usage",
@@ -1216,7 +1498,7 @@ live()
         min_loc=1,
         min_stmt=1,
     )
-    _, _, _, _, regular_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, regular_metrics, _ = _extract_source(
         source=src,
         filepath="pkg/usage.py",
         module_name="pkg.usage",
@@ -1253,7 +1535,7 @@ class Service:
     def make():
         return Service()
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=src,
         filepath="pkg/service.py",
         module_name="pkg.service",
@@ -1289,7 +1571,7 @@ class Reader(Protocol):
 
     def close(self) -> None: ...
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=src,
         filepath="pkg/reader.py",
         module_name="pkg.reader",
@@ -1383,7 +1665,7 @@ def test_extract_pydantic_cohesion_exclusions(
     method_count: int,
     risk: str,
 ) -> None:
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath=filepath,
         module_name=module_name,
@@ -1414,7 +1696,7 @@ class Item(BaseModel):
     def used(self) -> int:
         return self.value
 """.strip()
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath="pkg/item.py",
         module_name="pkg.item",
@@ -1440,7 +1722,7 @@ def test_orphan_usage():
     assert orphan() == 1
 """
 
-    _, _, _, _, prod_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, prod_metrics, _ = _extract_source(
         source=src_prod,
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -1448,7 +1730,7 @@ def test_orphan_usage():
         min_loc=1,
         min_stmt=1,
     )
-    _, _, _, _, test_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, test_metrics, _ = _extract_source(
         source=src_test,
         filepath="pkg/tests/test_mod.py",
         module_name="pkg.tests.test_mod",
@@ -2439,7 +2721,7 @@ def used():
             return None
 
     monkeypatch.setattr(qualnames, "QualnameCollector", _CollectorNoClassMetrics)
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source="class Broken:\n    pass\n",
         filepath="pkg/mod.py",
         module_name="pkg.mod",
@@ -2459,7 +2741,7 @@ def wrapper():
     value = _run_impl()
     return helpers.decorate(value)
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=src,
         filepath="pkg/cli.py",
         module_name="pkg.cli",
@@ -2484,7 +2766,7 @@ def source(value):
     factory()()
     return callback
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath="pkg/module.py",
         module_name="pkg.module",
@@ -2546,7 +2828,7 @@ def by_local_import():
     from pkg.other import run
     return run()
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath="pkg/module.py",
         module_name="pkg.module",
@@ -2596,9 +2878,14 @@ match value:
 """
     )
 
+    identity, registry = module_registry_context(
+        filepath="pkg/module.py",
+        module_name="pkg.module",
+    )
     index = module_walk_mod._collect_relationship_import_index(
         tree=tree,
-        module_name="pkg.module",
+        source=identity,
+        registry=registry,
     )
 
     assert index.module_bindings["alpha"] == frozenset({"pkg.alpha"})
@@ -2612,7 +2899,8 @@ match value:
     )
     assert module_walk_mod._collect_relationship_import_index(
         tree=ast.Constant(value=1),
-        module_name="pkg.module",
+        source=identity,
+        registry=registry,
     ) == module_walk_mod._RelationshipImportIndex({}, {}, frozenset())
 
 
@@ -2794,7 +3082,7 @@ def test_relationship_expression_resolution_branches(
 def _function_relationship_facts_for(
     source: str, source_qualname: str
 ) -> FunctionRelationshipFacts:
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath="pkg/module.py",
         module_name="pkg.module",
@@ -2912,7 +3200,7 @@ from prod import only_used_by_test
 def test_it():
     assert only_used_by_test() == 1
 """
-    _, _, _, _, file_metrics, _ = units_mod.extract_units_and_stats_from_source(
+    _, _, _, _, file_metrics, _ = _extract_source(
         source=source,
         filepath="tests/test_prod.py",
         module_name="tests.test_prod",

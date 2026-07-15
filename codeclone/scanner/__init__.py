@@ -203,15 +203,3 @@ def discover_python_files(
                 )
 
     return tuple(sorted(candidates)), hard_excluded
-
-
-def module_name_from_path(root: str, filepath: str) -> str:
-    rootp = Path(root).resolve()
-    fp = Path(filepath).resolve()
-    rel = fp.relative_to(rootp)
-    # strip ".py"
-    stem = rel.with_suffix("")
-    # __init__.py -> package name
-    if stem.name == "__init__":
-        stem = stem.parent
-    return ".".join(stem.parts)

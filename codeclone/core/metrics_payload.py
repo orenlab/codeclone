@@ -23,7 +23,9 @@ from ..models import (
     GroupItemLike,
     MetricsDiff,
     ModuleDep,
+    ModuleRegistryHandle,
     ProjectMetrics,
+    ResolvedSourceIdentity,
     RuntimeReachabilityFact,
     SecuritySurface,
 )
@@ -40,6 +42,74 @@ from .coverage_payload import (
     _permille,
 )
 from .security_surfaces_payload import build_security_surfaces_payload
+
+
+def _dependency_source_identity(
+    source: str,
+    registry: ModuleRegistryHandle,
+) -> ResolvedSourceIdentity:
+    entry = registry.entries_by_module.get(source)
+    if entry is None:
+        entry = registry.entries_by_path.get(source)
+    if entry is None:
+        raise ValueError(f"dependency source is absent from module registry: {source}")
+    return entry.identity
+
+
+def _source_identity_payload(identity: ResolvedSourceIdentity) -> dict[str, object]:
+    module = identity.python_module
+    return {
+        "file": {"path": identity.file.path},
+        "python_module": (
+            {
+                "module": module.module,
+                "package": module.package,
+                "is_package": module.is_package,
+                "mount_path": module.mount_path,
+                "origin": module.origin,
+                "node_kind": module.node_kind,
+            }
+            if module is not None
+            else None
+        ),
+    }
+
+
+def _dependency_observation_rows(
+    deps: Sequence[ModuleDep],
+    registry: ModuleRegistryHandle,
+) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = [
+        {
+            "source": _source_identity_payload(
+                _dependency_source_identity(dep.source, registry)
+            ),
+            "syntax_kind": dep.import_type,
+            "level": dep.level,
+            "requested_module": dep.requested_module,
+            "requested_names": list(dep.requested_names),
+            "resolution": dep.resolution,
+            "candidate_targets": list(dep.candidate_targets),
+            "resolved_target": dep.target or None,
+        }
+        for dep in deps
+    ]
+    return sorted(rows, key=_dependency_observation_sort_key)
+
+
+def _dependency_observation_sort_key(
+    row: Mapping[str, object],
+) -> tuple[str, ...]:
+    return (
+        as_str(as_mapping(as_mapping(row["source"]).get("file")).get("path")),
+        as_str(row["syntax_kind"]),
+        f"{as_int(row['level']):020d}",
+        as_str(row["requested_module"]),
+        "\0".join(as_str(name) for name in as_sequence(row["requested_names"])),
+        as_str(row["resolution"]),
+        "\0".join(as_str(name) for name in as_sequence(row["candidate_targets"])),
+        as_str(row["resolved_target"]),
+    )
 
 
 def _enrich_metrics_report_payload(
@@ -114,6 +184,7 @@ def build_metrics_report_payload(
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
     module_deps: Sequence[ModuleDep] = (),
+    module_registry: ModuleRegistryHandle,
     runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
     security_surfaces: Sequence[SecuritySurface] = (),
     source_stats_by_file: Sequence[tuple[str, int, int, int, int]] = (),
@@ -233,6 +304,10 @@ def build_metrics_report_payload(
             },
         },
         "dependencies": {
+            "observations": _dependency_observation_rows(
+                module_deps,
+                module_registry,
+            ),
             "modules": project_metrics.dependency_modules,
             "edges": project_metrics.dependency_edges,
             "max_depth": project_metrics.dependency_max_depth,
@@ -315,6 +390,7 @@ def build_metrics_report_payload(
         },
         "overloaded_modules": build_overloaded_modules_payload(
             scan_root=scan_root,
+            registry=module_registry,
             source_stats_by_file=source_stats_by_file,
             units=units,
             class_metrics=class_metrics,

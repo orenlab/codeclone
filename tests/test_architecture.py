@@ -95,6 +95,20 @@ _GENERATED_DIRECTORY_NAMES = frozenset(
         "node_modules",
     }
 )
+_PHASE39H_LEGACY_SYMBOLS = frozenset(
+    {
+        "_internal_roots",
+        "_module_names_from_units",
+        "_resolve_import_target",
+        "module_name_from_path",
+    }
+)
+_PHASE39H_OWNER_PREFIXES = (
+    "codeclone.analysis",
+    "codeclone.core",
+    "codeclone.metrics",
+    "codeclone.scanner",
+)
 
 
 def _iter_codeclone_modules(root: Path) -> list[tuple[str, Path]]:
@@ -294,11 +308,36 @@ def _model_store_violations(
                     )
 
 
+def _phase39h_legacy_symbol_violations(
+    root: Path,
+    violations: dict[str, set[str]],
+) -> None:
+    for module_name, path in _iter_codeclone_modules(root):
+        if not module_name.startswith(_PHASE39H_OWNER_PREFIXES):
+            continue
+        tree = ast.parse(path.read_text("utf-8"))
+        symbols: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                symbols.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.Name):
+                symbols.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                symbols.add(node.attr)
+        for symbol in sorted(symbols & _PHASE39H_LEGACY_SYMBOLS):
+            _add_violation(
+                violations,
+                "phase39h:legacy_identity_symbol",
+                f"{module_name}::{symbol}",
+            )
+
+
 def _architecture_boundary_violations(root: Path) -> dict[str, tuple[str, ...]]:
     violations: dict[str, set[str]] = {}
     _production_import_violations(root, violations)
     _test_import_violations(root, violations)
     _model_store_violations(root, violations)
+    _phase39h_legacy_symbol_violations(root, violations)
     return {
         family: tuple(sorted(items))
         for family, items in sorted(violations.items())

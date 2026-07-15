@@ -10,6 +10,7 @@ import inspect
 import os
 from collections.abc import Callable
 from functools import lru_cache
+from pathlib import Path
 
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.phase_ledger import (
@@ -25,8 +26,8 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
 )
-from ..models import ModuleRegistryHandle
-from ..scanner import module_name_from_path, resolved_path_under_root
+from ..models import ModuleRegistryHandle, ResolvedSourceIdentity
+from ..scanner import resolved_path_under_root
 from ._types import MAX_FILE_SIZE, FileProcessResult
 
 _WORKER_MODULE_REGISTRY: ModuleRegistryHandle | None = None
@@ -37,6 +38,19 @@ def _install_module_registry(registry: ModuleRegistryHandle) -> None:
 
     global _WORKER_MODULE_REGISTRY
     _WORKER_MODULE_REGISTRY = registry
+
+
+def _source_identity_for_worker(
+    *,
+    registry: ModuleRegistryHandle,
+    root: str,
+    resolved_path: Path,
+) -> ResolvedSourceIdentity:
+    relative_path = resolved_path.relative_to(Path(root).resolve()).as_posix()
+    entry = registry.entries_by_path.get(relative_path)
+    if entry is None:
+        raise ValueError(f"source path is absent from module registry: {relative_path}")
+    return entry.identity
 
 
 def process_file(
@@ -102,12 +116,20 @@ def process_file(
                 error=f"Cannot read file: {exc}",
                 error_kind="source_read_error",
             )
-        module_name = module_name_from_path(root, filepath)
+        registry = _WORKER_MODULE_REGISTRY
+        if registry is None:
+            raise RuntimeError("module registry is not installed in worker")
+        identity = _source_identity_for_worker(
+            registry=registry,
+            root=root,
+            resolved_path=resolved,
+        )
         units, blocks, segments, source_stats, file_metrics, structural_findings = (
             extract_units_and_stats_from_source(
                 source=source,
                 filepath=filepath,
-                module_name=module_name,
+                identity=identity,
+                registry=registry,
                 cfg=cfg,
                 min_loc=min_loc,
                 min_stmt=min_stmt,

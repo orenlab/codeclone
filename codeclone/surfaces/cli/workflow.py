@@ -117,7 +117,7 @@ _make_plain_console = cli_console._make_plain_console
 _make_rich_console = cli_console.make_console
 _parse_metric_reason_entry = cli_console._parse_metric_reason_entry
 _print_banner_impl = cli_console.print_banner
-_print_gating_failure_block = cli_console._print_gating_failure_block
+_print_gating_failure_block_impl = cli_console._print_gating_failure_block
 _print_verbose_clone_hashes = cli_console._print_verbose_clone_hashes
 _rich_progress_symbols = cli_console._rich_progress_symbols
 
@@ -246,7 +246,21 @@ def _run_pre_analysis_controller_query(
 
 def print_banner(*, root: Path | None = None) -> None:
     _set_console(console)
-    _print_banner_impl(root=root)
+    _print_banner_impl(console=_console(), root=root)
+
+
+def _print_gating_failure_block(
+    *,
+    code: str,
+    entries: tuple[tuple[str, object], ...] | list[tuple[str, object]],
+    args: CLIArgsLike,
+) -> None:
+    _print_gating_failure_block_impl(
+        console=_console(),
+        code=code,
+        entries=entries,
+        args=args,
+    )
 
 
 def _configure_runtime_console(args: CLIArgsLike) -> None:

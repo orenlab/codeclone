@@ -1,0 +1,20 @@
+[
+  {
+    "inventory_expansion": false,
+    "resolution": "analyzed",
+    "source": "pkg",
+    "target": "pkg"
+  },
+  {
+    "inventory_expansion": true,
+    "resolution": "analyzed",
+    "source": "pkg",
+    "target": "pkg.child"
+  },
+  {
+    "inventory_expansion": false,
+    "resolution": "analyzed",
+    "source": "pkg.consumer",
+    "target": "pkg.child"
+  }
+]

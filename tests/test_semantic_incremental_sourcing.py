@@ -22,7 +22,6 @@ import pytest
 
 from codeclone.memory.embedding import DeterministicHashEmbeddingProvider
 from codeclone.memory.embedding.batching import EmbedBatchLimits
-from codeclone.memory.semantic import RebuildReport, rebuild_semantic_index
 from codeclone.memory.semantic.models import (
     ExistingSourceRevision,
     SemanticHit,
@@ -33,6 +32,7 @@ from codeclone.memory.semantic.models import (
     SemanticSource,
 )
 from codeclone.memory.semantic.projection import text_hash
+from codeclone.memory.semantic.rebuild import RebuildReport, rebuild_semantic_index
 from codeclone.memory.semantic.sources import SourceScan, SourceScanError
 
 

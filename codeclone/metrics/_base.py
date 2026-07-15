@@ -12,17 +12,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from ..models import (
-        ClassMetrics,
-        DeadCandidate,
-        GroupItemLike,
-        ModuleApiSurface,
-        ModuleDep,
-        ModuleDocstringCoverage,
-        ModuleTypingCoverage,
-        RuntimeReachabilityFact,
-        SecuritySurface,
-    )
+    from ..models import MetricProjectContext
 
 MetricResult = dict[str, object]
 
@@ -31,28 +21,6 @@ MetricResult = dict[str, object]
 class MetricAggregate:
     project_fields: dict[str, object]
     artifacts: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class MetricProjectContext:
-    units: tuple[GroupItemLike, ...]
-    class_metrics: tuple[ClassMetrics, ...]
-    module_deps: tuple[ModuleDep, ...]
-    dead_candidates: tuple[DeadCandidate, ...]
-    referenced_names: frozenset[str]
-    referenced_qualnames: frozenset[str]
-    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
-    security_surfaces: tuple[SecuritySurface, ...] = ()
-    typing_modules: tuple[ModuleTypingCoverage, ...] = ()
-    docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
-    api_modules: tuple[ModuleApiSurface, ...] = ()
-    files_found: int = 0
-    files_analyzed_or_cached: int = 0
-    function_clone_groups: int = 0
-    block_clone_groups: int = 0
-    skip_dependencies: bool = False
-    skip_dead_code: bool = False
-    memo: dict[str, MetricResult] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)

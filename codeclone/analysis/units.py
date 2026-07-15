@@ -29,6 +29,8 @@ from ..models import (
     BlockUnit,
     ClassMetrics,
     FileMetrics,
+    ModuleRegistryHandle,
+    ResolvedSourceIdentity,
     SegmentUnit,
     SourceStats,
     StructuralFindingGroup,
@@ -115,7 +117,8 @@ def _collect_timed_clone_units(
 def extract_units_and_stats_from_source(
     source: str,
     filepath: str,
-    module_name: str,
+    identity: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
     cfg: NormalizationConfig,
     min_loc: int,
     min_stmt: int,
@@ -143,6 +146,10 @@ def extract_units_and_stats_from_source(
         raise ParseError(f"Failed to parse {filepath}: {e}") from e
     if not isinstance(tree, ast.Module):
         raise ParseError(f"Failed to parse {filepath}: expected module AST root")
+    identity_module = identity.python_module
+    module_name = (
+        identity_module.module if identity_module is not None else identity.file.path
+    )
 
     collector = _qualnames.QualnameCollector()
     with phase_ledger.phase(AnalysisPhaseKey.QUALNAME):
@@ -156,7 +163,8 @@ def extract_units_and_stats_from_source(
     with phase_ledger.phase(AnalysisPhaseKey.MODULE_WALK):
         _walk = _collect_module_walk_data(
             tree=tree,
-            module_name=module_name,
+            source=identity,
+            registry=registry,
             collector=collector,
             collect_referenced_names=not is_test_file,
         )
@@ -172,7 +180,8 @@ def extract_units_and_stats_from_source(
     with phase_ledger.phase(AnalysisPhaseKey.RELATIONSHIP):
         function_relationship_facts = _collect_function_relationship_facts(
             tree=tree,
-            module_name=module_name,
+            source=identity,
+            registry=registry,
             filepath=filepath,
             collector=collector,
             origin_lane="test" if is_test_file else "production",

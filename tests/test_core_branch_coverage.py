@@ -70,6 +70,7 @@ from codeclone.models import (
 )
 from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
+from tests._ast_metrics_helpers import module_registry_context
 
 
 def _dead_candidate(
@@ -591,6 +592,10 @@ def test_pipeline_analyze_uses_cached_segment_projection(
         cached_referenced_names=frozenset(),
         files_to_process=(),
         skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="placeholder.py",
+            module_name="placeholder",
+        )[1],
         cached_segment_report_projection=cast(
             SegmentReportProjection, cached_projection
         ),
@@ -724,6 +729,10 @@ def test_pipeline_analyze_tracks_suppressed_dead_code_candidates() -> None:
         cached_referenced_names=frozenset(),
         files_to_process=(),
         skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="pkg/mod.py",
+            module_name="pkg.mod",
+        )[1],
     )
     processing = ProcessingResult(
         units=(),
@@ -977,6 +986,10 @@ tool = "pkg.cli:main"
         cached_referenced_names=frozenset(),
         files_to_process=(),
         skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="pkg/cli.py",
+            module_name="pkg.cli",
+        )[1],
     )
     processing = ProcessingResult(
         units=(),
@@ -1377,6 +1390,10 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
             cached_referenced_names=frozenset(),
             files_to_process=(),
             skipped_warnings=(),
+            module_registry=module_registry_context(
+                filepath="placeholder.py",
+                module_name="placeholder",
+            )[1],
         ),
     )
     monkeypatch.setattr(

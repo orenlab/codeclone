@@ -43,12 +43,30 @@ from codeclone.core._types import (
     AnalysisResult,
     BootstrapResult,
     DiscoveryResult,
+    FileProcessResult,
     ProcessingResult,
 )
 from codeclone.core.reporting import GatingResult
-from codeclone.core.worker import process_file
+from codeclone.core.worker import (
+    _install_module_registry,
+)
+from codeclone.core.worker import (
+    process_file as _worker_process_file,
+)
 from codeclone.models import HealthScore, ProjectMetrics
 from tests._assertions import assert_contains_all, assert_contains_none
+from tests._ast_metrics_helpers import module_registry_context, worker_registry_context
+
+
+def process_file(
+    filepath: str,
+    root: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+) -> FileProcessResult:
+    _install_module_registry(worker_registry_context(filepath=filepath, root=root))
+    return _worker_process_file(filepath, root, cfg, min_loc, min_stmt)
 
 
 class _RecordingPrinter:
@@ -2323,6 +2341,10 @@ def _stub_discovery_result() -> DiscoveryResult:
         cached_referenced_names=frozenset(),
         files_to_process=(),
         skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="placeholder.py",
+            module_name="placeholder",
+        )[1],
     )
 
 

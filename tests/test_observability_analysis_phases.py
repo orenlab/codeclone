@@ -24,6 +24,7 @@ from codeclone.observability.analysis_phases import (
     apply_pipeline_process_phase_counters,
     apply_stage_counters,
 )
+from tests._ast_metrics_helpers import module_registry_context
 
 
 class _FakeSpan:
@@ -123,10 +124,15 @@ def example(value):
     return total
 """
 
+    identity, registry = module_registry_context(
+        filepath="pkg/example.py",
+        module_name="pkg.example",
+    )
     units, blocks, segments, *_ = extract_units_and_stats_from_source(
         source=source,
         filepath="pkg/example.py",
-        module_name="pkg.example",
+        identity=identity,
+        registry=registry,
         cfg=NormalizationConfig(),
         min_loc=3,
         min_stmt=2,

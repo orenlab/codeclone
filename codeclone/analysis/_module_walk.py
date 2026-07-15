@@ -16,9 +16,12 @@ from .. import qualnames as _qualnames
 from ..models import (
     DeadCandidate,
     FunctionRelationshipFacts,
+    ImportObservation,
     ModuleDep,
+    ModuleRegistryHandle,
     RelationshipOriginLane,
     RelationshipRecord,
+    ResolvedSourceIdentity,
 )
 from .class_metrics import _node_line_span
 from .parser import (
@@ -75,19 +78,118 @@ _COHESION_IGNORED_PYDANTIC_HOOKS = _PYDANTIC_DECORATOR_NAMES - frozenset(
 )
 
 
-def _resolve_import_target(
-    module_name: str,
-    import_node: ast.ImportFrom,
-) -> str:
-    if import_node.level <= 0:
-        return import_node.module or ""
+def _source_module_key(source: ResolvedSourceIdentity) -> str:
+    module = source.python_module
+    return module.module if module is not None else source.file.path
 
-    parent_parts = module_name.split(".")
-    keep = max(0, len(parent_parts) - import_node.level)
-    prefix = parent_parts[:keep]
-    if import_node.module:
-        return ".".join([*prefix, import_node.module])
-    return ".".join(prefix)
+
+def _classify_import_target(
+    target: str,
+    registry: ModuleRegistryHandle,
+) -> Literal["analyzed", "known_internal_not_analyzed", "external"]:
+    entry = registry.entries_by_module.get(target)
+    if entry is not None:
+        return entry.internality
+    for prefix in registry.package_prefixes:
+        if prefix.module != target:
+            continue
+        return (
+            "analyzed"
+            if any(
+                registry.entries_by_path[path].analyzed
+                for path in prefix.contributing_paths
+            )
+            else "known_internal_not_analyzed"
+        )
+    return "external"
+
+
+def resolve_import_observation(
+    source: ResolvedSourceIdentity,
+    node: ast.ImportFrom,
+    registry: ModuleRegistryHandle,
+) -> ImportObservation:
+    requested_names = tuple(sorted(alias.name for alias in node.names))
+    requested_module = node.module
+    if node.level <= 0:
+        target = requested_module or ""
+        return ImportObservation(
+            source=source,
+            syntax_kind="from_import",
+            level=0,
+            requested_module=requested_module,
+            requested_names=requested_names,
+            resolution=_classify_import_target(target, registry),
+            candidate_targets=(target,),
+            resolved_target=target,
+        )
+
+    module = source.python_module
+    package_parts = (
+        module.package.split(".") if module is not None and module.package else []
+    )
+    parents_to_strip = node.level - 1
+    if module is None or not package_parts or parents_to_strip >= len(package_parts):
+        return ImportObservation(
+            source=source,
+            syntax_kind="from_import",
+            level=node.level,
+            requested_module=requested_module,
+            requested_names=requested_names,
+            resolution="unresolved_relative",
+            candidate_targets=(),
+            resolved_target=None,
+        )
+
+    base_parts = package_parts[: len(package_parts) - parents_to_strip]
+    target = (
+        ".".join((*base_parts, requested_module))
+        if requested_module
+        else ".".join(base_parts)
+    )
+    return ImportObservation(
+        source=source,
+        syntax_kind="from_import",
+        level=node.level,
+        requested_module=requested_module,
+        requested_names=requested_names,
+        resolution=_classify_import_target(target, registry),
+        candidate_targets=(target,),
+        resolved_target=target,
+    )
+
+
+def _import_from_observations(
+    source: ResolvedSourceIdentity,
+    node: ast.ImportFrom,
+    registry: ModuleRegistryHandle,
+) -> tuple[ImportObservation, ...]:
+    primary = resolve_import_observation(source, node, registry)
+    target = primary.resolved_target
+    if target is None or node.module is not None:
+        return (primary,)
+    expansions: list[ImportObservation] = []
+    for alias in node.names:
+        if alias.name == "*":
+            continue
+        candidate = f"{target}.{alias.name}"
+        resolution = _classify_import_target(candidate, registry)
+        if resolution == "external":
+            continue
+        expansions.append(
+            ImportObservation(
+                source=source,
+                syntax_kind="from_import",
+                level=node.level,
+                requested_module=None,
+                requested_names=(alias.name,),
+                resolution=resolution,
+                candidate_targets=(candidate,),
+                resolved_target=candidate,
+                inventory_expansion=True,
+            )
+        )
+    return (primary, *expansions)
 
 
 @dataclass(slots=True)
@@ -117,18 +219,22 @@ class _ModuleWalkState:
 
 def _append_module_dep(
     *,
-    module_name: str,
-    target: str,
-    import_type: Literal["import", "from_import"],
+    observation: ImportObservation,
     line: int,
     state: _ModuleWalkState,
 ) -> None:
     state.deps.append(
         ModuleDep(
-            source=module_name,
-            target=target,
-            import_type=import_type,
+            source=_source_module_key(observation.source),
+            target=observation.resolved_target or "",
+            import_type=observation.syntax_kind,
             line=line,
+            resolution=observation.resolution,
+            inventory_expansion=observation.inventory_expansion,
+            level=observation.level,
+            requested_module=observation.requested_module,
+            requested_names=observation.requested_names,
+            candidate_targets=observation.candidate_targets,
         )
     )
 
@@ -136,7 +242,8 @@ def _append_module_dep(
 def _collect_import_node(
     *,
     node: ast.Import,
-    module_name: str,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
     state: _ModuleWalkState,
     collect_referenced_names: bool,
 ) -> None:
@@ -144,10 +251,18 @@ def _collect_import_node(
     for alias in node.names:
         alias_name = alias.asname or alias.name.split(".", 1)[0]
         state.import_names.add(alias_name)
+        observation = ImportObservation(
+            source=source,
+            syntax_kind="import",
+            level=0,
+            requested_module=alias.name,
+            requested_names=(),
+            resolution=_classify_import_target(alias.name, registry),
+            candidate_targets=(alias.name,),
+            resolved_target=alias.name,
+        )
         _append_module_dep(
-            module_name=module_name,
-            target=alias.name,
-            import_type="import",
+            observation=observation,
             line=line,
             state=state,
         )
@@ -377,17 +492,19 @@ def _local_export_qualname(
 def _collect_import_from_node(
     *,
     node: ast.ImportFrom,
-    module_name: str,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
     state: _ModuleWalkState,
     collect_referenced_names: bool,
 ) -> None:
-    target = _resolve_import_target(module_name, node)
-    if target:
-        state.import_names.add(target.split(".", 1)[0])
+    observations = _import_from_observations(source, node, registry)
+    primary_target = observations[0].resolved_target
+    for observation in observations:
+        target = observation.resolved_target
+        if target:
+            state.import_names.add(target.partition(".")[0])
         _append_module_dep(
-            module_name=module_name,
-            target=target,
-            import_type="from_import",
+            observation=observation,
             line=int(getattr(node, "lineno", 0)),
             state=state,
         )
@@ -407,7 +524,7 @@ def _collect_import_from_node(
             _matching_import_aliases(node, _COHESION_IGNORED_PYDANTIC_HOOKS)
         )
 
-    if not collect_referenced_names or not target:
+    if not collect_referenced_names or not primary_target:
         return
 
     for alias in node.names:
@@ -415,7 +532,7 @@ def _collect_import_from_node(
             continue
         alias_name = alias.asname or alias.name
         state.imported_symbol_bindings.setdefault(alias_name, set()).add(
-            f"{target}:{alias.name}"
+            f"{primary_target}:{alias.name}"
         )
 
 
@@ -474,7 +591,8 @@ def _scope_declaration_binding_name(node: ast.AST) -> str | None:
 def _collect_relationship_import_index(
     *,
     tree: ast.AST,
-    module_name: str,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
 ) -> _RelationshipImportIndex:
     symbol_bindings: dict[str, set[str]] = {}
     module_bindings: dict[str, set[str]] = {}
@@ -489,7 +607,7 @@ def _collect_relationship_import_index(
                 module_bindings.setdefault(alias_name, set()).add(alias.name)
             continue
         if isinstance(node, ast.ImportFrom):
-            target = _resolve_import_target(module_name, node)
+            target = resolve_import_observation(source, node, registry).resolved_target
             if target:
                 for alias in node.names:
                     if alias.name != "*":
@@ -733,15 +851,18 @@ def _is_relationship_reference_node(
 def _collect_function_relationship_facts(
     *,
     tree: ast.AST,
-    module_name: str,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
     filepath: str,
     collector: _qualnames.QualnameCollector,
     origin_lane: RelationshipOriginLane,
 ) -> tuple[FunctionRelationshipFacts, ...]:
     imports = _collect_relationship_import_index(
         tree=tree,
-        module_name=module_name,
+        source=source,
+        registry=registry,
     )
+    module_name = _source_module_key(source)
     top_level_function_names = frozenset(
         local_name for local_name, _node in collector.units if "." not in local_name
     )
@@ -1129,7 +1250,8 @@ class _ModuleWalkResult(NamedTuple):
 def _collect_module_walk_data(
     *,
     tree: ast.AST,
-    module_name: str,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
     collector: _qualnames.QualnameCollector,
     collect_referenced_names: bool,
 ) -> _ModuleWalkResult:
@@ -1138,19 +1260,22 @@ def _collect_module_walk_data(
     Reduces the hot path to one tree walk plus one local qualname resolution phase.
     """
     state = _ModuleWalkState()
+    module_name = _source_module_key(source)
     _collect_module_all_exports(tree, state)
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             _collect_import_node(
                 node=node,
-                module_name=module_name,
+                source=source,
+                registry=registry,
                 state=state,
                 collect_referenced_names=collect_referenced_names,
             )
         elif isinstance(node, ast.ImportFrom):
             _collect_import_from_node(
                 node=node,
-                module_name=module_name,
+                source=source,
+                registry=registry,
                 state=state,
                 collect_referenced_names=collect_referenced_names,
             )

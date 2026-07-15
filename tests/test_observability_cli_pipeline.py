@@ -44,6 +44,7 @@ from codeclone.observability.store.schema import (
 )
 from codeclone.observability.store.writer import write_operation
 from codeclone.surfaces.cli.observability import observability_main
+from tests._ast_metrics_helpers import module_registry_context
 from tests.observability_equality import assert_observability_subprocess_equality
 from tests.test_observability_query import _seed_future_observability_schema
 
@@ -69,6 +70,10 @@ def _discovery(files: tuple[str, ...]) -> DiscoveryResult:
         cached_referenced_names=frozenset(),
         files_to_process=files,
         skipped_warnings=(),
+        module_registry=module_registry_context(
+            filepath="placeholder.py",
+            module_name="placeholder",
+        )[1],
     )
 
 

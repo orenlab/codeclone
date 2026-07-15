@@ -88,7 +88,7 @@ class DiscoveryResult:
     cached_referenced_names: frozenset[str]
     files_to_process: tuple[str, ...]
     skipped_warnings: tuple[str, ...]
-    module_registry: ModuleRegistryHandle | None = None
+    module_registry: ModuleRegistryHandle
     cached_runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     cached_security_surfaces: tuple[SecuritySurface, ...] = ()
     cached_referenced_qualnames: frozenset[str] = frozenset()
@@ -312,16 +312,6 @@ def _class_metric_sort_key(metric: ClassMetrics) -> tuple[str, int, int, str]:
 
 def _dead_candidate_sort_key(item: DeadCandidate) -> tuple[str, int, int, str]:
     return item.filepath, item.start_line, item.end_line, item.qualname
-
-
-def _module_names_from_units(units: tuple[GroupItemLike, ...]) -> frozenset[str]:
-    modules: set[str] = set()
-    for item in units:
-        qualname = as_str(item.get("qualname")) if isinstance(item, Mapping) else ""
-        module_name = qualname.split(":", 1)[0] if ":" in qualname else qualname
-        if module_name:
-            modules.add(module_name)
-    return frozenset(sorted(modules))
 
 
 def _unit_to_group_item(unit: Unit) -> GroupItem:
