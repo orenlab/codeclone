@@ -12,7 +12,8 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 
-from . import lifecycle
+import codeclone.workspace_intent.lifecycle as lifecycle
+
 from .contract import WorkspaceIntentRecord
 from .lifecycle import PidLiveness
 

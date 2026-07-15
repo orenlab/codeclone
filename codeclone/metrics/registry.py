@@ -16,6 +16,7 @@ from ..models import (
     DeadItem,
     DepGraph,
     HealthScore,
+    MetricProjectContext,
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
@@ -24,7 +25,7 @@ from ..models import (
 )
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_str as _as_str
-from ._base import MetricAggregate, MetricFamily, MetricProjectContext, MetricResult
+from ._base import MetricAggregate, MetricFamily, MetricResult
 from .dead_code import find_unused
 from .dependencies import build_dep_graph
 from .health import HealthInputs, compute_health
@@ -47,18 +48,6 @@ def _class_metric_sort_key(metric: object) -> tuple[str, int, int, str]:
     end_line = getattr(metric, "end_line", 0)
     qualname = getattr(metric, "qualname", "")
     return str(filepath), int(start_line), int(end_line), str(qualname)
-
-
-def _module_names_from_units(units: tuple[object, ...]) -> frozenset[str]:
-    modules: set[str] = set()
-    for item in units:
-        if not isinstance(item, dict):
-            continue
-        qualname = _as_str(item.get("qualname"))
-        module_name = qualname.split(":", 1)[0] if ":" in qualname else qualname
-        if module_name:
-            modules.add(module_name)
-    return frozenset(sorted(modules))
 
 
 def _empty_dep_graph() -> DepGraph:
@@ -456,7 +445,7 @@ def _build_dependencies_result(context: MetricProjectContext) -> MetricResult:
     dep_graph = _empty_dep_graph()
     if not context.skip_dependencies:
         dep_graph = build_dep_graph(
-            modules=_module_names_from_units(tuple(context.units)),
+            registry=context.module_registry,
             deps=context.module_deps,
         )
     return {

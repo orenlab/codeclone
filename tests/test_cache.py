@@ -1579,6 +1579,42 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == "0.0"
 
 
+def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
+    tmp_path: Path,
+) -> None:
+    assert Cache._CACHE_VERSION == "2.11"
+
+    cache_path = tmp_path / "cache.json"
+    old_cache = Cache(cache_path)
+    old_cache.put_file_entry("old_identity.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    old_cache.save()
+
+    old_document = json.loads(cache_path.read_text("utf-8"))
+    assert old_document["v"] == "2.11"
+    old_document["v"] = "2.10"
+    cache_path.write_text(json.dumps(old_document), "utf-8")
+
+    regenerated = Cache(cache_path)
+    regenerated.load()
+
+    assert regenerated.load_status == CacheStatus.VERSION_MISMATCH
+    assert regenerated.cache_schema_version == "2.10"
+    assert regenerated.get_file_entry("old_identity.py") is None
+    assert regenerated.data["files"] == {}
+
+    regenerated.put_file_entry(
+        "registry_identity.py", {"mtime_ns": 2, "size": 20}, [], [], []
+    )
+    regenerated.save()
+
+    reloaded = Cache(cache_path)
+    reloaded.load()
+    assert reloaded.load_status == CacheStatus.OK
+    assert reloaded.cache_schema_version == Cache._CACHE_VERSION
+    assert reloaded.get_file_entry("old_identity.py") is None
+    assert reloaded.get_file_entry("registry_identity.py") is not None
+
+
 @pytest.mark.parametrize("version", ["0.0", "2.2", "2.7"])
 def test_cache_v_field_version_mismatch_warns(tmp_path: Path, version: str) -> None:
     cache_path = tmp_path / "cache.json"

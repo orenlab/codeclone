@@ -29,8 +29,8 @@ from codeclone.metrics.complexity import (
 from codeclone.metrics.coupling import _resolve_cbo, coupling_risk
 from codeclone.metrics.dead_code import find_suppressed_unused, find_unused
 from codeclone.metrics.dependencies import (
-    _internal_roots,
     _is_internal_target,
+    _registry_modules,
     build_dep_graph,
     build_import_graph,
     depth_profile,
@@ -42,6 +42,7 @@ from codeclone.metrics.dependencies import (
 from codeclone.metrics.health import HealthInputs, compute_health
 from codeclone.models import ClassWalkFacts, DeadCandidate, DeadItem, ModuleDep
 from codeclone.paths import is_test_filepath
+from tests._ast_metrics_helpers import module_registry_context
 
 
 def _parse_named_node(
@@ -75,13 +76,16 @@ def _class_walk_facts(
     )
 
 
-def test_dependency_internal_roots_and_target_guards() -> None:
-    dep = ModuleDep(source="pkg.a", target="ext.b", import_type="import", line=1)
-    roots = _internal_roots(["pkg.mod"], [dep])
-    assert roots == frozenset(["pkg"])
-    assert _is_internal_target("", internal_roots=roots) is False
-    assert _is_internal_target("pkg.sub", internal_roots=roots) is True
-    assert _is_internal_target("ext.b", internal_roots=roots) is False
+def test_dependency_registry_membership_and_target_guards() -> None:
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        inventory_modules=("pkg.sub",),
+    )[1]
+    assert _registry_modules(registry) == frozenset({"pkg.mod", "pkg.sub"})
+    assert _is_internal_target("", registry=registry) is False
+    assert _is_internal_target("pkg.sub", registry=registry) is True
+    assert _is_internal_target("ext.b", registry=registry) is False
 
 
 def test_cyclomatic_complexity_floor_and_nontrivial_graph() -> None:
@@ -677,7 +681,7 @@ def test_build_import_graph_cycle_depth_and_chain_helpers() -> None:
     assert graph["f"] == set()
 
     cycles = find_cycles(graph)
-    assert cycles == (("a", "b"), ("c",))
+    assert cycles == (("a", "b"),)
     assert max_depth(graph) >= 2
     assert longest_chains(graph, limit=0) == ()
     assert longest_chains(graph, limit=2)
@@ -686,7 +690,12 @@ def test_build_import_graph_cycle_depth_and_chain_helpers() -> None:
 def test_build_dep_graph_deduplicates_edges() -> None:
     repeated = ModuleDep(source="pkg.a", target="pkg.b", import_type="import", line=1)
     external = ModuleDep(source="pkg.a", target="typing", import_type="import", line=2)
-    dep_graph = build_dep_graph(modules={"pkg.a"}, deps=(repeated, repeated, external))
+    registry = module_registry_context(
+        filepath="pkg/a.py",
+        module_name="pkg.a",
+        inventory_modules=("pkg.b",),
+    )[1]
+    dep_graph = build_dep_graph(registry=registry, deps=(repeated, repeated, external))
     assert dep_graph.modules == frozenset({"pkg.a", "pkg.b"})
     assert dep_graph.edges == (repeated,)
     assert dep_graph.avg_depth == 1.5

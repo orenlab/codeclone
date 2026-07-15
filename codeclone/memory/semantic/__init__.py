@@ -36,11 +36,6 @@ from .projection import (
     project_trajectory,
     text_hash,
 )
-from .rebuild import RebuildReport, rebuild_semantic_index
-from .rebuild_workflow import (
-    build_semantic_index_sources,
-    execute_semantic_index_rebuild,
-)
 from .sources import (
     AuditIndexSource,
     IndexSource,
@@ -201,7 +196,6 @@ __all__ = [
     "IndexSource",
     "MemoryIndexSource",
     "NullSemanticIndex",
-    "RebuildReport",
     "SemanticHit",
     "SemanticIndex",
     "SemanticIndexStatus",
@@ -212,17 +206,14 @@ __all__ = [
     "SemanticSource",
     "TrajectoryIndexSource",
     "UnavailableSemanticIndex",
-    "build_semantic_index_sources",
     "close_semantic_index",
     "collapse_trajectory_hits",
-    "execute_semantic_index_rebuild",
     "expand_projection",
     "is_indexed_audit_event",
     "is_indexed_memory_type",
     "project_audit_event",
     "project_memory_record",
     "project_trajectory",
-    "rebuild_semantic_index",
     "resolve_passage_chunker",
     "resolve_semantic_index",
     "resolve_semantic_index_writer",

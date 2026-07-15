@@ -17,7 +17,6 @@ from codeclone.scanner import (
     HARD_SAFETY_EXCLUDES,
     discover_python_files,
     iter_py_files,
-    module_name_from_path,
 )
 
 
@@ -107,18 +106,6 @@ def test_iter_py_files_deterministic_sorted_order(tmp_path: Path) -> None:
 
     files = list(iter_py_files(str(tmp_path)))
     assert files == sorted(files)
-
-
-def test_module_name_from_path(tmp_path: Path) -> None:
-    pkg = tmp_path / "pkg"
-    pkg.mkdir()
-    init = pkg / "__init__.py"
-    init.write_text("", "utf-8")
-    module = pkg / "mod.py"
-    module.write_text("x = 1\n", "utf-8")
-
-    assert module_name_from_path(str(tmp_path), str(init)) == "pkg"
-    assert module_name_from_path(str(tmp_path), str(module)) == "pkg.mod"
 
 
 def test_iter_py_files_invalid_root(tmp_path: Path) -> None:

@@ -22,13 +22,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
+import codeclone.workspace_intent.lifecycle as intent_lifecycle
+import codeclone.workspace_intent.reader as intent_reader
 from codeclone.config.intent_registry import (
     IntentRegistryConfig,
     IntentRegistryConfigError,
     resolve_intent_registry_config,
 )
-from codeclone.workspace_intent import lifecycle as intent_lifecycle
-from codeclone.workspace_intent import reader as intent_reader
 from codeclone.workspace_intent.contract import WorkspaceIntentRecord
 from codeclone.workspace_intent.lifecycle import (
     PidLiveness,

@@ -17,8 +17,7 @@ from ..domain.source_scope import (
     SOURCE_KIND_PRODUCTION,
     SOURCE_KIND_TESTS,
 )
-from ..models import ClassMetrics, GroupItemLike, ModuleDep
-from ..scanner import module_name_from_path
+from ..models import ClassMetrics, GroupItemLike, ModuleDep, ModuleRegistryHandle
 from ..utils.coerce import as_float, as_int, as_sequence, as_str
 
 _CANDIDATE = "candidate"
@@ -59,6 +58,25 @@ def _source_kind(filepath: str, *, scan_root: str) -> str:
     return SOURCE_KIND_PRODUCTION
 
 
+def _module_key_for_filepath(
+    filepath: str,
+    *,
+    scan_root: str,
+    registry: ModuleRegistryHandle,
+) -> str:
+    normalized_path = _normalize_path(filepath)
+    normalized_root = _normalize_path(scan_root).rstrip("/")
+    registry_path = normalized_path
+    if normalized_root and normalized_path.startswith(f"{normalized_root}/"):
+        registry_path = normalized_path[len(normalized_root) + 1 :]
+    registry_path = registry_path.removeprefix("./")
+    entry = registry.entries_by_path.get(registry_path)
+    if entry is None:
+        raise ValueError(f"source path is absent from module registry: {filepath}")
+    module = entry.identity.python_module
+    return module.module if module is not None else entry.identity.file.path
+
+
 def _score_quantile(sorted_values: Sequence[float], q: float) -> float:
     if not sorted_values:
         return 0.0
@@ -95,6 +113,7 @@ def _round_score(value: float) -> float:
 def build_overloaded_modules_payload(
     *,
     scan_root: str,
+    registry: ModuleRegistryHandle,
     source_stats_by_file: Sequence[tuple[str, int, int, int, int]],
     units: Sequence[GroupItemLike],
     class_metrics: Sequence[ClassMetrics],
@@ -105,7 +124,11 @@ def build_overloaded_modules_payload(
     filepath_to_module: dict[str, str] = {}
 
     for filepath, lines, functions, methods, classes in sorted(source_stats_by_file):
-        module_name = module_name_from_path(scan_root, filepath)
+        module_name = _module_key_for_filepath(
+            filepath,
+            scan_root=scan_root,
+            registry=registry,
+        )
         filepath_to_module[filepath] = module_name
         module_rows[module_name] = {
             "module": module_name,

@@ -11,7 +11,6 @@ from codeclone.metrics.overloaded_modules import _score_quantile
 from codeclone.metrics.registry import (
     METRIC_FAMILIES,
     _group_item_sort_key,
-    _module_names_from_units,
 )
 
 
@@ -30,12 +29,6 @@ def test_registered_metric_families_define_contract_metadata() -> None:
 
 def test_registry_sort_helpers_handle_non_mapping_units() -> None:
     assert _group_item_sort_key("not-a-mapping") == ("", 0, 0, "")
-    assert _module_names_from_units(
-        ("skip-me", {"qualname": "pkg.mod:fn"})
-    ) == frozenset(["pkg.mod"])
-    assert _module_names_from_units(({"qualname": "standalone"},)) == frozenset(
-        ["standalone"]
-    )
 
 
 def test_score_quantile_q_one_returns_last_value() -> None:

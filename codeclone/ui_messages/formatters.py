@@ -17,10 +17,6 @@ from pathlib import Path
 
 from .. import __version__
 from ..contracts import ISSUES_URL
-from ..paths.gitignore import (
-    GITIGNORE_CODECLONE_CACHE_MESSAGE,
-    GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
-)
 from .labels import (
     CLI_LAYOUT_MAX_WIDTH,
     SUMMARY_COMPACT,
@@ -143,10 +139,10 @@ def fmt_vscode_extension_tip(*, url: str) -> str:
     return TIP_VSCODE_EXTENSION.format(url=url)
 
 
-def fmt_gitignore_codeclone_cache_tip() -> str:
+def fmt_gitignore_codeclone_cache_tip(*, message: str, entry: str) -> str:
     return TIP_GITIGNORE_CODECLONE_CACHE.format(
-        message=GITIGNORE_CODECLONE_CACHE_MESSAGE,
-        entry=GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
+        message=message,
+        entry=entry,
     )
 
 

@@ -25,7 +25,7 @@ from ..models import (
     SecuritySurface,
     StructuralFindingGroup,
 )
-from ..observability import record_counter
+from ..observability import record_counter, span
 from ._types import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_RUNTIME_PROCESSES,
@@ -74,7 +74,16 @@ def process(
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> ProcessingResult:
     files_to_process = discovery.files_to_process
+    registry = discovery.module_registry
     if not files_to_process:
+        with span(name="analysis.registry_bind") as registry_span:
+            registry_span.set_counter("facts_bound", 0)
+            with span(name="analysis.relative_imports") as relative_span:
+                relative_span.set_counter("analysis_dependency_targets", 0)
+                relative_span.set_counter("analysis_known_internal_not_analyzed", 0)
+                relative_span.set_counter("unresolved_relatives", 0)
+                relative_span.set_counter("analysis_inventory_submodule_expansions", 0)
+                relative_span.set_counter("typed_failures", 0)
         record_counter("registry_worker_installs", 0)
         return ProcessingResult(
             units=discovery.cached_units,
@@ -269,8 +278,7 @@ def process(
             source_read_failures.append(failure)
 
     def _run_sequential(files: Sequence[str]) -> None:
-        if discovery.module_registry is not None:
-            _install_module_registry(discovery.module_registry)
+        _install_module_registry(registry)
         for filepath in files:
             _accept_result(
                 _invoke_process_file(
@@ -292,76 +300,91 @@ def process(
             if on_advance is not None:
                 on_advance()
 
-    if _should_use_parallel(len(files_to_process), processes):
-        try:
-            if discovery.module_registry is None:
-                executor_context = ProcessPoolExecutor(max_workers=processes)
-            else:
+    def _run_files() -> None:
+        nonlocal files_skipped
+        if _should_use_parallel(len(files_to_process), processes):
+            try:
                 try:
                     executor_context = ProcessPoolExecutor(
                         max_workers=processes,
                         initializer=_install_module_registry,
-                        initargs=(discovery.module_registry,),
+                        initargs=(registry,),
                     )
                 except TypeError as exc:
                     raise RuntimeError(
                         "process backend does not support registry initialization"
                     ) from exc
-            with executor_context as executor:
-                for idx in range(0, len(files_to_process), batch_size):
-                    batch = files_to_process[idx : idx + batch_size]
-                    futures = [
-                        executor.submit(
-                            _invoke_process_file,
-                            filepath,
-                            root_str,
-                            boot.config,
-                            min_loc,
-                            min_stmt,
-                            collect_structural_findings=collect_structural_findings,
-                            collect_api_surface=collect_api_surface,
-                            api_include_private_modules=api_include_private_modules,
-                            block_min_loc=block_min_loc,
-                            block_min_stmt=block_min_stmt,
-                            segment_min_loc=segment_min_loc,
-                            segment_min_stmt=segment_min_stmt,
-                            phase_ledger=_phase_ledger_for_file(),
-                        )
-                        for filepath in batch
-                    ]
-                    future_to_path = {
-                        id(future): filepath
-                        for future, filepath in zip(futures, batch, strict=True)
-                    }
-                    for future in as_completed(futures):
-                        filepath = future_to_path[id(future)]
-                        try:
-                            _accept_result(future.result())
-                        except Exception as exc:  # pragma: no cover - worker crash
-                            files_skipped += 1
-                            failed_files.append(f"{filepath}: {exc}")
-                            if on_worker_error is not None:
-                                on_worker_error(str(exc))
-                        if on_advance is not None:
-                            on_advance()
-            record_counter(
-                "registry_worker_installs",
-                processes if discovery.module_registry is not None else 0,
-            )
-        except (OSError, RuntimeError, PermissionError) as exc:
-            if on_parallel_fallback is not None:
-                on_parallel_fallback(exc)
+                with executor_context as executor:
+                    for idx in range(0, len(files_to_process), batch_size):
+                        batch = files_to_process[idx : idx + batch_size]
+                        futures = [
+                            executor.submit(
+                                _invoke_process_file,
+                                filepath,
+                                root_str,
+                                boot.config,
+                                min_loc,
+                                min_stmt,
+                                collect_structural_findings=collect_structural_findings,
+                                collect_api_surface=collect_api_surface,
+                                api_include_private_modules=api_include_private_modules,
+                                block_min_loc=block_min_loc,
+                                block_min_stmt=block_min_stmt,
+                                segment_min_loc=segment_min_loc,
+                                segment_min_stmt=segment_min_stmt,
+                                phase_ledger=_phase_ledger_for_file(),
+                            )
+                            for filepath in batch
+                        ]
+                        future_to_path = {
+                            id(future): filepath
+                            for future, filepath in zip(futures, batch, strict=True)
+                        }
+                        for future in as_completed(futures):
+                            filepath = future_to_path[id(future)]
+                            try:
+                                _accept_result(future.result())
+                            except Exception as exc:  # pragma: no cover - worker crash
+                                files_skipped += 1
+                                failed_files.append(f"{filepath}: {exc}")
+                                if on_worker_error is not None:
+                                    on_worker_error(str(exc))
+                            if on_advance is not None:
+                                on_advance()
+                record_counter("registry_worker_installs", processes)
+            except (OSError, RuntimeError, PermissionError) as exc:
+                if on_parallel_fallback is not None:
+                    on_parallel_fallback(exc)
+                _run_sequential(files_to_process)
+                record_counter("registry_worker_installs", 1)
+        else:
             _run_sequential(files_to_process)
-            record_counter(
-                "registry_worker_installs",
-                1 if discovery.module_registry is not None else 0,
+            record_counter("registry_worker_installs", 1)
+
+    with span(name="analysis.registry_bind") as registry_span:
+        with span(name="analysis.relative_imports") as relative_span:
+            _run_files()
+            relative_span.set_counter(
+                "analysis_dependency_targets",
+                sum(bool(dep.target) for dep in all_module_deps),
             )
-    else:
-        _run_sequential(files_to_process)
-        record_counter(
-            "registry_worker_installs",
-            1 if discovery.module_registry is not None else 0,
-        )
+            relative_span.set_counter(
+                "analysis_known_internal_not_analyzed",
+                sum(
+                    dep.resolution == "known_internal_not_analyzed"
+                    for dep in all_module_deps
+                ),
+            )
+            relative_span.set_counter(
+                "unresolved_relatives",
+                sum(dep.resolution == "unresolved_relative" for dep in all_module_deps),
+            )
+            relative_span.set_counter(
+                "analysis_inventory_submodule_expansions",
+                sum(dep.inventory_expansion for dep in all_module_deps),
+            )
+            relative_span.set_counter("typed_failures", len(failed_files))
+        registry_span.set_counter("facts_bound", len(source_stats_by_file))
 
     volumes = batch_snapshot.volume_map()
     phase_snapshot = batch_snapshot if volumes.get("files_timed", 0) > 0 else None

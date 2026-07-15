@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import builtins
 from argparse import Namespace
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
@@ -39,6 +40,7 @@ from codeclone.core.pipeline import analyze
 from codeclone.core.reporting import report
 from codeclone.metrics.coverage_join import CoverageJoinParseError
 from codeclone.models import DepGraph, HealthScore, ProjectMetrics
+from codeclone.paths.module_identity.inventory import build_module_registry
 
 
 class _FailExec:
@@ -87,7 +89,7 @@ def test_resolve_process_count_defaults_in_runtime() -> None:
     assert _resolve_process_count(3) == 3
 
 
-def _build_discovery(filepaths: tuple[str, ...]) -> DiscoveryResult:
+def _build_discovery(filepaths: tuple[str, ...], *, root: Path) -> DiscoveryResult:
     return DiscoveryResult(
         files_found=len(filepaths),
         cache_hits=0,
@@ -102,6 +104,7 @@ def _build_discovery(filepaths: tuple[str, ...]) -> DiscoveryResult:
         cached_referenced_names=frozenset(),
         files_to_process=filepaths,
         skipped_warnings=(),
+        module_registry=build_module_registry(root=root),
     )
 
 
@@ -159,7 +162,7 @@ def _build_large_batch_case(
         filepaths.append(str(src))
 
     boot = _build_boot(tmp_path, processes=2)
-    discovery = _build_discovery(tuple(filepaths))
+    discovery = _build_discovery(tuple(filepaths), root=tmp_path)
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
     return boot, discovery, cache, filepaths
 
@@ -170,7 +173,88 @@ def _build_single_file_process_case(
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(src)
-    return filepath, _build_boot(tmp_path, processes=1), _build_discovery((filepath,))
+    return (
+        filepath,
+        _build_boot(tmp_path, processes=1),
+        _build_discovery((filepath,), root=tmp_path),
+    )
+
+
+class _ObservedAnalysisSpan:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.counters: dict[str, int] = {}
+
+    def set_counter(self, key: str, value: int) -> None:
+        self.counters[key] = value
+
+
+def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    valid = tmp_path / "valid.py"
+    broken = tmp_path / "broken.py"
+    valid.write_text("from .. import missing\n", "utf-8")
+    broken.write_text("def broken(:\n", "utf-8")
+    filepaths = (str(broken), str(valid))
+    boot = _build_boot(tmp_path, processes=1)
+    boot.args.skip_metrics = False
+    discovery = _build_discovery(filepaths, root=tmp_path)
+
+    unobserved = process(
+        boot=boot,
+        discovery=discovery,
+        cache=Cache(tmp_path / "unobserved-cache.json", root=tmp_path),
+    )
+
+    recorded: list[_ObservedAnalysisSpan] = []
+
+    @contextmanager
+    def _recording_span(*, name: str) -> Iterator[_ObservedAnalysisSpan]:
+        observed = _ObservedAnalysisSpan(name)
+        recorded.append(observed)
+        yield observed
+
+    real_process_file = core_worker.process_file
+    process_calls = 0
+
+    def _counted_process_file(
+        filepath: str,
+        root: str,
+        cfg: NormalizationConfig,
+        min_loc: int,
+        min_stmt: int,
+    ) -> FileProcessResult:
+        nonlocal process_calls
+        process_calls += 1
+        return real_process_file(filepath, root, cfg, min_loc, min_stmt)
+
+    monkeypatch.setattr(core_parallelism, "span", _recording_span)
+    monkeypatch.setattr(core_worker, "process_file", _counted_process_file)
+    observed = process(
+        boot=boot,
+        discovery=discovery,
+        cache=Cache(tmp_path / "observed-cache.json", root=tmp_path),
+    )
+
+    assert observed == unobserved
+    assert tuple(unit["fingerprint"] for unit in observed.units) == tuple(
+        unit["fingerprint"] for unit in unobserved.units
+    )
+    assert process_calls == len(filepaths)
+    assert [stage.name for stage in recorded] == [
+        "analysis.registry_bind",
+        "analysis.relative_imports",
+    ]
+    assert recorded[0].counters == {"facts_bound": 1}
+    assert recorded[1].counters == {
+        "analysis_dependency_targets": 0,
+        "analysis_inventory_submodule_expansions": 0,
+        "analysis_known_internal_not_analyzed": 0,
+        "typed_failures": 1,
+        "unresolved_relatives": 1,
+    }
 
 
 def _build_report_case(
@@ -196,7 +280,7 @@ def _build_report_case(
         ),
         cache_path=tmp_path / "cache.json",
     )
-    discovery = _build_discovery(())
+    discovery = _build_discovery((), root=tmp_path)
     processing = ProcessingResult(
         units=(),
         blocks=(),
@@ -266,7 +350,7 @@ def test_process_small_batch_skips_parallel_executor(
     src.write_text("def f():\n    return 1\n", "utf-8")
 
     boot = _build_boot(tmp_path, processes=4)
-    discovery = _build_discovery((str(src),))
+    discovery = _build_discovery((str(src),), root=tmp_path)
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
     callbacks: list[str] = []
 
@@ -578,7 +662,7 @@ def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(
         output_paths=OutputPaths(),
         cache_path=tmp_path / "cache.json",
     )
-    discovery = _build_discovery(())
+    discovery = _build_discovery((), root=tmp_path)
     processing = ProcessingResult(
         units=(),
         blocks=(),

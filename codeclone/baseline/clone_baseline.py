@@ -11,6 +11,8 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import codeclone.baseline.trust as _trust
+
 from .. import __version__
 from ..contracts import (
     BASELINE_FINGERPRINT_VERSION,
@@ -21,7 +23,6 @@ from ..utils.json_io import (
     write_json_document_atomically as _write_json_document_atomically,
 )
 from ..utils.schema_validation import validate_top_level_structure
-from . import trust as _trust
 from .diff import diff_clone_groups
 
 if TYPE_CHECKING:

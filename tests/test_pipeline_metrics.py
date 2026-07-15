@@ -24,7 +24,6 @@ from codeclone.core._types import (
     _as_sorted_str_tuple,
     _class_metric_sort_key,
     _module_dep_sort_key,
-    _module_names_from_units,
 )
 from codeclone.core.bootstrap import _resolve_optional_runtime_path
 from codeclone.core.coverage_payload import _coverage_join_rows, _coverage_join_summary
@@ -95,6 +94,13 @@ from codeclone.report.gates.evaluator import (
 )
 from codeclone.utils.coerce import as_int as _as_int
 from codeclone.utils.coerce import as_str as _as_str
+from tests._ast_metrics_helpers import module_registry_context
+
+_TEST_MODULE_REGISTRY = module_registry_context(
+    filepath="pkg/mod.py",
+    module_name="pkg.mod",
+    inventory_modules=("pkg.api", "pkg.dep"),
+)[1]
 
 
 def _project_metrics(*, dead_confidence: str = "high") -> ProjectMetrics:
@@ -231,17 +237,6 @@ def test_pipeline_basic_helpers_and_sort_keys() -> None:
     assert _class_metric_sort_key(cls) == ("pkg/mod.py", 10, 30, "pkg.mod:Service")
 
 
-def test_module_names_from_units_extracts_module_prefixes() -> None:
-    units = (
-        {"qualname": "pkg.core:build"},
-        {"qualname": "pkg.utils.helper"},
-        {"qualname": ""},
-    )
-    assert _module_names_from_units(units) == frozenset(
-        {"pkg.core", "pkg.utils.helper"}
-    )
-
-
 def test_optional_runtime_path_resolves_and_falls_back(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -269,6 +264,7 @@ def test_optional_runtime_path_resolves_and_falls_back(
 
 def test_compute_project_metrics_respects_skip_flags() -> None:
     project_metrics, dep_graph, dead_items = compute_project_metrics(
+        module_registry=_TEST_MODULE_REGISTRY,
         units=(
             {
                 "qualname": "pkg.mod:run",
@@ -309,6 +305,7 @@ def test_compute_project_metrics_respects_skip_flags() -> None:
 
 def test_compute_project_metrics_uses_runtime_reachability_for_dead_code() -> None:
     project_metrics, _dep_graph, dead_items = compute_project_metrics(
+        module_registry=_TEST_MODULE_REGISTRY,
         units=(),
         class_metrics=(),
         module_deps=(),
@@ -354,6 +351,7 @@ def test_compute_project_metrics_uses_runtime_reachability_for_dead_code() -> No
 
 def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> None:
     payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
         project_metrics=_project_metrics(dead_confidence="high"),
         units=(),
         class_metrics=(),
@@ -390,6 +388,7 @@ def test_build_metrics_report_payload_includes_adoption_and_api_surface_families
     None
 ):
     payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
         project_metrics=_project_metrics_with_adoption_and_api(),
         units=(),
         class_metrics=(),
@@ -463,6 +462,7 @@ def test_build_metrics_report_payload_includes_adoption_and_api_surface_families
 
 def test_build_metrics_report_payload_includes_security_surfaces_family() -> None:
     payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
         scan_root="/repo",
         project_metrics=_project_metrics(dead_confidence="high"),
         units=(),
@@ -554,6 +554,7 @@ def test_build_metrics_report_payload_includes_security_surfaces_family() -> Non
 
 def test_build_metrics_report_payload_includes_runtime_reachability_facts() -> None:
     payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
         scan_root="/repo",
         project_metrics=_project_metrics(dead_confidence="high"),
         units=(),
@@ -602,7 +603,13 @@ def test_build_metrics_report_payload_includes_runtime_reachability_facts() -> N
 
 
 def test_metrics_payload_includes_overloaded_modules_for_small_population() -> None:
+    registry = module_registry_context(
+        filepath="pkg/alpha.py",
+        module_name="pkg.alpha",
+        inventory_modules=("tests.test_beta",),
+    )[1]
     payload = build_metrics_report_payload(
+        module_registry=registry,
         scan_root="/repo",
         project_metrics=_project_metrics(dead_confidence="high"),
         units=(
@@ -696,8 +703,14 @@ def test_build_overloaded_modules_payload_flags_project_relative_candidates() ->
             for idx in range(10, 20)
         ),
     ]
+    registry = module_registry_context(
+        filepath="pkg/core.py",
+        module_name="pkg.core",
+        inventory_modules=tuple(f"pkg.mod_{idx}" for idx in range(20)),
+    )[1]
 
     payload = build_overloaded_modules_payload(
+        registry=registry,
         scan_root=scan_root,
         source_stats_by_file=source_stats,
         units=units,
@@ -736,7 +749,12 @@ def test_overloaded_modules_helper_edge_cases() -> None:
 def test_build_overloaded_modules_payload_skips_unknown_units_and_external_deps() -> (
     None
 ):
+    registry = module_registry_context(
+        filepath="pkg/a.py",
+        module_name="pkg.a",
+    )[1]
     payload = build_overloaded_modules_payload(
+        registry=registry,
         scan_root="/repo",
         source_stats_by_file=[("/repo/pkg/a.py", 10, 1, 0, 0)],
         units=[
@@ -1468,6 +1486,7 @@ def test_enrich_metrics_report_payload_adds_docstring_and_breaking_api_rows() ->
         ),
     )
     base_payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
         project_metrics=replace(
             _project_metrics_with_adoption_and_api(),
             typing_modules=(),
@@ -1507,6 +1526,7 @@ def test_enrich_metrics_report_payload_adds_docstring_and_breaking_api_rows() ->
 def test_enrich_metrics_report_payload_hides_api_diff_without_api_baseline() -> None:
     payload = _enrich_metrics_report_payload(
         metrics_payload=build_metrics_report_payload(
+            module_registry=_TEST_MODULE_REGISTRY,
             project_metrics=_project_metrics_with_adoption_and_api(),
             units=(),
             class_metrics=(),

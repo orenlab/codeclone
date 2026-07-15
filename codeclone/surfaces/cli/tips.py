@@ -15,7 +15,11 @@ from typing import NamedTuple, TextIO
 from packaging.version import InvalidVersion, Version
 
 from ... import ui_messages as ui
-from ...paths.gitignore import repo_gitignore_covers_codeclone_cache
+from ...paths.gitignore import (
+    GITIGNORE_CODECLONE_CACHE_MESSAGE,
+    GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
+    repo_gitignore_covers_codeclone_cache,
+)
 from ...utils.json_io import read_json_object, write_json_document_atomically
 from .attrs import bool_attr
 from .types import PrinterLike
@@ -422,7 +426,12 @@ def maybe_print_gitignore_codeclone_cache_tip(
         return False
     if repo_gitignore_covers_codeclone_cache(root_path):
         return False
-    console.print(ui.fmt_gitignore_codeclone_cache_tip())
+    console.print(
+        ui.fmt_gitignore_codeclone_cache_tip(
+            message=GITIGNORE_CODECLONE_CACHE_MESSAGE,
+            entry=GITIGNORE_CODECLONE_CACHE_SUGGESTED_ENTRY,
+        )
+    )
     return True
 
 

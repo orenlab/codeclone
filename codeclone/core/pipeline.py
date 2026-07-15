@@ -21,7 +21,6 @@ from ..findings.clones.grouping import (
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
-from ..metrics._base import MetricProjectContext
 from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
 from ..metrics.dead_code import find_suppressed_unused
 from ..metrics.registry import (
@@ -36,9 +35,11 @@ from ..models import (
     DeadItem,
     DepGraph,
     GroupItemLike,
+    MetricProjectContext,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
+    ModuleRegistryHandle,
     ModuleTypingCoverage,
     ProjectMetrics,
     RuntimeReachabilityFact,
@@ -95,6 +96,7 @@ def compute_project_metrics(
     files_analyzed_or_cached: int,
     function_clone_groups: int,
     block_clone_groups: int,
+    module_registry: ModuleRegistryHandle,
     skip_dependencies: bool,
     skip_dead_code: bool,
 ) -> tuple[ProjectMetrics, DepGraph, tuple[DeadItem, ...]]:
@@ -114,6 +116,7 @@ def compute_project_metrics(
         files_analyzed_or_cached=files_analyzed_or_cached,
         function_clone_groups=function_clone_groups,
         block_clone_groups=block_clone_groups,
+        module_registry=module_registry,
         skip_dependencies=skip_dependencies,
         skip_dead_code=skip_dead_code,
     )
@@ -302,6 +305,7 @@ def analyze(
             files_analyzed_or_cached=files_analyzed_or_cached,
             function_clone_groups=func_clones_count,
             block_clone_groups=block_clones_count,
+            module_registry=discovery.module_registry,
             skip_dependencies=boot.args.skip_dependencies,
             skip_dead_code=boot.args.skip_dead_code,
         )
@@ -354,6 +358,7 @@ def analyze(
             units=processing.units,
             class_metrics=processing.class_metrics,
             module_deps=processing.module_deps,
+            module_registry=discovery.module_registry,
             runtime_reachability=processing.runtime_reachability,
             security_surfaces=processing.security_surfaces,
             source_stats_by_file=processing.source_stats_by_file,

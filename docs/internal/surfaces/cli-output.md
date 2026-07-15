@@ -142,7 +142,7 @@ graph TD
 ### Invalid cache (contract error, exit code 2)
 
 - Cache file is corrupted
-- Cache schema version does not match `CACHE_VERSION` ("2.10")
+- Cache schema version does not match `CACHE_VERSION` ("2.11")
 - Cache exceeds `DEFAULT_MAX_CACHE_SIZE_MB` (50 MB)
 
 **Remediation:** Delete `.codeclone/cache.json` and re-run.

@@ -55,7 +55,7 @@ evidence, platform self-observability, and broader IDE/agent integration.
 
 ### Contract changes
 
-- Cache schema advanced to **2.9** for the rebuildable per-function relationship-fact projection and to **2.10** for
+- Cache schema advanced to **2.9** for the rebuildable per-function relationship-fact projection and to **2.11** for
   intra-module, class-method, and receiver-aware call resolution.
 - Engineering Memory schema advanced to **1.7** for trajectory and Patch Trail evidence.
 - Semantic index format advanced to **3** for LanceDB rows with `source_revision`; existing semantic sidecars should be

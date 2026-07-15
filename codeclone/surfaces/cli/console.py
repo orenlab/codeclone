@@ -19,8 +19,7 @@ from typing import TYPE_CHECKING, cast
 from ... import __version__
 from ... import ui_messages as ui
 from ...report.gates import reasons as gate_reasons
-from . import state as cli_state
-from .types import CLIArgsLike, PrinterLike, StatusConsole, require_status_console
+from .types import CLIArgsLike, PrinterLike
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
@@ -172,10 +171,6 @@ def _render_banner(
         console.print(f"  [dim]Root:[/dim] [dim]{root_display}[/dim]")
 
 
-def _console() -> StatusConsole:
-    return require_status_console(cli_state.get_console())
-
-
 def _rich_progress_symbols() -> tuple[
     type[RichProgress],
     type[RichSpinnerColumn],
@@ -201,12 +196,13 @@ def _parse_metric_reason_entry(reason: str) -> tuple[str, str]:
 
 def _print_gating_failure_block(
     *,
+    console: PrinterLike,
     code: str,
     entries: Sequence[tuple[str, object]],
     args: CLIArgsLike,
 ) -> None:
     gate_reasons.print_gating_failure_block(
-        console=_console(),
+        console=console,
         code=code,
         entries=list(entries),
         args=args,
@@ -226,9 +222,9 @@ def _print_verbose_clone_hashes(
         console.print(f"      - {clone_hash}")
 
 
-def print_banner(*, root: Path | None = None) -> None:
+def print_banner(*, console: PrinterLike, root: Path | None = None) -> None:
     _render_banner(
-        console=_console(),
+        console=console,
         banner_title=ui.banner_title(__version__),
         project_name=(root.name if root is not None else None),
         root_display=(str(root) if root is not None else None),

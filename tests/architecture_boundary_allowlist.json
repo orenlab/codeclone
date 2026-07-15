@@ -1,7 +1,7 @@
 {
   "counts": {
     "model_store:base_model_definition": 20,
-    "model_store:dataclass_definition": 281,
+    "model_store:dataclass_definition": 280,
     "model_store:pydantic_dependency": 9,
     "production_import:r1->r2": 2,
     "production_import:r1->r2p": 5,
@@ -9,7 +9,7 @@
     "production_import:r2->r4": 18,
     "production_import:r2p->r2": 61,
     "production_import:r2p->r4": 6,
-    "production_import:r4->r2": 168,
+    "production_import:r4->r2": 167,
     "production_import:r4->r2p": 116,
     "test_import:r2p->r2": 67,
     "test_import:r4->r2": 170,
@@ -226,7 +226,6 @@
       "codeclone.memory.vacuum::VacuumReport",
       "codeclone.metrics._base::MetricAggregate",
       "codeclone.metrics._base::MetricFamily",
-      "codeclone.metrics._base::MetricProjectContext",
       "codeclone.metrics._visibility::ModuleVisibility",
       "codeclone.metrics.coverage_join::_CoverageFileLines",
       "codeclone.metrics.coverage_join::_CoverageReport",
@@ -608,7 +607,6 @@
       "codeclone.surfaces.mcp.server -> codeclone.config.observability",
       "codeclone.surfaces.mcp.session -> codeclone.cache.store",
       "codeclone.surfaces.mcp.session -> codeclone.report.meta",
-      "codeclone.ui_messages.formatters -> codeclone.paths.gitignore",
       "codeclone.ui_messages.styling -> codeclone.domain.quality"
     ],
     "production_import:r4->r2p": [

@@ -21,7 +21,7 @@ The MCP workflow surface (`codeclone.surfaces.mcp`) exposes a deterministic, ses
 | SEMANTIC_INDEX_FORMAT_VERSION           | str    | `3`              |
 | ENGINEERING_MEMORY_SCHEMA_VERSION       | str    | `1.7`            |
 | REPORT_SCHEMA_VERSION                   | str    | `2.12`           |
-| CACHE_VERSION                           | str    | `2.10`           |
+| CACHE_VERSION                           | str    | `2.11`           |
 | BASELINE_SCHEMA_VERSION                 | str    | `2.1`            |
 | PATCH_TRAIL_SCHEMA_VERSION              | str    | `1`              |
 

@@ -76,7 +76,7 @@ def test_extractor_canonical_helpers_live_in_analysis_modules() -> None:
         == "codeclone.analysis._module_walk"
     )
     assert (
-        analysis_module_walk._resolve_import_target.__module__
+        analysis_module_walk.resolve_import_observation.__module__
         == "codeclone.analysis._module_walk"
     )
     assert (

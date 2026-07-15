@@ -31,11 +31,12 @@ from codeclone.findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
 from codeclone.models import ClassMetrics, DeadCandidate, ModuleDep
-from codeclone.scanner import iter_py_files, module_name_from_path
+from codeclone.scanner import iter_py_files
 from tests._assertions import (
     assert_snapshot_matches_or_smoke_on_python_tag_mismatch,
     snapshot_python_tag,
 )
+from tests._ast_metrics_helpers import build_test_module_registry
 
 _GOLDEN_V2_ROOT = Path("tests/fixtures/golden_v2").resolve()
 
@@ -63,7 +64,11 @@ class _InlineExecutor:
 
 def _dummy_process_pool_executor(
     max_workers: int | None = None,
+    initializer: Callable[..., object] | None = None,
+    initargs: tuple[object, ...] = (),
 ) -> object:
+    if initializer is not None:
+        initializer(*initargs)
     return nullcontext(_InlineExecutor(max_workers=max_workers))
 
 
@@ -95,6 +100,7 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
     referenced_qualnames: set[str] = set()
 
     files = tuple(iter_py_files(str(project_root)))
+    registry = build_test_module_registry(root=project_root)
     lines_total = 0
     functions_total = 0
     methods_total = 0
@@ -102,8 +108,8 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
 
     for filepath in files:
         source = Path(filepath).read_text("utf-8")
-        module_name = module_name_from_path(str(project_root), filepath)
         relative_filepath = str(Path(filepath).resolve().relative_to(project_root))
+        identity = registry.entries_by_path[relative_filepath].identity
         (
             file_units,
             file_blocks,
@@ -114,7 +120,8 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
         ) = extract_units_and_stats_from_source(
             source=source,
             filepath=relative_filepath,
-            module_name=module_name,
+            identity=identity,
+            registry=registry,
             cfg=cfg,
             min_loc=1,
             min_stmt=1,
@@ -151,6 +158,7 @@ def _collect_analysis_snapshot(project_root: Path) -> dict[str, object]:
         files_analyzed_or_cached=len(files),
         function_clone_groups=len(function_groups),
         block_clone_groups=len(block_groups),
+        module_registry=registry,
         skip_dependencies=False,
         skip_dead_code=False,
     )

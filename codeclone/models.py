@@ -43,6 +43,13 @@ ModuleIdentityStrategy = ImportMountOrigin
 PythonModuleOrigin = Literal["import_mount"]
 PythonModuleNodeKind = Literal["module_file", "regular_package"]
 ModuleInternality = Literal["analyzed", "known_internal_not_analyzed"]
+DependencyResolution = Literal[
+    "analyzed",
+    "known_internal_not_analyzed",
+    "external",
+    "unresolved_relative",
+    "ambiguous",
+]
 PackagePrefixNodeKind = Literal["namespace_package", "synthetic_prefix"]
 AnalysisMountOrigin = Literal["analysis_only"]
 PortablePathIssueKind = Literal[
@@ -458,6 +465,34 @@ class ModuleDep:
     target: str
     import_type: Literal["import", "from_import"]
     line: int
+    resolution: DependencyResolution = "external"
+    inventory_expansion: bool = False
+    level: int = 0
+    requested_module: str | None = None
+    requested_names: tuple[str, ...] = ()
+    candidate_targets: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ImportObservation:
+    source: ResolvedSourceIdentity
+    syntax_kind: Literal["import", "from_import"]
+    level: int
+    requested_module: str | None
+    requested_names: tuple[str, ...]
+    resolution: DependencyResolution
+    candidate_targets: tuple[str, ...]
+    resolved_target: str | None
+    inventory_expansion: bool = False
+
+    def __post_init__(self) -> None:
+        if self.candidate_targets != tuple(sorted(set(self.candidate_targets))):
+            raise ValueError("import candidate targets must be sorted and unique")
+        if self.resolution == "unresolved_relative":
+            if self.resolved_target is not None:
+                raise ValueError("unresolved relative imports cannot have a target")
+        elif not self.resolved_target:
+            raise ValueError("resolved import observations require a target")
 
 
 @dataclass(frozen=True, slots=True)
@@ -808,6 +843,31 @@ class SuppressedCloneGroup:
 
 GroupItem = dict[str, object]
 GroupItemLike = Mapping[str, object]
+
+
+@dataclass(slots=True)
+class MetricProjectContext:
+    units: tuple[GroupItemLike, ...]
+    class_metrics: tuple[ClassMetrics, ...]
+    module_deps: tuple[ModuleDep, ...]
+    dead_candidates: tuple[DeadCandidate, ...]
+    referenced_names: frozenset[str]
+    referenced_qualnames: frozenset[str]
+    module_registry: ModuleRegistryHandle
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
+    security_surfaces: tuple[SecuritySurface, ...] = ()
+    typing_modules: tuple[ModuleTypingCoverage, ...] = ()
+    docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
+    api_modules: tuple[ModuleApiSurface, ...] = ()
+    files_found: int = 0
+    files_analyzed_or_cached: int = 0
+    function_clone_groups: int = 0
+    block_clone_groups: int = 0
+    skip_dependencies: bool = False
+    skip_dead_code: bool = False
+    memo: dict[str, dict[str, object]] = field(default_factory=dict)
+
+
 GroupItemsLike = Sequence[GroupItemLike]
 GroupMapLike = Mapping[str, Sequence[GroupItemLike]]
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from math import ceil
 from typing import TYPE_CHECKING
 
-from ..models import DepGraph, ModuleDep
+from ..models import DepGraph, ModuleDep, ModuleRegistryHandle
 from ..utils import coerce
 
 if TYPE_CHECKING:
@@ -18,24 +18,25 @@ if TYPE_CHECKING:
 DepAdjacency = dict[str, set[str]]
 
 
-def _internal_roots(
-    modules: Iterable[str],
-    deps: Sequence[ModuleDep],
-) -> frozenset[str]:
-    roots: set[str] = set()
-    for module_name in modules:
-        if module_name:
-            roots.add(module_name.split(".", 1)[0])
-    for dep in deps:
-        if dep.source:
-            roots.add(dep.source.split(".", 1)[0])
-    return frozenset(sorted(roots))
+def _registry_modules(registry: ModuleRegistryHandle) -> frozenset[str]:
+    entry_modules = {
+        module.module
+        for entry in registry.entries_by_module.values()
+        if entry.analyzed and (module := entry.identity.python_module) is not None
+    }
+    prefix_modules = {prefix.module for prefix in registry.package_prefixes}
+    return frozenset(sorted(entry_modules | prefix_modules))
 
 
-def _is_internal_target(target: str, *, internal_roots: frozenset[str]) -> bool:
-    if not target:
-        return False
-    return target.split(".", 1)[0] in internal_roots
+def _is_internal_target(
+    target: str,
+    *,
+    registry: ModuleRegistryHandle,
+) -> bool:
+    return bool(target) and (
+        target in registry.entries_by_module
+        or any(prefix.module == target for prefix in registry.package_prefixes)
+    )
 
 
 def _unique_sorted_edges(deps: Sequence[ModuleDep]) -> tuple[ModuleDep, ...]:
@@ -102,15 +103,11 @@ def _tarjan_scc(graph: DepAdjacency) -> list[list[str]]:
 
 
 def find_cycles(graph: DepAdjacency) -> tuple[tuple[str, ...], ...]:
-    cycles: list[tuple[str, ...]] = []
-    for component in _tarjan_scc(graph):
-        if len(component) > 1:
-            cycles.append(tuple(component))
-            continue
-        node = component[0]
-        if node in graph and node in graph[node]:
-            cycles.append((node,))
-    return tuple(sorted(cycles))
+    return tuple(
+        sorted(
+            tuple(component) for component in _tarjan_scc(graph) if len(component) > 1
+        )
+    )
 
 
 def _longest_path_from(
@@ -229,23 +226,17 @@ def longest_chains(
     return tuple(sorted_chains[:limit])
 
 
-def build_dep_graph(*, modules: Iterable[str], deps: Sequence[ModuleDep]) -> DepGraph:
-    base_modules = frozenset(
-        sorted(
-            {
-                str(module_name).strip()
-                for module_name in modules
-                if str(module_name).strip()
-            }
-        )
-    )
-    internal_roots = _internal_roots(base_modules, deps)
+def build_dep_graph(
+    *,
+    registry: ModuleRegistryHandle,
+    deps: Sequence[ModuleDep],
+) -> DepGraph:
+    base_modules = _registry_modules(registry)
     internal_edges = _unique_sorted_edges(
         tuple(
             dep
             for dep in deps
-            if dep.source
-            and _is_internal_target(dep.target, internal_roots=internal_roots)
+            if dep.source and _is_internal_target(dep.target, registry=registry)
         )
     )
     graph_modules = frozenset(

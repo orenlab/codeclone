@@ -14,8 +14,9 @@ import pytest
 
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ValidationError
-from codeclone.core._types import MAX_FILE_SIZE
-from codeclone.core.worker import process_file
+from codeclone.core._types import MAX_FILE_SIZE, FileProcessResult
+from codeclone.core.worker import _install_module_registry
+from codeclone.core.worker import process_file as _worker_process_file
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import build_html_report
 from codeclone.report.renderers.markdown import render_markdown_report_document
@@ -27,6 +28,18 @@ from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
     MCPServiceContractError,
 )
+from tests._ast_metrics_helpers import worker_registry_context
+
+
+def process_file(
+    filepath: str,
+    root: str,
+    cfg: NormalizationConfig,
+    min_loc: int,
+    min_stmt: int,
+) -> FileProcessResult:
+    _install_module_registry(worker_registry_context(filepath=filepath, root=root))
+    return _worker_process_file(filepath, root, cfg, min_loc, min_stmt)
 
 
 def test_scanner_path_traversal() -> None:
