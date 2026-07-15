@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import cast
 
+from ...api.memory import rebuild_semantic_index
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...config.memory_defaults import DEFAULT_MEMORY_STATEMENT_PREVIEW_CHARS
@@ -38,7 +39,6 @@ from ...memory.retrieval import query_engineering_memory, query_records_for_repo
 from ...memory.retrieval.semantic import semantic_search
 from ...memory.semantic import (
     close_semantic_index,
-    execute_semantic_index_rebuild,
     resolve_semantic_index,
 )
 from ...memory.semantic.models import SemanticSearchResult
@@ -1314,9 +1314,8 @@ def _run_semantic_status(*, console: PrinterLike, root_path: Path) -> int:
 
 
 def _run_semantic_rebuild(*, console: PrinterLike, root_path: Path) -> int:
-    config = resolve_memory_config(root_path)
     try:
-        payload = execute_semantic_index_rebuild(root_path=root_path, config=config)
+        payload = rebuild_semantic_index(root_path=root_path).to_payload()
     except MemoryContractError as exc:
         console.print(str(exc))
         console.print("Run: codeclone memory init")

@@ -138,6 +138,7 @@ packages = [
     "codeclone.analytics.report",
     "codeclone.analytics.report.messages",
     "codeclone.analytics.store",
+    "codeclone.api",
     "codeclone.audit",
     "codeclone.baseline",
     "codeclone.blocks",
