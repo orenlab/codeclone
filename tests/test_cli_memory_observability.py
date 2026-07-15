@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from codeclone.api.memory import SemanticIndexRebuildDTO
 from codeclone.config.memory import resolve_memory_config
 from codeclone.memory.semantic.rebuild_workflow import execute_semantic_index_rebuild
 from codeclone.models import ObservabilityConfig
@@ -37,19 +38,19 @@ def test_memory_cli_semantic_rebuild_records_cli_operation(
     monkeypatch.setenv("CODECLONE_OBSERVABILITY_ENABLED", "1")
     with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
         with patch(
-            "codeclone.surfaces.cli.memory.execute_semantic_index_rebuild",
-            return_value={
-                "action": "rebuild_semantic_index",
-                "status": "ok",
-                "index_path": ".codeclone/db/semantic",
-                "embedding_provider": "diagnostic",
-                "indexed": 3,
-                "deleted": 0,
-                "embedded": 1,
-                "skipped_unchanged": 2,
-                "by_source": {"memory": 3},
-                "embedding_model": "diagnostic-hash-v1",
-            },
+            "codeclone.surfaces.cli.memory.rebuild_semantic_index",
+            return_value=SemanticIndexRebuildDTO(
+                action="rebuild_semantic_index",
+                status="ok",
+                index_path=".codeclone/db/semantic",
+                embedding_provider="diagnostic",
+                indexed=3,
+                deleted=0,
+                embedded=1,
+                skipped_unchanged=2,
+                by_source=(("memory", 3),),
+                embedding_model="diagnostic-hash-v1",
+            ),
         ):
             code = memory_main(["semantic", "rebuild", "--root", str(root)])
         assert code == 0

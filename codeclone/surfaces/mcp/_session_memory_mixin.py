@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import cast
 
+from ...api.memory import rebuild_semantic_index
 from ...audit.validation import DEFAULT_AUDIT_PATH, resolve_audit_path
 from ...config.memory import MemoryConfig, resolve_memory_config
 from ...memory.application import (
@@ -45,7 +46,6 @@ from ...memory.retrieval.continuation import (
 )
 from ...memory.semantic import (
     close_semantic_index,
-    execute_semantic_index_rebuild,
     resolve_semantic_index,
 )
 from ...memory.sqlite_store import SqliteEngineeringMemoryStore
@@ -331,14 +331,7 @@ class _MCPSessionMemoryMixin:
                 finally:
                     store.close()
             if normalized == "rebuild_semantic_index":
-                config = resolve_memory_config(root_path)
-                return cast(
-                    dict[str, object],
-                    execute_semantic_index_rebuild(
-                        root_path=root_path,
-                        config=config,
-                    ),
-                )
+                return rebuild_semantic_index(root_path=root_path).to_payload()
             if normalized == "rebuild_trajectories":
                 config = resolve_memory_config(root_path)
                 from ...memory.trajectory.rebuild_workflow import (

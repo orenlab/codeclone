@@ -279,7 +279,11 @@ def _model_store_violations(
                         "model_store:base_model_definition",
                         f"{module_name}::{node.name}",
                     )
-                if any(
+                is_facade_dto = (
+                    module_name == "codeclone.api"
+                    or module_name.startswith("codeclone.api.")
+                )
+                if not is_facade_dto and any(
                     _expression_name(decorator).split(".")[-1] == "dataclass"
                     for decorator in node.decorator_list
                 ):
@@ -361,6 +365,11 @@ def test_phase39s_ratchet_detects_growth_and_stale_entries() -> None:
     )
     assert unexpected == {"edge": ("new",)}
     assert resolved == {"edge": ("resolved",)}
+
+
+def test_phase39s_api_ring_registration_is_specific_before_general() -> None:
+    assert _ring_for_module("codeclone.api.memory") == "r3"
+    assert _ring_for_module("codeclone.surfaces.mcp") == "r4"
 
 
 def test_phase39s_architecture_boundary_ratchet() -> None:
