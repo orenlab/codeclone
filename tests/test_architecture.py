@@ -655,3 +655,20 @@ def test_analytics_package_does_not_import_forbidden_surfaces() -> None:
 
 def test_memory_package_does_not_import_forbidden_surfaces() -> None:
     _assert_no_forbidden_surface_imports("codeclone.memory")
+
+
+def test_phase39i_legacy_content_hit_and_git_owners_are_absent() -> None:
+    root = Path(__file__).resolve().parents[1]
+    worker_source = (root / "codeclone/core/worker.py").read_text("utf-8")
+    parallel_source = (root / "codeclone/core/parallelism.py").read_text("utf-8")
+    discovery_source = (root / "codeclone/core/discovery.py").read_text("utf-8")
+    hygiene_source = (root / "codeclone/surfaces/mcp/_workspace_hygiene.py").read_text(
+        "utf-8"
+    )
+
+    assert "read_text(" not in worker_source
+    assert "inspect.signature" not in worker_source
+    assert "except TypeError" not in parallel_source
+    assert '["stat"] == stat' not in discovery_source
+    assert "_dirty_paths_from_porcelain" not in hygiene_source
+    assert "subprocess.run" not in hygiene_source

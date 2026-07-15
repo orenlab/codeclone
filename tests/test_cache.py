@@ -95,6 +95,7 @@ from codeclone.core.discovery import _decode_cached_function_relationship_facts
 from codeclone.models import (
     ApiParamSpec,
     BlockUnit,
+    DigestObject,
     FileMetrics,
     FunctionRelationshipFacts,
     ModuleApiSurface,
@@ -112,6 +113,21 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
+
+_SOURCE_CONTENT_DIGEST = DigestObject(
+    domain="codeclone.source-content.v1",
+    algorithm="sha256",
+    value="0" * 64,
+)
+
+
+def _wire_entry(**fields: object) -> dict[str, object]:
+    return {
+        "cb": "1",
+        "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+        "gb": None,
+        **fields,
+    }
 
 
 def _make_unit(filepath: str) -> Unit:
@@ -159,6 +175,27 @@ def _analysis_payload(cache: Cache, *, files: object) -> dict[str, object]:
     }
 
 
+def _save_single_cache_entry(cache_path: Path, *, filepath: str = "x.py") -> None:
+    cache = Cache(cache_path)
+    cache.put_file_entry(
+        filepath,
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
+    cache.save()
+
+
+def _load_cache_entry(cache_path: Path, filepath: str) -> tuple[Cache, CacheEntry]:
+    loaded = Cache(cache_path)
+    loaded.load()
+    entry = loaded.get_file_entry(filepath)
+    assert entry is not None
+    return loaded, entry
+
+
 def _roundtrip_cache_entry_with_metrics(
     tmp_path: Path,
     *,
@@ -172,14 +209,12 @@ def _roundtrip_cache_entry_with_metrics(
         [],
         [],
         [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
         file_metrics=file_metrics,
     )
     cache.save()
 
-    loaded = Cache(cache_path)
-    loaded.load()
-    entry = loaded.get_file_entry("x.py")
-    assert entry is not None
+    _, entry = _load_cache_entry(cache_path, "x.py")
     return entry
 
 
@@ -190,14 +225,16 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     block = _make_block("x.py")
     segment = _make_segment("x.py")
     cache.put_file_entry(
-        "x.py", {"mtime_ns": 1, "size": 10}, [unit], [block], [segment]
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [unit],
+        [block],
+        [segment],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
     )
     cache.save()
 
-    loaded = Cache(cache_path)
-    loaded.load()
-    entry = loaded.get_file_entry("x.py")
-    assert entry is not None
+    loaded, entry = _load_cache_entry(cache_path, "x.py")
     assert entry["stat"]["size"] == 10
     assert entry["units"][0]["qualname"] == "mod:func"
     assert loaded.load_status == CacheStatus.OK
@@ -207,7 +244,14 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
 def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path, root=tmp_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
     cache.save()
 
     bootstrap(ObservabilityConfig(enabled=True), root=tmp_path)
@@ -244,9 +288,7 @@ def test_cache_release_loaded_entries_clears_clean_loaded_entries(
     tmp_path: Path,
 ) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path)
 
     loaded = Cache(cache_path)
     loaded.load()
@@ -262,7 +304,14 @@ def test_cache_release_loaded_entries_refuses_dirty_cache_by_default(
     tmp_path: Path,
 ) -> None:
     cache = Cache(tmp_path / "cache.json")
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
 
     assert cache.release_loaded_entries() == 0
     assert cache.get_file_entry("x.py") is not None
@@ -270,14 +319,19 @@ def test_cache_release_loaded_entries_refuses_dirty_cache_by_default(
 
 def test_cache_read_only_mode_suppresses_entry_writes(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path)
 
     loaded = Cache(cache_path, write_enabled=False)
     loaded.load()
 
-    loaded.put_file_entry("y.py", {"mtime_ns": 2, "size": 20}, [], [], [])
+    loaded.put_file_entry(
+        "y.py",
+        {"mtime_ns": 2, "size": 20},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
     assert loaded.prune_file_entries([]) == 0
     loaded.save()
 
@@ -329,6 +383,7 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
         [_make_unit(filepath)],
         [],
         [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
         function_relationship_facts=(facts,),
     )
     cache.save()
@@ -410,6 +465,7 @@ def test_cache_derives_function_relationship_facts_from_file_metrics(
         [],
         [],
         [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
         file_metrics=FileMetrics(
             class_metrics=(),
             module_deps=(),
@@ -567,6 +623,7 @@ def test_cache_rejects_relationship_source_mismatch(tmp_path: Path) -> None:
             [],
             [],
             [],
+            source_content_digest=_SOURCE_CONTENT_DIGEST,
             function_relationship_facts=(facts,),
         )
 
@@ -610,6 +667,7 @@ def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
         [],
         [],
         [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
     )
     cache.put_file_entry(
         str(stale),
@@ -617,6 +675,7 @@ def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
         [],
         [],
         [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
     )
     cache.save()
 
@@ -646,14 +705,12 @@ def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> 
         [],
         [],
         [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
         structural_findings=[],
     )
     cache.save()
 
-    loaded = Cache(cache_path)
-    loaded.load()
-    entry = loaded.get_file_entry("x.py")
-    assert entry is not None
+    _, entry = _load_cache_entry(cache_path, "x.py")
     assert "structural_findings" in entry
     assert entry["structural_findings"] == []
 
@@ -1084,6 +1141,9 @@ def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None
     entry = cast(
         Any,
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _SOURCE_CONTENT_DIGEST,
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 10},
             "units": [],
             "blocks": [],
@@ -1165,6 +1225,9 @@ def test_get_file_entry_uses_wire_key_fallback(tmp_path: Path) -> None:
     cache.data["files"][runtime_key] = cast(
         Any,
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _SOURCE_CONTENT_DIGEST,
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 1},
             "units": [],
             "blocks": [],
@@ -1179,9 +1242,7 @@ def test_get_file_entry_keeps_loaded_cache_clean_on_canonical_hit(
     tmp_path: Path,
 ) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path)
 
     loaded = Cache(cache_path)
     loaded.load()
@@ -1198,6 +1259,9 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
         Any,
         _canonicalize_cache_entry(
             {
+                "cache_content_binding_version": "1",
+                "source_content_digest": _SOURCE_CONTENT_DIGEST,
+                "git_blob_id_at_write": None,
                 "stat": {"mtime_ns": 1, "size": 1},
                 "units": [],
                 "blocks": [],
@@ -1410,6 +1474,7 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
         [_make_unit(str(target))],
         [_make_block(str(target))],
         [_make_segment(str(target))],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
     )
     cache.save()
 
@@ -1423,7 +1488,7 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
 def test_cache_v13_missing_optional_sections_default_empty(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path)
-    payload = _analysis_payload(cache, files={"x.py": {"st": [1, 2]}})
+    payload = _analysis_payload(cache, files={"x.py": _wire_entry(st=[1, 2])})
     signature = sign_cache_payload(payload)
     cache_path.write_text(
         json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
@@ -1440,9 +1505,7 @@ def test_cache_v13_missing_optional_sections_default_empty(tmp_path: Path) -> No
 
 def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path)
 
     raw = json.loads(cache_path.read_text("utf-8"))
     cache_path.write_text(json.dumps(raw, ensure_ascii=False, indent=2), "utf-8")
@@ -1473,9 +1536,7 @@ def test_cache_load_accepts_legacy_string_signed_unicode_payload(
     tmp_path: Path,
 ) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry("unicodé.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path, filepath="unicodé.py")
 
     raw = json.loads(cache_path.read_text("utf-8"))
     payload = cast(dict[str, object], raw["payload"])
@@ -1492,6 +1553,9 @@ def test_cache_load_accepts_legacy_string_signed_unicode_payload(
 def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> None:
     encoded = _encode_wire_file_entry(
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _SOURCE_CONTENT_DIGEST,
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 10},
             "units": [_unit_dict_from_model(_make_unit("x.py"), "x.py")],
             "blocks": [_block_dict_from_model(_make_block("x.py"), "x.py")],
@@ -1542,9 +1606,7 @@ def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> 
 
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path)
 
     data = json.loads(cache_path.read_text("utf-8"))
     data["sig"] = "bad"
@@ -1586,7 +1648,14 @@ def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path)
-    old_cache.put_file_entry("old_identity.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    old_cache.put_file_entry(
+        "old_identity.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
@@ -1603,7 +1672,12 @@ def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
     assert regenerated.data["files"] == {}
 
     regenerated.put_file_entry(
-        "registry_identity.py", {"mtime_ns": 2, "size": 20}, [], [], []
+        "registry_identity.py",
+        {"mtime_ns": 2, "size": 20},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
     )
     regenerated.save()
 
@@ -1688,6 +1762,9 @@ def test_cache_entry_invalid_units_container_type(tmp_path: Path) -> None:
     cache.data["files"]["x.py"] = cast(
         Any,
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _SOURCE_CONTENT_DIGEST,
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 1},
             "units": {},
             "blocks": [],
@@ -1816,6 +1893,9 @@ def test_cache_entry_valid_deep_schema(tmp_path: Path) -> None:
     cache.data["files"]["x.py"] = cast(
         Any,
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _SOURCE_CONTENT_DIGEST,
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 1},
             "units": [
                 {
@@ -1997,9 +2077,7 @@ def test_cache_legacy_secret_warning_preserved_after_successful_load(
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     legacy_secret = cache_path.parent / ".cache_secret"
     legacy_secret.write_text("legacy", "utf-8")
-    cache = Cache(cache_path)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
-    cache.save()
+    _save_single_cache_entry(cache_path)
 
     loaded = Cache(cache_path)
     loaded.load()
@@ -2137,7 +2215,14 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
 def test_cache_load_analysis_profile_mismatch(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path, min_loc=1, min_stmt=1)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
     cache.save()
 
     loaded = Cache(cache_path, min_loc=15, min_stmt=6)
@@ -2155,7 +2240,14 @@ def test_cache_load_analysis_profile_mismatch_collect_api_surface(
 ) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path, collect_api_surface=False)
-    cache.put_file_entry("x.py", {"mtime_ns": 1, "size": 10}, [], [], [])
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
     cache.save()
 
     loaded = Cache(cache_path, collect_api_surface=True)
@@ -2468,7 +2560,7 @@ def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> No
     )
     assert _decode_wire_file_entry({"st": [1, 2], "dc": "bad"}, "x.py") is None
     decoded = _decode_wire_file_entry(
-        {"st": [1, 2], "dc": [["q", "n", 1, 2, "function"]]},
+        _wire_entry(st=[1, 2], dc=[["q", "n", 1, 2, "function"]]),
         "x.py",
     )
     assert decoded is not None
@@ -2510,16 +2602,16 @@ def test_decode_wire_file_entry_returns_none_when_optional_sections_invalid() ->
 
 def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
     decoded = _decode_wire_file_entry(
-        {
-            "st": [1, 2],
-            "cm": [["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
-            "cc": [["pkg.mod:Service", ["Zeta", "Alpha"]]],
-            "md": [["a", "b", "import", 1]],
-            "dc": [["pkg.mod:unused", "unused", 1, 2, "function"]],
-            "rn": ["name"],
-            "in": ["typing", "os"],
-            "cn": ["Service", "Model"],
-        },
+        _wire_entry(
+            st=[1, 2],
+            cm=[["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
+            cc=[["pkg.mod:Service", ["Zeta", "Alpha"]]],
+            md=[["a", "b", "import", 1]],
+            dc=[["pkg.mod:unused", "unused", 1, 2, "function"]],
+            rn=["name"],
+            **{"in": ["typing", "os"]},
+            cn=["Service", "Model"],
+        ),
         "x.py",
     )
     assert decoded is not None
@@ -2533,7 +2625,7 @@ def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
 
 def test_decode_wire_file_entry_optional_source_stats() -> None:
     decoded = _decode_wire_file_entry(
-        {"st": [1, 2], "ss": [10, 3, 1, 1]},
+        _wire_entry(st=[1, 2], ss=[10, 3, 1, 1]),
         "x.py",
     )
     assert decoded is not None
@@ -2575,6 +2667,9 @@ def test_canonicalize_cache_entry_skips_invalid_dead_candidate_suppression_shape
         cast(
             Any,
             {
+                "cache_content_binding_version": "1",
+                "source_content_digest": _SOURCE_CONTENT_DIGEST,
+                "git_blob_id_at_write": None,
                 "stat": {"mtime_ns": 1, "size": 2},
                 "units": [],
                 "blocks": [],
@@ -2623,11 +2718,11 @@ def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> N
 
 def test_decode_wire_file_entry_skips_empty_coupled_classes_mapping() -> None:
     decoded = _decode_wire_file_entry(
-        {
-            "st": [1, 2],
-            "cm": [["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
-            "cc": [["pkg.mod:Service", ["", ""]]],
-        },
+        _wire_entry(
+            st=[1, 2],
+            cm=[["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
+            cc=[["pkg.mod:Service", ["", ""]]],
+        ),
         "x.py",
     )
     assert decoded is not None
@@ -2684,6 +2779,9 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
 
 def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _SOURCE_CONTENT_DIGEST,
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -2722,6 +2820,9 @@ def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
 
 def test_encode_wire_file_entry_compacts_dead_candidate_filepaths() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _SOURCE_CONTENT_DIGEST,
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -2748,6 +2849,9 @@ def test_encode_wire_file_entry_compacts_dead_candidate_filepaths() -> None:
 
 def test_encode_wire_file_entry_encodes_dead_candidate_suppressions() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _SOURCE_CONTENT_DIGEST,
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -2775,6 +2879,9 @@ def test_encode_wire_file_entry_encodes_dead_candidate_suppressions() -> None:
 
 def test_encode_wire_file_entry_skips_empty_or_invalid_coupled_classes() -> None:
     entry: CacheEntry = {
+        "cache_content_binding_version": "1",
+        "source_content_digest": _SOURCE_CONTENT_DIGEST,
+        "git_blob_id_at_write": None,
         "stat": {"mtime_ns": 1, "size": 2},
         "units": [],
         "blocks": [],
@@ -2824,6 +2931,9 @@ def test_get_file_entry_sorts_coupled_classes_in_runtime_payload(
     cache.data["files"]["x.py"] = cast(
         Any,
         {
+            "cache_content_binding_version": "1",
+            "source_content_digest": _SOURCE_CONTENT_DIGEST,
+            "git_blob_id_at_write": None,
             "stat": {"mtime_ns": 1, "size": 1},
             "source_stats": {"lines": 1, "functions": 1, "methods": 0, "classes": 0},
             "units": [],

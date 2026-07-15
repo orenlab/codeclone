@@ -15,6 +15,7 @@ from ._validators import (
     _is_dead_candidate_dict,
     _is_file_stat_dict,
     _is_function_relationship_facts_dict,
+    _is_git_blob_identity,
     _is_module_api_surface_dict,
     _is_module_dep_dict,
     _is_module_docstring_coverage_dict,
@@ -22,6 +23,7 @@ from ._validators import (
     _is_runtime_reachability_fact_dict,
     _is_security_surface_dict,
     _is_segment_dict,
+    _is_source_content_digest,
     _is_source_stats_dict,
     _is_string_list,
     _is_unit_dict,
@@ -266,7 +268,15 @@ def _is_canonical_cache_entry(value: object) -> TypeGuard[CacheEntry]:
 
 
 def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
-    required = {"stat", "units", "blocks", "segments"}
+    required = {
+        "cache_content_binding_version",
+        "source_content_digest",
+        "git_blob_id_at_write",
+        "stat",
+        "units",
+        "blocks",
+        "segments",
+    }
     if not required.issubset(entry.keys()):
         return False
     if not isinstance(entry.get("stat"), dict):
@@ -276,6 +286,13 @@ def _has_cache_entry_container_shape(entry: Mapping[str, object]) -> bool:
     if not isinstance(entry.get("blocks"), list):
         return False
     if not isinstance(entry.get("segments"), list):
+        return False
+    if entry.get("cache_content_binding_version") != "1":
+        return False
+    if not _is_source_content_digest(entry.get("source_content_digest")):
+        return False
+    git_blob_id = entry.get("git_blob_id_at_write")
+    if git_blob_id is not None and not _is_git_blob_identity(git_blob_id):
         return False
     source_stats = entry.get("source_stats")
     if source_stats is not None and not _is_source_stats_dict(source_stats):
@@ -512,6 +529,9 @@ def _canonicalize_cache_entry(entry: CacheEntry) -> CacheEntry:
     ]
 
     result: CacheEntry = {
+        "cache_content_binding_version": entry["cache_content_binding_version"],
+        "source_content_digest": entry["source_content_digest"],
+        "git_blob_id_at_write": entry["git_blob_id_at_write"],
         "stat": entry["stat"],
         "units": entry["units"],
         "blocks": entry["blocks"],

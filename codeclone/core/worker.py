@@ -6,10 +6,7 @@
 
 from __future__ import annotations
 
-import inspect
 import os
-from collections.abc import Callable
-from functools import lru_cache
 from pathlib import Path
 
 from ..analysis.normalizer import NormalizationConfig
@@ -20,6 +17,7 @@ from ..analysis.phase_ledger import (
 )
 from ..analysis.units import extract_units_and_stats_from_source
 from ..cache.entries import FileStat
+from ..cache.reuse import source_content_digest
 from ..contracts import (
     DEFAULT_BLOCK_MIN_LOC,
     DEFAULT_BLOCK_MIN_STMT,
@@ -74,6 +72,7 @@ def process_file(
             return FileProcessResult(
                 filepath=filepath,
                 success=False,
+                source_content_digest=None,
                 error="Source path resolves outside repository root.",
                 error_kind="source_read_error",
             )
@@ -83,6 +82,7 @@ def process_file(
                 return FileProcessResult(
                     filepath=filepath,
                     success=False,
+                    source_content_digest=None,
                     error=(
                         f"File too large: {stat_result.st_size} bytes "
                         f"(max {MAX_FILE_SIZE})"
@@ -93,6 +93,7 @@ def process_file(
             return FileProcessResult(
                 filepath=filepath,
                 success=False,
+                source_content_digest=None,
                 error=f"Cannot stat file: {exc}",
                 error_kind="stat_error",
             )
@@ -101,11 +102,14 @@ def process_file(
             "size": stat_result.st_size,
         }
         try:
-            source = resolved.read_text("utf-8")
+            raw_source = resolved.read_bytes()
+            parsed_source_digest = source_content_digest(raw_source)
+            source = raw_source.decode("utf-8")
         except UnicodeDecodeError as exc:
             return FileProcessResult(
                 filepath=filepath,
                 success=False,
+                source_content_digest=parsed_source_digest,
                 error=f"Encoding error: {exc}",
                 error_kind="source_read_error",
             )
@@ -113,6 +117,7 @@ def process_file(
             return FileProcessResult(
                 filepath=filepath,
                 success=False,
+                source_content_digest=None,
                 error=f"Cannot read file: {exc}",
                 error_kind="source_read_error",
             )
@@ -150,6 +155,7 @@ def process_file(
         return FileProcessResult(
             filepath=filepath,
             success=True,
+            source_content_digest=parsed_source_digest,
             units=units,
             blocks=blocks,
             segments=segments,
@@ -166,29 +172,10 @@ def process_file(
         return FileProcessResult(
             filepath=filepath,
             success=False,
+            source_content_digest=None,
             error=f"Unexpected error: {type(exc).__name__}: {exc}",
             error_kind="unexpected_error",
         )
-
-
-def _call_process_file(
-    process_callable: Callable[..., FileProcessResult],
-    filepath: str,
-    root: str,
-    cfg: NormalizationConfig,
-    min_loc: int,
-    min_stmt: int,
-    *,
-    supported_kwargs: dict[str, object],
-) -> FileProcessResult:
-    return process_callable(
-        filepath,
-        root,
-        cfg,
-        min_loc,
-        min_stmt,
-        **supported_kwargs,
-    )
 
 
 def _invoke_process_file(
@@ -207,47 +194,18 @@ def _invoke_process_file(
     segment_min_stmt: int,
     phase_ledger: PhaseLedger | None = None,
 ) -> FileProcessResult:
-    optional_kwargs: dict[str, object] = {
-        "collect_structural_findings": collect_structural_findings,
-        "collect_api_surface": collect_api_surface,
-        "api_include_private_modules": api_include_private_modules,
-        "block_min_loc": block_min_loc,
-        "block_min_stmt": block_min_stmt,
-        "segment_min_loc": segment_min_loc,
-        "segment_min_stmt": segment_min_stmt,
-    }
-    if phase_ledger is not None:
-        optional_kwargs["phase_ledger"] = phase_ledger
-    process_callable: Callable[..., FileProcessResult] = process_file
-    supported_names = _supported_process_file_kwarg_names(process_callable)
-    if supported_names is None:
-        supported_kwargs = optional_kwargs
-    else:
-        supported_kwargs = {
-            key: value
-            for key, value in optional_kwargs.items()
-            if key in supported_names
-        }
-    return _call_process_file(
-        process_callable,
+    return process_file(
         filepath,
         root,
         cfg,
         min_loc,
         min_stmt,
-        supported_kwargs=supported_kwargs,
+        collect_structural_findings=collect_structural_findings,
+        collect_api_surface=collect_api_surface,
+        api_include_private_modules=api_include_private_modules,
+        block_min_loc=block_min_loc,
+        block_min_stmt=block_min_stmt,
+        segment_min_loc=segment_min_loc,
+        segment_min_stmt=segment_min_stmt,
+        phase_ledger=phase_ledger or INERT_PHASE_LEDGER,
     )
-
-
-@lru_cache(maxsize=32)
-def _supported_process_file_kwarg_names(
-    process_callable: Callable[..., FileProcessResult],
-) -> frozenset[str] | None:
-    try:
-        signature = inspect.signature(process_callable)
-    except (TypeError, ValueError):
-        return None
-    parameters = tuple(signature.parameters.values())
-    if any(parameter.kind == inspect.Parameter.VAR_KEYWORD for parameter in parameters):
-        return None
-    return frozenset(parameter.name for parameter in parameters)

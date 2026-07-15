@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal, TypedDict
 from uuid import UUID
 
@@ -59,6 +60,20 @@ PortablePathIssueKind = Literal[
     "trailing_dot_or_space",
     "windows_device",
     "windows_forbidden_byte",
+]
+GitObjectFormat = Literal["sha1", "sha256"]
+CacheContentDecisionReason = Literal[
+    "blob_hit",
+    "digest_hit",
+    "digest_miss",
+    "stat_mismatch",
+]
+GitContentFallbackReason = Literal[
+    "dirty",
+    "git_unavailable",
+    "index_ambiguous",
+    "racy",
+    "untracked",
 ]
 
 CONFIG_VALUE_UNSET = object()
@@ -127,6 +142,76 @@ class FoundationConfig:
     source_roots: tuple[str, ...] | None
     baseline_scope_id: str | None
     project_label: str | None
+
+
+class GitStatusEntryInput(BaseModel):
+    """Strict subprocess-boundary shape for one porcelain status entry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    status_xy: str
+    path: str
+
+    @field_validator("status_xy")
+    @classmethod
+    def _valid_status_xy(cls, value: str) -> str:
+        if len(value) != 2:
+            raise ValueError("git status_xy must contain exactly two characters")
+        return value
+
+    @field_validator("path")
+    @classmethod
+    def _non_empty_status_path(cls, value: str) -> str:
+        if not value:
+            raise ValueError("git status path must be non-empty")
+        return value
+
+
+class GitIndexEntryInput(BaseModel):
+    """Strict subprocess-boundary shape for one batched index entry."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    tag: str
+    mode: str
+    object_id: str
+    stage: int
+    path: str
+    mtime_ns: int
+    size: int
+    flags: int
+
+    @field_validator("tag")
+    @classmethod
+    def _valid_tag(cls, value: str) -> str:
+        if len(value) != 1:
+            raise ValueError("git index tag must contain exactly one character")
+        return value
+
+    @field_validator("path", "mode", "object_id")
+    @classmethod
+    def _non_empty_index_text(cls, value: str) -> str:
+        if not value:
+            raise ValueError("git index text fields must be non-empty")
+        return value
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitStatusEntry:
+    status_xy: str
+    path: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitIndexEntry:
+    tag: str
+    mode: str
+    object_id: str
+    stage: int
+    path: str
+    mtime_ns: int
+    size: int
+    flags: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,7 +345,7 @@ class PackagePrefix:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DigestObject:
-    domain: Literal["codeclone.module-registry.v1"]
+    domain: Literal["codeclone.module-registry.v1", "codeclone.source-content.v1"]
     algorithm: Literal["sha256"]
     value: str
 
@@ -269,6 +354,121 @@ class DigestObject:
             character not in "0123456789abcdef" for character in self.value
         ):
             raise ValueError("sha256 digest values must be 64 lowercase hex characters")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitBlobIdentity:
+    object_format: GitObjectFormat
+    object_id: str
+
+    def __post_init__(self) -> None:
+        expected_length = 40 if self.object_format == "sha1" else 64
+        if len(self.object_id) != expected_length or any(
+            character not in "0123456789abcdef" for character in self.object_id
+        ):
+            raise ValueError("git object id does not match its declared format")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitTrackedContent:
+    path: str
+    blob: GitBlobIdentity
+    source_content_digest: DigestObject
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitDirtyEntry:
+    path: str
+    status_xy: str
+    digest: str | None
+    digest_status: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitWorkspaceSnapshot:
+    git_available: bool
+    entries: tuple[GitDirtyEntry, ...]
+
+    def __post_init__(self) -> None:
+        paths = tuple(entry.path for entry in self.entries)
+        if paths != tuple(sorted(set(paths))):
+            raise ValueError("git workspace snapshot paths must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class GitContentSnapshot:
+    root: str
+    git_available: bool
+    object_format: GitObjectFormat | None
+    tracked: tuple[GitTrackedContent, ...]
+    dirty_paths: frozenset[str]
+    untracked_paths: frozenset[str]
+    index_ambiguous_paths: frozenset[str]
+    racy_paths: frozenset[str]
+
+    def __post_init__(self) -> None:
+        paths = tuple(item.path for item in self.tracked)
+        if paths != tuple(sorted(set(paths))):
+            raise ValueError("git tracked content paths must be sorted and unique")
+        if not self.git_available and self.object_format is not None:
+            raise ValueError("unavailable git snapshot cannot declare an object format")
+
+    def repository_path(self, path: str | Path) -> str | None:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            return candidate.as_posix()
+        try:
+            return candidate.resolve().relative_to(Path(self.root).resolve()).as_posix()
+        except (OSError, ValueError):
+            return None
+
+    def tracked_content(self, path: str | Path) -> GitTrackedContent | None:
+        repository_path = self.repository_path(path)
+        if repository_path is None:
+            return None
+        low = 0
+        high = len(self.tracked)
+        while low < high:
+            middle = (low + high) // 2
+            item = self.tracked[middle]
+            if item.path < repository_path:
+                low = middle + 1
+            elif item.path > repository_path:
+                high = middle
+            else:
+                return item
+        return None
+
+    def fallback_reason(
+        self,
+        path: str | Path,
+    ) -> GitContentFallbackReason | None:
+        if not self.git_available:
+            return "git_unavailable"
+        repository_path = self.repository_path(path)
+        if repository_path is None:
+            return "index_ambiguous"
+        if repository_path in self.untracked_paths:
+            return "untracked"
+        if repository_path in self.dirty_paths:
+            return "dirty"
+        if repository_path in self.racy_paths:
+            return "racy"
+        if (
+            repository_path in self.index_ambiguous_paths
+            or self.tracked_content(repository_path) is None
+        ):
+            return "index_ambiguous"
+        return None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContentIdentityVerdict:
+    hit: bool
+    reason: CacheContentDecisionReason
+    git_fallback_reason: GitContentFallbackReason | None
+    digest_verify_cost_us: int
+    stat_fast_reject: bool
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

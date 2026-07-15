@@ -12,7 +12,7 @@
     "production_import:r4->r2": 167,
     "production_import:r4->r2p": 116,
     "test_import:r2p->r2": 67,
-    "test_import:r4->r2": 170,
+    "test_import:r4->r2": 169,
     "test_import:r4->r2p": 169
   },
   "policy": "phase39s-s0-observe-shrink-only",
@@ -844,7 +844,6 @@
       "tests.test_core_branch_coverage -> codeclone.cache.entries",
       "tests.test_core_branch_coverage -> codeclone.cache.projection",
       "tests.test_core_branch_coverage -> codeclone.cache.store",
-      "tests.test_core_branch_coverage -> codeclone.core",
       "tests.test_core_branch_coverage -> codeclone.core._types",
       "tests.test_core_branch_coverage -> codeclone.core.discovery",
       "tests.test_core_branch_coverage -> codeclone.core.discovery_cache",

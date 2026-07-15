@@ -26,8 +26,10 @@ from ..contracts import (
 from ..contracts.errors import CacheError
 from ..models import (
     BlockUnit,
+    DigestObject,
     FileMetrics,
     FunctionRelationshipFacts,
+    GitContentSnapshot,
     SegmentUnit,
     StructuralFindingGroup,
     Unit,
@@ -43,6 +45,7 @@ from ._canonicalize import (
     _decode_optional_cache_sections,
     _is_canonical_cache_entry,
 )
+from ._validators import _is_git_blob_identity, _is_source_content_digest
 from ._wire_decode import _decode_wire_file_entry
 from ._wire_encode import _encode_wire_file_entry
 from .entries import (
@@ -84,6 +87,7 @@ from .projection import (
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
 )
+from .reuse import git_blob_identity_for_parsed_source
 from .versioning import (
     LEGACY_CACHE_SECRET_FILENAME,
     MAX_CACHE_SIZE_BYTES,
@@ -135,6 +139,7 @@ class Cache:
     __slots__ = (
         "_canonical_runtime_paths",
         "_dirty",
+        "_git_content_snapshot",
         "_write_enabled",
         "analysis_profile",
         "cache_schema_version",
@@ -186,6 +191,17 @@ class Cache:
             analysis_profile=self.analysis_profile,
         )
         self._canonical_runtime_paths: set[str] = set()
+        snapshot_root = self.root if self.root is not None else self.path.parent
+        self._git_content_snapshot = GitContentSnapshot(
+            root=str(snapshot_root.resolve()),
+            git_available=False,
+            object_format=None,
+            tracked=(),
+            dirty_paths=frozenset(),
+            untracked_paths=frozenset(),
+            index_ambiguous_paths=frozenset(),
+            racy_paths=frozenset(),
+        )
         self.legacy_secret_warning = self._detect_legacy_secret_warning()
         self.cache_schema_version: str | None = None
         self.load_status = CacheStatus.MISSING
@@ -207,6 +223,9 @@ class Cache:
         except OSError as exc:
             return f"Legacy cache secret check failed: {exc}"
         return None
+
+    def bind_git_content_snapshot(self, snapshot: GitContentSnapshot) -> None:
+        self._git_content_snapshot = snapshot
 
     def _set_load_warning(self, message: str | None) -> None:
         warning = message
@@ -534,10 +553,25 @@ class Cache:
             return None
 
         stat = _as_file_stat_dict(entry_obj.get("stat"))
+        binding_version = entry_obj.get("cache_content_binding_version")
+        source_content_digest = entry_obj.get("source_content_digest")
+        git_blob_id_at_write = entry_obj.get("git_blob_id_at_write")
         units = _as_typed_unit_list(entry_obj.get("units"))
         blocks = _as_typed_block_list(entry_obj.get("blocks"))
         segments = _as_typed_segment_list(entry_obj.get("segments"))
-        if stat is None or units is None or blocks is None or segments is None:
+        if (
+            binding_version != "1"
+            or not _is_source_content_digest(source_content_digest)
+            or "git_blob_id_at_write" not in entry_obj
+            or (
+                git_blob_id_at_write is not None
+                and not _is_git_blob_identity(git_blob_id_at_write)
+            )
+            or stat is None
+            or units is None
+            or blocks is None
+            or segments is None
+        ):
             return None
 
         optional_sections = _decode_optional_cache_sections(entry_obj)
@@ -563,6 +597,9 @@ class Cache:
 
         entry_to_canonicalize: CacheEntry = _attach_optional_cache_sections(
             CacheEntry(
+                cache_content_binding_version="1",
+                source_content_digest=source_content_digest,
+                git_blob_id_at_write=git_blob_id_at_write,
                 stat=stat,
                 units=units,
                 blocks=blocks,
@@ -600,6 +637,7 @@ class Cache:
         blocks: list[BlockUnit],
         segments: list[SegmentUnit],
         *,
+        source_content_digest: DigestObject,
         source_stats: SourceStatsDict | None = None,
         file_metrics: FileMetrics | None = None,
         structural_findings: list[StructuralFindingGroup] | None = None,
@@ -689,7 +727,15 @@ class Cache:
             methods=0,
             classes=0,
         )
+        git_blob_id_at_write = git_blob_identity_for_parsed_source(
+            path=Path(runtime_path),
+            source_digest=source_content_digest,
+            git_snapshot=self._git_content_snapshot,
+        )
         entry_dict = CacheEntry(
+            cache_content_binding_version="1",
+            source_content_digest=source_content_digest,
+            git_blob_id_at_write=git_blob_id_at_write,
             stat=stat_sig,
             source_stats=source_stats_payload,
             units=unit_rows,

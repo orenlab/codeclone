@@ -190,7 +190,11 @@ def process(
         nonlocal analyzed_methods
         nonlocal analyzed_classes
 
-        if result.success and result.stat is not None:
+        if result.success:
+            if result.stat is None or result.source_content_digest is None:
+                raise RuntimeError(
+                    "successful file processing requires stat and source digest"
+                )
             if result.phase_snapshot is not None:
                 batch_snapshot = batch_snapshot.merge(result.phase_snapshot)
             source_stats_payload = SourceStatsDict(
@@ -202,29 +206,17 @@ def process(
             structural_payload = (
                 result.structural_findings if collect_structural_findings else None
             )
-            try:
-                cache.put_file_entry(
-                    result.filepath,
-                    result.stat,
-                    result.units or [],
-                    result.blocks or [],
-                    result.segments or [],
-                    source_stats=source_stats_payload,
-                    file_metrics=result.file_metrics,
-                    structural_findings=structural_payload,
-                )
-            except TypeError as exc:
-                if "source_stats" not in str(exc):
-                    raise
-                cache.put_file_entry(
-                    result.filepath,
-                    result.stat,
-                    result.units or [],
-                    result.blocks or [],
-                    result.segments or [],
-                    file_metrics=result.file_metrics,
-                    structural_findings=structural_payload,
-                )
+            cache.put_file_entry(
+                result.filepath,
+                result.stat,
+                result.units or [],
+                result.blocks or [],
+                result.segments or [],
+                source_content_digest=result.source_content_digest,
+                source_stats=source_stats_payload,
+                file_metrics=result.file_metrics,
+                structural_findings=structural_payload,
+            )
             files_analyzed += 1
             analyzed_lines += result.lines
             analyzed_functions += result.functions
@@ -304,16 +296,11 @@ def process(
         nonlocal files_skipped
         if _should_use_parallel(len(files_to_process), processes):
             try:
-                try:
-                    executor_context = ProcessPoolExecutor(
-                        max_workers=processes,
-                        initializer=_install_module_registry,
-                        initargs=(registry,),
-                    )
-                except TypeError as exc:
-                    raise RuntimeError(
-                        "process backend does not support registry initialization"
-                    ) from exc
+                executor_context = ProcessPoolExecutor(
+                    max_workers=processes,
+                    initializer=_install_module_registry,
+                    initargs=(registry,),
+                )
                 with executor_context as executor:
                     for idx in range(0, len(files_to_process), batch_size):
                         batch = files_to_process[idx : idx + batch_size]
