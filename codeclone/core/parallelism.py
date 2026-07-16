@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -15,6 +16,7 @@ from ..cache.store import Cache
 from ..models import (
     ClassMetrics,
     DeadCandidate,
+    EventKind,
     FunctionRelationshipFacts,
     GroupItem,
     ModuleApiSurface,
@@ -23,9 +25,11 @@ from ..models import (
     ModuleTypingCoverage,
     RuntimeReachabilityFact,
     SecuritySurface,
+    SemanticEvent,
     StructuralFindingGroup,
 )
 from ..observability import record_counter, span
+from ..semantics.events import event_counter_key
 from ._types import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_RUNTIME_PROCESSES,
@@ -95,6 +99,7 @@ def process(
             referenced_names=discovery.cached_referenced_names,
             runtime_reachability=discovery.cached_runtime_reachability,
             security_surfaces=discovery.cached_security_surfaces,
+            semantic_events=(),
             referenced_qualnames=discovery.cached_referenced_qualnames,
             typing_modules=discovery.cached_typing_modules,
             docstring_modules=discovery.cached_docstring_modules,
@@ -126,6 +131,7 @@ def process(
     all_security_surfaces: list[SecuritySurface] = list(
         discovery.cached_security_surfaces
     )
+    all_semantic_events: list[SemanticEvent] = []
     all_typing_modules: list[ModuleTypingCoverage] = list(
         discovery.cached_typing_modules
     )
@@ -252,6 +258,7 @@ def process(
                     result.file_metrics.runtime_reachability
                 )
                 all_security_surfaces.extend(result.file_metrics.security_surfaces)
+                all_semantic_events.extend(result.file_metrics.semantic_events)
                 all_function_relationship_facts.extend(
                     result.file_metrics.function_relationship_facts
                 )
@@ -350,7 +357,20 @@ def process(
 
     with span(name="analysis.registry_bind") as registry_span:
         with span(name="analysis.relative_imports") as relative_span:
-            _run_files()
+            with span(name="semantics.events") as event_span:
+                _run_files()
+                event_counts: Counter[EventKind] = Counter(
+                    event.kind for event in all_semantic_events
+                )
+                for kind, count in sorted(event_counts.items()):
+                    event_span.set_counter(event_counter_key(kind), count)
+                event_span.set_counter(
+                    "events_unresolved",
+                    sum(
+                        event.resolution == "unavailable"
+                        for event in all_semantic_events
+                    ),
+                )
             relative_span.set_counter(
                 "analysis_dependency_targets",
                 sum(bool(dep.target) for dep in all_module_deps),
@@ -411,6 +431,18 @@ def process(
                     item.category,
                     item.capability,
                     item.evidence_symbol,
+                ),
+            )
+        ),
+        semantic_events=tuple(
+            sorted(
+                all_semantic_events,
+                key=lambda item: (
+                    item.location[0],
+                    item.location[1],
+                    item.event_id,
+                    item.kind,
+                    item.subject,
                 ),
             )
         ),

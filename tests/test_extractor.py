@@ -3016,6 +3016,10 @@ def test_relationship_expression_resolution_branches(
         "pkg.module:local_function",
         "same_module_function",
     )
+    assert resolve("Service") == (
+        "pkg.module:Service",
+        "same_module_class",
+    )
     assert resolve(
         "local_function",
         caller_bindings=frozenset({"local_function"}),

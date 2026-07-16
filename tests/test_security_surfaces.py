@@ -8,20 +8,29 @@ from __future__ import annotations
 
 import ast
 
-from codeclone.analysis.ast_helpers import ast_node_end_line, ast_node_start_line
-from codeclone.analysis.security_surfaces import (
-    _SecuritySurfaceVisitor,
-    collect_security_surfaces,
-)
+from codeclone.analysis import _module_walk as module_walk_mod
+from codeclone.analysis.security_surfaces import project_security_surfaces
+from codeclone.models import FactRef, SemanticEvent
+from codeclone.qualnames import QualnameCollector
+from tests._ast_metrics_helpers import module_registry_context
 
 
 def _collect(source: str) -> tuple[tuple[str, str, str, str], ...]:
-    tree = ast.parse(source)
-    surfaces = collect_security_surfaces(
-        tree=tree,
+    identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
         module_name="pkg.mod",
-        filepath="/repo/pkg/mod.py",
     )
+    tree = ast.parse(source)
+    collector = QualnameCollector()
+    collector.visit(tree)
+    walk = module_walk_mod._collect_module_walk_data(
+        tree=tree,
+        source=identity,
+        registry=registry,
+        collector=collector,
+        collect_referenced_names=True,
+    )
+    surfaces = project_security_surfaces(walk.semantic_events)
     return tuple(
         (
             surface.category,
@@ -33,7 +42,7 @@ def _collect(source: str) -> tuple[tuple[str, str, str, str], ...]:
     )
 
 
-def test_collect_security_surfaces_detects_exact_boundaries() -> None:
+def test_event_projection_detects_exact_security_boundaries() -> None:
     source = """
 import requests
 import subprocess
@@ -87,7 +96,7 @@ def run(cmd: list[str]) -> None:
     )
 
 
-def test_collect_security_surfaces_skips_type_checking_only_imports() -> None:
+def test_event_projection_skips_type_checking_only_imports() -> None:
     source = """
 from typing import TYPE_CHECKING
 
@@ -108,7 +117,7 @@ def save() -> None:
     )
 
 
-def test_collect_security_surfaces_handles_aliases_guards_and_deduplicates() -> None:
+def test_event_projection_handles_aliases_guards_and_deduplicates() -> None:
     source = """
 import subprocess as sp
 import typing
@@ -190,21 +199,22 @@ class Writer:
 
 
 def test_security_surface_helper_edges_cover_line_fallbacks_and_blank_imports() -> None:
-    assert ast_node_start_line(ast.Name(id="value")) is None
-    assert ast_node_end_line(ast.Name(id="value")) == 0
-
-    visitor = _SecuritySurfaceVisitor(
-        module_name="pkg.mod",
-        filepath="/repo/pkg/mod.py",
+    unrelated = SemanticEvent(
+        event_id="pkg.mod#000001",
+        kind="return_value",
+        subject="pkg.mod:run",
+        inputs=(FactRef(kind="const", ref="none"),),
+        output=None,
+        guards=(),
+        location=("pkg/mod.py", 1),
+        resolution="resolved",
     )
-    visitor.visit_Import(ast.Import(names=[ast.alias(name=" ", asname=None)]))
-    visitor._emit(
-        category="process_boundary",
-        capability="subprocess_run",
-        node=ast.Name(id="missing_line"),
-        classification_mode="exact_call",
-        evidence_kind="call",
-        evidence_symbol="subprocess.run",
+    assert project_security_surfaces((unrelated,)) == ()
+    assert _collect("import importlib\n") == (
+        (
+            "dynamic_loading",
+            "importlib_import",
+            "pkg.mod",
+            "importlib",
+        ),
     )
-
-    assert visitor.items == []

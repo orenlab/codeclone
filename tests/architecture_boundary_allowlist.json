@@ -1,7 +1,7 @@
 {
   "counts": {
     "model_store:base_model_definition": 20,
-    "model_store:dataclass_definition": 280,
+    "model_store:dataclass_definition": 278,
     "model_store:pydantic_dependency": 9,
     "production_import:r1->r2": 2,
     "production_import:r1->r2p": 5,
@@ -54,8 +54,6 @@
       "codeclone.analysis.reachability::_RouteDecoratorFactory",
       "codeclone.analysis.reachability::_RouteRegistration",
       "codeclone.analysis.reachability::_Target",
-      "codeclone.analysis.security_surfaces::_CallRule",
-      "codeclone.analysis.security_surfaces::_ImportRule",
       "codeclone.analysis.suppressions::DeclarationTarget",
       "codeclone.analysis.suppressions::SuppressionBinding",
       "codeclone.analysis.suppressions::SuppressionDirective",

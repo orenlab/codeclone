@@ -22,7 +22,10 @@ from ..models import (
     RelationshipOriginLane,
     RelationshipRecord,
     ResolvedSourceIdentity,
+    SemanticEvent,
 )
+from ..semantics.events import SemanticEventCollector
+from .ast_helpers import is_type_checking_guard
 from .class_metrics import _node_line_span
 from .parser import (
     _build_declaration_token_index,
@@ -763,6 +766,8 @@ def _resolve_relationship_expression(
             return None, "unresolved_name"
         if node.id in top_level_function_names:
             return f"{module_name}:{node.id}", "same_module_function"
+        if node.id in top_level_class_names:
+            return f"{module_name}:{node.id}", "same_module_class"
         return None, "unresolved_name"
 
     if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
@@ -1245,6 +1250,139 @@ class _ModuleWalkResult(NamedTuple):
     non_runtime_decorator_aliases: frozenset[str]
     pydantic_module_aliases: frozenset[str]
     cohesion_ignored_decorator_aliases: frozenset[str]
+    semantic_events: tuple[SemanticEvent, ...]
+
+
+def _collect_module_walk_node(
+    *,
+    node: ast.AST,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
+    state: _ModuleWalkState,
+    collect_referenced_names: bool,
+) -> None:
+    if isinstance(node, ast.Import):
+        _collect_import_node(
+            node=node,
+            source=source,
+            registry=registry,
+            state=state,
+            collect_referenced_names=collect_referenced_names,
+        )
+    elif isinstance(node, ast.ImportFrom):
+        _collect_import_from_node(
+            node=node,
+            source=source,
+            registry=registry,
+            state=state,
+            collect_referenced_names=collect_referenced_names,
+        )
+    elif collect_referenced_names:
+        _collect_load_reference_node(node=node, state=state)
+
+
+def _walk_module_tree(
+    *,
+    node: ast.AST,
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
+    state: _ModuleWalkState,
+    event_collector: SemanticEventCollector,
+    collect_referenced_names: bool,
+    scope: tuple[str, ...] = (),
+    callable_depth: int = 0,
+    class_depth: int = 0,
+    runtime_enabled: bool = True,
+    guards: tuple[str, ...] = (),
+) -> None:
+    _collect_module_walk_node(
+        node=node,
+        source=source,
+        registry=registry,
+        state=state,
+        collect_referenced_names=collect_referenced_names,
+    )
+    if runtime_enabled:
+        event_collector.observe(
+            node,
+            scope=scope,
+            callable_depth=callable_depth,
+            class_depth=class_depth,
+            guards=guards,
+        )
+
+    child_scope = scope
+    child_callable_depth = callable_depth
+    child_class_depth = class_depth
+    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+        child_scope = (*scope, node.name)
+        child_callable_depth += 1
+    elif isinstance(node, ast.ClassDef):
+        child_scope = (*scope, node.name)
+        child_class_depth += 1
+
+    if isinstance(node, ast.If):
+        _walk_module_tree(
+            node=node.test,
+            source=source,
+            registry=registry,
+            state=state,
+            event_collector=event_collector,
+            collect_referenced_names=collect_referenced_names,
+            scope=child_scope,
+            callable_depth=child_callable_depth,
+            class_depth=child_class_depth,
+            runtime_enabled=False
+            if is_type_checking_guard(node.test)
+            else runtime_enabled,
+            guards=guards,
+        )
+        type_checking_only = is_type_checking_guard(node.test)
+        branch_guard = f"if@{int(getattr(node, 'lineno', 0))}"
+        for child in node.body:
+            _walk_module_tree(
+                node=child,
+                source=source,
+                registry=registry,
+                state=state,
+                event_collector=event_collector,
+                collect_referenced_names=collect_referenced_names,
+                scope=child_scope,
+                callable_depth=child_callable_depth,
+                class_depth=child_class_depth,
+                runtime_enabled=runtime_enabled and not type_checking_only,
+                guards=(*guards, f"{branch_guard}:true"),
+            )
+        for child in node.orelse:
+            _walk_module_tree(
+                node=child,
+                source=source,
+                registry=registry,
+                state=state,
+                event_collector=event_collector,
+                collect_referenced_names=collect_referenced_names,
+                scope=child_scope,
+                callable_depth=child_callable_depth,
+                class_depth=child_class_depth,
+                runtime_enabled=runtime_enabled,
+                guards=(*guards, f"{branch_guard}:false"),
+            )
+        return
+
+    for nested_node in ast.iter_child_nodes(node):
+        _walk_module_tree(
+            node=nested_node,
+            source=source,
+            registry=registry,
+            state=state,
+            event_collector=event_collector,
+            collect_referenced_names=collect_referenced_names,
+            scope=child_scope,
+            callable_depth=child_callable_depth,
+            class_depth=child_class_depth,
+            runtime_enabled=runtime_enabled,
+            guards=guards,
+        )
 
 
 def _collect_module_walk_data(
@@ -1261,26 +1399,22 @@ def _collect_module_walk_data(
     """
     state = _ModuleWalkState()
     module_name = _source_module_key(source)
+    event_collector = SemanticEventCollector(
+        module_name=module_name,
+        filepath=source.file.path,
+        top_level_class_names=frozenset(
+            qualname for qualname, _node in collector.class_nodes if "." not in qualname
+        ),
+    )
     _collect_module_all_exports(tree, state)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            _collect_import_node(
-                node=node,
-                source=source,
-                registry=registry,
-                state=state,
-                collect_referenced_names=collect_referenced_names,
-            )
-        elif isinstance(node, ast.ImportFrom):
-            _collect_import_from_node(
-                node=node,
-                source=source,
-                registry=registry,
-                state=state,
-                collect_referenced_names=collect_referenced_names,
-            )
-        elif collect_referenced_names:
-            _collect_load_reference_node(node=node, state=state)
+    _walk_module_tree(
+        node=tree,
+        source=source,
+        registry=registry,
+        state=state,
+        event_collector=event_collector,
+        collect_referenced_names=collect_referenced_names,
+    )
     if collect_referenced_names:
         state.referenced_names.update(_collect_dynamic_getattr_names(tree))
 
@@ -1312,6 +1446,7 @@ def _collect_module_walk_data(
         cohesion_ignored_decorator_aliases=frozenset(
             state.cohesion_ignored_decorator_aliases
         ),
+        semantic_events=event_collector.events,
     )
 
 

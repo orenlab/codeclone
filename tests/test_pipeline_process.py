@@ -368,6 +368,7 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
     assert [stage.name for stage in recorded] == [
         "analysis.registry_bind",
         "analysis.relative_imports",
+        "semantics.events",
     ]
     assert recorded[0].counters == {"facts_bound": 1}
     assert recorded[1].counters == {
@@ -377,6 +378,7 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         "typed_failures": 1,
         "unresolved_relatives": 1,
     }
+    assert recorded[2].counters == {"events_unresolved": 0}
 
 
 def _build_report_case(

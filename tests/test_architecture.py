@@ -65,6 +65,7 @@ _RING_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("codeclone.paths", "r2"),
     ("codeclone.qualnames", "r2"),
     ("codeclone.scanner", "r2"),
+    ("codeclone.semantics", "r2"),
     ("codeclone", "r4"),
     ("extensions", "r4"),
     ("plugins", "r4"),
