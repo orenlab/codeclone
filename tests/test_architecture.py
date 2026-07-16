@@ -346,32 +346,84 @@ def _architecture_boundary_violations(root: Path) -> dict[str, tuple[str, ...]]:
     }
 
 
-def test_phase39d3_contract_ir_has_exact_owners_and_no_reexports() -> None:
-    root = Path(__file__).resolve().parents[1]
-    model_names = {
-        "ContractIRBuildResult",
-        "ContractIRDocument",
-        "ContractIRFailureState",
-        "ContractIRSideEffect",
-        "ContractIRTransformation",
-        "FunctionContractIR",
-    }
+def _assert_phase39_models_have_exact_owner(
+    *,
+    root: Path,
+    model_names: set[str],
+    behavior_path: Path,
+    reexport_name: str,
+    contract_declaration: str,
+) -> None:
     models_tree = ast.parse((root / "codeclone/models.py").read_text("utf-8"))
-    ir_tree = ast.parse((root / "codeclone/semantics/ir.py").read_text("utf-8"))
+    behavior_tree = ast.parse(behavior_path.read_text("utf-8"))
     model_definitions = {
         node.name for node in models_tree.body if isinstance(node, ast.ClassDef)
     }
     behavior_definitions = {
-        node.name for node in ir_tree.body if isinstance(node, ast.ClassDef)
+        node.name for node in behavior_tree.body if isinstance(node, ast.ClassDef)
     }
 
     assert model_names <= model_definitions
     assert not model_names & behavior_definitions
-    assert "ContractIR" not in (root / "codeclone/semantics/__init__.py").read_text(
+    assert reexport_name not in (root / "codeclone/semantics/__init__.py").read_text(
         "utf-8"
     )
     contracts_text = (root / "codeclone/contracts/__init__.py").read_text("utf-8")
-    assert 'CONTRACT_IR_VERSION: Final = "1"' in contracts_text
+    assert contract_declaration in contracts_text
+
+
+def test_phase39d3_contract_ir_has_exact_owners_and_no_reexports() -> None:
+    root = Path(__file__).resolve().parents[1]
+    _assert_phase39_models_have_exact_owner(
+        root=root,
+        model_names={
+            "ContractIRBuildResult",
+            "ContractIRDocument",
+            "ContractIRFailureState",
+            "ContractIRSideEffect",
+            "ContractIRTransformation",
+            "FunctionContractIR",
+        },
+        behavior_path=root / "codeclone/semantics/ir.py",
+        reexport_name="ContractIR",
+        contract_declaration='CONTRACT_IR_VERSION: Final = "1"',
+    )
+
+
+def test_phase39d4_authority_has_one_behavior_owner_and_no_enforcement_reader() -> None:
+    root = Path(__file__).resolve().parents[1]
+    _assert_phase39_models_have_exact_owner(
+        root=root,
+        model_names={
+            "AuthorityCandidate",
+            "AuthorityGraph",
+            "AuthorityGraphEdge",
+            "AuthorityGraphNode",
+            "AuthoritySinkResult",
+            "SemanticAuthorityResult",
+        },
+        behavior_path=root / "codeclone/semantics/authority.py",
+        reexport_name="SemanticAuthorityResult",
+        contract_declaration='AUTHORITY_ANALYSIS_REVISION: Final = "1"',
+    )
+
+    forbidden_readers = (
+        root / "codeclone/report/gates",
+        root / "codeclone/metrics/health.py",
+        root / "codeclone/surfaces/cli/workflow.py",
+        root / "codeclone/surfaces/cli/execution.py",
+        root / "codeclone/surfaces/cli/post_run.py",
+        root / "codeclone/surfaces/cli/baseline_state.py",
+        root / "codeclone/surfaces/cli/summary.py",
+    )
+    violations = [
+        str(path.relative_to(root))
+        for owner in forbidden_readers
+        for path in ([owner] if owner.is_file() else sorted(owner.glob("*.py")))
+        if "semantic_authority" in path.read_text("utf-8")
+        or "AuthorityStatus" in path.read_text("utf-8")
+    ]
+    assert violations == []
 
 
 def _string_mapping(value: object, *, field: str) -> dict[str, object]:

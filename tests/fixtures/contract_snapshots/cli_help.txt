@@ -14,6 +14,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--update-baseline | --no-update-baseline]
                  [--metrics-baseline [FILE]]
                  [--update-metrics-baseline | --no-update-metrics-baseline]
+                 [--semantic-authority | --no-semantic-authority]
                  [--ci | --no-ci] [--api-surface | --no-api-surface]
                  [--coverage FILE] [--fail-on-new | --no-fail-on-new]
                  [--fail-on-new-metrics | --no-fail-on-new-metrics]
@@ -99,6 +100,9 @@ Baselines and CI:
                         If FILE is omitted, uses codeclone.baseline.json.
   --update-metrics-baseline, --no-update-metrics-baseline
                         Overwrite the metrics baseline with current metrics.
+                        Disabled by default.
+  --semantic-authority, --no-semantic-authority
+                        Collect report-only semantic authority candidates and provenance facts.
                         Disabled by default.
   --ci, --no-ci         Enable CI preset.
                         Equivalent to: --fail-on-new --no-color --quiet.

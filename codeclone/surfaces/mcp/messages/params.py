@@ -348,8 +348,8 @@ FamilyParam = Annotated[
     Field(
         description=(
             "metrics_detail: complexity, coupling, cohesion, dependencies, "
-            "dead_code, api_surface, security_surfaces, overloaded_modules, "
-            "health, coverage_adoption, coverage_join. "
+            "dead_code, api_surface, security_surfaces, semantic_authority, "
+            "overloaded_modules, health, coverage_adoption, coverage_join. "
             "findings: clone, structural, dead_code, or design."
         )
     ),

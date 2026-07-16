@@ -44,6 +44,7 @@ from ..models import (
     ProjectMetrics,
     RuntimeReachabilityFact,
     SecuritySurface,
+    SemanticAuthorityResult,
     StructuralFindingGroup,
     Suggestion,
 )
@@ -92,6 +93,7 @@ def compute_project_metrics(
     typing_modules: Sequence[ModuleTypingCoverage] = (),
     docstring_modules: Sequence[ModuleDocstringCoverage] = (),
     api_modules: Sequence[ModuleApiSurface] = (),
+    semantic_authority: SemanticAuthorityResult | None = None,
     files_found: int,
     files_analyzed_or_cached: int,
     function_clone_groups: int,
@@ -112,6 +114,7 @@ def compute_project_metrics(
         typing_modules=tuple(typing_modules),
         docstring_modules=tuple(docstring_modules),
         api_modules=tuple(api_modules),
+        semantic_authority=semantic_authority,
         files_found=files_found,
         files_analyzed_or_cached=files_analyzed_or_cached,
         function_clone_groups=function_clone_groups,
@@ -263,7 +266,11 @@ def analyze(
     func_clones_count = len(func_groups)
     block_clones_count = len(block_groups)
     segment_clones_count = len(segment_groups)
-    files_analyzed_or_cached = processing.files_analyzed + discovery.cache_hits
+    files_analyzed_or_cached = processing.files_analyzed + (
+        0
+        if bool(getattr(boot.args, "semantic_authority", False))
+        else discovery.cache_hits
+    )
 
     project_metrics: ProjectMetrics | None = None
     metrics_payload: dict[str, object] | None = None
@@ -301,6 +308,7 @@ def analyze(
             typing_modules=processing.typing_modules,
             docstring_modules=processing.docstring_modules,
             api_modules=processing.api_modules,
+            semantic_authority=processing.semantic_authority,
             files_found=discovery.files_found,
             files_analyzed_or_cached=files_analyzed_or_cached,
             function_clone_groups=func_clones_count,

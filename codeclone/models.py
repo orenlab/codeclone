@@ -959,6 +959,74 @@ class ContractIRBuildResult:
     fixpoint_iterations: int
 
 
+AuthorityStatus = Literal[
+    "authoritative",
+    "adapter",
+    "shadow",
+    "mixed",
+    "unavailable",
+]
+AuthorityCandidateLevel = Literal[
+    "exact_contract_ir",
+    "same_effect_signature",
+    "same_output_fact_and_input_family",
+    "overlapping_transform_chain",
+    "divergent_projection",
+]
+AuthorityResolutionState = Literal["resolved", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityGraphNode:
+    function: str
+    effect_signature: str
+    producer_root_ids: tuple[str, ...]
+    output_facts: tuple[str, ...]
+    resolution_state: AuthorityResolutionState
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityGraphEdge:
+    source: str
+    target: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityGraph:
+    nodes: tuple[AuthorityGraphNode, ...]
+    edges: tuple[AuthorityGraphEdge, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthoritySinkResult:
+    sink_identity: str
+    authority_status: AuthorityStatus
+    producer_root_ids: tuple[str, ...]
+    effect_signature: str
+    resolution_state: AuthorityResolutionState
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityCandidate:
+    candidate_id: str
+    level: AuthorityCandidateLevel
+    score: int
+    producers: tuple[str, ...]
+    shared_fact: str
+    independence: bool
+    semantic_divergence: bool
+    sink_statuses: tuple[AuthorityStatus, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SemanticAuthorityResult:
+    algorithm_revision: str
+    contract_ir: ContractIRBuildResult
+    graph: AuthorityGraph
+    sinks: tuple[AuthoritySinkResult, ...]
+    candidates: tuple[AuthorityCandidate, ...]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class SemanticFileFacts:
     events: tuple[SemanticEvent, ...] = ()
@@ -1081,6 +1149,7 @@ class ProjectMetrics:
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     api_surface: ApiSurfaceSnapshot | None = None
+    semantic_authority: SemanticAuthorityResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1236,6 +1305,7 @@ class MetricProjectContext:
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     api_modules: tuple[ModuleApiSurface, ...] = ()
+    semantic_authority: SemanticAuthorityResult | None = None
     files_found: int = 0
     files_analyzed_or_cached: int = 0
     function_clone_groups: int = 0

@@ -289,9 +289,11 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
     }
 
 
+@pytest.mark.parametrize("authority_enabled", [False, True])
 def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    authority_enabled: bool,
 ) -> None:
     valid = tmp_path / "valid.py"
     broken = tmp_path / "broken.py"
@@ -303,6 +305,7 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
     filepaths = (str(broken), str(valid))
     boot = _build_boot(tmp_path, processes=1)
     boot.args.skip_metrics = False
+    boot.args.semantic_authority = authority_enabled
     discovery = _build_discovery(filepaths, root=tmp_path)
 
     unobserved = process(
@@ -373,6 +376,7 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         "analysis.relative_imports",
         "semantics.events",
         "semantics.flow",
+        "semantics.authority.build",
     ]
     assert recorded[0].counters == {"facts_bound": 1}
     assert recorded[1].counters == {
@@ -390,6 +394,22 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         "functions_summarized": 1,
         "unresolved_flow_functions": 0,
     }
+    authority_counters = recorded[4].counters
+    assert set(authority_counters) == {
+        "candidates_emitted",
+        "fixpoint_iterations",
+        "ir_nodes",
+        "scc_count",
+        "sinks_by_status.adapter",
+        "sinks_by_status.authoritative",
+        "sinks_by_status.mixed",
+        "sinks_by_status.shadow",
+        "sinks_by_status.unavailable",
+    }
+    if authority_enabled:
+        assert authority_counters["ir_nodes"] > 0
+    else:
+        assert all(value == 0 for value in authority_counters.values())
 
 
 def _build_report_case(
@@ -505,6 +525,19 @@ def test_process_small_batch_skips_parallel_executor(
     assert callbacks == []
     assert result.files_analyzed == 1
     assert result.files_skipped == 0
+
+
+def test_process_empty_authority_builds_the_empty_repo_fact(tmp_path: Path) -> None:
+    boot = _build_boot(tmp_path, processes=1)
+    boot.args.semantic_authority = True
+    result = process(
+        boot=boot,
+        discovery=_build_discovery((), root=tmp_path),
+        cache=Cache(tmp_path / "cache.json", root=tmp_path),
+    )
+
+    assert result.semantic_authority is not None
+    assert result.semantic_authority.contract_ir.contracts == ()
 
 
 def test_invoke_process_file_passes_full_contract_without_introspection(

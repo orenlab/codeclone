@@ -170,6 +170,8 @@ def _metrics_detail_family(value: str | None) -> MetricsDetailFamily | None:
             return "api_surface"
         case "security_surfaces":
             return "security_surfaces"
+        case "semantic_authority":
+            return "semantic_authority"
         case "god_modules" | "overloaded_modules":
             return "overloaded_modules"
         case "health":

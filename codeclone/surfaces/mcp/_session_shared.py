@@ -158,6 +158,7 @@ MetricsDetailFamily = Literal[
     "dead_code",
     "api_surface",
     "security_surfaces",
+    "semantic_authority",
     "god_modules",
     "overloaded_modules",
     "health",

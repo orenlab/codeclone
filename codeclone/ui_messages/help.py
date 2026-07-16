@@ -126,6 +126,10 @@ HELP_API_SURFACE = (
     "Collect public API surface facts for baseline-aware compatibility review.\n"
     "Disabled by default."
 )
+HELP_SEMANTIC_AUTHORITY = (
+    "Collect report-only semantic authority candidates and provenance facts.\n"
+    "Disabled by default."
+)
 HELP_COVERAGE = (
     "Join external Cobertura XML line coverage to function spans.\n"
     "Pass a `coverage xml` report path."
