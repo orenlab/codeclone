@@ -346,6 +346,34 @@ def _architecture_boundary_violations(root: Path) -> dict[str, tuple[str, ...]]:
     }
 
 
+def test_phase39d3_contract_ir_has_exact_owners_and_no_reexports() -> None:
+    root = Path(__file__).resolve().parents[1]
+    model_names = {
+        "ContractIRBuildResult",
+        "ContractIRDocument",
+        "ContractIRFailureState",
+        "ContractIRSideEffect",
+        "ContractIRTransformation",
+        "FunctionContractIR",
+    }
+    models_tree = ast.parse((root / "codeclone/models.py").read_text("utf-8"))
+    ir_tree = ast.parse((root / "codeclone/semantics/ir.py").read_text("utf-8"))
+    model_definitions = {
+        node.name for node in models_tree.body if isinstance(node, ast.ClassDef)
+    }
+    behavior_definitions = {
+        node.name for node in ir_tree.body if isinstance(node, ast.ClassDef)
+    }
+
+    assert model_names <= model_definitions
+    assert not model_names & behavior_definitions
+    assert "ContractIR" not in (root / "codeclone/semantics/__init__.py").read_text(
+        "utf-8"
+    )
+    contracts_text = (root / "codeclone/contracts/__init__.py").read_text("utf-8")
+    assert 'CONTRACT_IR_VERSION: Final = "1"' in contracts_text
+
+
 def _string_mapping(value: object, *, field: str) -> dict[str, object]:
     assert isinstance(value, dict), f"{field} must be an object"
     result: dict[str, object] = {}
