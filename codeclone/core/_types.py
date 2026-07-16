@@ -39,6 +39,7 @@ from ..models import (
     SecuritySurface,
     SegmentGroupItem,
     SegmentUnit,
+    SemanticEvent,
     StructuralFindingGroup,
     Suggestion,
     SuppressedCloneGroup,
@@ -153,6 +154,7 @@ class ProcessingResult:
     source_read_failures: tuple[str, ...]
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
+    semantic_events: tuple[SemanticEvent, ...] = ()
     referenced_qualnames: frozenset[str] = frozenset()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Final
 
-OBSERVER_VOCABULARY_VERSION: Final = "1"
+OBSERVER_VOCABULARY_VERSION: Final = "2"
 DB_COUNTER_VERSION: Final = 2
 
 _MCP_TOOL_NAMES: Final = frozenset(
@@ -255,6 +255,7 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "events_by_kind.resolve_identity",
         "events_by_kind.return_value",
         "events_by_kind.serialize_field",
+        "events_by_kind.security_observation",
         "events_unresolved",
         "facts_bound",
         "manifest_collisions",

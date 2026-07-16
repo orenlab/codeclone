@@ -788,6 +788,40 @@ SecuritySurfaceClassificationMode = Literal[
 ]
 SecuritySurfaceEvidenceKind = Literal["builtin", "call", "import"]
 
+EventKind = Literal[
+    "artifact_write",
+    "assign",
+    "compatibility_check",
+    "compute_digest",
+    "construct",
+    "field_write",
+    "publish_event",
+    "resolve_identity",
+    "return_value",
+    "serialize_field",
+    "security_observation",
+]
+FactRefKind = Literal["param", "event", "const", "unresolved"]
+SemanticEventResolution = Literal["resolved", "unavailable"]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FactRef:
+    kind: FactRefKind
+    ref: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SemanticEvent:
+    event_id: str
+    kind: EventKind
+    subject: str
+    inputs: tuple[FactRef, ...]
+    output: FactRef | None
+    guards: tuple[str, ...]
+    location: tuple[str, int]
+    resolution: SemanticEventResolution
+
 
 @dataclass(frozen=True, slots=True)
 class SecuritySurface:
@@ -814,6 +848,7 @@ class FileMetrics:
     class_names: frozenset[str]
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
+    semantic_events: tuple[SemanticEvent, ...] = ()
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
     typing_coverage: ModuleTypingCoverage | None = None
     docstring_coverage: ModuleDocstringCoverage | None = None

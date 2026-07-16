@@ -179,6 +179,7 @@ packages = [
     "codeclone.report.messages",
     "codeclone.report.renderers",
     "codeclone.scanner",
+    "codeclone.semantics",
     "codeclone.surfaces",
     "codeclone.surfaces.cli",
     "codeclone.surfaces.cli.ui",

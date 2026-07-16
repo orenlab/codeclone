@@ -57,7 +57,7 @@ from .phase_ledger import (
     PhaseLedger,
 )
 from .reachability import collect_runtime_reachability
-from .security_surfaces import collect_security_surfaces
+from .security_surfaces import project_security_surfaces
 
 __all__ = ["extract_units_and_stats_from_source"]
 
@@ -382,11 +382,7 @@ def extract_units_and_stats_from_source(
             )
         security_surfaces = phase_ledger.run_subphase_us(
             SUBPHASE_MODULE_PASSES_SECURITY_US,
-            lambda: collect_security_surfaces(
-                tree=tree,
-                module_name=module_name,
-                filepath=filepath,
-            ),
+            lambda: project_security_surfaces(_walk.semantic_events),
         )
         runtime_reachability = collect_runtime_reachability(
             tree=tree,
@@ -415,6 +411,7 @@ def extract_units_and_stats_from_source(
             class_names=class_names,
             runtime_reachability=runtime_reachability,
             security_surfaces=security_surfaces,
+            semantic_events=_walk.semantic_events,
             referenced_qualnames=referenced_qualnames,
             typing_coverage=typing_coverage,
             docstring_coverage=docstring_coverage,
