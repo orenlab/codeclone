@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Final, Literal, TypedDict
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -830,6 +830,133 @@ class FunctionContractSummary:
     param_flows: tuple[tuple[str, str], ...]
     returns: tuple[FactRef, ...]
     unresolved_flow: bool
+
+
+ContractIROperationKind = Literal["canonical_operation", "pure_builtin"]
+ContractIRTransformationRole = Literal[
+    "call",
+    "compatibility_check",
+    "compute_digest",
+    "construct",
+    "resolve_identity",
+]
+ContractIRSideEffectKind = Literal[
+    "artifact_write",
+    "field_write",
+    "publish_event",
+    "security_observation",
+    "serialize_field",
+]
+ContractIRFailureKind = Literal["unresolved_call", "unresolved_flow"]
+PureBuiltinOperation = Literal[
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "bytes",
+    "dict",
+    "enumerate",
+    "float",
+    "frozenset",
+    "int",
+    "len",
+    "list",
+    "max",
+    "min",
+    "range",
+    "reversed",
+    "round",
+    "set",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
+]
+PURE_BUILTIN_OPERATIONS: Final[tuple[PureBuiltinOperation, ...]] = (
+    "abs",
+    "all",
+    "any",
+    "bool",
+    "bytes",
+    "dict",
+    "enumerate",
+    "float",
+    "frozenset",
+    "int",
+    "len",
+    "list",
+    "max",
+    "min",
+    "range",
+    "reversed",
+    "round",
+    "set",
+    "sorted",
+    "str",
+    "sum",
+    "tuple",
+    "zip",
+)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractIRTransformation:
+    role: ContractIRTransformationRole
+    operation_kind: ContractIROperationKind
+    operation: str
+    inputs: tuple[str, ...]
+    outputs: tuple[str, ...]
+    guards: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractIRSideEffect:
+    kind: ContractIRSideEffectKind
+    operation: str
+    inputs: tuple[str, ...]
+    guards: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractIRFailureState:
+    kind: ContractIRFailureKind
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractIRDocument:
+    inputs: tuple[str, ...]
+    guards: tuple[str, ...]
+    transformations: tuple[ContractIRTransformation, ...]
+    dependencies: tuple[str, ...]
+    output_facts: tuple[str, ...]
+    side_effects: tuple[ContractIRSideEffect, ...]
+    failure_states: tuple[ContractIRFailureState, ...]
+    unresolved: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FunctionContractIR:
+    function: str
+    document: ContractIRDocument
+    wire: str
+    effect_signature: str
+    provenance_roots: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if len(self.effect_signature) != 64 or any(
+            character not in "0123456789abcdef" for character in self.effect_signature
+        ):
+            raise ValueError(
+                "contract IR effect signatures must be 64 lowercase hex characters"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractIRBuildResult:
+    contracts: tuple[FunctionContractIR, ...]
+    sccs: tuple[tuple[str, ...], ...]
+    fixpoint_iterations: int
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
