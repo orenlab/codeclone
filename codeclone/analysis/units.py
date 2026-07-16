@@ -29,14 +29,17 @@ from ..models import (
     BlockUnit,
     ClassMetrics,
     FileMetrics,
+    FunctionContractSummary,
     ModuleRegistryHandle,
     ResolvedSourceIdentity,
     SegmentUnit,
+    SemanticFileFacts,
     SourceStats,
     StructuralFindingGroup,
     Unit,
 )
 from ..paths import is_test_filepath
+from ..semantics.flow import summarize_function_contract
 from ._module_walk import (
     _build_suppression_index_for_source,
     _cohesion_ignored_method_names,
@@ -203,9 +206,25 @@ def extract_units_and_stats_from_source(
     block_units: list[BlockUnit] = []
     segment_units: list[SegmentUnit] = []
     structural_findings: list[StructuralFindingGroup] = []
+    function_contract_summaries: list[FunctionContractSummary] = []
 
     for local_name, node in collector.units:
         phase_ledger.add_volume(AnalysisVolumeKey.UNITS_SEEN)
+        qualname = f"{module_name}:{local_name}"
+        graph, fingerprint, complexity = _cfg_fingerprint_and_complexity(
+            node,
+            cfg,
+            qualname,
+            phase_ledger=phase_ledger,
+        )
+        function_contract_summaries.append(
+            summarize_function_contract(
+                function=qualname,
+                node=node,
+                graph=graph,
+                events=_walk.semantic_events,
+            )
+        )
         unit_shape = _eligible_unit_shape(
             node,
             min_loc=min_loc,
@@ -216,13 +235,6 @@ def extract_units_and_stats_from_source(
         phase_ledger.add_volume(AnalysisVolumeKey.UNITS_ELIGIBLE)
         start, end, loc, stmt_count = unit_shape
 
-        qualname = f"{module_name}:{local_name}"
-        fingerprint, complexity = _cfg_fingerprint_and_complexity(
-            node,
-            cfg,
-            qualname,
-            phase_ledger=phase_ledger,
-        )
         phase_ledger.add_volume(AnalysisVolumeKey.UNITS_FINGERPRINTED)
         with phase_ledger.phase(AnalysisPhaseKey.UNIT_STRUCTURAL):
             structure_facts = scan_function_structure(
@@ -411,7 +423,15 @@ def extract_units_and_stats_from_source(
             class_names=class_names,
             runtime_reachability=runtime_reachability,
             security_surfaces=security_surfaces,
-            semantic_events=_walk.semantic_events,
+            semantic_facts=SemanticFileFacts(
+                events=_walk.semantic_events,
+                function_contract_summaries=tuple(
+                    sorted(
+                        function_contract_summaries,
+                        key=lambda summary: summary.function,
+                    )
+                ),
+            ),
             referenced_qualnames=referenced_qualnames,
             typing_coverage=typing_coverage,
             docstring_coverage=docstring_coverage,

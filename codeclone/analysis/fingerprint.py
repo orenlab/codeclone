@@ -12,7 +12,7 @@ from typing import Final
 
 from .. import qualnames as _qualnames
 from ..metrics.complexity import cyclomatic_complexity
-from .cfg import CFGBuilder
+from .cfg import CFG, CFGBuilder
 from .normalizer import NormalizationConfig
 from .phase_ledger import INERT_PHASE_LEDGER, AnalysisPhaseKey, PhaseLedger
 from .wire import emit_wire_seq
@@ -41,7 +41,7 @@ def _cfg_fingerprint_and_complexity(
     qualname: str,
     *,
     phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
-) -> tuple[str, int]:
+) -> tuple[CFG, str, int]:
     """
     Generate a structural fingerprint for a function using CFG analysis.
 
@@ -61,7 +61,9 @@ def _cfg_fingerprint_and_complexity(
         qualname: Qualified name for logging/debugging
 
     Returns:
-        64-character hex SHA-256 hash of the normalized CFG
+        The built CFG, its 64-character hex SHA-256 fingerprint, and its
+        cyclomatic complexity. The graph is returned so downstream analysis
+        can reuse the exact structure that produced the fingerprint.
     """
     builder = CFGBuilder()
     with phase_ledger.phase(AnalysisPhaseKey.UNIT_CFG):
@@ -75,7 +77,11 @@ def _cfg_fingerprint_and_complexity(
         with phase_ledger.phase(AnalysisPhaseKey.UNIT_NORMALIZE_CFG):
             block_dump = emit_wire_seq(block.statements, cfg)
         parts.append(f"BLOCK[{block.id}]:{block_dump}|SUCCESSORS:{succ_ids}")
-    return sha256_hex(_FN_DOMAIN, "|".join(parts)), cyclomatic_complexity(graph)
+    return (
+        graph,
+        sha256_hex(_FN_DOMAIN, "|".join(parts)),
+        cyclomatic_complexity(graph),
+    )
 
 
 def _signature_token(node: _qualnames.FunctionNode) -> str:

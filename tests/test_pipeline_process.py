@@ -295,7 +295,10 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
 ) -> None:
     valid = tmp_path / "valid.py"
     broken = tmp_path / "broken.py"
-    valid.write_text("from .. import missing\n", "utf-8")
+    valid.write_text(
+        "from .. import missing\ndef identity(value):\n    return value\n",
+        "utf-8",
+    )
     broken.write_text("def broken(:\n", "utf-8")
     filepaths = (str(broken), str(valid))
     boot = _build_boot(tmp_path, processes=1)
@@ -369,6 +372,7 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         "analysis.registry_bind",
         "analysis.relative_imports",
         "semantics.events",
+        "semantics.flow",
     ]
     assert recorded[0].counters == {"facts_bound": 1}
     assert recorded[1].counters == {
@@ -378,7 +382,14 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         "typed_failures": 1,
         "unresolved_relatives": 1,
     }
-    assert recorded[2].counters == {"events_unresolved": 0}
+    assert recorded[2].counters == {
+        "events_by_kind.return_value": 1,
+        "events_unresolved": 0,
+    }
+    assert recorded[3].counters == {
+        "functions_summarized": 1,
+        "unresolved_flow_functions": 0,
+    }
 
 
 def _build_report_case(

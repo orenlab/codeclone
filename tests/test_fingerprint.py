@@ -35,7 +35,7 @@ def _function(source: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
 
 def _fingerprint(source: str, *, active_ledger: bool = False) -> str:
     node = _function(source)
-    fingerprint, _complexity = _cfg_fingerprint_and_complexity(
+    _graph, fingerprint, _complexity = _cfg_fingerprint_and_complexity(
         node,
         _CFG,
         f"test:{node.name}",
@@ -160,7 +160,7 @@ for raw_path in sys.argv[1:]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.name)
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            fingerprint, _ = _cfg_fingerprint_and_complexity(
+            _graph, fingerprint, _ = _cfg_fingerprint_and_complexity(
                 node, config, f"fixture:{node.name}"
             )
             rows.append((path.name, node.name, node.lineno, fingerprint))

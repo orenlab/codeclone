@@ -823,6 +823,21 @@ class SemanticEvent:
     resolution: SemanticEventResolution
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class FunctionContractSummary:
+    function: str
+    events: tuple[SemanticEvent, ...]
+    param_flows: tuple[tuple[str, str], ...]
+    returns: tuple[FactRef, ...]
+    unresolved_flow: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SemanticFileFacts:
+    events: tuple[SemanticEvent, ...] = ()
+    function_contract_summaries: tuple[FunctionContractSummary, ...] = ()
+
+
 @dataclass(frozen=True, slots=True)
 class SecuritySurface:
     category: SecuritySurfaceCategory
@@ -848,7 +863,7 @@ class FileMetrics:
     class_names: frozenset[str]
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
-    semantic_events: tuple[SemanticEvent, ...] = ()
+    semantic_facts: SemanticFileFacts = field(default_factory=SemanticFileFacts)
     referenced_qualnames: frozenset[str] = field(default_factory=frozenset)
     typing_coverage: ModuleTypingCoverage | None = None
     docstring_coverage: ModuleDocstringCoverage | None = None

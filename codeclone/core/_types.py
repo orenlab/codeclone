@@ -26,6 +26,7 @@ from ..models import (
     DeadCandidate,
     DigestObject,
     FileMetrics,
+    FunctionContractSummary,
     FunctionRelationshipFacts,
     GroupItem,
     GroupItemLike,
@@ -155,6 +156,7 @@ class ProcessingResult:
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     semantic_events: tuple[SemanticEvent, ...] = ()
+    function_contract_summaries: tuple[FunctionContractSummary, ...] = ()
     referenced_qualnames: frozenset[str] = frozenset()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
