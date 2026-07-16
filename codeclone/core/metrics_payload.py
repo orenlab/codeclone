@@ -28,6 +28,7 @@ from ..models import (
     ResolvedSourceIdentity,
     RuntimeReachabilityFact,
     SecuritySurface,
+    SemanticAuthorityResult,
 )
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
@@ -42,6 +43,78 @@ from .coverage_payload import (
     _permille,
 )
 from .security_surfaces_payload import build_security_surfaces_payload
+
+
+def _semantic_authority_payload(
+    result: SemanticAuthorityResult,
+) -> dict[str, object]:
+    status_counts = {
+        status: sum(sink.authority_status == status for sink in result.sinks)
+        for status in (
+            "authoritative",
+            "adapter",
+            "shadow",
+            "mixed",
+            "unavailable",
+        )
+    }
+    sink_items: list[dict[str, object]] = [
+        {
+            "item_kind": "sink",
+            "sink_identity": sink.sink_identity,
+            "authority_status": sink.authority_status,
+            "producer_root_ids": list(sink.producer_root_ids),
+            "effect_signature": sink.effect_signature,
+            "resolution_state": sink.resolution_state,
+            "algorithm_revision": result.algorithm_revision,
+        }
+        for sink in result.sinks
+    ]
+    candidate_items: list[dict[str, object]] = [
+        {
+            "item_kind": "candidate",
+            "candidate_id": candidate.candidate_id,
+            "level": candidate.level,
+            "score": candidate.score,
+            "producers": list(candidate.producers),
+            "shared_fact": candidate.shared_fact,
+            "independence": candidate.independence,
+            "semantic_divergence": candidate.semantic_divergence,
+            "sink_statuses": list(candidate.sink_statuses),
+            "algorithm_revision": result.algorithm_revision,
+        }
+        for candidate in result.candidates
+    ]
+    return {
+        "summary": {
+            "enabled": True,
+            "report_only": True,
+            "algorithm_revision": result.algorithm_revision,
+            "contracts": len(result.contract_ir.contracts),
+            "sinks": len(result.sinks),
+            "candidates": len(result.candidates),
+            "scc_count": len(result.contract_ir.sccs),
+            "fixpoint_iterations": result.contract_ir.fixpoint_iterations,
+            "sinks_by_status": status_counts,
+        },
+        "items": sorted(
+            [*sink_items, *candidate_items],
+            key=lambda item: (
+                str(item["item_kind"]),
+                str(item.get("sink_identity", "")),
+                str(item.get("candidate_id", "")),
+            ),
+        ),
+        "contract_ir": [
+            {
+                "function": contract.function,
+                "wire": contract.wire,
+                "effect_signature": contract.effect_signature,
+                "producer_root_ids": list(contract.provenance_roots),
+            }
+            for contract in result.contract_ir.contracts
+        ],
+    }
 
 
 def _dependency_source_identity(
@@ -401,6 +474,10 @@ def build_metrics_report_payload(
             surfaces=security_surfaces,
         ),
     }
+    if project_metrics.semantic_authority is not None:
+        payload["semantic_authority"] = _semantic_authority_payload(
+            project_metrics.semantic_authority
+        )
     if coverage_join is not None:
         payload["coverage_join"] = {
             "summary": dict(coverage_join_summary),

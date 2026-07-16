@@ -416,6 +416,15 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         pyproject_type=bool,
     ),
     _option(
+        dest="semantic_authority",
+        group="Baselines and CI",
+        cli_kind="bool_optional",
+        flags=("--semantic-authority",),
+        default=False,
+        help_text=ui.HELP_SEMANTIC_AUTHORITY,
+        pyproject_type=bool,
+    ),
+    _option(
         dest="ci",
         group="Baselines and CI",
         cli_kind="bool_optional",

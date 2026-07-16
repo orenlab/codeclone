@@ -1667,6 +1667,95 @@ def test_report_contract_includes_canonical_adoption_and_api_surface_families() 
     ) == ("symbol", "pkg/mod.py", "breaking_change", "removed")
 
 
+def test_report_contract_includes_authority_only_when_opted_in() -> None:
+    disabled = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={},
+    )
+    disabled_metrics = cast("dict[str, object]", disabled["metrics"])
+    assert "semantic_authority" not in cast(
+        "dict[str, object]",
+        disabled_metrics["families"],
+    )
+
+    enabled = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "semantic_authority": {
+                "summary": {
+                    "enabled": True,
+                    "report_only": True,
+                    "algorithm_revision": "1",
+                    "contracts": 2,
+                    "sinks": 2,
+                    "candidates": 1,
+                    "scc_count": 2,
+                    "fixpoint_iterations": 1,
+                    "sinks_by_status": {
+                        "authoritative": 0,
+                        "adapter": 0,
+                        "shadow": 2,
+                        "mixed": 0,
+                        "unavailable": 0,
+                    },
+                },
+                "items": [
+                    {
+                        "item_kind": "candidate",
+                        "candidate_id": "authority:candidate:1",
+                        "level": "exact_contract_ir",
+                        "score": 5,
+                        "producers": ["pkg.second", "pkg.first"],
+                        "shared_fact": "digest",
+                        "independence": True,
+                        "semantic_divergence": False,
+                        "sink_statuses": ["shadow", "shadow"],
+                        "algorithm_revision": "1",
+                    }
+                ],
+                "contract_ir": [
+                    {
+                        "function": "pkg.first",
+                        "wire": "wire",
+                        "effect_signature": "a" * 64,
+                        "producer_root_ids": ["pkg.first"],
+                    }
+                ],
+            }
+        },
+    )
+
+    summary, family, items = _metric_family_payload(
+        enabled,
+        "semantic_authority",
+    )
+    family_summary = cast("dict[str, object]", family["summary"])
+    assert summary["semantic_authority"] == family_summary
+    assert family_summary["report_only"] is True
+    assert family_summary["sinks_by_status"] == {
+        "authoritative": 0,
+        "adapter": 0,
+        "shadow": 2,
+        "mixed": 0,
+        "unavailable": 0,
+    }
+    assert items[0]["producers"] == ["pkg.first", "pkg.second"]
+    assert family["contract_ir"] == [
+        {
+            "function": "pkg.first",
+            "wire": "wire",
+            "effect_signature": "a" * 64,
+            "producer_root_ids": ["pkg.first"],
+        }
+    ]
+
+
 def test_report_contract_includes_canonical_coverage_join_family() -> None:
     payload = build_report_document(
         func_groups={},

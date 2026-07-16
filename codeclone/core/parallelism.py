@@ -26,10 +26,12 @@ from ..models import (
     ModuleTypingCoverage,
     RuntimeReachabilityFact,
     SecuritySurface,
+    SemanticAuthorityResult,
     SemanticEvent,
     StructuralFindingGroup,
 )
 from ..observability import record_counter, span
+from ..semantics.authority import build_semantic_authority
 from ..semantics.events import event_counter_key
 from ._types import (
     DEFAULT_BATCH_SIZE,
@@ -78,7 +80,11 @@ def process(
     on_parallel_fallback: Callable[[Exception], None] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> ProcessingResult:
-    files_to_process = discovery.files_to_process
+    authority_enabled = bool(getattr(boot.args, "semantic_authority", False))
+    semantic_authority: SemanticAuthorityResult | None = None
+    files_to_process = (
+        discovery.all_file_paths if authority_enabled else discovery.files_to_process
+    )
     registry = discovery.module_registry
     if not files_to_process:
         with span(name="analysis.registry_bind") as registry_span:
@@ -95,6 +101,18 @@ def process(
         with span(name="semantics.flow") as flow_span:
             flow_span.set_counter("functions_summarized", 0)
             flow_span.set_counter("unresolved_flow_functions", 0)
+        with span(name="semantics.authority.build") as authority_span:
+            if authority_enabled:
+                semantic_authority = build_semantic_authority((), ())
+            authority_span.set_counter("ir_nodes", 0)
+            authority_span.set_counter("scc_count", 0)
+            authority_span.set_counter("fixpoint_iterations", 0)
+            authority_span.set_counter("sinks_by_status.authoritative", 0)
+            authority_span.set_counter("sinks_by_status.adapter", 0)
+            authority_span.set_counter("sinks_by_status.shadow", 0)
+            authority_span.set_counter("sinks_by_status.mixed", 0)
+            authority_span.set_counter("sinks_by_status.unavailable", 0)
+            authority_span.set_counter("candidates_emitted", 0)
         return ProcessingResult(
             units=discovery.cached_units,
             blocks=discovery.cached_blocks,
@@ -107,6 +125,7 @@ def process(
             security_surfaces=discovery.cached_security_surfaces,
             semantic_events=(),
             function_contract_summaries=(),
+            semantic_authority=semantic_authority,
             referenced_qualnames=discovery.cached_referenced_qualnames,
             typing_modules=discovery.cached_typing_modules,
             docstring_modules=discovery.cached_docstring_modules,
@@ -124,29 +143,48 @@ def process(
             source_stats_by_file=discovery.cached_source_stats_by_file,
         )
 
-    all_units: list[GroupItem] = list(discovery.cached_units)
-    all_blocks: list[GroupItem] = list(discovery.cached_blocks)
-    all_segments: list[GroupItem] = list(discovery.cached_segments)
-    all_class_metrics: list[ClassMetrics] = list(discovery.cached_class_metrics)
-    all_module_deps: list[ModuleDep] = list(discovery.cached_module_deps)
-    all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
-    all_referenced_names: set[str] = set(discovery.cached_referenced_names)
-    all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
+    use_cached_facts = not authority_enabled
+    all_units: list[GroupItem] = (
+        list(discovery.cached_units) if use_cached_facts else []
+    )
+    all_blocks: list[GroupItem] = (
+        list(discovery.cached_blocks) if use_cached_facts else []
+    )
+    all_segments: list[GroupItem] = (
+        list(discovery.cached_segments) if use_cached_facts else []
+    )
+    all_class_metrics: list[ClassMetrics] = (
+        list(discovery.cached_class_metrics) if use_cached_facts else []
+    )
+    all_module_deps: list[ModuleDep] = (
+        list(discovery.cached_module_deps) if use_cached_facts else []
+    )
+    all_dead_candidates: list[DeadCandidate] = (
+        list(discovery.cached_dead_candidates) if use_cached_facts else []
+    )
+    all_referenced_names: set[str] = (
+        set(discovery.cached_referenced_names) if use_cached_facts else set()
+    )
+    all_referenced_qualnames: set[str] = (
+        set(discovery.cached_referenced_qualnames) if use_cached_facts else set()
+    )
     all_runtime_reachability: list[RuntimeReachabilityFact] = list(
-        discovery.cached_runtime_reachability
+        discovery.cached_runtime_reachability if use_cached_facts else ()
     )
     all_security_surfaces: list[SecuritySurface] = list(
-        discovery.cached_security_surfaces
+        discovery.cached_security_surfaces if use_cached_facts else ()
     )
     all_semantic_events: list[SemanticEvent] = []
     all_function_contract_summaries: list[FunctionContractSummary] = []
     all_typing_modules: list[ModuleTypingCoverage] = list(
-        discovery.cached_typing_modules
+        discovery.cached_typing_modules if use_cached_facts else ()
     )
     all_docstring_modules: list[ModuleDocstringCoverage] = list(
-        discovery.cached_docstring_modules
+        discovery.cached_docstring_modules if use_cached_facts else ()
     )
-    all_api_modules: list[ModuleApiSurface] = list(discovery.cached_api_modules)
+    all_api_modules: list[ModuleApiSurface] = list(
+        discovery.cached_api_modules if use_cached_facts else ()
+    )
 
     collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
     collect_api_surface = not boot.args.skip_metrics and bool(
@@ -162,10 +200,10 @@ def process(
     analyzed_methods = 0
     analyzed_classes = 0
     all_structural_findings: list[StructuralFindingGroup] = list(
-        discovery.cached_structural_findings
+        discovery.cached_structural_findings if use_cached_facts else ()
     )
     all_function_relationship_facts: list[FunctionRelationshipFacts] = list(
-        discovery.cached_function_relationship_facts
+        discovery.cached_function_relationship_facts if use_cached_facts else ()
     )
     source_stats_by_file: dict[str, tuple[int, int, int, int]] = {
         filepath: (lines, functions, methods, classes)
@@ -175,7 +213,7 @@ def process(
             functions,
             methods,
             classes,
-        ) in discovery.cached_source_stats_by_file
+        ) in (discovery.cached_source_stats_by_file if use_cached_facts else ())
     }
     failed_files: list[str] = []
     source_read_failures: list[str] = []
@@ -417,6 +455,60 @@ def process(
             relative_span.set_counter("typed_failures", len(failed_files))
         registry_span.set_counter("facts_bound", len(source_stats_by_file))
 
+    with span(name="semantics.authority.build") as authority_span:
+        if authority_enabled:
+            semantic_authority = build_semantic_authority(
+                all_function_contract_summaries,
+                all_function_relationship_facts,
+            )
+        authority_span.set_counter(
+            "ir_nodes",
+            len(semantic_authority.contract_ir.contracts)
+            if semantic_authority is not None
+            else 0,
+        )
+        authority_span.set_counter(
+            "scc_count",
+            len(semantic_authority.contract_ir.sccs)
+            if semantic_authority is not None
+            else 0,
+        )
+        authority_span.set_counter(
+            "fixpoint_iterations",
+            semantic_authority.contract_ir.fixpoint_iterations
+            if semantic_authority is not None
+            else 0,
+        )
+        authority_status_counts = (
+            Counter(sink.authority_status for sink in semantic_authority.sinks)
+            if semantic_authority is not None
+            else Counter()
+        )
+        authority_span.set_counter(
+            "sinks_by_status.authoritative",
+            authority_status_counts["authoritative"],
+        )
+        authority_span.set_counter(
+            "sinks_by_status.adapter",
+            authority_status_counts["adapter"],
+        )
+        authority_span.set_counter(
+            "sinks_by_status.shadow",
+            authority_status_counts["shadow"],
+        )
+        authority_span.set_counter(
+            "sinks_by_status.mixed",
+            authority_status_counts["mixed"],
+        )
+        authority_span.set_counter(
+            "sinks_by_status.unavailable",
+            authority_status_counts["unavailable"],
+        )
+        authority_span.set_counter(
+            "candidates_emitted",
+            len(semantic_authority.candidates) if semantic_authority is not None else 0,
+        )
+
     volumes = batch_snapshot.volume_map()
     phase_snapshot = batch_snapshot if volumes.get("files_timed", 0) > 0 else None
 
@@ -476,6 +568,7 @@ def process(
                 key=lambda summary: summary.function,
             )
         ),
+        semantic_authority=semantic_authority,
         referenced_qualnames=frozenset(all_referenced_qualnames),
         typing_modules=tuple(
             sorted(all_typing_modules, key=lambda item: (item.filepath, item.module))

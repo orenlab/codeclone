@@ -48,6 +48,8 @@ _COVERAGE_JOIN_FAMILY = "coverage_join"
 
 _SECURITY_SURFACES_FAMILY = "security_surfaces"
 
+_SEMANTIC_AUTHORITY_FAMILY = "semantic_authority"
+
 
 def _normalize_metrics_families(
     metrics: Mapping[str, object] | None,
@@ -490,6 +492,61 @@ def _normalize_metrics_families(
             item["evidence_symbol"],
         ),
     )
+    semantic_authority = _as_mapping(metrics_map.get(_SEMANTIC_AUTHORITY_FAMILY))
+    semantic_authority_summary = _as_mapping(semantic_authority.get("summary"))
+    semantic_authority_items = sorted(
+        (
+            {
+                "item_kind": str(item_map.get("item_kind", "")).strip(),
+                "sink_identity": str(item_map.get("sink_identity", "")).strip(),
+                "authority_status": str(item_map.get("authority_status", "")).strip(),
+                "producer_root_ids": sorted(
+                    str(value)
+                    for value in _as_sequence(item_map.get("producer_root_ids"))
+                ),
+                "effect_signature": str(item_map.get("effect_signature", "")).strip(),
+                "resolution_state": str(item_map.get("resolution_state", "")).strip(),
+                "candidate_id": str(item_map.get("candidate_id", "")).strip(),
+                "level": str(item_map.get("level", "")).strip(),
+                "score": _as_int(item_map.get("score")),
+                "producers": sorted(
+                    str(value) for value in _as_sequence(item_map.get("producers"))
+                ),
+                "shared_fact": str(item_map.get("shared_fact", "")).strip(),
+                "independence": bool(item_map.get("independence")),
+                "semantic_divergence": bool(item_map.get("semantic_divergence")),
+                "sink_statuses": [
+                    str(value) for value in _as_sequence(item_map.get("sink_statuses"))
+                ],
+                "algorithm_revision": str(
+                    item_map.get("algorithm_revision", "")
+                ).strip(),
+            }
+            for item in _as_sequence(semantic_authority.get("items"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["item_kind"],
+            item["sink_identity"],
+            item["candidate_id"],
+        ),
+    )
+    semantic_authority_contracts: list[dict[str, object]] = sorted(
+        [
+            {
+                "function": str(item_map.get("function", "")).strip(),
+                "wire": str(item_map.get("wire", "")),
+                "effect_signature": str(item_map.get("effect_signature", "")).strip(),
+                "producer_root_ids": sorted(
+                    str(value)
+                    for value in _as_sequence(item_map.get("producer_root_ids"))
+                ),
+            }
+            for item in _as_sequence(semantic_authority.get("contract_ir"))
+            for item_map in (_as_mapping(item),)
+        ],
+        key=lambda item: str(item["function"]),
+    )
     dead_high_confidence = sum(
         1
         for item in dead_items
@@ -719,6 +776,39 @@ def _normalize_metrics_families(
             "items_truncated": False,
         },
     }
+    if semantic_authority:
+        raw_status_counts = _as_mapping(
+            semantic_authority_summary.get("sinks_by_status")
+        )
+        family_sections[_SEMANTIC_AUTHORITY_FAMILY] = {
+            "summary": {
+                "enabled": bool(semantic_authority_summary.get("enabled")),
+                "report_only": bool(semantic_authority_summary.get("report_only")),
+                "algorithm_revision": str(
+                    semantic_authority_summary.get("algorithm_revision", "")
+                ),
+                "contracts": _as_int(semantic_authority_summary.get("contracts")),
+                "sinks": _as_int(semantic_authority_summary.get("sinks")),
+                "candidates": _as_int(semantic_authority_summary.get("candidates")),
+                "scc_count": _as_int(semantic_authority_summary.get("scc_count")),
+                "fixpoint_iterations": _as_int(
+                    semantic_authority_summary.get("fixpoint_iterations")
+                ),
+                "sinks_by_status": {
+                    status: _as_int(raw_status_counts.get(status))
+                    for status in (
+                        "authoritative",
+                        "adapter",
+                        "shadow",
+                        "mixed",
+                        "unavailable",
+                    )
+                },
+            },
+            "items": semantic_authority_items,
+            "contract_ir": semantic_authority_contracts,
+            "items_truncated": False,
+        }
     if coverage_join_summary or coverage_join_items or coverage_join:
         family_sections[_COVERAGE_JOIN_FAMILY] = {
             "summary": {

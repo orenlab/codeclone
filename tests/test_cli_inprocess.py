@@ -3987,6 +3987,40 @@ def test_cli_api_surface_ignores_non_api_warm_cache(
     assert cast("dict[str, object]", api_surface_summary)["modules"] == 1
 
 
+def test_cli_semantic_authority_requests_metrics_without_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "module.py").write_text(
+        "def digest(value: bytes) -> str:\n    return value.hex()\n",
+        "utf-8",
+    )
+    report_path = tmp_path / "report.json"
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--no-progress",
+            "--semantic-authority",
+            "--json",
+            str(report_path),
+        ],
+    )
+    _ = capsys.readouterr()
+    metrics = cast(
+        "dict[str, object]",
+        json.loads(report_path.read_text("utf-8"))["metrics"],
+    )
+    families = cast("dict[str, object]", metrics["families"])
+    family = cast("dict[str, object]", families["semantic_authority"])
+    summary = cast("dict[str, object]", family["summary"])
+
+    assert summary["enabled"] is True
+    assert summary["report_only"] is True
+
+
 def test_cli_summary_no_color_has_no_ansi(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

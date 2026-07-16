@@ -68,6 +68,7 @@ def _metrics_flags_requested(args: object) -> bool:
         or int_attr(args, "min_typing_coverage", -1) >= 0
         or int_attr(args, "min_docstring_coverage", -1) >= 0
         or bool_attr(args, "api_surface")
+        or bool_attr(args, "semantic_authority")
         or bool_attr(args, "update_metrics_baseline")
         or bool(optional_text_attr(args, "coverage_xml"))
     )

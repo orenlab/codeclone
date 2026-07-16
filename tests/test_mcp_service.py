@@ -7457,6 +7457,7 @@ def test_mcp_session_helper_private_edges(
             "dead_code",
             "api_surface",
             "security_surfaces",
+            "semantic_authority",
             "god_modules",
             "health",
             "unknown",
@@ -7471,6 +7472,7 @@ def test_mcp_session_helper_private_edges(
         "dead_code",
         "api_surface",
         "security_surfaces",
+        "semantic_authority",
         "overloaded_modules",
         "health",
         None,
@@ -10496,6 +10498,52 @@ def test_mcp_service_summary_and_metrics_detail_helper_fallbacks(
                 "capability": "requests_import",
                 "classification_mode": "exact_import",
                 "evidence_symbol": "requests",
+            }
+        ],
+    }
+    semantic_authority_payload = service._metrics_detail_payload(
+        metrics={
+            "summary": {},
+            "families": {
+                "semantic_authority": {
+                    "items": [
+                        {
+                            "item_kind": "candidate",
+                            "candidate_id": "authority:candidate:1",
+                            "level": "exact_contract_ir",
+                            "score": 5,
+                            "producers": ["pkg.first", "pkg.second"],
+                            "shared_fact": "digest",
+                            "independence": True,
+                            "semantic_divergence": False,
+                        }
+                    ]
+                }
+            },
+        },
+        family="semantic_authority",
+        path=None,
+        offset=0,
+        limit=5,
+    )
+    assert semantic_authority_payload == {
+        "family": "semantic_authority",
+        "path": None,
+        "offset": 0,
+        "limit": 5,
+        "returned": 1,
+        "total": 1,
+        "has_more": False,
+        "items": [
+            {
+                "item_kind": "candidate",
+                "candidate_id": "authority:candidate:1",
+                "level": "exact_contract_ir",
+                "score": 5,
+                "producers": ["pkg.first", "pkg.second"],
+                "shared_fact": "digest",
+                "independence": True,
+                "semantic_divergence": False,
             }
         ],
     }

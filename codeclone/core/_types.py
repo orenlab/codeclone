@@ -40,6 +40,7 @@ from ..models import (
     SecuritySurface,
     SegmentGroupItem,
     SegmentUnit,
+    SemanticAuthorityResult,
     SemanticEvent,
     StructuralFindingGroup,
     Suggestion,
@@ -157,6 +158,7 @@ class ProcessingResult:
     security_surfaces: tuple[SecuritySurface, ...] = ()
     semantic_events: tuple[SemanticEvent, ...] = ()
     function_contract_summaries: tuple[FunctionContractSummary, ...] = ()
+    semantic_authority: SemanticAuthorityResult | None = None
     referenced_qualnames: frozenset[str] = frozenset()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()

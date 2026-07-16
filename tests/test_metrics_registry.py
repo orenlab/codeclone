@@ -31,5 +31,14 @@ def test_registry_sort_helpers_handle_non_mapping_units() -> None:
     assert _group_item_sort_key("not-a-mapping") == ("", 0, 0, "")
 
 
+def test_semantic_authority_family_is_report_only() -> None:
+    family = METRIC_FAMILIES["semantic_authority"]
+
+    assert family.report_section == "semantic_authority"
+    assert family.baseline_key is None
+    assert family.gate_keys == ()
+    assert family.skippable_flag == "skip_metrics"
+
+
 def test_score_quantile_q_one_returns_last_value() -> None:
     assert _score_quantile([1.0, 2.0, 3.0], 1.0) == 3.0

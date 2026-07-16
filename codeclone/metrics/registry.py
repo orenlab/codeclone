@@ -22,6 +22,7 @@ from ..models import (
     ModuleTypingCoverage,
     ProjectMetrics,
     RuntimeReachabilityFact,
+    SemanticAuthorityResult,
 )
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_str as _as_str
@@ -159,6 +160,7 @@ def project_metrics_defaults() -> dict[str, object]:
         "typing_modules": (),
         "docstring_modules": (),
         "api_surface": None,
+        "semantic_authority": None,
     }
 
 
@@ -213,6 +215,10 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
             "docstring_modules",
         ),
         api_surface=_result_api_surface(project_fields, "api_surface"),
+        semantic_authority=_result_semantic_authority(
+            project_fields,
+            "semantic_authority",
+        ),
     )
 
 
@@ -265,6 +271,14 @@ def _result_runtime_reachability(
 def _result_health(result: dict[str, object], key: str) -> HealthScore:
     value = result.get(key)
     return value if isinstance(value, HealthScore) else _EMPTY_HEALTH_SCORE
+
+
+def _result_semantic_authority(
+    result: dict[str, object],
+    key: str,
+) -> SemanticAuthorityResult | None:
+    value = result.get(key)
+    return value if isinstance(value, SemanticAuthorityResult) else None
 
 
 def _result_typing_modules(
@@ -656,6 +670,26 @@ def _aggregate_api_surface_family(results: list[MetricResult]) -> MetricAggregat
     return MetricAggregate(project_fields={"api_surface": result.get("api_surface")})
 
 
+def _compute_semantic_authority_family(
+    context: MetricProjectContext,
+) -> MetricResult:
+    return {"semantic_authority": context.semantic_authority}
+
+
+def _aggregate_semantic_authority_family(
+    results: list[MetricResult],
+) -> MetricAggregate:
+    result = _first_result(results)
+    return MetricAggregate(
+        project_fields={
+            "semantic_authority": _result_semantic_authority(
+                result,
+                "semantic_authority",
+            )
+        }
+    )
+
+
 def _compute_report_only_family(_context: MetricProjectContext) -> MetricResult:
     return {}
 
@@ -756,6 +790,15 @@ METRIC_FAMILIES: dict[str, MetricFamily] = {
         compute=_compute_report_only_family,
         aggregate=_aggregate_empty_family,
         report_section="security_surfaces",
+        baseline_key=None,
+        gate_keys=(),
+        skippable_flag="skip_metrics",
+    ),
+    "semantic_authority": MetricFamily(
+        name="semantic_authority",
+        compute=_compute_semantic_authority_family,
+        aggregate=_aggregate_semantic_authority_family,
+        report_section="semantic_authority",
         baseline_key=None,
         gate_keys=(),
         skippable_flag="skip_metrics",
