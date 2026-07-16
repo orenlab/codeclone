@@ -17,6 +17,7 @@ from ..models import (
     ClassMetrics,
     DeadCandidate,
     EventKind,
+    FunctionContractSummary,
     FunctionRelationshipFacts,
     GroupItem,
     ModuleApiSurface,
@@ -89,6 +90,11 @@ def process(
                 relative_span.set_counter("analysis_inventory_submodule_expansions", 0)
                 relative_span.set_counter("typed_failures", 0)
         record_counter("registry_worker_installs", 0)
+        with span(name="semantics.events") as event_span:
+            event_span.set_counter("events_unresolved", 0)
+        with span(name="semantics.flow") as flow_span:
+            flow_span.set_counter("functions_summarized", 0)
+            flow_span.set_counter("unresolved_flow_functions", 0)
         return ProcessingResult(
             units=discovery.cached_units,
             blocks=discovery.cached_blocks,
@@ -100,6 +106,7 @@ def process(
             runtime_reachability=discovery.cached_runtime_reachability,
             security_surfaces=discovery.cached_security_surfaces,
             semantic_events=(),
+            function_contract_summaries=(),
             referenced_qualnames=discovery.cached_referenced_qualnames,
             typing_modules=discovery.cached_typing_modules,
             docstring_modules=discovery.cached_docstring_modules,
@@ -132,6 +139,7 @@ def process(
         discovery.cached_security_surfaces
     )
     all_semantic_events: list[SemanticEvent] = []
+    all_function_contract_summaries: list[FunctionContractSummary] = []
     all_typing_modules: list[ModuleTypingCoverage] = list(
         discovery.cached_typing_modules
     )
@@ -258,7 +266,11 @@ def process(
                     result.file_metrics.runtime_reachability
                 )
                 all_security_surfaces.extend(result.file_metrics.security_surfaces)
-                all_semantic_events.extend(result.file_metrics.semantic_events)
+                semantic_facts = result.file_metrics.semantic_facts
+                all_semantic_events.extend(semantic_facts.events)
+                all_function_contract_summaries.extend(
+                    semantic_facts.function_contract_summaries
+                )
                 all_function_relationship_facts.extend(
                     result.file_metrics.function_relationship_facts
                 )
@@ -358,7 +370,19 @@ def process(
     with span(name="analysis.registry_bind") as registry_span:
         with span(name="analysis.relative_imports") as relative_span:
             with span(name="semantics.events") as event_span:
-                _run_files()
+                with span(name="semantics.flow") as flow_span:
+                    _run_files()
+                    flow_span.set_counter(
+                        "functions_summarized",
+                        len(all_function_contract_summaries),
+                    )
+                    flow_span.set_counter(
+                        "unresolved_flow_functions",
+                        sum(
+                            summary.unresolved_flow
+                            for summary in all_function_contract_summaries
+                        ),
+                    )
                 event_counts: Counter[EventKind] = Counter(
                     event.kind for event in all_semantic_events
                 )
@@ -444,6 +468,12 @@ def process(
                     item.kind,
                     item.subject,
                 ),
+            )
+        ),
+        function_contract_summaries=tuple(
+            sorted(
+                all_function_contract_summaries,
+                key=lambda summary: summary.function,
             )
         ),
         referenced_qualnames=frozenset(all_referenced_qualnames),

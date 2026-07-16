@@ -3934,15 +3934,23 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
     def _fake_parse(_source: str, _timeout_s: int) -> ast.AST:
         return tree
 
+    helper_name = "_cfg_fingerprint_and_complexity"
+    real_fingerprint = getattr(units_mod, helper_name)
+
     def _fake_fingerprint(
         _node: ast.FunctionDef | ast.AsyncFunctionDef,
         _cfg: NormalizationConfig,
         _qualname: str,
         *,
         phase_ledger: object,
-    ) -> tuple[str, int]:
+    ) -> tuple[object, str, int]:
         del phase_ledger
-        return "f" * 64, 1
+        graph, _fingerprint, _complexity = real_fingerprint(
+            _node,
+            _cfg,
+            _qualname,
+        )
+        return graph, "f" * 64, 1
 
     def _fake_extract_segments(
         _node: ast.FunctionDef | ast.AsyncFunctionDef,

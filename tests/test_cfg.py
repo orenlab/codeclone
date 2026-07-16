@@ -72,7 +72,7 @@ def _cfg_fingerprint(
 ) -> str:
     func = _parse_function(source, skip_reason=skip_reason)
     cfg = NormalizationConfig()
-    return _cfg_fingerprint_and_complexity(func, cfg, qualname)[0]
+    return _cfg_fingerprint_and_complexity(func, cfg, qualname)[1]
 
 
 def _assert_fingerprint_diff(
