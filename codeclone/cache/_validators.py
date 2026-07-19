@@ -9,14 +9,14 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TypeGuard
 
-from ..models import DigestObject, GitBlobIdentity
-from .entries import (
+from ..models import (
     ApiParamSpecDict,
-    BlockDict,
     ClassMetricsDict,
     DeadCandidateDict,
+    DigestObject,
     FileStat,
     FunctionRelationshipFactsDict,
+    GitBlobIdentity,
     ModuleApiSurfaceDict,
     ModuleDepDict,
     ModuleDocstringCoverageDict,
@@ -25,8 +25,11 @@ from .entries import (
     RelationshipRecordDict,
     RuntimeReachabilityFactDict,
     SecuritySurfaceDict,
-    SegmentDict,
     SourceStatsDict,
+)
+from .entries import (
+    BlockDict,
+    SegmentDict,
     UnitDict,
     _as_relationship_kind,
     _as_relationship_origin_lane,

@@ -26,34 +26,31 @@ from ..contracts import (
 from ..contracts.errors import CacheError
 from ..models import (
     BlockUnit,
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheNeutralBlock,
+    CacheNeutralPayload,
+    CacheNeutralSegment,
+    CacheNeutralUnit,
+    CacheReuseDecision,
+    ContentIdentityVerdict,
     DigestObject,
     FileMetrics,
+    FileStat,
     FunctionRelationshipFacts,
     GitContentSnapshot,
+    ModuleRegistryHandle,
     SegmentUnit,
+    SemanticFileFacts,
+    SourceStatsDict,
     StructuralFindingGroup,
     Unit,
 )
 from ..observability import span
-from ._canonicalize import (
-    _as_file_stat_dict,
-    _as_typed_block_list,
-    _as_typed_segment_list,
-    _as_typed_unit_list,
-    _attach_optional_cache_sections,
-    _canonicalize_cache_entry,
-    _decode_optional_cache_sections,
-    _is_canonical_cache_entry,
-)
-from ._validators import _is_git_blob_identity, _is_source_content_digest
 from ._wire_decode import _decode_wire_file_entry
 from ._wire_encode import _encode_wire_file_entry
 from .entries import (
-    CacheEntry,
-    FileStat,
-    SourceStatsDict,
     _api_surface_dict_from_model,
-    _block_dict_from_model,
     _class_metrics_dict_from_model,
     _dead_candidate_dict_from_model,
     _docstring_coverage_dict_from_model,
@@ -63,10 +60,8 @@ from .entries import (
     _normalize_cached_structural_groups,
     _runtime_reachability_dict_from_model,
     _security_surface_dict_from_model,
-    _segment_dict_from_model,
     _structural_group_dict_from_model,
     _typing_coverage_dict_from_model,
-    _unit_dict_from_model,
 )
 from .integrity import (
     as_str_dict as _as_str_dict,
@@ -84,17 +79,21 @@ from .projection import (
     SegmentReportProjection,
     decode_segment_report_projection,
     encode_segment_report_projection,
+    localize_semantic_facts,
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
 )
-from .reuse import git_blob_identity_for_parsed_source
+from .reuse import (
+    build_module_dependent_profile,
+    build_module_neutral_profile,
+    cache_reuse_decision,
+    git_blob_identity_for_parsed_source,
+)
 from .versioning import (
     LEGACY_CACHE_SECRET_FILENAME,
     MAX_CACHE_SIZE_BYTES,
-    AnalysisProfile,
     CacheData,
     CacheStatus,
-    _as_analysis_profile,
     _empty_cache_data,
     _resolve_root,
 )
@@ -138,10 +137,13 @@ def resolve_cache_status(cache: _CacheStatusLike) -> tuple[CacheStatus, str | No
 class Cache:
     __slots__ = (
         "_canonical_runtime_paths",
+        "_collect_api_surface",
         "_dirty",
         "_git_content_snapshot",
+        "_module_dependent_profile",
+        "_module_names_by_runtime_path",
+        "_module_neutral_profile",
         "_write_enabled",
-        "analysis_profile",
         "cache_schema_version",
         "data",
         "fingerprint_version",
@@ -175,20 +177,30 @@ class Cache:
         self.root = _resolve_root(root)
         self._write_enabled = write_enabled
         self.fingerprint_version = BASELINE_FINGERPRINT_VERSION
-        self.analysis_profile: AnalysisProfile = {
-            "min_loc": min_loc,
-            "min_stmt": min_stmt,
-            "block_min_loc": block_min_loc,
-            "block_min_stmt": block_min_stmt,
-            "segment_min_loc": segment_min_loc,
-            "segment_min_stmt": segment_min_stmt,
-            "collect_api_surface": collect_api_surface,
-        }
+        self._collect_api_surface = collect_api_surface
+        self._module_neutral_profile = build_module_neutral_profile(
+            fingerprint_version=self.fingerprint_version,
+            min_loc=min_loc,
+            min_stmt=min_stmt,
+            block_min_loc=block_min_loc,
+            block_min_stmt=block_min_stmt,
+            segment_min_loc=segment_min_loc,
+            segment_min_stmt=segment_min_stmt,
+        )
+        self._module_dependent_profile = build_module_dependent_profile(
+            neutral_profile=self._module_neutral_profile,
+            module_manifest_digest=DigestObject(
+                domain="codeclone.module-registry.v1",
+                algorithm="sha256",
+                value="0" * 64,
+            ),
+            collect_api_surface=collect_api_surface,
+        )
+        self._module_names_by_runtime_path: dict[str, str] = {}
         self.data: CacheData = _empty_cache_data(
             version=self._CACHE_VERSION,
             python_tag=current_python_tag(),
             fingerprint_version=self.fingerprint_version,
-            analysis_profile=self.analysis_profile,
         )
         self._canonical_runtime_paths: set[str] = set()
         snapshot_root = self.root if self.root is not None else self.path.parent
@@ -227,6 +239,37 @@ class Cache:
     def bind_git_content_snapshot(self, snapshot: GitContentSnapshot) -> None:
         self._git_content_snapshot = snapshot
 
+    def bind_module_registry(self, registry: ModuleRegistryHandle) -> None:
+        if self.root is None:
+            raise ValueError("cache module registry binding requires a project root")
+        self._module_names_by_runtime_path = {
+            str((self.root / entry.identity.file.path).resolve()): (
+                entry.identity.python_module.module
+                if entry.identity.python_module is not None
+                else entry.identity.file.path
+            )
+            for entry in registry.entries_by_path.values()
+            if entry.analyzed
+        }
+        self._module_dependent_profile = build_module_dependent_profile(
+            neutral_profile=self._module_neutral_profile,
+            module_manifest_digest=registry.digest,
+            collect_api_surface=self._collect_api_surface,
+        )
+
+    def reuse_decision(
+        self,
+        *,
+        content: ContentIdentityVerdict,
+        entry: CacheEntryV3,
+    ) -> CacheReuseDecision:
+        return cache_reuse_decision(
+            content=content,
+            entry=entry,
+            neutral_profile=self._module_neutral_profile,
+            dependent_profile=self._module_dependent_profile,
+        )
+
     def _set_load_warning(self, message: str | None) -> None:
         warning = message
         if warning is None:
@@ -249,7 +292,6 @@ class Cache:
             version=self._CACHE_VERSION,
             python_tag=current_python_tag(),
             fingerprint_version=self.fingerprint_version,
-            analysis_profile=self.analysis_profile,
         )
         self._canonical_runtime_paths = set()
         self.segment_report_projection = None
@@ -402,26 +444,6 @@ class Cache:
                     schema_version=version,
                 )
 
-            analysis_profile = _as_analysis_profile(payload.get("ap"))
-            if analysis_profile is None:
-                return self._reject_invalid_cache_format(schema_version=version)
-
-            if analysis_profile != self.analysis_profile:
-                return self._reject_cache_load(
-                    "Cache analysis profile mismatch "
-                    f"(found min_loc={analysis_profile['min_loc']}, "
-                    f"min_stmt={analysis_profile['min_stmt']}, "
-                    "collect_api_surface="
-                    f"{str(analysis_profile['collect_api_surface']).lower()}; "
-                    f"expected min_loc={self.analysis_profile['min_loc']}, "
-                    f"min_stmt={self.analysis_profile['min_stmt']}, "
-                    "collect_api_surface="
-                    f"{str(self.analysis_profile['collect_api_surface']).lower()}); "
-                    "ignoring cache.",
-                    status=CacheStatus.ANALYSIS_PROFILE_MISMATCH,
-                    schema_version=version,
-                )
-
             files_dict = _as_str_dict(payload.get("files"))
             if files_dict is None:
                 return self._reject_invalid_cache_format(schema_version=version)
@@ -430,7 +452,7 @@ class Cache:
             payload.clear()
             raw.clear()
 
-        parsed_files: dict[str, CacheEntry] = {}
+        parsed_files: dict[str, CacheEntryV3] = {}
         with span(name="cache.decode_entries") as decode_span:
             decode_span.set_counter("cache_entries", len(files_dict))
             while files_dict:
@@ -440,7 +462,7 @@ class Cache:
                 parsed_entry = self._decode_entry(file_entry_obj, runtime_path)
                 if parsed_entry is None:
                     return self._reject_invalid_cache_format(schema_version=version)
-                parsed_files[runtime_path] = _canonicalize_cache_entry(parsed_entry)
+                parsed_files[runtime_path] = parsed_entry
             decode_span.set_counter("decoded_entries", len(parsed_files))
         with span(name="cache.segment_projection"):
             self.segment_report_projection = decode_segment_report_projection(
@@ -453,7 +475,6 @@ class Cache:
             version=self._CACHE_VERSION,
             python_tag=runtime_tag,
             fingerprint_version=self.fingerprint_version,
-            analysis_profile=self.analysis_profile,
             files=parsed_files,
         )
 
@@ -477,7 +498,6 @@ class Cache:
             payload: dict[str, object] = {
                 "py": current_python_tag(),
                 "fp": self.fingerprint_version,
-                "ap": self.analysis_profile,
                 "files": wire_files,
             }
             segment_projection = encode_segment_report_projection(
@@ -497,7 +517,6 @@ class Cache:
             self.data["version"] = self._CACHE_VERSION
             self.data["python_tag"] = current_python_tag()
             self.data["fingerprint_version"] = self.fingerprint_version
-            self.data["analysis_profile"] = self.analysis_profile
         except OSError as exc:
             raise CacheError(f"Failed to save cache: {exc}") from exc
 
@@ -512,19 +531,19 @@ class Cache:
             return released
 
     @staticmethod
-    def _decode_entry(value: object, filepath: str) -> CacheEntry | None:
+    def _decode_entry(value: object, filepath: str) -> CacheEntryV3 | None:
         return _decode_wire_file_entry(value, filepath)
 
     @staticmethod
-    def _encode_entry(entry: CacheEntry) -> dict[str, object]:
+    def _encode_entry(entry: CacheEntryV3) -> dict[str, object]:
         return _encode_wire_file_entry(entry)
 
     def _store_canonical_file_entry(
         self,
         *,
         runtime_path: str,
-        canonical_entry: CacheEntry,
-    ) -> CacheEntry:
+        canonical_entry: CacheEntryV3,
+    ) -> CacheEntryV3:
         previous_entry = self.data["files"].get(runtime_path)
         was_canonical = runtime_path in self._canonical_runtime_paths
         self.data["files"][runtime_path] = canonical_entry
@@ -533,7 +552,7 @@ class Cache:
             self._dirty = True
         return canonical_entry
 
-    def get_file_entry(self, filepath: str) -> CacheEntry | None:
+    def get_file_entry(self, filepath: str) -> CacheEntryV3 | None:
         runtime_lookup_key = filepath
         entry_obj = self.data["files"].get(runtime_lookup_key)
         if entry_obj is None:
@@ -544,90 +563,7 @@ class Cache:
         if entry_obj is None:
             return None
 
-        if runtime_lookup_key in self._canonical_runtime_paths:
-            if _is_canonical_cache_entry(entry_obj):
-                return entry_obj
-            self._canonical_runtime_paths.discard(runtime_lookup_key)
-
-        if not isinstance(entry_obj, dict):
-            return None
-
-        stat = _as_file_stat_dict(entry_obj.get("stat"))
-        binding_version = entry_obj.get("cache_content_binding_version")
-        source_content_digest = entry_obj.get("source_content_digest")
-        git_blob_id_at_write = entry_obj.get("git_blob_id_at_write")
-        units = _as_typed_unit_list(entry_obj.get("units"))
-        blocks = _as_typed_block_list(entry_obj.get("blocks"))
-        segments = _as_typed_segment_list(entry_obj.get("segments"))
-        if (
-            binding_version != "1"
-            or not _is_source_content_digest(source_content_digest)
-            or "git_blob_id_at_write" not in entry_obj
-            or (
-                git_blob_id_at_write is not None
-                and not _is_git_blob_identity(git_blob_id_at_write)
-            )
-            or stat is None
-            or units is None
-            or blocks is None
-            or segments is None
-        ):
-            return None
-
-        optional_sections = _decode_optional_cache_sections(entry_obj)
-        if optional_sections is None:
-            return None
-        (
-            class_metrics_raw,
-            module_deps_raw,
-            dead_candidates_raw,
-            referenced_names_raw,
-            referenced_qualnames_raw,
-            import_names_raw,
-            class_names_raw,
-            runtime_reachability_raw,
-            security_surfaces_raw,
-            function_relationship_facts_raw,
-            typing_coverage_raw,
-            docstring_coverage_raw,
-            api_surface_raw,
-            source_stats,
-            structural_findings,
-        ) = optional_sections
-
-        entry_to_canonicalize: CacheEntry = _attach_optional_cache_sections(
-            CacheEntry(
-                cache_content_binding_version="1",
-                source_content_digest=source_content_digest,
-                git_blob_id_at_write=git_blob_id_at_write,
-                stat=stat,
-                units=units,
-                blocks=blocks,
-                segments=segments,
-                class_metrics=class_metrics_raw,
-                module_deps=module_deps_raw,
-                dead_candidates=dead_candidates_raw,
-                referenced_names=referenced_names_raw,
-                referenced_qualnames=referenced_qualnames_raw,
-                import_names=import_names_raw,
-                class_names=class_names_raw,
-                runtime_reachability=runtime_reachability_raw,
-                security_surfaces=security_surfaces_raw,
-            ),
-            typing_coverage=typing_coverage_raw,
-            docstring_coverage=docstring_coverage_raw,
-            api_surface=api_surface_raw,
-            runtime_reachability=runtime_reachability_raw,
-            security_surfaces=security_surfaces_raw,
-            function_relationship_facts=function_relationship_facts_raw,
-            source_stats=source_stats,
-            structural_findings=structural_findings,
-        )
-        canonical_entry = _canonicalize_cache_entry(entry_to_canonicalize)
-        return self._store_canonical_file_entry(
-            runtime_path=runtime_lookup_key,
-            canonical_entry=canonical_entry,
-        )
+        return entry_obj
 
     def put_file_entry(
         self,
@@ -650,11 +586,6 @@ class Cache:
             root=self.root,
         )
 
-        unit_rows = [_unit_dict_from_model(unit, runtime_path) for unit in units]
-        block_rows = [_block_dict_from_model(block, runtime_path) for block in blocks]
-        segment_rows = [
-            _segment_dict_from_model(segment, runtime_path) for segment in segments
-        ]
         effective_relationship_facts = function_relationship_facts
         if effective_relationship_facts is None:
             effective_relationship_facts = (
@@ -732,44 +663,115 @@ class Cache:
             source_digest=source_content_digest,
             git_snapshot=self._git_content_snapshot,
         )
-        entry_dict = CacheEntry(
+        module_name = self._module_names_by_runtime_path.get(runtime_path)
+        if module_name is None:
+            raise ValueError(
+                f"cache entry path is absent from module registry: {runtime_path}"
+            )
+
+        def local_name(qualname: str) -> str:
+            prefix = f"{module_name}:"
+            if not qualname.startswith(prefix):
+                raise ValueError(
+                    "cache neutral qualname is outside module "
+                    f"{module_name}: {qualname}"
+                )
+            return qualname[len(prefix) :]
+
+        structural_rows = (
+            tuple(
+                _normalize_cached_structural_groups(
+                    [
+                        _structural_group_dict_from_model(group)
+                        for group in structural_findings
+                    ],
+                    filepath=runtime_path,
+                )
+            )
+            if structural_findings is not None
+            else None
+        )
+        entry = CacheEntryV3(
             cache_content_binding_version="1",
             source_content_digest=source_content_digest,
             git_blob_id_at_write=git_blob_id_at_write,
             stat=stat_sig,
-            source_stats=source_stats_payload,
-            units=unit_rows,
-            blocks=block_rows,
-            segments=segment_rows,
-            class_metrics=class_metrics_rows,
-            module_deps=module_dep_rows,
-            dead_candidates=dead_candidate_rows,
-            referenced_names=referenced_names,
-            referenced_qualnames=referenced_qualnames,
-            import_names=import_names,
-            class_names=class_names,
-            runtime_reachability=runtime_reachability,
-            security_surfaces=security_surfaces,
-            function_relationship_facts=function_relationship_fact_rows,
+            module_neutral_profile=self._module_neutral_profile,
+            module_dependent_profile=self._module_dependent_profile,
+            module_neutral=CacheNeutralPayload(
+                source_stats=source_stats_payload,
+                units=tuple(
+                    CacheNeutralUnit(
+                        local_name=local_name(unit.qualname),
+                        start_line=unit.start_line,
+                        end_line=unit.end_line,
+                        loc=unit.loc,
+                        stmt_count=unit.stmt_count,
+                        fingerprint=unit.fingerprint,
+                        loc_bucket=unit.loc_bucket,
+                        cyclomatic_complexity=unit.cyclomatic_complexity,
+                        nesting_depth=unit.nesting_depth,
+                        risk=unit.risk,
+                        raw_hash=unit.raw_hash,
+                        entry_guard_count=unit.entry_guard_count,
+                        entry_guard_terminal_profile=unit.entry_guard_terminal_profile,
+                        entry_guard_has_side_effect_before=unit.entry_guard_has_side_effect_before,
+                        terminal_kind=unit.terminal_kind,
+                        try_finally_profile=unit.try_finally_profile,
+                        side_effect_order_profile=unit.side_effect_order_profile,
+                    )
+                    for unit in units
+                ),
+                blocks=tuple(
+                    CacheNeutralBlock(
+                        local_name=local_name(block.qualname),
+                        start_line=block.start_line,
+                        end_line=block.end_line,
+                        size=block.size,
+                        block_hash=block.block_hash,
+                    )
+                    for block in blocks
+                ),
+                segments=tuple(
+                    CacheNeutralSegment(
+                        local_name=local_name(segment.qualname),
+                        start_line=segment.start_line,
+                        end_line=segment.end_line,
+                        size=segment.size,
+                        segment_hash=segment.segment_hash,
+                        segment_sig=segment.segment_sig,
+                    )
+                    for segment in segments
+                ),
+                semantic_facts=localize_semantic_facts(
+                    (
+                        file_metrics.semantic_facts
+                        if file_metrics is not None
+                        else SemanticFileFacts()
+                    ),
+                    module_name=module_name,
+                ),
+            ),
+            module_dependent=CacheDependentPayload(
+                class_metrics=tuple(class_metrics_rows),
+                module_deps=tuple(module_dep_rows),
+                dead_candidates=tuple(dead_candidate_rows),
+                referenced_names=tuple(referenced_names),
+                referenced_qualnames=tuple(referenced_qualnames),
+                import_names=tuple(import_names),
+                class_names=tuple(class_names),
+                runtime_reachability=tuple(runtime_reachability),
+                security_surfaces=tuple(security_surfaces),
+                function_relationship_facts=tuple(function_relationship_fact_rows),
+                typing_coverage=typing_coverage,
+                docstring_coverage=docstring_coverage,
+                api_surface=api_surface,
+                structural_findings=structural_rows,
+            ),
         )
-        if typing_coverage is not None:
-            entry_dict["typing_coverage"] = typing_coverage
-        if docstring_coverage is not None:
-            entry_dict["docstring_coverage"] = docstring_coverage
-        if api_surface is not None:
-            entry_dict["api_surface"] = api_surface
-        if structural_findings is not None:
-            entry_dict["structural_findings"] = _normalize_cached_structural_groups(
-                [
-                    _structural_group_dict_from_model(group)
-                    for group in structural_findings
-                ],
-                filepath=runtime_path,
-            )
-        canonical_entry = _canonicalize_cache_entry(entry_dict)
         self._store_canonical_file_entry(
             runtime_path=runtime_path,
-            canonical_entry=canonical_entry,
+            canonical_entry=entry,
         )
 
     def prune_file_entries(self, existing_filepaths: Collection[str]) -> int:

@@ -46,6 +46,7 @@ from tests._assertions import (
     assert_mapping_entries,
     assert_missing_keys,
 )
+from tests._ast_metrics_helpers import build_test_module_registry
 from tests._report_access import (
     report_clone_groups as _report_clone_groups,
 )
@@ -212,6 +213,40 @@ def _run_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
 def _run_parallel_main(monkeypatch: pytest.MonkeyPatch, args: Iterable[str]) -> None:
     _patch_parallel(monkeypatch)
     _run_main(monkeypatch, args)
+
+
+def _run_cache_profile_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    root: Path,
+    baseline_path: Path,
+    cache_path: Path,
+    report_path: Path,
+    profile_args: list[str],
+) -> None:
+    _run_main(
+        monkeypatch,
+        [
+            str(root),
+            "--baseline",
+            str(baseline_path),
+            "--cache-path",
+            str(cache_path),
+            "--json",
+            str(report_path),
+            *profile_args,
+            "--no-progress",
+        ],
+    )
+
+
+def _prepare_cache_profile_case(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[Path, Path]:
+    _write_profile_compatibility_source(tmp_path)
+    baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
+    _patch_parallel(monkeypatch)
+    return baseline_path, tmp_path / "cache.json"
 
 
 def _assert_cli_exit(
@@ -547,6 +582,9 @@ def _capture_cache_path_for_args(
         def bind_git_content_snapshot(self, _snapshot: object) -> None:
             return None
 
+        def bind_module_registry(self, _registry: object) -> None:
+            return None
+
         def get_file_entry(self, _fp: str) -> None:
             return None
 
@@ -741,7 +779,11 @@ def _prepare_single_source_cache(tmp_path: Path) -> tuple[Path, Path, Cache]:
     src = tmp_path / "a.py"
     src.write_text("def f():\n    return 1\n", "utf-8")
     cache_path = tmp_path / "cache.json"
-    return src, cache_path, Cache(cache_path)
+    cache = Cache(cache_path, root=tmp_path)
+    cache.bind_module_registry(
+        build_test_module_registry(root=tmp_path, source_roots=(".",))
+    )
+    return src, cache_path, cache
 
 
 def _source_read_error_result(filepath: str) -> CliFileProcessResult:
@@ -851,6 +893,9 @@ def test_cli_default_cache_dir_per_root(
             return None
 
         def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
+        def bind_module_registry(self, _registry: object) -> None:
             return None
 
         def get_file_entry(self, _fp: str) -> None:
@@ -1061,6 +1106,9 @@ def test_cli_no_legacy_warning_when_paths_match(
         def bind_git_content_snapshot(self, _snapshot: object) -> None:
             return None
 
+        def bind_module_registry(self, _registry: object) -> None:
+            return None
+
         def get_file_entry(self, _fp: str) -> None:
             return None
 
@@ -1116,6 +1164,9 @@ def test_cli_cache_status_string_fallback(
             return None
 
         def bind_git_content_snapshot(self, _snapshot: object) -> None:
+            return None
+
+        def bind_module_registry(self, _registry: object) -> None:
             return None
 
         def get_file_entry(self, _fp: str) -> None:
@@ -2198,22 +2249,22 @@ def test_cli_reports_cache_meta_when_cache_missing(
             1,
             15,
             6,
-            False,
-            "analysis_profile_mismatch",
+            True,
+            "ok",
             CACHE_VERSION,
             0,
-            "analysis profile mismatch",
+            None,
         ),
         (
             15,
             6,
             1,
             1,
-            False,
-            "analysis_profile_mismatch",
+            True,
+            "ok",
             CACHE_VERSION,
             1,
-            "analysis profile mismatch",
+            None,
         ),
         (1, 1, 1, 1, True, "ok", CACHE_VERSION, 1, None),
     ],
@@ -2232,47 +2283,36 @@ def test_cli_cache_analysis_profile_compatibility(
     expected_functions_total: int,
     expected_warning: str | None,
 ) -> None:
-    _write_profile_compatibility_source(tmp_path)
-    baseline_path = _write_current_python_baseline(tmp_path / "baseline.json")
-    cache_path = tmp_path / "cache.json"
+    baseline_path, cache_path = _prepare_cache_profile_case(tmp_path, monkeypatch)
     json_first = tmp_path / "report-first.json"
     json_second = tmp_path / "report-second.json"
-    _patch_parallel(monkeypatch)
 
-    _run_main(
+    _run_cache_profile_analysis(
         monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--cache-path",
-            str(cache_path),
-            "--json",
-            str(json_first),
+        root=tmp_path,
+        baseline_path=baseline_path,
+        cache_path=cache_path,
+        report_path=json_first,
+        profile_args=[
             "--min-loc",
             str(first_min_loc),
             "--min-stmt",
             str(first_min_stmt),
-            "--no-progress",
         ],
     )
     capsys.readouterr()
 
-    _run_main(
+    _run_cache_profile_analysis(
         monkeypatch,
-        [
-            str(tmp_path),
-            "--baseline",
-            str(baseline_path),
-            "--cache-path",
-            str(cache_path),
-            "--json",
-            str(json_second),
+        root=tmp_path,
+        baseline_path=baseline_path,
+        cache_path=cache_path,
+        report_path=json_second,
+        profile_args=[
             "--min-loc",
             str(second_min_loc),
             "--min-stmt",
             str(second_min_stmt),
-            "--no-progress",
         ],
     )
     out = capsys.readouterr().out
@@ -2288,6 +2328,34 @@ def test_cli_cache_analysis_profile_compatibility(
     assert (
         payload["findings"]["summary"]["clones"]["functions"]
         == expected_functions_total
+    )
+
+
+def test_cli_cache_evaluator_threshold_change_keeps_full_lane_hit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    baseline_path, cache_path = _prepare_cache_profile_case(tmp_path, monkeypatch)
+    report_path = tmp_path / "report.json"
+
+    for threshold in (100, -1):
+        _run_cache_profile_analysis(
+            monkeypatch,
+            root=tmp_path,
+            baseline_path=baseline_path,
+            cache_path=cache_path,
+            report_path=report_path,
+            profile_args=["--fail-threshold", str(threshold)],
+        )
+        capsys.readouterr()
+
+    payload = json.loads(report_path.read_text("utf-8"))
+    _assert_report_cache_meta(
+        payload,
+        used=True,
+        status="ok",
+        schema_version=CACHE_VERSION,
     )
 
 
@@ -3206,9 +3274,12 @@ def test_cli_cache_warning(
 ) -> None:
     _write_default_source(tmp_path)
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
+    cache = Cache(cache_path, root=tmp_path)
+    cache.bind_module_registry(
+        build_test_module_registry(root=tmp_path, source_roots=(".",))
+    )
     cache.put_file_entry(
-        "x.py",
+        str(tmp_path / "a.py"),
         {"mtime_ns": 1, "size": 1},
         [],
         [],
@@ -3332,12 +3403,15 @@ def test_cli_discovery_cache_hit(
     src_resolved = src.resolve()
 
     cache = Cache(tmp_path / "cache.json", root=root)
+    cache.bind_module_registry(
+        build_test_module_registry(root=root, source_roots=(".",))
+    )
     cache.put_file_entry(
         str(src_resolved),
         file_stat_signature(str(src_resolved)),
         [
             Unit(
-                qualname="mod:f",
+                qualname="a:f",
                 filepath=str(src_resolved),
                 start_line=1,
                 end_line=2,
@@ -3640,6 +3714,7 @@ def test_cli_ci_discovery_cache_hit(
         [],
         [],
         source_content_digest=_source_content_digest(src),
+        structural_findings=[],
     )
     cache.save()
     baseline = tmp_path / "baseline.json"
@@ -4528,7 +4603,7 @@ def fn(x):
     )
     cache_payload = json.loads(cache_path.read_text("utf-8"))
     files_before = cache_payload["payload"]["files"]
-    assert all("sf" not in entry for entry in files_before.values())
+    assert all("sf" not in entry["d"] for entry in files_before.values())
 
     _run_main(
         monkeypatch,
@@ -4546,7 +4621,7 @@ def fn(x):
 
     cache_payload = json.loads(cache_path.read_text("utf-8"))
     files_after = cache_payload["payload"]["files"]
-    assert any("sf" in entry for entry in files_after.values())
+    assert any("sf" in entry["d"] for entry in files_after.values())
 
 
 @pytest.mark.parametrize(

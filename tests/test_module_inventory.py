@@ -416,10 +416,12 @@ def test_process_pool_installs_one_registry_per_worker_not_per_task(
         lambda key, value: counters.append((key, value)),
     )
 
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.bind_module_registry(registry)
     result = process(
         boot=boot,
         discovery=discovery,
-        cache=Cache(tmp_path / "cache.json", root=tmp_path),
+        cache=cache,
     )
 
     assert result.files_analyzed == len(filepaths)

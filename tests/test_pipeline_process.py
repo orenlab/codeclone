@@ -21,7 +21,6 @@ import codeclone.core.pipeline as core_pipeline
 import codeclone.core.worker as core_worker
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import INERT_PHASE_LEDGER, PhaseLedger
-from codeclone.cache.entries import CacheEntry, SourceStatsDict
 from codeclone.cache.reuse import source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.core._types import (
@@ -42,7 +41,18 @@ from codeclone.core.parallelism import (
 from codeclone.core.pipeline import analyze
 from codeclone.core.reporting import report
 from codeclone.metrics.coverage_join import CoverageJoinParseError
-from codeclone.models import DepGraph, HealthScore, ProjectMetrics
+from codeclone.models import (
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheNeutralPayload,
+    DepGraph,
+    DigestObject,
+    HealthScore,
+    ProjectMetrics,
+    RehydratedCacheNeutral,
+    SemanticFileFacts,
+    SourceStatsDict,
+)
 from codeclone.paths.module_identity.inventory import build_module_registry
 
 
@@ -193,6 +203,7 @@ def _stub_process_file(
         segment_min_loc: int = 20,
         segment_min_stmt: int = 10,
         phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
+        neutral_reuse: RehydratedCacheNeutral | None = None,
     ) -> FileProcessResult:
         if expected_root is not None:
             assert root == expected_root
@@ -204,6 +215,7 @@ def _stub_process_file(
         assert collect_api_surface is False
         assert api_include_private_modules is False
         assert phase_ledger is INERT_PHASE_LEDGER
+        assert neutral_reuse is None
         return _ok_result(filepath)
 
     return _process_file
@@ -221,6 +233,7 @@ def _build_large_batch_case(
     boot = _build_boot(tmp_path, processes=2)
     discovery = _build_discovery(tuple(filepaths), root=tmp_path)
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.bind_module_registry(discovery.module_registry)
     return boot, discovery, cache, filepaths
 
 
@@ -273,7 +286,8 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
 
     assert observed == unobserved
     assert [observed_span.name for observed_span in recorded] == [
-        "cache.content_identity"
+        "cache.content_identity",
+        "cache.profile_reuse",
     ]
     assert set(recorded[0].counters) == {
         "cache_content_decision_blob_hit",
@@ -286,6 +300,49 @@ def test_cache_content_identity_stage_is_wrapped_once_and_passive(
         "cache_content_decision_untracked",
         "cache_content_digest_verify_cost_us",
         "cache_stat_fast_reject",
+    }
+    assert recorded[1].counters == {
+        "cache_lane_neutral_hit": 0,
+        "cache_lane_dependent_miss": 0,
+    }
+
+
+def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "module.py"
+    source.write_text("def example():\n    return 1\n", "utf-8")
+    boot = _build_boot(tmp_path, processes=1)
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cold = core_discovery.discover(boot=boot, cache=cache)
+    process(boot=boot, discovery=cold, cache=cache)
+
+    recorded: list[_ObservedAnalysisSpan] = []
+
+    @contextmanager
+    def _recording_span(*, name: str) -> Iterator[_ObservedAnalysisSpan]:
+        observed = _ObservedAnalysisSpan(name)
+        recorded.append(observed)
+        yield observed
+
+    monkeypatch.setattr(core_discovery, "span", _recording_span)
+    full = core_discovery.discover(boot=boot, cache=cache)
+    assert full.cache_hits == 1
+    assert [stage.name for stage in recorded].count("cache.profile_reuse") == 1
+    assert recorded[1].counters == {
+        "cache_lane_neutral_hit": 1,
+        "cache_lane_dependent_miss": 0,
+    }
+
+    (tmp_path / "added.py").write_text("VALUE = 1\n", "utf-8")
+    recorded.clear()
+    partial = core_discovery.discover(boot=boot, cache=cache)
+    assert partial.cache_hits == 0
+    assert [stage.name for stage in recorded].count("cache.profile_reuse") == 1
+    assert recorded[1].counters == {
+        "cache_lane_neutral_hit": 1,
+        "cache_lane_dependent_miss": 1,
     }
 
 
@@ -308,10 +365,12 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
     boot.args.semantic_authority = authority_enabled
     discovery = _build_discovery(filepaths, root=tmp_path)
 
+    unobserved_cache = Cache(tmp_path / "unobserved-cache.json", root=tmp_path)
+    unobserved_cache.bind_module_registry(discovery.module_registry)
     unobserved = process(
         boot=boot,
         discovery=discovery,
-        cache=Cache(tmp_path / "unobserved-cache.json", root=tmp_path),
+        cache=unobserved_cache,
     )
 
     recorded: list[_ObservedAnalysisSpan] = []
@@ -339,6 +398,7 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
         segment_min_loc: int = 20,
         segment_min_stmt: int = 10,
         phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
+        neutral_reuse: RehydratedCacheNeutral | None = None,
     ) -> FileProcessResult:
         nonlocal process_calls
         process_calls += 1
@@ -356,14 +416,17 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
             segment_min_loc=segment_min_loc,
             segment_min_stmt=segment_min_stmt,
             phase_ledger=phase_ledger,
+            neutral_reuse=neutral_reuse,
         )
 
     monkeypatch.setattr(core_parallelism, "span", _recording_span)
     monkeypatch.setattr(core_worker, "process_file", _counted_process_file)
+    observed_cache = Cache(tmp_path / "observed-cache.json", root=tmp_path)
+    observed_cache.bind_module_registry(discovery.module_registry)
     observed = process(
         boot=boot,
         discovery=discovery,
-        cache=Cache(tmp_path / "observed-cache.json", root=tmp_path),
+        cache=observed_cache,
     )
 
     assert observed == unobserved
@@ -507,6 +570,7 @@ def test_process_small_batch_skips_parallel_executor(
     boot = _build_boot(tmp_path, processes=4)
     discovery = _build_discovery((str(src),), root=tmp_path)
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.bind_module_registry(discovery.module_registry)
     callbacks: list[str] = []
 
     monkeypatch.setattr(core_parallelism, "ProcessPoolExecutor", _UnexpectedExec)
@@ -720,53 +784,85 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
         "methods": 1,
         "classes": 1,
     }
-    base_entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "source_stats": source_stats,
-    }
-    complete_entry: CacheEntry = {
-        **base_entry,
-        "source_stats": source_stats,
-        "class_metrics": [],
-        "module_deps": [],
-        "dead_candidates": [],
-        "referenced_names": [],
-        "referenced_qualnames": [],
-        "import_names": [],
-        "class_names": [],
-        "structural_findings": [],
-    }
+    profile = DigestObject(
+        domain="codeclone.cache.profile.neutral.v1",
+        algorithm="sha256",
+        value="1" * 64,
+    )
+    dependent_profile = DigestObject(
+        domain="codeclone.cache.profile.dependent.v1",
+        algorithm="sha256",
+        value="2" * 64,
+    )
+    complete_entry = CacheEntryV3(
+        cache_content_binding_version="1",
+        source_content_digest=source_content_digest(b"source"),
+        git_blob_id_at_write=None,
+        stat={"mtime_ns": 1, "size": 1},
+        module_neutral_profile=profile,
+        module_dependent_profile=dependent_profile,
+        module_neutral=CacheNeutralPayload(
+            source_stats=source_stats,
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=(),
+            referenced_qualnames=(),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=(),
+        ),
+    )
     assert usable_cached_source_stats(
         complete_entry,
         skip_metrics=False,
         collect_structural_findings=True,
     ) == (5, 2, 1, 1)
-    assert (
-        usable_cached_source_stats(
-            base_entry,
-            skip_metrics=False,
-            collect_structural_findings=False,
-        )
-        is None
+    no_structural_entry = CacheEntryV3(
+        cache_content_binding_version=complete_entry.cache_content_binding_version,
+        source_content_digest=complete_entry.source_content_digest,
+        git_blob_id_at_write=None,
+        stat=complete_entry.stat,
+        module_neutral_profile=profile,
+        module_dependent_profile=dependent_profile,
+        module_neutral=complete_entry.module_neutral,
+        module_dependent=CacheDependentPayload(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=(),
+            referenced_qualnames=(),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=None,
+        ),
     )
+    assert usable_cached_source_stats(
+        no_structural_entry,
+        skip_metrics=False,
+        collect_structural_findings=False,
+    ) == (5, 2, 1, 1)
     assert (
         usable_cached_source_stats(
-            {
-                **base_entry,
-                "class_metrics": [],
-                "module_deps": [],
-                "dead_candidates": [],
-                "referenced_names": [],
-                "referenced_qualnames": [],
-                "import_names": [],
-                "class_names": [],
-            },
+            no_structural_entry,
             skip_metrics=False,
             collect_structural_findings=True,
         )

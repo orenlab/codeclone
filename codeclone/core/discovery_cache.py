@@ -9,35 +9,33 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from ..cache.entries import (
-    CacheEntry,
-    ClassMetricsDict,
-    DeadCandidateDict,
-    ModuleDepDict,
-    RuntimeReachabilityFactDict,
-    SecuritySurfaceDict,
-    StructuralFindingGroupDict,
-)
 from ..models import (
     ApiParamSpec,
+    CacheEntryV3,
     ClassMetrics,
+    ClassMetricsDict,
     DeadCandidate,
+    DeadCandidateDict,
     ModuleApiSurface,
     ModuleDep,
+    ModuleDepDict,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
     PublicSymbol,
     RuntimeReachabilityConfidence,
     RuntimeReachabilityEdgeKind,
     RuntimeReachabilityFact,
+    RuntimeReachabilityFactDict,
     RuntimeReachabilityFramework,
     RuntimeReachabilityTargetKind,
     SecuritySurface,
     SecuritySurfaceCategory,
     SecuritySurfaceClassificationMode,
+    SecuritySurfaceDict,
     SecuritySurfaceEvidenceKind,
     SecuritySurfaceLocationScope,
     StructuralFindingGroup,
+    StructuralFindingGroupDict,
     StructuralFindingOccurrence,
 )
 from ..paths import is_test_filepath
@@ -301,47 +299,21 @@ def decode_cached_structural_finding_group(
     )
 
 
-def _cache_entry_has_metrics(entry: CacheEntry) -> bool:
-    metric_keys = (
-        "class_metrics",
-        "module_deps",
-        "dead_candidates",
-        "referenced_names",
-        "referenced_qualnames",
-        "import_names",
-        "class_names",
-    )
-    return all(key in entry and isinstance(entry.get(key), list) for key in metric_keys)
+def _cache_entry_has_metrics(entry: CacheEntryV3) -> bool:
+    return entry.module_dependent is not None
 
 
-def _cache_entry_has_structural_findings(entry: CacheEntry) -> bool:
-    return "structural_findings" in entry
+def _cache_entry_has_structural_findings(entry: CacheEntryV3) -> bool:
+    return entry.module_dependent.structural_findings is not None
 
 
-def _cache_entry_source_stats(entry: CacheEntry) -> tuple[int, int, int, int] | None:
-    stats_obj = entry.get("source_stats")
-    if not isinstance(stats_obj, dict):
-        return None
-    lines = stats_obj.get("lines")
-    functions = stats_obj.get("functions")
-    methods = stats_obj.get("methods")
-    classes = stats_obj.get("classes")
-    if not (
-        isinstance(lines, int)
-        and isinstance(functions, int)
-        and isinstance(methods, int)
-        and isinstance(classes, int)
-        and lines >= 0
-        and functions >= 0
-        and methods >= 0
-        and classes >= 0
-    ):
-        return None
-    return lines, functions, methods, classes
+def _cache_entry_source_stats(entry: CacheEntryV3) -> tuple[int, int, int, int]:
+    stats = entry.module_neutral.source_stats
+    return stats["lines"], stats["functions"], stats["methods"], stats["classes"]
 
 
 def usable_cached_source_stats(
-    entry: CacheEntry,
+    entry: CacheEntryV3,
     *,
     skip_metrics: bool,
     collect_structural_findings: bool,
@@ -647,7 +619,7 @@ def _runtime_reachability_from_cache_row(
 
 
 def load_cached_metrics_extended(
-    entry: CacheEntry,
+    entry: CacheEntryV3,
     *,
     filepath: str,
 ) -> tuple[
@@ -662,21 +634,22 @@ def load_cached_metrics_extended(
     tuple[RuntimeReachabilityFact, ...],
     tuple[SecuritySurface, ...],
 ]:
-    class_metrics_rows: list[ClassMetricsDict] = entry.get("class_metrics", [])
+    dependent = entry.module_dependent
+    class_metrics_rows = dependent.class_metrics
     class_metrics_items: list[ClassMetrics] = []
     for metric_row in class_metrics_rows:
         parsed_metric = _class_metric_from_cache_row(metric_row)
         if parsed_metric is not None:
             class_metrics_items.append(parsed_metric)
     class_metrics = tuple(class_metrics_items)
-    module_dep_rows: list[ModuleDepDict] = entry.get("module_deps", [])
+    module_dep_rows = dependent.module_deps
     module_dep_items: list[ModuleDep] = []
     for dep_row in module_dep_rows:
         parsed_dep = _module_dep_from_cache_row(dep_row)
         if parsed_dep is not None:
             module_dep_items.append(parsed_dep)
     module_deps = tuple(module_dep_items)
-    dead_rows: list[DeadCandidateDict] = entry.get("dead_candidates", [])
+    dead_rows = dependent.dead_candidates
     dead_candidate_items: list[DeadCandidate] = []
     for dead_row in dead_rows:
         parsed_dead = _dead_candidate_from_cache_row(dead_row)
@@ -686,24 +659,20 @@ def load_cached_metrics_extended(
     referenced_names = (
         frozenset()
         if is_test_filepath(filepath)
-        else frozenset(entry.get("referenced_names", []))
+        else frozenset(dependent.referenced_names)
     )
     referenced_qualnames = (
         frozenset()
         if is_test_filepath(filepath)
-        else frozenset(entry.get("referenced_qualnames", []))
+        else frozenset(dependent.referenced_qualnames)
     )
-    security_surface_rows: list[SecuritySurfaceDict] = entry.get(
-        "security_surfaces", []
-    )
+    security_surface_rows = dependent.security_surfaces
     security_surface_items: list[SecuritySurface] = []
     for surface_row in security_surface_rows:
         parsed_surface = _security_surface_from_cache_row(surface_row)
         if parsed_surface is not None:
             security_surface_items.append(parsed_surface)
-    reachability_rows: list[RuntimeReachabilityFactDict] = entry.get(
-        "runtime_reachability", []
-    )
+    reachability_rows = dependent.runtime_reachability
     reachability_items: list[RuntimeReachabilityFact] = []
     for fact_row in reachability_rows:
         parsed_fact = _runtime_reachability_from_cache_row(fact_row)
@@ -715,9 +684,9 @@ def load_cached_metrics_extended(
         dead_candidates,
         referenced_names,
         referenced_qualnames,
-        _typing_coverage_from_cache_dict(entry.get("typing_coverage")),
-        _docstring_coverage_from_cache_dict(entry.get("docstring_coverage")),
-        _api_surface_from_cache_dict(entry.get("api_surface")),
+        _typing_coverage_from_cache_dict(dependent.typing_coverage),
+        _docstring_coverage_from_cache_dict(dependent.docstring_coverage),
+        _api_surface_from_cache_dict(dependent.api_surface),
         tuple(reachability_items),
         tuple(security_surface_items),
     )

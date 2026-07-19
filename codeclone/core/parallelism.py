@@ -82,9 +82,7 @@ def process(
 ) -> ProcessingResult:
     authority_enabled = bool(getattr(boot.args, "semantic_authority", False))
     semantic_authority: SemanticAuthorityResult | None = None
-    files_to_process = (
-        discovery.all_file_paths if authority_enabled else discovery.files_to_process
-    )
+    files_to_process = discovery.files_to_process
     registry = discovery.module_registry
     if not files_to_process:
         with span(name="analysis.registry_bind") as registry_span:
@@ -103,7 +101,10 @@ def process(
             flow_span.set_counter("unresolved_flow_functions", 0)
         with span(name="semantics.authority.build") as authority_span:
             if authority_enabled:
-                semantic_authority = build_semantic_authority((), ())
+                semantic_authority = build_semantic_authority(
+                    discovery.cached_function_contract_summaries,
+                    discovery.cached_function_relationship_facts,
+                )
             authority_span.set_counter("ir_nodes", 0)
             authority_span.set_counter("scc_count", 0)
             authority_span.set_counter("fixpoint_iterations", 0)
@@ -123,8 +124,8 @@ def process(
             referenced_names=discovery.cached_referenced_names,
             runtime_reachability=discovery.cached_runtime_reachability,
             security_surfaces=discovery.cached_security_surfaces,
-            semantic_events=(),
-            function_contract_summaries=(),
+            semantic_events=discovery.cached_semantic_events,
+            function_contract_summaries=(discovery.cached_function_contract_summaries),
             semantic_authority=semantic_authority,
             referenced_qualnames=discovery.cached_referenced_qualnames,
             typing_modules=discovery.cached_typing_modules,
@@ -143,48 +144,31 @@ def process(
             source_stats_by_file=discovery.cached_source_stats_by_file,
         )
 
-    use_cached_facts = not authority_enabled
-    all_units: list[GroupItem] = (
-        list(discovery.cached_units) if use_cached_facts else []
-    )
-    all_blocks: list[GroupItem] = (
-        list(discovery.cached_blocks) if use_cached_facts else []
-    )
-    all_segments: list[GroupItem] = (
-        list(discovery.cached_segments) if use_cached_facts else []
-    )
-    all_class_metrics: list[ClassMetrics] = (
-        list(discovery.cached_class_metrics) if use_cached_facts else []
-    )
-    all_module_deps: list[ModuleDep] = (
-        list(discovery.cached_module_deps) if use_cached_facts else []
-    )
-    all_dead_candidates: list[DeadCandidate] = (
-        list(discovery.cached_dead_candidates) if use_cached_facts else []
-    )
-    all_referenced_names: set[str] = (
-        set(discovery.cached_referenced_names) if use_cached_facts else set()
-    )
-    all_referenced_qualnames: set[str] = (
-        set(discovery.cached_referenced_qualnames) if use_cached_facts else set()
-    )
+    all_units: list[GroupItem] = list(discovery.cached_units)
+    all_blocks: list[GroupItem] = list(discovery.cached_blocks)
+    all_segments: list[GroupItem] = list(discovery.cached_segments)
+    all_class_metrics: list[ClassMetrics] = list(discovery.cached_class_metrics)
+    all_module_deps: list[ModuleDep] = list(discovery.cached_module_deps)
+    all_dead_candidates: list[DeadCandidate] = list(discovery.cached_dead_candidates)
+    all_referenced_names: set[str] = set(discovery.cached_referenced_names)
+    all_referenced_qualnames: set[str] = set(discovery.cached_referenced_qualnames)
     all_runtime_reachability: list[RuntimeReachabilityFact] = list(
-        discovery.cached_runtime_reachability if use_cached_facts else ()
+        discovery.cached_runtime_reachability
     )
     all_security_surfaces: list[SecuritySurface] = list(
-        discovery.cached_security_surfaces if use_cached_facts else ()
+        discovery.cached_security_surfaces
     )
-    all_semantic_events: list[SemanticEvent] = []
-    all_function_contract_summaries: list[FunctionContractSummary] = []
+    all_semantic_events: list[SemanticEvent] = list(discovery.cached_semantic_events)
+    all_function_contract_summaries: list[FunctionContractSummary] = list(
+        discovery.cached_function_contract_summaries
+    )
     all_typing_modules: list[ModuleTypingCoverage] = list(
-        discovery.cached_typing_modules if use_cached_facts else ()
+        discovery.cached_typing_modules
     )
     all_docstring_modules: list[ModuleDocstringCoverage] = list(
-        discovery.cached_docstring_modules if use_cached_facts else ()
+        discovery.cached_docstring_modules
     )
-    all_api_modules: list[ModuleApiSurface] = list(
-        discovery.cached_api_modules if use_cached_facts else ()
-    )
+    all_api_modules: list[ModuleApiSurface] = list(discovery.cached_api_modules)
 
     collect_structural_findings = _should_collect_structural_findings(boot.output_paths)
     collect_api_surface = not boot.args.skip_metrics and bool(
@@ -200,10 +184,10 @@ def process(
     analyzed_methods = 0
     analyzed_classes = 0
     all_structural_findings: list[StructuralFindingGroup] = list(
-        discovery.cached_structural_findings if use_cached_facts else ()
+        discovery.cached_structural_findings
     )
     all_function_relationship_facts: list[FunctionRelationshipFacts] = list(
-        discovery.cached_function_relationship_facts if use_cached_facts else ()
+        discovery.cached_function_relationship_facts
     )
     source_stats_by_file: dict[str, tuple[int, int, int, int]] = {
         filepath: (lines, functions, methods, classes)
@@ -213,8 +197,9 @@ def process(
             functions,
             methods,
             classes,
-        ) in (discovery.cached_source_stats_by_file if use_cached_facts else ())
+        ) in discovery.cached_source_stats_by_file
     }
+    neutral_reuse_by_file = dict(discovery.neutral_reuse_by_file)
     failed_files: list[str] = []
     source_read_failures: list[str] = []
     root_str = str(boot.root)
@@ -344,6 +329,7 @@ def process(
                     segment_min_loc=segment_min_loc,
                     segment_min_stmt=segment_min_stmt,
                     phase_ledger=_phase_ledger_for_file(),
+                    neutral_reuse=neutral_reuse_by_file.get(filepath),
                 )
             )
             if on_advance is not None:
@@ -377,6 +363,7 @@ def process(
                                 segment_min_loc=segment_min_loc,
                                 segment_min_stmt=segment_min_stmt,
                                 phase_ledger=_phase_ledger_for_file(),
+                                neutral_reuse=neutral_reuse_by_file.get(filepath),
                             )
                             for filepath in batch
                         ]

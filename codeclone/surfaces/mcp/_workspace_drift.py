@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from ...cache.entries import FileStat
 from ...cache.store import file_stat_signature
 from ...contracts.errors import ValidationError
+from ...models import FileStat
 from ...scanner import iter_py_files
 from ._session_shared import MCPRunRecord
 from ._workspace_hygiene import DirtySnapshot, collect_dirty_snapshot

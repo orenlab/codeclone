@@ -16,7 +16,6 @@ from ..analysis.phase_ledger import (
     PhaseLedger,
 )
 from ..analysis.units import extract_units_and_stats_from_source
-from ..cache.entries import FileStat
 from ..cache.reuse import source_content_digest
 from ..contracts import (
     DEFAULT_BLOCK_MIN_LOC,
@@ -24,7 +23,12 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_LOC,
     DEFAULT_SEGMENT_MIN_STMT,
 )
-from ..models import ModuleRegistryHandle, ResolvedSourceIdentity
+from ..models import (
+    FileStat,
+    ModuleRegistryHandle,
+    RehydratedCacheNeutral,
+    ResolvedSourceIdentity,
+)
 from ..scanner import resolved_path_under_root
 from ._types import MAX_FILE_SIZE, FileProcessResult
 
@@ -65,6 +69,7 @@ def process_file(
     segment_min_loc: int = DEFAULT_SEGMENT_MIN_LOC,
     segment_min_stmt: int = DEFAULT_SEGMENT_MIN_STMT,
     phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
+    neutral_reuse: RehydratedCacheNeutral | None = None,
 ) -> FileProcessResult:
     try:
         resolved = resolved_path_under_root(filepath, root)
@@ -146,6 +151,7 @@ def process_file(
                 collect_api_surface=collect_api_surface,
                 api_include_private_modules=api_include_private_modules,
                 phase_ledger=phase_ledger,
+                neutral_reuse=neutral_reuse,
             )
         )
         phase_snapshot = None
@@ -193,6 +199,7 @@ def _invoke_process_file(
     segment_min_loc: int,
     segment_min_stmt: int,
     phase_ledger: PhaseLedger | None = None,
+    neutral_reuse: RehydratedCacheNeutral | None = None,
 ) -> FileProcessResult:
     return process_file(
         filepath,
@@ -208,4 +215,5 @@ def _invoke_process_file(
         segment_min_loc=segment_min_loc,
         segment_min_stmt=segment_min_stmt,
         phase_ledger=phase_ledger or INERT_PHASE_LEDGER,
+        neutral_reuse=neutral_reuse,
     )

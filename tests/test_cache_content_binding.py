@@ -15,7 +15,6 @@ import pytest
 
 import codeclone.paths.git_snapshot as git_snapshot_mod
 from codeclone.cache._wire_decode import _decode_wire_file_entry
-from codeclone.cache.entries import CacheEntry, FileStat
 from codeclone.cache.integrity import sign_cache_payload
 from codeclone.cache.reuse import (
     git_blob_identity_for_parsed_source,
@@ -24,12 +23,17 @@ from codeclone.cache.reuse import (
 )
 from codeclone.cache.store import Cache
 from codeclone.models import (
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheNeutralPayload,
     DigestObject,
+    FileStat,
     GitBlobIdentity,
     GitContentFallbackReason,
     GitContentSnapshot,
     GitIndexEntry,
     GitTrackedContent,
+    SemanticFileFacts,
 )
 from codeclone.paths.git_snapshot import (
     _blob_content_digests,
@@ -43,6 +47,7 @@ from codeclone.paths.git_snapshot import (
     collect_git_workspace_snapshot,
     dirty_entry_digest,
 )
+from codeclone.paths.module_identity.inventory import build_module_registry
 
 
 def _blob(object_id: str = "1" * 40) -> GitBlobIdentity:
@@ -54,15 +59,47 @@ def _entry(
     stat: FileStat,
     *,
     blob: GitBlobIdentity | None = None,
-) -> CacheEntry:
-    return CacheEntry(
+) -> CacheEntryV3:
+    neutral_profile = DigestObject(
+        domain="codeclone.cache.profile.neutral.v1",
+        algorithm="sha256",
+        value="2" * 64,
+    )
+    dependent_profile = DigestObject(
+        domain="codeclone.cache.profile.dependent.v1",
+        algorithm="sha256",
+        value="3" * 64,
+    )
+    return CacheEntryV3(
         cache_content_binding_version="1",
         source_content_digest=source_content_digest(raw_source),
         git_blob_id_at_write=blob,
         stat=stat,
-        units=[],
-        blocks=[],
-        segments=[],
+        module_neutral_profile=neutral_profile,
+        module_dependent_profile=dependent_profile,
+        module_neutral=CacheNeutralPayload(
+            source_stats={"lines": 0, "functions": 0, "methods": 0, "classes": 0},
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=(),
+            referenced_qualnames=(),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=None,
+        ),
     )
 
 
@@ -656,6 +693,9 @@ def test_dirty_source_write_never_persists_blob_identity(tmp_path: Path) -> None
     digest = source_content_digest(raw_source)
     blob = _blob()
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    cache.bind_module_registry(
+        build_module_registry(root=tmp_path, source_roots=(".",))
+    )
     cache.bind_git_content_snapshot(
         _snapshot(
             tmp_path,
@@ -680,7 +720,7 @@ def test_dirty_source_write_never_persists_blob_identity(tmp_path: Path) -> None
 
     entry = cache.get_file_entry(str(source))
     assert entry is not None
-    assert entry["git_blob_id_at_write"] is None
+    assert entry.git_blob_id_at_write is None
 
 
 def test_signed_envelope_without_content_binding_cannot_authorize_hit(
@@ -691,7 +731,6 @@ def test_signed_envelope_without_content_binding_cannot_authorize_hit(
     payload = {
         "py": cache.data["python_tag"],
         "fp": cache.data["fingerprint_version"],
-        "ap": cache.data["analysis_profile"],
         "files": {"module.py": {"st": [1, 2]}},
     }
     cache_path.write_text(
