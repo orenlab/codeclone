@@ -73,7 +73,7 @@ def _descriptor(name: ObservationLaneName) -> ObservationLaneDescriptor:
     return ObservationLaneDescriptor(
         name=name,
         descriptor_version=BASELINE_LANE_DESCRIPTOR_VERSION,
-        payload_schema="1",
+        payload_schema="2" if name == "module_identity" else "1",
         algorithm_revision=_algorithm_revision(name),
         canonicalization_version=WIRE_VERSION,
         required_contracts=_required_contracts(name),

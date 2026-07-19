@@ -6,8 +6,10 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import replace
 
+import orjson
 import pytest
 
 from codeclone.models import (
@@ -39,6 +41,33 @@ def _registry() -> ModuleRegistryHandle:
 
 TEST_OBSERVATION_BUNDLE = build_observation_bundle(module_registry=_registry())
 
+_ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
+    "adoption_counts": (
+        "26c87d090b1e6f745df028d8266471b99a7dd3742d5f55c66df8c7bc001f88ee"
+    ),
+    "api_surface": "8efe1f19bf4d29d1abb654af4a3601ada7861960b46f8130cd22d52fa5f15609",
+    "clones.blocks": "1d178dfa537ab09521500e1170b954c058e3de3564597d30911c561d89282cf1",
+    "clones.functions": (
+        "7f87a5ec435e59c109da4cdf8eaf57441795e48a3d6431dfae3abb874c9f9c23"
+    ),
+    "coupling_cohesion_observations": (
+        "4e12a7194990b24db7f494bb8b2ca0ae752fda85eaec81f89696649253cd2cbe"
+    ),
+    "dead_code": "845f17059d61b386e07822620c6f5387e37f52a1192a0471ce85d245d81564d8",
+    "dependencies": "cf680b2291c90af360cf33045736d00cb5cd2e47d6f2446ca28abb6f843e272c",
+    "risk_observations": (
+        "33ae8dc7727ede84f90673aac6e9ae04dfee8c2508a602c34546079a5140416c"
+    ),
+    "semantic_authority": (
+        "af551458e4577c554d38b66386ccf53ea0cdd7dd6dae0327203a24aa60acac68"
+    ),
+}
+
+
+def _descriptor_digest(descriptor: object) -> str:
+    payload = orjson.dumps(descriptor, option=orjson.OPT_SORT_KEYS)
+    return hashlib.sha256(payload).hexdigest()
+
 
 def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
     bundle = build_observation_bundle(
@@ -54,6 +83,26 @@ def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
     assert tuple(lane.descriptor.name for lane in lanes) == (
         bundle.contract.enabled_lanes
     )
+
+
+def test_only_module_identity_advances_its_payload_schema() -> None:
+    contract = build_observation_contract(
+        collect_metrics=True,
+        collect_dependencies=True,
+        collect_dead_code=True,
+        collect_api_surface=True,
+        collect_semantic_authority=True,
+    )
+    descriptors = {descriptor.name: descriptor for descriptor in contract.descriptors}
+    module_identity = descriptors.pop("module_identity")
+
+    assert module_identity.payload_schema == "2"
+    assert _descriptor_digest(replace(module_identity, payload_schema="1")) == (
+        "85ccbadac461be9e606b4d76c3e1ec52a56adf1cbaaa61d4ade0deee1659c3b6"
+    )
+    assert {
+        name: _descriptor_digest(descriptor) for name, descriptor in descriptors.items()
+    } == _ACCEPTED_V1_DESCRIPTOR_DIGESTS
 
 
 def test_missing_emitted_lane_is_a_typed_contract_failure() -> None:
