@@ -54,6 +54,7 @@ from codeclone.models import (
     SourceStatsDict,
 )
 from codeclone.paths.module_identity.inventory import build_module_registry
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 class _FailExec:
@@ -531,6 +532,7 @@ def _build_report_case(
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
     return boot, discovery, processing, analysis
 

@@ -346,9 +346,11 @@ class PackagePrefix:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DigestObject:
     domain: Literal[
+        "ccapi1:sig",
         "codeclone.cache.profile.dependent.v1",
         "codeclone.cache.profile.neutral.v1",
         "codeclone.module-registry.v1",
+        "codeclone.source-observations.v1",
         "codeclone.source-content.v1",
     ]
     algorithm: Literal["sha256"]
@@ -1478,6 +1480,280 @@ class ModuleApiSurface:
 @dataclass(frozen=True, slots=True)
 class ApiSurfaceSnapshot:
     modules: tuple[ModuleApiSurface, ...]
+
+
+ObservationLaneName = Literal[
+    "adoption_counts",
+    "api_surface",
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations",
+    "semantic_authority",
+]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObservationLaneDescriptor:
+    name: ObservationLaneName
+    descriptor_version: str
+    payload_schema: str
+    algorithm_revision: str
+    canonicalization_version: str
+    required_contracts: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        keys = tuple(key for key, _value in self.required_contracts)
+        if self.required_contracts != tuple(sorted(self.required_contracts)):
+            raise ValueError("lane required contracts must be sorted")
+        if len(keys) != len(set(keys)):
+            raise ValueError("lane required contracts must be unique")
+        versions = (
+            self.descriptor_version,
+            self.payload_schema,
+            self.algorithm_revision,
+            self.canonicalization_version,
+        )
+        if any(not value for value in versions):
+            raise ValueError("lane descriptor versions must be non-empty")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObservationContract:
+    observation_digest_version: str
+    enabled_lanes: tuple[ObservationLaneName, ...]
+    descriptors: tuple[ObservationLaneDescriptor, ...]
+
+    def __post_init__(self) -> None:
+        if not self.observation_digest_version:
+            raise ValueError("observation digest version must be non-empty")
+        if self.enabled_lanes != tuple(sorted(set(self.enabled_lanes))):
+            raise ValueError("enabled observation lanes must be sorted and unique")
+        descriptor_names = tuple(descriptor.name for descriptor in self.descriptors)
+        if descriptor_names != self.enabled_lanes:
+            raise ValueError("lane descriptors must exactly match enabled lanes")
+        if "module_identity" not in self.enabled_lanes:
+            raise ValueError("module_identity is required for native observations")
+
+
+# Dormant until report-v3 evaluation identity consumes it; 39O/O1 removes this.
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EvaluationContract:  # codeclone: ignore[dead-code]
+    health_algorithm_revision: str
+    gate_algorithm_revision: str
+    gate_thresholds_digest: str
+
+    def __post_init__(self) -> None:
+        if not self.health_algorithm_revision or not self.gate_algorithm_revision:
+            raise ValueError("evaluation algorithm revisions must be non-empty")
+        if len(self.gate_thresholds_digest) != 64 or any(
+            character not in "0123456789abcdef"
+            for character in self.gate_thresholds_digest
+        ):
+            raise ValueError(
+                "gate threshold digests must be 64 lowercase hex characters"
+            )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApiParameterObservation:
+    name: str
+    kind: Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
+    has_default: bool
+    annotation_digest: DigestObject | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApiSymbolObservation:
+    owner: ResolvedSourceIdentity
+    symbol: str
+    symbol_kind: Literal["function", "class", "method", "constant"]
+    visibility: Literal["all", "name"]
+    parameters: tuple[ApiParameterObservation, ...]
+    returns_digest: DigestObject | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeadCodeObservation:
+    entity: str
+    candidate_kind: Literal["function", "class", "method", "import"]
+    reference_count: int
+    reachable: bool
+    runtime_marker_count: int
+    source_markers: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.reference_count < 0 or self.runtime_marker_count < 0:
+            raise ValueError("dead-code observation counts must be non-negative")
+        if self.source_markers != tuple(sorted(set(self.source_markers))):
+            raise ValueError("dead-code source markers must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IntegerObservation:
+    entity: str
+    dimension: str
+    numerator: int
+    denominator: int | None
+
+    def __post_init__(self) -> None:
+        if self.numerator < 0:
+            raise ValueError("observation numerators must be non-negative")
+        if self.denominator is not None and self.denominator <= 0:
+            raise ValueError("observation denominators must be positive")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AdoptionCount:
+    scope: str
+    feature: str
+    numerator: int
+    denominator: int
+
+    def __post_init__(self) -> None:
+        if self.numerator < 0 or self.denominator <= 0:
+            raise ValueError("adoption counts require non-negative/positive values")
+        if self.numerator > self.denominator:
+            raise ValueError("adoption numerator cannot exceed denominator")
+
+
+def _is_hex64(value: str) -> bool:
+    return len(value) == 64 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _is_fp_v2_function_clone_id(value: str) -> bool:
+    fingerprint, separator, loc_bucket = value.partition("|")
+    if not separator or not _is_hex64(fingerprint):
+        return False
+    if loc_bucket.endswith("+"):
+        return loc_bucket[:-1].isdecimal() and loc_bucket[:-1].isascii()
+    start, separator, end = loc_bucket.partition("-")
+    return bool(
+        separator
+        and start.isdecimal()
+        and start.isascii()
+        and end.isdecimal()
+        and end.isascii()
+    )
+
+
+def _is_fp_v2_block_clone_id(value: str) -> bool:
+    parts = value.split("|")
+    return len(parts) == 4 and all(_is_hex64(part) for part in parts)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class StructuralObservationFacts:
+    function_clone_keys: tuple[str, ...]
+    block_clone_keys: tuple[str, ...]
+    dependencies: tuple[ImportObservation, ...]
+    api_surface: tuple[ApiSymbolObservation, ...]
+    dead_code: tuple[DeadCodeObservation, ...]
+    risk_observations: tuple[IntegerObservation, ...]
+    adoption_counts: tuple[AdoptionCount, ...]
+    coupling_cohesion_observations: tuple[IntegerObservation, ...]
+
+    def __post_init__(self) -> None:
+        for keys in (self.function_clone_keys, self.block_clone_keys):
+            if keys != tuple(sorted(set(keys))):
+                raise ValueError("clone observation keys must be sorted and unique")
+        if any(
+            not _is_fp_v2_function_clone_id(value) for value in self.function_clone_keys
+        ):
+            raise ValueError(
+                "function clone observation keys must be canonical fp-v2 IDs"
+            )
+        if any(not _is_fp_v2_block_clone_id(value) for value in self.block_clone_keys):
+            raise ValueError("block clone observation keys must be canonical fp-v2 IDs")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CloneObservationPayload:
+    items: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleIdentityObservationPayload:
+    manifest: ModuleIdentityManifest
+    module_registry: tuple[ResolvedSourceIdentity, ...]
+    package_prefixes: tuple[PackagePrefix, ...]
+    registry_digest: DigestObject
+    entry_count: int
+    null_module_count: int
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DependencyObservationPayload:
+    observations: tuple[ImportObservation, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApiSurfaceObservationPayload:
+    symbols: tuple[ApiSymbolObservation, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeadCodeObservationPayload:
+    candidates: tuple[DeadCodeObservation, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IntegerObservationPayload:
+    observations: tuple[IntegerObservation, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AdoptionObservationPayload:
+    counts: tuple[AdoptionCount, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class SemanticAuthorityObservationPayload:
+    result: SemanticAuthorityResult
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObservationLane:
+    descriptor: ObservationLaneDescriptor
+    payload: (
+        CloneObservationPayload
+        | ModuleIdentityObservationPayload
+        | DependencyObservationPayload
+        | ApiSurfaceObservationPayload
+        | DeadCodeObservationPayload
+        | IntegerObservationPayload
+        | AdoptionObservationPayload
+        | SemanticAuthorityObservationPayload
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ObservationBundle:
+    contract: ObservationContract
+    analysis_scope: tuple[FileIdentity, ...]
+    manifest: ModuleIdentityManifest
+    registry: ModuleRegistryHandle
+    semantic: SemanticAuthorityResult | None
+    structural: StructuralObservationFacts
+    observation_digest: DigestObject
+
+    def __post_init__(self) -> None:
+        paths = tuple(identity.path for identity in self.analysis_scope)
+        if paths != tuple(sorted(set(paths))):
+            raise ValueError("observation analysis scope must be sorted and unique")
+        if self.observation_digest.domain != "codeclone.source-observations.v1":
+            raise ValueError("observation bundle has the wrong digest domain")
+        semantic_enabled = "semantic_authority" in self.contract.enabled_lanes
+        if semantic_enabled != (self.semantic is not None):
+            raise ValueError("semantic lane presence must match the semantic fact")
+
+    def digest(self) -> DigestObject:
+        return self.observation_digest
 
 
 @dataclass(frozen=True, slots=True)

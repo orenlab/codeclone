@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import ast
-from typing import TYPE_CHECKING, Literal
+import hashlib
+from functools import lru_cache
+from typing import TYPE_CHECKING, Final, Literal
 
 from ..models import (
     ApiBreakingChange,
@@ -23,12 +25,27 @@ from ._visibility import (
 )
 
 if TYPE_CHECKING:
+    from ..analysis.normalizer import NormalizationConfig
     from ..qualnames import FunctionNode, QualnameCollector
 
 __all__ = [
     "collect_module_api_surface",
     "compare_api_surfaces",
 ]
+
+_API_SIGNATURE_DOMAIN: Final = b"ccapi1:sig\x00"
+
+
+@lru_cache(maxsize=1)
+def _api_signature_wire_config() -> NormalizationConfig:
+    from ..analysis.normalizer import NormalizationConfig
+
+    return NormalizationConfig(
+        ignore_type_annotations=False,
+        normalize_attributes=False,
+        normalize_constants=False,
+        normalize_names=False,
+    )
 
 
 def collect_module_api_surface(
@@ -340,7 +357,10 @@ def _is_implicit_method_receiver(*, is_method: bool, index: int, name: str) -> b
 def _annotation_hash(node: ast.AST | None) -> str:
     if node is None:
         return ""
-    return ast.dump(node, include_attributes=False)
+    from ..analysis.wire import emit_wire
+
+    wire = emit_wire(node, _api_signature_wire_config()).encode("utf-8")
+    return hashlib.sha256(_API_SIGNATURE_DOMAIN + wire).hexdigest()
 
 
 def _public_constant_rows(

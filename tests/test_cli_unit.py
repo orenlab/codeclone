@@ -56,6 +56,7 @@ from codeclone.core.worker import (
 from codeclone.models import HealthScore, ProjectMetrics
 from tests._assertions import assert_contains_all, assert_contains_none
 from tests._ast_metrics_helpers import module_registry_context, worker_registry_context
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 def process_file(
@@ -1222,6 +1223,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
     def _fake_gate(**kwargs: object) -> GatingResult:
@@ -1286,6 +1288,7 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
     def _fake_gate(**kwargs: object) -> GatingResult:
@@ -2385,6 +2388,7 @@ def _stub_analysis_result(
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
 

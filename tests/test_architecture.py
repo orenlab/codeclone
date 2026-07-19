@@ -33,6 +33,7 @@ _RING_BY_PREFIX: tuple[tuple[str, str], ...] = (
     ("codeclone.observability.sqlite_access", "r2p"),
     ("codeclone.observability.views", "r2p"),
     ("codeclone.observability", "r1"),
+    ("codeclone.observations", "r2"),
     ("codeclone.report.renderers", "r4"),
     ("codeclone.report.html", "r4"),
     ("codeclone.report.messages", "r4"),
@@ -753,3 +754,8 @@ def test_phase39i_legacy_content_hit_and_git_owners_are_absent() -> None:
     assert '["stat"] == stat' not in discovery_source
     assert "_dirty_paths_from_porcelain" not in hygiene_source
     assert "subprocess.run" not in hygiene_source
+
+
+def test_phase39l_observations_package_is_an_r2_fact_owner() -> None:
+    assert _ring_for_module("codeclone.observations") == "r2"
+    assert _ring_for_module("codeclone.observations.lanes") == "r2"

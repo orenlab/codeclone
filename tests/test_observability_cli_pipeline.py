@@ -47,6 +47,7 @@ from codeclone.surfaces.cli.observability import observability_main
 from tests._ast_metrics_helpers import module_registry_context
 from tests.observability_equality import assert_observability_subprocess_equality
 from tests.test_observability_query import _seed_future_observability_schema
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 @pytest.fixture(autouse=True)
@@ -140,6 +141,7 @@ def _analysis() -> AnalysisResult:
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
         structural_findings=(),
     )
 

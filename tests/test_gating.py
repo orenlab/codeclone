@@ -25,6 +25,7 @@ from codeclone.surfaces.mcp.session import (
     MCPGateRequest,
     MCPRunRecord,
 )
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 def _project_metrics() -> ProjectMetrics:
@@ -158,6 +159,7 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
     cli_result = cli_gate(

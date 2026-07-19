@@ -35,6 +35,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
+    ObservationBundle,
     ProjectMetrics,
     RehydratedCacheNeutral,
     RuntimeReachabilityFact,
@@ -193,6 +194,7 @@ class AnalysisResult:
     metrics_payload: dict[str, object] | None
     suggestions: tuple[Suggestion, ...]
     segment_groups_raw_digest: str
+    observation_bundle: ObservationBundle
     suppressed_clone_groups: tuple[SuppressedCloneGroup, ...] = ()
     coverage_join: CoverageJoinResult | None = None
     suppressed_dead_code_items: int = 0

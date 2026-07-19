@@ -48,6 +48,14 @@ from ..models import (
     StructuralFindingGroup,
     Suggestion,
 )
+from ..observability.runtime import span
+from ..observations.contracts import ObservationContractError
+from ..observations.lanes import (
+    build_observation_lanes,
+    canonical_observation_lane_bytes,
+    observation_lane_item_count,
+)
+from ..observations.projection import build_observation_bundle
 from ..report.blocks import prepare_block_report_groups
 from ..report.explain import build_block_group_facts
 from ..report.segments import prepare_segment_report_groups
@@ -373,6 +381,67 @@ def analyze(
             suppressed_dead_code=suppressed_dead_items,
         )
 
+    collect_metrics = not bool(boot.args.skip_metrics)
+    collect_api_surface = collect_metrics and bool(
+        getattr(boot.args, "api_surface", False)
+    )
+    with span(name="observations.build") as observation_span:
+        try:
+            observation_bundle = build_observation_bundle(
+                module_registry=discovery.module_registry,
+                function_clone_keys=tuple(func_groups),
+                block_clone_keys=tuple(block_groups),
+                module_deps=processing.module_deps,
+                api_modules=processing.api_modules,
+                dead_candidates=processing.dead_candidates,
+                referenced_names=processing.referenced_names,
+                referenced_qualnames=processing.referenced_qualnames,
+                runtime_reachability=processing.runtime_reachability,
+                units=processing.units,
+                class_metrics=processing.class_metrics,
+                typing_modules=processing.typing_modules,
+                docstring_modules=processing.docstring_modules,
+                semantic_authority=processing.semantic_authority,
+                collect_metrics=collect_metrics,
+                collect_dependencies=(
+                    collect_metrics and not bool(boot.args.skip_dependencies)
+                ),
+                collect_dead_code=(
+                    collect_metrics and not bool(boot.args.skip_dead_code)
+                ),
+                collect_api_surface=collect_api_surface,
+            )
+        except ObservationContractError:
+            observation_span.set_counter("observations_contract_failures", 1)
+            raise
+        observation_span.set_counter(
+            "observations_fact_families",
+            len(observation_bundle.contract.enabled_lanes),
+        )
+        observation_span.set_counter(
+            "observations_semantic_reuse",
+            int(observation_bundle.semantic is not None),
+        )
+
+    with span(name="observations.lanes.build") as lanes_span:
+        try:
+            observation_lanes = build_observation_lanes(observation_bundle)
+        except ObservationContractError:
+            lanes_span.set_counter("observations_contract_failures", 1)
+            raise
+        lanes_span.set_counter("observations_enabled_lanes", len(observation_lanes))
+        lanes_span.set_counter(
+            "observations_lane_items",
+            sum(observation_lane_item_count(lane) for lane in observation_lanes),
+        )
+        lanes_span.set_counter(
+            "observations_lane_bytes",
+            sum(
+                len(canonical_observation_lane_bytes(lane))
+                for lane in observation_lanes
+            ),
+        )
+
     return AnalysisResult(
         func_groups=func_groups,
         block_groups=block_groups,
@@ -389,6 +458,7 @@ def analyze(
         metrics_payload=metrics_payload,
         suggestions=suggestions,
         segment_groups_raw_digest=segment_groups_raw_digest,
+        observation_bundle=observation_bundle,
         coverage_join=coverage_join,
         suppressed_dead_code_items=len(suppressed_dead_items),
         structural_findings=combined_structural_findings,

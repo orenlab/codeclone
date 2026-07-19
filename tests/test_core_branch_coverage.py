@@ -80,6 +80,7 @@ from codeclone.models import (
 from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
 from tests._ast_metrics_helpers import module_registry_context
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 def _source_digest_fixture(raw_source: bytes) -> DigestObject:
@@ -1591,6 +1592,7 @@ def test_cli_run_analysis_stages_handles_cache_save_error(
             metrics_payload=None,
             suggestions=(),
             segment_groups_raw_digest="",
+            observation_bundle=TEST_OBSERVATION_BUNDLE,
             structural_findings=(),
         ),
     )
