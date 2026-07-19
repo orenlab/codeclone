@@ -1680,7 +1680,7 @@ class CloneObservationPayload:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModuleIdentityObservationPayload:
     manifest: ModuleIdentityManifest
-    module_registry: tuple[ResolvedSourceIdentity, ...]
+    module_registry: tuple[ModuleInventoryEntry, ...]
     package_prefixes: tuple[PackagePrefix, ...]
     registry_digest: DigestObject
     entry_count: int

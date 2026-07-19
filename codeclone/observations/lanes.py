@@ -30,15 +30,14 @@ def _module_identity_payload(
     bundle: ObservationBundle,
 ) -> ModuleIdentityObservationPayload:
     entries = tuple(entry for _path, entry in bundle.registry.entries_by_path.rows)
-    identities = tuple(entry.identity for entry in entries)
     return ModuleIdentityObservationPayload(
         manifest=bundle.manifest,
-        module_registry=identities,
+        module_registry=entries,
         package_prefixes=bundle.registry.package_prefixes,
         registry_digest=bundle.registry.digest,
         entry_count=len(entries),
         null_module_count=sum(
-            identity.python_module is None for identity in identities
+            entry.identity.python_module is None for entry in entries
         ),
     )
 

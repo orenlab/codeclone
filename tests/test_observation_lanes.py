@@ -21,6 +21,7 @@ from codeclone.models import (
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
+    ModuleIdentityObservationPayload,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
     ObservationBundle,
@@ -195,6 +196,27 @@ def test_raw_lanes_are_closed_policy_free_and_component_structured() -> None:
             + b",".join(canonical_observation_lane_bytes(lane) for lane in lanes)
             + b"]"
         )
+    )
+
+
+def test_module_identity_lane_preserves_canonical_inventory_facts() -> None:
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        known_internal_modules=("pkg.hidden",),
+    )[1]
+    bundle = build_observation_bundle(module_registry=registry)
+    lanes = {lane.descriptor.name: lane for lane in build_observation_lanes(bundle)}
+    payload = lanes["module_identity"].payload
+
+    assert isinstance(payload, ModuleIdentityObservationPayload)
+    assert payload.module_registry == tuple(
+        entry for _path, entry in registry.entries_by_path.rows
+    )
+    assert tuple(entry.analyzed for entry in payload.module_registry) == (False, True)
+    assert tuple(entry.internality for entry in payload.module_registry) == (
+        "known_internal_not_analyzed",
+        "analyzed",
     )
 
 
