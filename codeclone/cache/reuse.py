@@ -16,6 +16,7 @@ from typing import Literal
 import orjson
 
 from ..baseline.trust import current_python_tag
+from ..contracts import API_SURFACE_SIGNATURE_VERSION
 from ..models import (
     CacheEntryV3,
     CacheLaneVerdict,
@@ -89,6 +90,7 @@ def build_module_dependent_profile(
         tag=_DEPENDENT_PROFILE_DOMAIN,
         payload={
             "api_surface": collect_api_surface,
+            "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
             "module_manifest_digest": module_manifest_digest.value,
             "neutral_profile": neutral_profile.value,

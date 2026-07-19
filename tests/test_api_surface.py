@@ -79,6 +79,61 @@ VALUE = 1
     assert [param.name for param in init_symbol.params] == ["dep", "lazy"]
     assert [param.name for param in method_symbol.params] == ["item"]
 
+    run_symbol = next(
+        symbol for symbol in surface.symbols if symbol.qualname == "pkg.mod:run"
+    )
+    component_digests = (
+        *(parameter.annotation_hash for parameter in run_symbol.params),
+        run_symbol.returns_hash,
+    )
+    assert all(len(value) == 64 for value in component_digests)
+    assert all(set(value) <= set("0123456789abcdef") for value in component_digests)
+
+
+def test_api_signature_component_digests_are_parse_stable() -> None:
+    source = """
+__all__ = ["run"]
+
+def run(left: list[str], /, right: dict[str, int] | None = None) -> tuple[str, ...]:
+    return tuple(left)
+"""
+    first_tree, first_collector, first_imports = tree_collector_and_imports(
+        source,
+        module_name="pkg.mod",
+    )
+    second_tree, second_collector, second_imports = tree_collector_and_imports(
+        source,
+        module_name="pkg.mod",
+    )
+
+    first = collect_module_api_surface(
+        tree=first_tree,
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        collector=first_collector,
+        imported_names=first_imports,
+    )
+    second = collect_module_api_surface(
+        tree=second_tree,
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        collector=second_collector,
+        imported_names=second_imports,
+    )
+
+    assert first == second
+    assert first is not None
+    symbol = first.symbols[0]
+    assert tuple(parameter.name for parameter in symbol.params) == ("left", "right")
+    assert tuple(parameter.annotation_hash for parameter in symbol.params) == (
+        "d848e7ea6a2971377d41e7d72f4c7e0f0bf543e857fe1d5a287ba6d5e87d8d8f",
+        "6973abc818e5033a061453bfc60e8cfd53c69d48e60c751c06bab4e647b9fc5a",
+    )
+    assert (
+        symbol.returns_hash
+        == "482d6d649923a7350f54e3b1d64b23be713f87ba712c546ffe99493fc627479d"
+    )
+
 
 def test_compare_api_surfaces_reports_added_removed_and_signature_breaks() -> None:
     baseline = ApiSurfaceSnapshot(

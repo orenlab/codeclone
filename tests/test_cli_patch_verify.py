@@ -22,6 +22,7 @@ from codeclone.surfaces.cli.patch_verify import (
     validate_strictness,
 )
 from codeclone.surfaces.cli.post_run import DiffContext
+from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
 class _RecordingPrinter:
@@ -73,6 +74,7 @@ def _analysis(*, function_clones: int = 0) -> AnalysisResult:
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
 
@@ -314,6 +316,7 @@ def _analysis_with_metrics(
         metrics_payload=None,
         suggestions=(),
         segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
 

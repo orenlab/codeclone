@@ -70,6 +70,7 @@ from codeclone.cache.projection import (
 )
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _resolve_root
+from codeclone.contracts import CACHE_VERSION
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
 from codeclone.core.discovery import _decode_cached_function_relationship_facts
@@ -2911,3 +2912,11 @@ def test_integrity_read_json_document_forwards_max_bytes(tmp_path: Path) -> None
     path = tmp_path / "doc.json"
     path.write_text('{"ok": true}', encoding="utf-8")
     assert read_json_document(path, max_bytes=64) == {"ok": True}
+
+
+def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
+
+    assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
+    assert CACHE_VERSION == "3.0"

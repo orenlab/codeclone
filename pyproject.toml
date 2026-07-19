@@ -165,6 +165,7 @@ packages = [
     "codeclone.memory.trajectory",
     "codeclone.observability",
     "codeclone.observability.store",
+    "codeclone.observations",
     "codeclone.paths",
     "codeclone.paths.module_identity",
     "codeclone.qualnames",

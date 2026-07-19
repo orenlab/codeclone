@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import (
@@ -161,3 +162,11 @@ def test_core_result_equality_ignores_phase_snapshot() -> None:
     base = _processing_result()
     snapshot = PhaseSnapshot(totals=PhaseTotals(parse_ns=1_000), volumes=())
     assert base == replace(base, phase_snapshot=snapshot)
+
+
+def test_phase39l_pipeline_owns_each_observation_span_once() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "codeclone/core/pipeline.py").read_text(encoding="utf-8")
+
+    assert source.count('span(name="observations.build")') == 1
+    assert source.count('span(name="observations.lanes.build")') == 1

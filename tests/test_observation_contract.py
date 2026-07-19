@@ -1,0 +1,245 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at https://mozilla.org/MPL/2.0/.
+# SPDX-License-Identifier: MPL-2.0
+# Copyright (c) 2026 Den Rozhnovskiy
+
+from __future__ import annotations
+
+from dataclasses import replace
+
+import pytest
+
+from codeclone.models import (
+    AdoptionCount,
+    DeadCodeObservation,
+    DigestObject,
+    EvaluationContract,
+    IntegerObservation,
+    ModuleDep,
+    ModuleRegistryHandle,
+)
+from codeclone.observations.contracts import (
+    ObservationContractError,
+    build_observation_contract,
+    validate_emitted_lanes,
+)
+from codeclone.observations.lanes import build_observation_lanes
+from codeclone.observations.projection import build_observation_bundle
+from tests._ast_metrics_helpers import module_registry_context
+
+
+def _registry() -> ModuleRegistryHandle:
+    return module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        inventory_modules=("pkg.dep",),
+    )[1]
+
+
+TEST_OBSERVATION_BUNDLE = build_observation_bundle(module_registry=_registry())
+
+
+def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
+    bundle = build_observation_bundle(
+        module_registry=_registry(),
+        collect_api_surface=False,
+    )
+    lanes = build_observation_lanes(bundle)
+
+    assert bundle.semantic is None
+    assert "semantic_authority" not in bundle.contract.enabled_lanes
+    assert "api_surface" not in bundle.contract.enabled_lanes
+    assert "module_identity" in bundle.contract.enabled_lanes
+    assert tuple(lane.descriptor.name for lane in lanes) == (
+        bundle.contract.enabled_lanes
+    )
+
+
+def test_missing_emitted_lane_is_a_typed_contract_failure() -> None:
+    bundle = build_observation_bundle(module_registry=_registry())
+    lanes = build_observation_lanes(bundle)
+
+    with pytest.raises(ObservationContractError, match="missing="):
+        validate_emitted_lanes(bundle.contract, lanes[:-1])
+
+
+def test_evaluation_contract_cannot_change_observation_identity() -> None:
+    bundle = build_observation_bundle(module_registry=_registry())
+    before = EvaluationContract(
+        health_algorithm_revision="1",
+        gate_algorithm_revision="1",
+        gate_thresholds_digest="1" * 64,
+    )
+    after = replace(before, gate_thresholds_digest="2" * 64)
+
+    assert before != after
+    assert bundle.digest() == bundle.observation_digest
+
+
+def test_observation_bundle_digest_is_input_order_independent() -> None:
+    function_a = f"{'a' * 64}|0-19"
+    function_b = f"{'b' * 64}|20+"
+    block_c = "|".join(("c" * 64, "1" * 64, "2" * 64, "3" * 64))
+    block_d = "|".join(("d" * 64, "4" * 64, "5" * 64, "6" * 64))
+    first = build_observation_bundle(
+        module_registry=_registry(),
+        function_clone_keys=(function_b, function_a),
+        block_clone_keys=(block_d, block_c),
+    )
+    second = build_observation_bundle(
+        module_registry=_registry(),
+        function_clone_keys=(function_a, function_b),
+        block_clone_keys=(block_c, block_d),
+    )
+
+    assert first.structural == second.structural
+    assert first.digest() == second.digest()
+
+
+def test_lane_descriptor_and_contract_reject_noncanonical_shapes() -> None:
+    bundle = TEST_OBSERVATION_BUNDLE
+    descriptor = bundle.contract.descriptors[0]
+
+    with pytest.raises(ValueError, match="sorted"):
+        replace(
+            descriptor,
+            required_contracts=(
+                ("z", "1"),
+                ("a", "1"),
+            ),
+        )
+    with pytest.raises(ValueError, match="unique"):
+        replace(
+            descriptor,
+            required_contracts=(
+                ("key", "1"),
+                ("key", "2"),
+            ),
+        )
+    with pytest.raises(ValueError, match="non-empty"):
+        replace(descriptor, payload_schema="")
+    with pytest.raises(ValueError, match="digest version"):
+        replace(bundle.contract, observation_digest_version="")
+    with pytest.raises(ValueError, match="sorted and unique"):
+        replace(
+            bundle.contract,
+            enabled_lanes=("module_identity", "clones.blocks"),
+        )
+    with pytest.raises(ValueError, match="exactly match"):
+        replace(bundle.contract, descriptors=bundle.contract.descriptors[:-1])
+    with pytest.raises(ValueError, match="module_identity"):
+        replace(
+            bundle.contract,
+            enabled_lanes=("clones.blocks", "clones.functions"),
+            descriptors=tuple(
+                item
+                for item in bundle.contract.descriptors
+                if item.name in {"clones.blocks", "clones.functions"}
+            ),
+        )
+
+
+def test_observation_models_reject_invalid_counts_and_evaluation_contracts() -> None:
+    with pytest.raises(ValueError, match="algorithm revisions"):
+        EvaluationContract(
+            health_algorithm_revision="",
+            gate_algorithm_revision="1",
+            gate_thresholds_digest="1" * 64,
+        )
+    with pytest.raises(ValueError, match="64 lowercase hex"):
+        EvaluationContract(
+            health_algorithm_revision="1",
+            gate_algorithm_revision="1",
+            gate_thresholds_digest="x" * 64,
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        DeadCodeObservation(
+            entity="pkg.mod:run",
+            candidate_kind="function",
+            reference_count=-1,
+            reachable=False,
+            runtime_marker_count=0,
+        )
+    with pytest.raises(ValueError, match="sorted and unique"):
+        DeadCodeObservation(
+            entity="pkg.mod:run",
+            candidate_kind="function",
+            reference_count=0,
+            reachable=False,
+            runtime_marker_count=0,
+            source_markers=(("z", "1"), ("a", "1")),
+        )
+    with pytest.raises(ValueError, match="numerators"):
+        IntegerObservation(
+            entity="pkg.mod:run",
+            dimension="risk",
+            numerator=-1,
+            denominator=None,
+        )
+    with pytest.raises(ValueError, match="denominators"):
+        IntegerObservation(
+            entity="pkg.mod:run",
+            dimension="risk",
+            numerator=0,
+            denominator=0,
+        )
+    with pytest.raises(ValueError, match="non-negative/positive"):
+        AdoptionCount(scope="pkg.mod", feature="typing", numerator=0, denominator=0)
+    with pytest.raises(ValueError, match="cannot exceed"):
+        AdoptionCount(scope="pkg.mod", feature="typing", numerator=2, denominator=1)
+
+
+def test_bundle_rejects_invalid_cross_links_and_digest_contracts() -> None:
+    bundle = TEST_OBSERVATION_BUNDLE
+    with pytest.raises(ValueError, match="scope must be sorted and unique"):
+        replace(bundle, analysis_scope=bundle.analysis_scope * 2)
+    with pytest.raises(ValueError, match="wrong digest domain"):
+        replace(
+            bundle,
+            observation_digest=DigestObject(
+                domain="codeclone.source-content.v1",
+                algorithm="sha256",
+                value="1" * 64,
+            ),
+        )
+    semantic_contract = build_observation_contract(
+        collect_metrics=True,
+        collect_dependencies=True,
+        collect_dead_code=True,
+        collect_api_surface=True,
+        collect_semantic_authority=True,
+    )
+    with pytest.raises(ValueError, match="semantic lane presence"):
+        replace(bundle, contract=semantic_contract)
+
+
+def test_dependency_sources_resolve_by_path_or_fail_typed() -> None:
+    path_dependency = ModuleDep(
+        source="pkg/mod.py",
+        target="pkg.dep",
+        import_type="from_import",
+        line=1,
+        resolution="analyzed",
+        requested_module="pkg.dep",
+        requested_names=("value",),
+        candidate_targets=("pkg.dep",),
+    )
+    bundle = build_observation_bundle(
+        module_registry=_registry(),
+        module_deps=(path_dependency,),
+    )
+    assert bundle.structural.dependencies[0].source.file.path == "pkg/mod.py"
+
+    with pytest.raises(ObservationContractError, match="dependency source"):
+        build_observation_bundle(
+            module_registry=_registry(),
+            module_deps=(replace(path_dependency, source="missing.py"),),
+        )
+
+
+def test_duplicate_emitted_lanes_are_a_typed_contract_failure() -> None:
+    bundle = TEST_OBSERVATION_BUNDLE
+    lanes = build_observation_lanes(bundle)
+    with pytest.raises(ObservationContractError, match="sorted and duplicate-free"):
+        validate_emitted_lanes(bundle.contract, (lanes[0], lanes[0]))
