@@ -13,13 +13,6 @@ from typing import cast
 
 import pytest
 
-from codeclone.cache.entries import (
-    ApiParamSpecDict,
-    CacheEntry,
-    ModuleApiSurfaceDict,
-    PublicSymbolDict,
-    SecuritySurfaceDict,
-)
 from codeclone.cache.reuse import source_content_digest
 from codeclone.core._types import (
     _as_sorted_str_tuple,
@@ -71,21 +64,38 @@ from codeclone.metrics.overloaded_modules import (
 from codeclone.models import (
     ApiBreakingChange,
     ApiParamSpec,
+    ApiParamSpecDict,
     ApiSurfaceSnapshot,
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheNeutralPayload,
     ClassMetrics,
+    ClassMetricsDict,
     CoverageJoinResult,
     DeadCandidate,
+    DeadCandidateDict,
     DeadItem,
+    DigestObject,
+    FunctionRelationshipFactsDict,
     HealthScore,
     MetricsDiff,
     ModuleApiSurface,
+    ModuleApiSurfaceDict,
     ModuleDep,
+    ModuleDepDict,
     ModuleDocstringCoverage,
+    ModuleDocstringCoverageDict,
     ModuleTypingCoverage,
+    ModuleTypingCoverageDict,
     ProjectMetrics,
     PublicSymbol,
+    PublicSymbolDict,
     RuntimeReachabilityFact,
+    RuntimeReachabilityFactDict,
     SecuritySurface,
+    SecuritySurfaceDict,
+    SemanticFileFacts,
+    StructuralFindingGroupDict,
     UnitCoverageFact,
 )
 from codeclone.report.gates.evaluator import (
@@ -102,6 +112,62 @@ _TEST_MODULE_REGISTRY = module_registry_context(
     module_name="pkg.mod",
     inventory_modules=("pkg.api", "pkg.dep"),
 )[1]
+
+
+def _cache_entry_v3(
+    *,
+    class_metrics: tuple[ClassMetricsDict, ...] = (),
+    module_deps: tuple[ModuleDepDict, ...] = (),
+    dead_candidates: tuple[DeadCandidateDict, ...] = (),
+    referenced_names: tuple[str, ...] = (),
+    referenced_qualnames: tuple[str, ...] = (),
+    runtime_reachability: tuple[RuntimeReachabilityFactDict, ...] = (),
+    security_surfaces: tuple[SecuritySurfaceDict, ...] = (),
+    function_relationship_facts: tuple[FunctionRelationshipFactsDict, ...] = (),
+    typing_coverage: ModuleTypingCoverageDict | None = None,
+    docstring_coverage: ModuleDocstringCoverageDict | None = None,
+    api_surface: ModuleApiSurfaceDict | None = None,
+    structural_findings: tuple[StructuralFindingGroupDict, ...] | None = None,
+) -> CacheEntryV3:
+    return CacheEntryV3(
+        cache_content_binding_version="1",
+        source_content_digest=source_content_digest(b"source"),
+        git_blob_id_at_write=None,
+        stat={"mtime_ns": 1, "size": 1},
+        module_neutral_profile=DigestObject(
+            domain="codeclone.cache.profile.neutral.v1",
+            algorithm="sha256",
+            value="1" * 64,
+        ),
+        module_dependent_profile=DigestObject(
+            domain="codeclone.cache.profile.dependent.v1",
+            algorithm="sha256",
+            value="2" * 64,
+        ),
+        module_neutral=CacheNeutralPayload(
+            source_stats={"lines": 0, "functions": 0, "methods": 0, "classes": 0},
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=class_metrics,
+            module_deps=module_deps,
+            dead_candidates=dead_candidates,
+            referenced_names=referenced_names,
+            referenced_qualnames=referenced_qualnames,
+            import_names=(),
+            class_names=(),
+            runtime_reachability=runtime_reachability,
+            security_surfaces=security_surfaces,
+            function_relationship_facts=function_relationship_facts,
+            typing_coverage=typing_coverage,
+            docstring_coverage=docstring_coverage,
+            api_surface=api_surface,
+            structural_findings=structural_findings,
+        ),
+    )
 
 
 def _project_metrics(*, dead_confidence: str = "high") -> ProjectMetrics:
@@ -785,16 +851,7 @@ def test_build_overloaded_modules_payload_skips_unknown_units_and_external_deps(
 
 
 def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "referenced_names": ["orphan", "helper"],
-    }
+    entry = _cache_entry_v3(referenced_names=("orphan", "helper"))
     _, _, _, test_names, test_qualnames, *_ = _load_cached_metrics_extended(
         entry,
         filepath="pkg/tests/test_mod.py",
@@ -810,15 +867,8 @@ def test_load_cached_metrics_ignores_referenced_names_from_test_files() -> None:
 
 
 def test_load_cached_metrics_preserves_coupled_classes() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [
+    entry = _cache_entry_v3(
+        class_metrics=(
             {
                 "qualname": "pkg.mod:Service",
                 "filepath": "pkg/mod.py",
@@ -831,9 +881,9 @@ def test_load_cached_metrics_preserves_coupled_classes() -> None:
                 "risk_coupling": "low",
                 "risk_cohesion": "low",
                 "coupled_classes": ["TypeB", "TypeA", "TypeA"],
-            }
-        ],
-    }
+            },
+        ),
+    )
     class_metrics, _, _, _, _, *_ = _load_cached_metrics_extended(
         entry,
         filepath="pkg/mod.py",
@@ -843,15 +893,8 @@ def test_load_cached_metrics_preserves_coupled_classes() -> None:
 
 
 def test_load_cached_metrics_preserves_dead_candidate_suppressions() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "dead_candidates": [
+    entry = _cache_entry_v3(
+        dead_candidates=(
             {
                 "qualname": "pkg.mod:runtime_hook",
                 "local_name": "runtime_hook",
@@ -860,9 +903,9 @@ def test_load_cached_metrics_preserves_dead_candidate_suppressions() -> None:
                 "end_line": 11,
                 "kind": "function",
                 "suppressed_rules": ["dead-code", "dead-code"],
-            }
-        ],
-    }
+            },
+        ),
+    )
     _, _, dead_candidates, _, _, *_ = _load_cached_metrics_extended(
         entry,
         filepath="pkg/mod.py",
@@ -975,15 +1018,8 @@ def test_pipeline_cache_decode_helpers_cover_invalid_and_valid_payloads() -> Non
 def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces() -> (
     None
 ):
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "typing_coverage": {
+    entry = _cache_entry_v3(
+        typing_coverage={
             "module": "pkg.mod",
             "filepath": "pkg/mod.py",
             "callable_count": 2,
@@ -993,13 +1029,13 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
             "returns_annotated": 1,
             "any_annotation_count": 1,
         },
-        "docstring_coverage": {
+        docstring_coverage={
             "module": "pkg.mod",
             "filepath": "pkg/mod.py",
             "public_symbol_total": 3,
             "public_symbol_documented": 2,
         },
-        "api_surface": {
+        api_surface={
             "module": "pkg.mod",
             "filepath": "pkg/mod.py",
             "all_declared": ["run"],
@@ -1015,7 +1051,7 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
                 }
             ],
         },
-        "runtime_reachability": [
+        runtime_reachability=(
             {
                 "target_qualname": "pkg.mod:run",
                 "filepath": "pkg/mod.py",
@@ -1028,9 +1064,9 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
                 "evidence": "route decorator",
                 "evidence_symbol": "router.get",
                 "source_qualname": "pkg.mod:router",
-            }
-        ],
-        "security_surfaces": [
+            },
+        ),
+        security_surfaces=(
             {
                 "category": "network_boundary",
                 "capability": "requests_import",
@@ -1043,9 +1079,9 @@ def test_load_cached_metrics_extended_decodes_adoption_api_and_security_surfaces
                 "classification_mode": "exact_import",
                 "evidence_kind": "import",
                 "evidence_symbol": "requests",
-            }
-        ],
-    }
+            },
+        ),
+    )
     (
         *_,
         typing_coverage,
@@ -1138,16 +1174,7 @@ def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtere
 
     assert _security_surface_from_cache_row(invalid_row) is None
 
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "security_surfaces": [invalid_row],
-    }
+    entry = _cache_entry_v3(security_surfaces=(invalid_row,))
 
     *_, security_surfaces = _load_cached_metrics_extended(entry, filepath="pkg/mod.py")
 
@@ -1354,15 +1381,8 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
         is None
     )
 
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": source_content_digest(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [
+    entry = _cache_entry_v3(
+        class_metrics=(
             {
                 "qualname": "pkg.mod:Service",
                 "filepath": "pkg/mod.py",
@@ -1388,8 +1408,8 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
                 "risk_coupling": "broken",
                 "risk_cohesion": "low",
             },
-        ],
-        "module_deps": [
+        ),
+        module_deps=(
             {
                 "source": "pkg.mod",
                 "target": "pkg.dep",
@@ -1402,8 +1422,8 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
                 "import_type": "broken",
                 "line": 4,
             },
-        ],
-        "dead_candidates": [
+        ),
+        dead_candidates=(
             {
                 "qualname": "pkg.mod:unused",
                 "local_name": "unused",
@@ -1421,10 +1441,10 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
                 "end_line": 42,
                 "kind": "broken",
             },
-        ],
-        "referenced_names": ["run"],
-        "referenced_qualnames": ["pkg.mod:run"],
-    }
+        ),
+        referenced_names=("run",),
+        referenced_qualnames=("pkg.mod:run",),
+    )
 
     (
         class_metrics,

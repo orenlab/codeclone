@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING
 import orjson
 
 from ..analysis.normalizer import NormalizationConfig
-from ..cache.entries import FileStat
 from ..cache.projection import SegmentReportProjection
 from ..contracts import DEFAULT_PROCESSES
 from ..models import (
@@ -26,6 +25,7 @@ from ..models import (
     DeadCandidate,
     DigestObject,
     FileMetrics,
+    FileStat,
     FunctionContractSummary,
     FunctionRelationshipFacts,
     GroupItem,
@@ -36,6 +36,7 @@ from ..models import (
     ModuleRegistryHandle,
     ModuleTypingCoverage,
     ProjectMetrics,
+    RehydratedCacheNeutral,
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentGroupItem,
@@ -101,6 +102,9 @@ class DiscoveryResult:
     cached_api_modules: tuple[ModuleApiSurface, ...] = ()
     cached_structural_findings: tuple[StructuralFindingGroup, ...] = ()
     cached_function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = ()
+    cached_semantic_events: tuple[SemanticEvent, ...] = ()
+    cached_function_contract_summaries: tuple[FunctionContractSummary, ...] = ()
+    neutral_reuse_by_file: tuple[tuple[str, RehydratedCacheNeutral], ...] = ()
     cached_segment_report_projection: SegmentReportProjection | None = None
     cached_lines: int = 0
     cached_functions: int = 0

@@ -21,7 +21,6 @@ import orjson
 
 from ... import __version__
 from ...baseline import Baseline
-from ...cache.entries import FileStat
 from ...cache.store import Cache
 from ...cache.versioning import CacheStatus
 from ...config.pyproject_loader import (
@@ -95,6 +94,7 @@ from ...findings.ids import (
 )
 from ...models import (
     CoverageJoinResult,
+    FileStat,
     FunctionRelationshipFacts,
     MetricsDiff,
     ModuleDep,

@@ -10,46 +10,34 @@ import hashlib
 import json
 import os
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+import codeclone.cache._validators as cache_validators
+import codeclone.cache._wire_decode as cache_wire_decode
+import codeclone.cache._wire_helpers as cache_wire_helpers
+import codeclone.cache.entries as cache_entries
 import codeclone.cache.store as cache_store
-from codeclone.cache._canonicalize import (
-    _as_module_api_surface_dict,
-    _as_module_docstring_coverage_dict,
-    _as_module_typing_coverage_dict,
-    _attach_optional_cache_sections,
-    _canonicalize_cache_entry,
-    _has_cache_entry_container_shape,
-)
 from codeclone.cache._validators import (
-    _is_api_param_spec_dict,
     _is_class_metrics_dict,
     _is_dead_candidate_dict,
     _is_function_relationship_facts_dict,
     _is_module_api_surface_dict,
     _is_module_dep_dict,
-    _is_public_symbol_dict,
     _is_relationship_record_dict,
     _is_runtime_reachability_fact_dict,
     _is_security_surface_dict,
 )
 from codeclone.cache._wire_decode import (
-    _decode_optional_wire_api_surface,
     _decode_optional_wire_function_relationship_facts,
-    _decode_optional_wire_module_ints,
-    _decode_optional_wire_source_stats,
-    _decode_wire_api_param_spec,
-    _decode_wire_api_surface_symbol,
     _decode_wire_block,
     _decode_wire_class_metric,
     _decode_wire_dead_candidate,
     _decode_wire_file_entry,
-    _decode_wire_file_sections,
     _decode_wire_module_dep,
-    _decode_wire_name_sections,
     _decode_wire_relationship_record,
     _decode_wire_runtime_reachability,
     _decode_wire_security_surface,
@@ -58,14 +46,9 @@ from codeclone.cache._wire_decode import (
 )
 from codeclone.cache._wire_encode import _encode_wire_file_entry
 from codeclone.cache._wire_helpers import (
-    _decode_optional_wire_coupled_classes,
     _decode_wire_int_fields,
-    _decode_wire_qualname_span_size,
 )
 from codeclone.cache.entries import (
-    CacheEntry,
-    ModuleApiSurfaceDict,
-    SourceStatsDict,
     _as_relationship_kind,
     _as_relationship_origin_lane,
     _as_relationship_resolution_status,
@@ -77,24 +60,30 @@ from codeclone.cache.entries import (
     _as_security_surface_classification_mode,
     _as_security_surface_evidence_kind,
     _as_security_surface_location_scope,
-    _block_dict_from_model,
-    _segment_dict_from_model,
-    _unit_dict_from_model,
 )
 from codeclone.cache.integrity import as_str_dict as _as_str_dict
 from codeclone.cache.integrity import canonical_json, sign_cache_payload
 from codeclone.cache.projection import (
+    rehydrate_cache_neutral,
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
 )
 from codeclone.cache.store import Cache, file_stat_signature
-from codeclone.cache.versioning import CacheStatus, _as_analysis_profile, _resolve_root
+from codeclone.cache.versioning import CacheStatus, _resolve_root
 from codeclone.contracts.errors import CacheError
 from codeclone.core._types import _unit_to_group_item
 from codeclone.core.discovery import _decode_cached_function_relationship_facts
 from codeclone.models import (
     ApiParamSpec,
     BlockUnit,
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheNeutralBlock,
+    CacheNeutralPayload,
+    CacheNeutralSegment,
+    CacheNeutralUnit,
+    CacheReuseDecision,
+    ContentIdentityVerdict,
     DigestObject,
     FileMetrics,
     FunctionRelationshipFacts,
@@ -105,6 +94,7 @@ from codeclone.models import (
     RuntimeReachabilityFact,
     SecuritySurface,
     SegmentUnit,
+    SemanticFileFacts,
     Unit,
 )
 from codeclone.observability import bootstrap, operation, shutdown
@@ -113,12 +103,106 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
+from tests._ast_metrics_helpers import module_registry_context
 
 _SOURCE_CONTENT_DIGEST = DigestObject(
     domain="codeclone.source-content.v1",
     algorithm="sha256",
     value="0" * 64,
 )
+
+_NEUTRAL_PROFILE = DigestObject(
+    domain="codeclone.cache.profile.neutral.v1",
+    algorithm="sha256",
+    value="1" * 64,
+)
+_DEPENDENT_PROFILE = DigestObject(
+    domain="codeclone.cache.profile.dependent.v1",
+    algorithm="sha256",
+    value="2" * 64,
+)
+
+
+def _empty_v3_entry() -> CacheEntryV3:
+    return CacheEntryV3(
+        cache_content_binding_version="1",
+        stat={"mtime_ns": 1, "size": 2},
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+        git_blob_id_at_write=None,
+        module_neutral_profile=_NEUTRAL_PROFILE,
+        module_dependent_profile=_DEPENDENT_PROFILE,
+        module_neutral=CacheNeutralPayload(
+            source_stats={"lines": 0, "functions": 0, "methods": 0, "classes": 0},
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=(),
+            referenced_qualnames=(),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=None,
+        ),
+    )
+
+
+def _bind_module_paths(cache: Cache, *filepaths: str) -> None:
+    assert cache.root is not None
+    relative_paths = tuple(
+        (
+            Path(filepath).resolve().relative_to(cache.root.resolve()).as_posix()
+            if Path(filepath).is_absolute()
+            else Path(filepath).as_posix()
+        )
+        for filepath in filepaths
+    )
+    module_names = tuple(
+        ".".join(Path(path).with_suffix("").parts) for path in relative_paths
+    )
+    cache.bind_module_registry(
+        module_registry_context(
+            filepath=relative_paths[0],
+            module_name=module_names[0],
+            inventory_modules=module_names[1:],
+        )[1]
+    )
+
+
+def _store_empty_profile_entry(cache: Cache) -> None:
+    _bind_module_paths(cache, "x.py")
+    cache.put_file_entry(
+        "x.py",
+        {"mtime_ns": 1, "size": 10},
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
+    cache.save()
+
+
+def _content_hit_decision(cache: Cache, entry: CacheEntryV3) -> CacheReuseDecision:
+    return cache.reuse_decision(
+        content=ContentIdentityVerdict(
+            hit=True,
+            reason="digest_hit",
+            git_fallback_reason=None,
+            digest_verify_cost_us=0,
+            stat_fast_reject=False,
+        ),
+        entry=entry,
+    )
 
 
 def _wire_entry(**fields: object) -> dict[str, object]:
@@ -130,9 +214,9 @@ def _wire_entry(**fields: object) -> dict[str, object]:
     }
 
 
-def _make_unit(filepath: str) -> Unit:
+def _make_unit(filepath: str, *, module_name: str = "x") -> Unit:
     return Unit(
-        qualname="mod:func",
+        qualname=f"{module_name}:func",
         filepath=filepath,
         start_line=1,
         end_line=2,
@@ -143,23 +227,23 @@ def _make_unit(filepath: str) -> Unit:
     )
 
 
-def _make_block(filepath: str) -> BlockUnit:
+def _make_block(filepath: str, *, module_name: str = "x") -> BlockUnit:
     return BlockUnit(
         block_hash="h1",
         filepath=filepath,
-        qualname="mod:func",
+        qualname=f"{module_name}:func",
         start_line=1,
         end_line=2,
         size=4,
     )
 
 
-def _make_segment(filepath: str) -> SegmentUnit:
+def _make_segment(filepath: str, *, module_name: str = "x") -> SegmentUnit:
     return SegmentUnit(
         segment_hash="s1",
         segment_sig="sig1",
         filepath=filepath,
-        qualname="mod:func",
+        qualname=f"{module_name}:func",
         start_line=1,
         end_line=6,
         size=6,
@@ -170,13 +254,13 @@ def _analysis_payload(cache: Cache, *, files: object) -> dict[str, object]:
     return {
         "py": cache.data["python_tag"],
         "fp": cache.data["fingerprint_version"],
-        "ap": cache.data["analysis_profile"],
         "files": files,
     }
 
 
 def _save_single_cache_entry(cache_path: Path, *, filepath: str = "x.py") -> None:
-    cache = Cache(cache_path)
+    cache = Cache(cache_path, root=cache_path.parent)
+    _bind_module_paths(cache, filepath)
     cache.put_file_entry(
         filepath,
         {"mtime_ns": 1, "size": 10},
@@ -188,8 +272,8 @@ def _save_single_cache_entry(cache_path: Path, *, filepath: str = "x.py") -> Non
     cache.save()
 
 
-def _load_cache_entry(cache_path: Path, filepath: str) -> tuple[Cache, CacheEntry]:
-    loaded = Cache(cache_path)
+def _load_cache_entry(cache_path: Path, filepath: str) -> tuple[Cache, CacheEntryV3]:
+    loaded = Cache(cache_path, root=cache_path.parent)
     loaded.load()
     entry = loaded.get_file_entry(filepath)
     assert entry is not None
@@ -200,9 +284,10 @@ def _roundtrip_cache_entry_with_metrics(
     tmp_path: Path,
     *,
     file_metrics: FileMetrics,
-) -> CacheEntry:
+) -> CacheEntryV3:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
+    cache = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(cache, "x.py")
     cache.put_file_entry(
         "x.py",
         {"mtime_ns": 1, "size": 10},
@@ -220,7 +305,8 @@ def _roundtrip_cache_entry_with_metrics(
 
 def test_cache_roundtrip(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
+    cache = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(cache, "x.py")
     unit = _make_unit("x.py")
     block = _make_block("x.py")
     segment = _make_segment("x.py")
@@ -235,8 +321,8 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
     cache.save()
 
     loaded, entry = _load_cache_entry(cache_path, "x.py")
-    assert entry["stat"]["size"] == 10
-    assert entry["units"][0]["qualname"] == "mod:func"
+    assert entry.stat["size"] == 10
+    assert entry.module_neutral.units[0].local_name == "func"
     assert loaded.load_status == CacheStatus.OK
     assert loaded.cache_schema_version == Cache._CACHE_VERSION
 
@@ -244,6 +330,7 @@ def test_cache_roundtrip(tmp_path: Path) -> None:
 def test_cache_load_emits_observability_subspans(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(cache, "x.py")
     cache.put_file_entry(
         "x.py",
         {"mtime_ns": 1, "size": 10},
@@ -290,7 +377,7 @@ def test_cache_release_loaded_entries_clears_clean_loaded_entries(
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
-    loaded = Cache(cache_path)
+    loaded = Cache(cache_path, root=tmp_path)
     loaded.load()
     assert loaded.get_file_entry("x.py") is not None
 
@@ -303,7 +390,8 @@ def test_cache_release_loaded_entries_clears_clean_loaded_entries(
 def test_cache_release_loaded_entries_refuses_dirty_cache_by_default(
     tmp_path: Path,
 ) -> None:
-    cache = Cache(tmp_path / "cache.json")
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    _bind_module_paths(cache, "x.py")
     cache.put_file_entry(
         "x.py",
         {"mtime_ns": 1, "size": 10},
@@ -321,7 +409,7 @@ def test_cache_read_only_mode_suppresses_entry_writes(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
 
-    loaded = Cache(cache_path, write_enabled=False)
+    loaded = Cache(cache_path, root=tmp_path, write_enabled=False)
     loaded.load()
 
     loaded.put_file_entry(
@@ -337,7 +425,7 @@ def test_cache_read_only_mode_suppresses_entry_writes(tmp_path: Path) -> None:
 
     assert loaded.get_file_entry("x.py") is not None
     assert loaded.get_file_entry("y.py") is None
-    reloaded = Cache(cache_path)
+    reloaded = Cache(cache_path, root=tmp_path)
     reloaded.load()
     assert reloaded.get_file_entry("x.py") is not None
     assert reloaded.get_file_entry("y.py") is None
@@ -350,6 +438,7 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
     filepath = str((root / "pkg" / "module.py").resolve())
     cache_path = root / "cache.json"
     cache = Cache(cache_path, root=root)
+    _bind_module_paths(cache, filepath)
     facts = FunctionRelationshipFacts(
         source_qualname="pkg.module:source",
         relationships=(
@@ -380,7 +469,7 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
     cache.put_file_entry(
         filepath,
         {"mtime_ns": 1, "size": 10},
-        [_make_unit(filepath)],
+        [_make_unit(filepath, module_name="pkg.module")],
         [],
         [],
         source_content_digest=_SOURCE_CONTENT_DIGEST,
@@ -393,40 +482,25 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
     entry = loaded.get_file_entry(filepath)
 
     assert entry is not None
-    assert entry["function_relationship_facts"] == [
-        {
-            "source_qualname": "pkg.module:source",
-            "relationships": [
-                {
-                    "relation_kind": "call",
-                    "resolution_status": "unresolved",
-                    "origin_lane": "test",
-                    "source_qualname": "pkg.module:source",
-                    "target_qualname": None,
-                    "path": filepath,
-                    "line": 11,
-                    "expression": "factory()",
-                    "resolution_rule": "dynamic_call",
-                },
-                {
-                    "relation_kind": "reference",
-                    "resolution_status": "resolved",
-                    "origin_lane": "production",
-                    "source_qualname": "pkg.module:source",
-                    "target_qualname": "pkg.target:handler",
-                    "path": filepath,
-                    "line": 7,
-                    "expression": "handler",
-                    "resolution_rule": "cross_module_import",
-                },
-            ],
-        }
-    ]
+    stored_facts = entry.module_dependent.function_relationship_facts
+    assert len(stored_facts) == 1
+    assert stored_facts[0]["source_qualname"] == "pkg.module:source"
+    assert tuple(
+        (
+            record["relation_kind"],
+            record["target_qualname"],
+            record["resolution_rule"],
+        )
+        for record in stored_facts[0]["relationships"]
+    ) == (
+        ("reference", "pkg.target:handler", "cross_module_import"),
+        ("call", None, "dynamic_call"),
+    )
 
     # Step 7a: discovery rehydrates the stored dicts back into typed models for
     # cross-file aggregation. Round-trip must be faithful (storage sort order).
     decoded = _decode_cached_function_relationship_facts(
-        entry["function_relationship_facts"]
+        entry.module_dependent.function_relationship_facts
     )
     assert len(decoded) == 1
     assert decoded[0].source_qualname == "pkg.module:source"
@@ -434,10 +508,10 @@ def test_cache_roundtrip_preserves_function_relationship_facts(
         (record.relation_kind, record.target_qualname, record.resolution_rule)
         for record in decoded[0].relationships
     ) == (
-        ("call", None, "dynamic_call"),
         ("reference", "pkg.target:handler", "cross_module_import"),
+        ("call", None, "dynamic_call"),
     )
-    assert decoded[0].relationships[0].origin_lane == "test"
+    assert decoded[0].relationships[1].origin_lane == "test"
 
 
 def test_cache_derives_function_relationship_facts_from_file_metrics(
@@ -459,6 +533,7 @@ def test_cache_derives_function_relationship_facts_from_file_metrics(
         ),
     )
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    _bind_module_paths(cache, filepath)
     cache.put_file_entry(
         filepath,
         {"mtime_ns": 1, "size": 10},
@@ -481,7 +556,9 @@ def test_cache_derives_function_relationship_facts_from_file_metrics(
 
     assert entry is not None
     assert (
-        entry["function_relationship_facts"][0]["relationships"][0]["target_qualname"]
+        entry.module_dependent.function_relationship_facts[0]["relationships"][0][
+            "target_qualname"
+        ]
         == "pkg.target:handler"
     )
 
@@ -598,6 +675,7 @@ def test_decode_optional_wire_relationship_facts_rejects_invalid_container() -> 
 
 def test_cache_rejects_relationship_source_mismatch(tmp_path: Path) -> None:
     cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    _bind_module_paths(cache, "pkg/module.py")
     facts = FunctionRelationshipFacts(
         source_qualname="pkg.module:source",
         relationships=(
@@ -629,7 +707,7 @@ def test_cache_rejects_relationship_source_mismatch(tmp_path: Path) -> None:
 
 
 def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
-    unit = _make_unit("pkg/module.py")
+    unit = _make_unit("pkg/module.py", module_name="mod")
 
     assert _unit_to_group_item(unit) == {
         "qualname": "mod:func",
@@ -661,6 +739,7 @@ def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
     live.write_text("def live():\n    return 1\n", "utf-8")
 
     cache = Cache(cache_path, root=root)
+    _bind_module_paths(cache, str(live), str(stale))
     cache.put_file_entry(
         str(live),
         file_stat_signature(str(live)),
@@ -698,7 +777,8 @@ def test_cache_prune_file_entries_removes_stale_paths(tmp_path: Path) -> None:
 
 def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
+    cache = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(cache, "x.py")
     cache.put_file_entry(
         "x.py",
         {"mtime_ns": 1, "size": 10},
@@ -711,8 +791,7 @@ def test_cache_roundtrip_preserves_empty_structural_findings(tmp_path: Path) -> 
     cache.save()
 
     _, entry = _load_cache_entry(cache_path, "x.py")
-    assert "structural_findings" in entry
-    assert entry["structural_findings"] == []
+    assert entry.module_dependent.structural_findings == ()
 
 
 def test_cache_roundtrip_preserves_api_surface_parameter_order(
@@ -754,7 +833,8 @@ def test_cache_roundtrip_preserves_api_surface_parameter_order(
             ),
         ),
     )
-    params = entry["api_surface"]["symbols"][0]["params"]
+    assert entry.module_dependent.api_surface is not None
+    params = entry.module_dependent.api_surface["symbols"][0]["params"]
     assert [param["name"] for param in params] == ["beta", "alpha"]
 
 
@@ -785,12 +865,12 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
             ),
         ),
     )
-    assert entry["security_surfaces"] == [
+    assert entry.module_dependent.security_surfaces == (
         {
             "category": "process_boundary",
             "capability": "subprocess_run",
             "module": "pkg.runner",
-            "filepath": "x.py",
+            "filepath": str((tmp_path / "x.py").resolve()),
             "qualname": "pkg.runner:run_command",
             "start_line": 10,
             "end_line": 10,
@@ -798,89 +878,8 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
             "classification_mode": "exact_call",
             "evidence_kind": "call",
             "evidence_symbol": "subprocess.run",
-        }
-    ]
-
-
-def test_attach_optional_cache_sections_sets_all_optional_blocks() -> None:
-    base = cast(
-        CacheEntry,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-            "class_metrics": [],
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": [],
-            "referenced_qualnames": [],
-            "import_names": [],
-            "class_names": [],
         },
     )
-    attached = _attach_optional_cache_sections(
-        base,
-        typing_coverage={
-            "module": "pkg.mod",
-            "filepath": "pkg/mod.py",
-            "callable_count": 1,
-            "params_total": 1,
-            "params_annotated": 1,
-            "returns_total": 1,
-            "returns_annotated": 1,
-            "any_annotation_count": 0,
-        },
-        docstring_coverage={
-            "module": "pkg.mod",
-            "filepath": "pkg/mod.py",
-            "public_symbol_total": 1,
-            "public_symbol_documented": 1,
-        },
-        api_surface={
-            "module": "pkg.mod",
-            "filepath": "pkg/mod.py",
-            "all_declared": [],
-            "symbols": [],
-        },
-        runtime_reachability=[
-            {
-                "target_qualname": "pkg.mod:fn",
-                "filepath": "pkg/mod.py",
-                "start_line": 1,
-                "end_line": 2,
-                "target_kind": "function",
-                "framework": "fastapi",
-                "edge_kind": "registers_handler",
-                "confidence": "high",
-                "evidence": "route",
-                "evidence_symbol": "get",
-                "source_qualname": "pkg.mod:router",
-            }
-        ],
-        security_surfaces=[
-            {
-                "category": "process_boundary",
-                "capability": "subprocess_run",
-                "module": "pkg.mod",
-                "filepath": "pkg/mod.py",
-                "qualname": "pkg.mod:run",
-                "start_line": 1,
-                "end_line": 1,
-                "location_scope": "callable",
-                "classification_mode": "exact_call",
-                "evidence_kind": "call",
-                "evidence_symbol": "subprocess.run",
-            }
-        ],
-        source_stats=SourceStatsDict(lines=10, functions=1, methods=0, classes=0),
-        structural_findings=[],
-    )
-    assert attached["typing_coverage"]["module"] == "pkg.mod"
-    assert attached["runtime_reachability"][0]["framework"] == "fastapi"
-    assert attached["security_surfaces"][0]["category"] == "process_boundary"
-    assert attached["source_stats"]["lines"] == 10
-    assert attached["structural_findings"] == []
 
 
 def test_cache_roundtrip_preserves_runtime_reachability(tmp_path: Path) -> None:
@@ -910,10 +909,10 @@ def test_cache_roundtrip_preserves_runtime_reachability(tmp_path: Path) -> None:
             ),
         ),
     )
-    assert entry["runtime_reachability"] == [
+    assert entry.module_dependent.runtime_reachability == (
         {
             "target_qualname": "pkg.api:list_items",
-            "filepath": "x.py",
+            "filepath": str((tmp_path / "x.py").resolve()),
             "start_line": 12,
             "end_line": 14,
             "target_kind": "function",
@@ -923,8 +922,8 @@ def test_cache_roundtrip_preserves_runtime_reachability(tmp_path: Path) -> None:
             "evidence": "route decorator",
             "evidence_symbol": "router.get",
             "source_qualname": "pkg.api:router",
-        }
-    ]
+        },
+    )
 
 
 def test_security_surface_cache_helpers_reject_invalid_values() -> None:
@@ -1135,87 +1134,6 @@ def test_decode_wire_security_surface_covers_valid_and_invalid_rows() -> None:
     }
 
 
-def test_cache_load_normalizes_stale_structural_findings(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    entry = cast(
-        Any,
-        {
-            "cache_content_binding_version": "1",
-            "source_content_digest": _SOURCE_CONTENT_DIGEST,
-            "git_blob_id_at_write": None,
-            "stat": {"mtime_ns": 1, "size": 10},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-            "class_metrics": [],
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": [],
-            "import_names": [],
-            "class_names": [],
-            "structural_findings": [
-                {
-                    "finding_kind": "duplicated_branches",
-                    "finding_key": "abc" * 13 + "a",
-                    "signature": {
-                        "calls": "2+",
-                        "has_loop": "0",
-                        "has_try": "0",
-                        "nested_if": "0",
-                        "raises": "0",
-                        "stmt_seq": "Expr",
-                        "terminal": "expr",
-                    },
-                    "items": [
-                        {"qualname": "mod:fn", "start": 5, "end": 5},
-                        {"qualname": "mod:fn", "start": 8, "end": 8},
-                    ],
-                },
-                {
-                    "finding_kind": "duplicated_branches",
-                    "finding_key": "def" * 13 + "d",
-                    "signature": {
-                        "calls": "0",
-                        "has_loop": "0",
-                        "has_try": "1",
-                        "nested_if": "1",
-                        "raises": "0",
-                        "stmt_seq": "Try",
-                        "terminal": "fallthrough",
-                    },
-                    "items": [
-                        {"qualname": "mod:fn", "start": 10, "end": 20},
-                        {"qualname": "mod:fn", "start": 14, "end": 20},
-                        {"qualname": "mod:fn", "start": 30, "end": 35},
-                    ],
-                },
-            ],
-        },
-    )
-    payload = _analysis_payload(
-        cache,
-        files={"x.py": _encode_wire_file_entry(entry)},
-    )
-    signature = sign_cache_payload(payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
-        "utf-8",
-    )
-
-    loaded = Cache(cache_path)
-    loaded.load()
-    loaded_entry = loaded.get_file_entry("x.py")
-    assert loaded_entry is not None
-    findings = loaded_entry["structural_findings"]
-    assert len(findings) == 1
-    assert findings[0]["finding_key"] == "def" * 13 + "d"
-    assert findings[0]["items"] == [
-        {"qualname": "mod:fn", "start": 10, "end": 20},
-        {"qualname": "mod:fn", "start": 30, "end": 35},
-    ]
-
-
 def test_get_file_entry_uses_wire_key_fallback(tmp_path: Path) -> None:
     root = tmp_path / "project"
     file_path = root / "pkg" / "module.py"
@@ -1255,27 +1173,7 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
     tmp_path: Path,
 ) -> None:
     cache = Cache(tmp_path / "cache.json")
-    canonical_entry = cast(
-        Any,
-        _canonicalize_cache_entry(
-            {
-                "cache_content_binding_version": "1",
-                "source_content_digest": _SOURCE_CONTENT_DIGEST,
-                "git_blob_id_at_write": None,
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "class_metrics": [],
-                "module_deps": [],
-                "dead_candidates": [],
-                "referenced_names": [],
-                "referenced_qualnames": [],
-                "import_names": [],
-                "class_names": [],
-            }
-        ),
-    )
+    canonical_entry = _empty_v3_entry()
     cache.data["files"]["x.py"] = canonical_entry
     cache._canonical_runtime_paths.add("x.py")
     cache._dirty = False
@@ -1294,165 +1192,6 @@ def test_store_canonical_file_entry_marks_dirty_only_when_entry_changes(
     assert cache._dirty is True
 
 
-def test_cache_helper_type_guards_accept_valid_optional_metric_dicts() -> None:
-    typing = {
-        "module": "pkg.mod",
-        "filepath": "pkg/mod.py",
-        "callable_count": 1,
-        "params_total": 2,
-        "params_annotated": 1,
-        "returns_total": 1,
-        "returns_annotated": 1,
-        "any_annotation_count": 0,
-    }
-    docstrings = {
-        "module": "pkg.mod",
-        "filepath": "pkg/mod.py",
-        "public_symbol_total": 2,
-        "public_symbol_documented": 1,
-    }
-    api_surface: ModuleApiSurfaceDict = {
-        "module": "pkg.mod",
-        "filepath": "pkg/mod.py",
-        "all_declared": [],
-        "symbols": [],
-    }
-    assert _as_module_typing_coverage_dict(typing) == typing
-    assert _as_module_docstring_coverage_dict(docstrings) == docstrings
-    assert _as_module_api_surface_dict(api_surface) == api_surface
-
-
-def test_cache_helper_type_guards_and_wire_api_decoders_cover_invalid_inputs() -> None:
-    assert _as_module_typing_coverage_dict({"module": "pkg"}) is None
-    assert _as_module_docstring_coverage_dict({"module": "pkg"}) is None
-    assert _as_module_api_surface_dict({"module": "pkg"}) is None
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "class_metrics": "not-a-list",
-            }
-        )
-        is False
-    )
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "typing_coverage": {"module": "pkg"},
-            }
-        )
-        is False
-    )
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "docstring_coverage": {"module": "pkg"},
-            }
-        )
-        is False
-    )
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "api_surface": {"module": "pkg"},
-            }
-        )
-        is False
-    )
-    assert (
-        _decode_optional_wire_api_surface(
-            obj={"as": ["pkg.mod", ["run"], [None]]},
-            filepath="pkg/mod.py",
-        )
-        is None
-    )
-    assert (
-        _decode_optional_wire_module_ints(
-            obj={"tc": ["pkg.mod", "bad"]},
-            key="tc",
-            expected_len=2,
-            int_indexes=(1,),
-        )
-        is None
-    )
-    assert _decode_wire_api_surface_symbol(["pkg.mod:run"]) is None
-    assert (
-        _decode_wire_api_surface_symbol(
-            ["pkg.mod:run", "function", 1, 2, "name", "", "bad-params"]
-        )
-        is None
-    )
-    assert _decode_wire_api_param_spec(["name", "pos_or_kw", "not-int", ""]) is None
-    assert (
-        _decode_wire_api_surface_symbol(
-            ["pkg.mod:run", "function", 1, 2, "name", "", [None]]
-        )
-        is None
-    )
-    assert _decode_wire_api_param_spec(["value"]) is None
-    assert _is_api_param_spec_dict([]) is False
-    assert _is_api_param_spec_dict(
-        {
-            "name": "value",
-            "kind": "pos_or_kw",
-            "has_default": False,
-            "annotation_hash": "",
-        }
-    )
-    assert _is_public_symbol_dict([]) is False
-    assert (
-        _is_public_symbol_dict(
-            {
-                "qualname": "pkg.mod:run",
-                "kind": "function",
-                "exported_via": "name",
-                "start_line": "bad",
-                "end_line": 2,
-            }
-        )
-        is False
-    )
-    assert _is_public_symbol_dict(
-        {
-            "qualname": "pkg.mod:run",
-            "kind": "function",
-            "exported_via": "name",
-            "start_line": 1,
-            "end_line": 2,
-            "returns_hash": "",
-            "params": [],
-        }
-    )
-    assert (
-        _is_public_symbol_dict(
-            {
-                "qualname": "pkg.mod:run",
-                "kind": "function",
-                "exported_via": "name",
-                "start_line": 1,
-                "end_line": 2,
-                "params": "bad",
-            }
-        )
-        is False
-    )
-
-
 def test_get_file_entry_missing_after_fallback_returns_none(tmp_path: Path) -> None:
     root = tmp_path / "project"
     root.mkdir()
@@ -1468,12 +1207,13 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
 
     cache_path = project_root / ".codeclone" / "cache.json"
     cache = Cache(cache_path, root=project_root)
+    _bind_module_paths(cache, str(target))
     cache.put_file_entry(
         str(target),
         {"mtime_ns": 1, "size": 10},
-        [_make_unit(str(target))],
-        [_make_block(str(target))],
-        [_make_segment(str(target))],
+        [_make_unit(str(target), module_name="pkg.module")],
+        [_make_block(str(target), module_name="pkg.module")],
+        [_make_segment(str(target), module_name="pkg.module")],
         source_content_digest=_SOURCE_CONTENT_DIGEST,
     )
     cache.save()
@@ -1483,24 +1223,6 @@ def test_cache_v13_uses_relpaths_when_root_set(tmp_path: Path) -> None:
     files = cast(dict[str, object], payload["files"])
     assert "pkg/module.py" in files
     assert str(target) not in files
-
-
-def test_cache_v13_missing_optional_sections_default_empty(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    payload = _analysis_payload(cache, files={"x.py": _wire_entry(st=[1, 2])})
-    signature = sign_cache_payload(payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": signature}),
-        "utf-8",
-    )
-
-    cache.load()
-    entry = cache.get_file_entry("x.py")
-    assert entry is not None
-    assert entry["units"] == []
-    assert entry["blocks"] == []
-    assert entry["segments"] == []
 
 
 def test_cache_signature_validation_ignores_json_whitespace(tmp_path: Path) -> None:
@@ -1550,60 +1272,6 @@ def test_cache_load_accepts_legacy_string_signed_unicode_payload(
     assert loaded.get_file_entry("unicodé.py") is not None
 
 
-def test_decode_wire_file_and_name_section_helpers_cover_valid_and_invalid() -> None:
-    encoded = _encode_wire_file_entry(
-        {
-            "cache_content_binding_version": "1",
-            "source_content_digest": _SOURCE_CONTENT_DIGEST,
-            "git_blob_id_at_write": None,
-            "stat": {"mtime_ns": 1, "size": 10},
-            "units": [_unit_dict_from_model(_make_unit("x.py"), "x.py")],
-            "blocks": [_block_dict_from_model(_make_block("x.py"), "x.py")],
-            "segments": [_segment_dict_from_model(_make_segment("x.py"), "x.py")],
-            "class_metrics": [],
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": ["used"],
-            "referenced_qualnames": ["pkg.mod:used"],
-            "import_names": ["pkg"],
-            "class_names": ["Service"],
-        }
-    )
-    assert isinstance(encoded, dict)
-
-    file_sections = _decode_wire_file_sections(obj=encoded, filepath="x.py")
-    assert file_sections is not None
-    units, blocks, segments, class_metrics, module_deps, dead_candidates = file_sections
-    assert units[0]["qualname"] == "mod:func"
-    assert blocks[0]["qualname"] == "mod:func"
-    assert segments[0]["qualname"] == "mod:func"
-    assert class_metrics == []
-    assert module_deps == []
-    assert dead_candidates == []
-
-    name_sections = _decode_wire_name_sections(obj=encoded)
-    assert name_sections == (
-        ["used"],
-        ["pkg.mod:used"],
-        ["pkg"],
-        ["Service"],
-    )
-
-    invalid_sections = dict(encoded)
-    invalid_sections["u"] = "bad"
-    assert (
-        _decode_wire_file_sections(
-            obj=invalid_sections,
-            filepath="x.py",
-        )
-        is None
-    )
-
-    invalid_names = dict(encoded)
-    invalid_names["rn"] = 1
-    assert _decode_wire_name_sections(obj=invalid_names) is None
-
-
 def test_cache_signature_mismatch_warns(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
     _save_single_cache_entry(cache_path)
@@ -1641,13 +1309,14 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
     assert loaded.cache_schema_version == "0.0"
 
 
-def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
+def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "2.11"
+    assert Cache._CACHE_VERSION == "3.0"
 
     cache_path = tmp_path / "cache.json"
-    old_cache = Cache(cache_path)
+    old_cache = Cache(cache_path, root=tmp_path)
+    _bind_module_paths(old_cache, "old_identity.py")
     old_cache.put_file_entry(
         "old_identity.py",
         {"mtime_ns": 1, "size": 10},
@@ -1659,11 +1328,11 @@ def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "2.11"
+    assert old_document["v"] == "3.0"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
-    regenerated = Cache(cache_path)
+    regenerated = Cache(cache_path, root=tmp_path)
     regenerated.load()
 
     assert regenerated.load_status == CacheStatus.VERSION_MISMATCH
@@ -1671,6 +1340,7 @@ def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
     assert regenerated.get_file_entry("old_identity.py") is None
     assert regenerated.data["files"] == {}
 
+    _bind_module_paths(regenerated, "registry_identity.py")
     regenerated.put_file_entry(
         "registry_identity.py",
         {"mtime_ns": 2, "size": 20},
@@ -1681,7 +1351,7 @@ def test_cache_v210_identity_rows_are_rejected_without_partial_reuse(
     )
     regenerated.save()
 
-    reloaded = Cache(cache_path)
+    reloaded = Cache(cache_path, root=tmp_path)
     reloaded.load()
     assert reloaded.load_status == CacheStatus.OK
     assert reloaded.cache_schema_version == Cache._CACHE_VERSION
@@ -1722,219 +1392,6 @@ def test_cache_too_large_warns(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert cache.cache_schema_version is None
 
 
-def test_cache_entry_validation(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.data["files"]["x.py"] = cast(Any, {"stat": {"mtime_ns": 1, "size": 1}})
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_invalid_stat_types(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": "1", "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_stat_not_dict(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": [],
-            "units": [],
-            "blocks": [],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_invalid_units_container_type(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "cache_content_binding_version": "1",
-            "source_content_digest": _SOURCE_CONTENT_DIGEST,
-            "git_blob_id_at_write": None,
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": {},
-            "blocks": [],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_unit_item_not_dict(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": ["bad"],
-            "blocks": [],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_invalid_unit_field_type(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [
-                {
-                    "qualname": "q",
-                    "filepath": "x.py",
-                    "start_line": "1",
-                    "end_line": 2,
-                    "loc": 2,
-                    "stmt_count": 1,
-                    "fingerprint": "fp",
-                    "loc_bucket": "0-19",
-                }
-            ],
-            "blocks": [],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_block_item_not_dict(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": ["bad"],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_invalid_block_field_type(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [
-                {
-                    "block_hash": "h",
-                    "filepath": "x.py",
-                    "qualname": "q",
-                    "start_line": 1,
-                    "end_line": 2,
-                    "size": "4",
-                }
-            ],
-            "segments": [],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_segment_item_not_dict(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": ["bad"],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_invalid_segment_field_type(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": [
-                {
-                    "segment_hash": "h",
-                    "segment_sig": "sig",
-                    "filepath": "x.py",
-                    "qualname": "q",
-                    "start_line": 1,
-                    "end_line": 2,
-                    "size": "6",
-                }
-            ],
-        },
-    )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_cache_entry_valid_deep_schema(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "cache_content_binding_version": "1",
-            "source_content_digest": _SOURCE_CONTENT_DIGEST,
-            "git_blob_id_at_write": None,
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [
-                {
-                    "qualname": "q",
-                    "filepath": "x.py",
-                    "start_line": 1,
-                    "end_line": 2,
-                    "loc": 2,
-                    "stmt_count": 1,
-                    "fingerprint": "fp",
-                    "loc_bucket": "0-19",
-                }
-            ],
-            "blocks": [
-                {
-                    "block_hash": "h",
-                    "filepath": "x.py",
-                    "qualname": "q",
-                    "start_line": 1,
-                    "end_line": 2,
-                    "size": 4,
-                }
-            ],
-            "segments": [
-                {
-                    "segment_hash": "h",
-                    "segment_sig": "sig",
-                    "filepath": "x.py",
-                    "qualname": "q",
-                    "start_line": 1,
-                    "end_line": 2,
-                    "size": 6,
-                }
-            ],
-        },
-    )
-    assert cache.get_file_entry("x.py") is not None
-
-
 def test_cache_load_missing_file(tmp_path: Path) -> None:
     cache_path = tmp_path / "missing.json"
     cache = Cache(cache_path)
@@ -1942,13 +1399,6 @@ def test_cache_load_missing_file(tmp_path: Path) -> None:
     assert cache.load_warning is None
     assert cache.load_status == CacheStatus.MISSING
     assert cache.cache_schema_version is None
-
-
-def test_cache_entry_not_dict(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    cache.data["files"]["x.py"] = cast(Any, ["bad"])
-    assert cache.get_file_entry("x.py") is None
 
 
 def test_file_stat_signature(tmp_path: Path) -> None:
@@ -2182,7 +1632,6 @@ def test_cache_load_python_tag_mismatch(tmp_path: Path) -> None:
     payload = {
         "py": "cp999",
         "fp": cache.data["fingerprint_version"],
-        "ap": cache.data["analysis_profile"],
         "files": {},
     }
     sig = sign_cache_payload(payload)
@@ -2200,7 +1649,6 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
     payload = {
         "py": cache.data["python_tag"],
         "fp": "old",
-        "ap": cache.data["analysis_profile"],
         "files": {},
     }
     sig = sign_cache_payload(payload)
@@ -2212,106 +1660,40 @@ def test_cache_load_fingerprint_version_mismatch(tmp_path: Path) -> None:
     assert "fingerprint version mismatch" in cache.load_warning
 
 
-def test_cache_load_analysis_profile_mismatch(tmp_path: Path) -> None:
+def test_cache_lane_profiles_reject_neutral_extraction_mismatch(tmp_path: Path) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path, min_loc=1, min_stmt=1)
-    cache.put_file_entry(
-        "x.py",
-        {"mtime_ns": 1, "size": 10},
-        [],
-        [],
-        [],
-        source_content_digest=_SOURCE_CONTENT_DIGEST,
-    )
-    cache.save()
+    cache = Cache(cache_path, root=tmp_path, min_loc=1, min_stmt=1)
+    _store_empty_profile_entry(cache)
 
-    loaded = Cache(cache_path, min_loc=15, min_stmt=6)
+    loaded = Cache(cache_path, root=tmp_path, min_loc=15, min_stmt=6)
     loaded.load()
+    _bind_module_paths(loaded, "x.py")
+    entry = loaded.get_file_entry("x.py")
+    assert entry is not None
+    decision = _content_hit_decision(loaded, entry)
 
-    assert loaded.load_warning is not None
-    assert "analysis profile mismatch" in loaded.load_warning
-    assert loaded.data["files"] == {}
-    assert loaded.load_status == CacheStatus.ANALYSIS_PROFILE_MISMATCH
-    assert loaded.cache_schema_version == Cache._CACHE_VERSION
+    assert decision.neutral.reason == "neutral_profile_mismatch"
+    assert decision.dependent.reason == "dependent_profile_mismatch"
+    assert loaded.load_status == CacheStatus.OK
 
 
-def test_cache_load_analysis_profile_mismatch_collect_api_surface(
+def test_cache_dependent_lane_rejects_api_surface_mismatch(
     tmp_path: Path,
 ) -> None:
     cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path, collect_api_surface=False)
-    cache.put_file_entry(
-        "x.py",
-        {"mtime_ns": 1, "size": 10},
-        [],
-        [],
-        [],
-        source_content_digest=_SOURCE_CONTENT_DIGEST,
-    )
-    cache.save()
+    cache = Cache(cache_path, root=tmp_path, collect_api_surface=False)
+    _store_empty_profile_entry(cache)
 
-    loaded = Cache(cache_path, collect_api_surface=True)
+    loaded = Cache(cache_path, root=tmp_path, collect_api_surface=True)
     loaded.load()
+    _bind_module_paths(loaded, "x.py")
+    entry = loaded.get_file_entry("x.py")
+    assert entry is not None
+    decision = _content_hit_decision(loaded, entry)
 
-    assert loaded.load_warning is not None
-    assert "analysis profile mismatch" in loaded.load_warning
-    assert "collect_api_surface=false" in loaded.load_warning
-    assert "collect_api_surface=true" in loaded.load_warning
-    assert loaded.data["files"] == {}
-    assert loaded.load_status == CacheStatus.ANALYSIS_PROFILE_MISMATCH
-    assert loaded.cache_schema_version == Cache._CACHE_VERSION
-
-
-def test_cache_load_missing_analysis_profile_in_payload(tmp_path: Path) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "files": {},
-    }
-    sig = sign_cache_payload(payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
-    )
-
-    cache.load()
-    assert cache.load_warning is not None
-    assert "format invalid" in cache.load_warning
-    assert cache.load_status == CacheStatus.INVALID_TYPE
-    assert cache.cache_schema_version == Cache._CACHE_VERSION
-    assert cache.data["files"] == {}
-
-
-@pytest.mark.parametrize(
-    "bad_analysis_profile",
-    [
-        {"min_loc": 15},
-        {"min_loc": "15", "min_stmt": 6},
-    ],
-)
-def test_cache_load_invalid_analysis_profile_payload(
-    tmp_path: Path, bad_analysis_profile: object
-) -> None:
-    cache_path = tmp_path / "cache.json"
-    cache = Cache(cache_path)
-    payload = {
-        "py": cache.data["python_tag"],
-        "fp": cache.data["fingerprint_version"],
-        "ap": bad_analysis_profile,
-        "files": {},
-    }
-    sig = sign_cache_payload(payload)
-    cache_path.write_text(
-        json.dumps({"v": cache._CACHE_VERSION, "payload": payload, "sig": sig}), "utf-8"
-    )
-
-    cache.load()
-    assert cache.load_warning is not None
-    assert "format invalid" in cache.load_warning
-    assert cache.load_status == CacheStatus.INVALID_TYPE
-    assert cache.cache_schema_version == Cache._CACHE_VERSION
-    assert cache.data["files"] == {}
+    assert decision.neutral.reason == "hit"
+    assert decision.dependent.reason == "dependent_profile_mismatch"
+    assert loaded.load_status == CacheStatus.OK
 
 
 def test_cache_load_invalid_wire_file_entry(tmp_path: Path) -> None:
@@ -2521,212 +1903,809 @@ def test_resolve_root_oserror_returns_none(
     assert _resolve_root(tmp_path) is None
 
 
-def test_cache_entry_rejects_invalid_metrics_sections(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-            "class_metrics": "bad",
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": [],
-            "import_names": [],
-            "class_names": [],
-        },
+def test_decode_wire_file_entry_rejects_malformed_v3_lanes() -> None:
+    wire = _encode_wire_file_entry(_empty_v3_entry())
+    malformed_neutral = dict(wire)
+    malformed_neutral["n"] = "not-a-lane"
+    assert _decode_wire_file_entry(malformed_neutral, "x.py") is None
+
+    malformed_dependent = dict(wire)
+    malformed_dependent["d"] = {"cm": "not-a-list"}
+    assert _decode_wire_file_entry(malformed_dependent, "x.py") is None
+
+    missing_profile = dict(wire)
+    del missing_profile["np"]
+    assert _decode_wire_file_entry(missing_profile, "x.py") is None
+
+
+def test_cache_v3_wire_helpers_reject_malformed_rows_without_partial_decode() -> None:
+    assert cache_wire_helpers._decode_wire_qualname_span(["q", 1, 2]) == ("q", 1, 2)
+    assert cache_wire_helpers._decode_wire_qualname_span([None, 1, 2]) is None
+    assert cache_wire_helpers._decode_wire_qualname_span_size(["q", 1, 2, 3]) == (
+        "q",
+        1,
+        2,
+        3,
     )
-    assert cache.get_file_entry("x.py") is None
-
-
-def test_decode_wire_file_entry_rejects_metrics_related_invalid_sections() -> None:
-    assert _decode_wire_file_entry({"st": [1, 2], "cm": "bad"}, "x.py") is None
+    assert cache_wire_helpers._decode_wire_qualname_span_size(["q", 1, 2, None]) is None
     assert (
-        _decode_wire_file_entry(
-            {"st": [1, 2], "cm": [["Q", 1, 2, 3, 4, 5, 6, "low"]]},
-            "x.py",
+        cache_wire_helpers._decode_optional_wire_items(
+            obj={}, key="x", decode_item=lambda item: str(item)
         )
-        is None
+        == []
     )
-    assert _decode_wire_file_entry({"st": [1, 2], "md": "bad"}, "x.py") is None
     assert (
-        _decode_wire_file_entry(
-            {"st": [1, 2], "md": [["source", "target", "import"]]},
-            "x.py",
-        )
-        is None
-    )
-    assert _decode_wire_file_entry({"st": [1, 2], "dc": "bad"}, "x.py") is None
-    decoded = _decode_wire_file_entry(
-        _wire_entry(st=[1, 2], dc=[["q", "n", 1, 2, "function"]]),
-        "x.py",
-    )
-    assert decoded is not None
-    assert decoded["dead_candidates"][0]["filepath"] == "x.py"
-    assert _decode_wire_file_entry({"st": [1, 2], "rn": [1]}, "x.py") is None
-    assert _decode_wire_file_entry({"st": [1, 2], "in": [1]}, "x.py") is None
-    assert _decode_wire_file_entry({"st": [1, 2], "cn": [1]}, "x.py") is None
-    assert _decode_wire_file_entry({"st": [1, 2], "cc": "bad"}, "x.py") is None
-    assert _decode_wire_file_entry({"st": [1, 2], "cc": [["Q"]]}, "x.py") is None
-    assert (
-        _decode_wire_file_entry(
-            {"st": [1, 2], "cc": [["Q", ["A", 1]]]},
-            "x.py",
-        )
-        is None
-    )
-
-
-def test_decode_wire_file_entry_returns_none_when_optional_sections_invalid() -> None:
-    assert (
-        _decode_wire_file_entry(
-            {
-                "st": [1, 2],
-                "cc": [],
-                "rr": "not-a-list",
-            },
-            "x.py",
+        cache_wire_helpers._decode_optional_wire_items(
+            obj={"x": "bad"}, key="x", decode_item=lambda item: str(item)
         )
         is None
     )
     assert (
-        _decode_optional_wire_api_surface(
-            obj={"as": [None, [], []]},
-            filepath="pkg/mod.py",
+        cache_wire_helpers._decode_optional_wire_items(
+            obj={"x": [1, None]},
+            key="x",
+            decode_item=lambda item: str(item) if item is not None else None,
         )
         is None
     )
-
-
-def test_decode_wire_file_entry_accepts_metrics_sections() -> None:
-    decoded = _decode_wire_file_entry(
-        _wire_entry(
-            st=[1, 2],
-            cm=[["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
-            cc=[["pkg.mod:Service", ["Zeta", "Alpha"]]],
-            md=[["a", "b", "import", 1]],
-            dc=[["pkg.mod:unused", "unused", 1, 2, "function"]],
-            rn=["name"],
-            **{"in": ["typing", "os"]},
-            cn=["Service", "Model"],
-        ),
-        "x.py",
+    assert cache_wire_helpers._decode_optional_wire_items_for_filepath(
+        obj={"x": [1]},
+        key="x",
+        filepath="x.py",
+        decode_item=lambda item, filepath: f"{filepath}:{item}",
+    ) == ["x.py:1"]
+    assert (
+        cache_wire_helpers._decode_optional_wire_items_for_filepath(
+            obj={"x": [None]},
+            key="x",
+            filepath="x.py",
+            decode_item=lambda item, filepath: None,
+        )
+        is None
     )
-    assert decoded is not None
-    assert decoded["class_metrics"][0]["qualname"] == "pkg.mod:Service"
-    assert decoded["class_metrics"][0]["coupled_classes"] == ["Alpha", "Zeta"]
-    assert decoded["module_deps"][0]["target"] == "b"
-    assert decoded["dead_candidates"][0]["qualname"] == "pkg.mod:unused"
-    assert decoded["import_names"] == ["typing", "os"]
-    assert decoded["class_names"] == ["Service", "Model"]
-
-
-def test_decode_wire_file_entry_optional_source_stats() -> None:
-    decoded = _decode_wire_file_entry(
-        _wire_entry(st=[1, 2], ss=[10, 3, 1, 1]),
-        "x.py",
+    assert cache_wire_helpers._decode_optional_wire_row(
+        obj={"x": [1, 2]}, key="x", expected_len=2
+    ) == [1, 2]
+    assert (
+        cache_wire_helpers._decode_optional_wire_row(
+            obj={"x": [1]}, key="x", expected_len=2
+        )
+        is None
     )
-    assert decoded is not None
-    assert decoded["source_stats"] == {
-        "lines": 10,
-        "functions": 3,
-        "methods": 1,
-        "classes": 1,
+    assert cache_wire_helpers._decode_optional_wire_names(obj={}, key="x") == []
+    assert (
+        cache_wire_helpers._decode_optional_wire_names(obj={"x": ["a", 1]}, key="x")
+        is None
+    )
+    assert cache_wire_helpers._decode_optional_wire_coupled_classes(
+        obj={"x": [["q", ["B", "", "A", "A"]]]}, key="x"
+    ) == {"q": ["A", "B"]}
+    assert (
+        cache_wire_helpers._decode_optional_wire_coupled_classes(
+            obj={"x": [[None, ["A"]]]}, key="x"
+        )
+        is None
+    )
+    assert cache_wire_helpers._decode_wire_named_span(
+        ["q", 1, 2], valid_lengths={3}
+    ) == (["q", 1, 2], "q", 1, 2)
+    assert cache_wire_helpers._decode_wire_named_sized_span(
+        ["q", 1, 2, 3], valid_lengths={4}
+    ) == (["q", 1, 2, 3], "q", 1, 2, 3)
+    assert cache_wire_helpers._decode_wire_named_span("bad", valid_lengths={3}) is None
+    assert cache_wire_helpers._decode_wire_int_fields([1, "bad"], 0, 1) is None
+    assert cache_wire_helpers._decode_wire_str_fields(["a", 1], 0, 1) is None
+
+
+def test_cache_v3_type_guards_validate_both_lane_payload_shapes() -> None:
+    unit = _decode_wire_unit(
+        ["q", 1, 2, 3, 4, "fp", "0-19", 1, 0, "low", "raw"], "x.py"
+    )
+    block = _decode_wire_block(["q", 1, 2, 3, "hash"], "x.py")
+    segment = _decode_wire_segment(["q", 1, 2, 3, "hash", "sig"], "x.py")
+    assert cache_validators._is_file_stat_dict({"mtime_ns": 1, "size": 2})
+    assert not cache_validators._is_file_stat_dict([])
+    assert cache_validators._is_source_content_digest(_SOURCE_CONTENT_DIGEST)
+    assert not cache_validators._is_source_content_digest(_NEUTRAL_PROFILE)
+    assert not cache_validators._is_git_blob_identity(None)
+    assert cache_validators._is_source_stats_dict(
+        {"lines": 1, "functions": 1, "methods": 0, "classes": 0}
+    )
+    assert not cache_validators._is_source_stats_dict(
+        {"lines": -1, "functions": 1, "methods": 0, "classes": 0}
+    )
+    assert unit is not None and cache_validators._is_unit_dict(unit)
+    assert block is not None and cache_validators._is_block_dict(block)
+    assert segment is not None and cache_validators._is_segment_dict(segment)
+    assert not cache_validators._is_unit_dict({"qualname": "q"})
+    assert not cache_validators._is_block_dict([])
+    assert not cache_validators._is_segment_dict([])
+
+    typing = {
+        "module": "m",
+        "filepath": "m.py",
+        "callable_count": 1,
+        "params_total": 1,
+        "params_annotated": 1,
+        "returns_total": 1,
+        "returns_annotated": 1,
+        "any_annotation_count": 0,
     }
+    docstrings = {
+        "module": "m",
+        "filepath": "m.py",
+        "public_symbol_total": 1,
+        "public_symbol_documented": 1,
+    }
+    param = {
+        "name": "x",
+        "kind": "pos_or_kw",
+        "has_default": False,
+        "annotation_hash": "",
+    }
+    symbol = {
+        "qualname": "m:f",
+        "kind": "function",
+        "exported_via": "name",
+        "start_line": 1,
+        "end_line": 2,
+        "returns_hash": "",
+        "params": [param],
+    }
+    assert cache_validators._is_module_typing_coverage_dict(typing)
+    assert cache_validators._is_module_docstring_coverage_dict(docstrings)
+    assert cache_validators._is_api_param_spec_dict(param)
+    assert cache_validators._is_public_symbol_dict(symbol)
+    assert cache_validators._is_module_api_surface_dict(
+        {"module": "m", "filepath": "m.py", "all_declared": ["f"], "symbols": [symbol]}
+    )
+    assert not cache_validators._is_module_api_surface_dict(
+        {"module": "m", "filepath": "m.py", "all_declared": [1], "symbols": []}
+    )
 
-    assert _decode_optional_wire_source_stats(obj={"ss": "bad"}) is None
-    assert _decode_optional_wire_source_stats(obj={"ss": [1, 2, 3]}) is None
-    assert _decode_optional_wire_source_stats(obj={"ss": [1, 2, -1, 0]}) is None
+    class_metrics = {
+        "qualname": "m:C",
+        "filepath": "m.py",
+        "risk_coupling": "low",
+        "risk_cohesion": "low",
+        "start_line": 1,
+        "end_line": 2,
+        "cbo": 0,
+        "lcom4": 1,
+        "method_count": 1,
+        "instance_var_count": 0,
+        "coupled_classes": ["m:D"],
+    }
+    dead = {
+        "qualname": "m:f",
+        "local_name": "f",
+        "filepath": "m.py",
+        "kind": "function",
+        "start_line": 1,
+        "end_line": 2,
+        "suppressed_rules": ["rule"],
+    }
+    assert cache_validators._is_class_metrics_dict(class_metrics)
+    assert not cache_validators._is_class_metrics_dict(
+        {**class_metrics, "coupled_classes": [1]}
+    )
+    assert cache_validators._is_module_dep_dict(
+        {"source": "m", "target": "n", "import_type": "import", "line": 1}
+    )
+    assert cache_validators._is_dead_candidate_dict(dead)
+    assert not cache_validators._is_dead_candidate_dict(
+        {**dead, "suppressed_rules": [1]}
+    )
 
 
-def test_cache_helpers_cover_invalid_analysis_profile_and_source_stats_shapes() -> None:
-    assert _decode_wire_qualname_span_size(["pkg.mod:fn", 1, 2, "bad"]) is None
-    assert _decode_wire_qualname_span_size([None, 1, 2, 4]) is None
+def test_cache_v3_semantic_and_binding_decoders_reject_invalid_contracts() -> None:
+    event = [
+        "event-1",
+        "assign",
+        "m:f",
+        [["param", "x"]],
+        ["event", "out"],
+        ["guard"],
+        1,
+        "resolved",
+    ]
+    for kind in (
+        "artifact_write",
+        "assign",
+        "compatibility_check",
+        "compute_digest",
+        "construct",
+        "field_write",
+        "publish_event",
+        "resolve_identity",
+        "return_value",
+        "serialize_field",
+        "security_observation",
+    ):
+        assert (
+            cache_wire_decode._decode_semantic_event(
+                [event[0], kind, *event[2:]], filepath="m.py"
+            )
+            is not None
+        )
     assert (
-        _as_analysis_profile(
+        cache_wire_decode._decode_semantic_event(
+            [event[0], "unknown", *event[2:]], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_event(
+            [*event[:6], 0, *event[7:]], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_event(
+            [*event[:3], [["bad", "x"]], *event[4:]], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_contract_summary(
+            ["m:f", [event], [["x", "out"]], [["event", "out"]], False],
+            filepath="m.py",
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_contract_summary(
+            ["m:f", [event], [["x"]], [], False], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_facts(
+            {"se": [event], "fc": []}, filepath="m.py"
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_facts(
+            {"se": [None], "fc": []}, filepath="m.py"
+        )
+        is None
+    )
+
+    assert (
+        cache_wire_decode._decode_profile_digest(
+            ["codeclone.cache.profile.neutral.v1", "sha256", "0" * 64],
+            expected_domain="codeclone.cache.profile.neutral.v1",
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_profile_digest(
+            ["codeclone.cache.profile.neutral.v1", "sha1", "0" * 64],
+            expected_domain="codeclone.cache.profile.neutral.v1",
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
             {
-                "min_loc": 1,
-                "min_stmt": 1,
-                "block_min_loc": 2,
-                "block_min_stmt": "bad",
-                "segment_min_loc": 3,
-                "segment_min_stmt": 4,
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+                "gb": None,
+            }
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha1", "0" * 64],
+                "gb": None,
             }
         )
         is None
     )
-    assert _decode_optional_wire_source_stats(obj={"ss": [1, 2, "bad", 0]}) is None
 
 
-def test_canonicalize_cache_entry_skips_invalid_dead_candidate_suppression_shape() -> (
-    None
-):
-    normalized = _canonicalize_cache_entry(
-        cast(
-            Any,
-            {
-                "cache_content_binding_version": "1",
-                "source_content_digest": _SOURCE_CONTENT_DIGEST,
-                "git_blob_id_at_write": None,
-                "stat": {"mtime_ns": 1, "size": 2},
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "class_metrics": [],
-                "module_deps": [],
-                "dead_candidates": [
-                    {
-                        "qualname": "pkg.mod:unused",
-                        "local_name": "unused",
-                        "filepath": "pkg/mod.py",
-                        "start_line": 1,
-                        "end_line": 2,
-                        "kind": "function",
-                        "suppressed_rules": "dead-code",
-                    }
-                ],
-                "referenced_names": [],
-                "referenced_qualnames": [],
-                "import_names": [],
-                "class_names": [],
-            },
-        )
-    )
-    assert normalized["dead_candidates"] == [
-        {
-            "qualname": "pkg.mod:unused",
-            "local_name": "unused",
-            "filepath": "pkg/mod.py",
-            "start_line": 1,
-            "end_line": 2,
-            "kind": "function",
-        }
+def test_cache_v3_semantic_decoder_covers_closed_vocabulary_edges() -> None:
+    for kind in ("param", "event", "const", "unresolved"):
+        assert cache_wire_decode._decode_fact_ref([kind, "value"]) is not None
+    assert cache_wire_decode._decode_fact_ref("bad") is None
+    assert cache_wire_decode._decode_fact_ref(["bad", "value"]) is None
+    assert cache_wire_decode._decode_fact_ref(["param", None]) is None
+
+    base_event: list[object] = [
+        "event-1",
+        "assign",
+        "m:f",
+        [],
+        None,
+        [],
+        1,
+        "unavailable",
     ]
-
-
-def test_decode_optional_wire_coupled_classes_rejects_non_string_qualname() -> None:
     assert (
-        _decode_optional_wire_coupled_classes(
-            obj={"cc": [[1, ["A"]]]},
-            key="cc",
+        cache_wire_decode._decode_semantic_event(base_event, filepath="m.py")
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_event(
+            [*base_event[:4], ["bad", "value"], *base_event[5:]], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_event(
+            [*base_event[:5], [None], *base_event[6:]], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_event(
+            [*base_event[:7], "bad"], filepath="m.py"
+        )
+        is None
+    )
+    assert cache_wire_decode._decode_contract_summary("bad", filepath="m.py") is None
+    assert (
+        cache_wire_decode._decode_contract_summary(
+            ["m:f", [], [], [["bad", "value"]], False], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_contract_summary(
+            ["m:f", [], [[None, "out"]], [], False], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_facts(
+            {"se": [], "fc": [None]}, filepath="m.py"
         )
         is None
     )
 
 
-def test_decode_wire_file_entry_skips_empty_coupled_classes_mapping() -> None:
-    decoded = _decode_wire_file_entry(
-        _wire_entry(
-            st=[1, 2],
-            cm=[["pkg.mod:Service", 1, 10, 3, 2, 4, 1, "low", "medium"]],
-            cc=[["pkg.mod:Service", ["", ""]]],
-        ),
-        "x.py",
+def test_cache_v3_wire_edge_decoders_are_fail_closed() -> None:
+    assert cache_wire_decode._decode_wire_stat({"st": [1, 2]}) == {
+        "mtime_ns": 1,
+        "size": 2,
+    }
+    assert cache_wire_decode._decode_wire_stat({"st": [1, None]}) is None
+    assert (
+        cache_wire_decode._decode_profile_digest(
+            ["codeclone.cache.profile.dependent.v1", "sha256", "1" * 64],
+            expected_domain="codeclone.cache.profile.dependent.v1",
+        )
+        is not None
     )
+    assert (
+        cache_wire_decode._decode_profile_digest(
+            ["codeclone.cache.profile.neutral.v1", "sha256", "short"],
+            expected_domain="codeclone.cache.profile.neutral.v1",
+        )
+        is None
+    )
+    assert cache_wire_decode._decode_content_binding({}) is None
+    assert (
+        cache_wire_decode._decode_content_binding({"cb": "1", "sd": "bad", "gb": None})
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "short"],
+                "gb": None,
+            }
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+                "gb": ["sha256", "0" * 64],
+            }
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+                "gb": ["sha1", "short"],
+            }
+        )
+        is None
+    )
+    assert cache_wire_decode._decode_optional_wire_source_stats(
+        obj={"ss": [1, 2, 3, 4]}
+    ) == {"lines": 1, "functions": 2, "methods": 3, "classes": 4}
+    assert (
+        cache_wire_decode._decode_optional_wire_source_stats(
+            obj={"ss": [1, 2, "bad", 4]}
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_source_stats(obj={"ss": [1, -1, 3, 4]})
+        is None
+    )
+
+    assert cache_wire_decode._decode_optional_wire_module_ints(
+        obj={"x": ["m", 1]}, key="x", expected_len=2, int_indexes=(1,)
+    ) == ("m", (1,))
+    assert (
+        cache_wire_decode._decode_optional_wire_module_ints(
+            obj={"x": [None, 1]}, key="x", expected_len=2, int_indexes=(1,)
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_typing_coverage(
+            obj={"tc": ["m", 1, 2, 1, 1, 1, 0]}, filepath="m.py"
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_docstring_coverage(
+            obj={"dg": ["m", 1, 1]}, filepath="m.py"
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_api_surface(
+            obj={"as": ["m", ["f"], [["m:f", "function", 1, 2, "name", "", []]]]},
+            filepath="m.py",
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_api_surface(
+            obj={"as": ["m", ["f"], [None]]}, filepath="m.py"
+        )
+        is None
+    )
+
+    assert cache_wire_decode._decode_wire_structural_findings_optional({}) == []
+    structural = [["kind", "key", [["a", "b"]], [["m:f", 1, 2]]]]
+    assert (
+        cache_wire_decode._decode_wire_structural_findings_optional({"sf": structural})
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_wire_structural_findings_optional({"sf": [None]})
+        is None
+    )
+    assert cache_wire_decode._decode_wire_structural_signature([["a", "b"]]) == {
+        "a": "b"
+    }
+    assert cache_wire_decode._decode_wire_structural_signature([[None, "b"]]) is None
+    assert cache_wire_decode._decode_wire_structural_occurrence(["m:f", 1, 2]) == {
+        "qualname": "m:f",
+        "start": 1,
+        "end": 2,
+    }
+    assert (
+        cache_wire_decode._decode_wire_structural_occurrence(["m:f", None, 2]) is None
+    )
+
+
+def test_cache_v3_remaining_type_guard_edges_are_explicit() -> None:
+    assert not cache_validators._is_source_stats_dict([])
+    assert not cache_validators._is_unit_dict([])
+    assert not cache_validators._is_module_typing_coverage_dict([])
+    assert not cache_validators._is_module_docstring_coverage_dict([])
+    assert not cache_validators._is_api_param_spec_dict([])
+    assert not cache_validators._is_public_symbol_dict([])
+    assert not cache_validators._is_module_api_surface_dict([])
+    assert not cache_validators._is_class_metrics_dict([])
+    assert not cache_validators._is_dead_candidate_dict([])
+    assert not cache_validators._has_typed_fields(
+        [], string_keys=("name",), int_keys=("line",)
+    )
+
+
+def test_cache_v3_decoder_rejects_every_nested_lane_boundary() -> None:
+    assert (
+        cache_wire_decode._decode_contract_summary(
+            [None, [], [], [], False], filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_semantic_facts(
+            {"se": "bad", "fc": []}, filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_profile_digest(
+            ["other", "sha256", "0" * 64], expected_domain="other"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+                "gb": ["sha1", None],
+            }
+        )
+        is None
+    )
+    assert cache_wire_decode._decode_optional_wire_source_stats(obj={}) is None
+    assert cache_wire_decode._decode_wire_name_sections(obj={"rn": [1]}) is None
+    assert (
+        cache_wire_decode._decode_optional_wire_api_surface(
+            obj={"as": [None, [], []]}, filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_function_relationship_facts(
+            obj={"fr": [None]}, filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_optional_wire_function_relationship_facts(
+            obj={"fr": [["m:f", [None]]]}, filepath="m.py"
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_wire_api_surface_symbol(
+            ["m:f", "function", 1, 2, "name", "", "bad"]
+        )
+        is None
+    )
+    assert (
+        cache_wire_decode._decode_wire_api_surface_symbol(
+            ["m:f", "function", 1, 2, "name", "", [None]]
+        )
+        is None
+    )
+    assert cache_wire_decode._decode_wire_api_param_spec(["x"]) is None
+    assert (
+        cache_wire_decode._decode_wire_api_param_spec(["x", "pos_or_kw", "bad", ""])
+        is None
+    )
+    assert cache_wire_decode._decode_wire_module_dep("bad") is None
+
+    wire = _encode_wire_file_entry(_empty_v3_entry())
+    for lane, key, value in (
+        ("n", "se", "bad"),
+        ("n", "rn", [1]),
+        ("d", "cc", "bad"),
+        ("d", "rr", "bad"),
+        ("d", "sf", "bad"),
+    ):
+        malformed = json.loads(json.dumps(wire))
+        malformed[lane][key] = value
+        assert _decode_wire_file_entry(malformed, "x.py") is None
+
+    coupled = json.loads(json.dumps(wire))
+    coupled["d"]["cm"] = [["m:C", 1, 2, 0, 1, 1, 0, "low", "low"]]
+    coupled["d"]["cc"] = [["m:C", ["m:D"]]]
+    decoded = _decode_wire_file_entry(coupled, "x.py")
     assert decoded is not None
-    assert "coupled_classes" not in decoded["class_metrics"][0]
+    assert decoded.module_dependent.class_metrics[0]["coupled_classes"] == ["m:D"]
+
+
+def test_cache_v3_entry_projection_and_content_miss_are_typed() -> None:
+    assert cache_entries._as_security_surface_category(None) is None
+    assert cache_entries._as_runtime_reachability_framework(None) is None
+    assert cache_entries._as_runtime_reachability_edge_kind(None) is None
+    assert cache_entries._new_optional_metrics_payload() == (
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        [],
+        None,
+        None,
+        None,
+    )
+    assert (
+        cache_entries._unit_dict_from_model(_make_unit("x.py"), "x.py")["filepath"]
+        == "x.py"
+    )
+    assert (
+        cache_entries._block_dict_from_model(_make_block("x.py"), "x.py")["filepath"]
+        == "x.py"
+    )
+    assert (
+        cache_entries._segment_dict_from_model(_make_segment("x.py"), "x.py")[
+            "filepath"
+        ]
+        == "x.py"
+    )
+    cache = Cache(Path("cache.json"), root=Path("."))
+    cache.bind_module_registry(
+        module_registry_context(filepath="x.py", module_name="x")[1]
+    )
+    decision = cache.reuse_decision(
+        content=ContentIdentityVerdict(
+            hit=False,
+            reason="digest_miss",
+            git_fallback_reason=None,
+            digest_verify_cost_us=1,
+            stat_fast_reject=False,
+        ),
+        entry=_empty_v3_entry(),
+    )
+    assert decision.neutral.reason == "content_miss"
+    assert decision.dependent.reason == "content_miss"
+
+
+def test_cache_v3_neutral_qualnames_are_owned_by_current_registry() -> None:
+    payload = replace(
+        _empty_v3_entry().module_neutral,
+        units=(
+            CacheNeutralUnit(
+                local_name="f",
+                start_line=1,
+                end_line=2,
+                loc=2,
+                stmt_count=1,
+                fingerprint="fp",
+                loc_bucket="0-19",
+                cyclomatic_complexity=1,
+                nesting_depth=0,
+                risk="low",
+                raw_hash="raw",
+                entry_guard_count=0,
+                entry_guard_terminal_profile="none",
+                entry_guard_has_side_effect_before=False,
+                terminal_kind="fallthrough",
+                try_finally_profile="none",
+                side_effect_order_profile="none",
+            ),
+        ),
+        blocks=(
+            CacheNeutralBlock(
+                local_name="f",
+                start_line=1,
+                end_line=2,
+                size=2,
+                block_hash="block",
+            ),
+        ),
+        segments=(
+            CacheNeutralSegment(
+                local_name="f",
+                start_line=1,
+                end_line=2,
+                size=2,
+                segment_hash="segment",
+                segment_sig="sig",
+            ),
+        ),
+    )
+
+    flat = rehydrate_cache_neutral(
+        payload, module_name="pkg.mod", filepath="pkg/mod.py"
+    )
+    src = rehydrate_cache_neutral(
+        payload, module_name="src_pkg.mod", filepath="src/src_pkg/mod.py"
+    )
+
+    assert flat.units[0].qualname == "pkg.mod:f"
+    assert flat.blocks[0].qualname == "pkg.mod:f"
+    assert flat.segments[0].qualname == "pkg.mod:f"
+    assert src.units[0].qualname == "src_pkg.mod:f"
+    assert src.units[0].fingerprint == flat.units[0].fingerprint
+
+
+def test_cache_v3_profiles_exclude_evaluator_thresholds(tmp_path: Path) -> None:
+    first = Cache(tmp_path / "first.json", root=tmp_path)
+    second = Cache(tmp_path / "second.json", root=tmp_path)
+    registry = module_registry_context(filepath="m.py", module_name="m")[1]
+    first.bind_module_registry(registry)
+    second.bind_module_registry(registry)
+
+    evaluator_thresholds = (0, 100)
+    assert evaluator_thresholds[0] != evaluator_thresholds[1]
+    assert first._module_neutral_profile == second._module_neutral_profile
+    assert first._module_dependent_profile == second._module_dependent_profile
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+                "gb": ["sha1", "0" * 40],
+            }
+        )
+        is not None
+    )
+    assert (
+        cache_wire_decode._decode_content_binding(
+            {
+                "cb": "1",
+                "sd": ["codeclone.source-content.v1", "sha256", "0" * 64],
+                "gb": ["md5", "0" * 32],
+            }
+        )
+        is None
+    )
+
+
+def test_cache_v3_empty_entry_encode_decode_is_deterministic() -> None:
+    entry = _empty_v3_entry()
+    first = _encode_wire_file_entry(entry)
+    second = _encode_wire_file_entry(entry)
+
+    assert first == second
+    assert _decode_wire_file_entry(first, "x.py") == entry
+
+
+def test_cache_v3_wire_matches_golden_without_neutral_module_authority() -> None:
+    wire = _encode_wire_file_entry(_empty_v3_entry())
+    golden_path = Path(__file__).parent / "fixtures" / "cache_v3" / "golden_entry.json"
+
+    assert wire == json.loads(golden_path.read_text("utf-8"))
+    neutral_json = json.dumps(wire["n"], sort_keys=True)
+    assert "module" not in neutral_json
+    assert "filepath" not in neutral_json
+
+
+def test_cache_manifest_change_preserves_neutral_lane_only(tmp_path: Path) -> None:
+    source = tmp_path / "a.py"
+    source.write_text("def f():\n    return 1\n", "utf-8")
+    cache_path = tmp_path / "cache.json"
+    initial_registry = module_registry_context(filepath="a.py", module_name="a")[1]
+    cache = Cache(cache_path, root=tmp_path)
+    cache.bind_module_registry(initial_registry)
+    cache.put_file_entry(
+        str(source),
+        file_stat_signature(str(source)),
+        [],
+        [],
+        [],
+        source_content_digest=_SOURCE_CONTENT_DIGEST,
+    )
+    entry = cache.get_file_entry(str(source))
+    assert entry is not None
+
+    (tmp_path / "b.py").write_text("VALUE = 1\n", "utf-8")
+    changed_registry = module_registry_context(
+        filepath="a.py",
+        module_name="a",
+        inventory_modules=("b",),
+    )[1]
+    changed_registry = replace(
+        changed_registry,
+        digest=DigestObject(
+            domain="codeclone.module-registry.v1",
+            algorithm="sha256",
+            value="1" * 64,
+        ),
+    )
+    cache.bind_module_registry(changed_registry)
+    decision = cache.reuse_decision(
+        content=ContentIdentityVerdict(
+            hit=True,
+            reason="digest_hit",
+            git_fallback_reason=None,
+            digest_verify_cost_us=0,
+            stat_fast_reject=False,
+        ),
+        entry=entry,
+    )
+
+    assert decision.neutral.reason == "hit"
+    assert decision.dependent.reason == "dependent_profile_mismatch"
 
 
 def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
@@ -2775,231 +2754,6 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
     )
     assert dead_candidate_with_suppression is not None
     assert dead_candidate_with_suppression["suppressed_rules"] == ["dead-code"]
-
-
-def test_encode_wire_file_entry_includes_optional_metrics_sections() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _SOURCE_CONTENT_DIGEST,
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 2},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [
-            {
-                "qualname": "pkg.mod:Service",
-                "filepath": "x.py",
-                "start_line": 1,
-                "end_line": 10,
-                "cbo": 3,
-                "lcom4": 2,
-                "method_count": 4,
-                "instance_var_count": 1,
-                "risk_coupling": "low",
-                "risk_cohesion": "medium",
-                "coupled_classes": ["ServiceB", "ServiceA"],
-            }
-        ],
-        "module_deps": [
-            {"source": "a", "target": "b", "import_type": "import", "line": 1}
-        ],
-        "dead_candidates": [],
-        "referenced_names": [],
-        "import_names": ["z", "a"],
-        "class_names": ["B", "A"],
-    }
-    wire = _encode_wire_file_entry(entry)
-    assert "cm" in wire
-    assert "cc" in wire
-    assert "md" in wire
-    assert wire["cc"] == [["pkg.mod:Service", ["ServiceA", "ServiceB"]]]
-    assert wire["in"] == ["a", "z"]
-    assert wire["cn"] == ["A", "B"]
-
-
-def test_encode_wire_file_entry_compacts_dead_candidate_filepaths() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _SOURCE_CONTENT_DIGEST,
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 2},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [],
-        "module_deps": [],
-        "dead_candidates": [
-            {
-                "qualname": "pkg.mod:unused",
-                "local_name": "unused",
-                "filepath": "/repo/pkg/mod.py",
-                "start_line": 3,
-                "end_line": 4,
-                "kind": "function",
-            }
-        ],
-        "referenced_names": [],
-        "import_names": [],
-        "class_names": [],
-    }
-    wire = _encode_wire_file_entry(entry)
-    assert wire["dc"] == [["pkg.mod:unused", "unused", 3, 4, "function"]]
-
-
-def test_encode_wire_file_entry_encodes_dead_candidate_suppressions() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _SOURCE_CONTENT_DIGEST,
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 2},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [],
-        "module_deps": [],
-        "dead_candidates": [
-            {
-                "qualname": "pkg.mod:unused",
-                "local_name": "unused",
-                "filepath": "/repo/pkg/mod.py",
-                "start_line": 3,
-                "end_line": 4,
-                "kind": "function",
-                "suppressed_rules": ["dead-code", "dead-code"],
-            }
-        ],
-        "referenced_names": [],
-        "import_names": [],
-        "class_names": [],
-    }
-    wire = _encode_wire_file_entry(entry)
-    assert wire["dc"] == [["pkg.mod:unused", "unused", 3, 4, "function", ["dead-code"]]]
-
-
-def test_encode_wire_file_entry_skips_empty_or_invalid_coupled_classes() -> None:
-    entry: CacheEntry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _SOURCE_CONTENT_DIGEST,
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 2},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-        "class_metrics": [
-            {
-                "qualname": "pkg.mod:Empty",
-                "filepath": "x.py",
-                "start_line": 1,
-                "end_line": 2,
-                "cbo": 1,
-                "lcom4": 1,
-                "method_count": 1,
-                "instance_var_count": 1,
-                "risk_coupling": "low",
-                "risk_cohesion": "low",
-                "coupled_classes": [],
-            },
-            {
-                "qualname": "pkg.mod:Invalid",
-                "filepath": "x.py",
-                "start_line": 3,
-                "end_line": 4,
-                "cbo": 1,
-                "lcom4": 1,
-                "method_count": 1,
-                "instance_var_count": 1,
-                "risk_coupling": "low",
-                "risk_cohesion": "low",
-                "coupled_classes": cast(Any, [1]),
-            },
-        ],
-        "module_deps": [],
-        "dead_candidates": [],
-        "referenced_names": [],
-        "import_names": [],
-        "class_names": [],
-    }
-    wire = _encode_wire_file_entry(entry)
-    assert "cc" not in wire
-
-
-def test_get_file_entry_sorts_coupled_classes_in_runtime_payload(
-    tmp_path: Path,
-) -> None:
-    cache = Cache(tmp_path / "cache.json")
-    cache.data["files"]["x.py"] = cast(
-        Any,
-        {
-            "cache_content_binding_version": "1",
-            "source_content_digest": _SOURCE_CONTENT_DIGEST,
-            "git_blob_id_at_write": None,
-            "stat": {"mtime_ns": 1, "size": 1},
-            "source_stats": {"lines": 1, "functions": 1, "methods": 0, "classes": 0},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-            "class_metrics": [
-                {
-                    "qualname": "pkg.mod:NoDeps",
-                    "filepath": "x.py",
-                    "start_line": 0,
-                    "end_line": 0,
-                    "cbo": 0,
-                    "lcom4": 1,
-                    "method_count": 0,
-                    "instance_var_count": 0,
-                    "risk_coupling": "low",
-                    "risk_cohesion": "low",
-                    "coupled_classes": [],
-                },
-                {
-                    "qualname": "pkg.mod:Service",
-                    "filepath": "x.py",
-                    "start_line": 1,
-                    "end_line": 10,
-                    "cbo": 2,
-                    "lcom4": 1,
-                    "method_count": 3,
-                    "instance_var_count": 1,
-                    "risk_coupling": "low",
-                    "risk_cohesion": "low",
-                    "coupled_classes": ["Zeta", "Alpha", "Alpha"],
-                },
-            ],
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": [],
-            "import_names": [],
-            "class_names": [],
-        },
-    )
-    entry = cache.get_file_entry("x.py")
-    assert entry is not None
-    assert len(entry["class_metrics"]) == 2
-    assert entry["class_metrics"][0]["qualname"] == "pkg.mod:NoDeps"
-    assert entry["class_metrics"][1]["coupled_classes"] == ["Alpha", "Zeta"]
-    assert entry["source_stats"]["functions"] == 1
-
-
-def test_cache_entry_container_shape_rejects_invalid_source_stats() -> None:
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "source_stats": {
-                    "lines": 1,
-                    "functions": 1,
-                    "methods": "0",
-                    "classes": 0,
-                },
-                "units": [],
-                "blocks": [],
-                "segments": [],
-            }
-        )
-        is False
-    )
 
 
 def test_cache_type_predicates_reject_non_dict_variants() -> None:
@@ -3157,108 +2911,3 @@ def test_integrity_read_json_document_forwards_max_bytes(tmp_path: Path) -> None
     path = tmp_path / "doc.json"
     path.write_text('{"ok": true}', encoding="utf-8")
     assert read_json_document(path, max_bytes=64) == {"ok": True}
-
-
-def test_canonicalize_helpers_reject_invalid_structural_shapes() -> None:
-    from codeclone.cache._canonicalize import (
-        _as_str_value_dict,
-        _as_structural_group_dict,
-        _as_structural_occurrence_dict,
-        _as_typed_structural_finding_list,
-        _as_typed_structural_occurrence_list,
-        _decode_structural_findings_section,
-    )
-
-    assert _as_str_value_dict({"key": 1}) is None
-    assert (
-        _as_structural_occurrence_dict({"qualname": "pkg.fn", "start": "x", "end": 1})
-        is None
-    )
-    assert (
-        _as_typed_structural_occurrence_list(
-            [{"qualname": "pkg.fn", "start": 1, "end": "x"}]
-        )
-        is None
-    )
-    assert _as_typed_structural_occurrence_list("not-a-list") is None
-    assert (
-        _as_structural_group_dict(
-            {
-                "finding_kind": "dup",
-                "finding_key": "k1",
-                "signature": {"kind": 1},
-                "items": [{"qualname": "pkg.fn", "start": 1, "end": 2}],
-            }
-        )
-        is None
-    )
-    assert _as_typed_structural_finding_list([{"finding_kind": "dup"}]) is None
-    ok, findings = _decode_structural_findings_section(None)
-    assert ok is True and findings is None
-    bad, findings = _decode_structural_findings_section([{"finding_kind": "dup"}])
-    assert bad is False and findings is None
-
-    assert _as_structural_occurrence_dict(None) is None
-    assert (
-        _as_structural_group_dict(
-            {
-                "finding_kind": "dup",
-                "finding_key": "k1",
-                "signature": {"kind": "sig"},
-                "items": [None],
-            }
-        )
-        is None
-    )
-    assert _as_typed_structural_finding_list([None]) is None
-
-
-def test_attach_optional_cache_sections_sets_relationship_facts() -> None:
-    base = cast(
-        CacheEntry,
-        {
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-            "class_metrics": [],
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": [],
-            "referenced_qualnames": [],
-            "import_names": [],
-            "class_names": [],
-        },
-    )
-    attached = _attach_optional_cache_sections(
-        base,
-        function_relationship_facts=[
-            {
-                "source_qualname": "pkg.mod:src",
-                "relationships": [
-                    {
-                        "relation_kind": "calls",
-                        "resolution_status": "resolved",
-                        "origin_lane": "analysis",
-                        "source_qualname": "pkg.mod:src",
-                        "target_qualname": "pkg.mod:tgt",
-                        "path": "pkg/mod.py",
-                        "line": 1,
-                        "expression": "tgt()",
-                        "resolution_rule": "direct",
-                    }
-                ],
-            }
-        ],
-        structural_findings=[
-            {
-                "finding_kind": "dup",
-                "finding_key": "k1",
-                "signature": {"kind": "sig"},
-                "items": [{"qualname": "pkg.mod:fn", "start": 1, "end": 2}],
-            }
-        ],
-    )
-    relationships = attached["function_relationship_facts"][0]["relationships"]
-    assert relationships[0]["relation_kind"] == "calls"
-    assert attached["structural_findings"][0]["finding_kind"] == "dup"

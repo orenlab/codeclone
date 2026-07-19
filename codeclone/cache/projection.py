@@ -6,11 +6,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import TypedDict
 
-from ..models import SegmentGroupItem
+from ..models import (
+    BlockUnit,
+    CacheNeutralPayload,
+    FactRef,
+    FunctionContractSummary,
+    RehydratedCacheNeutral,
+    SegmentGroupItem,
+    SegmentUnit,
+    SemanticEvent,
+    SemanticFileFacts,
+    SourceStats,
+    Unit,
+)
 from ..utils.repo_paths import RepoPathPolicy, resolve_under_repo_root
 from .integrity import (
     as_int_or_none,
@@ -20,6 +33,182 @@ from .integrity import (
 )
 
 SegmentDict = SegmentGroupItem
+
+_LOCAL_SEMANTIC_REF_PREFIX = "cc-local:"
+
+
+def _localize_semantic_value(value: str, *, module_name: str) -> str:
+    module_prefix = f"{module_name}:"
+    if value.startswith(module_prefix):
+        return f"{_LOCAL_SEMANTIC_REF_PREFIX}{value[len(module_prefix) :]}"
+    return value
+
+
+def _rehydrate_semantic_value(value: str, *, module_name: str) -> str:
+    if value.startswith(_LOCAL_SEMANTIC_REF_PREFIX):
+        return f"{module_name}:{value[len(_LOCAL_SEMANTIC_REF_PREFIX) :]}"
+    return value
+
+
+def _map_fact_ref(
+    fact: FactRef,
+    *,
+    transform: Callable[[str], str],
+) -> FactRef:
+    return replace(fact, ref=transform(fact.ref))
+
+
+def _map_semantic_event(
+    event: SemanticEvent,
+    *,
+    transform: Callable[[str], str],
+    filepath: str,
+) -> SemanticEvent:
+    return replace(
+        event,
+        event_id=transform(event.event_id),
+        subject=transform(event.subject),
+        inputs=tuple(_map_fact_ref(fact, transform=transform) for fact in event.inputs),
+        output=(
+            _map_fact_ref(event.output, transform=transform)
+            if event.output is not None
+            else None
+        ),
+        location=(filepath, event.location[1]),
+    )
+
+
+def _map_contract_summary(
+    summary: FunctionContractSummary,
+    *,
+    transform: Callable[[str], str],
+    filepath: str,
+) -> FunctionContractSummary:
+    return replace(
+        summary,
+        function=transform(summary.function),
+        events=tuple(
+            _map_semantic_event(event, transform=transform, filepath=filepath)
+            for event in summary.events
+        ),
+        param_flows=tuple(
+            (transform(source), transform(target))
+            for source, target in summary.param_flows
+        ),
+        returns=tuple(
+            _map_fact_ref(fact, transform=transform) for fact in summary.returns
+        ),
+    )
+
+
+def localize_semantic_facts(
+    facts: SemanticFileFacts,
+    *,
+    module_name: str,
+) -> SemanticFileFacts:
+    transform = lambda value: _localize_semantic_value(  # noqa: E731
+        value,
+        module_name=module_name,
+    )
+    return SemanticFileFacts(
+        events=tuple(
+            _map_semantic_event(event, transform=transform, filepath="")
+            for event in facts.events
+        ),
+        function_contract_summaries=tuple(
+            _map_contract_summary(summary, transform=transform, filepath="")
+            for summary in facts.function_contract_summaries
+        ),
+    )
+
+
+def rehydrate_semantic_facts(
+    facts: SemanticFileFacts,
+    *,
+    module_name: str,
+    filepath: str,
+) -> SemanticFileFacts:
+    transform = lambda value: _rehydrate_semantic_value(  # noqa: E731
+        value,
+        module_name=module_name,
+    )
+    return SemanticFileFacts(
+        events=tuple(
+            _map_semantic_event(event, transform=transform, filepath=filepath)
+            for event in facts.events
+        ),
+        function_contract_summaries=tuple(
+            _map_contract_summary(summary, transform=transform, filepath=filepath)
+            for summary in facts.function_contract_summaries
+        ),
+    )
+
+
+def rehydrate_cache_neutral(
+    payload: CacheNeutralPayload,
+    *,
+    module_name: str,
+    filepath: str,
+) -> RehydratedCacheNeutral:
+    def qualify(local_name: str) -> str:
+        return f"{module_name}:{local_name}"
+
+    return RehydratedCacheNeutral(
+        source_stats=SourceStats(**payload.source_stats),
+        units=tuple(
+            Unit(
+                qualname=qualify(item.local_name),
+                filepath=filepath,
+                start_line=item.start_line,
+                end_line=item.end_line,
+                loc=item.loc,
+                stmt_count=item.stmt_count,
+                fingerprint=item.fingerprint,
+                loc_bucket=item.loc_bucket,
+                cyclomatic_complexity=item.cyclomatic_complexity,
+                nesting_depth=item.nesting_depth,
+                risk=item.risk,
+                raw_hash=item.raw_hash,
+                entry_guard_count=item.entry_guard_count,
+                entry_guard_terminal_profile=item.entry_guard_terminal_profile,
+                entry_guard_has_side_effect_before=(
+                    item.entry_guard_has_side_effect_before
+                ),
+                terminal_kind=item.terminal_kind,
+                try_finally_profile=item.try_finally_profile,
+                side_effect_order_profile=item.side_effect_order_profile,
+            )
+            for item in payload.units
+        ),
+        blocks=tuple(
+            BlockUnit(
+                qualname=qualify(item.local_name),
+                filepath=filepath,
+                start_line=item.start_line,
+                end_line=item.end_line,
+                size=item.size,
+                block_hash=item.block_hash,
+            )
+            for item in payload.blocks
+        ),
+        segments=tuple(
+            SegmentUnit(
+                qualname=qualify(item.local_name),
+                filepath=filepath,
+                start_line=item.start_line,
+                end_line=item.end_line,
+                size=item.size,
+                segment_hash=item.segment_hash,
+                segment_sig=item.segment_sig,
+            )
+            for item in payload.segments
+        ),
+        semantic_facts=rehydrate_semantic_facts(
+            payload.semantic_facts,
+            module_name=module_name,
+            filepath=filepath,
+        ),
+    )
 
 
 def wire_filepath_from_runtime(
@@ -232,6 +421,9 @@ __all__ = [
     "build_segment_report_projection",
     "decode_segment_report_projection",
     "encode_segment_report_projection",
+    "localize_semantic_facts",
+    "rehydrate_cache_neutral",
+    "rehydrate_semantic_facts",
     "runtime_filepath_from_wire",
     "wire_filepath_from_runtime",
 ]

@@ -7,240 +7,48 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import Literal, TypedDict
+from typing import Literal
 
 from ..findings.structural.detectors import normalize_structural_finding_group
 from ..models import (
+    ApiParamSpecDict,
     BlockGroupItem,
     BlockUnit,
     ClassMetrics,
+    ClassMetricsDict,
     DeadCandidate,
-    DigestObject,
+    DeadCandidateDict,
     FunctionGroupItem,
     FunctionRelationshipFacts,
-    GitBlobIdentity,
+    FunctionRelationshipFactsDict,
     ModuleApiSurface,
+    ModuleApiSurfaceDict,
     ModuleDep,
+    ModuleDepDict,
     ModuleDocstringCoverage,
+    ModuleDocstringCoverageDict,
     ModuleTypingCoverage,
+    ModuleTypingCoverageDict,
+    PublicSymbolDict,
     RelationshipRecord,
+    RelationshipRecordDict,
     RuntimeReachabilityFact,
+    RuntimeReachabilityFactDict,
     SecuritySurface,
+    SecuritySurfaceDict,
     SegmentGroupItem,
     SegmentUnit,
+    SourceStatsDict,
     StructuralFindingGroup,
+    StructuralFindingGroupDict,
     StructuralFindingOccurrence,
+    StructuralFindingOccurrenceDict,
     Unit,
 )
-
-
-class FileStat(TypedDict):
-    mtime_ns: int
-    size: int
-
-
-class SourceStatsDict(TypedDict):
-    lines: int
-    functions: int
-    methods: int
-    classes: int
-
-
-class RelationshipRecordDict(TypedDict):
-    relation_kind: str
-    resolution_status: str
-    origin_lane: str
-    source_qualname: str
-    target_qualname: str | None
-    path: str
-    line: int
-    expression: str | None
-    resolution_rule: str | None
-
-
-class FunctionRelationshipFactsDict(TypedDict):
-    source_qualname: str
-    relationships: list[RelationshipRecordDict]
-
 
 UnitDict = FunctionGroupItem
 BlockDict = BlockGroupItem
 SegmentDict = SegmentGroupItem
-
-
-class ClassMetricsDictBase(TypedDict):
-    qualname: str
-    filepath: str
-    start_line: int
-    end_line: int
-    cbo: int
-    lcom4: int
-    method_count: int
-    instance_var_count: int
-    risk_coupling: str
-    risk_cohesion: str
-
-
-class ClassMetricsDict(ClassMetricsDictBase, total=False):
-    coupled_classes: list[str]
-
-
-class ModuleDepDict(TypedDict):
-    source: str
-    target: str
-    import_type: str
-    line: int
-
-
-class DeadCandidateDictBase(TypedDict):
-    qualname: str
-    local_name: str
-    filepath: str
-    start_line: int
-    end_line: int
-    kind: str
-
-
-class DeadCandidateDict(DeadCandidateDictBase, total=False):
-    suppressed_rules: list[str]
-
-
-class SecuritySurfaceDictBase(TypedDict):
-    category: str
-    capability: str
-    module: str
-    filepath: str
-    qualname: str
-    start_line: int
-    end_line: int
-    location_scope: str
-    classification_mode: str
-    evidence_kind: str
-    evidence_symbol: str
-
-
-class SecuritySurfaceDict(SecuritySurfaceDictBase):
-    pass
-
-
-class RuntimeReachabilityFactDict(TypedDict):
-    target_qualname: str
-    filepath: str
-    start_line: int
-    end_line: int
-    target_kind: str
-    framework: str
-    edge_kind: str
-    confidence: str
-    evidence: str
-    evidence_symbol: str
-    source_qualname: str
-
-
-class ModuleTypingCoverageDict(TypedDict):
-    module: str
-    filepath: str
-    callable_count: int
-    params_total: int
-    params_annotated: int
-    returns_total: int
-    returns_annotated: int
-    any_annotation_count: int
-
-
-class ModuleDocstringCoverageDict(TypedDict):
-    module: str
-    filepath: str
-    public_symbol_total: int
-    public_symbol_documented: int
-
-
-class ApiParamSpecDict(TypedDict):
-    name: str
-    kind: str
-    has_default: bool
-    annotation_hash: str
-
-
-class PublicSymbolDict(TypedDict):
-    qualname: str
-    kind: str
-    start_line: int
-    end_line: int
-    params: list[ApiParamSpecDict]
-    returns_hash: str
-    exported_via: str
-
-
-class ModuleApiSurfaceDict(TypedDict):
-    module: str
-    filepath: str
-    all_declared: list[str]
-    symbols: list[PublicSymbolDict]
-
-
-class StructuralFindingOccurrenceDict(TypedDict):
-    qualname: str
-    start: int
-    end: int
-
-
-class StructuralFindingGroupDict(TypedDict):
-    finding_kind: str
-    finding_key: str
-    signature: dict[str, str]
-    items: list[StructuralFindingOccurrenceDict]
-
-
-class _FileEntryBase(TypedDict):
-    cache_content_binding_version: Literal["1"]
-    source_content_digest: DigestObject
-    git_blob_id_at_write: GitBlobIdentity | None
-    stat: FileStat
-    units: list[UnitDict]
-    blocks: list[BlockDict]
-    segments: list[SegmentDict]
-
-
-class _FileEntryAnalysisFacts(TypedDict, total=False):
-    source_stats: SourceStatsDict
-    module_deps: list[ModuleDepDict]
-    dead_candidates: list[DeadCandidateDict]
-    referenced_names: list[str]
-    referenced_qualnames: list[str]
-    import_names: list[str]
-    class_names: list[str]
-    runtime_reachability: list[RuntimeReachabilityFactDict]
-
-
-class _FileEntryQualityFacts(TypedDict, total=False):
-    class_metrics: list[ClassMetricsDict]
-    security_surfaces: list[SecuritySurfaceDict]
-    typing_coverage: ModuleTypingCoverageDict
-    docstring_coverage: ModuleDocstringCoverageDict
-
-
-class _FileEntryReportFacts(TypedDict, total=False):
-    api_surface: ModuleApiSurfaceDict
-    structural_findings: list[StructuralFindingGroupDict]
-
-
-class _FileEntryRelationshipFacts(TypedDict, total=False):
-    function_relationship_facts: list[FunctionRelationshipFactsDict]
-
-
-class _FileEntryV29(
-    _FileEntryBase,
-    _FileEntryAnalysisFacts,
-    _FileEntryQualityFacts,
-    _FileEntryReportFacts,
-    _FileEntryRelationshipFacts,
-):
-    pass
-
-
-CacheEntryBase = _FileEntryBase
-CacheEntry = _FileEntryV29
 
 
 def _normalize_cached_structural_group(
@@ -715,11 +523,8 @@ def _structural_group_dict_from_model(
 __all__ = [
     "ApiParamSpecDict",
     "BlockDict",
-    "CacheEntry",
-    "CacheEntryBase",
     "ClassMetricsDict",
     "DeadCandidateDict",
-    "FileStat",
     "FunctionRelationshipFactsDict",
     "ModuleApiSurfaceDict",
     "ModuleDepDict",

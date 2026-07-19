@@ -345,7 +345,12 @@ class PackagePrefix:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DigestObject:
-    domain: Literal["codeclone.module-registry.v1", "codeclone.source-content.v1"]
+    domain: Literal[
+        "codeclone.cache.profile.dependent.v1",
+        "codeclone.cache.profile.neutral.v1",
+        "codeclone.module-registry.v1",
+        "codeclone.source-content.v1",
+    ]
     algorithm: Literal["sha256"]
     value: str
 
@@ -367,6 +372,264 @@ class GitBlobIdentity:
             character not in "0123456789abcdef" for character in self.object_id
         ):
             raise ValueError("git object id does not match its declared format")
+
+
+class FileStat(TypedDict):
+    mtime_ns: int
+    size: int
+
+
+class SourceStatsDict(TypedDict):
+    lines: int
+    functions: int
+    methods: int
+    classes: int
+
+
+class RelationshipRecordDict(TypedDict):
+    relation_kind: str
+    resolution_status: str
+    origin_lane: str
+    source_qualname: str
+    target_qualname: str | None
+    path: str
+    line: int
+    expression: str | None
+    resolution_rule: str | None
+
+
+class FunctionRelationshipFactsDict(TypedDict):
+    source_qualname: str
+    relationships: list[RelationshipRecordDict]
+
+
+class ClassMetricsDictBase(TypedDict):
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    cbo: int
+    lcom4: int
+    method_count: int
+    instance_var_count: int
+    risk_coupling: str
+    risk_cohesion: str
+
+
+class ClassMetricsDict(ClassMetricsDictBase, total=False):
+    coupled_classes: list[str]
+
+
+class ModuleDepDict(TypedDict):
+    source: str
+    target: str
+    import_type: str
+    line: int
+
+
+class DeadCandidateDictBase(TypedDict):
+    qualname: str
+    local_name: str
+    filepath: str
+    start_line: int
+    end_line: int
+    kind: str
+
+
+class DeadCandidateDict(DeadCandidateDictBase, total=False):
+    suppressed_rules: list[str]
+
+
+class SecuritySurfaceDict(TypedDict):
+    category: str
+    capability: str
+    module: str
+    filepath: str
+    qualname: str
+    start_line: int
+    end_line: int
+    location_scope: str
+    classification_mode: str
+    evidence_kind: str
+    evidence_symbol: str
+
+
+class RuntimeReachabilityFactDict(TypedDict):
+    target_qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    target_kind: str
+    framework: str
+    edge_kind: str
+    confidence: str
+    evidence: str
+    evidence_symbol: str
+    source_qualname: str
+
+
+class ModuleTypingCoverageDict(TypedDict):
+    module: str
+    filepath: str
+    callable_count: int
+    params_total: int
+    params_annotated: int
+    returns_total: int
+    returns_annotated: int
+    any_annotation_count: int
+
+
+class ModuleDocstringCoverageDict(TypedDict):
+    module: str
+    filepath: str
+    public_symbol_total: int
+    public_symbol_documented: int
+
+
+class ApiParamSpecDict(TypedDict):
+    name: str
+    kind: str
+    has_default: bool
+    annotation_hash: str
+
+
+class PublicSymbolDict(TypedDict):
+    qualname: str
+    kind: str
+    start_line: int
+    end_line: int
+    params: list[ApiParamSpecDict]
+    returns_hash: str
+    exported_via: str
+
+
+class ModuleApiSurfaceDict(TypedDict):
+    module: str
+    filepath: str
+    all_declared: list[str]
+    symbols: list[PublicSymbolDict]
+
+
+class StructuralFindingOccurrenceDict(TypedDict):
+    qualname: str
+    start: int
+    end: int
+
+
+class StructuralFindingGroupDict(TypedDict):
+    finding_kind: str
+    finding_key: str
+    signature: dict[str, str]
+    items: list[StructuralFindingOccurrenceDict]
+
+
+CacheLaneReuseReason = Literal[
+    "content_miss",
+    "dependent_profile_mismatch",
+    "hit",
+    "malformed_payload",
+    "neutral_profile_mismatch",
+]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheNeutralUnit:
+    local_name: str
+    start_line: int
+    end_line: int
+    loc: int
+    stmt_count: int
+    fingerprint: str
+    loc_bucket: str
+    cyclomatic_complexity: int
+    nesting_depth: int
+    risk: Literal["low", "medium", "high"]
+    raw_hash: str
+    entry_guard_count: int
+    entry_guard_terminal_profile: str
+    entry_guard_has_side_effect_before: bool
+    terminal_kind: str
+    try_finally_profile: str
+    side_effect_order_profile: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheNeutralBlock:
+    local_name: str
+    start_line: int
+    end_line: int
+    size: int
+    block_hash: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheNeutralSegment:
+    local_name: str
+    start_line: int
+    end_line: int
+    size: int
+    segment_hash: str
+    segment_sig: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheNeutralPayload:
+    source_stats: SourceStatsDict
+    units: tuple[CacheNeutralUnit, ...]
+    blocks: tuple[CacheNeutralBlock, ...]
+    segments: tuple[CacheNeutralSegment, ...]
+    semantic_facts: SemanticFileFacts
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RehydratedCacheNeutral:
+    source_stats: SourceStats
+    units: tuple[Unit, ...]
+    blocks: tuple[BlockUnit, ...]
+    segments: tuple[SegmentUnit, ...]
+    semantic_facts: SemanticFileFacts
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheDependentPayload:
+    class_metrics: tuple[ClassMetricsDict, ...]
+    module_deps: tuple[ModuleDepDict, ...]
+    dead_candidates: tuple[DeadCandidateDict, ...]
+    referenced_names: tuple[str, ...]
+    referenced_qualnames: tuple[str, ...]
+    import_names: tuple[str, ...]
+    class_names: tuple[str, ...]
+    runtime_reachability: tuple[RuntimeReachabilityFactDict, ...]
+    security_surfaces: tuple[SecuritySurfaceDict, ...]
+    function_relationship_facts: tuple[FunctionRelationshipFactsDict, ...]
+    typing_coverage: ModuleTypingCoverageDict | None
+    docstring_coverage: ModuleDocstringCoverageDict | None
+    api_surface: ModuleApiSurfaceDict | None
+    structural_findings: tuple[StructuralFindingGroupDict, ...] | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheEntryV3:
+    cache_content_binding_version: Literal["1"]
+    stat: FileStat
+    source_content_digest: DigestObject
+    git_blob_id_at_write: GitBlobIdentity | None
+    module_neutral_profile: DigestObject
+    module_dependent_profile: DigestObject
+    module_neutral: CacheNeutralPayload
+    module_dependent: CacheDependentPayload
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheLaneVerdict:
+    hit: bool
+    reason: CacheLaneReuseReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class CacheReuseDecision:
+    neutral: CacheLaneVerdict
+    dependent: CacheLaneVerdict
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1360,6 +1623,30 @@ class SegmentGroupItem(TypedDict):
     start_line: int
     end_line: int
     size: int
+
+
+class CacheFactsDictBase(TypedDict):
+    source_stats: SourceStatsDict
+    units: list[FunctionGroupItem]
+    blocks: list[BlockGroupItem]
+    segments: list[SegmentGroupItem]
+    class_metrics: list[ClassMetricsDict]
+    module_deps: list[ModuleDepDict]
+    dead_candidates: list[DeadCandidateDict]
+    referenced_names: list[str]
+    referenced_qualnames: list[str]
+    import_names: list[str]
+    class_names: list[str]
+    runtime_reachability: list[RuntimeReachabilityFactDict]
+    security_surfaces: list[SecuritySurfaceDict]
+    function_relationship_facts: list[FunctionRelationshipFactsDict]
+
+
+class CacheFactsDict(CacheFactsDictBase, total=False):
+    typing_coverage: ModuleTypingCoverageDict
+    docstring_coverage: ModuleDocstringCoverageDict
+    api_surface: ModuleApiSurfaceDict
+    structural_findings: list[StructuralFindingGroupDict]
 
 
 GroupMap = dict[str, list[GroupItem]]

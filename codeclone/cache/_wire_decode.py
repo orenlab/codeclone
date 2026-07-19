@@ -6,15 +6,45 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from ..models import (
+    ApiParamSpecDict,
     BlockGroupItem,
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheNeutralBlock,
+    CacheNeutralPayload,
+    CacheNeutralSegment,
+    CacheNeutralUnit,
+    ClassMetricsDict,
+    DeadCandidateDict,
     DigestObject,
+    EventKind,
+    FactRef,
+    FactRefKind,
+    FileStat,
+    FunctionContractSummary,
     FunctionGroupItem,
+    FunctionRelationshipFactsDict,
     GitBlobIdentity,
     GitObjectFormat,
+    ModuleApiSurfaceDict,
+    ModuleDepDict,
+    ModuleDocstringCoverageDict,
+    ModuleTypingCoverageDict,
+    PublicSymbolDict,
+    RelationshipRecordDict,
+    RuntimeReachabilityFactDict,
+    SecuritySurfaceDict,
     SegmentGroupItem,
+    SemanticEvent,
+    SemanticEventResolution,
+    SemanticFileFacts,
+    SourceStatsDict,
+    StructuralFindingGroupDict,
+    StructuralFindingOccurrenceDict,
 )
-from ._canonicalize import _attach_optional_cache_sections
 from ._wire_helpers import (
     _decode_optional_wire_coupled_classes,
     _decode_optional_wire_items,
@@ -33,25 +63,8 @@ from ._wire_helpers import (
     _decode_wire_unit_flow_profiles,
 )
 from .entries import (
-    ApiParamSpecDict,
     BlockDict,
-    CacheEntry,
-    ClassMetricsDict,
-    DeadCandidateDict,
-    FileStat,
-    FunctionRelationshipFactsDict,
-    ModuleApiSurfaceDict,
-    ModuleDepDict,
-    ModuleDocstringCoverageDict,
-    ModuleTypingCoverageDict,
-    PublicSymbolDict,
-    RelationshipRecordDict,
-    RuntimeReachabilityFactDict,
-    SecuritySurfaceDict,
     SegmentDict,
-    SourceStatsDict,
-    StructuralFindingGroupDict,
-    StructuralFindingOccurrenceDict,
     UnitDict,
     _as_relationship_kind,
     _as_relationship_origin_lane,
@@ -80,6 +93,184 @@ from .integrity import (
 )
 
 
+def _event_kind(value: object) -> EventKind | None:
+    match value:
+        case "artifact_write":
+            return "artifact_write"
+        case "assign":
+            return "assign"
+        case "compatibility_check":
+            return "compatibility_check"
+        case "compute_digest":
+            return "compute_digest"
+        case "construct":
+            return "construct"
+        case "field_write":
+            return "field_write"
+        case "publish_event":
+            return "publish_event"
+        case "resolve_identity":
+            return "resolve_identity"
+        case "return_value":
+            return "return_value"
+        case "serialize_field":
+            return "serialize_field"
+        case "security_observation":
+            return "security_observation"
+        case _:
+            return None
+
+
+def _fact_ref_kind(value: object) -> FactRefKind | None:
+    match value:
+        case "param":
+            return "param"
+        case "event":
+            return "event"
+        case "const":
+            return "const"
+        case "unresolved":
+            return "unresolved"
+        case _:
+            return None
+
+
+def _event_resolution(value: object) -> SemanticEventResolution | None:
+    match value:
+        case "resolved":
+            return "resolved"
+        case "unavailable":
+            return "unavailable"
+        case _:
+            return None
+
+
+def _decode_fact_ref(value: object) -> FactRef | None:
+    row = _as_list(value)
+    if row is None or len(row) != 2:
+        return None
+    kind = _fact_ref_kind(row[0])
+    ref = _as_str(row[1])
+    if kind is None or ref is None:
+        return None
+    return FactRef(kind=kind, ref=ref)
+
+
+def _decode_semantic_event(value: object, *, filepath: str) -> SemanticEvent | None:
+    row = _as_list(value)
+    if row is None or len(row) != 8:
+        return None
+    event_id = _as_str(row[0])
+    kind = _event_kind(row[1])
+    subject = _as_str(row[2])
+    inputs_raw = _as_list(row[3])
+    output_raw = row[4]
+    guards_raw = _as_list(row[5])
+    line = _as_int(row[6])
+    resolution = _event_resolution(row[7])
+    if (
+        event_id is None
+        or kind is None
+        or subject is None
+        or inputs_raw is None
+        or guards_raw is None
+        or line is None
+        or line < 1
+        or resolution is None
+    ):
+        return None
+    inputs = tuple(_decode_fact_ref(item) for item in inputs_raw)
+    if any(item is None for item in inputs):
+        return None
+    guards = tuple(_as_str(item) for item in guards_raw)
+    if any(item is None for item in guards):
+        return None
+    output = None if output_raw is None else _decode_fact_ref(output_raw)
+    if output_raw is not None and output is None:
+        return None
+    return SemanticEvent(
+        event_id=event_id,
+        kind=kind,
+        subject=subject,
+        inputs=tuple(item for item in inputs if item is not None),
+        output=output,
+        guards=tuple(item for item in guards if item is not None),
+        location=(filepath, line),
+        resolution=resolution,
+    )
+
+
+def _decode_contract_summary(
+    value: object,
+    *,
+    filepath: str,
+) -> FunctionContractSummary | None:
+    row = _as_list(value)
+    if row is None or len(row) != 5:
+        return None
+    function = _as_str(row[0])
+    events_raw = _as_list(row[1])
+    flows_raw = _as_list(row[2])
+    returns_raw = _as_list(row[3])
+    unresolved_flow = row[4]
+    if (
+        function is None
+        or events_raw is None
+        or flows_raw is None
+        or returns_raw is None
+        or not isinstance(unresolved_flow, bool)
+    ):
+        return None
+    events = tuple(
+        _decode_semantic_event(item, filepath=filepath) for item in events_raw
+    )
+    returns = tuple(_decode_fact_ref(item) for item in returns_raw)
+    if any(item is None for item in events) or any(item is None for item in returns):
+        return None
+    flows: list[tuple[str, str]] = []
+    for item in flows_raw:
+        flow = _as_list(item)
+        if flow is None or len(flow) != 2:
+            return None
+        source = _as_str(flow[0])
+        target = _as_str(flow[1])
+        if source is None or target is None:
+            return None
+        flows.append((source, target))
+    return FunctionContractSummary(
+        function=function,
+        events=tuple(item for item in events if item is not None),
+        param_flows=tuple(flows),
+        returns=tuple(item for item in returns if item is not None),
+        unresolved_flow=unresolved_flow,
+    )
+
+
+def _decode_semantic_facts(
+    obj: dict[str, object],
+    *,
+    filepath: str,
+) -> SemanticFileFacts | None:
+    events_raw = _as_list(obj.get("se"))
+    summaries_raw = _as_list(obj.get("fc"))
+    if events_raw is None or summaries_raw is None:
+        return None
+    events = tuple(
+        _decode_semantic_event(item, filepath=filepath) for item in events_raw
+    )
+    summaries = tuple(
+        _decode_contract_summary(item, filepath=filepath) for item in summaries_raw
+    )
+    if any(item is None for item in events) or any(item is None for item in summaries):
+        return None
+    return SemanticFileFacts(
+        events=tuple(item for item in events if item is not None),
+        function_contract_summaries=tuple(
+            item for item in summaries if item is not None
+        ),
+    )
+
+
 def _decode_wire_stat(obj: dict[str, object]) -> FileStat | None:
     stat_list = _as_list(obj.get("st"))
     if stat_list is None or len(stat_list) != 2:
@@ -91,24 +282,61 @@ def _decode_wire_stat(obj: dict[str, object]) -> FileStat | None:
     return FileStat(mtime_ns=mtime_ns, size=size)
 
 
+def _decode_sha256_value(value: object, *, expected_domain: str) -> str | None:
+    row = _as_list(value)
+    if row is None or len(row) != 3:
+        return None
+    domain = _as_str(row[0])
+    algorithm = _as_str(row[1])
+    digest_value = _as_str(row[2])
+    if domain != expected_domain or algorithm != "sha256":
+        return None
+    return digest_value
+
+
+def _decode_profile_digest(
+    value: object,
+    *,
+    expected_domain: str,
+) -> DigestObject | None:
+    digest_value = _decode_sha256_value(value, expected_domain=expected_domain)
+    if digest_value is None:
+        return None
+    normalized_domain: Literal[
+        "codeclone.cache.profile.neutral.v1",
+        "codeclone.cache.profile.dependent.v1",
+    ]
+    if expected_domain == "codeclone.cache.profile.neutral.v1":
+        normalized_domain = "codeclone.cache.profile.neutral.v1"
+    elif expected_domain == "codeclone.cache.profile.dependent.v1":
+        normalized_domain = "codeclone.cache.profile.dependent.v1"
+    else:
+        return None
+    try:
+        return DigestObject(
+            domain=normalized_domain,
+            algorithm="sha256",
+            value=digest_value,
+        )
+    except ValueError:
+        return None
+
+
 def _decode_content_binding(
     obj: dict[str, object],
 ) -> tuple[DigestObject, GitBlobIdentity | None] | None:
     if obj.get("cb") != "1" or "gb" not in obj:
         return None
-    source_digest_row = _as_list(obj.get("sd"))
-    if source_digest_row is None or len(source_digest_row) != 3:
-        return None
-    domain = _as_str(source_digest_row[0])
-    algorithm = _as_str(source_digest_row[1])
-    value = _as_str(source_digest_row[2])
-    if domain != "codeclone.source-content.v1" or algorithm != "sha256":
+    value = _decode_sha256_value(
+        obj.get("sd"), expected_domain="codeclone.source-content.v1"
+    )
+    if value is None:
         return None
     try:
         source_digest = DigestObject(
             domain="codeclone.source-content.v1",
             algorithm="sha256",
-            value=value or "",
+            value=value,
         )
     except ValueError:
         return None
@@ -161,18 +389,83 @@ def _decode_optional_wire_source_stats(
     )
 
 
-def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
+def _neutral_unit_from_wire(unit: UnitDict) -> CacheNeutralUnit:
+    return CacheNeutralUnit(
+        local_name=unit["qualname"],
+        start_line=unit["start_line"],
+        end_line=unit["end_line"],
+        loc=unit["loc"],
+        stmt_count=unit["stmt_count"],
+        fingerprint=unit["fingerprint"],
+        loc_bucket=unit["loc_bucket"],
+        cyclomatic_complexity=unit.get("cyclomatic_complexity", 1),
+        nesting_depth=unit.get("nesting_depth", 0),
+        risk=unit.get("risk", "low"),
+        raw_hash=unit.get("raw_hash", ""),
+        entry_guard_count=unit.get("entry_guard_count", 0),
+        entry_guard_terminal_profile=unit.get("entry_guard_terminal_profile", "none"),
+        entry_guard_has_side_effect_before=unit.get(
+            "entry_guard_has_side_effect_before", False
+        ),
+        terminal_kind=unit.get("terminal_kind", "fallthrough"),
+        try_finally_profile=unit.get("try_finally_profile", "none"),
+        side_effect_order_profile=unit.get("side_effect_order_profile", "none"),
+    )
+
+
+def _neutral_block_from_wire(block: BlockDict) -> CacheNeutralBlock:
+    return CacheNeutralBlock(
+        local_name=block["qualname"],
+        start_line=block["start_line"],
+        end_line=block["end_line"],
+        size=block["size"],
+        block_hash=block["block_hash"],
+    )
+
+
+def _neutral_segment_from_wire(segment: SegmentDict) -> CacheNeutralSegment:
+    return CacheNeutralSegment(
+        local_name=segment["qualname"],
+        start_line=segment["start_line"],
+        end_line=segment["end_line"],
+        size=segment["size"],
+        segment_hash=segment["segment_hash"],
+        segment_sig=segment["segment_sig"],
+    )
+
+
+def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None:
     obj = _as_str_dict(value)
     if obj is None:
         return None
 
     stat = _decode_wire_stat(obj)
     content_binding = _decode_content_binding(obj)
-    if stat is None or content_binding is None:
+    neutral_profile = _decode_profile_digest(
+        obj.get("np"), expected_domain="codeclone.cache.profile.neutral.v1"
+    )
+    dependent_profile = _decode_profile_digest(
+        obj.get("dp"), expected_domain="codeclone.cache.profile.dependent.v1"
+    )
+    neutral_obj = _as_str_dict(obj.get("n"))
+    dependent_obj = _as_str_dict(obj.get("d"))
+    if (
+        stat is None
+        or content_binding is None
+        or neutral_profile is None
+        or dependent_profile is None
+        or neutral_obj is None
+        or dependent_obj is None
+    ):
         return None
     source_content_digest, git_blob_id_at_write = content_binding
-    source_stats = _decode_optional_wire_source_stats(obj=obj)
-    file_sections = _decode_wire_file_sections(obj=obj, filepath=filepath)
+    source_stats = _decode_optional_wire_source_stats(obj=neutral_obj)
+    semantic_facts = _decode_semantic_facts(neutral_obj, filepath=filepath)
+    if source_stats is None or semantic_facts is None:
+        return None
+    facts_obj = dict(dependent_obj)
+    facts_obj.update(neutral_obj)
+    file_sections = _decode_wire_file_sections(obj=facts_obj, filepath=filepath)
     if file_sections is None:
         return None
     (
@@ -183,7 +476,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         module_deps,
         dead_candidates,
     ) = file_sections
-    name_sections = _decode_wire_name_sections(obj=obj)
+    name_sections = _decode_wire_name_sections(obj=facts_obj)
     if name_sections is None:
         return None
     (
@@ -192,25 +485,31 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         import_names,
         class_names,
     ) = name_sections
-    typing_coverage = _decode_optional_wire_typing_coverage(obj=obj, filepath=filepath)
+    typing_coverage = _decode_optional_wire_typing_coverage(
+        obj=dependent_obj, filepath=filepath
+    )
     docstring_coverage = _decode_optional_wire_docstring_coverage(
-        obj=obj,
+        obj=dependent_obj,
         filepath=filepath,
     )
-    api_surface = _decode_optional_wire_api_surface(obj=obj, filepath=filepath)
+    api_surface = _decode_optional_wire_api_surface(
+        obj=dependent_obj, filepath=filepath
+    )
     runtime_reachability = _decode_optional_wire_runtime_reachability(
-        obj=obj,
+        obj=dependent_obj,
         filepath=filepath,
     )
     security_surfaces = _decode_optional_wire_security_surfaces(
-        obj=obj,
+        obj=dependent_obj,
         filepath=filepath,
     )
     function_relationship_facts = _decode_optional_wire_function_relationship_facts(
-        obj=obj,
+        obj=dependent_obj,
         filepath=filepath,
     )
-    coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
+    coupled_classes_map = _decode_optional_wire_coupled_classes(
+        obj=dependent_obj, key="cc"
+    )
     if coupled_classes_map is None:
         return None
     if (
@@ -225,39 +524,48 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntry | None:
         if names:
             metric["coupled_classes"] = names
 
-    has_structural_findings = "sf" in obj
-    structural_findings = _decode_wire_structural_findings_optional(obj)
+    has_structural_findings = "sf" in dependent_obj
+    structural_findings = _decode_wire_structural_findings_optional(dependent_obj)
     if structural_findings is None:
         return None
 
-    return _attach_optional_cache_sections(
-        CacheEntry(
-            cache_content_binding_version="1",
-            source_content_digest=source_content_digest,
-            git_blob_id_at_write=git_blob_id_at_write,
-            stat=stat,
-            units=units,
-            blocks=blocks,
-            segments=segments,
-            class_metrics=class_metrics,
-            module_deps=module_deps,
-            dead_candidates=dead_candidates,
-            referenced_names=referenced_names,
-            referenced_qualnames=referenced_qualnames,
-            import_names=import_names,
-            class_names=class_names,
+    return CacheEntryV3(
+        cache_content_binding_version="1",
+        source_content_digest=source_content_digest,
+        git_blob_id_at_write=git_blob_id_at_write,
+        stat=stat,
+        module_neutral_profile=neutral_profile,
+        module_dependent_profile=dependent_profile,
+        module_neutral=CacheNeutralPayload(
+            source_stats=source_stats,
+            units=tuple(_neutral_unit_from_wire(unit) for unit in units),
+            blocks=tuple(_neutral_block_from_wire(block) for block in blocks),
+            segments=tuple(_neutral_segment_from_wire(segment) for segment in segments),
+            semantic_facts=semantic_facts,
         ),
-        typing_coverage=typing_coverage,
-        docstring_coverage=docstring_coverage,
-        api_surface=api_surface,
-        runtime_reachability=runtime_reachability,
-        security_surfaces=security_surfaces,
-        function_relationship_facts=function_relationship_facts,
-        source_stats=source_stats,
-        structural_findings=(
-            _normalize_cached_structural_groups(structural_findings, filepath=filepath)
-            if has_structural_findings
-            else None
+        module_dependent=CacheDependentPayload(
+            class_metrics=tuple(class_metrics),
+            module_deps=tuple(module_deps),
+            dead_candidates=tuple(dead_candidates),
+            referenced_names=tuple(referenced_names),
+            referenced_qualnames=tuple(referenced_qualnames),
+            import_names=tuple(import_names),
+            class_names=tuple(class_names),
+            runtime_reachability=tuple(runtime_reachability),
+            security_surfaces=tuple(security_surfaces),
+            function_relationship_facts=tuple(function_relationship_facts),
+            typing_coverage=typing_coverage,
+            docstring_coverage=docstring_coverage,
+            api_surface=api_surface,
+            structural_findings=(
+                tuple(
+                    _normalize_cached_structural_groups(
+                        structural_findings, filepath=filepath
+                    )
+                )
+                if has_structural_findings
+                else None
+            ),
         ),
     )
 

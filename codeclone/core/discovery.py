@@ -15,20 +15,25 @@ from ..cache.entries import (
     _as_relationship_origin_lane,
     _as_relationship_resolution_status,
 )
+from ..cache.projection import rehydrate_cache_neutral
 from ..cache.reuse import prove_cached_source_identity
 from ..cache.store import Cache, file_stat_signature
 from ..models import (
     ClassMetrics,
+    ContentIdentityVerdict,
     DeadCandidate,
+    FunctionContractSummary,
     FunctionRelationshipFacts,
     GroupItem,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
     ModuleTypingCoverage,
+    RehydratedCacheNeutral,
     RelationshipRecord,
     RuntimeReachabilityFact,
     SecuritySurface,
+    SemanticEvent,
     StructuralFindingGroup,
 )
 from ..observability import span
@@ -37,12 +42,15 @@ from ..paths.module_identity.inventory import build_module_registry
 from ._types import (
     BootstrapResult,
     DiscoveryResult,
+    _block_to_group_item,
     _class_metric_sort_key,
     _coerce_segment_report_projection,
     _dead_candidate_sort_key,
     _group_item_sort_key,
     _module_dep_sort_key,
+    _segment_to_group_item,
     _should_collect_structural_findings,
+    _unit_to_group_item,
 )
 from .discovery_cache import (
     decode_cached_structural_finding_group as _decode_cached_structural_finding_group,
@@ -122,13 +130,27 @@ DiscoveryBuffers = tuple[
 ]
 
 
-def _group_items_from_cache(rows: Sequence[Mapping[str, object]]) -> list[GroupItem]:
-    return [dict(row) for row in rows]
-
-
 def _new_discovery_buffers() -> DiscoveryBuffers:
     # Keep buffer order aligned with DiscoveryBuffers above.
     return [], [], [], [], [], [], set(), set(), [], [], [], [], [], [], []
+
+
+ContentIdentityCounters = tuple[int, int, int, int, int, int, int, int]
+
+
+def _content_identity_counters(
+    verdict: ContentIdentityVerdict,
+) -> ContentIdentityCounters:
+    return (
+        int(verdict.reason == "blob_hit"),
+        int(verdict.reason == "digest_hit"),
+        int(verdict.reason == "digest_miss"),
+        int(verdict.git_fallback_reason == "dirty"),
+        int(verdict.git_fallback_reason == "git_unavailable"),
+        int(verdict.git_fallback_reason == "index_ambiguous"),
+        int(verdict.git_fallback_reason == "racy"),
+        int(verdict.git_fallback_reason == "untracked"),
+    )
 
 
 def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
@@ -159,6 +181,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     cached_sf: list[StructuralFindingGroup] = []
     cached_relationship_facts: list[FunctionRelationshipFacts] = []
     cached_source_stats_by_file: list[tuple[str, int, int, int, int]] = []
+    cached_semantic_events: list[SemanticEvent] = []
+    cached_function_contract_summaries: list[FunctionContractSummary] = []
+    neutral_reuse_by_file: list[tuple[str, RehydratedCacheNeutral]] = []
     cached_lines = cached_functions = cached_methods = cached_classes = 0
     all_file_paths: list[str] = []
 
@@ -173,6 +198,7 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         root=boot.root,
         source_roots=source_roots,
     )
+    cache.bind_module_registry(module_registry)
     analyzed_paths = tuple(
         str(boot.root / entry.identity.file.path)
         for entry in module_registry.entries_by_path.values()
@@ -184,8 +210,12 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
     dirty_fallbacks = git_unavailable_fallbacks = 0
     index_ambiguous_fallbacks = racy_fallbacks = untracked_fallbacks = 0
     digest_verify_cost_us = stat_fast_rejects = 0
+    neutral_hits = dependent_misses = 0
 
-    with span(name="cache.content_identity") as content_span:
+    with (
+        span(name="cache.content_identity") as content_span,
+        span(name="cache.profile_reuse") as profile_span,
+    ):
         for filepath in analyzed_paths:
             files_found += 1
             all_file_paths.append(filepath)
@@ -203,25 +233,54 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     current_stat=stat,
                     git_snapshot=git_snapshot,
                 )
-                if verdict.reason == "blob_hit":
-                    blob_hits += 1
-                elif verdict.reason == "digest_hit":
-                    digest_hits += 1
-                elif verdict.reason == "digest_miss":
-                    digest_misses += 1
-                if verdict.git_fallback_reason == "dirty":
-                    dirty_fallbacks += 1
-                elif verdict.git_fallback_reason == "git_unavailable":
-                    git_unavailable_fallbacks += 1
-                elif verdict.git_fallback_reason == "index_ambiguous":
-                    index_ambiguous_fallbacks += 1
-                elif verdict.git_fallback_reason == "racy":
-                    racy_fallbacks += 1
-                elif verdict.git_fallback_reason == "untracked":
-                    untracked_fallbacks += 1
+                (
+                    blob_hit,
+                    digest_hit,
+                    digest_miss,
+                    dirty_fallback,
+                    git_unavailable_fallback,
+                    index_ambiguous_fallback,
+                    racy_fallback,
+                    untracked_fallback,
+                ) = _content_identity_counters(verdict)
+                blob_hits += blob_hit
+                digest_hits += digest_hit
+                digest_misses += digest_miss
+                dirty_fallbacks += dirty_fallback
+                git_unavailable_fallbacks += git_unavailable_fallback
+                index_ambiguous_fallbacks += index_ambiguous_fallback
+                racy_fallbacks += racy_fallback
+                untracked_fallbacks += untracked_fallback
                 digest_verify_cost_us += verdict.digest_verify_cost_us
                 stat_fast_rejects += int(verdict.stat_fast_reject)
-                if verdict.hit:
+                decision = cache.reuse_decision(content=verdict, entry=cached)
+                neutral_hits += int(decision.neutral.hit)
+                dependent_misses += int(not decision.dependent.hit)
+                if decision.neutral.hit:
+                    registry_entry = module_registry.entries_by_path.get(
+                        Path(filepath)
+                        .resolve()
+                        .relative_to(boot.root.resolve())
+                        .as_posix()
+                    )
+                    if registry_entry is None:
+                        files_to_process.append(filepath)
+                        continue
+                    python_module = registry_entry.identity.python_module
+                    module_name = (
+                        python_module.module
+                        if python_module is not None
+                        else registry_entry.identity.file.path
+                    )
+                    neutral = rehydrate_cache_neutral(
+                        cached.module_neutral,
+                        module_name=module_name,
+                        filepath=filepath,
+                    )
+                    if not decision.dependent.hit:
+                        files_to_process.append(filepath)
+                        neutral_reuse_by_file.append((filepath, neutral))
+                        continue
                     cached_source_stats = _usable_cached_source_stats(
                         cached,
                         skip_metrics=boot.args.skip_metrics,
@@ -239,9 +298,19 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                     cached_source_stats_by_file.append(
                         (filepath, lines, functions, methods, classes)
                     )
-                    cached_units.extend(_group_items_from_cache(cached["units"]))
-                    cached_blocks.extend(_group_items_from_cache(cached["blocks"]))
-                    cached_segments.extend(_group_items_from_cache(cached["segments"]))
+                    cached_units.extend(
+                        _unit_to_group_item(unit) for unit in neutral.units
+                    )
+                    cached_blocks.extend(
+                        _block_to_group_item(block) for block in neutral.blocks
+                    )
+                    cached_segments.extend(
+                        _segment_to_group_item(segment) for segment in neutral.segments
+                    )
+                    cached_semantic_events.extend(neutral.semantic_facts.events)
+                    cached_function_contract_summaries.extend(
+                        neutral.semantic_facts.function_contract_summaries
+                    )
                     if not boot.args.skip_metrics:
                         (
                             class_metrics,
@@ -274,11 +343,13 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                                 group_dict,
                                 filepath,
                             )
-                            for group_dict in cached.get("structural_findings") or []
+                            for group_dict in (
+                                cached.module_dependent.structural_findings or ()
+                            )
                         )
                     cached_relationship_facts.extend(
                         _decode_cached_function_relationship_facts(
-                            cached.get("function_relationship_facts") or []
+                            cached.module_dependent.function_relationship_facts
                         )
                     )
                     continue
@@ -306,6 +377,8 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
             digest_verify_cost_us,
         )
         content_span.set_counter("cache_stat_fast_reject", stat_fast_rejects)
+        profile_span.set_counter("cache_lane_neutral_hit", neutral_hits)
+        profile_span.set_counter("cache_lane_dependent_miss", dependent_misses)
 
     cache.prune_file_entries(all_file_paths)
 
@@ -372,6 +445,18 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
         cached_structural_findings=tuple(cached_sf),
         cached_function_relationship_facts=tuple(
             sorted(cached_relationship_facts, key=lambda facts: facts.source_qualname)
+        ),
+        cached_semantic_events=tuple(
+            sorted(cached_semantic_events, key=lambda event: event.event_id)
+        ),
+        cached_function_contract_summaries=tuple(
+            sorted(
+                cached_function_contract_summaries,
+                key=lambda summary: summary.function,
+            )
+        ),
+        neutral_reuse_by_file=tuple(
+            sorted(neutral_reuse_by_file, key=lambda item: item[0])
         ),
         cached_segment_report_projection=cached_segment_projection,
         cached_lines=cached_lines,

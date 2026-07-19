@@ -21,10 +21,6 @@ import codeclone.core.pipeline as core_pipeline
 import codeclone.surfaces.cli.console as cli_console
 import codeclone.surfaces.cli.workflow as cli
 from codeclone.analysis.normalizer import NormalizationConfig
-from codeclone.cache._canonicalize import (
-    _as_file_stat_dict,
-    _has_cache_entry_container_shape,
-)
 from codeclone.cache._validators import _is_dead_candidate_dict
 from codeclone.cache._wire_decode import (
     _decode_content_binding,
@@ -36,7 +32,7 @@ from codeclone.cache._wire_decode import (
     _decode_wire_unit,
 )
 from codeclone.cache._wire_encode import _encode_wire_file_entry
-from codeclone.cache.entries import CacheEntry, SourceStatsDict, _as_risk_literal
+from codeclone.cache.entries import _as_risk_literal
 from codeclone.cache.projection import (
     SegmentReportProjection,
     build_segment_report_projection,
@@ -55,19 +51,21 @@ from codeclone.core._types import (
 )
 from codeclone.core.discovery import discover
 from codeclone.core.discovery_cache import (
-    _cache_entry_source_stats,
     decode_cached_structural_finding_group,
 )
 from codeclone.core.entrypoints import collect_project_entrypoint_qualnames
 from codeclone.core.pipeline import analyze
 from codeclone.findings.clones.grouping import build_segment_groups
 from codeclone.models import (
-    BlockUnit,
-    ClassMetrics,
+    CacheDependentPayload,
+    CacheEntryV3,
+    CacheLaneVerdict,
+    CacheNeutralPayload,
+    CacheReuseDecision,
     ContentIdentityVerdict,
     DeadCandidate,
     DigestObject,
-    FileMetrics,
+    FileStat,
     FoundationConfigInput,
     GitBlobIdentity,
     GitContentSnapshot,
@@ -76,8 +74,8 @@ from codeclone.models import (
     GitStatusEntryInput,
     GitTrackedContent,
     GitWorkspaceSnapshot,
-    ModuleDep,
-    SegmentUnit,
+    SemanticFileFacts,
+    SourceStatsDict,
 )
 from codeclone.report.gates.reasons import policy_context
 from tests._assertions import assert_contains_all
@@ -114,51 +112,6 @@ def test_cache_risk_and_shape_helpers() -> None:
     assert _as_risk_literal("high") == "high"
     assert _as_risk_literal("oops") is None
 
-    assert _has_cache_entry_container_shape({}) is False
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": 1,
-                "blocks": [],
-                "segments": [],
-            }
-        )
-        is False
-    )
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": 1,
-                "segments": [],
-            }
-        )
-        is False
-    )
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": 1,
-                "units": [],
-                "blocks": [],
-                "segments": [],
-            }
-        )
-        is False
-    )
-    assert (
-        _has_cache_entry_container_shape(
-            {
-                "stat": {"mtime_ns": 1, "size": 1},
-                "units": [],
-                "blocks": [],
-                "segments": 1,
-            }
-        )
-        is False
-    )
     assert _is_dead_candidate_dict("bad") is False
     assert (
         _is_dead_candidate_dict(
@@ -173,44 +126,6 @@ def test_cache_risk_and_shape_helpers() -> None:
         )
         is True
     )
-
-
-def _minimal_bound_cache_entry() -> dict[str, object]:
-    return {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _source_digest_fixture(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 6},
-        "units": [],
-        "blocks": [],
-        "segments": [],
-    }
-
-
-@pytest.mark.parametrize(
-    ("field", "invalid_value"),
-    [
-        ("stat", None),
-        ("units", ()),
-        ("blocks", ()),
-        ("segments", ()),
-        ("cache_content_binding_version", "0"),
-        ("source_content_digest", "invalid"),
-        ("git_blob_id_at_write", "invalid"),
-        ("source_stats", {"lines": -1}),
-        ("class_metrics", ()),
-        ("typing_coverage", {}),
-        ("docstring_coverage", {}),
-        ("api_surface", {}),
-    ],
-)
-def test_bound_cache_entry_shape_rejects_each_invalid_section(
-    field: str,
-    invalid_value: object,
-) -> None:
-    entry = _minimal_bound_cache_entry()
-    entry[field] = invalid_value
-    assert _has_cache_entry_container_shape(entry) is False
 
 
 @pytest.mark.parametrize(
@@ -419,21 +334,6 @@ def test_cached_relationship_decoders_ignore_non_records() -> None:
     )
 
 
-def test_cache_as_file_stat_dict_flaky_mapping() -> None:
-    class _FlakyDict(dict[str, object]):
-        def __init__(self) -> None:
-            super().__init__()
-            self._calls = 0
-
-        def get(self, key: str, default: object = None) -> object:
-            self._calls += 1
-            if self._calls <= 2:
-                return 1
-            return "not-int"
-
-    assert _as_file_stat_dict(_FlakyDict()) is None
-
-
 def test_cache_decode_structural_invalid_rows() -> None:
     assert _decode_wire_structural_findings_optional({"sf": "bad"}) is None
     assert _decode_wire_structural_findings_optional({"sf": [["broken"]]}) is None
@@ -515,145 +415,50 @@ def test_cache_decode_wire_unit_extended_invalid_shape() -> None:
     assert _decode_wire_unit(row, "a.py") is None
 
 
-def test_cache_get_file_entry_canonicalization_paths(tmp_path: Path) -> None:
-    cache = Cache(tmp_path / "cache.json", root=tmp_path)
-    filepath = str((tmp_path / "a.py").resolve())
-
-    cast(dict[str, object], cache.data["files"])[filepath] = {
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": 1,
-        "blocks": [],
-        "segments": [],
-    }
-    cache._canonical_runtime_paths.add(filepath)
-    assert cache.get_file_entry(filepath) is None
-    assert filepath not in cache._canonical_runtime_paths
-
-    cast(dict[str, object], cache.data["files"])[filepath] = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _source_digest_fixture(b"source"),
-        "git_blob_id_at_write": None,
-        "stat": {"mtime_ns": 1, "size": 1},
-        "units": [
-            {
-                "qualname": "q",
-                "filepath": filepath,
-                "start_line": 1,
-                "end_line": 2,
-                "loc": 1,
-                "stmt_count": 1,
-                "fingerprint": "fp",
-                "loc_bucket": "1-19",
-                "cyclomatic_complexity": 1,
-                "nesting_depth": 0,
-                "risk": "low",
-                "raw_hash": "rh",
-            }
-        ],
-        "blocks": [
-            {
-                "block_hash": "bh",
-                "filepath": filepath,
-                "qualname": "q",
-                "start_line": 1,
-                "end_line": 2,
-                "size": 2,
-            }
-        ],
-        "segments": [
-            {
-                "segment_hash": "sh",
-                "segment_sig": "ss",
-                "filepath": filepath,
-                "qualname": "q",
-                "start_line": 1,
-                "end_line": 2,
-                "size": 2,
-            }
-        ],
-        "class_metrics": [],
-        "module_deps": [],
-        "dead_candidates": [],
-        "referenced_names": [],
-        "referenced_qualnames": [],
-        "import_names": [],
-        "class_names": [],
-        "structural_findings": [
-            {
-                "finding_kind": "duplicated_branches",
-                "finding_key": "k",
-                "signature": {"stmt_seq": "Expr,Return"},
-                "items": [{"qualname": "q", "start": 1, "end": 2}],
-            }
-        ],
-    }
-    entry = cache.get_file_entry(filepath)
-    assert entry is not None
-    assert "structural_findings" in entry
-
-    metric = ClassMetrics(
-        qualname="pkg:Cls",
-        filepath=filepath,
-        start_line=1,
-        end_line=10,
-        cbo=11,
-        lcom4=4,
-        method_count=4,
-        instance_var_count=1,
-        risk_coupling="high",
-        risk_cohesion="high",
-        coupled_classes=("A", "B"),
-    )
-    dep = ModuleDep(source="pkg.a", target="pkg.b", import_type="import", line=3)
-    dead = DeadCandidate(
-        qualname="pkg:dead",
-        local_name="dead",
-        filepath=filepath,
-        start_line=20,
-        end_line=22,
-        kind="function",
-    )
-    file_metrics = FileMetrics(
-        class_metrics=(metric,),
-        module_deps=(dep,),
-        dead_candidates=(dead,),
-        referenced_names=frozenset({"used"}),
-        import_names=frozenset({"pkg.b"}),
-        class_names=frozenset({"Cls"}),
-    )
-    cache.put_file_entry(
-        filepath,
-        {"mtime_ns": 1, "size": 1},
-        [],
-        [BlockUnit("bh", filepath, "q", 1, 2, 2)],
-        [SegmentUnit("sh", "ss", filepath, "q", 1, 2, 2)],
-        source_content_digest=_source_digest_fixture(b"source"),
-        file_metrics=file_metrics,
-    )
-
-
 def test_cache_encode_wire_file_entry_includes_rq() -> None:
-    entry = cast(
-        CacheEntry,
-        {
-            "cache_content_binding_version": "1",
-            "source_content_digest": _source_digest_fixture(b"source"),
-            "git_blob_id_at_write": None,
-            "stat": {"mtime_ns": 1, "size": 1},
-            "units": [],
-            "blocks": [],
-            "segments": [],
-            "class_metrics": [],
-            "module_deps": [],
-            "dead_candidates": [],
-            "referenced_names": [],
-            "referenced_qualnames": ["pkg:b", "pkg:a", "pkg:a"],
-            "import_names": [],
-            "class_names": [],
-        },
+    entry = CacheEntryV3(
+        cache_content_binding_version="1",
+        source_content_digest=_source_digest_fixture(b"source"),
+        git_blob_id_at_write=None,
+        stat={"mtime_ns": 1, "size": 1},
+        module_neutral_profile=DigestObject(
+            domain="codeclone.cache.profile.neutral.v1",
+            algorithm="sha256",
+            value="1" * 64,
+        ),
+        module_dependent_profile=DigestObject(
+            domain="codeclone.cache.profile.dependent.v1",
+            algorithm="sha256",
+            value="2" * 64,
+        ),
+        module_neutral=CacheNeutralPayload(
+            source_stats={"lines": 0, "functions": 0, "methods": 0, "classes": 0},
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=(),
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=(),
+            referenced_qualnames=("pkg:b", "pkg:a", "pkg:a"),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=None,
+        ),
     )
     wire = _encode_wire_file_entry(entry)
-    assert wire.get("rq") == ["pkg:a", "pkg:b"]
+    dependent = wire.get("d")
+    assert isinstance(dependent, dict)
+    assert dependent.get("rq") == ["pkg:a", "pkg:b"]
 
 
 def test_cache_segment_report_projection_roundtrip(tmp_path: Path) -> None:
@@ -1322,26 +1127,103 @@ def _discover_with_single_cached_entry(
     *,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    cached_entry: dict[str, object],
+    decision: CacheReuseDecision,
 ) -> DiscoveryResult:
     source = tmp_path / "a.py"
     source.write_text("def f():\n    return 1\n", "utf-8")
     filepath = str(source)
-    stat = {"mtime_ns": 1, "size": 1}
-    cache_entry = {
-        "cache_content_binding_version": "1",
-        "source_content_digest": _source_digest_fixture(source.read_bytes()),
-        "git_blob_id_at_write": None,
-        "stat": stat,
-        **cached_entry,
-    }
+    stat = FileStat(mtime_ns=1, size=1)
+    cache_entry = CacheEntryV3(
+        cache_content_binding_version="1",
+        source_content_digest=_source_digest_fixture(source.read_bytes()),
+        git_blob_id_at_write=None,
+        stat=stat,
+        module_neutral_profile=DigestObject(
+            domain="codeclone.cache.profile.neutral.v1",
+            algorithm="sha256",
+            value="1" * 64,
+        ),
+        module_dependent_profile=DigestObject(
+            domain="codeclone.cache.profile.dependent.v1",
+            algorithm="sha256",
+            value="2" * 64,
+        ),
+        module_neutral=CacheNeutralPayload(
+            source_stats={"lines": 2, "functions": 1, "methods": 0, "classes": 0},
+            units=(),
+            blocks=(),
+            segments=(),
+            semantic_facts=SemanticFileFacts(),
+        ),
+        module_dependent=CacheDependentPayload(
+            class_metrics=(
+                {
+                    "qualname": "pkg:Cls",
+                    "filepath": "placeholder",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "cbo": 11,
+                    "lcom4": 4,
+                    "method_count": 4,
+                    "instance_var_count": 1,
+                    "risk_coupling": "high",
+                    "risk_cohesion": "high",
+                    "coupled_classes": ["A", "B"],
+                },
+            ),
+            module_deps=(
+                {
+                    "source": "pkg.a",
+                    "target": "pkg.b",
+                    "import_type": "import",
+                    "line": 3,
+                },
+            ),
+            dead_candidates=(
+                {
+                    "qualname": "pkg:dead",
+                    "local_name": "dead",
+                    "filepath": "placeholder",
+                    "start_line": 20,
+                    "end_line": 22,
+                    "kind": "function",
+                },
+            ),
+            referenced_names=("used_name",),
+            referenced_qualnames=(),
+            import_names=(),
+            class_names=(),
+            runtime_reachability=(),
+            security_surfaces=(),
+            function_relationship_facts=(),
+            typing_coverage=None,
+            docstring_coverage=None,
+            api_surface=None,
+            structural_findings=None,
+        ),
+    )
 
     class _FakeCache:
         def bind_git_content_snapshot(self, _snapshot: object) -> None:
             return None
 
-        def get_file_entry(self, _path: str) -> dict[str, object]:
+        def bind_module_registry(self, _registry: object) -> None:
+            return None
+
+        def get_file_entry(self, _path: str) -> CacheEntryV3:
             return cache_entry
+
+        def reuse_decision(
+            self,
+            *,
+            content: ContentIdentityVerdict,
+            entry: CacheEntryV3,
+        ) -> CacheReuseDecision:
+            del entry
+            if not content.hit:
+                miss = CacheLaneVerdict(hit=False, reason="content_miss")
+                return CacheReuseDecision(neutral=miss, dependent=miss)
+            return decision
 
         def prune_file_entries(self, existing_filepaths: object) -> int:
             return 0
@@ -1378,6 +1260,13 @@ def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
 
     cache_path = tmp_path / "cache.json"
     cache = Cache(cache_path, root=tmp_path)
+    cache.bind_module_registry(
+        module_registry_context(
+            filepath="a.py",
+            module_name="a",
+            inventory_modules=("stale",),
+        )[1]
+    )
     cache.put_file_entry(
         str(live),
         file_stat_signature(str(live)),
@@ -1411,8 +1300,9 @@ def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
     result = discover(boot=boot, cache=loaded)
 
     assert result.files_found == 1
-    assert result.cache_hits == 1
-    assert result.files_to_process == ()
+    assert result.cache_hits == 0
+    assert result.files_to_process == (str(live),)
+    assert len(result.neutral_reuse_by_file) == 1
     assert str(stale) not in loaded.data["files"]
 
     loaded.save()
@@ -1423,109 +1313,44 @@ def test_discover_prunes_deleted_cache_entries(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    ("cached_entry", "expected_cache_hits", "expected_files_to_process"),
+    ("decision", "expected_cache_hits", "expected_files_to_process"),
     [
         (
-            {
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "class_metrics": [
-                    {
-                        "qualname": "pkg:Cls",
-                        "filepath": "placeholder",
-                        "start_line": 1,
-                        "end_line": 10,
-                        "cbo": 11,
-                        "lcom4": 4,
-                        "method_count": 4,
-                        "instance_var_count": 1,
-                        "risk_coupling": "high",
-                        "risk_cohesion": "high",
-                        "coupled_classes": ["A", "B"],
-                    }
-                ],
-                "module_deps": [
-                    {
-                        "source": "pkg.a",
-                        "target": "pkg.b",
-                        "import_type": "import",
-                        "line": 3,
-                    }
-                ],
-                "dead_candidates": [
-                    {
-                        "qualname": "pkg:dead",
-                        "local_name": "dead",
-                        "filepath": "placeholder",
-                        "start_line": 20,
-                        "end_line": 22,
-                        "kind": "function",
-                    }
-                ],
-                "referenced_names": ["used_name"],
-                "referenced_qualnames": [],
-                "import_names": [],
-                "class_names": [],
-                "source_stats": {
-                    "lines": 2,
-                    "functions": 1,
-                    "methods": 0,
-                    "classes": 0,
-                },
-            },
+            CacheReuseDecision(
+                neutral=CacheLaneVerdict(hit=True, reason="hit"),
+                dependent=CacheLaneVerdict(hit=True, reason="hit"),
+            ),
             1,
             (),
         ),
         (
-            {
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "class_metrics": [],
-                "module_deps": [],
-                "dead_candidates": [],
-                "referenced_names": ["used_name"],
-                "referenced_qualnames": [],
-                "import_names": [],
-                "class_names": [],
-            },
-            0,
-            ("a.py",),
-        ),
-        (
-            {
-                "units": [],
-                "blocks": [],
-                "segments": [],
-                "source_stats": {
-                    "lines": 2,
-                    "functions": 1,
-                    "methods": 0,
-                    "classes": 0,
-                },
-            },
+            CacheReuseDecision(
+                neutral=CacheLaneVerdict(hit=True, reason="hit"),
+                dependent=CacheLaneVerdict(
+                    hit=False,
+                    reason="dependent_profile_mismatch",
+                ),
+            ),
             0,
             ("a.py",),
         ),
     ],
     ids=[
-        "cached-metrics-hit",
-        "missing-source-stats",
-        "missing-metrics-sections",
+        "full-hit",
+        "neutral-hit-dependent-miss",
     ],
 )
 def test_pipeline_discover_cache_admission_branches(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    cached_entry: dict[str, object],
+    decision: CacheReuseDecision,
     expected_cache_hits: int,
     expected_files_to_process: tuple[str, ...],
 ) -> None:
     discovered = _discover_with_single_cached_entry(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
-        cached_entry=cached_entry,
+        decision=decision,
     )
     assert discovered.cache_hits == expected_cache_hits
     assert tuple(Path(path).name for path in discovered.files_to_process) == (
@@ -1598,31 +1423,14 @@ def test_discover_records_each_content_identity_outcome(
     discovered = _discover_with_single_cached_entry(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
-        cached_entry={},
+        decision=CacheReuseDecision(
+            neutral=CacheLaneVerdict(hit=True, reason="hit"),
+            dependent=CacheLaneVerdict(hit=True, reason="hit"),
+        ),
     )
 
     assert discovered.cache_hits == 0
     assert tuple(Path(path).name for path in discovered.files_to_process) == ("a.py",)
-
-
-def test_pipeline_cached_source_stats_helper_invalid_shapes() -> None:
-    assert _cache_entry_source_stats(cast(CacheEntry, {})) is None
-    assert (
-        _cache_entry_source_stats(
-            cast(
-                CacheEntry,
-                {
-                    "source_stats": {
-                        "lines": 1,
-                        "functions": 1,
-                        "methods": -1,
-                        "classes": 0,
-                    }
-                },
-            )
-        )
-        is None
-    )
 
 
 def test_cli_metric_reason_parser_and_policy_context() -> None:

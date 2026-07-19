@@ -31,6 +31,7 @@ from ..models import (
     FileMetrics,
     FunctionContractSummary,
     ModuleRegistryHandle,
+    RehydratedCacheNeutral,
     ResolvedSourceIdentity,
     SegmentUnit,
     SemanticFileFacts,
@@ -134,6 +135,7 @@ def extract_units_and_stats_from_source(
     collect_api_surface: bool = False,
     api_include_private_modules: bool = False,
     phase_ledger: PhaseLedger = INERT_PHASE_LEDGER,
+    neutral_reuse: RehydratedCacheNeutral | None = None,
 ) -> tuple[
     list[Unit],
     list[BlockUnit],
@@ -202,15 +204,39 @@ def extract_units_and_stats_from_source(
     module_class_names = set(class_names)
     class_metrics: list[ClassMetrics] = []
 
-    units: list[Unit] = []
-    block_units: list[BlockUnit] = []
-    segment_units: list[SegmentUnit] = []
+    units: list[Unit] = list(neutral_reuse.units) if neutral_reuse is not None else []
+    block_units: list[BlockUnit] = (
+        list(neutral_reuse.blocks) if neutral_reuse is not None else []
+    )
+    segment_units: list[SegmentUnit] = (
+        list(neutral_reuse.segments) if neutral_reuse is not None else []
+    )
     structural_findings: list[StructuralFindingGroup] = []
-    function_contract_summaries: list[FunctionContractSummary] = []
+    function_contract_summaries: list[FunctionContractSummary] = (
+        list(neutral_reuse.semantic_facts.function_contract_summaries)
+        if neutral_reuse is not None
+        else []
+    )
 
     for local_name, node in collector.units:
         phase_ledger.add_volume(AnalysisVolumeKey.UNITS_SEEN)
         qualname = f"{module_name}:{local_name}"
+        unit_shape = _eligible_unit_shape(
+            node,
+            min_loc=min_loc,
+            min_stmt=min_stmt,
+        )
+        if neutral_reuse is not None:
+            if unit_shape is not None and collect_structural_findings:
+                with phase_ledger.phase(AnalysisPhaseKey.UNIT_STRUCTURAL):
+                    structure_facts = scan_function_structure(
+                        node,
+                        filepath,
+                        qualname,
+                        collect_findings=True,
+                    )
+                structural_findings.extend(structure_facts.structural_findings)
+            continue
         graph, fingerprint, complexity = _cfg_fingerprint_and_complexity(
             node,
             cfg,
@@ -224,11 +250,6 @@ def extract_units_and_stats_from_source(
                 graph=graph,
                 events=_walk.semantic_events,
             )
-        )
-        unit_shape = _eligible_unit_shape(
-            node,
-            min_loc=min_loc,
-            min_stmt=min_stmt,
         )
         if unit_shape is None:
             continue
@@ -392,9 +413,14 @@ def extract_units_and_stats_from_source(
                 imported_names=import_names,
                 include_private_modules=api_include_private_modules,
             )
+        semantic_events = (
+            neutral_reuse.semantic_facts.events
+            if neutral_reuse is not None
+            else _walk.semantic_events
+        )
         security_surfaces = phase_ledger.run_subphase_us(
             SUBPHASE_MODULE_PASSES_SECURITY_US,
-            lambda: project_security_surfaces(_walk.semantic_events),
+            lambda: project_security_surfaces(semantic_events),
         )
         runtime_reachability = collect_runtime_reachability(
             tree=tree,
@@ -408,11 +434,15 @@ def extract_units_and_stats_from_source(
         units,
         block_units,
         segment_units,
-        SourceStats(
-            lines=source_line_count,
-            functions=collector.function_count,
-            methods=collector.method_count,
-            classes=collector.class_count,
+        (
+            neutral_reuse.source_stats
+            if neutral_reuse is not None
+            else SourceStats(
+                lines=source_line_count,
+                functions=collector.function_count,
+                methods=collector.method_count,
+                classes=collector.class_count,
+            )
         ),
         FileMetrics(
             class_metrics=sorted_class_metrics,
@@ -424,7 +454,7 @@ def extract_units_and_stats_from_source(
             runtime_reachability=runtime_reachability,
             security_surfaces=security_surfaces,
             semantic_facts=SemanticFileFacts(
-                events=_walk.semantic_events,
+                events=semantic_events,
                 function_contract_summaries=tuple(
                     sorted(
                         function_contract_summaries,

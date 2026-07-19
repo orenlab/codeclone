@@ -53,7 +53,6 @@ from codeclone.audit.events import AuditEvent
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
 from codeclone.baseline import Baseline, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
-from codeclone.cache.entries import FileStat
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import (
@@ -62,7 +61,7 @@ from codeclone.contracts import (
     REPORT_SCHEMA_VERSION,
 )
 from codeclone.contracts.errors import BaselineValidationError
-from codeclone.models import DigestObject, MetricsDiff
+from codeclone.models import DigestObject, FileStat, MetricsDiff
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     CachePolicy,
@@ -2122,7 +2121,7 @@ def test_workspace_drift_marks_missing_files_when_topology_unknown(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from codeclone.cache.entries import FileStat
+    from codeclone.models import FileStat
 
     record = replace(
         _dummy_run_record(tmp_path, "drift-oserror"),

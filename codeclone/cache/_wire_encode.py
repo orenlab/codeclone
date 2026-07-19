@@ -6,11 +6,22 @@
 
 from __future__ import annotations
 
+from ..models import (
+    BlockGroupItem,
+    CacheEntryV3,
+    CacheFactsDict,
+    ClassMetricsDict,
+    DigestObject,
+    FactRef,
+    FunctionContractSummary,
+    FunctionGroupItem,
+    SegmentGroupItem,
+    SemanticEvent,
+)
 from ._canonicalize import _normalized_optional_string_list
-from .entries import CacheEntry, ClassMetricsDict
 
 
-def _encode_source_stats(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_source_stats(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     source_stats = entry.get("source_stats")
     if source_stats is not None:
         wire["ss"] = [
@@ -21,7 +32,7 @@ def _encode_source_stats(entry: CacheEntry, wire: dict[str, object]) -> None:
         ]
 
 
-def _encode_units(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_units(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     units = sorted(
         entry["units"],
         key=lambda unit: (
@@ -56,7 +67,7 @@ def _encode_units(entry: CacheEntry, wire: dict[str, object]) -> None:
         ]
 
 
-def _encode_blocks(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_blocks(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     blocks = sorted(
         entry["blocks"],
         key=lambda block: (
@@ -79,7 +90,7 @@ def _encode_blocks(entry: CacheEntry, wire: dict[str, object]) -> None:
         ]
 
 
-def _encode_segments(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_segments(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     segments = sorted(
         entry["segments"],
         key=lambda segment: (
@@ -115,7 +126,7 @@ def _append_coupled_classes_row(
         rows.append([metric["qualname"], coupled_classes])
 
 
-def _encode_class_metrics(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_class_metrics(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     class_metrics = sorted(
         entry["class_metrics"],
         key=lambda metric: (
@@ -146,7 +157,7 @@ def _encode_class_metrics(entry: CacheEntry, wire: dict[str, object]) -> None:
             wire["cc"] = coupled_classes_rows
 
 
-def _encode_module_deps(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     module_deps = sorted(
         entry["module_deps"],
         key=lambda dep: (dep["source"], dep["target"], dep["import_type"], dep["line"]),
@@ -163,7 +174,7 @@ def _encode_module_deps(entry: CacheEntry, wire: dict[str, object]) -> None:
         ]
 
 
-def _encode_dead_candidates(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_dead_candidates(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     dead_candidates = sorted(
         entry["dead_candidates"],
         key=lambda candidate: (
@@ -192,7 +203,7 @@ def _encode_dead_candidates(entry: CacheEntry, wire: dict[str, object]) -> None:
         wire["dc"] = encoded_dead_candidates
 
 
-def _encode_name_lists(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_name_lists(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     if entry["referenced_names"]:
         wire["rn"] = sorted(set(entry["referenced_names"]))
     if entry.get("referenced_qualnames"):
@@ -203,7 +214,7 @@ def _encode_name_lists(entry: CacheEntry, wire: dict[str, object]) -> None:
         wire["cn"] = sorted(set(entry["class_names"]))
 
 
-def _encode_security_surfaces(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_security_surfaces(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     security_surfaces = sorted(
         entry.get("security_surfaces", []),
         key=lambda item: (
@@ -233,7 +244,10 @@ def _encode_security_surfaces(entry: CacheEntry, wire: dict[str, object]) -> Non
         ]
 
 
-def _encode_runtime_reachability(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_runtime_reachability(
+    entry: CacheFactsDict,
+    wire: dict[str, object],
+) -> None:
     runtime_reachability = sorted(
         entry.get("runtime_reachability", []),
         key=lambda item: (
@@ -264,7 +278,7 @@ def _encode_runtime_reachability(entry: CacheEntry, wire: dict[str, object]) -> 
 
 
 def _encode_function_relationship_facts(
-    entry: CacheEntry,
+    entry: CacheFactsDict,
     wire: dict[str, object],
 ) -> None:
     facts_rows = entry.get("function_relationship_facts", [])
@@ -290,7 +304,7 @@ def _encode_function_relationship_facts(
 
 
 def _encode_optional_metrics_sections(
-    entry: CacheEntry, wire: dict[str, object]
+    entry: CacheFactsDict, wire: dict[str, object]
 ) -> None:
     typing_coverage = entry.get("typing_coverage")
     if typing_coverage is not None:
@@ -338,7 +352,7 @@ def _encode_optional_metrics_sections(
         ]
 
 
-def _encode_structural_findings(entry: CacheEntry, wire: dict[str, object]) -> None:
+def _encode_structural_findings(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     if "structural_findings" in entry:
         structural_findings = entry.get("structural_findings", [])
         wire["sf"] = [
@@ -355,11 +369,167 @@ def _encode_structural_findings(entry: CacheEntry, wire: dict[str, object]) -> N
         ]
 
 
-def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
-    source_digest = entry["source_content_digest"]
-    git_blob = entry["git_blob_id_at_write"]
+def _encode_fact_ref(fact: FactRef) -> list[str]:
+    return [fact.kind, fact.ref]
+
+
+def _encode_semantic_event(event: SemanticEvent) -> list[object]:
+    return [
+        event.event_id,
+        event.kind,
+        event.subject,
+        [_encode_fact_ref(fact) for fact in event.inputs],
+        _encode_fact_ref(event.output) if event.output is not None else None,
+        list(event.guards),
+        event.location[1],
+        event.resolution,
+    ]
+
+
+def _encode_contract_summary(summary: FunctionContractSummary) -> list[object]:
+    return [
+        summary.function,
+        [_encode_semantic_event(event) for event in summary.events],
+        [list(flow) for flow in summary.param_flows],
+        [_encode_fact_ref(fact) for fact in summary.returns],
+        summary.unresolved_flow,
+    ]
+
+
+def _encode_semantic_facts(entry: CacheEntryV3, wire: dict[str, object]) -> None:
+    facts = entry.module_neutral.semantic_facts
+    wire["se"] = [
+        _encode_semantic_event(event)
+        for event in sorted(facts.events, key=lambda item: item.event_id)
+    ]
+    wire["fc"] = [
+        _encode_contract_summary(summary)
+        for summary in sorted(
+            facts.function_contract_summaries,
+            key=lambda item: item.function,
+        )
+    ]
+
+
+def _neutral_facts(entry: CacheEntryV3) -> CacheFactsDict:
+    neutral = entry.module_neutral
+    return CacheFactsDict(
+        source_stats=neutral.source_stats,
+        units=[
+            FunctionGroupItem(
+                qualname=item.local_name,
+                filepath="",
+                start_line=item.start_line,
+                end_line=item.end_line,
+                loc=item.loc,
+                stmt_count=item.stmt_count,
+                fingerprint=item.fingerprint,
+                loc_bucket=item.loc_bucket,
+                cyclomatic_complexity=item.cyclomatic_complexity,
+                nesting_depth=item.nesting_depth,
+                risk=item.risk,
+                raw_hash=item.raw_hash,
+                entry_guard_count=item.entry_guard_count,
+                entry_guard_terminal_profile=item.entry_guard_terminal_profile,
+                entry_guard_has_side_effect_before=item.entry_guard_has_side_effect_before,
+                terminal_kind=item.terminal_kind,
+                try_finally_profile=item.try_finally_profile,
+                side_effect_order_profile=item.side_effect_order_profile,
+            )
+            for item in neutral.units
+        ],
+        blocks=[
+            BlockGroupItem(
+                qualname=item.local_name,
+                filepath="",
+                start_line=item.start_line,
+                end_line=item.end_line,
+                size=item.size,
+                block_hash=item.block_hash,
+            )
+            for item in neutral.blocks
+        ],
+        segments=[
+            SegmentGroupItem(
+                qualname=item.local_name,
+                filepath="",
+                start_line=item.start_line,
+                end_line=item.end_line,
+                size=item.size,
+                segment_hash=item.segment_hash,
+                segment_sig=item.segment_sig,
+            )
+            for item in neutral.segments
+        ],
+        class_metrics=[],
+        module_deps=[],
+        dead_candidates=[],
+        referenced_names=[],
+        referenced_qualnames=[],
+        import_names=[],
+        class_names=[],
+        runtime_reachability=[],
+        security_surfaces=[],
+        function_relationship_facts=[],
+    )
+
+
+def _dependent_facts(entry: CacheEntryV3) -> CacheFactsDict:
+    dependent = entry.module_dependent
+    facts = CacheFactsDict(
+        source_stats=entry.module_neutral.source_stats,
+        units=[],
+        blocks=[],
+        segments=[],
+        class_metrics=list(dependent.class_metrics),
+        module_deps=list(dependent.module_deps),
+        dead_candidates=list(dependent.dead_candidates),
+        referenced_names=list(dependent.referenced_names),
+        referenced_qualnames=list(dependent.referenced_qualnames),
+        import_names=list(dependent.import_names),
+        class_names=list(dependent.class_names),
+        runtime_reachability=list(dependent.runtime_reachability),
+        security_surfaces=list(dependent.security_surfaces),
+        function_relationship_facts=list(dependent.function_relationship_facts),
+    )
+    if dependent.typing_coverage is not None:
+        facts["typing_coverage"] = dependent.typing_coverage
+    if dependent.docstring_coverage is not None:
+        facts["docstring_coverage"] = dependent.docstring_coverage
+    if dependent.api_surface is not None:
+        facts["api_surface"] = dependent.api_surface
+    if dependent.structural_findings is not None:
+        facts["structural_findings"] = list(dependent.structural_findings)
+    return facts
+
+
+def _digest_row(digest: DigestObject) -> list[object]:
+    return [digest.domain, digest.algorithm, digest.value]
+
+
+def _encode_wire_file_entry(entry: CacheEntryV3) -> dict[str, object]:
+    source_digest = entry.source_content_digest
+    git_blob = entry.git_blob_id_at_write
+    neutral_wire: dict[str, object] = {}
+    dependent_wire: dict[str, object] = {}
+    neutral_facts = _neutral_facts(entry)
+    dependent_facts = _dependent_facts(entry)
+    _encode_source_stats(neutral_facts, neutral_wire)
+    _encode_units(neutral_facts, neutral_wire)
+    _encode_blocks(neutral_facts, neutral_wire)
+    _encode_segments(neutral_facts, neutral_wire)
+    _encode_semantic_facts(entry, neutral_wire)
+    _encode_class_metrics(dependent_facts, dependent_wire)
+    _encode_module_deps(dependent_facts, dependent_wire)
+    _encode_dead_candidates(dependent_facts, dependent_wire)
+    _encode_name_lists(dependent_facts, dependent_wire)
+    _encode_runtime_reachability(dependent_facts, dependent_wire)
+    _encode_function_relationship_facts(dependent_facts, dependent_wire)
+    _encode_security_surfaces(dependent_facts, dependent_wire)
+    _encode_optional_metrics_sections(dependent_facts, dependent_wire)
+    _encode_structural_findings(dependent_facts, dependent_wire)
     wire: dict[str, object] = {
-        "cb": entry["cache_content_binding_version"],
+        "cb": entry.cache_content_binding_version,
         "sd": [
             source_digest.domain,
             source_digest.algorithm,
@@ -370,21 +540,12 @@ def _encode_wire_file_entry(entry: CacheEntry) -> dict[str, object]:
             if git_blob is not None
             else None
         ),
-        "st": [entry["stat"]["mtime_ns"], entry["stat"]["size"]],
+        "st": [entry.stat["mtime_ns"], entry.stat["size"]],
+        "np": _digest_row(entry.module_neutral_profile),
+        "dp": _digest_row(entry.module_dependent_profile),
+        "n": neutral_wire,
+        "d": dependent_wire,
     }
-    _encode_source_stats(entry, wire)
-    _encode_units(entry, wire)
-    _encode_blocks(entry, wire)
-    _encode_segments(entry, wire)
-    _encode_class_metrics(entry, wire)
-    _encode_module_deps(entry, wire)
-    _encode_dead_candidates(entry, wire)
-    _encode_name_lists(entry, wire)
-    _encode_runtime_reachability(entry, wire)
-    _encode_function_relationship_facts(entry, wire)
-    _encode_security_surfaces(entry, wire)
-    _encode_optional_metrics_sections(entry, wire)
-    _encode_structural_findings(entry, wire)
     return wire
 
 
