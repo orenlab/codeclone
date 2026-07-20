@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Final, Literal, TypedDict
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, JsonValue, TypeAdapter, field_validator
 
 DEFAULT_OBSERVABILITY_RETENTION_DAYS = 7
 DEFAULT_OBSERVABILITY_MAX_OPERATIONS = 2000
@@ -74,6 +74,18 @@ GitContentFallbackReason = Literal[
     "index_ambiguous",
     "racy",
     "untracked",
+]
+DigestDomain = Literal[
+    "ccmi2:manifest",
+    "ccapi1:sig",
+    "codeclone.analysis-scope.v1",
+    "codeclone.baseline.lane.v1",
+    "codeclone.baseline.root.v1",
+    "codeclone.cache.profile.dependent.v1",
+    "codeclone.cache.profile.neutral.v1",
+    "codeclone.module-registry.v1",
+    "codeclone.source-observations.v1",
+    "codeclone.source-content.v1",
 ]
 
 CONFIG_VALUE_UNSET = object()
@@ -345,15 +357,7 @@ class PackagePrefix:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DigestObject:
-    domain: Literal[
-        "ccmi2:manifest",
-        "ccapi1:sig",
-        "codeclone.cache.profile.dependent.v1",
-        "codeclone.cache.profile.neutral.v1",
-        "codeclone.module-registry.v1",
-        "codeclone.source-observations.v1",
-        "codeclone.source-content.v1",
-    ]
+    domain: DigestDomain
     algorithm: Literal["sha256"]
     value: str
 
@@ -1720,6 +1724,62 @@ class SemanticAuthorityObservationPayload:
     result: SemanticAuthorityResult
 
 
+_CLONE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(CloneObservationPayload)
+_MODULE_IDENTITY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(
+    ModuleIdentityObservationPayload
+)
+_DEPENDENCY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(DependencyObservationPayload)
+_API_SURFACE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(ApiSurfaceObservationPayload)
+_DEAD_CODE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(DeadCodeObservationPayload)
+_INTEGER_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(IntegerObservationPayload)
+_ADOPTION_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(AdoptionObservationPayload)
+_SEMANTIC_AUTHORITY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(
+    SemanticAuthorityObservationPayload
+)
+
+
+def parse_clone_observation_payload(value: object) -> CloneObservationPayload:
+    return _CLONE_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_module_identity_observation_payload(
+    value: object,
+) -> ModuleIdentityObservationPayload:
+    return _MODULE_IDENTITY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_dependency_observation_payload(
+    value: object,
+) -> DependencyObservationPayload:
+    return _DEPENDENCY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_api_surface_observation_payload(
+    value: object,
+) -> ApiSurfaceObservationPayload:
+    return _API_SURFACE_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_dead_code_observation_payload(
+    value: object,
+) -> DeadCodeObservationPayload:
+    return _DEAD_CODE_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_integer_observation_payload(value: object) -> IntegerObservationPayload:
+    return _INTEGER_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_adoption_observation_payload(value: object) -> AdoptionObservationPayload:
+    return _ADOPTION_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_semantic_authority_observation_payload(
+    value: object,
+) -> SemanticAuthorityObservationPayload:
+    return _SEMANTIC_AUTHORITY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ObservationLane:
     descriptor: ObservationLaneDescriptor
@@ -1757,6 +1817,315 @@ class ObservationBundle:
 
     def digest(self) -> DigestObject:
         return self.observation_digest
+
+
+BaselineReadFailureKind = Literal[
+    "inconsistent_container",
+    "invalid_container",
+    "invalid_json",
+    "lane_digest_mismatch",
+    "root_digest_mismatch",
+    "too_large",
+    "unknown_required_lane",
+    "unsupported_format",
+    "unreadable",
+]
+LaneTrustStatus = Literal["trusted", "unavailable"]
+LaneTrustReason = Literal[
+    "algorithm_revision",
+    "canonicalization_version",
+    "compatible",
+    "descriptor_version",
+    "lane_digest_mismatch",
+    "payload_schema",
+    "python_tag",
+    "required_contract",
+    "root_digest_mismatch",
+    "runtime_lane_unknown",
+]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselineGenerator:
+    name: Literal["codeclone"]
+    version: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselineMeta:
+    container_version: Literal["3.0"]
+    generator: BaselineGenerator
+    python_tag: str
+    created_at: str
+    project_label: str | None
+    root_digest: DigestObject
+
+    def __post_init__(self) -> None:
+        if not self.python_tag:
+            raise ValueError("baseline python tag must be non-empty")
+        if not self.created_at.endswith("Z"):
+            raise ValueError("baseline created_at must be a UTC Z timestamp")
+        if self.root_digest.domain != "codeclone.baseline.root.v1":
+            raise ValueError("baseline meta has the wrong root digest domain")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class NativeSourceBinding:
+    module_identity_manifest_digest: DigestObject
+    module_registry_digest: DigestObject
+    analysis_scope_digest: DigestObject
+    observation_digest: DigestObject
+
+    def __post_init__(self) -> None:
+        expected = (
+            (self.module_identity_manifest_digest, "ccmi2:manifest"),
+            (self.module_registry_digest, "codeclone.module-registry.v1"),
+            (self.analysis_scope_digest, "codeclone.analysis-scope.v1"),
+            (self.observation_digest, "codeclone.source-observations.v1"),
+        )
+        if any(digest.domain != domain for digest, domain in expected):
+            raise ValueError("native source binding digest domains are inconsistent")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class EpochTransitionEvidence:
+    source_schema: str
+    imported_lanes: tuple[str, ...]
+    skipped_content: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not self.source_schema:
+            raise ValueError("transition source schema must be non-empty")
+        if self.imported_lanes:
+            raise ValueError("native v3 transitions cannot import legacy lanes")
+        if self.skipped_content != tuple(sorted(set(self.skipped_content))):
+            raise ValueError("transition skipped content must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContractIndex(Mapping[str, str]):
+    rows: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        keys = tuple(key for key, _value in self.rows)
+        if keys != tuple(sorted(set(keys))):
+            raise ValueError("container contracts must be sorted and unique")
+        if any(not key or not value for key, value in self.rows):
+            raise ValueError("container contracts must be non-empty")
+
+    def __getitem__(self, key: str) -> str:
+        for row_key, value in self.rows:
+            if row_key == key:
+                return value
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[str]:
+        return (key for key, _value in self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselineLane:
+    name: ObservationLaneName
+    required: bool
+    descriptor: ObservationLaneDescriptor
+    observation_digest: DigestObject
+    digest: DigestObject
+    payload: (
+        CloneObservationPayload
+        | ModuleIdentityObservationPayload
+        | DependencyObservationPayload
+        | ApiSurfaceObservationPayload
+        | DeadCodeObservationPayload
+        | IntegerObservationPayload
+        | AdoptionObservationPayload
+        | SemanticAuthorityObservationPayload
+    )
+
+    def __post_init__(self) -> None:
+        if self.name != self.descriptor.name:
+            raise ValueError("baseline lane name must match its descriptor")
+        if self.observation_digest.domain != "codeclone.source-observations.v1":
+            raise ValueError("baseline lane has the wrong observation digest domain")
+        if self.digest.domain != "codeclone.baseline.lane.v1":
+            raise ValueError("baseline lane has the wrong digest domain")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselineLaneIndex(Mapping[ObservationLaneName, BaselineLane]):
+    rows: tuple[tuple[ObservationLaneName, BaselineLane], ...]
+
+    def __post_init__(self) -> None:
+        keys = tuple(key for key, _lane in self.rows)
+        if keys != tuple(sorted(set(keys))):
+            raise ValueError("baseline lane keys must be sorted and unique")
+        if any(key != lane.name for key, lane in self.rows):
+            raise ValueError("baseline lane index keys must match lane names")
+
+    def __getitem__(self, key: ObservationLaneName) -> BaselineLane:
+        for row_key, lane in self.rows:
+            if row_key == key:
+                return lane
+        raise KeyError(key)
+
+    def __iter__(self) -> Iterator[ObservationLaneName]:
+        return (key for key, _lane in self.rows)
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselineContainerV3:
+    format_name: Literal["codeclone-baseline"]
+    meta: BaselineMeta
+    contracts: ContractIndex
+    baseline_scope_id: UUID
+    observation_contract: ObservationContract
+    source: NativeSourceBinding
+    transition: EpochTransitionEvidence | None
+    lanes: BaselineLaneIndex
+
+    def __post_init__(self) -> None:
+        lane_names = tuple(self.lanes)
+        if lane_names != self.observation_contract.enabled_lanes:
+            raise ValueError("container lanes must exactly match enabled lanes")
+        if "module_identity" not in self.lanes:
+            raise ValueError("native baseline containers require module_identity")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class RuntimeContracts:
+    python_tag: str
+    lane_descriptors: tuple[ObservationLaneDescriptor, ...]
+
+    def __post_init__(self) -> None:
+        names = tuple(item.name for item in self.lane_descriptors)
+        if names != tuple(sorted(set(names))):
+            raise ValueError("runtime lane descriptors must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class LaneTrust:
+    name: ObservationLaneName
+    status: LaneTrustStatus
+    reason: LaneTrustReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class TrustVector:
+    root_verified: bool
+    lanes: tuple[LaneTrust, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContainerReadSuccess:
+    container: BaselineContainerV3
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContainerReadFailure:
+    reason: BaselineReadFailureKind
+    detail: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ContainerInspectionResult:
+    root_digest: DigestObject
+    unknown_optional_lanes: tuple[str, ...]
+    rewrite_allowed: Literal[False] = False
+
+
+ContainerReadResult = (
+    ContainerReadSuccess | ContainerReadFailure | ContainerInspectionResult
+)
+
+
+class DigestObjectInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    domain: DigestDomain
+    algorithm: Literal["sha256"]
+    value: str
+
+
+class ObservationLaneDescriptorInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    name: str
+    descriptor_version: str
+    payload_schema: str
+    algorithm_revision: str
+    canonicalization_version: str
+    required_contracts: tuple[tuple[str, str], ...]
+
+
+class ObservationContractInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    observation_digest_version: str
+    enabled_lanes: tuple[str, ...]
+    descriptors: tuple[ObservationLaneDescriptorInput, ...]
+
+
+class BaselineGeneratorInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    name: str
+    version: str
+
+
+class BaselineMetaInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    container_version: str
+    generator: BaselineGeneratorInput
+    python_tag: str
+    created_at: str
+    project_label: str | None
+    root_digest: DigestObjectInput
+
+
+class NativeSourceBindingInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    module_identity_manifest_digest: DigestObjectInput
+    module_registry_digest: DigestObjectInput
+    analysis_scope_digest: DigestObjectInput
+    observation_digest: DigestObjectInput
+
+
+class EpochTransitionEvidenceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    source_schema: str
+    imported_lanes: tuple[str, ...]
+    skipped_content: tuple[str, ...]
+
+
+class BaselineLaneInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    required: bool
+    descriptor: ObservationLaneDescriptorInput
+    observation_digest: DigestObjectInput
+    digest: DigestObjectInput
+    payload: JsonValue
+
+
+class BaselineContainerV3Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    format: str
+    meta: BaselineMetaInput
+    contracts: dict[str, str]
+    baseline_scope_id: UUID
+    observation_contract: ObservationContractInput
+    source: NativeSourceBindingInput
+    transition: EpochTransitionEvidenceInput | None
+    lanes: dict[str, BaselineLaneInput]
 
 
 @dataclass(frozen=True, slots=True)

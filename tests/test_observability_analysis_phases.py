@@ -170,3 +170,13 @@ def test_phase39l_pipeline_owns_each_observation_span_once() -> None:
 
     assert source.count('span(name="observations.build")') == 1
     assert source.count('span(name="observations.lanes.build")') == 1
+
+
+def test_phase39m_container_owns_each_stage_span_once() -> None:
+    root = Path(__file__).resolve().parents[1]
+    container = (root / "codeclone/baseline/container.py").read_text(encoding="utf-8")
+    trust = (root / "codeclone/baseline/container_trust.py").read_text(encoding="utf-8")
+
+    assert container.count('span(name="baseline.container.build")') == 1
+    assert container.count('span(name="baseline.container.read")') == 1
+    assert trust.count('span(name="baseline.container.trust")') == 1
