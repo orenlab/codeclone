@@ -88,6 +88,11 @@ def module_registry_context(
     )
     return source, ModuleRegistryHandle(
         manifest=manifest,
+        manifest_digest=DigestObject(
+            domain="ccmi2:manifest",
+            algorithm="sha256",
+            value="f" * 64,
+        ),
         entries_by_path=ModuleInventoryIndex(
             rows=tuple((entry.identity.file.path, entry) for entry in entries)
         ),

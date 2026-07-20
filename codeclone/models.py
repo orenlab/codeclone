@@ -346,6 +346,7 @@ class PackagePrefix:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DigestObject:
     domain: Literal[
+        "ccmi2:manifest",
         "ccapi1:sig",
         "codeclone.cache.profile.dependent.v1",
         "codeclone.cache.profile.neutral.v1",
@@ -771,6 +772,7 @@ class ModuleInventoryIndex(Mapping[str, ModuleInventoryEntry]):
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModuleRegistryHandle:
     manifest: ModuleIdentityManifest
+    manifest_digest: DigestObject
     entries_by_path: ModuleInventoryIndex
     entries_by_module: ModuleInventoryIndex
     package_prefixes: tuple[PackagePrefix, ...]
@@ -1680,6 +1682,7 @@ class CloneObservationPayload:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ModuleIdentityObservationPayload:
     manifest: ModuleIdentityManifest
+    manifest_digest: DigestObject
     module_registry: tuple[ModuleInventoryEntry, ...]
     package_prefixes: tuple[PackagePrefix, ...]
     registry_digest: DigestObject
