@@ -146,6 +146,9 @@ def test_registry_digest_is_creation_order_stable_and_handle_is_picklable(
     left_registry = build_module_registry(root=left)
     right_registry = build_module_registry(root=right)
 
+    assert left_registry.manifest_digest == right_registry.manifest_digest
+    assert left_registry.manifest_digest.domain == "ccmi2:manifest"
+    assert left_registry.manifest_digest != left_registry.digest
     assert left_registry.digest == right_registry.digest
     assert left_registry == right_registry
     assert pickle.loads(pickle.dumps(left_registry)) == left_registry

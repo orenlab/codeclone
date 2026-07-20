@@ -247,6 +247,11 @@ def _freeze_registry(
     digest_value = hashlib.sha256(_REGISTRY_DIGEST_DOMAIN + canonical).hexdigest()
     return ModuleRegistryHandle(
         manifest=manifest,
+        manifest_digest=DigestObject(
+            domain="ccmi2:manifest",
+            algorithm="sha256",
+            value=manifest_digest,
+        ),
         entries_by_path=ModuleInventoryIndex(
             rows=tuple((entry.identity.file.path, entry) for entry in entries)
         ),

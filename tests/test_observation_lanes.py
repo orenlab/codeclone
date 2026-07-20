@@ -210,6 +210,8 @@ def test_module_identity_lane_preserves_canonical_inventory_facts() -> None:
     payload = lanes["module_identity"].payload
 
     assert isinstance(payload, ModuleIdentityObservationPayload)
+    assert payload.manifest_digest is registry.manifest_digest
+    assert payload.manifest_digest != payload.registry_digest
     assert payload.module_registry == tuple(
         entry for _path, entry in registry.entries_by_path.rows
     )

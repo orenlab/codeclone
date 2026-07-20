@@ -32,6 +32,7 @@ def _module_identity_payload(
     entries = tuple(entry for _path, entry in bundle.registry.entries_by_path.rows)
     return ModuleIdentityObservationPayload(
         manifest=bundle.manifest,
+        manifest_digest=bundle.registry.manifest_digest,
         module_registry=entries,
         package_prefixes=bundle.registry.package_prefixes,
         registry_digest=bundle.registry.digest,
