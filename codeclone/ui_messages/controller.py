@@ -41,18 +41,18 @@ ERR_METRICS_BASELINE_REQUIRES_ANALYSIS: Final = (
 )
 ERR_METRICS_BASELINE_REQUIRED_FOR_GATES: Final = (
     "Metrics baseline file is required for metrics baseline-aware gates. "
-    "Run codeclone . --update-metrics-baseline first."
+    "Run codeclone <root> --update-baseline --baseline <path> first."
 )
 ERR_METRICS_BASELINE_UPDATE_WITHOUT_METRICS: Final = (
     "Cannot update metrics baseline: metrics were not computed."
 )
 ERR_METRICS_BASELINE_TYPING_GATES: Final = (
     "Typing/docstring regression gates require a metrics baseline that includes "
-    "coverage adoption data. Run codeclone . --update-metrics-baseline first."
+    "coverage adoption data. Run codeclone <root> --update-baseline --baseline <path>."
 )
 ERR_METRICS_BASELINE_API_GATES: Final = (
     "API break gating requires a metrics baseline with public API surface data. "
-    "Run codeclone . --api-surface --update-metrics-baseline first."
+    "Run codeclone <root> --api-surface --update-baseline --baseline <path> first."
 )
 
 # ── session stats ───────────────────────────────────────────────────

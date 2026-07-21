@@ -80,6 +80,7 @@ DigestDomain = Literal[
     "ccapi1:sig",
     "codeclone.analysis-scope.v1",
     "codeclone.baseline.lane.v1",
+    "codeclone.baseline.legacy-evidence.v1",
     "codeclone.baseline.root.v1",
     "codeclone.cache.profile.dependent.v1",
     "codeclone.cache.profile.neutral.v1",
@@ -1840,8 +1841,20 @@ BaselineReadFailureKind = Literal[
     "unreadable",
 ]
 LaneTrustStatus = Literal["trusted", "unavailable"]
+BaselinePublishOutcome = Literal["noop", "published", "recovered"]
+BaselineTargetKind = Literal["absent", "legacy", "v3"]
+BaselinePublishFailureReason = Literal[
+    "active_lock",
+    "cas_conflict",
+    "foreign_lock",
+    "invalid_lock",
+    "invalid_target",
+    "oversize",
+    "scope_mismatch",
+]
 LaneTrustReason = Literal[
     "algorithm_revision",
+    "baseline_scope_id",
     "canonicalization_version",
     "compatible",
     "descriptor_version",
@@ -1898,17 +1911,37 @@ class NativeSourceBinding:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class EpochTransitionEvidence:
-    source_schema: str
+    kind: Literal["baseline_epoch_transition"]
+    from_schema: str | None
+    from_fingerprint: str | None
+    to_schema: Literal["3.0"]
+    to_fingerprint: Literal["2"]
     imported_lanes: tuple[str, ...]
-    skipped_content: tuple[str, ...]
+    regenerated_lanes: tuple[ObservationLaneName, ...]
+    source_legacy_digest: DigestObject | None
 
     def __post_init__(self) -> None:
-        if not self.source_schema:
+        source_fields = (
+            self.from_schema,
+            self.from_fingerprint,
+            self.source_legacy_digest,
+        )
+        if any(value is None for value in source_fields) and not all(
+            value is None for value in source_fields
+        ):
+            raise ValueError("transition legacy source fields are all-or-none")
+        if self.from_schema is not None and not self.from_schema:
             raise ValueError("transition source schema must be non-empty")
+        if self.from_fingerprint is not None and not self.from_fingerprint:
+            raise ValueError("transition source fingerprint must be non-empty")
+        if self.source_legacy_digest is not None and (
+            self.source_legacy_digest.domain != "codeclone.baseline.legacy-evidence.v1"
+        ):
+            raise ValueError("transition has the wrong legacy digest domain")
         if self.imported_lanes:
             raise ValueError("native v3 transitions cannot import legacy lanes")
-        if self.skipped_content != tuple(sorted(set(self.skipped_content))):
-            raise ValueError("transition skipped content must be sorted and unique")
+        if self.regenerated_lanes != tuple(sorted(set(self.regenerated_lanes))):
+            raise ValueError("transition regenerated lanes must be sorted and unique")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2008,6 +2041,7 @@ class BaselineContainerV3:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class RuntimeContracts:
     python_tag: str
+    baseline_scope_id: UUID
     lane_descriptors: tuple[ObservationLaneDescriptor, ...]
 
     def __post_init__(self) -> None:
@@ -2052,12 +2086,50 @@ ContainerReadResult = (
 )
 
 
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselinePublicationReceipt:
+    outcome: BaselinePublishOutcome
+    observed_kind: BaselineTargetKind
+    observed_identity: str
+    published_root_digest: DigestObject | None
+    backup_created: bool
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BaselinePublishLock:
+    token: str
+    pid: int
+    hostname: str
+    process_start: str
+    created_at: str
+
+    def __post_init__(self) -> None:
+        if (
+            not self.token
+            or self.pid <= 0
+            or not self.hostname
+            or not self.process_start
+            or not self.created_at.endswith("Z")
+        ):
+            raise ValueError("baseline publication lock fields must be non-empty")
+
+
 class DigestObjectInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     domain: DigestDomain
     algorithm: Literal["sha256"]
     value: str
+
+
+class BaselinePublishLockInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    token: str
+    pid: int
+    hostname: str
+    process_start: str
+    created_at: str
 
 
 class ObservationLaneDescriptorInput(BaseModel):
@@ -2086,6 +2158,30 @@ class BaselineGeneratorInput(BaseModel):
     version: str
 
 
+class LegacyBaselineMetaInput(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
+
+    generator: BaselineGeneratorInput
+    schema_version: str
+    fingerprint_version: str
+    python_tag: str
+    payload_sha256: str
+
+
+class LegacyClonePayloadInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    functions: tuple[str, ...]
+    blocks: tuple[str, ...]
+
+
+class LegacyBaselineEvidenceInput(BaseModel):
+    model_config = ConfigDict(extra="allow", frozen=True, strict=True)
+
+    meta: LegacyBaselineMetaInput
+    clones: LegacyClonePayloadInput
+
+
 class BaselineMetaInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
@@ -2109,9 +2205,14 @@ class NativeSourceBindingInput(BaseModel):
 class EpochTransitionEvidenceInput(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    source_schema: str
+    kind: Literal["baseline_epoch_transition"]
+    from_schema: str | None
+    from_fingerprint: str | None
+    to_schema: Literal["3.0"]
+    to_fingerprint: Literal["2"]
     imported_lanes: tuple[str, ...]
-    skipped_content: tuple[str, ...]
+    regenerated_lanes: tuple[str, ...]
+    source_legacy_digest: DigestObjectInput | None
 
 
 class BaselineLaneInput(BaseModel):

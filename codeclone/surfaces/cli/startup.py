@@ -16,8 +16,7 @@ from ... import ui_messages as ui
 from ...config.pyproject_loader import ConfigValidationError
 from ...contracts import DEFAULT_ROOT, ExitCode
 from .attrs import text_attr
-from .baseline_state import MetricsBaselineSectionProbe
-from .types import CLIArgsLike, ParserWithDefaults, StatusConsole
+from .types import CLIArgsLike, StatusConsole
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +25,6 @@ class ResolvedBaselineInputs:
     baseline_exists: bool
     metrics_baseline_path: Path
     metrics_baseline_exists: bool
-    shared_baseline_payload: dict[str, object] | None
 
 
 def resolve_runtime_path_arg(
@@ -123,12 +121,9 @@ def validate_numeric_args_or_exit(
 
 def resolve_baseline_inputs(
     *,
-    ap: ParserWithDefaults,
     args: CLIArgsLike,
     root_path: Path,
     baseline_path_from_args: bool,
-    metrics_path_from_args: bool,
-    probe_metrics_baseline_section_fn: Callable[[Path], MetricsBaselineSectionProbe],
     printer: StatusConsole,
 ) -> ResolvedBaselineInputs:
     baseline_arg_path = Path(text_attr(args, "baseline")).expanduser()
@@ -146,44 +141,9 @@ def resolve_baseline_inputs(
             cause=exc,
         )
 
-    shared_baseline_payload: dict[str, object] | None = None
-    default_metrics_baseline = ap.get_default("metrics_baseline")
-    metrics_baseline_value = text_attr(args, "metrics_baseline")
-    metrics_path_overridden = metrics_path_from_args or (
-        metrics_baseline_value != str(default_metrics_baseline)
-    )
-    metrics_baseline_raw_path = (
-        metrics_baseline_value
-        if metrics_path_overridden
-        else text_attr(args, "baseline")
-    )
-    metrics_baseline_arg_path = Path(metrics_baseline_raw_path).expanduser()
-    try:
-        metrics_baseline_path = resolve_runtime_path_arg(
-            root_path=root_path,
-            raw_path=metrics_baseline_raw_path,
-            from_cli=metrics_path_from_args,
-        )
-        if metrics_baseline_path == baseline_path:
-            probe = probe_metrics_baseline_section_fn(metrics_baseline_path)
-            metrics_baseline_exists = probe.has_metrics_section
-            shared_baseline_payload = probe.payload
-        else:
-            metrics_baseline_exists = metrics_baseline_path.exists()
-    except OSError as exc:
-        exit_contract_error(
-            ui.fmt_invalid_baseline_path(
-                path=metrics_baseline_arg_path,
-                error=exc,
-            ),
-            printer=printer,
-            cause=exc,
-        )
-
     return ResolvedBaselineInputs(
         baseline_path=baseline_path,
         baseline_exists=baseline_exists,
-        metrics_baseline_path=metrics_baseline_path,
-        metrics_baseline_exists=metrics_baseline_exists,
-        shared_baseline_payload=shared_baseline_payload,
+        metrics_baseline_path=baseline_path,
+        metrics_baseline_exists=baseline_exists,
     )

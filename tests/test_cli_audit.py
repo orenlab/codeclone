@@ -776,7 +776,6 @@ class TestControllerQueryFlagValidation:
             "audit_json": False,
             "strictness": "ci",
             "update_baseline": False,
-            "update_metrics_baseline": False,
             "changed_only": False,
             "diff_against": None,
             "paths_from_git_diff": None,
@@ -803,7 +802,6 @@ class TestControllerQueryFlagValidation:
             audit_json=False,
             strictness="strict",
             update_baseline=False,
-            update_metrics_baseline=False,
             changed_only=False,
             diff_against=None,
             paths_from_git_diff=None,
@@ -834,10 +832,6 @@ class TestControllerQueryFlagValidation:
         with pytest.raises(SystemExit):
             self._validate(audit=True, update_baseline=True)
 
-    def test_update_metrics_baseline_in_controller_mode(self) -> None:
-        with pytest.raises(SystemExit):
-            self._validate(audit=True, update_metrics_baseline=True)
-
     def test_changed_only_in_controller_mode(self) -> None:
         with pytest.raises(SystemExit):
             self._validate(audit=True, changed_only=True)
@@ -860,7 +854,6 @@ class TestControllerQueryFlagValidation:
             audit_json=False,
             strictness="ci",
             update_baseline=False,
-            update_metrics_baseline=False,
             changed_only=False,
             diff_against=None,
             paths_from_git_diff=None,

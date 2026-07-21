@@ -137,7 +137,12 @@ def _validate_container_consistency(container: BaselineContainerV3) -> None:
                 raise ValueError(f"container contract {key} is inconsistent")
 
 
-def build_container(bundle: ObservationBundle, scope_id: UUID) -> BaselineContainerV3:
+def build_container(
+    bundle: ObservationBundle,
+    scope_id: UUID,
+    *,
+    transition: EpochTransitionEvidence | None = None,
+) -> BaselineContainerV3:
     """Build a complete native v3 container without publishing it."""
 
     with span(name="baseline.container.build") as build_span:
@@ -200,7 +205,7 @@ def build_container(bundle: ObservationBundle, scope_id: UUID) -> BaselineContai
             baseline_scope_id=scope_id,
             observation_contract=bundle.contract,
             source=source,
-            transition=None,
+            transition=transition,
             lanes=BaselineLaneIndex(rows=lanes),
         )
         container = replace(
@@ -244,10 +249,26 @@ def _transition_from_input(
 ) -> EpochTransitionEvidence | None:
     if value is None:
         return None
+    regenerated_lanes = []
+    for name in value.regenerated_lanes:
+        if not is_observation_lane_name(name):
+            raise BaselineLaneValidationError(
+                "transition has an unknown regenerated lane"
+            )
+        regenerated_lanes.append(name)
     return EpochTransitionEvidence(
-        source_schema=value.source_schema,
+        kind=value.kind,
+        from_schema=value.from_schema,
+        from_fingerprint=value.from_fingerprint,
+        to_schema=value.to_schema,
+        to_fingerprint=value.to_fingerprint,
         imported_lanes=value.imported_lanes,
-        skipped_content=value.skipped_content,
+        regenerated_lanes=tuple(regenerated_lanes),
+        source_legacy_digest=(
+            None
+            if value.source_legacy_digest is None
+            else _digest_from_input(value.source_legacy_digest)
+        ),
     )
 
 
@@ -296,7 +317,11 @@ def _read_bytes(path: Path, *, limit_bytes: int) -> bytes | ContainerReadFailure
 def _validated_input(raw: bytes) -> BaselineContainerV3Input | ContainerReadFailure:
     try:
         text = raw.decode("utf-8")
-        json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+        document = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+        if not isinstance(document, dict):
+            return _read_failure("unsupported_format", "baseline root is not an object")
+        if document.get("format") != "codeclone-baseline":
+            return _read_failure("unsupported_format", "legacy baseline format")
         return BaselineContainerV3Input.model_validate_json(raw)
     except UnicodeDecodeError as exc:
         return _read_failure("invalid_json", str(exc))
@@ -427,6 +452,26 @@ def _container_from_input(
     return container
 
 
+def read_container_v3_bytes(raw: bytes, *, limit_bytes: int) -> ContainerReadResult:
+    """Read one already bounded v3 byte buffer without side effects."""
+
+    if len(raw) > limit_bytes:
+        return _read_failure("too_large", "container exceeds configured size limit")
+    parsed = _validated_input(raw)
+    if isinstance(parsed, ContainerReadFailure):
+        return parsed
+    authentication_failure = _authenticated_input(parsed)
+    if authentication_failure is not None:
+        return authentication_failure
+    lane_set_failure = _validate_raw_lane_set(parsed)
+    if lane_set_failure is not None:
+        return lane_set_failure
+    converted = _container_from_input(parsed)
+    if isinstance(converted, BaselineContainerV3):
+        return ContainerReadSuccess(container=converted)
+    return converted
+
+
 def read_container_v3(path: Path, *, limit_bytes: int) -> ContainerReadResult:
     """Read one bounded v3 artifact; no legacy branch or publication side effect."""
 
@@ -437,31 +482,24 @@ def read_container_v3(path: Path, *, limit_bytes: int) -> ContainerReadResult:
             return raw_or_failure
         raw = raw_or_failure
         read_span.set_counter("baseline_bytes", len(raw))
-        parsed = _validated_input(raw)
-        if isinstance(parsed, ContainerReadFailure):
+        converted = read_container_v3_bytes(raw, limit_bytes=limit_bytes)
+        if isinstance(converted, ContainerReadFailure):
             read_span.set_counter("baseline_read_failures", 1)
-            return parsed
-        authentication_failure = _authenticated_input(parsed)
-        if authentication_failure is not None:
-            read_span.set_counter("baseline_read_failures", 1)
-            if authentication_failure.reason == "root_digest_mismatch":
+            if converted.reason == "root_digest_mismatch":
                 read_span.set_counter("baseline_root_verification_fail", 1)
-            else:
+            elif converted.reason == "lane_digest_mismatch":
                 read_span.set_counter("baseline_lane_verification_fail", 1)
-            return authentication_failure
-        lane_set_failure = _validate_raw_lane_set(parsed)
-        if lane_set_failure is not None:
-            read_span.set_counter("baseline_read_failures", 1)
-            return lane_set_failure
-        read_span.set_counter("baseline_root_verification_pass", 1)
-        read_span.set_counter("baseline_lane_verification_pass", len(parsed.lanes))
-        converted = _container_from_input(parsed)
-        if isinstance(converted, (ContainerReadFailure, ContainerInspectionResult)):
-            if isinstance(converted, ContainerReadFailure):
-                read_span.set_counter("baseline_read_failures", 1)
             return converted
-        read_span.set_counter("baseline_lanes", len(converted.lanes))
-        return ContainerReadSuccess(container=converted)
+        if isinstance(converted, ContainerInspectionResult):
+            read_span.set_counter("baseline_root_verification_pass", 1)
+            return converted
+        read_span.set_counter("baseline_root_verification_pass", 1)
+        read_span.set_counter(
+            "baseline_lane_verification_pass",
+            len(converted.container.lanes),
+        )
+        read_span.set_counter("baseline_lanes", len(converted.container.lanes))
+        return converted
 
 
-__all__ = ["build_container", "read_container_v3"]
+__all__ = ["build_container", "read_container_v3", "read_container_v3_bytes"]

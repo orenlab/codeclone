@@ -13,6 +13,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from ..... import __version__
 from .....analytics.capabilities import check_capability
@@ -23,8 +24,8 @@ from .....baseline import (
     BaselineStatus,
     coerce_baseline_status,
     current_python_tag,
+    probe_metrics_baseline_section,
 )
-from .....baseline.metrics_baseline import probe_metrics_baseline_section
 from .....config.memory import resolve_memory_config
 from .....config.pyproject_loader import ConfigValidationError, load_pyproject_config
 from .....contracts import DEFAULT_BASELINE_PATH, DEFAULT_MAX_BASELINE_SIZE_MB
@@ -98,7 +99,14 @@ def _build_context(root_path: Path) -> DiscoverContext:
         raw_path=baseline_raw,
         from_cli=False,
     )
-    baseline_status = _probe_baseline_status(baseline_path)
+    baseline_status = _probe_baseline_status(
+        baseline_path,
+        baseline_scope_id=(
+            str(config["baseline_scope_id"])
+            if config.get("baseline_scope_id") is not None
+            else None
+        ),
+    )
 
     git = read_git_provenance(root_path)
     head_commit = git.head if git.available else None
@@ -597,7 +605,11 @@ _PROBE_BY_ID = {
 }
 
 
-def _probe_baseline_status(baseline_path: Path) -> BaselineStatus | None:
+def _probe_baseline_status(
+    baseline_path: Path,
+    *,
+    baseline_scope_id: str | None,
+) -> BaselineStatus | None:
     if not baseline_path.exists():
         return BaselineStatus.MISSING
     baseline = Baseline(baseline_path)
@@ -605,7 +617,12 @@ def _probe_baseline_status(baseline_path: Path) -> BaselineStatus | None:
         baseline.load(
             max_size_bytes=DEFAULT_MAX_BASELINE_SIZE_MB * 1024 * 1024,
         )
-        baseline.verify_compatibility(current_python_tag=current_python_tag())
+        if baseline_scope_id is None:
+            return BaselineStatus.MISMATCH_SCOPE_ID
+        baseline.verify_compatibility(
+            current_python_tag=current_python_tag(),
+            baseline_scope_id=UUID(baseline_scope_id),
+        )
     except BaselineValidationError as exc:
         return coerce_baseline_status(exc.status)
     except OSError:

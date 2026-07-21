@@ -18,7 +18,11 @@ import orjson
 import pytest
 
 import codeclone.baseline.container as container_mod
-from codeclone.baseline.container import build_container, read_container_v3
+from codeclone.baseline.container import (
+    build_container,
+    read_container_v3,
+    read_container_v3_bytes,
+)
 from codeclone.baseline.container_digest import (
     canonical_container_bytes,
     compute_analysis_scope_digest,
@@ -41,6 +45,7 @@ from codeclone.models import (
     BaselineLane,
     BaselineLaneIndex,
     BaselineLaneInput,
+    BaselinePublishLock,
     CloneObservationPayload,
     ContainerInspectionResult,
     ContainerReadFailure,
@@ -55,6 +60,7 @@ from codeclone.models import (
     ObservationLaneDescriptorInput,
     ObservationLaneName,
     RuntimeContracts,
+    StructuralObservationFacts,
 )
 from codeclone.observability import bootstrap, operation, shutdown
 from codeclone.observations.lanes import build_observation_lanes
@@ -411,9 +417,18 @@ def test_root_excludes_presentation_and_binds_contract_content(
     changed_transition = replace(
         container,
         transition=EpochTransitionEvidence(
-            source_schema="2.1",
+            kind="baseline_epoch_transition",
+            from_schema="2.1",
+            from_fingerprint="2",
+            to_schema="3.0",
+            to_fingerprint="2",
             imported_lanes=(),
-            skipped_content=("clones",),
+            regenerated_lanes=container.observation_contract.enabled_lanes,
+            source_legacy_digest=DigestObject(
+                domain="codeclone.baseline.legacy-evidence.v1",
+                algorithm="sha256",
+                value="9" * 64,
+            ),
         ),
     )
     assert compute_root_digest(changed_source) != container.meta.root_digest
@@ -614,6 +629,8 @@ def test_round_trip_duplicate_invalid_and_size_taxonomy(
 
     too_large = read_container_v3(target, limit_bytes=len(raw) - 1)
     _assert_read_failure(too_large, "too_large")
+    buffered_too_large = read_container_v3_bytes(raw, limit_bytes=len(raw) - 1)
+    _assert_read_failure(buffered_too_large, "too_large")
 
     duplicate = read_container_v3(
         _DUPLICATE_KEYS_FIXTURE,
@@ -625,6 +642,18 @@ def test_round_trip_duplicate_invalid_and_size_taxonomy(
     )
     _assert_read_failure(duplicate, "invalid_json")
     _assert_read_failure(invalid, "invalid_json")
+
+
+def test_private_conversion_rejects_noncanonical_format(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    raw = canonical_container_bytes(_container(monkeypatch))
+    value = BaselineContainerV3Input.model_validate_json(raw)
+    wrong_format = value.model_copy(update={"format": "other"})
+
+    result = container_mod._container_from_input(wrong_format)
+
+    _assert_read_failure(result, "unsupported_format")
 
 
 def test_reader_unreadable_unicode_and_authentication_taxonomy(
@@ -842,9 +871,18 @@ def test_reader_handles_transition_and_rejects_format_and_generator(
     transition = replace(
         container,
         transition=EpochTransitionEvidence(
-            source_schema="2.1",
+            kind="baseline_epoch_transition",
+            from_schema="2.1",
+            from_fingerprint="2",
+            to_schema="3.0",
+            to_fingerprint="2",
             imported_lanes=(),
-            skipped_content=("clones",),
+            regenerated_lanes=container.observation_contract.enabled_lanes,
+            source_legacy_digest=DigestObject(
+                domain="codeclone.baseline.legacy-evidence.v1",
+                algorithm="sha256",
+                value="9" * 64,
+            ),
         ),
     )
     transition = replace(
@@ -859,6 +897,16 @@ def test_reader_handles_transition_and_rejects_format_and_generator(
     result = read_container_v3(target, limit_bytes=target.stat().st_size)
     assert isinstance(result, ContainerReadSuccess)
     assert result.container.transition == transition.transition
+
+    transition_input = BaselineContainerV3Input.model_validate_json(
+        canonical_container_bytes(transition)
+    ).transition
+    assert transition_input is not None
+    future_transition = transition_input.model_copy(
+        update={"regenerated_lanes": ("future",)}
+    )
+    with pytest.raises(BaselineLaneValidationError, match="unknown regenerated"):
+        container_mod._transition_from_input(future_transition)
 
     wrong_format = _document(container)
     wrong_format["format"] = "future-baseline"
@@ -1027,6 +1075,7 @@ def test_trust_is_reader_side_and_lane_local(
     container = _container(monkeypatch)
     runtime = RuntimeContracts(
         python_tag="cp314",
+        baseline_scope_id=_SCOPE_ID,
         lane_descriptors=container.observation_contract.descriptors,
     )
     trusted = evaluate_lane_trust(container, runtime)
@@ -1080,6 +1129,7 @@ def test_lane_trust_projects_each_compatibility_reason_independently(
 
     without_api = RuntimeContracts(
         python_tag="cp314",
+        baseline_scope_id=_SCOPE_ID,
         lane_descriptors=tuple(
             item for item in descriptors if item.name != "api_surface"
         ),
@@ -1099,6 +1149,7 @@ def test_lane_trust_projects_each_compatibility_reason_independently(
     for expected_reason, runtime_descriptor in variants:
         runtime = RuntimeContracts(
             python_tag="cp314",
+            baseline_scope_id=_SCOPE_ID,
             lane_descriptors=tuple(
                 runtime_descriptor if item.name == "api_surface" else item
                 for item in descriptors
@@ -1108,6 +1159,7 @@ def test_lane_trust_projects_each_compatibility_reason_independently(
 
     wrong_python = RuntimeContracts(
         python_tag="cp313",
+        baseline_scope_id=_SCOPE_ID,
         lane_descriptors=descriptors,
     )
     assert api_reason(wrong_python) == "python_tag"
@@ -1126,7 +1178,11 @@ def test_lane_trust_projects_each_compatibility_reason_independently(
     )
     vector = evaluate_lane_trust(
         bad_digest,
-        RuntimeContracts(python_tag="cp314", lane_descriptors=descriptors),
+        RuntimeContracts(
+            python_tag="cp314",
+            baseline_scope_id=_SCOPE_ID,
+            lane_descriptors=descriptors,
+        ),
     )
     state = next(item for item in vector.lanes if item.name == "api_surface")
     assert state.reason == "lane_digest_mismatch"
@@ -1137,6 +1193,11 @@ def test_container_domain_models_reject_invalid_closed_invariants(
 ) -> None:
     container = _container(monkeypatch)
     lane = container.lanes["clones.functions"]
+    legacy_digest = DigestObject(
+        domain="codeclone.baseline.legacy-evidence.v1",
+        algorithm="sha256",
+        value="9" * 64,
+    )
 
     with pytest.raises(ValueError):
         replace(container.meta, python_tag="")
@@ -1162,21 +1223,93 @@ def test_container_domain_models_reject_invalid_closed_invariants(
 
     with pytest.raises(ValueError):
         EpochTransitionEvidence(
-            source_schema="",
+            kind="baseline_epoch_transition",
+            from_schema="",
+            from_fingerprint="2",
+            to_schema="3.0",
+            to_fingerprint="2",
             imported_lanes=(),
-            skipped_content=(),
+            regenerated_lanes=(),
+            source_legacy_digest=DigestObject(
+                domain="codeclone.baseline.legacy-evidence.v1",
+                algorithm="sha256",
+                value="9" * 64,
+            ),
         )
     with pytest.raises(ValueError):
         EpochTransitionEvidence(
-            source_schema="2.1",
+            kind="baseline_epoch_transition",
+            from_schema="2.1",
+            from_fingerprint="2",
+            to_schema="3.0",
+            to_fingerprint="2",
             imported_lanes=("clones",),
-            skipped_content=(),
+            regenerated_lanes=(),
+            source_legacy_digest=DigestObject(
+                domain="codeclone.baseline.legacy-evidence.v1",
+                algorithm="sha256",
+                value="9" * 64,
+            ),
         )
     with pytest.raises(ValueError):
         EpochTransitionEvidence(
-            source_schema="2.1",
+            kind="baseline_epoch_transition",
+            from_schema=None,
+            from_fingerprint=None,
+            to_schema="3.0",
+            to_fingerprint="2",
             imported_lanes=(),
-            skipped_content=("z", "a"),
+            regenerated_lanes=("risk_observations", "api_surface"),
+            source_legacy_digest=None,
+        )
+    with pytest.raises(ValueError, match="all-or-none"):
+        EpochTransitionEvidence(
+            kind="baseline_epoch_transition",
+            from_schema="2.1",
+            from_fingerprint=None,
+            to_schema="3.0",
+            to_fingerprint="2",
+            imported_lanes=(),
+            regenerated_lanes=(),
+            source_legacy_digest=legacy_digest,
+        )
+    with pytest.raises(ValueError, match="fingerprint must be non-empty"):
+        EpochTransitionEvidence(
+            kind="baseline_epoch_transition",
+            from_schema="2.1",
+            from_fingerprint="",
+            to_schema="3.0",
+            to_fingerprint="2",
+            imported_lanes=(),
+            regenerated_lanes=(),
+            source_legacy_digest=legacy_digest,
+        )
+    with pytest.raises(ValueError, match="wrong legacy digest domain"):
+        EpochTransitionEvidence(
+            kind="baseline_epoch_transition",
+            from_schema="2.1",
+            from_fingerprint="2",
+            to_schema="3.0",
+            to_fingerprint="2",
+            imported_lanes=(),
+            regenerated_lanes=(),
+            source_legacy_digest=replace(
+                legacy_digest,
+                domain="codeclone.baseline.root.v1",
+            ),
+        )
+
+    valid_function_id = f"{'a' * 64}|0-19"
+    with pytest.raises(ValueError, match="sorted and unique"):
+        StructuralObservationFacts(
+            function_clone_keys=(valid_function_id, valid_function_id),
+            block_clone_keys=(),
+            dependencies=(),
+            api_surface=(),
+            dead_code=(),
+            risk_observations=(),
+            adoption_counts=(),
+            coupling_cohesion_observations=(),
         )
 
     with pytest.raises(ValueError):
@@ -1233,7 +1366,17 @@ def test_container_domain_models_reject_invalid_closed_invariants(
     with pytest.raises(ValueError):
         RuntimeContracts(
             python_tag="cp314",
+            baseline_scope_id=_SCOPE_ID,
             lane_descriptors=(lane.descriptor, lane.descriptor),
+        )
+
+    with pytest.raises(ValueError, match="lock fields must be non-empty"):
+        BaselinePublishLock(
+            token="",
+            pid=1,
+            hostname="host",
+            process_start="start",
+            created_at="2026-07-21T00:00:00Z",
         )
 
 
@@ -1287,6 +1430,7 @@ def test_container_observer_on_off_byte_equality(
                     container,
                     RuntimeContracts(
                         python_tag="cp314",
+                        baseline_scope_id=_SCOPE_ID,
                         lane_descriptors=container.observation_contract.descriptors,
                     ),
                 )

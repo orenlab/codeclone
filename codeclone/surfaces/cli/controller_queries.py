@@ -63,7 +63,7 @@ def validate_controller_query_flags(
         _contract_error(printer, ui.ERR_BLAST_PATCH_BOTH)
     if not (blast_radius or patch_verify or session_stats or audit):
         return
-    if bool_attr(args, "update_baseline") or bool_attr(args, "update_metrics_baseline"):
+    if bool_attr(args, "update_baseline"):
         _contract_error(printer, ui.ERR_CONTROLLER_NO_BASELINE_UPDATE)
     if (
         bool_attr(args, "changed_only")

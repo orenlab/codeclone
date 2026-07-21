@@ -185,6 +185,7 @@ _FOCUS_PRODUCTION: Final[SummaryFocus] = "production"
 _FOCUS_CHANGED_PATHS: Final[SummaryFocus] = "changed_paths"
 _MCP_GOVERNANCE_CONFIG_KEYS = frozenset(
     {
+        "baseline_scope_id",
         "golden_fixture_paths",
     }
 )
@@ -200,6 +201,7 @@ _MCP_CONFIG_KEYS = frozenset(
         "cache_path",
         "max_cache_size_mb",
         "baseline",
+        "baseline_scope_id",
         "max_baseline_size_mb",
         "metrics_baseline",
         "api_surface",

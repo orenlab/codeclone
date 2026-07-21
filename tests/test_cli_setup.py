@@ -1997,7 +1997,13 @@ def test_setup_discover_baseline_status_oserror(
 
     monkeypatch.setattr(Baseline, "load", _load_oserror)
     # An unreadable baseline is "unknown" (fail closed), not "invalid JSON".
-    assert discover_mod._probe_baseline_status(baseline_path) is None
+    assert (
+        discover_mod._probe_baseline_status(
+            baseline_path,
+            baseline_scope_id=None,
+        )
+        is None
+    )
 
 
 def test_setup_discover_tool_codeclone_section_edge_cases(tmp_path: Path) -> None:
@@ -2512,7 +2518,10 @@ def test_setup_discover_baseline_status_maps_validation_error(
 
     monkeypatch.setattr(Baseline, "load", _raise_validation)
     assert (
-        discover_mod._probe_baseline_status(baseline_path)
+        discover_mod._probe_baseline_status(
+            baseline_path,
+            baseline_scope_id=None,
+        )
         == BaselineStatus.INVALID_JSON
     )
 

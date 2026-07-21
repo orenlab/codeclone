@@ -61,7 +61,7 @@ class CLIArgsLike(Protocol):
 
     root: str | Path
     baseline: str | Path
-    metrics_baseline: str | Path
+    baseline_scope_id: str | None
     cache_path: str | Path | None
     html_out: str | None
     json_out: str | None
@@ -92,7 +92,6 @@ class CLIArgsLike(Protocol):
     skip_dead_code: bool
     skip_dependencies: bool
     update_baseline: bool
-    update_metrics_baseline: bool
     fail_on_new: bool
     fail_threshold: int
     fail_complexity: int

@@ -4,58 +4,57 @@
 # SPDX-License-Identifier: MPL-2.0
 # Copyright (c) 2026 Den Rozhnovskiy
 
+"""Read-only metrics projection from authenticated native v3 lanes."""
+
 from __future__ import annotations
 
-import hmac
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from json import JSONDecodeError
 from pathlib import Path
+from uuid import UUID
 
-import orjson
-
-from .. import __version__
-from ..contracts import BASELINE_SCHEMA_VERSION, METRICS_BASELINE_SCHEMA_VERSION
+from ..contracts import (
+    BASELINE_SCHEMA_VERSION,
+    COHESION_RISK_MEDIUM_MAX,
+    COMPLEXITY_RISK_MEDIUM_MAX,
+    COUPLING_RISK_MEDIUM_MAX,
+)
 from ..contracts.errors import BaselineValidationError
-from ..models import ApiSurfaceSnapshot, MetricsDiff, MetricsSnapshot, ProjectMetrics
+from ..metrics.dependencies import (
+    build_import_graph,
+    depth_profile,
+    find_cycles,
+    max_depth,
+)
+from ..metrics.health import HealthInputs, compute_health
+from ..models import (
+    AdoptionObservationPayload,
+    ApiParamSpec,
+    ApiSurfaceObservationPayload,
+    ApiSurfaceSnapshot,
+    BaselineContainerV3,
+    CloneObservationPayload,
+    ContainerReadFailure,
+    ContainerReadSuccess,
+    DeadCodeObservationPayload,
+    DependencyObservationPayload,
+    ImportObservation,
+    IntegerObservationPayload,
+    MetricsDiff,
+    MetricsSnapshot,
+    ModuleApiSurface,
+    ModuleDep,
+    ModuleIdentityObservationPayload,
+    ObservationLaneName,
+    ProjectMetrics,
+    PublicSymbol,
+)
 from ._metrics_baseline_contract import (
-    _API_SURFACE_PAYLOAD_SHA256_KEY,
-    _META_REQUIRED_KEYS,
-    _METRICS_OPTIONAL_KEYS,
-    _METRICS_PAYLOAD_SHA256_KEY,
-    _METRICS_REQUIRED_KEYS,
     MAX_METRICS_BASELINE_SIZE_BYTES,
-    METRICS_BASELINE_GENERATOR,
-    METRICS_BASELINE_UNTRUSTED_STATUSES,
     MetricsBaselineStatus,
     coerce_metrics_baseline_status,
 )
-from ._metrics_baseline_payload import (
-    _build_payload,
-    _compute_api_surface_payload_sha256,
-    _compute_legacy_api_surface_payload_sha256,
-    _compute_payload_sha256,
-    _has_coverage_adoption_snapshot,
-    snapshot_from_project_metrics,
-)
-from ._metrics_baseline_validation import (
-    _atomic_write_json,
-    _extract_metrics_payload_sha256,
-    _extract_optional_payload_sha256,
-    _is_compatible_metrics_schema,
-    _load_json_object,
-    _optional_require_str,
-    _parse_api_surface_snapshot,
-    _parse_generator,
-    _parse_snapshot,
-    _require_embedded_clone_baseline_payload,
-    _require_object,
-    _require_str,
-    _resolve_embedded_schema_version,
-    _validate_exact_keys,
-    _validate_required_keys,
-    _validate_top_level_structure,
-)
+from .container import read_container_v3
+from .container_trust import map_container_read_failure, unavailable_container_lanes
 from .diff import diff_metrics
 from .trust import current_python_tag
 
@@ -66,55 +65,24 @@ class MetricsBaselineSectionProbe:
     payload: dict[str, object] | None
 
 
-def _now_utc_z() -> str:
-    return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .isoformat()
-        .replace("+00:00", "Z")
-    )
-
-
 def probe_metrics_baseline_section(path: Path) -> MetricsBaselineSectionProbe:
     if not path.exists():
-        return MetricsBaselineSectionProbe(
-            has_metrics_section=False,
-            payload=None,
-        )
-    try:
-        raw_payload = orjson.loads(path.read_text("utf-8"))
-    except (OSError, JSONDecodeError):
-        return MetricsBaselineSectionProbe(
-            has_metrics_section=True,
-            payload=None,
-        )
-    payload = _probe_json_object(raw_payload, path=path)
-    if payload is None:
-        return MetricsBaselineSectionProbe(
-            has_metrics_section=True,
-            payload=None,
-        )
+        return MetricsBaselineSectionProbe(False, None)
+    result = read_container_v3(path, limit_bytes=MAX_METRICS_BASELINE_SIZE_BYTES)
+    if not isinstance(result, ContainerReadSuccess):
+        return MetricsBaselineSectionProbe(True, None)
+    names = set(result.container.lanes)
     return MetricsBaselineSectionProbe(
-        has_metrics_section=("metrics" in payload),
-        payload=payload,
+        bool(names - {"clones.functions", "clones.blocks", "module_identity"}),
+        None,
     )
-
-
-def _probe_json_object(value: object, *, path: Path) -> dict[str, object] | None:
-    try:
-        return _require_object(
-            value,
-            label="metrics baseline payload",
-            path=path,
-        )
-    except BaselineValidationError:
-        return None
 
 
 class MetricsBaseline:
     __slots__ = (
         "api_surface_payload_sha256",
         "api_surface_snapshot",
+        "container",
         "created_at",
         "generator_name",
         "generator_version",
@@ -129,6 +97,7 @@ class MetricsBaseline:
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self.container: BaselineContainerV3 | None = None
         self.generator_name: str | None = None
         self.generator_version: str | None = None
         self.schema_version: str | None = None
@@ -139,356 +108,355 @@ class MetricsBaseline:
         self.has_coverage_adoption_snapshot = False
         self.api_surface_payload_sha256: str | None = None
         self.api_surface_snapshot: ApiSurfaceSnapshot | None = None
-        self.is_embedded_in_clone_baseline = False
+        self.is_embedded_in_clone_baseline = True
 
-    def load(
+    def load(self, *, max_size_bytes: int | None = None) -> None:
+        result = read_container_v3(
+            self.path,
+            limit_bytes=(
+                MAX_METRICS_BASELINE_SIZE_BYTES
+                if max_size_bytes is None
+                else max_size_bytes
+            ),
+        )
+        if isinstance(result, ContainerReadFailure):
+            raise BaselineValidationError(
+                result.detail,
+                status=map_container_read_failure(
+                    result.reason,
+                    too_large=MetricsBaselineStatus.TOO_LARGE,
+                    invalid_json=MetricsBaselineStatus.INVALID_JSON,
+                    integrity_failed=MetricsBaselineStatus.INTEGRITY_FAILED,
+                    schema_mismatch=MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION,
+                    invalid_type=MetricsBaselineStatus.INVALID_TYPE,
+                ),
+            )
+        if not isinstance(result, ContainerReadSuccess):
+            raise BaselineValidationError(
+                "Metrics lanes are inspection-only.",
+                status=MetricsBaselineStatus.INVALID_TYPE,
+            )
+        container = result.container
+        self.container = container
+        self.generator_name = container.meta.generator.name
+        self.generator_version = container.meta.generator.version
+        self.schema_version = container.meta.container_version
+        self.python_tag = container.meta.python_tag
+        self.created_at = container.meta.created_at
+        self.payload_sha256 = container.meta.root_digest.value
+        self.api_surface_snapshot = _api_surface_snapshot(container)
+        self.has_coverage_adoption_snapshot = "adoption_counts" in container.lanes
+
+    def verify_compatibility(
         self,
         *,
-        max_size_bytes: int | None = None,
-        preloaded_payload: dict[str, object] | None = None,
+        runtime_python_tag: str,
+        baseline_scope_id: UUID,
     ) -> None:
-        try:
-            exists = self.path.exists()
-        except OSError as e:
-            raise BaselineValidationError(
-                f"Cannot stat metrics baseline file at {self.path}: {e}",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            ) from e
-        if not exists:
-            return
-
-        size_limit = (
-            MAX_METRICS_BASELINE_SIZE_BYTES
-            if max_size_bytes is None
-            else max_size_bytes
+        unavailable = unavailable_container_lanes(
+            self.container,
+            python_tag=runtime_python_tag,
+            baseline_scope_id=baseline_scope_id,
+            missing_message="Metrics baseline container is missing.",
+            missing_status=MetricsBaselineStatus.MISSING_FIELDS,
+            root_message="Metrics baseline root digest mismatch.",
+            integrity_status=MetricsBaselineStatus.INTEGRITY_FAILED,
         )
-        try:
-            file_size = self.path.stat().st_size
-        except OSError as e:
-            raise BaselineValidationError(
-                f"Cannot stat metrics baseline file at {self.path}: {e}",
-                status=MetricsBaselineStatus.INVALID_TYPE,
-            ) from e
-        if file_size > size_limit:
-            raise BaselineValidationError(
-                "Metrics baseline file is too large "
-                f"({file_size} bytes, max {size_limit} bytes) at {self.path}.",
-                status=MetricsBaselineStatus.TOO_LARGE,
-            )
-
-        if preloaded_payload is None:
-            payload = _load_json_object(self.path)
-        else:
-            if not isinstance(preloaded_payload, dict):
-                raise BaselineValidationError(
-                    f"Metrics baseline payload must be an object at {self.path}",
-                    status=MetricsBaselineStatus.INVALID_TYPE,
-                )
-            payload = preloaded_payload
-
-        _validate_top_level_structure(payload, path=self.path)
-        self.is_embedded_in_clone_baseline = "clones" in payload
-
-        meta_obj = payload.get("meta")
-        metrics_obj = payload.get("metrics")
-        meta_obj = _require_object(meta_obj, label="'meta'", path=self.path)
-        metrics_obj = _require_object(metrics_obj, label="'metrics'", path=self.path)
-
-        _validate_required_keys(meta_obj, _META_REQUIRED_KEYS, path=self.path)
-        _validate_required_keys(metrics_obj, _METRICS_REQUIRED_KEYS, path=self.path)
-        _validate_exact_keys(
-            metrics_obj,
-            _METRICS_REQUIRED_KEYS | _METRICS_OPTIONAL_KEYS,
-            path=self.path,
-        )
-
-        generator_name, generator_version = _parse_generator(meta_obj, path=self.path)
-        self.generator_name = generator_name
-        self.generator_version = generator_version
-        self.schema_version = _require_str(meta_obj, "schema_version", path=self.path)
-        self.python_tag = _require_str(meta_obj, "python_tag", path=self.path)
-        self.created_at = _require_str(meta_obj, "created_at", path=self.path)
-        self.payload_sha256 = _extract_metrics_payload_sha256(
-            meta_obj,
-            path=self.path,
-        )
-        self.api_surface_payload_sha256 = _extract_optional_payload_sha256(
-            meta_obj,
-            key=_API_SURFACE_PAYLOAD_SHA256_KEY,
-        )
-        self.snapshot = _parse_snapshot(metrics_obj, path=self.path)
-        self.has_coverage_adoption_snapshot = _has_coverage_adoption_snapshot(
-            metrics_obj
-        )
-        self.api_surface_snapshot = _parse_api_surface_snapshot(
-            payload.get("api_surface"),
-            path=self.path,
-            root=self.path.parent,
-        )
-
-    def save(self) -> None:
-        if self.snapshot is None:
-            raise BaselineValidationError(
-                "Metrics baseline snapshot is missing.",
-                status=MetricsBaselineStatus.MISSING_FIELDS,
-            )
-
-        payload = _build_payload(
-            snapshot=self.snapshot,
-            schema_version=self.schema_version or METRICS_BASELINE_SCHEMA_VERSION,
-            python_tag=self.python_tag or current_python_tag(),
-            generator_name=self.generator_name or METRICS_BASELINE_GENERATOR,
-            generator_version=self.generator_version or __version__,
-            created_at=self.created_at or _now_utc_z(),
-            include_adoption=self.has_coverage_adoption_snapshot,
-            api_surface_snapshot=self.api_surface_snapshot,
-            api_surface_root=self.path.parent,
-        )
-        payload_meta = payload.get("meta")
-        payload_meta = _require_object(payload_meta, label="'meta'", path=self.path)
-        payload_metrics_hash = _require_str(
-            payload_meta,
-            "payload_sha256",
-            path=self.path,
-        )
-        payload_api_surface_hash = _optional_require_str(
-            payload_meta,
-            _API_SURFACE_PAYLOAD_SHA256_KEY,
-            path=self.path,
-        )
-
-        existing: dict[str, object] | None = None
-        try:
-            if self.path.exists():
-                loaded = _load_json_object(self.path)
-                if "clones" in loaded:
-                    existing = loaded
-        except BaselineValidationError as e:
-            raise BaselineValidationError(
-                f"Cannot read existing baseline file at {self.path}: {e}",
-                status=MetricsBaselineStatus.INVALID_JSON,
-            ) from e
-
-        if existing is not None:
-            existing_meta, clones_obj = _require_embedded_clone_baseline_payload(
-                existing,
-                path=self.path,
-            )
-            merged_schema_version = _resolve_embedded_schema_version(
-                existing_meta,
-                path=self.path,
-            )
-            merged_meta = dict(existing_meta)
-            merged_meta["schema_version"] = merged_schema_version
-            merged_meta[_METRICS_PAYLOAD_SHA256_KEY] = payload_metrics_hash
-            if payload_api_surface_hash is None:
-                merged_meta.pop(_API_SURFACE_PAYLOAD_SHA256_KEY, None)
+        if unavailable:
+            reasons = ", ".join(f"{item.name}:{item.reason}" for item in unavailable)
+            if any(item.reason == "baseline_scope_id" for item in unavailable):
+                status = MetricsBaselineStatus.MISMATCH_SCOPE_ID
+            elif any(item.reason == "python_tag" for item in unavailable):
+                status = MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
             else:
-                merged_meta[_API_SURFACE_PAYLOAD_SHA256_KEY] = payload_api_surface_hash
-            merged_payload: dict[str, object] = {
-                "meta": merged_meta,
-                "clones": clones_obj,
-                "metrics": payload["metrics"],
-            }
-            api_surface_payload = payload.get("api_surface")
-            if api_surface_payload is not None:
-                merged_payload["api_surface"] = api_surface_payload
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            _atomic_write_json(self.path, merged_payload)
-            self.is_embedded_in_clone_baseline = True
-            self.schema_version = merged_schema_version
-            self.python_tag = _require_str(merged_meta, "python_tag", path=self.path)
-            self.created_at = _require_str(merged_meta, "created_at", path=self.path)
-            self.payload_sha256 = _require_str(
-                merged_meta,
-                _METRICS_PAYLOAD_SHA256_KEY,
-                path=self.path,
-            )
-            self.api_surface_payload_sha256 = _optional_require_str(
-                merged_meta,
-                _API_SURFACE_PAYLOAD_SHA256_KEY,
-                path=self.path,
-            )
-            self.generator_name, self.generator_version = _parse_generator(
-                merged_meta,
-                path=self.path,
-            )
-            return
-
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(self.path, payload)
-        self.is_embedded_in_clone_baseline = False
-        self.schema_version = _require_str(
-            payload_meta,
-            "schema_version",
-            path=self.path,
-        )
-        self.python_tag = _require_str(
-            payload_meta,
-            "python_tag",
-            path=self.path,
-        )
-        self.created_at = _require_str(
-            payload_meta,
-            "created_at",
-            path=self.path,
-        )
-        self.payload_sha256 = payload_metrics_hash
-        self.api_surface_payload_sha256 = payload_api_surface_hash
-
-    def verify_compatibility(self, *, runtime_python_tag: str) -> None:
-        if self.generator_name != METRICS_BASELINE_GENERATOR:
+                status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
             raise BaselineValidationError(
-                "Metrics baseline generator mismatch: expected 'codeclone'.",
-                status=MetricsBaselineStatus.GENERATOR_MISMATCH,
+                f"Metrics baseline lane compatibility failed: {reasons}",
+                status=status,
             )
-        expected_schema = (
-            BASELINE_SCHEMA_VERSION
-            if self.is_embedded_in_clone_baseline
-            else METRICS_BASELINE_SCHEMA_VERSION
-        )
-        if not _is_compatible_metrics_schema(
-            baseline_version=self.schema_version,
-            expected_version=expected_schema,
-        ):
+        if self.schema_version != BASELINE_SCHEMA_VERSION:
             raise BaselineValidationError(
-                "Metrics baseline schema version mismatch: "
-                f"baseline={self.schema_version}, "
-                f"expected={expected_schema}.",
+                "Metrics baseline schema mismatch.",
                 status=MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION,
             )
         if self.python_tag != runtime_python_tag:
             raise BaselineValidationError(
-                "Metrics baseline python tag mismatch: "
-                f"baseline={self.python_tag}, current={runtime_python_tag}.",
+                "Metrics baseline Python tag mismatch.",
                 status=MetricsBaselineStatus.MISMATCH_PYTHON_VERSION,
             )
-        self.verify_integrity()
-
-    def verify_integrity(self) -> None:
-        if self.snapshot is None:
-            raise BaselineValidationError(
-                "Metrics baseline snapshot is missing.",
-                status=MetricsBaselineStatus.MISSING_FIELDS,
-            )
-        if not isinstance(self.payload_sha256, str) or len(self.payload_sha256) != 64:
-            raise BaselineValidationError(
-                "Metrics baseline integrity payload hash is missing.",
-                status=MetricsBaselineStatus.INTEGRITY_MISSING,
-            )
-
-        expected = _compute_payload_sha256(
-            self.snapshot,
-            include_adoption=self.has_coverage_adoption_snapshot,
-        )
-        if not hmac.compare_digest(self.payload_sha256, expected):
-            raise BaselineValidationError(
-                "Metrics baseline integrity check failed: payload_sha256 mismatch.",
-                status=MetricsBaselineStatus.INTEGRITY_FAILED,
-            )
-
-        if self.api_surface_snapshot is None:
-            return
-        if (
-            not isinstance(self.api_surface_payload_sha256, str)
-            or len(self.api_surface_payload_sha256) != 64
-        ):
-            raise BaselineValidationError(
-                "Metrics baseline API surface integrity payload hash is missing.",
-                status=MetricsBaselineStatus.INTEGRITY_MISSING,
-            )
-
-        expected_api = _compute_api_surface_payload_sha256(
-            self.api_surface_snapshot,
-            root=self.path.parent,
-        )
-        legacy_absolute_expected_api = _compute_api_surface_payload_sha256(
-            self.api_surface_snapshot
-        )
-        legacy_expected_api = _compute_legacy_api_surface_payload_sha256(
-            self.api_surface_snapshot,
-            root=self.path.parent,
-        )
-        legacy_absolute_qualname_expected_api = (
-            _compute_legacy_api_surface_payload_sha256(self.api_surface_snapshot)
-        )
-        if not (
-            hmac.compare_digest(self.api_surface_payload_sha256, expected_api)
-            or hmac.compare_digest(
-                self.api_surface_payload_sha256,
-                legacy_absolute_expected_api,
-            )
-            or hmac.compare_digest(
-                self.api_surface_payload_sha256,
-                legacy_expected_api,
-            )
-            or hmac.compare_digest(
-                self.api_surface_payload_sha256,
-                legacy_absolute_qualname_expected_api,
-            )
-        ):
-            raise BaselineValidationError(
-                "Metrics baseline integrity check failed: "
-                "api_surface payload_sha256 mismatch.",
-                status=MetricsBaselineStatus.INTEGRITY_FAILED,
-            )
-
-    @staticmethod
-    def from_project_metrics(
-        *,
-        project_metrics: ProjectMetrics,
-        path: str | Path,
-        schema_version: str | None = None,
-        python_tag: str | None = None,
-        generator_version: str | None = None,
-        include_adoption: bool = True,
-        include_api_surface: bool = True,
-    ) -> MetricsBaseline:
-        baseline = MetricsBaseline(path)
-        baseline.generator_name = METRICS_BASELINE_GENERATOR
-        baseline.generator_version = generator_version or __version__
-        baseline.schema_version = schema_version or METRICS_BASELINE_SCHEMA_VERSION
-        baseline.python_tag = python_tag or current_python_tag()
-        baseline.created_at = _now_utc_z()
-        baseline.snapshot = snapshot_from_project_metrics(project_metrics)
-        baseline.payload_sha256 = _compute_payload_sha256(
-            baseline.snapshot,
-            include_adoption=include_adoption,
-        )
-        baseline.has_coverage_adoption_snapshot = include_adoption
-        baseline.api_surface_snapshot = (
-            project_metrics.api_surface if include_api_surface else None
-        )
-        baseline.api_surface_payload_sha256 = (
-            _compute_api_surface_payload_sha256(
-                baseline.api_surface_snapshot,
-                root=baseline.path.parent,
-            )
-            if baseline.api_surface_snapshot is not None
-            else None
-        )
-        return baseline
 
     def diff(self, current: ProjectMetrics) -> MetricsDiff:
+        container = self.container
+        if container is None:
+            baseline_snapshot = None
+        else:
+            baseline_snapshot = _snapshot(container)
+            self.snapshot = baseline_snapshot
         return diff_metrics(
-            baseline_snapshot=self.snapshot,
-            current_snapshot=snapshot_from_project_metrics(current),
+            baseline_snapshot=baseline_snapshot,
+            current_snapshot=_current_snapshot(current),
             baseline_api_surface=self.api_surface_snapshot,
             current_api_surface=current.api_surface,
         )
 
 
+def _lane_payload(
+    container: BaselineContainerV3,
+    name: ObservationLaneName,
+) -> object | None:
+    try:
+        return container.lanes[name].payload
+    except KeyError:
+        return None
+
+
+def _integer_rows(
+    container: BaselineContainerV3,
+    name: ObservationLaneName,
+) -> tuple[tuple[str, str, int], ...]:
+    payload = _lane_payload(container, name)
+    if not isinstance(payload, IntegerObservationPayload):
+        return ()
+    return tuple(
+        (item.entity, item.dimension, item.numerator) for item in payload.observations
+    )
+
+
+def _qualname(entity: str) -> str:
+    return entity.rsplit(":", 1)[-1]
+
+
+def _permille(rows: tuple[tuple[int, int], ...]) -> int:
+    numerator = sum(item[0] for item in rows)
+    denominator = sum(item[1] for item in rows)
+    return round(numerator * 1000 / denominator) if denominator else 0
+
+
+def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
+    risk_rows = _integer_rows(container, "risk_observations")
+    class_rows = _integer_rows(container, "coupling_cohesion_observations")
+    complexities = tuple(
+        value for _entity, dim, value in risk_rows if dim == "cyclomatic_complexity"
+    )
+    coupling = tuple(value for _entity, dim, value in class_rows if dim == "cbo")
+    cohesion = tuple(value for _entity, dim, value in class_rows if dim == "lcom4")
+    high_risk = tuple(
+        sorted(
+            _qualname(entity)
+            for entity, dim, value in risk_rows
+            if dim == "cyclomatic_complexity" and value > COMPLEXITY_RISK_MEDIUM_MAX
+        )
+    )
+    high_coupling = tuple(
+        sorted(
+            _qualname(entity)
+            for entity, dim, value in class_rows
+            if dim == "cbo" and value > COUPLING_RISK_MEDIUM_MAX
+        )
+    )
+    low_cohesion = tuple(
+        sorted(
+            _qualname(entity)
+            for entity, dim, value in class_rows
+            if dim == "lcom4" and value > COHESION_RISK_MEDIUM_MAX
+        )
+    )
+
+    dependency_payload = _lane_payload(container, "dependencies")
+    if isinstance(dependency_payload, DependencyObservationPayload):
+        modules = tuple(
+            sorted(
+                {
+                    module
+                    for item in dependency_payload.observations
+                    for module in (
+                        (
+                            item.source.python_module.module
+                            if item.source.python_module
+                            else ""
+                        ),
+                        item.resolved_target or "",
+                    )
+                    if module
+                }
+            )
+        )
+        graph = build_import_graph(
+            modules=modules,
+            deps=tuple(
+                _import_dependency(item)
+                for item in dependency_payload.observations
+                if item.source.python_module is not None
+                and item.resolved_target is not None
+            ),
+        )
+    else:
+        graph = {}
+    cycles = find_cycles(graph)
+    depth_avg, depth_p95 = depth_profile(graph)
+    graph_depth = max_depth(graph)
+
+    dead_payload = _lane_payload(container, "dead_code")
+    dead = (
+        tuple(item.entity for item in dead_payload.candidates)
+        if isinstance(dead_payload, DeadCodeObservationPayload)
+        else ()
+    )
+    adoption = _lane_payload(container, "adoption_counts")
+    adoption_rows = (
+        adoption.counts if isinstance(adoption, AdoptionObservationPayload) else ()
+    )
+    typing_params = tuple(
+        (item.numerator, item.denominator)
+        for item in adoption_rows
+        if item.feature == "typing.parameters"
+    )
+    typing_returns = tuple(
+        (item.numerator, item.denominator)
+        for item in adoption_rows
+        if item.feature == "typing.returns"
+    )
+    docstrings = tuple(
+        (item.numerator, item.denominator)
+        for item in adoption_rows
+        if item.feature == "docstrings.public_symbols"
+    )
+
+    module_payload = _lane_payload(container, "module_identity")
+    analyzed_files = (
+        sum(item.analyzed for item in module_payload.module_registry)
+        if isinstance(module_payload, ModuleIdentityObservationPayload)
+        else 0
+    )
+    function_clones = _lane_payload(container, "clones.functions")
+    block_clones = _lane_payload(container, "clones.blocks")
+    health = compute_health(
+        HealthInputs(
+            files_found=analyzed_files,
+            files_analyzed_or_cached=analyzed_files,
+            function_clone_groups=(
+                len(function_clones.items)
+                if isinstance(function_clones, CloneObservationPayload)
+                else 0
+            ),
+            block_clone_groups=(
+                len(block_clones.items)
+                if isinstance(block_clones, CloneObservationPayload)
+                else 0
+            ),
+            complexity_avg=(
+                sum(complexities) / len(complexities) if complexities else 0.0
+            ),
+            complexity_max=max(complexities, default=0),
+            high_risk_functions=len(high_risk),
+            coupling_avg=sum(coupling) / len(coupling) if coupling else 0.0,
+            coupling_max=max(coupling, default=0),
+            high_risk_classes=len(high_coupling),
+            cohesion_avg=sum(cohesion) / len(cohesion) if cohesion else 0.0,
+            low_cohesion_classes=len(low_cohesion),
+            dependency_cycles=len(cycles),
+            dependency_max_depth=graph_depth,
+            dependency_avg_depth=depth_avg,
+            dependency_p95_depth=depth_p95,
+            dead_code_items=len(dead),
+        )
+    )
+    return MetricsSnapshot(
+        max_complexity=max(complexities, default=0),
+        high_risk_functions=high_risk,
+        max_coupling=max(coupling, default=0),
+        high_coupling_classes=high_coupling,
+        max_cohesion=max(cohesion, default=0),
+        low_cohesion_classes=low_cohesion,
+        dependency_cycles=cycles,
+        dependency_max_depth=graph_depth,
+        dead_code_items=tuple(sorted(dead)),
+        health_score=health.total,
+        health_grade=health.grade,
+        typing_param_permille=_permille(typing_params),
+        typing_return_permille=_permille(typing_returns),
+        docstring_permille=_permille(docstrings),
+        typing_any_count=0,
+    )
+
+
+def _import_dependency(item: ImportObservation) -> ModuleDep:
+    if item.source.python_module is None or item.resolved_target is None:
+        raise ValueError("dependency observation is not graph-resolvable")
+    return ModuleDep(
+        source=item.source.python_module.module,
+        target=item.resolved_target,
+        import_type=item.syntax_kind,
+        line=0,
+        resolution=item.resolution,
+        inventory_expansion=item.inventory_expansion,
+        level=item.level,
+        requested_module=item.requested_module,
+        requested_names=item.requested_names,
+        candidate_targets=item.candidate_targets,
+    )
+
+
+def _api_surface_snapshot(container: BaselineContainerV3) -> ApiSurfaceSnapshot | None:
+    payload = _lane_payload(container, "api_surface")
+    if not isinstance(payload, ApiSurfaceObservationPayload):
+        return None
+    rows: dict[tuple[str, str], list[PublicSymbol]] = {}
+    for item in payload.symbols:
+        module = item.owner.python_module
+        if module is None:
+            continue
+        key = (module.module, item.owner.file.path)
+        rows.setdefault(key, []).append(
+            PublicSymbol(
+                qualname=item.symbol,
+                kind=item.symbol_kind,
+                start_line=0,
+                end_line=0,
+                params=tuple(
+                    ApiParamSpec(
+                        name=parameter.name,
+                        kind=parameter.kind,
+                        has_default=parameter.has_default,
+                        annotation_hash=(
+                            parameter.annotation_digest.value
+                            if parameter.annotation_digest
+                            else ""
+                        ),
+                    )
+                    for parameter in item.parameters
+                ),
+                returns_hash=(item.returns_digest.value if item.returns_digest else ""),
+                exported_via=item.visibility,
+            )
+        )
+    return ApiSurfaceSnapshot(
+        modules=tuple(
+            ModuleApiSurface(
+                module=module,
+                filepath=filepath,
+                symbols=tuple(
+                    sorted(symbols, key=lambda item: (item.qualname, item.kind))
+                ),
+            )
+            for (module, filepath), symbols in sorted(rows.items())
+        )
+    )
+
+
+def _current_snapshot(current: ProjectMetrics) -> MetricsSnapshot:
+    from ._metrics_baseline_payload import snapshot_from_project_metrics
+
+    return snapshot_from_project_metrics(current)
+
+
 __all__ = [
     "BASELINE_SCHEMA_VERSION",
     "MAX_METRICS_BASELINE_SIZE_BYTES",
-    "METRICS_BASELINE_GENERATOR",
-    "METRICS_BASELINE_SCHEMA_VERSION",
-    "METRICS_BASELINE_UNTRUSTED_STATUSES",
     "MetricsBaseline",
     "MetricsBaselineSectionProbe",
     "MetricsBaselineStatus",
     "coerce_metrics_baseline_status",
     "current_python_tag",
     "probe_metrics_baseline_section",
-    "snapshot_from_project_metrics",
 ]

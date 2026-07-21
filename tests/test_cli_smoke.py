@@ -91,6 +91,11 @@ def f2():
     print("hello")
     return 1
 """)
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\n"
+        'baseline_scope_id = "018f4b8e-5a5f-7d35-9c21-4af5d18df420"\n',
+        encoding="utf-8",
+    )
 
     baseline_file = tmp_path / "codeclone.baseline.json"
 

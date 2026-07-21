@@ -169,13 +169,6 @@ HELP_CI = (
     "When a trusted metrics baseline is available, CI mode also enables\n"
     "metrics regression gating."
 )
-HELP_UPDATE_METRICS_BASELINE = (
-    "Overwrite the metrics baseline with current metrics.\nDisabled by default."
-)
-HELP_METRICS_BASELINE = (
-    "Path to the metrics baseline.\n"
-    f"If FILE is omitted, uses {Path(DEFAULT_BASELINE_PATH)}."
-)
 HELP_SKIP_METRICS = "Skip full metrics analysis and run in clone-only mode."
 HELP_SKIP_DEAD_CODE = "Skip dead code detection."
 HELP_SKIP_DEPENDENCIES = "Skip dependency graph analysis."
@@ -222,6 +215,15 @@ HELP_INTERACTIVE = (
 )
 HELP_MASCOT_TAGLINE = (
     "Run `codeclone --help --interactive-help` for a guided product tour."
+)
+HELP_BASELINE_COMMAND = "Manage the native baseline publication state."
+HELP_BASELINE_RECOVER_LOCK = (
+    "Explicitly recover a stale baseline publication lock without writing the baseline."
+)
+HELP_BASELINE_RECOVER_PATH = "Baseline target whose adjacent lock is recovered."
+HELP_BASELINE_RECOVER_TOKEN = "Exact lock token observed by the operator."
+HELP_BASELINE_RECOVER_FORCE = (
+    "Allow recovery of foreign-host or malformed lock evidence."
 )
 HELP_TOUR_STEP_INTRO_TITLE = "CodeClone product tour"
 HELP_TOUR_STEP_INTRO_BODY = (
