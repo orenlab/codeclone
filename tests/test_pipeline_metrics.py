@@ -32,7 +32,6 @@ from codeclone.core.discovery_cache import (
     _dead_candidate_kind,
     _docstring_coverage_from_cache_dict,
     _exported_via_kind,
-    _import_type,
     _module_dep_from_cache_row,
     _public_symbol_from_cache_dict,
     _public_symbol_kind,
@@ -1188,7 +1187,6 @@ def test_security_surface_from_cache_row_rejects_invalid_literals_and_is_filtere
         (_public_symbol_kind, ("function", "class", "method", "constant")),
         (_exported_via_kind, ("all", "name")),
         (_risk_level, ("low", "medium", "high")),
-        (_import_type, ("import", "from_import")),
         (_dead_candidate_kind, ("function", "class", "method", "import")),
     ),
 )
@@ -1361,12 +1359,74 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
             {
                 "source": "pkg.mod",
                 "target": "pkg.dep",
-                "import_type": "broken",
+                "import_type": "import",
                 "line": 3,
             }
         )
         is None
     )
+    complete_dependency = ModuleDep(
+        source="pkg.mod",
+        target="pkg.dep",
+        import_type="from_import",
+        line=3,
+        resolution="analyzed",
+        inventory_expansion=True,
+        level=1,
+        requested_module="dep",
+        requested_names=("VALUE",),
+        candidate_targets=("pkg.dep",),
+    )
+    assert (
+        _module_dep_from_cache_row(
+            {
+                "source": "pkg.mod",
+                "target": "pkg.dep",
+                "import_type": "from_import",
+                "line": 3,
+                "resolution": "analyzed",
+                "inventory_expansion": True,
+                "level": 1,
+                "requested_module": "dep",
+                "requested_names": ["VALUE"],
+                "candidate_targets": ["pkg.dep"],
+            }
+        )
+        == complete_dependency
+    )
+    assert (
+        _module_dep_from_cache_row(
+            {
+                "source": "pkg.mod",
+                "target": "",
+                "import_type": "from_import",
+                "line": 3,
+                "resolution": "external",
+                "inventory_expansion": False,
+                "level": 0,
+                "requested_module": None,
+                "requested_names": [],
+                "candidate_targets": [],
+            }
+        )
+        is None
+    )
+    unresolved_dependency = _module_dep_from_cache_row(
+        {
+            "source": "pkg.mod",
+            "target": "",
+            "import_type": "from_import",
+            "line": 3,
+            "resolution": "unresolved_relative",
+            "inventory_expansion": False,
+            "level": 2,
+            "requested_module": None,
+            "requested_names": ["missing"],
+            "candidate_targets": [],
+        }
+    )
+    assert unresolved_dependency is not None
+    assert unresolved_dependency.target == ""
     assert (
         _dead_candidate_from_cache_row(
             {
@@ -1415,12 +1475,12 @@ def test_discovery_cache_parsers_reject_invalid_rows_and_skip_invalid_entries() 
                 "target": "pkg.dep",
                 "import_type": "import",
                 "line": 3,
-            },
-            {
-                "source": "pkg.mod",
-                "target": "pkg.bad",
-                "import_type": "broken",
-                "line": 4,
+                "resolution": "analyzed",
+                "inventory_expansion": False,
+                "level": 0,
+                "requested_module": "pkg.dep",
+                "requested_names": [],
+                "candidate_targets": ["pkg.dep"],
             },
         ),
         dead_candidates=(

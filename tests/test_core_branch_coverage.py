@@ -1178,6 +1178,12 @@ def _discover_with_single_cached_entry(
                     "target": "pkg.b",
                     "import_type": "import",
                     "line": 3,
+                    "resolution": "analyzed",
+                    "inventory_expansion": False,
+                    "level": 0,
+                    "requested_module": "pkg.b",
+                    "requested_names": [],
+                    "candidate_targets": ["pkg.b"],
                 },
             ),
             dead_candidates=(

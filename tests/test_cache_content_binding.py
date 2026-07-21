@@ -9,10 +9,12 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
+import codeclone.cache.reuse as cache_reuse
 import codeclone.paths.git_snapshot as git_snapshot_mod
 from codeclone.cache._wire_decode import _decode_wire_file_entry
 from codeclone.cache.integrity import sign_cache_payload
@@ -26,6 +28,7 @@ from codeclone.models import (
     CacheDependentPayload,
     CacheEntryV3,
     CacheNeutralPayload,
+    ContentIdentityVerdict,
     DigestObject,
     FileStat,
     GitBlobIdentity,
@@ -101,6 +104,59 @@ def _entry(
             structural_findings=None,
         ),
     )
+
+
+def test_dependency_observation_revision_misses_only_dependent_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    neutral_profile = cache_reuse.build_module_neutral_profile(
+        fingerprint_version="2",
+        min_loc=1,
+        min_stmt=1,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+    )
+    manifest_digest = DigestObject(
+        domain="codeclone.module-registry.v1",
+        algorithm="sha256",
+        value="3" * 64,
+    )
+    monkeypatch.setattr(cache_reuse, "_DEPENDENCY_OBSERVATION_REVISION", "1")
+    legacy_dependent_profile = cache_reuse.build_module_dependent_profile(
+        neutral_profile=neutral_profile,
+        module_manifest_digest=manifest_digest,
+        collect_api_surface=False,
+    )
+    monkeypatch.setattr(cache_reuse, "_DEPENDENCY_OBSERVATION_REVISION", "2")
+    current_dependent_profile = cache_reuse.build_module_dependent_profile(
+        neutral_profile=neutral_profile,
+        module_manifest_digest=manifest_digest,
+        collect_api_surface=False,
+    )
+    entry = replace(
+        _entry(b"source", {"mtime_ns": 1, "size": 6}),
+        module_neutral_profile=neutral_profile,
+        module_dependent_profile=legacy_dependent_profile,
+    )
+
+    decision = cache_reuse.cache_reuse_decision(
+        content=ContentIdentityVerdict(
+            hit=True,
+            reason="digest_hit",
+            git_fallback_reason=None,
+            digest_verify_cost_us=0,
+            stat_fast_reject=False,
+        ),
+        entry=entry,
+        neutral_profile=neutral_profile,
+        dependent_profile=current_dependent_profile,
+    )
+
+    assert legacy_dependent_profile != current_dependent_profile
+    assert decision.neutral.reason == "hit"
+    assert decision.dependent.reason == "dependent_profile_mismatch"
 
 
 def _write_source_with_stat(root: Path, raw_source: bytes) -> tuple[Path, FileStat]:

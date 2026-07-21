@@ -30,6 +30,7 @@ from ..models import (
 
 _NEUTRAL_PROFILE_DOMAIN = b"codeclone.cache.profile.neutral.v1\x00"
 _DEPENDENT_PROFILE_DOMAIN = b"codeclone.cache.profile.dependent.v1\x00"
+_DEPENDENCY_OBSERVATION_REVISION = "2"
 
 
 def _profile_digest(
@@ -92,6 +93,7 @@ def build_module_dependent_profile(
             "api_surface": collect_api_surface,
             "api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION,
             "call_resolution_version": "1",
+            "dependency_observation_revision": _DEPENDENCY_OBSERVATION_REVISION,
             "module_manifest_digest": module_manifest_digest.value,
             "neutral_profile": neutral_profile.value,
             "resolver_version": "2",

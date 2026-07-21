@@ -16,6 +16,7 @@ from ..models import (
     ClassMetricsDict,
     DeadCandidate,
     DeadCandidateDict,
+    DependencyResolution,
     ModuleApiSurface,
     ModuleDep,
     ModuleDepDict,
@@ -46,7 +47,6 @@ _ApiParamKind = Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
 _PublicSymbolKind = Literal["function", "class", "method", "constant"]
 _ExportedViaKind = Literal["all", "name"]
 _RiskLevel = Literal["low", "medium", "high"]
-_ImportType = Literal["import", "from_import"]
 _DeadCandidateKind = Literal["function", "class", "method", "import"]
 
 
@@ -98,16 +98,6 @@ def _risk_level(value: object) -> _RiskLevel | None:
             return "medium"
         case "high":
             return "high"
-        case _:
-            return None
-
-
-def _import_type(value: object) -> _ImportType | None:
-    match value:
-        case "import":
-            return "import"
-        case "from_import":
-            return "from_import"
         case _:
             return None
 
@@ -526,15 +516,42 @@ def _class_metric_from_cache_row(metric_row: ClassMetricsDict) -> ClassMetrics |
     )
 
 
+def _module_dep_target_is_valid(
+    *,
+    resolution: DependencyResolution,
+    target: str,
+) -> bool:
+    return resolution == "unresolved_relative" or bool(target)
+
+
 def _module_dep_from_cache_row(dep_row: ModuleDepDict) -> ModuleDep | None:
-    import_type = _import_type(dep_row["import_type"])
-    if not dep_row.get("source") or not dep_row.get("target") or import_type is None:
+    try:
+        resolution = dep_row["resolution"]
+        inventory_expansion = dep_row["inventory_expansion"]
+        level = dep_row["level"]
+        requested_module = dep_row["requested_module"]
+        requested_names = dep_row["requested_names"]
+        candidate_targets = dep_row["candidate_targets"]
+    except KeyError:
+        return None
+    import_type = dep_row["import_type"]
+    target = dep_row["target"]
+    if not dep_row.get("source") or not _module_dep_target_is_valid(
+        resolution=resolution,
+        target=target,
+    ):
         return None
     return ModuleDep(
         source=dep_row["source"],
-        target=dep_row["target"],
+        target=target,
         import_type=import_type,
         line=dep_row["line"],
+        resolution=resolution,
+        inventory_expansion=inventory_expansion,
+        level=level,
+        requested_module=requested_module,
+        requested_names=tuple(requested_names),
+        candidate_targets=tuple(candidate_targets),
     )
 
 
