@@ -89,6 +89,7 @@ from codeclone.models import (
     FileMetrics,
     FunctionRelationshipFacts,
     ModuleApiSurface,
+    ModuleDep,
     ObservabilityConfig,
     PublicSymbol,
     RelationshipRecord,
@@ -2728,6 +2729,80 @@ def test_decode_wire_metrics_items_and_deps_roundtrip_shape() -> None:
     assert module_dep is not None
     assert module_dep["source"] == "a"
     assert _decode_wire_module_dep(["a", "b", "import", "1"]) is None
+    assert _decode_wire_module_dep(["a", "b", "broken", 1]) is None
+
+    complete_dep = ModuleDep(
+        source="pkg.mod",
+        target="pkg.dep",
+        import_type="from_import",
+        line=7,
+        resolution="analyzed",
+        inventory_expansion=True,
+        level=1,
+        requested_module="dep",
+        requested_names=("VALUE", "OTHER"),
+        candidate_targets=("pkg.dep", "pkg.dep.VALUE"),
+    )
+    complete_row = cache_entries._module_dep_dict_from_model(complete_dep)
+    complete_entry = replace(
+        _empty_v3_entry(),
+        module_dependent=replace(
+            _empty_v3_entry().module_dependent,
+            module_deps=(complete_row,),
+        ),
+    )
+    decoded_entry = _decode_wire_file_entry(
+        _encode_wire_file_entry(complete_entry),
+        "pkg/mod.py",
+    )
+    assert decoded_entry is not None
+    decoded_dep_row = decoded_entry.module_dependent.module_deps[0]
+    assert decoded_dep_row == complete_row
+
+    legacy_entry = replace(
+        _empty_v3_entry(),
+        module_dependent=replace(
+            _empty_v3_entry().module_dependent,
+            module_deps=(module_dep,),
+        ),
+    )
+    decoded_legacy_entry = _decode_wire_file_entry(
+        _encode_wire_file_entry(legacy_entry),
+        "pkg/mod.py",
+    )
+    assert decoded_legacy_entry is not None
+    assert decoded_legacy_entry.module_dependent.module_deps == (module_dep,)
+
+    malformed_complete_row = [
+        "pkg.mod",
+        "pkg.dep",
+        "from_import",
+        7,
+        "analyzed",
+        False,
+        1,
+        "dep",
+        ["VALUE"],
+        [1],
+    ]
+    assert _decode_wire_module_dep(malformed_complete_row) is None
+    assert (
+        _decode_wire_module_dep(
+            [
+                "pkg.mod",
+                "pkg.dep",
+                "from_import",
+                7,
+                "broken",
+                False,
+                1,
+                "dep",
+                ["VALUE"],
+                ["pkg.dep"],
+            ]
+        )
+        is None
+    )
 
     dead_candidate = _decode_wire_dead_candidate(
         ["pkg.mod:unused", "unused", 1, 2, "function"],
@@ -2875,6 +2950,47 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
             }
         )
         is True
+    )
+    assert (
+        _is_module_dep_dict(
+            {
+                "source": "a",
+                "target": "b",
+                "import_type": "from_import",
+                "line": 1,
+                "resolution": "analyzed",
+                "inventory_expansion": False,
+                "level": 1,
+                "requested_module": "b",
+                "requested_names": ["VALUE"],
+                "candidate_targets": ["b"],
+            }
+        )
+        is True
+    )
+    assert (
+        _is_module_dep_dict(
+            {
+                "source": "a",
+                "target": "b",
+                "import_type": "from_import",
+                "line": 1,
+                "resolution": "analyzed",
+            }
+        )
+        is False
+    )
+    assert _is_module_dep_dict({"source": "a"}) is False
+    assert (
+        _is_module_dep_dict(
+            {
+                "source": "a",
+                "target": "b",
+                "import_type": "broken",
+                "line": 1,
+            }
+        )
+        is False
     )
 
 

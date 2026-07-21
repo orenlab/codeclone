@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, TypeGuard
 
 from ..models import (
     ApiParamSpecDict,
@@ -19,6 +19,7 @@ from ..models import (
     CacheNeutralUnit,
     ClassMetricsDict,
     DeadCandidateDict,
+    DependencyResolution,
     DigestObject,
     EventKind,
     FactRef,
@@ -119,6 +120,22 @@ def _event_kind(value: object) -> EventKind | None:
             return "security_observation"
         case _:
             return None
+
+
+def _is_dependency_resolution(value: object) -> TypeGuard[DependencyResolution]:
+    return isinstance(value, str) and value in {
+        "analyzed",
+        "known_internal_not_analyzed",
+        "external",
+        "unresolved_relative",
+        "ambiguous",
+    }
+
+
+def _is_module_dep_import_type(
+    value: object,
+) -> TypeGuard[Literal["import", "from_import"]]:
+    return isinstance(value, str) and value in {"import", "from_import"}
 
 
 def _fact_ref_kind(value: object) -> FactRefKind | None:
@@ -1207,19 +1224,65 @@ def _decode_wire_class_metric(
 
 def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     row = _as_list(value)
-    if row is None or len(row) != 4:
+    if row is None or len(row) not in {4, 10}:
         return None
     source = _as_str(row[0])
     target = _as_str(row[1])
-    import_type = _as_str(row[2])
+    import_type = row[2]
     line = _as_int(row[3])
-    if source is None or target is None or import_type is None or line is None:
+    if (
+        source is None
+        or target is None
+        or not _is_module_dep_import_type(import_type)
+        or line is None
+        or isinstance(line, bool)
+    ):
         return None
-    return ModuleDepDict(
+    base = ModuleDepDict(
         source=source,
         target=target,
         import_type=import_type,
         line=line,
+    )
+    if len(row) == 4:
+        return base
+
+    resolution = row[4]
+    inventory_expansion = row[5]
+    level = _as_int(row[6])
+    requested_module_raw = row[7]
+    requested_names_raw = _as_list(row[8])
+    candidate_targets_raw = _as_list(row[9])
+    requested_names = (
+        None
+        if requested_names_raw is None
+        else [_as_str(item) for item in requested_names_raw]
+    )
+    candidate_targets = (
+        None
+        if candidate_targets_raw is None
+        else [_as_str(item) for item in candidate_targets_raw]
+    )
+    if (
+        not _is_dependency_resolution(resolution)
+        or not isinstance(inventory_expansion, bool)
+        or level is None
+        or isinstance(level, bool)
+        or not (requested_module_raw is None or isinstance(requested_module_raw, str))
+        or requested_names is None
+        or any(item is None for item in requested_names)
+        or candidate_targets is None
+        or any(item is None for item in candidate_targets)
+    ):
+        return None
+    return ModuleDepDict(
+        **base,
+        resolution=resolution,
+        inventory_expansion=inventory_expansion,
+        level=level,
+        requested_module=requested_module_raw,
+        requested_names=[item for item in requested_names if item is not None],
+        candidate_targets=[item for item in candidate_targets if item is not None],
     )
 
 

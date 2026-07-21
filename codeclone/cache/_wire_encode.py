@@ -160,18 +160,44 @@ def _encode_class_metrics(entry: CacheFactsDict, wire: dict[str, object]) -> Non
 def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     module_deps = sorted(
         entry["module_deps"],
-        key=lambda dep: (dep["source"], dep["target"], dep["import_type"], dep["line"]),
+        key=lambda dep: (
+            dep["source"],
+            dep["target"],
+            dep["import_type"],
+            dep["line"],
+            dep.get("resolution", ""),
+            dep.get("level", -1),
+            dep.get("requested_module") or "",
+            tuple(dep.get("requested_names", ())),
+            tuple(dep.get("candidate_targets", ())),
+            dep.get("inventory_expansion", False),
+        ),
     )
     if module_deps:
-        wire["md"] = [
-            [
+        rows: list[list[object]] = []
+        for dep in module_deps:
+            base_row: list[object] = [
                 dep["source"],
                 dep["target"],
                 dep["import_type"],
                 dep["line"],
             ]
-            for dep in module_deps
-        ]
+            try:
+                detail_row: tuple[object, ...] = (
+                    dep["resolution"],
+                    dep["inventory_expansion"],
+                    dep["level"],
+                    dep["requested_module"],
+                    dep["requested_names"],
+                    dep["candidate_targets"],
+                )
+            except KeyError:
+                # A pre-revision row is retained only so its neutral lane can
+                # survive the dependent-profile miss and be rewritten.
+                detail_row = ()
+            base_row.extend(detail_row)
+            rows.append(base_row)
+        wire["md"] = rows
 
 
 def _encode_dead_candidates(entry: CacheFactsDict, wire: dict[str, object]) -> None:

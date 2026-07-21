@@ -10,6 +10,7 @@ import builtins
 from argparse import Namespace
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
@@ -53,6 +54,11 @@ from codeclone.models import (
     SemanticFileFacts,
     SourceStatsDict,
 )
+from codeclone.observations.lanes import (
+    build_observation_lanes,
+    canonical_observation_lane_bytes,
+)
+from codeclone.observations.projection import build_observation_bundle
 from codeclone.paths.module_identity.inventory import build_module_registry
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
@@ -345,6 +351,86 @@ def test_cache_profile_reuse_span_is_single_for_full_and_partial_batches(
         "cache_lane_neutral_hit": 1,
         "cache_lane_dependent_miss": 1,
     }
+
+
+def _dependency_lane_bytes(
+    result: ProcessingResult,
+    discovery: DiscoveryResult,
+) -> bytes:
+    bundle = build_observation_bundle(
+        module_registry=discovery.module_registry,
+        module_deps=result.module_deps,
+        collect_metrics=False,
+        collect_dead_code=False,
+        collect_api_surface=False,
+    )
+    dependencies = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "dependencies"
+    )
+    return canonical_observation_lane_bytes(dependencies)
+
+
+def test_dependency_lane_bytes_match_cold_warm_partial_and_full_hits(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", "utf-8")
+    (package / "dep.py").write_text("VALUE = 1\n", "utf-8")
+    (package / "mod.py").write_text("from .dep import VALUE\n", "utf-8")
+    boot = _build_boot(tmp_path, processes=1)
+    boot.args.skip_metrics = False
+    cache_path = tmp_path / "cache.json"
+
+    cold_cache = Cache(cache_path, root=tmp_path)
+    cold_discovery = core_discovery.discover(boot=boot, cache=cold_cache)
+    cold_result = process(
+        boot=boot,
+        discovery=cold_discovery,
+        cache=cold_cache,
+    )
+    cold_bytes = _dependency_lane_bytes(cold_result, cold_discovery)
+    assert len(cold_result.module_deps) == 1
+    cold_cache.save()
+
+    warm_cache = Cache(cache_path, root=tmp_path)
+    warm_cache.load()
+    stale_dependent_profile = DigestObject(
+        domain="codeclone.cache.profile.dependent.v1",
+        algorithm="sha256",
+        value="f" * 64,
+    )
+    for filepath, entry in tuple(warm_cache.data["files"].items()):
+        warm_cache.data["files"][filepath] = replace(
+            entry,
+            module_dependent_profile=stale_dependent_profile,
+        )
+    warm_discovery = core_discovery.discover(boot=boot, cache=warm_cache)
+    assert warm_discovery.cache_hits == 0
+    assert len(warm_discovery.neutral_reuse_by_file) == 3
+    warm_result = process(
+        boot=boot,
+        discovery=warm_discovery,
+        cache=warm_cache,
+    )
+    warm_bytes = _dependency_lane_bytes(warm_result, warm_discovery)
+    warm_cache.save()
+
+    full_cache = Cache(cache_path, root=tmp_path)
+    full_cache.load()
+    full_discovery = core_discovery.discover(boot=boot, cache=full_cache)
+    assert full_discovery.cache_hits == 3
+    full_result = process(
+        boot=boot,
+        discovery=full_discovery,
+        cache=full_cache,
+    )
+    full_bytes = _dependency_lane_bytes(full_result, full_discovery)
+
+    assert cold_result.module_deps == warm_result.module_deps == full_result.module_deps
+    assert cold_bytes == warm_bytes == full_bytes
 
 
 @pytest.mark.parametrize("authority_enabled", [False, True])

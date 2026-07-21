@@ -216,10 +216,46 @@ def _is_class_metrics_dict(value: object) -> TypeGuard[ClassMetricsDict]:
 def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
     if not isinstance(value, dict):
         return False
-    return _has_typed_fields(
+    if not _has_typed_fields(
         value,
         string_keys=("source", "target", "import_type"),
         int_keys=("line",),
+    ):
+        return False
+    if value.get("import_type") not in {"import", "from_import"}:
+        return False
+    detail_keys = {
+        "resolution",
+        "inventory_expansion",
+        "level",
+        "requested_module",
+        "requested_names",
+        "candidate_targets",
+    }
+    present_detail_keys = detail_keys.intersection(value)
+    if not present_detail_keys:
+        return True
+    if present_detail_keys != detail_keys:
+        return False
+    resolution = value.get("resolution")
+    inventory_expansion = value.get("inventory_expansion")
+    level = value.get("level")
+    requested_module = value.get("requested_module")
+    return (
+        resolution
+        in {
+            "analyzed",
+            "known_internal_not_analyzed",
+            "external",
+            "unresolved_relative",
+            "ambiguous",
+        }
+        and isinstance(inventory_expansion, bool)
+        and isinstance(level, int)
+        and not isinstance(level, bool)
+        and (requested_module is None or isinstance(requested_module, str))
+        and _is_string_list(value.get("requested_names"))
+        and _is_string_list(value.get("candidate_targets"))
     )
 
 

@@ -427,11 +427,20 @@ class ClassMetricsDict(ClassMetricsDictBase, total=False):
     coupled_classes: list[str]
 
 
-class ModuleDepDict(TypedDict):
+class ModuleDepDictBase(TypedDict):
     source: str
     target: str
-    import_type: str
+    import_type: Literal["import", "from_import"]
     line: int
+
+
+class ModuleDepDict(ModuleDepDictBase, total=False):
+    resolution: DependencyResolution
+    inventory_expansion: bool
+    level: int
+    requested_module: str | None
+    requested_names: list[str]
+    candidate_targets: list[str]
 
 
 class DeadCandidateDictBase(TypedDict):
