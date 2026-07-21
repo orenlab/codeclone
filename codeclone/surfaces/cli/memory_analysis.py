@@ -94,14 +94,9 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
     printer = require_status_console(cli_state.get_console())
     started = cli_meta_mod._current_report_timestamp_utc()
     baseline_inputs = cli_startup.resolve_baseline_inputs(
-        ap=ap,
         args=args,
         root_path=root_path,
         baseline_path_from_args=False,
-        metrics_path_from_args=False,
-        probe_metrics_baseline_section_fn=(
-            cli_baseline_state._probe_metrics_baseline_section
-        ),
         printer=printer,
     )
     cache_path = cli_runtime._resolve_cache_path(
@@ -146,26 +141,17 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
             rich_progress_symbols_fn=_rich_progress_symbols,
         )
     )
-    shared_baseline_payload = (
-        baseline_inputs.shared_baseline_payload
-        if baseline_inputs.metrics_baseline_path == baseline_inputs.baseline_path
-        else None
-    )
     baseline_state = cli_baseline_state._resolve_clone_baseline_state(
         args=args,
         baseline_path=baseline_inputs.baseline_path,
         baseline_exists=baseline_inputs.baseline_exists,
         analysis=analysis_result,
-        shared_baseline_payload=shared_baseline_payload,
     )
     metrics_baseline_state = cli_baseline_state._resolve_metrics_baseline_state(
         args=args,
         metrics_baseline_path=baseline_inputs.metrics_baseline_path,
         metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
         clone_baseline_state=baseline_state,
-        baseline_updated_path=baseline_state.updated_path,
-        analysis=analysis_result,
-        shared_baseline_payload=shared_baseline_payload,
     )
     cache_status, cache_schema_version = cli_runtime._resolve_cache_status(cache)
     report_meta = cli_meta_mod.build_cli_report_meta(

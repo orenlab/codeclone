@@ -8,17 +8,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import UUID
 
 from ...baseline import (
     Baseline,
     BaselineStatus,
-    coerce_baseline_status,
-    current_python_tag,
-)
-from ...baseline.metrics_baseline import (
     MetricsBaseline,
     MetricsBaselineStatus,
+    coerce_baseline_status,
     coerce_metrics_baseline_status,
+    current_python_tag,
 )
 from ...contracts import ExitCode
 from ...contracts.errors import BaselineValidationError
@@ -50,7 +49,7 @@ def resolve_clone_baseline_state(
     baseline_path: Path,
     baseline_exists: bool,
     max_baseline_size_mb: int,
-    shared_baseline_payload: dict[str, object] | None = None,
+    baseline_scope_id: UUID | None,
 ) -> CloneBaselineState:
     baseline = Baseline(baseline_path)
     if not baseline_exists:
@@ -65,14 +64,16 @@ def resolve_clone_baseline_state(
         )
 
     try:
-        if shared_baseline_payload is None:
-            baseline.load(max_size_bytes=max_baseline_size_mb * 1024 * 1024)
-        else:
-            baseline.load(
-                max_size_bytes=max_baseline_size_mb * 1024 * 1024,
-                preloaded_payload=shared_baseline_payload,
+        baseline.load(max_size_bytes=max_baseline_size_mb * 1024 * 1024)
+        if baseline_scope_id is None:
+            raise BaselineValidationError(
+                "baseline_scope_id is required for baseline trust.",
+                status=BaselineStatus.MISMATCH_SCOPE_ID,
             )
-        baseline.verify_compatibility(current_python_tag=current_python_tag())
+        baseline.verify_compatibility(
+            current_python_tag=current_python_tag(),
+            baseline_scope_id=baseline_scope_id,
+        )
     except BaselineValidationError as exc:
         status = coerce_baseline_status(exc.status)
         return CloneBaselineState(
@@ -102,7 +103,7 @@ def resolve_metrics_baseline_state(
     metrics_baseline_exists: bool,
     max_baseline_size_mb: int,
     skip_metrics: bool,
-    shared_baseline_payload: dict[str, object] | None = None,
+    baseline_scope_id: UUID | None,
 ) -> MetricsBaselineState:
     baseline = MetricsBaseline(metrics_baseline_path)
     if skip_metrics or not metrics_baseline_exists:
@@ -116,14 +117,16 @@ def resolve_metrics_baseline_state(
         )
 
     try:
-        if shared_baseline_payload is None:
-            baseline.load(max_size_bytes=max_baseline_size_mb * 1024 * 1024)
-        else:
-            baseline.load(
-                max_size_bytes=max_baseline_size_mb * 1024 * 1024,
-                preloaded_payload=shared_baseline_payload,
+        baseline.load(max_size_bytes=max_baseline_size_mb * 1024 * 1024)
+        if baseline_scope_id is None:
+            raise BaselineValidationError(
+                "baseline_scope_id is required for metrics baseline trust.",
+                status=MetricsBaselineStatus.MISMATCH_SCOPE_ID,
             )
-        baseline.verify_compatibility(runtime_python_tag=current_python_tag())
+        baseline.verify_compatibility(
+            runtime_python_tag=current_python_tag(),
+            baseline_scope_id=baseline_scope_id,
+        )
     except BaselineValidationError as exc:
         status = coerce_metrics_baseline_status(exc.status)
         return MetricsBaselineState(

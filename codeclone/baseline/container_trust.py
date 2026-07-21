@@ -9,7 +9,10 @@
 from __future__ import annotations
 
 import hmac
+from typing import TypeVar
+from uuid import UUID
 
+from ..contracts.errors import BaselineValidationError
 from ..models import (
     BaselineContainerV3,
     BaselineLane,
@@ -20,7 +23,10 @@ from ..models import (
     TrustVector,
 )
 from ..observability import span
+from ..observations.contracts import build_observation_contract
 from .container_digest import compute_lane_digest, compute_root_digest
+
+_StatusT = TypeVar("_StatusT")
 
 
 def _runtime_descriptor(
@@ -102,6 +108,18 @@ def evaluate_lane_trust(
             trust_span.set_counter("baseline_root_verification_fail", 1)
             trust_span.set_counter("baseline_compatibility_fail", len(lanes))
             return TrustVector(root_verified=False, lanes=lanes)
+        scope_matches = container.baseline_scope_id == runtime.baseline_scope_id
+        if not scope_matches:
+            lanes = tuple(
+                LaneTrust(
+                    name=name,
+                    status="unavailable",
+                    reason="baseline_scope_id",
+                )
+                for name in container.lanes
+            )
+            trust_span.set_counter("baseline_compatibility_fail", len(lanes))
+            return TrustVector(root_verified=True, lanes=lanes)
         python_matches = container.meta.python_tag == runtime.python_tag
         lanes = tuple(
             _lane_trust(lane, runtime, python_matches=python_matches)
@@ -117,4 +135,104 @@ def evaluate_lane_trust(
         return TrustVector(root_verified=True, lanes=lanes)
 
 
-__all__ = ["evaluate_lane_trust"]
+def evaluate_container_trust(
+    container: BaselineContainerV3,
+    *,
+    python_tag: str,
+    baseline_scope_id: UUID,
+) -> TrustVector:
+    """Evaluate one container against the current runtime contract projection."""
+
+    return evaluate_lane_trust(
+        container,
+        runtime_contracts_for_container(
+            container,
+            python_tag=python_tag,
+            baseline_scope_id=baseline_scope_id,
+        ),
+    )
+
+
+def map_container_read_failure(
+    reason: str,
+    *,
+    too_large: _StatusT,
+    invalid_json: _StatusT,
+    integrity_failed: _StatusT,
+    schema_mismatch: _StatusT,
+    invalid_type: _StatusT,
+) -> _StatusT:
+    """Map the sole reader's failure vocabulary to one surface status enum."""
+
+    if reason == "too_large":
+        return too_large
+    if reason == "invalid_json":
+        return invalid_json
+    if reason in {"lane_digest_mismatch", "root_digest_mismatch"}:
+        return integrity_failed
+    if reason == "unsupported_format":
+        return schema_mismatch
+    return invalid_type
+
+
+def unavailable_container_lanes(
+    container: BaselineContainerV3 | None,
+    *,
+    python_tag: str,
+    baseline_scope_id: UUID,
+    missing_message: str,
+    missing_status: str,
+    root_message: str,
+    integrity_status: str,
+) -> tuple[LaneTrust, ...]:
+    """Require a root-authenticated container and return unavailable lanes."""
+
+    if container is None:
+        raise BaselineValidationError(missing_message, status=missing_status)
+    vector = evaluate_container_trust(
+        container,
+        python_tag=python_tag,
+        baseline_scope_id=baseline_scope_id,
+    )
+    if not vector.root_verified:
+        raise BaselineValidationError(root_message, status=integrity_status)
+    return tuple(item for item in vector.lanes if item.status != "trusted")
+
+
+def runtime_contracts_for_container(
+    container: BaselineContainerV3,
+    *,
+    python_tag: str,
+    baseline_scope_id: UUID,
+) -> RuntimeContracts:
+    """Build current-runtime descriptors for the lane set persisted in a container."""
+
+    names = set(container.lanes)
+    contract = build_observation_contract(
+        collect_metrics=bool(
+            names
+            & {
+                "adoption_counts",
+                "coupling_cohesion_observations",
+                "risk_observations",
+            }
+        ),
+        collect_dependencies="dependencies" in names,
+        collect_dead_code="dead_code" in names,
+        collect_api_surface="api_surface" in names,
+        collect_semantic_authority="semantic_authority" in names,
+    )
+    return RuntimeContracts(
+        python_tag=python_tag,
+        baseline_scope_id=baseline_scope_id,
+        lane_descriptors=contract.descriptors,
+    )
+
+
+__all__ = [
+    "evaluate_container_trust",
+    "evaluate_lane_trust",
+    "map_container_read_failure",
+    "runtime_contracts_for_container",
+    "unavailable_container_lanes",
+]

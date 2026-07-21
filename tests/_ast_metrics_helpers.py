@@ -9,7 +9,9 @@ from __future__ import annotations
 import ast
 import os
 from pathlib import Path
+from uuid import UUID
 
+import codeclone.baseline as baseline
 from codeclone.analysis import _module_walk as module_walk_mod
 from codeclone.contracts import MODULE_IDENTITY_VERSION
 from codeclone.models import (
@@ -25,6 +27,7 @@ from codeclone.models import (
     PythonModuleIdentity,
     ResolvedSourceIdentity,
 )
+from codeclone.observations.projection import build_observation_bundle
 from codeclone.qualnames import QualnameCollector
 
 
@@ -138,6 +141,29 @@ def build_test_module_registry(
     from codeclone.paths.module_identity.inventory import build_module_registry
 
     return build_module_registry(root=root.resolve(), source_roots=source_roots)
+
+
+def write_native_v3_baseline_fixture(
+    path: Path,
+    *,
+    scope_id: UUID,
+    function_clone_keys: tuple[str, ...] = (),
+    block_clone_keys: tuple[str, ...] = (),
+) -> Path:
+    """Write the canonical native-v3 baseline fixture used by surface tests."""
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    bundle = build_observation_bundle(
+        module_registry=registry,
+        function_clone_keys=tuple(sorted(function_clone_keys)),
+        block_clone_keys=tuple(sorted(block_clone_keys)),
+    )
+    path.write_bytes(
+        baseline.canonical_container_bytes(baseline.build_container(bundle, scope_id))
+    )
+    return path
 
 
 def tree_collector_and_imports(

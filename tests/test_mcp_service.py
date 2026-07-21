@@ -21,6 +21,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Literal, cast
 from unittest.mock import Mock, patch
+from uuid import UUID
 
 import pytest
 
@@ -51,12 +52,11 @@ import codeclone.surfaces.mcp.session as mcp_session_mod
 from codeclone.audit import DEFAULT_AUDIT_PATH, resolve_audit_path
 from codeclone.audit.events import AuditEvent
 from codeclone.audit.writer import NullAuditWriter, SqliteAuditWriter
-from codeclone.baseline import Baseline, current_python_tag
+from codeclone.baseline import Baseline, BaselineStatus, current_python_tag
 from codeclone.baseline.metrics_baseline import MetricsBaseline, MetricsBaselineStatus
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.contracts import (
-    BASELINE_FINGERPRINT_VERSION,
     BASELINE_SCHEMA_VERSION,
     REPORT_SCHEMA_VERSION,
 )
@@ -78,8 +78,10 @@ from codeclone.surfaces.mcp.session import (
 from codeclone.utils import coerce as _coerce
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
 from tests.memory_fixtures import cli_memory_repo
+from tests.test_cli_inprocess import _write_native_baseline
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
+_TEST_BASELINE_SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
 
 
 @pytest.fixture(autouse=True)
@@ -727,13 +729,12 @@ def _assert_loaded_mcp_baseline_state(
     *,
     calls: dict[str, object],
     expected_size_mb: int,
-    expected_payload: dict[str, object] | None,
     state: mcp_baseline_mod.CloneBaselineState | mcp_baseline_mod.MetricsBaselineState,
 ) -> None:
     assert calls == {
         "max_size_bytes": expected_size_mb * 1024 * 1024,
-        "preloaded_payload": expected_payload,
         "python_tag": current_python_tag(),
+        "scope_id": _TEST_BASELINE_SCOPE_ID,
     }
     assert state.loaded is True
     assert state.trusted_for_diff is True
@@ -788,13 +789,17 @@ def test_mcp_clone_baseline_state_loads_existing_baseline(
         self: Baseline,
         *,
         max_size_bytes: int,
-        preloaded_payload: dict[str, object] | None = None,
     ) -> None:
         calls["max_size_bytes"] = max_size_bytes
-        calls["preloaded_payload"] = preloaded_payload
 
-    def fake_verify(self: Baseline, *, current_python_tag: str) -> None:
+    def fake_verify(
+        self: Baseline,
+        *,
+        current_python_tag: str,
+        baseline_scope_id: UUID,
+    ) -> None:
         calls["python_tag"] = current_python_tag
+        calls["scope_id"] = baseline_scope_id
 
     monkeypatch.setattr(Baseline, "load", fake_load)
     monkeypatch.setattr(Baseline, "verify_compatibility", fake_verify)
@@ -803,12 +808,12 @@ def test_mcp_clone_baseline_state_loads_existing_baseline(
         baseline_path=tmp_path / "codeclone.baseline.json",
         baseline_exists=True,
         max_baseline_size_mb=2,
+        baseline_scope_id=_TEST_BASELINE_SCOPE_ID,
     )
 
     _assert_loaded_mcp_baseline_state(
         calls=calls,
         expected_size_mb=2,
-        expected_payload=None,
         state=state,
     )
 
@@ -823,13 +828,17 @@ def test_mcp_metrics_baseline_state_loads_existing_baseline(
         self: MetricsBaseline,
         *,
         max_size_bytes: int,
-        preloaded_payload: dict[str, object] | None = None,
     ) -> None:
         calls["max_size_bytes"] = max_size_bytes
-        calls["preloaded_payload"] = preloaded_payload
 
-    def fake_verify(self: MetricsBaseline, *, runtime_python_tag: str) -> None:
+    def fake_verify(
+        self: MetricsBaseline,
+        *,
+        runtime_python_tag: str,
+        baseline_scope_id: UUID,
+    ) -> None:
         calls["python_tag"] = runtime_python_tag
+        calls["scope_id"] = baseline_scope_id
 
     monkeypatch.setattr(MetricsBaseline, "load", fake_load)
     monkeypatch.setattr(MetricsBaseline, "verify_compatibility", fake_verify)
@@ -839,52 +848,39 @@ def test_mcp_metrics_baseline_state_loads_existing_baseline(
         metrics_baseline_exists=True,
         max_baseline_size_mb=3,
         skip_metrics=False,
+        baseline_scope_id=_TEST_BASELINE_SCOPE_ID,
     )
 
     _assert_loaded_mcp_baseline_state(
         calls=calls,
         expected_size_mb=3,
-        expected_payload=None,
         state=state,
     )
 
 
-def test_mcp_metrics_baseline_state_uses_shared_payload(
+def test_mcp_baseline_scope_is_required_for_both_projections(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    calls: dict[str, object] = {}
-    payload: dict[str, object] = {"metrics": {"summary": {"health": {"score": 100}}}}
+    monkeypatch.setattr(Baseline, "load", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(MetricsBaseline, "load", lambda *_args, **_kwargs: None)
 
-    def fake_load(
-        self: MetricsBaseline,
-        *,
-        max_size_bytes: int,
-        preloaded_payload: dict[str, object] | None = None,
-    ) -> None:
-        calls["max_size_bytes"] = max_size_bytes
-        calls["preloaded_payload"] = preloaded_payload
-
-    def fake_verify(self: MetricsBaseline, *, runtime_python_tag: str) -> None:
-        calls["python_tag"] = runtime_python_tag
-
-    monkeypatch.setattr(MetricsBaseline, "load", fake_load)
-    monkeypatch.setattr(MetricsBaseline, "verify_compatibility", fake_verify)
-
-    state = mcp_baseline_mod.resolve_metrics_baseline_state(
-        metrics_baseline_path=tmp_path / "metrics-baseline.json",
+    clone_state = mcp_baseline_mod.resolve_clone_baseline_state(
+        baseline_path=tmp_path / "baseline.json",
+        baseline_exists=True,
+        max_baseline_size_mb=10,
+        baseline_scope_id=None,
+    )
+    metrics_state = mcp_baseline_mod.resolve_metrics_baseline_state(
+        metrics_baseline_path=tmp_path / "baseline.json",
         metrics_baseline_exists=True,
-        max_baseline_size_mb=1,
+        max_baseline_size_mb=10,
         skip_metrics=False,
-        shared_baseline_payload=payload,
+        baseline_scope_id=None,
     )
 
-    _assert_loaded_mcp_baseline_state(
-        calls=calls,
-        expected_size_mb=1,
-        expected_payload=payload,
-        state=state,
-    )
+    assert clone_state.status is BaselineStatus.MISMATCH_SCOPE_ID
+    assert metrics_state.status is MetricsBaselineStatus.MISMATCH_SCOPE_ID
 
 
 def _analyze_quality_repository(
@@ -2632,21 +2628,21 @@ def test_mcp_session_renew_requires_active_intent() -> None:
 
 def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _write_clone_fixture(tmp_path)
-    baseline = Baseline(tmp_path / "codeclone.baseline.json")
-    baseline.generator = "codeclone"
-    baseline.schema_version = "2.0"
-    baseline.fingerprint_version = BASELINE_FINGERPRINT_VERSION
-    baseline.python_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
-    baseline.created_at = "2026-04-07T00:00:00Z"
-    baseline.save()
+    mismatch_tag = "cp313" if current_python_tag() != "cp313" else "cp314"
+    monkeypatch.setattr(
+        "codeclone.baseline.container.current_python_tag",
+        lambda: mismatch_tag,
+    )
+    _write_native_baseline(tmp_path / "codeclone.baseline.json")
 
     service = CodeCloneMCPService(history_limit=4)
     summary = service.analyze_repository(
         MCPAnalysisRequest(
             root=str(tmp_path),
-            respect_pyproject=False,
+            respect_pyproject=True,
             cache_policy="off",
         )
     )
@@ -2655,10 +2651,10 @@ def test_mcp_service_summary_explains_untrusted_baseline_python_tag_mismatch(
     assert baseline_payload["status"] == "mismatch_python_version"
     assert baseline_payload["trusted"] is False
     assert baseline_payload["compared_without_valid_baseline"] is True
-    assert baseline_payload["baseline_python_tag"] == baseline.python_tag
+    assert baseline_payload["baseline_python_tag"] == mismatch_tag
     assert baseline_payload["runtime_python_tag"] == current_python_tag()
     assert any(
-        "Baseline python tag mismatch" in warning
+        "python_tag" in warning.casefold()
         for warning in cast("list[str]", summary["warnings"])
     )
 
@@ -4613,12 +4609,11 @@ def test_mcp_service_all_section_and_optional_path_overrides(tmp_path: Path) -> 
     assert str(args.metrics_baseline).endswith("metrics-only.json")
     assert str(args.cache_path).endswith("custom-cache.json")
 
-    _, _, metrics_baseline_path, metrics_baseline_exists, shared_payload = (
+    _, _, metrics_baseline_path, metrics_baseline_exists = (
         service._resolve_baseline_inputs(root_path=tmp_path, args=args)
     )
     assert str(metrics_baseline_path).endswith("metrics-only.json")
     assert metrics_baseline_exists is False
-    assert shared_payload is None
 
 
 def test_mcp_service_root_cache_and_projection_helpers(
@@ -7516,6 +7511,7 @@ def test_mcp_session_helper_private_edges(
         metrics_baseline_exists=True,
         max_baseline_size_mb=1,
         skip_metrics=False,
+        baseline_scope_id=None,
     )
     assert baseline_state.loaded is False
     assert baseline_state.status == MetricsBaselineStatus.INVALID_JSON

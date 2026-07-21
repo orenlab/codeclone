@@ -301,8 +301,6 @@ def _collect_cli_snapshot(
             str(report_path),
             "--baseline",
             str(baseline_path),
-            "--metrics-baseline",
-            str(baseline_path),
             "--cache-path",
             str(cache_path),
             "--no-progress",

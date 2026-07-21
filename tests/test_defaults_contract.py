@@ -67,7 +67,6 @@ def test_cli_parser_defaults_follow_contract_defaults() -> None:
     assert args.max_cache_size_mb == DEFAULT_MAX_CACHE_SIZE_MB
     assert args.baseline == DEFAULT_BASELINE_PATH
     assert args.max_baseline_size_mb == DEFAULT_MAX_BASELINE_SIZE_MB
-    assert args.metrics_baseline == DEFAULT_BASELINE_PATH
     assert args.coverage_min == DEFAULT_COVERAGE_MIN
 
 

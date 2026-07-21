@@ -14,6 +14,18 @@ from .container_digest import (
     container_document,
 )
 from .container_trust import evaluate_lane_trust
+from .metrics_baseline import (
+    MetricsBaseline,
+    MetricsBaselineSectionProbe,
+    MetricsBaselineStatus,
+    coerce_metrics_baseline_status,
+    probe_metrics_baseline_section,
+)
+from .publish import (
+    BaselinePublicationError,
+    publish_baseline,
+    recover_publish_lock,
+)
 from .trust import (
     BASELINE_GENERATOR,
     BASELINE_UNTRUSTED_STATUSES,
@@ -28,15 +40,23 @@ __all__ = [
     "BASELINE_UNTRUSTED_STATUSES",
     "MAX_BASELINE_SIZE_BYTES",
     "Baseline",
+    "BaselinePublicationError",
     "BaselineStatus",
+    "MetricsBaseline",
+    "MetricsBaselineSectionProbe",
+    "MetricsBaselineStatus",
     "build_container",
     "canonical_container_bytes",
     "coerce_baseline_status",
+    "coerce_metrics_baseline_status",
     "compute_analysis_scope_digest",
     "compute_lane_digest",
     "compute_root_digest",
     "container_document",
     "current_python_tag",
     "evaluate_lane_trust",
+    "probe_metrics_baseline_section",
+    "publish_baseline",
     "read_container_v3",
+    "recover_publish_lock",
 ]

@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from types import TracebackType
+from uuid import UUID
 
 from ...audit import AuditEvent, AuditWriter, repo_root_digest
 from ...audit.runtime import open_audit_writer_for_root
@@ -290,7 +291,6 @@ class MCPSession(
                 baseline_exists,
                 metrics_baseline_path,
                 metrics_baseline_exists,
-                shared_baseline_payload,
             ) = self._resolve_baseline_inputs(root_path=root_path, args=args)
         cache_path = _helpers._resolve_cache_path(root_path=root_path, args=args)
         with span(name="pipeline.cache_load"):
@@ -347,26 +347,22 @@ class MCPSession(
                 processing=processing_result,
             )
 
+        raw_scope_id = getattr(args, "baseline_scope_id", None)
+        baseline_scope_id = (
+            UUID(raw_scope_id) if isinstance(raw_scope_id, str) else None
+        )
         clone_baseline_state = resolve_clone_baseline_state(
             baseline_path=baseline_path,
             baseline_exists=baseline_exists,
             max_baseline_size_mb=_as_int(args.max_baseline_size_mb, 0),
-            shared_baseline_payload=(
-                shared_baseline_payload
-                if metrics_baseline_path == baseline_path
-                else None
-            ),
+            baseline_scope_id=baseline_scope_id,
         )
         metrics_baseline_state = resolve_metrics_baseline_state(
             metrics_baseline_path=metrics_baseline_path,
             metrics_baseline_exists=metrics_baseline_exists,
             max_baseline_size_mb=_as_int(args.max_baseline_size_mb, 0),
             skip_metrics=bool(args.skip_metrics),
-            shared_baseline_payload=(
-                shared_baseline_payload
-                if metrics_baseline_path == baseline_path
-                else None
-            ),
+            baseline_scope_id=baseline_scope_id,
         )
 
         cache_status, cache_schema_version = resolve_cache_status(cache)

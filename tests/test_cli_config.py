@@ -16,12 +16,41 @@ import pytest
 
 import codeclone.config.pyproject_loader as loader_mod
 import codeclone.config.resolver as resolver_mod
+import codeclone.config.spec as spec_mod
 from codeclone.config.pyproject_loader import ConfigValidationError
 from codeclone.models import ConfigKeySpec
 
 
 def _write_pyproject(path: Path, content: str) -> None:
     path.write_text(content, "utf-8")
+
+
+def test_option_and_pyproject_spec_conflicts_are_typed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(TypeError, match="pyproject_key"):
+        spec_mod._option(
+            dest="invalid",
+            group=None,
+            pyproject_type=str,
+            pyproject_key=object(),
+        )
+
+    first = spec_mod._option(
+        dest="first",
+        group=None,
+        pyproject_type=str,
+        pyproject_key="shared",
+    )
+    second = spec_mod._option(
+        dest="second",
+        group=None,
+        pyproject_type=int,
+        pyproject_key="shared",
+    )
+    monkeypatch.setattr(spec_mod, "OPTIONS", (first, second))
+    with pytest.raises(RuntimeError, match="Conflicting pyproject spec"):
+        spec_mod._build_pyproject_specs()
 
 
 def test_collect_explicit_cli_dests_stops_on_double_dash() -> None:

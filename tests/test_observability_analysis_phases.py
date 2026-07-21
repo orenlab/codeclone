@@ -180,3 +180,10 @@ def test_phase39m_container_owns_each_stage_span_once() -> None:
     assert container.count('span(name="baseline.container.build")') == 1
     assert container.count('span(name="baseline.container.read")') == 1
     assert trust.count('span(name="baseline.container.trust")') == 1
+
+
+def test_phase39n_publisher_owns_publication_span_once() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "codeclone/baseline/publish.py").read_text(encoding="utf-8")
+
+    assert source.count('span(name="baseline.container.publish")') == 1

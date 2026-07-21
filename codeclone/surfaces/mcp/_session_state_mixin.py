@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-from ...baseline.metrics_baseline import probe_metrics_baseline_section
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
 from ._context_governance import attach_passive_context_governance
@@ -284,6 +283,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             cache_path=None,
             max_cache_size_mb=DEFAULT_MAX_CACHE_SIZE_MB,
             baseline=DEFAULT_BASELINE_PATH,
+            baseline_scope_id=None,
             max_baseline_size_mb=DEFAULT_MAX_BASELINE_SIZE_MB,
             update_baseline=False,
             fail_on_new=False,
@@ -431,7 +431,7 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
         *,
         root_path: Path,
         args: Namespace,
-    ) -> tuple[Path, bool, Path, bool, dict[str, object] | None]:
+    ) -> tuple[Path, bool, Path, bool]:
         allow_external_artifacts = bool(
             getattr(args, "allow_external_artifacts", False)
         )
@@ -451,20 +451,13 @@ class _MCPSessionAnalysisArgsMixin(_MCPSessionChangedProjectionMixin):
             allow_external_artifacts=allow_external_artifacts,
             allow_repo_absolute=True,
         )
-        shared_baseline_payload: dict[str, object] | None = None
-        if metrics_baseline_arg_path == baseline_path:
-            probe = probe_metrics_baseline_section(metrics_baseline_arg_path)
-            metrics_baseline_exists = probe.has_metrics_section
-            shared_baseline_payload = probe.payload
-        else:
-            metrics_baseline_exists = metrics_baseline_arg_path.exists()
+        metrics_baseline_exists = metrics_baseline_arg_path.exists()
 
         return (
             baseline_path,
             baseline_exists,
             metrics_baseline_arg_path,
             metrics_baseline_exists,
-            shared_baseline_payload,
         )
 
 

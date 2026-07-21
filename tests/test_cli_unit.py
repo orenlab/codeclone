@@ -78,6 +78,150 @@ class _RecordingPrinter:
         self.lines.append(" ".join(str(obj) for obj in objects))
 
 
+def _baseline_state_args(**overrides: object) -> SimpleNamespace:
+    values: dict[str, object] = {
+        "max_baseline_size_mb": 10,
+        "update_baseline": False,
+        "baseline_scope_id": "018f4b8e-5a5f-7d35-9c21-4af5d18df420",
+        "fail_on_new": False,
+        "skip_metrics": False,
+        "fail_on_new_metrics": False,
+        "fail_on_typing_regression": False,
+        "fail_on_docstring_regression": False,
+        "fail_on_api_break": False,
+        "api_surface": False,
+        "coverage_xml": None,
+        "coverage_min": 0.0,
+        "ci": False,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_baseline_state_recovery_and_invalid_scope_are_typed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "baseline.json"
+    monkeypatch.setattr(
+        cli_baselines_mod,
+        "recover_publish_lock",
+        lambda **_kwargs: None,
+    )
+    assert (
+        cli_baselines_mod.recover_baseline_publish_lock(
+            target=target,
+            expected_token="token",
+            force=False,
+        )
+        is None
+    )
+
+    def _fail_recovery(**_kwargs: object) -> None:
+        raise baseline_mod.BaselinePublicationError("foreign_lock", "foreign")
+
+    monkeypatch.setattr(
+        cli_baselines_mod,
+        "recover_publish_lock",
+        _fail_recovery,
+    )
+    assert (
+        cli_baselines_mod.recover_baseline_publish_lock(
+            target=target,
+            expected_token="token",
+            force=False,
+        )
+        == "foreign"
+    )
+
+    printer = _RecordingPrinter()
+    assert (
+        cli_baselines_mod._required_scope_id(
+            args=_baseline_state_args(baseline_scope_id="invalid"),
+            baseline_path=target,
+            console=printer,
+        )
+        is None
+    )
+    assert "baseline_scope_id" in "\n".join(printer.lines)
+
+
+@pytest.mark.parametrize("fail_on_new", [False, True])
+def test_clone_baseline_missing_scope_fails_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    fail_on_new: bool,
+) -> None:
+    path = tmp_path / "baseline.json"
+    path.write_text("{}", "utf-8")
+    monkeypatch.setattr(baseline_mod.Baseline, "load", lambda *_args, **_kwargs: None)
+    printer = _RecordingPrinter()
+
+    state = cli_baselines_mod.resolve_clone_baseline_state(
+        args=_baseline_state_args(
+            baseline_scope_id=None,
+            fail_on_new=fail_on_new,
+        ),
+        baseline_path=path,
+        baseline_exists=True,
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+        console=printer,
+    )
+
+    assert state.status is baseline_mod.BaselineStatus.MISMATCH_SCOPE_ID
+    assert state.trusted_for_diff is False
+    assert (state.failure_code is not None) is fail_on_new
+
+
+@pytest.mark.parametrize("gate_requested", [False, True])
+def test_metrics_corruption_preserves_typed_gate_behavior(
+    tmp_path: Path,
+    *,
+    gate_requested: bool,
+) -> None:
+    path = tmp_path / "invalid.json"
+    path.write_text("not-json", "utf-8")
+    clone_state = cli_baselines_mod.CloneBaselineState(
+        baseline=baseline_mod.Baseline(path),
+        loaded=True,
+        status=baseline_mod.BaselineStatus.OK,
+        failure_code=None,
+        trusted_for_diff=True,
+        updated_path=None,
+    )
+    printer = _RecordingPrinter()
+
+    state = cli_baselines_mod.resolve_metrics_baseline_state(
+        args=_baseline_state_args(fail_on_new_metrics=gate_requested),
+        metrics_baseline_path=path,
+        metrics_baseline_exists=True,
+        clone_baseline_state=clone_state,
+        console=printer,
+    )
+
+    assert state.status is metrics_baseline_mod.MetricsBaselineStatus.INVALID_JSON
+    assert (state.failure_code is not None) is gate_requested
+
+
+def test_skip_metrics_rejects_native_publication(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        cli_baselines_mod.resolve_metrics_baseline_state(
+            args=_baseline_state_args(skip_metrics=True, update_baseline=True),
+            metrics_baseline_path=tmp_path / "baseline.json",
+            metrics_baseline_exists=False,
+            clone_baseline_state=cli_baselines_mod.CloneBaselineState(
+                baseline=baseline_mod.Baseline(tmp_path / "baseline.json"),
+                loaded=False,
+                status=baseline_mod.BaselineStatus.MISSING,
+                failure_code=None,
+                trusted_for_diff=False,
+                updated_path=None,
+            ),
+            console=_RecordingPrinter(),
+        )
+
+
 class _TTYStream(StringIO):
     def __init__(self, *, is_tty: bool) -> None:
         super().__init__()
@@ -1326,7 +1470,6 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
     tmp_path: Path,
 ) -> None:
     baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
     cache_path = tmp_path / "cache.json"
     monkeypatch.setattr(
         sys,
@@ -1340,8 +1483,6 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
             "HEAD~1",
             "--baseline",
             str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
             "--cache-path",
             str(cache_path),
         ],
@@ -1402,7 +1543,7 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
         cli,
         "_resolve_metrics_baseline_state",
         lambda **_kwargs: SimpleNamespace(
-            baseline=metrics_baseline_mod.MetricsBaseline(metrics_path),
+            baseline=metrics_baseline_mod.MetricsBaseline(baseline_path),
             loaded=False,
             status=metrics_baseline_mod.MetricsBaselineStatus.MISSING,
             trusted_for_diff=False,
@@ -2295,12 +2436,12 @@ def test_main_impl_exits_on_invalid_pyproject_config(
     assert exc.value.code == 2
 
 
-def test_main_impl_debug_sets_env_and_handles_metrics_baseline_resolve_error(
+def test_main_impl_debug_sets_env_and_handles_baseline_resolve_error(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
     monkeypatch.delenv("CODECLONE_DEBUG", raising=False)
-    bad_metrics = tmp_path / "bad_metrics.json"
+    bad_baseline = tmp_path / "bad_baseline.json"
     monkeypatch.setattr(
         sys,
         "argv",
@@ -2308,15 +2449,15 @@ def test_main_impl_debug_sets_env_and_handles_metrics_baseline_resolve_error(
             "codeclone",
             str(tmp_path),
             "--debug",
-            "--metrics-baseline",
-            str(bad_metrics),
+            "--baseline",
+            str(bad_baseline),
         ],
     )
     monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
     original_resolve = Path.resolve
 
     def _resolve(self: Path, *, strict: bool = False) -> Path:
-        if self == bad_metrics:
+        if self == bad_baseline:
             raise OSError("resolve failed")
         return original_resolve(self, strict=strict)
 
@@ -2495,62 +2636,16 @@ def _prepare_fail_on_new_metrics_case(
     tmp_path: Path,
 ) -> list[str]:
     monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    metrics_path = tmp_path / "metrics.json"
-    metrics_path.write_text("{}", "utf-8")
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text("{}", "utf-8")
     return [
         "codeclone",
         str(tmp_path),
         "--quiet",
         "--baseline",
-        str(tmp_path / "baseline.json"),
-        "--metrics-baseline",
-        str(metrics_path),
+        str(baseline_path),
         "--fail-on-new-metrics",
     ]
-
-
-def test_main_impl_rejects_update_metrics_baseline_when_metrics_skipped(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
-    _assert_main_impl_exit_code(
-        monkeypatch,
-        [
-            "codeclone",
-            str(tmp_path),
-            "--quiet",
-            "--skip-metrics",
-            "--update-metrics-baseline",
-            "--baseline",
-            str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
-        ],
-        expected_code=2,
-    )
-
-
-def test_main_impl_update_metrics_baseline_requires_project_metrics(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
-    _assert_main_impl_exit_code(
-        monkeypatch,
-        [
-            "codeclone",
-            str(tmp_path),
-            "--quiet",
-            "--update-metrics-baseline",
-            "--baseline",
-            str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
-        ],
-        expected_code=2,
-        project_metrics=None,
-    )
 
 
 def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
@@ -2568,8 +2663,6 @@ def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
             "--quiet",
             "--baseline",
             str(tmp_path / "baseline.json"),
-            "--metrics-baseline",
-            str(tmp_path / "metrics.json"),
         ],
     )
     monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
@@ -2598,69 +2691,10 @@ def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
         assert needle in out
 
 
-def test_main_impl_uses_configured_metrics_baseline_without_cli_flag(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "codeclone",
-            str(tmp_path),
-            "--quiet",
-            "--baseline",
-            str(baseline_path),
-        ],
-    )
-    monkeypatch.setattr(
-        cli,
-        "load_pyproject_config",
-        lambda _root: {"metrics_baseline": str(metrics_path)},
-    )
-    monkeypatch.setattr(
-        cli,
-        "_probe_metrics_baseline_section",
-        lambda _path: pytest.fail("unexpected unified-baseline probe"),
-    )
-    _patch_main_pipeline_stubs(monkeypatch)
-    cli._main_impl()
-
-
-def test_main_impl_unified_metrics_update_auto_enables_baseline_update(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    baseline_path = tmp_path / "unified.baseline.json"
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "codeclone",
-            str(tmp_path),
-            "--quiet",
-            "--baseline",
-            str(baseline_path),
-            "--metrics-baseline",
-            str(baseline_path),
-            "--update-metrics-baseline",
-        ],
-    )
-    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
-    _patch_main_pipeline_stubs(monkeypatch, project_metrics=_sample_project_metrics())
-    cli._main_impl()
-    payload = json.loads(baseline_path.read_text("utf-8"))
-    assert "clones" in payload
-    assert "metrics" in payload
-
-
 def test_main_impl_skip_metrics_defensive_contract_guard(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
     _assert_main_impl_exit_code(
         monkeypatch,
         [
@@ -2668,11 +2702,9 @@ def test_main_impl_skip_metrics_defensive_contract_guard(
             str(tmp_path),
             "--quiet",
             "--skip-metrics",
-            "--update-metrics-baseline",
+            "--update-baseline",
             "--baseline",
             str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
         ],
         expected_code=2,
         configure_metrics_mode=lambda **_kwargs: None,
@@ -2683,7 +2715,6 @@ def test_main_impl_fail_on_new_metrics_requires_existing_baseline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "missing.metrics.json"
     _assert_main_impl_exit_code(
         monkeypatch,
         [
@@ -2692,8 +2723,6 @@ def test_main_impl_fail_on_new_metrics_requires_existing_baseline(
             "--quiet",
             "--baseline",
             str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
             "--fail-on-new-metrics",
         ],
         expected_code=2,
@@ -2780,110 +2809,6 @@ def test_metrics_baseline_runtime_requires_api_surface_snapshot_for_api_gate() -
         printer,
         expected_fragment="public API surface data",
     )
-
-
-def test_main_impl_update_metrics_baseline_write_error_contract(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
-
-    def _raise_save(self: object) -> None:
-        raise OSError("readonly fs")
-
-    monkeypatch.setattr(metrics_baseline_mod.MetricsBaseline, "save", _raise_save)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "codeclone",
-            str(tmp_path),
-            "--quiet",
-            "--baseline",
-            str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
-            "--update-metrics-baseline",
-        ],
-    )
-    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
-    _patch_main_pipeline_stubs(monkeypatch, project_metrics=_sample_project_metrics())
-    with pytest.raises(SystemExit) as exc:
-        cli._main_impl()
-    assert exc.value.code == 2
-
-
-def test_main_impl_update_metrics_baseline_separate_path_message_branch(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
-    metrics_baseline_mod.MetricsBaseline.from_project_metrics(
-        project_metrics=_sample_project_metrics(),
-        path=metrics_path,
-    ).save()
-
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "codeclone",
-            str(tmp_path),
-            "--quiet",
-            "--baseline",
-            str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
-            "--update-metrics-baseline",
-        ],
-    )
-    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
-    _patch_main_pipeline_stubs(monkeypatch, project_metrics=_sample_project_metrics())
-    cli._main_impl()
-    assert metrics_path.exists()
-
-
-def test_main_impl_ci_enables_fail_on_new_metrics_when_metrics_baseline_loaded(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(cli, "console", cli._make_console(no_color=True))
-    baseline_path = tmp_path / "baseline.json"
-    metrics_path = tmp_path / "metrics.json"
-
-    baseline_mod.Baseline.from_groups({}, {}, path=baseline_path).save()
-    metrics_baseline_mod.MetricsBaseline.from_project_metrics(
-        project_metrics=_sample_project_metrics(),
-        path=metrics_path,
-    ).save()
-
-    observed: dict[str, bool] = {}
-
-    def _capture_gate(**kwargs: object) -> GatingResult:
-        boot = kwargs["boot"]
-        assert isinstance(boot, BootstrapResult)
-        observed["fail_on_new_metrics"] = bool(boot.args.fail_on_new_metrics)
-        return GatingResult(exit_code=0, reasons=())
-
-    monkeypatch.setattr(cli, "gate", _capture_gate)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "codeclone",
-            str(tmp_path),
-            "--ci",
-            "--baseline",
-            str(baseline_path),
-            "--metrics-baseline",
-            str(metrics_path),
-        ],
-    )
-    monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
-    _patch_main_pipeline_stubs(monkeypatch, project_metrics=_sample_project_metrics())
-    cli._main_impl()
-    assert observed["fail_on_new_metrics"] is True
 
 
 def test_print_verbose_clone_hashes_noop_on_empty() -> None:

@@ -31,9 +31,11 @@ from .markers import BANNER_SUBTITLE, MARKER_CONTRACT_ERROR, MARKER_INTERNAL_ERR
 from .runtime import (
     ERR_BASELINE_CI_REQUIRES_TRUSTED,
     ERR_BASELINE_GATING_REQUIRES_TRUSTED,
+    ERR_BASELINE_LOCK_RECOVERY_FAILED,
     ERR_BASELINE_WRITE_FAILED,
     ERR_INVALID_BASELINE,
     ERR_INVALID_BASELINE_PATH,
+    ERR_INVALID_BASELINE_SCOPE_ID,
     ERR_INVALID_OUTPUT_EXT,
     ERR_INVALID_OUTPUT_PATH,
     ERR_REPORT_WRITE_FAILED,
@@ -42,6 +44,7 @@ from .runtime import (
     NOTE_COHESION_LCOM4_2_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_1_MIGRATION,
     NOTE_DEAD_CODE_REACHABILITY_2_0_2_MIGRATION,
+    SUCCESS_BASELINE_LOCK_RECOVERED,
     TIP_GITIGNORE_CODECLONE_CACHE,
     TIP_VSCODE_EXTENSION,
     WARN_BATCH_ITEM_FAILED,
@@ -93,6 +96,10 @@ def fmt_invalid_baseline_path(*, path: Path, error: object) -> str:
 
 def fmt_baseline_write_failed(*, path: Path, error: object) -> str:
     return ERR_BASELINE_WRITE_FAILED.format(path=path, error=error)
+
+
+def fmt_invalid_baseline_scope_id(*, path: Path, error: object) -> str:
+    return ERR_INVALID_BASELINE_SCOPE_ID.format(path=path, error=error)
 
 
 def fmt_report_write_failed(*, label: str, path: Path, error: object) -> str:
@@ -649,6 +656,14 @@ def fmt_pipeline_done(elapsed: float) -> str:
 
 def fmt_contract_error(message: str) -> str:
     return f"{MARKER_CONTRACT_ERROR}\n{message}"
+
+
+def fmt_baseline_lock_recovery_failed(*, path: Path, reason: str) -> str:
+    return ERR_BASELINE_LOCK_RECOVERY_FAILED.format(path=path, reason=reason)
+
+
+def fmt_baseline_lock_recovered(*, path: Path) -> str:
+    return SUCCESS_BASELINE_LOCK_RECOVERED.format(path=path)
 
 
 def fmt_internal_error(

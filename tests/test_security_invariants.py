@@ -350,44 +350,49 @@ def test_iter_py_files_rejects_excessive_file_count(tmp_path: Path) -> None:
 # ── baseline integrity tamper detection ──────────────────────────────
 
 
-def test_baseline_verify_integrity_rejects_tampered_clone_payload(
+def test_baseline_load_rejects_tampered_clone_payload(
     tmp_path: Path,
 ) -> None:
     """Trusted baseline comparison must fail closed on payload tampering."""
     import json
 
-    import codeclone.baseline as baseline_mod
-    import codeclone.baseline.clone_baseline as clone_baseline_mod
-    from codeclone.baseline import Baseline
+    from codeclone.baseline import Baseline, build_container, canonical_container_bytes
     from codeclone.contracts.errors import BaselineValidationError
+    from tests.test_baseline import _SCOPE_ID, _bundle
 
     func_id = f"{'a' * 64}|0-19"
-    block_id = "|".join(["a" * 64, "b" * 64, "c" * 64, "d" * 64])
-    payload = clone_baseline_mod._baseline_payload(
-        functions={func_id},
-        blocks={block_id},
-        generator="codeclone",
-        schema_version="2.1",
-        fingerprint_version="1",
-        python_tag=baseline_mod.current_python_tag(),
-        generator_version="2.1.0",
-        created_at="2026-02-08T11:43:16Z",
-    )
+    block_id = "|".join(("b" * 64,) * 4)
     baseline_path = tmp_path / "codeclone.baseline.json"
-    baseline_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
+    baseline_path.write_bytes(
+        canonical_container_bytes(build_container(_bundle(), _SCOPE_ID))
+    )
 
     baseline = Baseline(baseline_path)
     baseline.load()
-    baseline.verify_integrity()
+    assert baseline.functions == {func_id}
+    assert baseline.blocks == {block_id}
 
-    clones = payload["clones"]
-    assert isinstance(clones, dict)
-    clones["functions"] = [func_id, f"{'b' * 64}|20-39"]
+    payload = json.loads(baseline_path.read_text("utf-8"))
+    match payload["lanes"]:
+        case dict() as lanes:
+            pass
+        case _:
+            pytest.fail("baseline lanes must be an object")
+    match lanes["clones.functions"]:
+        case dict() as functions_lane:
+            pass
+        case _:
+            pytest.fail("function clone lane must be an object")
+    match functions_lane["payload"]:
+        case dict() as clone_payload:
+            pass
+        case _:
+            pytest.fail("function clone payload must be an object")
+    clone_payload["items"] = [func_id, f"{'b' * 64}|20-39"]
     baseline_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), "utf-8")
     tampered = Baseline(baseline_path)
-    tampered.load()
-    with pytest.raises(BaselineValidationError, match="payload_sha256 mismatch") as exc:
-        tampered.verify_integrity()
+    with pytest.raises(BaselineValidationError, match="lane digest mismatch") as exc:
+        tampered.load()
     assert exc.value.status == "integrity_failed"
 
 

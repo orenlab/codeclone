@@ -178,6 +178,69 @@ def test_analysis_dispatch_does_not_import_heavy_subcommands(
     assert [name for name in names if name in sys.modules] == []
 
 
+def test_baseline_recover_lock_dispatches_exact_operator_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = tmp_path / "baseline.json"
+    observed: dict[str, object] = {}
+
+    def _recover(**kwargs: object) -> None:
+        observed.update(kwargs)
+        return None
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.baseline_state.recover_baseline_publish_lock",
+        _recover,
+    )
+    with pytest.raises(SystemExit) as caught:
+        subcommands.dispatch_subcommand(
+            [
+                "codeclone",
+                "baseline",
+                "recover-lock",
+                "--path",
+                str(target),
+                "--expected-token",
+                "operator-token",
+                "--force",
+            ]
+        )
+
+    assert caught.value.code == 0
+    assert observed == {
+        "target": target.resolve(),
+        "expected_token": "operator-token",
+        "force": True,
+    }
+
+
+def test_baseline_recover_lock_surfaces_typed_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.baseline_state.recover_baseline_publish_lock",
+        lambda **_kwargs: "foreign lock",
+    )
+    with pytest.raises(SystemExit) as caught:
+        subcommands.dispatch_subcommand(
+            [
+                "codeclone",
+                "baseline",
+                "recover-lock",
+                "--path",
+                str(tmp_path / "baseline.json"),
+                "--expected-token",
+                "operator-token",
+            ]
+        )
+
+    assert caught.value.code == 2
+    assert "foreign lock" in capsys.readouterr().out
+
+
 def test_routing_modules_have_one_way_cli_owned_dependencies() -> None:
     root = Path(__file__).resolve().parents[1]
     for relative in (

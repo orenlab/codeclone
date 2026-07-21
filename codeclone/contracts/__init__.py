@@ -9,7 +9,7 @@ from __future__ import annotations
 from enum import IntEnum
 from typing import Final
 
-BASELINE_SCHEMA_VERSION: Final = "2.1"
+BASELINE_SCHEMA_VERSION: Final = "3.0"
 BASELINE_FINGERPRINT_VERSION: Final = "2"
 WIRE_VERSION: Final = "1"
 MODULE_IDENTITY_VERSION: Final = "2"

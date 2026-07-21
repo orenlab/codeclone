@@ -69,7 +69,7 @@ def _metrics_flags_requested(args: object) -> bool:
         or int_attr(args, "min_docstring_coverage", -1) >= 0
         or bool_attr(args, "api_surface")
         or bool_attr(args, "semantic_authority")
-        or bool_attr(args, "update_metrics_baseline")
+        or bool_attr(args, "update_baseline")
         or bool(optional_text_attr(args, "coverage_xml"))
     )
 
@@ -170,24 +170,11 @@ def prepare_metrics_mode_and_ui(
     configure_metrics_mode: _ConfigureMetricsModeHook | None,
     print_banner: _PrintBannerHook | None,
 ) -> None:
-    if (
-        bool_attr(args, "update_baseline")
-        and not bool_attr(args, "skip_metrics")
-        and not bool_attr(args, "update_metrics_baseline")
-    ):
-        set_bool_attr(args, "update_metrics_baseline", True)
     if configure_metrics_mode is not None:
         configure_metrics_mode(
             args=args,
             metrics_baseline_exists=metrics_baseline_exists,
         )
-    if (
-        bool_attr(args, "update_metrics_baseline")
-        and metrics_baseline_path == baseline_path
-        and not baseline_exists
-        and not bool_attr(args, "update_baseline")
-    ):
-        set_bool_attr(args, "update_baseline", True)
     if bool_attr(args, "quiet"):
         set_bool_attr(args, "no_progress", True)
         return

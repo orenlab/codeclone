@@ -45,6 +45,11 @@ ERR_INVALID_BASELINE_PATH = "[error]Invalid baseline path: {path} ({error}).[/er
 ERR_BASELINE_WRITE_FAILED = (
     "[error]Failed to write baseline file: {path} ({error}).[/error]"
 )
+ERR_BASELINE_SCOPE_ID_REQUIRED = (
+    "baseline_scope_id is required for baseline update and gating; set a "
+    "stable canonical UUID under [tool.codeclone]."
+)
+ERR_INVALID_BASELINE_SCOPE_ID = "Invalid baseline_scope_id for {path}: {error}."
 ERR_REPORT_WRITE_FAILED = (
     "[error]Failed to write {label} report: {path} ({error}).[/error]"
 )
@@ -99,6 +104,10 @@ ERR_BASELINE_GATING_REQUIRES_TRUSTED = (
     f"{ACTION_UPDATE_BASELINE}"
 )
 SUCCESS_BASELINE_UPDATED = "✔ Baseline updated: {path}"
+SUCCESS_BASELINE_LOCK_RECOVERED = "✔ Baseline publication lock recovered: {path}"
+ERR_BASELINE_LOCK_RECOVERY_FAILED = (
+    "[error]Baseline publication lock recovery failed for {path}: {reason}.[/error]"
+)
 
 FAIL_NEW_TITLE = "[error]FAILED: New code clones detected.[/error]"
 FAIL_NEW_SUMMARY_TITLE = "Summary:"
