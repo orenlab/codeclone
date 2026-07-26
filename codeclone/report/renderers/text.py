@@ -601,8 +601,6 @@ def _append_metric_family_sections(
         )
 
     overloaded_modules_family = _as_mapping(metrics_families.get("overloaded_modules"))
-    if not overloaded_modules_family:
-        overloaded_modules_family = _as_mapping(metrics_families.get("god_modules"))
     _append_top_metric_family(
         lines,
         title=proj.TEXT_SECTION_OVERLOADED_MODULES,
@@ -667,6 +665,14 @@ def _append_findings_sections(
             novelty="known",
             metric_name=metric_name,
         )
+        lines.append("")
+        _append_clone_section(
+            lines,
+            title=title,
+            groups=groups,
+            novelty="unavailable",
+            metric_name=metric_name,
+        )
 
     if suppressed_clone_groups:
         for title, group_key, metric_name in (
@@ -714,6 +720,7 @@ def _append_findings_sections(
 def render_text_report_document(payload: Mapping[str, object]) -> str:
     meta_payload = _as_mapping(payload.get("meta"))
     baseline = _as_mapping(meta_payload.get("baseline"))
+    comparison = _as_mapping(payload.get("baseline"))
     cache = _as_mapping(meta_payload.get("cache"))
     metrics_baseline = _as_mapping(meta_payload.get("metrics_baseline"))
     inventory_payload = _as_mapping(payload.get("inventory"))
@@ -741,7 +748,14 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     clone_groups = _as_mapping(findings_groups.get("clones"))
     suppressed_clone_groups = _as_mapping(clone_groups.get("suppressed"))
     runtime_meta = _as_mapping(meta_payload.get("runtime"))
-    clone_summary_keys: list[str] = ["functions", "blocks", "segments", "new", "known"]
+    clone_summary_keys: list[str] = [
+        "functions",
+        "blocks",
+        "segments",
+        "new",
+        "known",
+        "unavailable",
+    ]
     if "suppressed" in findings_clones:
         clone_summary_keys.append("suppressed")
     suppressed_summary_keys: list[str] = ["dead_code"]
@@ -814,6 +828,18 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
         or str(baseline.get("status", "")).strip().lower() != "ok"
     ):
         lines.append(proj.TEXT_BASELINE_UNTRUSTED_NOTE)
+    lines.extend(
+        [
+            "",
+            proj.TEXT_SECTION_BASELINE_LANE_TRUST,
+            *(
+                f"{format_meta_text_value(_as_mapping(row).get('name'))}: "
+                f"{format_meta_text_value(_as_mapping(row).get('status'))} "
+                f"reason={format_meta_text_value(_as_mapping(row).get('reason'))}"
+                for row in _as_sequence(comparison.get("sorted_lane_trust"))
+            ),
+        ]
+    )
 
     lines.extend(
         [

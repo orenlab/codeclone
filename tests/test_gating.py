@@ -14,11 +14,20 @@ from codeclone.core.reporting import gate as cli_gate
 from codeclone.models import (
     DeadItem,
     HealthScore,
+    LaneTrust,
     MetricsDiff,
     ModuleDep,
     ProjectMetrics,
+    TrustVector,
 )
-from codeclone.report.gates.evaluator import MetricGateConfig, evaluate_gates
+from codeclone.report.gates.evaluator import (
+    GateState,
+    MetricGateConfig,
+    active_gate_lane_requirements,
+    evaluate_gate_state,
+    evaluate_gates,
+    gate_lane_contract_versions,
+)
 from codeclone.surfaces.mcp.service import CodeCloneMCPService
 from codeclone.surfaces.mcp.session import (
     MCPAnalysisRequest,
@@ -61,9 +70,147 @@ def _project_metrics() -> ProjectMetrics:
     )
 
 
+def test_gate_lane_matrix_is_explicit_and_required_unavailable_exits_two() -> None:
+    config = MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=False,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+        fail_on_new=True,
+    )
+
+    assert active_gate_lane_requirements(
+        config=config,
+        enabled_lanes=("clones.blocks", "clones.functions"),
+    ) == (("clone_novelty", ("clones.blocks", "clones.functions")),)
+    result = evaluate_gate_state(
+        state=GateState(clone_new_count=0),
+        config=config,
+        lane_trust={"clones.blocks": "trusted"},
+        enabled_lanes=("clones.blocks", "clones.functions"),
+    )
+
+    assert result.exit_code == 2
+    assert result.required_lanes == ("clones.blocks", "clones.functions")
+    assert result.unavailable_lanes == ("clones.functions",)
+
+
+def test_disabled_optional_api_and_coverage_gates_are_informational() -> None:
+    config = MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=False,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+        fail_on_api_break=True,
+        fail_on_untested_hotspots=True,
+    )
+
+    result = evaluate_gate_state(
+        state=GateState(
+            api_breaking_changes=2,
+            coverage_join_status="ok",
+            coverage_hotspots=3,
+        ),
+        config=config,
+        lane_trust={},
+        enabled_lanes=("clones.blocks", "clones.functions"),
+    )
+
+    assert result.exit_code == 0
+    assert result.reasons == ()
+    assert result.required_lanes == ()
+
+
+def test_current_state_gate_requires_enabled_lane_not_baseline_trust() -> None:
+    config = MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=True,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+    )
+
+    result = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0),
+        config=config,
+        lane_trust={"dead_code": "unavailable"},
+        enabled_lanes=("dead_code",),
+    )
+
+    assert active_gate_lane_requirements(
+        config=config,
+        enabled_lanes=("dead_code",),
+    ) == (("dead_code_current", ("dead_code",)),)
+    assert result.exit_code == 0
+    assert result.required_lanes == ("dead_code",)
+    assert result.unavailable_lanes == ()
+
+
+def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
+    enabled_lanes = TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
+    config = MetricGateConfig(
+        fail_complexity=10,
+        fail_coupling=8,
+        fail_cohesion=4,
+        fail_cycles=True,
+        fail_dead_code=True,
+        fail_health=70,
+        fail_on_new_metrics=True,
+        fail_on_typing_regression=True,
+        fail_on_docstring_regression=True,
+        fail_on_api_break=True,
+        fail_on_untested_hotspots=True,
+        min_typing_coverage=900,
+        min_docstring_coverage=800,
+        fail_on_new=True,
+    )
+
+    requirements = active_gate_lane_requirements(
+        config=config,
+        enabled_lanes=enabled_lanes,
+    )
+
+    assert {name for name, _lanes in requirements} == {
+        "adoption_regression",
+        "adoption_threshold",
+        "api_compatibility",
+        "clone_novelty",
+        "complexity_current",
+        "complexity_delta",
+        "coupling_cohesion_current",
+        "coupling_cohesion_delta",
+        "coverage_hotspots",
+        "dead_code_current",
+        "dead_code_delta",
+        "dependency_cycles_current",
+        "dependency_delta",
+        "health_current",
+        "health_delta",
+    }
+    assert gate_lane_contract_versions() == ("1", "1")
+
+
 def _report_document() -> dict[str, object]:
+    enabled_lanes = TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
     return {
         "meta": {"baseline": {"status": "ok"}},
+        "baseline": {
+            "sorted_lane_trust": [
+                {"name": lane, "status": "trusted", "reason": "compatible"}
+                for lane in enabled_lanes
+            ]
+        },
+        "source_facts": {
+            "observation_contract": {"enabled_lanes": list(enabled_lanes)}
+        },
         "findings": {
             "groups": {
                 "clones": {
@@ -161,6 +308,13 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         segment_groups_raw_digest="",
         observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
+    baseline_trust = TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(name=lane, status="trusted", reason="compatible")
+            for lane in TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
+        ),
+    )
 
     cli_result = cli_gate(
         boot=boot,
@@ -168,6 +322,7 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
         new_func={"clone:function:new"},
         new_block=set(),
         metrics_diff=metrics_diff,
+        baseline_trust=baseline_trust,
     )
 
     service = CodeCloneMCPService(history_limit=2)
@@ -206,7 +361,6 @@ def test_cli_and_mcp_gate_results_match_for_same_inputs(tmp_path: Path) -> None:
     evaluator_result = evaluate_gates(
         report_document=report_document,
         config=config,
-        baseline_status="ok",
         metrics_diff=metrics_diff,
         clone_new_count=1,
         clone_total=1,

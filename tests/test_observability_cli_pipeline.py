@@ -354,9 +354,11 @@ def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
         "pipeline.analyze",
         "pipeline.report",
         "report.build",
+        "report.evaluate",
     } <= names
     assert len({row[1] for row in rows}) == 1
     assert sum(row[0] == "report.build" for row in rows) == 1
+    assert sum(row[0] == "report.evaluate" for row in rows) == 1
 
     conn = open_observability_store(observability_store_path(repo))
     try:
@@ -412,7 +414,11 @@ def test_cli_report_bytes_equal_with_observability_off_and_on(tmp_path: Path) ->
         "utf-8",
     )
 
-    report = repo / "report.json"
+    report_json = repo / "report.json"
+    report_html = repo / "report.html"
+    report_markdown = repo / "report.md"
+    report_sarif = repo / "report.sarif"
+    report_text = repo / "report.txt"
     driver = (
         "from codeclone.surfaces.cli import workflow; "
         "workflow.cli_meta_mod._current_report_timestamp_utc = "
@@ -427,19 +433,73 @@ def test_cli_report_bytes_equal_with_observability_off_and_on(tmp_path: Path) ->
         "--quiet",
         "--no-progress",
         "--json",
-        str(report),
+        str(report_json),
+        "--html",
+        str(report_html),
+        "--md",
+        str(report_markdown),
+        "--sarif",
+        str(report_sarif),
+        "--text",
+        str(report_text),
     )
+    report_artifacts = {
+        "html": report_html,
+        "json": report_json,
+        "markdown": report_markdown,
+        "sarif": report_sarif,
+        "text": report_text,
+    }
     assert_observability_subprocess_equality(
         disabled_command=base_command,
         enabled_command=base_command,
         disabled_cwd=repo,
         enabled_cwd=repo,
-        disabled_artifacts={"report_json": report},
-        enabled_artifacts={"report_json": report},
+        disabled_artifacts=report_artifacts,
+        enabled_artifacts=report_artifacts,
         reset_paths=(repo / ".codeclone" / "cache.json",),
     )
 
     assert observability_store_path(repo).is_file()
+    conn = open_observability_store(observability_store_path(repo))
+    try:
+        rows = conn.execute(
+            "SELECT name, counters_json FROM platform_spans "
+            "WHERE name IN ('report.build', 'report.evaluate', 'report.render')"
+        ).fetchall()
+    finally:
+        conn.close()
+    assert sum(row[0] == "report.build" for row in rows) == 1
+    assert sum(row[0] == "report.evaluate" for row in rows) == 1
+    render_counters = [
+        orjson.loads(row[1]) for row in rows if row[0] == "report.render"
+    ]
+    assert len(render_counters) == 5
+    assert sorted(
+        key
+        for counters in render_counters
+        for key, value in counters.items()
+        if key.startswith("report_render_format_") and value == 1
+    ) == [
+        "report_render_format_html",
+        "report_render_format_json",
+        "report_render_format_markdown",
+        "report_render_format_sarif",
+        "report_render_format_text",
+    ]
+    assert all(counters["report_render_bytes"] > 0 for counters in render_counters)
+    assert all(
+        frozenset(counters)
+        >= {
+            "report_items",
+            "report_novelty_known",
+            "report_novelty_new",
+            "report_novelty_unavailable",
+            "report_trust_trusted",
+            "report_trust_untrusted",
+        }
+        for counters in render_counters
+    )
 
 
 def test_observability_cli_help_and_stdout_trace(

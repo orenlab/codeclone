@@ -7,10 +7,9 @@
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import orjson
 
@@ -53,10 +52,6 @@ from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ..messages import sarif as sarif_msgs
-
-if TYPE_CHECKING:
-    from ...models import StructuralFindingGroup, Suggestion
-    from ..types import GroupMapLike
 
 SARIF_VERSION = "2.1.0"
 SARIF_PROFILE_VERSION = "1.0"
@@ -919,25 +914,6 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
     ).decode("utf-8")
 
 
-def to_sarif_report(
-    *,
-    report_document: Mapping[str, object],
-    meta: Mapping[str, object],
-    inventory: Mapping[str, object] | None = None,
-    func_groups: GroupMapLike,
-    block_groups: GroupMapLike,
-    segment_groups: GroupMapLike,
-    block_facts: Mapping[str, Mapping[str, str]] | None = None,
-    new_function_group_keys: Collection[str] | None = None,
-    new_block_group_keys: Collection[str] | None = None,
-    new_segment_group_keys: Collection[str] | None = None,
-    metrics: Mapping[str, object] | None = None,
-    suggestions: Collection[Suggestion] | None = None,
-    structural_findings: Sequence[StructuralFindingGroup] | None = None,
-) -> str:
-    return render_sarif_report_document(report_document)
-
-
 __all__ = [
     "_baseline_state",
     "_location_entry",
@@ -954,5 +930,4 @@ __all__ = [
     "_severity_to_level",
     "_text",
     "render_sarif_report_document",
-    "to_sarif_report",
 ]

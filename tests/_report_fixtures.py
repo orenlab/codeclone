@@ -14,6 +14,7 @@ from codeclone.models import (
     StructuralFindingGroup,
     Suggestion,
     SuppressedCloneGroup,
+    TrustVector,
 )
 from codeclone.observations.projection import build_observation_bundle
 from codeclone.report.document.builder import (
@@ -58,6 +59,9 @@ def build_test_report_document(
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    baseline_trust: TrustVector | None = None,
+    gate_exit_code: int = 0,
+    gate_reasons: tuple[str, ...] = (),
 ) -> dict[str, object]:
     """Build the sole canonical report-v3 fixture shape used by report tests."""
 
@@ -78,9 +82,9 @@ def build_test_report_document(
     return _build_report_document_v3(
         observation_bundle=observation_bundle,
         baseline_container=None,
-        baseline_trust=None,
+        baseline_trust=baseline_trust,
         gate_config=gate_config,
-        gate_result=GateResult(exit_code=0, reasons=()),
+        gate_result=GateResult(exit_code=gate_exit_code, reasons=gate_reasons),
         func_groups=func_groups,
         block_groups=block_groups,
         segment_groups=segment_groups,

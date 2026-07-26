@@ -16,12 +16,20 @@ import codeclone.surfaces.cli.changed_scope as cli_changed_scope
 import codeclone.surfaces.cli.workflow as cli_workflow
 from codeclone.contracts import ExitCode
 from codeclone.core._types import AnalysisResult
-from codeclone.models import HealthScore, MetricsDiff, ProjectMetrics
+from codeclone.models import (
+    HealthScore,
+    LaneTrust,
+    MetricsDiff,
+    ProjectMetrics,
+    TrustVector,
+)
 from codeclone.surfaces.cli.patch_verify import (
+    patch_gate_config,
     render_patch_verify,
     validate_strictness,
 )
 from codeclone.surfaces.cli.post_run import DiffContext
+from tests._report_fixtures import build_test_report_document
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
@@ -93,6 +101,28 @@ def _baseline_state(*, trusted: bool = True) -> object:
     return SimpleNamespace(trusted_for_diff=trusted)
 
 
+def _report_document(
+    *,
+    gate_exit_code: int = 0,
+    gate_reasons: tuple[str, ...] = (),
+) -> dict[str, object]:
+    trust = TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(name=lane, status="trusted", reason="compatible")
+            for lane in TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
+        ),
+    )
+    return build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        baseline_trust=trust,
+        gate_exit_code=gate_exit_code,
+        gate_reasons=gate_reasons,
+    )
+
+
 def test_patch_verify_accepts_clean_patch_quiet() -> None:
     printer = _RecordingPrinter()
 
@@ -100,6 +130,7 @@ def test_patch_verify_accepts_clean_patch_quiet() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(),
         analysis=_analysis(),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state()),
@@ -138,6 +169,13 @@ def test_patch_verify_reports_clone_regressions_by_strictness(
         console=printer,
         args=cast(Any, _args()),
         strictness=strictness,
+        report_document=_report_document(
+            gate_exit_code=(
+                int(ExitCode.SUCCESS)
+                if strictness == "relaxed"
+                else int(ExitCode.GATING_FAILURE)
+            )
+        ),
         analysis=_analysis(function_clones=1),
         diff_context=_diff_context(new_clones=1),
         baseline_state=cast(Any, _baseline_state()),
@@ -155,6 +193,7 @@ def test_patch_verify_requires_trusted_baseline() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(),
         analysis=_analysis(),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state(trusted=False)),
@@ -173,6 +212,31 @@ def test_patch_verify_validates_strictness_values() -> None:
         validate_strictness("nope")
 
 
+def test_patch_gate_config_covers_strictness_threshold_profiles() -> None:
+    strict = patch_gate_config(
+        args=cast(
+            Any,
+            _args(
+                fail_complexity=11,
+                fail_coupling=7,
+                fail_cohesion=4,
+            ),
+        ),
+        strictness="strict",
+    )
+    relaxed = patch_gate_config(
+        args=cast(Any, _args()),
+        strictness="relaxed",
+    )
+
+    assert strict.fail_complexity == 10
+    assert strict.fail_coupling == 5
+    assert strict.fail_cohesion == 3
+    assert relaxed.fail_complexity == -1
+    assert relaxed.fail_coupling == -1
+    assert relaxed.fail_cohesion == -1
+
+
 def test_patch_verify_rejects_invalid_strictness() -> None:
     printer = _RecordingPrinter()
 
@@ -180,6 +244,7 @@ def test_patch_verify_rejects_invalid_strictness() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="nope",
+        report_document=_report_document(),
         analysis=_analysis(),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state()),
@@ -197,6 +262,7 @@ def test_patch_verify_verbose_accepted() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(),
         analysis=_analysis(),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state()),
@@ -226,6 +292,7 @@ def test_patch_verify_verbose_violated() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(gate_exit_code=int(ExitCode.GATING_FAILURE)),
         analysis=_analysis(function_clones=1),
         diff_context=_diff_context(new_clones=1),
         baseline_state=cast(Any, _baseline_state()),
@@ -239,6 +306,45 @@ def test_patch_verify_verbose_violated() -> None:
     assert "Patch contract violated" in text
 
 
+def test_patch_verify_renders_canonical_gate_reasons() -> None:
+    printer = _RecordingPrinter()
+
+    exit_code = render_patch_verify(
+        console=printer,
+        args=cast(Any, _args()),
+        strictness="ci",
+        report_document=_report_document(
+            gate_exit_code=int(ExitCode.GATING_FAILURE),
+            gate_reasons=("clone:new",),
+        ),
+        analysis=_analysis(),
+        diff_context=_diff_context(),
+        baseline_state=cast(Any, _baseline_state()),
+        quiet=False,
+    )
+
+    assert exit_code == int(ExitCode.GATING_FAILURE)
+    assert "clone:new" in printer.text
+
+
+def test_patch_verify_missing_canonical_evaluation_fails_closed() -> None:
+    printer = _RecordingPrinter()
+
+    exit_code = render_patch_verify(
+        console=printer,
+        args=cast(Any, _args()),
+        strictness="ci",
+        report_document={},
+        analysis=_analysis(),
+        diff_context=_diff_context(),
+        baseline_state=cast(Any, _baseline_state()),
+        quiet=True,
+    )
+
+    assert exit_code == int(ExitCode.GATING_FAILURE)
+    assert "gates=FAIL" in printer.text
+
+
 def test_patch_verify_verbose_relaxed_advisory() -> None:
     printer = _RecordingPrinter()
 
@@ -246,6 +352,7 @@ def test_patch_verify_verbose_relaxed_advisory() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="relaxed",
+        report_document=_report_document(),
         analysis=_analysis(function_clones=1),
         diff_context=_diff_context(new_clones=1),
         baseline_state=cast(Any, _baseline_state()),
@@ -266,6 +373,7 @@ def test_patch_verify_strict_strictness_quiet_enforces_health() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="strict",
+        report_document=_report_document(gate_exit_code=int(ExitCode.GATING_FAILURE)),
         analysis=_analysis(),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state()),
@@ -328,6 +436,7 @@ def test_patch_verify_with_project_metrics_quiet() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(),
         analysis=_analysis_with_metrics(health=85),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state()),
@@ -346,6 +455,7 @@ def test_patch_verify_with_project_metrics_verbose() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(),
         analysis=_analysis_with_metrics(health=85),
         diff_context=_diff_context(),
         baseline_state=cast(Any, _baseline_state()),
@@ -383,6 +493,7 @@ def test_patch_verify_health_delta_from_metrics_diff() -> None:
         console=printer,
         args=cast(Any, _args()),
         strictness="ci",
+        report_document=_report_document(),
         analysis=_analysis_with_metrics(health=85),
         diff_context=_diff_context_with_metrics_diff(health_delta=5),
         baseline_state=cast(Any, _baseline_state()),
@@ -474,7 +585,7 @@ def test_run_controller_query_routes_patch_verify(
     )
     result = cli_workflow._run_controller_query(
         args=cast(Any, args),
-        report_document=None,
+        report_document=_report_document(),
         root_path=tmp_path,
         analysis_result=_analysis(),
         diff_context=_diff_context(),

@@ -21,6 +21,7 @@ from ...domain.findings import (
     CATEGORY_COUPLING,
     CLONE_NOVELTY_KNOWN,
     CLONE_NOVELTY_NEW,
+    CLONE_NOVELTY_UNAVAILABLE,
     FAMILY_DEAD_CODE,
 )
 from ...domain.quality import (
@@ -179,14 +180,16 @@ def _priority(
 def _clone_novelty(
     *,
     group_key: str,
-    baseline_trusted: bool,
+    lane_trusted: bool,
     new_keys: Collection[str] | None,
 ) -> str:
-    if not baseline_trusted:
-        return CLONE_NOVELTY_NEW
-    if new_keys is None:
-        return CLONE_NOVELTY_NEW
-    return CLONE_NOVELTY_NEW if group_key in new_keys else CLONE_NOVELTY_KNOWN
+    if not lane_trusted:
+        return CLONE_NOVELTY_UNAVAILABLE
+    return (
+        CLONE_NOVELTY_NEW
+        if group_key in frozenset(new_keys or ())
+        else CLONE_NOVELTY_KNOWN
+    )
 
 
 def _item_sort_key(item: Mapping[str, object]) -> tuple[str, int, int, str]:

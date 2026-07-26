@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
+from functools import partial
 from uuid import UUID
 
 from ..baseline.container_trust import evaluate_container_trust
@@ -22,6 +23,9 @@ from ..report.gates.evaluator import (
 )
 from ..report.renderers.json import render_json_report_document
 from ..report.renderers.text import render_text_report_document
+from ..utils.coerce import as_int as _as_int
+from ..utils.coerce import as_mapping as _as_mapping
+from ..utils.coerce import as_sequence as _as_sequence
 from ._types import (
     AnalysisResult,
     BootstrapResult,
@@ -34,21 +38,29 @@ from .metrics_payload import _enrich_metrics_report_payload
 MetricGateConfig = _MetricGateConfig
 GatingResult = GateResult
 
+_REPORT_FORMAT_COUNTERS = {
+    "html": "report_render_format_html",
+    "json": "report_render_format_json",
+    "markdown": "report_render_format_markdown",
+    "sarif": "report_render_format_sarif",
+    "text": "report_render_format_text",
+}
+
 
 def _coerce_metrics_diff(value: object | None) -> MetricsDiff | None:
     return value if isinstance(value, MetricsDiff) else None
 
 
 def _load_markdown_report_renderer() -> Callable[..., str]:
-    from ..report.renderers.markdown import to_markdown_report
+    from ..report.renderers.markdown import render_markdown_report_document
 
-    return to_markdown_report
+    return render_markdown_report_document
 
 
 def _load_sarif_report_renderer() -> Callable[..., str]:
-    from ..report.renderers.sarif import to_sarif_report
+    from ..report.renderers.sarif import render_sarif_report_document
 
-    return to_sarif_report
+    return render_sarif_report_document
 
 
 def _load_report_body_builder() -> Callable[..., dict[str, object]]:
@@ -61,6 +73,56 @@ def _load_report_document_finalizer() -> Callable[..., dict[str, object]]:
     from ..report.document.builder import finalize_report_document
 
     return finalize_report_document
+
+
+def _render_report_projection(
+    *,
+    format_name: str,
+    report_document: Mapping[str, object],
+    renderer: Callable[[], str],
+) -> str:
+    """Render one requested format once and attach bounded canonical counters."""
+
+    counter_key = _REPORT_FORMAT_COUNTERS[format_name]
+    with span(name="report.render") as render_span:
+        rendered = renderer()
+        findings_summary = _as_mapping(
+            _as_mapping(report_document.get("findings")).get("summary")
+        )
+        clone_summary = _as_mapping(findings_summary.get("clones"))
+        lane_rows = tuple(
+            _as_mapping(item)
+            for item in _as_sequence(
+                _as_mapping(report_document.get("baseline")).get("sorted_lane_trust")
+            )
+        )
+        trusted_lanes = sum(
+            1 for row in lane_rows if str(row.get("status", "")) == "trusted"
+        )
+        render_span.set_counter(counter_key, 1)
+        render_span.set_counter("report_render_bytes", len(rendered.encode("utf-8")))
+        render_span.set_counter(
+            "report_items",
+            _as_int(findings_summary.get("total")),
+        )
+        render_span.set_counter(
+            "report_novelty_known",
+            _as_int(clone_summary.get("known")),
+        )
+        render_span.set_counter(
+            "report_novelty_new",
+            _as_int(clone_summary.get("new")),
+        )
+        render_span.set_counter(
+            "report_novelty_unavailable",
+            _as_int(clone_summary.get("unavailable")),
+        )
+        render_span.set_counter("report_trust_trusted", trusted_lanes)
+        render_span.set_counter(
+            "report_trust_untrusted",
+            len(lane_rows) - trusted_lanes,
+        )
+        return rendered
 
 
 def resolve_report_baseline_trust(
@@ -89,18 +151,68 @@ def _metrics_for_report(
     metrics_diff: object | None,
     coverage_adoption_diff_available: bool,
     api_surface_diff_available: bool,
+    baseline_trust: TrustVector | None = None,
 ) -> Mapping[str, object] | None:
     validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
-    return (
-        _enrich_metrics_report_payload(
-            metrics_payload=analysis.metrics_payload,
-            metrics_diff=validated_metrics_diff,
-            coverage_adoption_diff_available=coverage_adoption_diff_available,
-            api_surface_diff_available=api_surface_diff_available,
-        )
-        if analysis.metrics_payload is not None
-        else None
+    if analysis.metrics_payload is None:
+        return None
+    enriched = _enrich_metrics_report_payload(
+        metrics_payload=analysis.metrics_payload,
+        metrics_diff=validated_metrics_diff,
+        coverage_adoption_diff_available=coverage_adoption_diff_available,
+        api_surface_diff_available=api_surface_diff_available,
     )
+    trusted_lanes = {
+        item.name
+        for item in (() if baseline_trust is None else baseline_trust.lanes)
+        if baseline_trust is not None
+        and baseline_trust.root_verified
+        and item.status == "trusted"
+    }
+    comparison_rows = (
+        (
+            (
+                "complexity",
+                "risk_observations",
+                "new_high_risk",
+                len(validated_metrics_diff.new_high_risk_functions),
+            ),
+            (
+                "coupling",
+                "coupling_cohesion_observations",
+                "new_high_risk",
+                len(validated_metrics_diff.new_high_coupling_classes),
+            ),
+            (
+                "dependencies",
+                "dependencies",
+                "new_cycles",
+                len(validated_metrics_diff.new_cycles),
+            ),
+            (
+                "dead_code",
+                "dead_code",
+                "new_items",
+                len(validated_metrics_diff.new_dead_code),
+            ),
+            (
+                "health",
+                "risk_observations",
+                "delta",
+                validated_metrics_diff.health_delta,
+            ),
+        )
+        if validated_metrics_diff is not None
+        else ()
+    )
+    for family_name, lane, value_key, value in comparison_rows:
+        family = dict(_as_mapping(enriched.get(family_name)))
+        summary = dict(_as_mapping(family.get("summary")))
+        summary["baseline_diff_available"] = lane in trusted_lanes
+        summary[value_key] = value if lane in trusted_lanes else 0
+        family["summary"] = summary
+        enriched[family_name] = family
+    return enriched
 
 
 def build_report_body_for_analysis(
@@ -114,6 +226,7 @@ def build_report_body_for_analysis(
     metrics_diff: object | None = None,
     coverage_adoption_diff_available: bool = False,
     api_surface_diff_available: bool = False,
+    baseline_trust: TrustVector | None = None,
 ) -> dict[str, object]:
     """Construct the report body once before the single gate evaluation."""
 
@@ -150,11 +263,13 @@ def build_report_body_for_analysis(
                 metrics_diff=metrics_diff,
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
+                baseline_trust=baseline_trust,
             ),
             suggestions=analysis.suggestions,
             structural_findings=(
                 analysis.structural_findings if analysis.structural_findings else None
             ),
+            baseline_trust=baseline_trust,
         )
 
 
@@ -186,25 +301,6 @@ def report(
         "sarif": None,
         "text": None,
     }
-    structural_findings = (
-        analysis.structural_findings if analysis.structural_findings else None
-    )
-    report_inventory = {
-        "files": {
-            "total_found": discovery.files_found,
-            "analyzed": processing.files_analyzed,
-            "cached": discovery.cache_hits,
-            "skipped": processing.files_skipped,
-            "source_io_skipped": len(processing.source_read_failures),
-        },
-        "code": {
-            "parsed_lines": processing.analyzed_lines + discovery.cached_lines,
-            "functions": processing.analyzed_functions + discovery.cached_functions,
-            "methods": processing.analyzed_methods + discovery.cached_methods,
-            "classes": processing.analyzed_classes + discovery.cached_classes,
-        },
-        "file_list": list(discovery.all_file_paths),
-    }
     report_document: dict[str, object] | None = None
     needs_report_document = (
         include_report_document
@@ -220,6 +316,14 @@ def report(
         )
     )
     if needs_report_document:
+        resolved_baseline_trust = (
+            baseline_trust
+            if baseline_trust is not None
+            else resolve_report_baseline_trust(
+                baseline_container,
+                baseline_scope_id=baseline_scope_id,
+            )
+        )
         resolved_body = (
             dict(report_body)
             if report_body is not None
@@ -233,6 +337,7 @@ def report(
                 metrics_diff=metrics_diff,
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
+                baseline_trust=resolved_baseline_trust,
             )
         )
         if (gate_config is None) != (gate_result is None):
@@ -244,15 +349,8 @@ def report(
                 new_func=new_func,
                 new_block=new_block,
                 metrics_diff=_coerce_metrics_diff(metrics_diff),
+                baseline_trust=resolved_baseline_trust,
             )
-        resolved_baseline_trust = (
-            baseline_trust
-            if baseline_trust is not None
-            else resolve_report_baseline_trust(
-                baseline_container,
-                baseline_scope_id=baseline_scope_id,
-            )
-        )
         report_document = _load_report_document_finalizer()(
             body=resolved_body,
             observation_bundle=analysis.observation_bundle,
@@ -265,28 +363,16 @@ def report(
         )
 
     if boot.output_paths.html and html_builder is not None:
-        metrics_for_html = _metrics_for_report(
-            analysis=analysis,
-            metrics_diff=metrics_diff,
-            coverage_adoption_diff_available=coverage_adoption_diff_available,
-            api_surface_diff_available=api_surface_diff_available,
-        )
-        contents["html"] = html_builder(
-            func_groups=analysis.func_groups,
-            block_groups=analysis.block_groups_report,
-            segment_groups=analysis.segment_groups,
-            block_group_facts=analysis.block_group_facts,
-            new_function_group_keys=new_func,
-            new_block_group_keys=new_block,
-            report_meta=report_meta,
-            metrics=metrics_for_html,
-            suggestions=analysis.suggestions,
-            structural_findings=structural_findings,
+        assert report_document is not None
+        contents["html"] = _render_report_projection(
+            format_name="html",
             report_document=report_document,
-            metrics_diff=metrics_diff,
-            title="CodeClone Report",
-            context_lines=3,
-            max_snippet_lines=220,
+            renderer=lambda: html_builder(
+                report_document=report_document,
+                title="CodeClone Report",
+                context_lines=3,
+                max_snippet_lines=220,
+            ),
         )
 
     if any(
@@ -301,24 +387,10 @@ def report(
         assert report_document is not None
 
     if boot.output_paths.json and report_document is not None:
-        contents["json"] = render_json_report_document(report_document)
-
-    def _render_projection_artifact(renderer: Callable[..., str]) -> str:
-        assert report_document is not None
-        return renderer(
+        contents["json"] = _render_report_projection(
+            format_name="json",
             report_document=report_document,
-            meta=report_meta,
-            inventory=report_inventory,
-            func_groups=analysis.func_groups,
-            block_groups=analysis.block_groups_report,
-            segment_groups=analysis.segment_groups,
-            block_facts=analysis.block_group_facts,
-            new_function_group_keys=new_func,
-            new_block_group_keys=new_block,
-            new_segment_group_keys=set(analysis.segment_groups.keys()),
-            metrics=analysis.metrics_payload,
-            suggestions=analysis.suggestions,
-            structural_findings=structural_findings,
+            renderer=lambda: render_json_report_document(report_document),
         )
 
     for key, output_path, loader in (
@@ -326,10 +398,19 @@ def report(
         ("sarif", boot.output_paths.sarif, _load_sarif_report_renderer),
     ):
         if output_path and report_document is not None:
-            contents[key] = _render_projection_artifact(loader())
+            render_projection = loader()
+            contents[key] = _render_report_projection(
+                format_name="markdown" if key == "md" else key,
+                report_document=report_document,
+                renderer=partial(render_projection, report_document),
+            )
 
     if boot.output_paths.text and report_document is not None:
-        contents["text"] = render_text_report_document(report_document)
+        contents["text"] = _render_report_projection(
+            format_name="text",
+            report_document=report_document,
+            renderer=lambda: render_text_report_document(report_document),
+        )
 
     return ReportArtifacts(
         html=contents["html"],
@@ -376,8 +457,10 @@ def gate_with_config(
     new_block: Collection[str],
     metrics_diff: MetricsDiff | None,
     clone_threshold_total: int | None = None,
+    baseline_trust: TrustVector | None = None,
+    gate_config: MetricGateConfig | None = None,
 ) -> tuple[MetricGateConfig, GatingResult]:
-    config = _gate_config(boot)
+    config = gate_config if gate_config is not None else _gate_config(boot)
     clone_new_count = len(tuple(new_func)) + len(tuple(new_block))
     clone_total = (
         analysis.func_clones_count + analysis.block_clones_count
@@ -394,7 +477,21 @@ def gate_with_config(
             clone_new_count=clone_new_count,
             clone_total=clone_total,
         )
-    result = _evaluate_gate_state(state=state, config=config)
+    lane_trust: Mapping[str, str] | None = (
+        None
+        if baseline_trust is None
+        else {
+            item.name: item.status
+            for item in baseline_trust.lanes
+            if baseline_trust.root_verified
+        }
+    )
+    result = _evaluate_gate_state(
+        state=state,
+        config=config,
+        lane_trust=lane_trust,
+        enabled_lanes=analysis.observation_bundle.contract.enabled_lanes,
+    )
     return config, result
 
 
@@ -405,6 +502,7 @@ def gate(
     new_func: Collection[str],
     new_block: Collection[str],
     metrics_diff: MetricsDiff | None,
+    baseline_trust: TrustVector | None = None,
 ) -> GatingResult:
     _config, result = gate_with_config(
         boot=boot,
@@ -412,5 +510,6 @@ def gate(
         new_func=new_func,
         new_block=new_block,
         metrics_diff=metrics_diff,
+        baseline_trust=baseline_trust,
     )
     return result

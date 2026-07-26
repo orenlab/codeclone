@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from codeclone.domain.findings import (
     STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
@@ -17,7 +18,6 @@ from codeclone.domain.findings import (
 )
 from codeclone.domain.quality import RISK_HIGH, RISK_LOW
 from codeclone.findings.ids import structural_group_id
-from codeclone.findings.structural.detectors import normalize_structural_findings
 
 from ..._source_kinds import SOURCE_KIND_FILTER_VALUES, source_kind_label
 from ...derived import (
@@ -39,10 +39,6 @@ from ..widgets.snippets import _FileCache, _render_code_block
 from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
-
     from .._context import ReportContext
 
 __all__ = [
@@ -53,7 +49,7 @@ __all__ = [
 _KIND_LABEL: dict[str, str] = dict(explain_msgs.STRUCTURAL_KIND_LABELS)
 
 
-def _sort_key_group(g: StructuralFindingGroup) -> tuple[str, int, str]:
+def _sort_key_group(g: Any) -> tuple[str, int, str]:
     unique_count = len(
         {(item.file_path, item.qualname, item.start, item.end) for item in g.items}
     )
@@ -78,7 +74,7 @@ def _signature_chips_html(sig: dict[str, str]) -> str:
 
 
 def _occurrences_table_html(
-    items: Sequence[StructuralFindingOccurrence],
+    items: Sequence[Any],
     *,
     scan_root: str,
     already_deduped: bool = False,
@@ -88,7 +84,7 @@ def _occurrences_table_html(
     visible_items = deduped_items[:visible_limit]
     hidden_items = deduped_items[visible_limit:]
 
-    def _rows_for(entries: Sequence[StructuralFindingOccurrence]) -> str:
+    def _rows_for(entries: Sequence[Any]) -> str:
         rows: list[str] = []
         for item in entries:
             location = report_location_from_structural_occurrence(
@@ -146,8 +142,8 @@ def _render_reason_list_html(reasons: Sequence[str]) -> str:
 
 
 def _finding_reason_list_html(
-    group: StructuralFindingGroup,
-    items: Sequence[StructuralFindingOccurrence],
+    group: Any,
+    items: Sequence[Any],
 ) -> str:
     spread = _spread(items)
     clone_cohort_reasons = {
@@ -198,8 +194,8 @@ def _finding_matters_paragraph(message: str) -> str:
 
 
 def _finding_matters_html(
-    group: StructuralFindingGroup,
-    items: Sequence[StructuralFindingOccurrence],
+    group: Any,
+    items: Sequence[Any],
 ) -> str:
     spread = _spread(items)
     count = len(items)
@@ -233,7 +229,7 @@ def _finding_matters_html(
 
 
 def _finding_example_card_html(
-    item: StructuralFindingOccurrence,
+    item: Any,
     *,
     label: str,
     file_cache: _FileCache,
@@ -262,7 +258,7 @@ def _finding_example_card_html(
 
 
 def _finding_inline_action_html(
-    group: StructuralFindingGroup,
+    group: Any,
     *,
     occurrence_count: int,
     spread_functions: int,
@@ -274,8 +270,6 @@ def _finding_inline_action_html(
     ):
         return ""
     action_steps = structural_action_steps(group)
-    if not action_steps:
-        return ""
     primary_action = action_steps[0]
     return (
         '<div class="sf-inline-action">'
@@ -287,8 +281,8 @@ def _finding_inline_action_html(
 
 
 def _finding_why_template_html(
-    group: StructuralFindingGroup,
-    items: Sequence[StructuralFindingOccurrence],
+    group: Any,
+    items: Sequence[Any],
     *,
     file_cache: _FileCache,
     context_lines: int,
@@ -358,7 +352,7 @@ def _finding_why_template_html(
 
 
 def _render_finding_card(
-    group: StructuralFindingGroup,
+    group: Any,
     *,
     scan_root: str,
     file_cache: _FileCache,
@@ -450,7 +444,7 @@ def _render_finding_card(
 
 
 def build_structural_findings_html_panel(
-    groups: Sequence[StructuralFindingGroup],
+    groups: Sequence[Any],
     files: list[str],
     *,
     scan_root: str = "",
@@ -468,14 +462,13 @@ def build_structural_findings_html_panel(
         + "</div>"
         "</div>"
     )
-    normalized_groups = normalize_structural_findings(groups)
-    if not normalized_groups:
+    if not groups:
         return intro + _tab_empty(explain_msgs.STRUCTURAL_EMPTY)
 
     resolved_file_cache = file_cache if file_cache is not None else _FileCache()
     why_templates: list[str] = []
     by_source: dict[str, list[str]] = {}
-    for group in sorted(normalized_groups, key=_sort_key_group):
+    for group in sorted(groups, key=_sort_key_group):
         card_html, source_kind = _render_finding_card(
             group,
             scan_root=scan_root,
@@ -518,7 +511,7 @@ def build_structural_findings_html_panel(
 
 
 def render_structural_panel(ctx: ReportContext) -> str:
-    structural_groups = list(normalize_structural_findings(ctx.structural_findings))
+    structural_groups = list(ctx.structural_findings)
     structural_files: list[str] = sorted(
         {occ.file_path for group in structural_groups for occ in group.items}
     )

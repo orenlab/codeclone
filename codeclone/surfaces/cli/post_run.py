@@ -11,9 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ... import ui_messages as ui
-from ...baseline import Baseline
 from ...core._types import AnalysisResult
-from ...models import MetricsDiff
+from ...models import MetricsDiff, TrustVector
 from .baseline_state import CloneBaselineState, MetricsBaselineState
 from .changed_scope import ChangedCloneGate
 from .summary import ChangedScopeSnapshot
@@ -36,22 +35,44 @@ def build_diff_context(
     baseline_path: Path,
     baseline_state: CloneBaselineState,
     metrics_baseline_state: MetricsBaselineState,
+    baseline_trust: TrustVector | None = None,
 ) -> DiffContext:
-    baseline_for_diff = (
-        baseline_state.baseline
-        if baseline_state.trusted_for_diff
-        else Baseline(baseline_path)
+    _ = baseline_path
+    function_lane_trusted = (
+        baseline_state.trusted_for_diff
+        if baseline_trust is None
+        else baseline_trust.root_verified
+        and any(
+            item.name == "clones.functions" and item.status == "trusted"
+            for item in baseline_trust.lanes
+        )
     )
-    raw_new_func, raw_new_block = baseline_for_diff.diff(
-        analysis.func_groups,
-        analysis.block_groups,
+    block_lane_trusted = (
+        baseline_state.trusted_for_diff
+        if baseline_trust is None
+        else baseline_trust.root_verified
+        and any(
+            item.name == "clones.blocks" and item.status == "trusted"
+            for item in baseline_trust.lanes
+        )
     )
+    raw_new_func: set[str] = set()
+    raw_new_block: set[str] = set()
+    if function_lane_trusted or block_lane_trusted:
+        diff_func, diff_block = baseline_state.baseline.diff(
+            analysis.func_groups,
+            analysis.block_groups,
+        )
+        if function_lane_trusted:
+            raw_new_func = set(diff_func)
+        if block_lane_trusted:
+            raw_new_block = set(diff_block)
     metrics_diff = None
     if analysis.project_metrics is not None and metrics_baseline_state.trusted_for_diff:
         metrics_diff = metrics_baseline_state.baseline.diff(analysis.project_metrics)
     return DiffContext(
-        new_func=set(raw_new_func),
-        new_block=set(raw_new_block),
+        new_func=raw_new_func,
+        new_block=raw_new_block,
         new_clones_count=len(raw_new_func) + len(raw_new_block),
         metrics_diff=metrics_diff,
         coverage_adoption_diff_available=bool(

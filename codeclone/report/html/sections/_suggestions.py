@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from codeclone.domain.findings import (
     CATEGORY_CLONE,
@@ -36,8 +36,6 @@ from ..widgets.components import insight_block
 from ..widgets.glossary import glossary_tip
 
 if TYPE_CHECKING:
-    from codeclone.models import Suggestion
-
     from .._context import ReportContext
 
 _as_int = _coerce.as_int
@@ -83,7 +81,7 @@ def _format_source_breakdown(
     return " \u00b7 ".join(f"{source_kind_label(k)} {c}" for k, c in rows if c > 0)
 
 
-def _suggestion_context_labels(s: Suggestion) -> tuple[str, ...]:
+def _suggestion_context_labels(s: Any) -> tuple[str, ...]:
     labels: list[str] = []
     source_label = source_kind_label(s.source_kind)
     if source_label:
@@ -111,7 +109,7 @@ def _spread_label(*, spread_functions: int, spread_files: int) -> str:
     return f"{spread_functions} {function_word} \u00b7 {spread_files} {file_word}"
 
 
-def _render_card(s: Suggestion, ctx: ReportContext) -> str:
+def _render_card(s: Any, ctx: ReportContext) -> str:
     actionable = "true" if s.severity != "info" else "false"
     spread_bucket = "high" if s.spread_files > 1 or s.spread_functions > 1 else "low"
     breakdown_text = _format_source_breakdown(s.source_breakdown)
@@ -159,7 +157,7 @@ def _render_card(s: Suggestion, ctx: ReportContext) -> str:
             f"{_escape_html(loc.relative_path)}"
             f'<span class="suggestion-loc-lines">:{loc.start_line}\u2013{loc.end_line}</span>'
             "</a></span>"
-            f'<span class="suggestion-loc-name">{_escape_html(ctx.bare_qualname(loc.qualname, loc.filepath))}</span>'
+            f'<span class="suggestion-loc-name">{_escape_html(loc.qualname)}</span>'
             "</li>"
             for loc in s.representative_locations
         )

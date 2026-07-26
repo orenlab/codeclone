@@ -82,7 +82,7 @@ def _derive_group_display_name(
         for it in items[:3]:
             qn = str(it.get("qualname", ""))
             fp = str(it.get("filepath", ""))
-            name = ctx.bare_qualname(qn, fp)
+            name = qn
             if name:
                 short_names.append(name)
             else:
@@ -177,6 +177,8 @@ def _render_group_explanation(meta: Mapping[str, object]) -> str:
         note = (
             f'<p class="group-explain-note">{_escape_html(str(meta["hint_note"]))}</p>'
         )
+    if not parts and not note:
+        return ""
     return f'<div class="group-explain" {attr_html}>{"".join(parts)}{note}</div>'
 
 
@@ -204,7 +206,7 @@ def _suppressed_group_label(
     first_item = _as_mapping(items[0]) if items else {}
     filepath = str(first_item.get("filepath", ""))
     qualname = str(first_item.get("qualname", ""))
-    label = ctx.bare_qualname(qualname, filepath) or ctx.relative_path(filepath)
+    label = qualname or str(first_item.get("relative_path", ""))
     if not label:
         label = str(group.get("id", ""))
     return label, filepath
@@ -497,8 +499,8 @@ def _render_group_items_html(
             context=ctx.context_lines,
             max_lines=ctx.max_snippet_lines,
         )
-        display_qualname = ctx.bare_qualname(qualname, filepath)
-        display_filepath = ctx.relative_path(filepath)
+        display_qualname = qualname
+        display_filepath = str(item.get("relative_path", filepath))
         compare_html = ""
         if include_compare_meta:
             compare_text = format_group_instance_compare_meta(
@@ -692,19 +694,16 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         return empty, False, 0, 0
 
     # Novelty maps
-    func_novelty = {
-        gk: ("new" if gk in ctx.new_func_keys else "known") for gk, _ in ctx.func_sorted
-    }
-    block_novelty = {
-        gk: ("new" if gk in ctx.new_block_keys else "known")
-        for gk, _ in ctx.block_sorted
-    }
-    novelty_enabled = bool(func_novelty) or bool(block_novelty)
-    total_new = sum(1 for v in func_novelty.values() if v == "new")
-    total_new += sum(1 for v in block_novelty.values() if v == "new")
-    total_known = sum(1 for v in func_novelty.values() if v == "known")
-    total_known += sum(1 for v in block_novelty.values() if v == "known")
-    default_novelty = "new" if total_new > 0 else "known"
+    func_novelty = dict(ctx.func_novelty)
+    block_novelty = dict(ctx.block_novelty)
+    segment_novelty = dict(ctx.segment_novelty)
+    novelty_enabled = bool(func_novelty or block_novelty or segment_novelty)
+    total_new = _as_int(ctx.clone_summary.get("new"))
+    total_known = _as_int(ctx.clone_summary.get("known"))
+    total_unavailable = _as_int(ctx.clone_summary.get("unavailable"))
+    default_novelty = (
+        "new" if total_new > 0 else "known" if total_known > 0 else "unavailable"
+    )
 
     global_novelty_html = ""
     if novelty_enabled:
@@ -718,6 +717,10 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
             f'New duplicates <span class="novelty-count">{total_new}</span></button>'
             '<button class="btn novelty-tab" type="button" data-global-novelty="known">'
             f'Known duplicates <span class="novelty-count">{total_known}</span></button>'
+            '<button class="btn novelty-tab" type="button" '
+            'data-global-novelty="unavailable">'
+            "Unavailable novelty "
+            f'<span class="novelty-count">{total_unavailable}</span></button>'
             "</div>"
             '<span class="novelty-bar-note">'
             f"{_escape_html(ctx.baseline_split_note)}</span>"
@@ -743,6 +746,7 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
         "segments",
         "Segment clones",
         list(ctx.segment_sorted),
+        novelty_by_group=segment_novelty,
     )
 
     sub_tabs: list[tuple[str, str, int, str]] = []
@@ -772,7 +776,8 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
     if novelty_enabled:
         clones_answer = (
             f"{ctx.clone_groups_total} groups total; "
-            f"{total_new} new vs {total_known} known."
+            f"{total_new} new, {total_known} known, "
+            f"{total_unavailable} unavailable."
         )
     else:
         clones_answer = f"{ctx.clone_groups_total} groups and {ctx.clone_instances_total} instances."

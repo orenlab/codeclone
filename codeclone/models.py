@@ -1603,10 +1603,28 @@ class EvaluationContract:
     health_algorithm_revision: str
     gate_algorithm_revision: str
     gate_thresholds_digest: str
+    gate_lane_matrix_version: str
+    health_input_manifest_version: str
+    health_input_lanes: tuple[ObservationLaneName, ...]
+    active_gate_lane_requirements: tuple[
+        tuple[str, tuple[ObservationLaneName, ...]], ...
+    ]
 
     def __post_init__(self) -> None:
         if not self.health_algorithm_revision or not self.gate_algorithm_revision:
             raise ValueError("evaluation algorithm revisions must be non-empty")
+        if not self.gate_lane_matrix_version or not self.health_input_manifest_version:
+            raise ValueError("evaluation matrix versions must be non-empty")
+        if self.health_input_lanes != tuple(sorted(set(self.health_input_lanes))):
+            raise ValueError("health input lanes must be sorted and unique")
+        gate_names = tuple(name for name, _lanes in self.active_gate_lane_requirements)
+        if gate_names != tuple(sorted(set(gate_names))):
+            raise ValueError("active gate requirements must be sorted and unique")
+        if any(
+            lanes != tuple(sorted(set(lanes)))
+            for _name, lanes in self.active_gate_lane_requirements
+        ):
+            raise ValueError("active gate lanes must be sorted and unique")
         if len(self.gate_thresholds_digest) != 64 or any(
             character not in "0123456789abcdef"
             for character in self.gate_thresholds_digest

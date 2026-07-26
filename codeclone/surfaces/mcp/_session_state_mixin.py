@@ -991,13 +991,6 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
                 fail_on_new=request.fail_on_new,
                 fail_threshold=request.fail_threshold,
             ),
-            baseline_status=str(
-                _helpers._as_mapping(
-                    _helpers._as_mapping(record.report_document.get("meta")).get(
-                        "baseline"
-                    )
-                ).get("status", "")
-            ),
             metrics_diff=record.metrics_diff,
             clone_new_count=len(record.new_func) + len(record.new_block),
             clone_total=record.func_clones_count + record.block_clones_count,

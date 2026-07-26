@@ -187,3 +187,15 @@ def test_phase39n_publisher_owns_publication_span_once() -> None:
     source = (root / "codeclone/baseline/publish.py").read_text(encoding="utf-8")
 
     assert source.count('span(name="baseline.container.publish")') == 1
+
+
+def test_phase39o_report_owns_each_inner_span_once() -> None:
+    root = Path(__file__).resolve().parents[1]
+    reporting = (root / "codeclone/core/reporting.py").read_text(encoding="utf-8")
+    evaluator = (root / "codeclone/report/gates/evaluator.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert reporting.count('span(name="report.build")') == 1
+    assert evaluator.count('span(name="report.evaluate")') == 1
+    assert reporting.count('span(name="report.render")') == 1

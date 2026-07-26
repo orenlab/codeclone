@@ -15,6 +15,7 @@ from ...domain.findings import (
     CLONE_KIND_SEGMENT,
     CLONE_NOVELTY_KNOWN,
     CLONE_NOVELTY_NEW,
+    CLONE_NOVELTY_UNAVAILABLE,
     FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_STRUCTURAL,
@@ -100,6 +101,7 @@ def _findings_summary(
         "functions": len(clone_functions),
         "blocks": len(clone_blocks),
         "segments": len(clone_segments),
+        "instances": sum(_as_int(group.get("count")) for group in clone_groups),
         CLONE_NOVELTY_NEW: sum(
             1
             for group in clone_groups
@@ -109,6 +111,11 @@ def _findings_summary(
             1
             for group in clone_groups
             if str(group.get("novelty", "")) == CLONE_NOVELTY_KNOWN
+        ),
+        CLONE_NOVELTY_UNAVAILABLE: sum(
+            1
+            for group in clone_groups
+            if str(group.get("novelty", "")) == CLONE_NOVELTY_UNAVAILABLE
         ),
     }
     if suppressed_clone_total > 0:
@@ -148,7 +155,8 @@ def _build_findings_payload(
     block_facts: Mapping[str, Mapping[str, str]],
     structural_findings: Sequence[StructuralFindingGroup] | None,
     metrics_payload: Mapping[str, object],
-    baseline_trusted: bool,
+    function_lane_trusted: bool,
+    block_lane_trusted: bool,
     new_function_group_keys: Collection[str] | None,
     new_block_group_keys: Collection[str] | None,
     new_segment_group_keys: Collection[str] | None,
@@ -159,7 +167,7 @@ def _build_findings_payload(
     clone_functions = _build_clone_groups(
         groups=func_groups,
         kind=CLONE_KIND_FUNCTION,
-        baseline_trusted=baseline_trusted,
+        lane_trusted=function_lane_trusted,
         new_keys=new_function_group_keys,
         block_facts=block_facts,
         scan_root=scan_root,
@@ -167,7 +175,7 @@ def _build_findings_payload(
     clone_blocks = _build_clone_groups(
         groups=block_groups,
         kind=CLONE_KIND_BLOCK,
-        baseline_trusted=baseline_trusted,
+        lane_trusted=block_lane_trusted,
         new_keys=new_block_group_keys,
         block_facts=block_facts,
         scan_root=scan_root,
@@ -175,7 +183,7 @@ def _build_findings_payload(
     clone_segments = _build_clone_groups(
         groups=segment_groups,
         kind=CLONE_KIND_SEGMENT,
-        baseline_trusted=baseline_trusted,
+        lane_trusted=False,
         new_keys=new_segment_group_keys,
         block_facts={},
         scan_root=scan_root,

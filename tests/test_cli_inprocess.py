@@ -1355,11 +1355,13 @@ def test_cli_main_outputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _write_python_module(tmp_path, "a.py")
-    html_out = tmp_path / "out.html"
-    json_out = tmp_path / "out.json"
-    md_out = tmp_path / "out.md"
-    sarif_out = tmp_path / "out.sarif"
-    text_out = tmp_path / "out.txt"
+    html_out, json_out, md_out, sarif_out, text_out = (
+        tmp_path / "out.html",
+        tmp_path / "out.json",
+        tmp_path / "out.md",
+        tmp_path / "out.sarif",
+        tmp_path / "out.txt",
+    )
     baseline = tmp_path / "baseline.json"
     _write_baseline(
         baseline,
@@ -1690,10 +1692,15 @@ def test_cli_legacy_baseline_normal_mode_ignored_and_exit_zero(
         out,
         "legacy baseline format",
         "Baseline is not trusted for this run and will be ignored",
-        "Comparison will proceed against an empty baseline",
+        "Baseline-relative novelty is unavailable for this run",
         "Run: codeclone . --update-baseline",
+    )
+    assert_contains_none(
+        out,
+        "Comparison will proceed against an empty baseline",
         "New clones detected but --fail-on-new not set.",
     )
+    assert _summary_metric(out, "New vs baseline") == 0
 
 
 def test_cli_legacy_baseline_fail_on_new_fails_fast_exit_2(
@@ -1846,10 +1853,16 @@ def f2():
     )
     out = capsys.readouterr().out
     assert_contains_all(out, "Baseline is not trusted for this run and will be ignored")
-    assert _summary_metric(out, "New vs baseline") > 0
+    assert _summary_metric(out, "New vs baseline") == 0
     report = json.loads(json_out.read_text("utf-8"))
     assert _report_meta_baseline(report)["status"] == "integrity_failed"
     assert _report_meta_baseline(report)["loaded"] is False
+    clone_groups = report["findings"]["groups"]["clones"]
+    assert {
+        group["novelty"]
+        for kind in ("functions", "blocks")
+        for group in clone_groups[kind]
+    } == {"unavailable"}
 
 
 def test_cli_invalid_baseline_fails_in_ci(
@@ -4222,6 +4235,8 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
         "total": 0,
         "high_confidence": 0,
         "suppressed": suppressed_count,
+        "baseline_diff_available": False,
+        "new_items": 0,
     }
 
     _run_main(

@@ -26,11 +26,13 @@ from codeclone.findings.clones.grouping import (
     build_segment_groups,
 )
 from codeclone.models import (
+    LaneTrust,
     ReportDigest,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
     SuppressedCloneGroup,
+    TrustVector,
 )
 from codeclone.report.blocks import prepare_block_report_groups
 from codeclone.report.document.integrity import (
@@ -45,8 +47,8 @@ from codeclone.report.html.sections._structural import (
 from codeclone.report.html.widgets.snippets import _FileCache
 from codeclone.report.overview import materialize_report_overview
 from codeclone.report.renderers.json import render_json_report_document
-from codeclone.report.renderers.markdown import to_markdown_report
-from codeclone.report.renderers.sarif import to_sarif_report
+from codeclone.report.renderers.markdown import render_markdown_report_document
+from codeclone.report.renderers.sarif import render_sarif_report_document
 from codeclone.report.renderers.text import render_text_report_document
 from codeclone.report.segments import (
     analyze_segment_statements as _analyze_segment_statements,
@@ -78,6 +80,24 @@ from tests._report_fixtures import (
 from tests._report_fixtures import (
     build_test_report_document as build_report_document,
 )
+
+
+def _trusted_clone_lanes() -> TrustVector:
+    return TrustVector(
+        root_verified=True,
+        lanes=(
+            LaneTrust(
+                name="clones.blocks",
+                status="trusted",
+                reason="compatible",
+            ),
+            LaneTrust(
+                name="clones.functions",
+                status="trusted",
+                reason="compatible",
+            ),
+        ),
+    )
 
 
 def test_report_artifact_door_rejects_foreign_schema_after_shape_validation(
@@ -207,6 +227,7 @@ def to_json_report(
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    baseline_trust: TrustVector | None = None,
 ) -> str:
     payload = build_report_document(
         func_groups=func_groups,
@@ -222,6 +243,7 @@ def to_json_report(
         metrics=metrics,
         suggestions=suggestions or (),
         structural_findings=structural_findings or (),
+        baseline_trust=baseline_trust,
     )
     return render_json_report_document(payload)
 
@@ -241,6 +263,7 @@ def to_text_report(
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    baseline_trust: TrustVector | None = None,
 ) -> str:
     payload = build_report_document(
         func_groups=func_groups,
@@ -256,6 +279,7 @@ def to_text_report(
         metrics=metrics,
         suggestions=suggestions or (),
         structural_findings=structural_findings or (),
+        baseline_trust=baseline_trust,
     )
     return render_text_report_document(payload)
 
@@ -337,21 +361,19 @@ def test_prepare_block_report_groups_merges_to_maximal_regions() -> None:
     prepared = prepare_block_report_groups(groups)
     items = prepared["h"]
     assert len(items) == 3
-
-    assert items[0]["qualname"] == "mod:f"
-    assert items[0]["start_line"] == 10
-    assert items[0]["end_line"] == 16
-    assert items[0]["size"] == 7
-
-    assert items[1]["qualname"] == "mod:f"
-    assert items[1]["start_line"] == 20
-    assert items[1]["end_line"] == 23
-    assert items[1]["size"] == 4
-
-    assert items[2]["qualname"] == "mod:g"
-    assert items[2]["start_line"] == 10
-    assert items[2]["end_line"] == 13
-    assert items[2]["size"] == 4
+    assert [
+        (
+            item["qualname"],
+            item["start_line"],
+            item["end_line"],
+            item["size"],
+        )
+        for item in items
+    ] == [
+        ("mod:f", 10, 16, 7),
+        ("mod:f", 20, 23, 4),
+        ("mod:g", 10, 13, 4),
+    ]
 
 
 def test_prepare_block_report_groups_skips_invalid_ranges() -> None:
@@ -507,27 +529,27 @@ def test_report_output_formats(
         cache_path="/tmp/cache.json",
         scan_root="/repo",
     )
-    report_out = to_json_report(groups, groups, {}, meta)
+    trusted_lanes = _trusted_clone_lanes()
+    report_out = to_json_report(
+        groups,
+        groups,
+        {},
+        meta,
+        new_function_group_keys=set(groups),
+        new_block_group_keys=set(groups),
+        baseline_trust=trusted_lanes,
+    )
     report_document = json.loads(report_out)
-    markdown_out = to_markdown_report(
-        report_document=report_document,
-        meta=meta,
-        func_groups=groups,
-        block_groups=groups,
-        segment_groups={},
-    )
-    sarif_out = to_sarif_report(
-        report_document=report_document,
-        meta=meta,
-        func_groups=groups,
-        block_groups=groups,
-        segment_groups={},
-    )
+    markdown_out = render_markdown_report_document(report_document)
+    sarif_out = render_sarif_report_document(report_document)
     text_out = to_text_report(
         meta=meta,
         func_groups=groups,
         block_groups=groups,
         segment_groups={},
+        new_function_group_keys=set(groups),
+        new_block_group_keys=set(groups),
+        baseline_trust=trusted_lanes,
     )
 
     expected_report = [
@@ -642,17 +664,15 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
         ]
     }
     sarif_payload = json.loads(
-        to_sarif_report(
-            report_document=build_report_document(
+        render_sarif_report_document(
+            build_report_document(
                 func_groups=groups,
                 block_groups={},
                 segment_groups={},
                 meta={"codeclone_version": "2.0.0b2", "scan_root": "/repo"},
+                new_function_group_keys={"k1"},
+                baseline_trust=_trusted_clone_lanes(),
             ),
-            meta={"codeclone_version": "2.0.0b2", "scan_root": "/repo"},
-            func_groups=groups,
-            block_groups={},
-            segment_groups={},
         )
     )
     run = sarif_payload["runs"][0]
@@ -818,7 +838,16 @@ def test_report_json_compact_v21_contract() -> None:
             },
         ]
     }
-    payload = json.loads(to_json_report(groups, {}, {}, {"codeclone_version": "1.4.0"}))
+    payload = json.loads(
+        to_json_report(
+            groups,
+            {},
+            {},
+            {"codeclone_version": "1.4.0"},
+            new_function_group_keys={"g1"},
+            baseline_trust=_trusted_clone_lanes(),
+        )
+    )
 
     assert "report_schema_version" not in payload["meta"]
     assert payload["inventory"]["file_registry"] == {
@@ -831,8 +860,10 @@ def test_report_json_compact_v21_contract() -> None:
         "functions": 1,
         "blocks": 0,
         "segments": 0,
+        "instances": 2,
         "new": 1,
         "known": 0,
+        "unavailable": 0,
     }
 
     function_group = _clone_group_map(payload, "functions")["g1"]
@@ -967,6 +998,21 @@ def test_report_json_serializes_rich_suggestions_and_overview() -> None:
         "location_label",
         "representative_locations",
         "action",
+        "severity",
+        "category",
+        "location",
+        "priority",
+        "finding_family",
+        "finding_kind",
+        "subject_key",
+        "fact_kind",
+        "fact_count",
+        "spread_files",
+        "spread_functions",
+        "clone_type",
+        "confidence",
+        "source_kind",
+        "source_breakdown",
     }
     assert suggestion["finding_id"] == "clone:function:clone:g1"
     assert suggestion["summary"] == "same parameterized function body"
@@ -1549,7 +1595,13 @@ def test_report_json_dead_code_summary_uses_high_confidence_key() -> None:
         )
     )
     summary = payload["metrics"]["families"]["dead_code"]["summary"]
-    assert summary == {"total": 1, "high_confidence": 1, "suppressed": 0}
+    assert summary == {
+        "total": 1,
+        "high_confidence": 1,
+        "suppressed": 0,
+        "baseline_diff_available": False,
+        "new_items": 0,
+    }
 
 
 def test_report_json_dead_code_suppressed_items_are_reported_separately() -> None:
@@ -1582,7 +1634,13 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
         )
     )
     dead_code = payload["metrics"]["families"]["dead_code"]
-    assert dead_code["summary"] == {"total": 0, "high_confidence": 0, "suppressed": 1}
+    assert dead_code["summary"] == {
+        "total": 0,
+        "high_confidence": 0,
+        "suppressed": 1,
+        "baseline_diff_available": False,
+        "new_items": 0,
+    }
     suppressed_items = dead_code["suppressed_items"]
     assert suppressed_items == [
         {
@@ -2310,23 +2368,34 @@ def test_report_json_groups_split_trusted_baseline() -> None:
             new_function_group_keys={"func-new"},
             new_block_group_keys={"block-new"},
             new_segment_group_keys={"segment-new"},
+            baseline_trust=_trusted_clone_lanes(),
         )
     )
     clones = payload["findings"]["groups"]["clones"]
     function_map = _clone_group_map(payload, "functions")
     block_map = _clone_group_map(payload, "blocks")
     segment_map = _clone_group_map(payload, "segments")
-    assert function_map["func-new"]["novelty"] == "new"
-    assert function_map["func-known"]["novelty"] == "known"
-    assert block_map["block-new"]["novelty"] == "new"
-    assert block_map["block-known"]["novelty"] == "known"
-    assert segment_map["segment-new"]["novelty"] == "new"
+    assert {
+        "func-new": function_map["func-new"]["novelty"],
+        "func-known": function_map["func-known"]["novelty"],
+        "block-new": block_map["block-new"]["novelty"],
+        "block-known": block_map["block-known"]["novelty"],
+    } == {
+        "func-new": "new",
+        "func-known": "known",
+        "block-new": "new",
+        "block-known": "known",
+    }
+    assert segment_map["segment-new"]["novelty"] == "unavailable"
+    assert segment_map["segment-new"]["novelty_reason"] == "not_baseline_governed"
     assert payload["findings"]["summary"]["clones"] == {
         "functions": len(clones["functions"]),
         "blocks": len(clones["blocks"]),
         "segments": len(clones["segments"]),
-        "new": 3,
+        "instances": 5,
+        "new": 2,
         "known": 2,
+        "unavailable": 1,
     }
 
 
@@ -2355,13 +2424,15 @@ def test_report_json_groups_split_untrusted_baseline() -> None:
         )
     )
     function_map = _clone_group_map(payload, "functions")
-    assert function_map["func-a"]["novelty"] == "new"
+    assert function_map["func-a"]["novelty"] == "unavailable"
     assert payload["findings"]["summary"]["clones"] == {
         "functions": 1,
         "blocks": 0,
         "segments": 0,
-        "new": 1,
+        "instances": 1,
+        "new": 0,
         "known": 0,
+        "unavailable": 1,
     }
 
 
@@ -2418,13 +2489,16 @@ def test_to_text_report_handles_missing_meta_fields() -> None:
         "Cache used: false",
         "INVENTORY",
         "INTEGRITY",
-        "Note: baseline is untrusted; all groups are treated as NEW.",
+        "Note: unavailable baseline lanes produce UNAVAILABLE novelty, never NEW.",
         "FUNCTION CLONES (NEW) (groups=0)\n(none)",
         "FUNCTION CLONES (KNOWN) (groups=0)\n(none)",
+        "FUNCTION CLONES (UNAVAILABLE) (groups=0)\n(none)",
         "BLOCK CLONES (NEW) (groups=0)\n(none)",
         "BLOCK CLONES (KNOWN) (groups=0)\n(none)",
+        "BLOCK CLONES (UNAVAILABLE) (groups=0)\n(none)",
         "SEGMENT CLONES (NEW) (groups=0)\n(none)",
         "SEGMENT CLONES (KNOWN) (groups=0)\n(none)",
+        "SEGMENT CLONES (UNAVAILABLE) (groups=0)\n(none)",
     )
 
 
@@ -2496,6 +2570,7 @@ def test_to_text_report_trusted_baseline_split_sections() -> None:
         block_groups={},
         segment_groups={},
         new_function_group_keys={"func-new"},
+        baseline_trust=_trusted_clone_lanes(),
     )
     assert "Note: baseline is untrusted" not in text_out
     assert "FUNCTION CLONES (NEW) (groups=1)" in text_out
@@ -2521,9 +2596,13 @@ def test_to_text_report_untrusted_baseline_known_sections_empty() -> None:
         block_groups={},
         segment_groups={},
     )
-    assert "Note: baseline is untrusted; all groups are treated as NEW." in text_out
-    assert "FUNCTION CLONES (NEW) (groups=1)" in text_out
+    assert (
+        "Note: unavailable baseline lanes produce UNAVAILABLE novelty, never NEW."
+        in text_out
+    )
+    assert "FUNCTION CLONES (NEW) (groups=0)\n(none)" in text_out
     assert "FUNCTION CLONES (KNOWN) (groups=0)\n(none)" in text_out
+    assert "FUNCTION CLONES (UNAVAILABLE) (groups=1)" in text_out
 
 
 def test_segment_groups_internal_only() -> None:
@@ -3091,13 +3170,7 @@ def test_text_and_markdown_report_include_suppressed_dead_code_sections() -> Non
         "suppressed_by=dead-code@inline_codeclone",
     )
 
-    markdown = to_markdown_report(
-        report_document=payload,
-        meta={},
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-    )
+    markdown = render_markdown_report_document(payload)
     assert '<a id="dead-code-suppressed"></a>' in markdown
     assert "suppression_rule=dead-code" in markdown
 
@@ -3140,19 +3213,14 @@ def test_text_and_markdown_report_include_suppressed_golden_fixture_clones() -> 
         segment_groups={},
         suppressed_clone_groups=(suppressed_group,),
     )
-    markdown = to_markdown_report(
-        report_document=build_report_document(
+    markdown = render_markdown_report_document(
+        build_report_document(
             func_groups={},
             block_groups={},
             segment_groups={},
             meta={"codeclone_version": "1.4.0", "scan_root": "/root"},
             suppressed_clone_groups=(suppressed_group,),
         ),
-        meta={"codeclone_version": "1.4.0", "scan_root": "/root"},
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        suppressed_clone_groups=(suppressed_group,),
     )
 
     assert_contains_all(
@@ -3353,15 +3421,7 @@ def test_text_and_sarif_renderers_cover_new_structural_kinds() -> None:
         "drift_fields",
     )
 
-    sarif = json.loads(
-        to_sarif_report(
-            report_document=payload,
-            meta={},
-            func_groups={},
-            block_groups={},
-            segment_groups={},
-        )
-    )
+    sarif = json.loads(render_sarif_report_document(payload))
     run = sarif["runs"][0]
     rule_ids = {rule["id"] for rule in run["tool"]["driver"]["rules"]}
     assert "CSTRUCT002" in rule_ids

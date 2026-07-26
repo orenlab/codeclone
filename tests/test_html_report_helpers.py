@@ -26,6 +26,7 @@ from codeclone.report.html.sections._dead_code import render_dead_code_panel
 from codeclone.report.html.sections._dependencies import _select_dep_nodes
 from codeclone.report.html.sections._meta import _path_basename, render_meta_panel
 from codeclone.report.html.sections._overview import (
+    _adoption_and_api_section,
     _directory_hotspot_bucket_body,
     _directory_kind_meta_parts,
     _health_gauge_html,
@@ -69,6 +70,7 @@ from codeclone.report.html.widgets.icons import section_icon_html
 from codeclone.report.html.widgets.snippets import _FileCache
 from codeclone.report.html.widgets.tabs import render_split_tabs
 from tests._assertions import assert_contains_none
+from tests._report_fixtures import build_test_report_document
 from tests.assertion_helpers import assert_all_contained
 
 
@@ -182,6 +184,40 @@ def test_html_fallback_helpers_cover_empty_label_and_review_text() -> None:
         == "2 overlaps · 1 scope gap"
     )
     assert _overloaded_modules_section(cast(Any, ctx)) == ""
+
+
+def test_overview_optional_canonical_families_cover_single_family_rows() -> None:
+    api_only = SimpleNamespace(
+        metrics_map={
+            "api_surface": {
+                "summary": {
+                    "modules": 1,
+                    "public_symbols": 2,
+                    "breaking": 0,
+                }
+            }
+        }
+    )
+    overloaded_without_path = SimpleNamespace(
+        overloaded_modules_map={
+            "summary": {"candidates": 1},
+            "items": [
+                {
+                    "module": "pkg.mod",
+                    "candidate_status": "candidate",
+                    "score": 0.8,
+                    "fan_in": 1,
+                    "fan_out": 2,
+                    "loc": 120,
+                }
+            ],
+        }
+    )
+
+    assert "Public API surface" in _adoption_and_api_section(cast(Any, api_only))
+    assert "pkg/mod.py" in _overloaded_modules_section(
+        cast(Any, overloaded_without_path)
+    )
 
 
 def test_dependency_sampler_cap_and_hub_threshold_empty() -> None:
@@ -336,6 +372,7 @@ def test_render_split_tabs_returns_empty_for_no_tabs() -> None:
 def _section_ctx(**overrides: object) -> SimpleNamespace:
     base: dict[str, object] = {
         "clone_groups_total": 4,
+        "clone_summary": {"new": 1, "known": 2, "unavailable": 0},
         "complexity_map": {"summary": {"high_risk": 5, "average": 2.5, "max": 9}},
         "coupling_map": {"summary": {"high_risk": 3, "average": 1.5, "max": 7}},
         "cohesion_map": {"summary": {"low_cohesion": 2, "average": 1.2, "max": 5}},
@@ -387,6 +424,59 @@ def _section_ctx(**overrides: object) -> SimpleNamespace:
         "report_generated_at": "2026-03-22T21:30:45Z",
     }
     base.update(overrides)
+    metrics_diff = base.get("metrics_diff")
+    if isinstance(metrics_diff, MetricsDiff):
+        base["complexity_map"] = {
+            **cast(dict[str, object], base["complexity_map"]),
+            "summary": {
+                **cast(
+                    dict[str, object],
+                    cast(dict[str, object], base["complexity_map"])["summary"],
+                ),
+                "baseline_diff_available": True,
+                "new_high_risk": len(metrics_diff.new_high_risk_functions),
+            },
+        }
+        base["coupling_map"] = {
+            **cast(dict[str, object], base["coupling_map"]),
+            "summary": {
+                **cast(
+                    dict[str, object],
+                    cast(dict[str, object], base["coupling_map"])["summary"],
+                ),
+                "baseline_diff_available": True,
+                "new_high_risk": len(metrics_diff.new_high_coupling_classes),
+            },
+        }
+        base["dead_code_map"] = {
+            **cast(dict[str, object], base["dead_code_map"]),
+            "summary": {
+                **cast(
+                    dict[str, object],
+                    cast(dict[str, object], base["dead_code_map"])["summary"],
+                ),
+                "baseline_diff_available": True,
+                "new_items": len(metrics_diff.new_dead_code),
+            },
+        }
+        base["dependencies_map"] = {
+            **cast(dict[str, object], base["dependencies_map"]),
+            "summary": {
+                "baseline_diff_available": True,
+                "new_cycles": len(metrics_diff.new_cycles),
+                "max_depth": 4,
+            },
+        }
+        base["health_map"] = {
+            "summary": {
+                "score": 82,
+                "grade": "B",
+                "dimensions": {},
+                "baseline_diff_available": True,
+                "delta": metrics_diff.health_delta,
+            }
+        }
+        base["clone_summary"] = {"new": 0, "known": 2, "unavailable": 0}
     return SimpleNamespace(**base)
 
 
@@ -491,11 +581,42 @@ def test_render_overview_panel_surfaces_baselined_and_partially_baselined_kpis()
     assert "health-ring-delta--up" in panel_html
 
 
+def test_render_overview_panel_summarizes_metrics_without_health_score() -> None:
+    panel_html = render_overview_panel(cast(Any, _section_ctx()))
+
+    assert (
+        "4 clone groups; 4 dead-code items (0 suppressed); 1 dependency cycles."
+        in panel_html
+    )
+
+
 def test_render_dead_code_panel_warns_when_only_medium_confidence_items_exist() -> None:
     panel_html = render_dead_code_panel(cast(Any, _section_ctx()))
     assert "2 candidates total" not in panel_html
     assert "4 candidates total" in panel_html
     assert "No dead code detected." not in panel_html
+
+
+def test_render_dead_code_panel_derives_high_confidence_count_from_items() -> None:
+    ctx = _section_ctx(
+        dead_code_map={
+            "summary": {"total": 1, "high_confidence": 0, "suppressed": 0},
+            "items": [
+                {
+                    "qualname": "pkg.mod:unused",
+                    "filepath": "pkg/mod.py",
+                    "start_line": 5,
+                    "kind": "function",
+                    "confidence": "high",
+                }
+            ],
+            "suppressed_items": [],
+        }
+    )
+
+    panel_html = render_dead_code_panel(cast(Any, ctx))
+
+    assert "1 high-confidence items" in panel_html
 
 
 def test_directory_hotspot_meta_omits_redundant_single_family_breakdown() -> None:
@@ -685,14 +806,15 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
     assert _FileCache().get_lines_range(str(snippet_path), 5, 6) == ()
 
     monkeypatch.setattr(assemble_mod, "_pygments_css", lambda _style: "")
-    html_without_pygments = assemble_mod.build_html_report(
+    report_document = build_test_report_document(
         func_groups={},
         block_groups={},
         segment_groups={},
-        block_group_facts={},
-        report_meta={"project_name": "demo"},
+        meta={"project_name": "demo"},
         metrics={},
-        report_document={},
+    )
+    html_without_pygments = assemble_mod.build_html_report(
+        report_document=report_document,
     )
     assert '[data-theme="light"] .codebox span' not in html_without_pygments
 
@@ -706,13 +828,7 @@ def test_meta_snippet_and_assembly_helpers_cover_empty_optional_paths(
         ),
     )
     html_without_light_rules = assemble_mod.build_html_report(
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-        block_group_facts={},
-        report_meta={"project_name": "demo"},
-        metrics={},
-        report_document={},
+        report_document=report_document,
     )
     assert '[data-theme="light"] .codebox span' not in html_without_light_rules
 

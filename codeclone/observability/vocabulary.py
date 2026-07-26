@@ -10,7 +10,8 @@ from __future__ import annotations
 
 from typing import Final
 
-OBSERVER_VOCABULARY_VERSION: Final = "2"
+from ..contracts import OBSERVER_VOCABULARY_VERSION
+
 DB_COUNTER_VERSION: Final = 2
 
 _MCP_TOOL_NAMES: Final = frozenset(
@@ -302,6 +303,7 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "report_items",
         "report_novelty_known",
         "report_novelty_new",
+        "report_novelty_unavailable",
         "report_render_bytes",
         "report_render_format_html",
         "report_render_format_json",

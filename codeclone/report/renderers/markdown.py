@@ -6,17 +6,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Mapping, Sequence
 
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
 from .._formatting import format_spread_text
 from ..messages import markdown as md_msgs
 from ..messages.projections import PROJECTION_NONE
-
-if TYPE_CHECKING:
-    from ...models import StructuralFindingGroup, Suggestion, SuppressedCloneGroup
-    from ..types import GroupMapLike
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5
@@ -140,6 +135,7 @@ def _append_findings_section(
                 ),
                 (md_msgs.MD_SPREAD, _spread_text(_as_mapping(group.get("spread")))),
                 (md_msgs.MD_OCCURRENCES, group.get("count")),
+                (md_msgs.MD_NOVELTY, group.get("novelty")),
             ),
         )
         facts = _as_mapping(group.get("facts"))
@@ -263,6 +259,8 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     severity_summary = _as_mapping(findings_summary.get("severity"))
     impact_summary = _as_mapping(findings_summary.get("impact_scope"))
     source_breakdown = _as_mapping(overview.get("source_scope_breakdown"))
+    baseline = _as_mapping(payload.get("baseline"))
+    lane_trust = _as_sequence(baseline.get("sorted_lane_trust"))
 
     lines = [
         md_msgs.MD_TITLE,
@@ -286,6 +284,19 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         ),
         "",
     ]
+    lines.extend(
+        [
+            f"### {md_msgs.MD_BASELINE_LANE_TRUST}",
+            "",
+            *(
+                f"- `{_text(_as_mapping(row).get('name'))}`: "
+                f"{_text(_as_mapping(row).get('status'))} "
+                f"({_text(_as_mapping(row).get('reason'))})"
+                for row in lane_trust
+            ),
+            "",
+        ]
+    )
 
     _append_anchor(lines, *_anchor("overview"))
     _append_kv_bullets(
@@ -583,8 +594,6 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
         if family_key == "security-surfaces":
             family_key = "security_surfaces"
         family_payload = _as_mapping(metrics_families.get(family_key))
-        if not family_payload and family_key == "overloaded_modules":
-            family_payload = _as_mapping(metrics_families.get("god_modules"))
         if not family_payload and family_key == "coverage_join":
             continue
         family_summary_map = _as_mapping(family_payload.get("summary"))
@@ -640,26 +649,6 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def to_markdown_report(
-    *,
-    report_document: Mapping[str, object],
-    meta: Mapping[str, object],
-    inventory: Mapping[str, object] | None = None,
-    func_groups: GroupMapLike,
-    block_groups: GroupMapLike,
-    segment_groups: GroupMapLike,
-    block_facts: Mapping[str, Mapping[str, str]] | None = None,
-    new_function_group_keys: Collection[str] | None = None,
-    new_block_group_keys: Collection[str] | None = None,
-    new_segment_group_keys: Collection[str] | None = None,
-    suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
-    metrics: Mapping[str, object] | None = None,
-    suggestions: Collection[Suggestion] | None = None,
-    structural_findings: Sequence[StructuralFindingGroup] | None = None,
-) -> str:
-    return render_markdown_report_document(report_document)
-
-
 __all__ = [
     "MARKDOWN_SCHEMA_VERSION",
     "_append_findings_section",
@@ -667,5 +656,4 @@ __all__ = [
     "_as_float",
     "_location_text",
     "render_markdown_report_document",
-    "to_markdown_report",
 ]

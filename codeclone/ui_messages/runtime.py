@@ -87,13 +87,13 @@ ERR_INVALID_BASELINE = (
 ACTION_UPDATE_BASELINE = "Run: codeclone . --update-baseline"
 WARN_BASELINE_MISSING = (
     "[warning]Baseline file not found at: [bold]{path}[/bold][/warning]\n"
-    "[dim]Comparing against an empty baseline. "
+    "[dim]Baseline-relative novelty is unavailable. "
     "Use --update-baseline to create it.[/dim]\n"
     f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
 WARN_BASELINE_IGNORED = (
     "[warning]Baseline is not trusted for this run and will be ignored.[/warning]\n"
-    "[dim]Comparison will proceed against an empty baseline.[/dim]\n"
+    "[dim]Baseline-relative novelty is unavailable for this run.[/dim]\n"
     f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
 ERR_BASELINE_CI_REQUIRES_TRUSTED = (

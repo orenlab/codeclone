@@ -36,6 +36,7 @@ from ...core.reporting import (
     gate,
     gate_with_config,
     report,
+    resolve_report_baseline_trust,
 )
 from ...observability import bootstrap as start_observability
 from ...observability import operation, span
@@ -523,6 +524,11 @@ def _main_impl() -> None:
             metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
             clone_baseline_state=baseline_state,
         )
+        baseline_container = baseline_state.baseline.container
+        baseline_trust = resolve_report_baseline_trust(
+            baseline_container,
+            baseline_scope_id=getattr(args, "baseline_scope_id", None),
+        )
 
         cache_status, cache_schema_version = _resolve_cache_status(cache)
         report_meta = cli_meta_mod.build_cli_report_meta(
@@ -548,6 +554,7 @@ def _main_impl() -> None:
             baseline_path=baseline_inputs.baseline_path,
             baseline_state=baseline_state,
             metrics_baseline_state=metrics_baseline_state,
+            baseline_trust=baseline_trust,
         )
         summary_counts = build_summary_counts(
             discovery_result=discovery_result,
@@ -597,6 +604,7 @@ def _main_impl() -> None:
                     diff_context.coverage_adoption_diff_available
                 ),
                 api_surface_diff_available=diff_context.api_surface_diff_available,
+                baseline_trust=baseline_trust,
             )
             changed_clone_gate = resolve_changed_clone_gate(
                 args=args,
@@ -614,6 +622,17 @@ def _main_impl() -> None:
                 if changed_clone_gate
                 else diff_context.new_block
             )
+            patch_gate_config = None
+            if bool(getattr(args, "patch_verify", False)):
+                from .patch_verify import patch_gate_config as build_patch_gate_config
+                from .patch_verify import validate_strictness
+
+                patch_gate_config = build_patch_gate_config(
+                    args=args,
+                    strictness=validate_strictness(
+                        str(getattr(args, "strictness", "ci") or "ci")
+                    ),
+                )
             gate_config, gate_result = gate_with_config(
                 boot=boot,
                 analysis=analysis_result,
@@ -625,8 +644,9 @@ def _main_impl() -> None:
                     if changed_clone_gate
                     else None
                 ),
+                baseline_trust=baseline_trust,
+                gate_config=patch_gate_config,
             )
-            baseline_container = baseline_state.baseline.container
             report_artifacts = report(
                 boot=boot,
                 discovery=discovery_result,
@@ -646,6 +666,7 @@ def _main_impl() -> None:
                 ),
                 report_body=report_body,
                 baseline_container=baseline_container,
+                baseline_trust=baseline_trust,
                 baseline_scope_id=getattr(args, "baseline_scope_id", None),
                 gate_config=gate_config,
                 gate_result=gate_result,

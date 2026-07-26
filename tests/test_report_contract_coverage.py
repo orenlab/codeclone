@@ -51,7 +51,6 @@ from codeclone.report.document.findings import _findings_summary
 from codeclone.report.document.inventory import _derive_inventory_code_counts
 from codeclone.report.renderers.markdown import (
     render_markdown_report_document,
-    to_markdown_report,
 )
 from codeclone.report.renderers.sarif import (
     _baseline_state as _sarif_baseline_state,
@@ -92,7 +91,6 @@ from codeclone.report.renderers.sarif import (
 from codeclone.report.renderers.sarif import (
     _severity_to_level,
     render_sarif_report_document,
-    to_sarif_report,
 )
 from codeclone.report.renderers.sarif import (
     _text as _sarif_text,
@@ -679,7 +677,10 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     assert run["artifacts"]
     assert run["artifacts"][0]["location"]["uriBaseId"] == "%SRCROOT%"
     assert any("relatedLocations" in result for result in run["results"])
-    assert any("baselineState" in result for result in run["results"])
+    assert any(
+        result.get("properties", {}).get("novelty") == "unavailable"
+        for result in run["results"]
+    )
     assert all("help" in rule for rule in run["tool"]["driver"]["rules"])
 
 
@@ -1066,20 +1067,8 @@ def test_directory_hotspot_helpers_cover_fallback_paths() -> None:
 
 def test_markdown_and_sarif_reuse_prebuilt_report_document() -> None:
     payload = _rich_report_document()
-    md = to_markdown_report(
-        report_document=payload,
-        meta={},
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-    )
-    sarif = to_sarif_report(
-        report_document=payload,
-        meta={},
-        func_groups={},
-        block_groups={},
-        segment_groups={},
-    )
+    md = render_markdown_report_document(payload)
+    sarif = render_sarif_report_document(payload)
     assert md.startswith("# CodeClone Report")
     sarif_payload = json.loads(sarif)
     assert sarif_payload["version"] == "2.1.0"
@@ -1481,7 +1470,7 @@ def test_report_contract_markdown_truncates_suppressed_clone_locations() -> None
     assert "... and 2 more occurrence(s)" in markdown
 
 
-def test_report_contract_markdown_supports_legacy_god_modules_metrics_key() -> None:
+def test_report_contract_markdown_does_not_alias_legacy_god_modules_key() -> None:
     payload = _rich_report_document()
     metrics = cast(dict[str, object], payload["metrics"])
     families = cast(dict[str, object], metrics["families"])
@@ -1490,7 +1479,7 @@ def test_report_contract_markdown_supports_legacy_god_modules_metrics_key() -> N
     markdown = render_markdown_report_document(payload)
 
     assert "### Overloaded Modules" in markdown
-    assert "candidate_status=candidate" in markdown
+    assert "candidate_status=candidate" not in markdown
 
 
 def test_report_contract_includes_canonical_overloaded_modules_family() -> None:

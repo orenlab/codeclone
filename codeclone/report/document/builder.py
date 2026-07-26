@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from ...contracts import REPORT_SCHEMA_VERSION
 from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 
 if TYPE_CHECKING:
     from ...models import (
@@ -40,7 +41,6 @@ from .integrity import (
     finalize_envelope_digest,
 )
 from .inventory import (
-    _baseline_is_trusted,
     _build_inventory_payload,
     _build_meta_payload,
 )
@@ -75,6 +75,7 @@ def build_report_body(
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    baseline_trust: TrustVector | None = None,
 ) -> dict[str, object]:
     """Build canonical report facts before evaluation and integrity sealing."""
 
@@ -106,7 +107,14 @@ def build_report_body(
         block_facts=block_facts or {},
         structural_findings=structural_findings,
         metrics_payload=metrics_payload,
-        baseline_trusted=_baseline_is_trusted(meta_payload),
+        function_lane_trusted=_lane_is_trusted(
+            baseline_trust,
+            "clones.functions",
+        ),
+        block_lane_trusted=_lane_is_trusted(
+            baseline_trust,
+            "clones.blocks",
+        ),
         new_function_group_keys=new_function_group_keys,
         new_block_group_keys=new_block_group_keys,
         new_segment_group_keys=new_segment_group_keys,
@@ -118,13 +126,34 @@ def build_report_body(
         findings=findings_payload,
         metrics_payload=metrics_payload,
     )
+    suggestions_payload = _build_derived_suggestions(suggestions)
+    structural_groups = _as_sequence(
+        _as_mapping(_as_mapping(findings_payload.get("groups")).get("structural")).get(
+            "groups"
+        )
+    )
+    overview_payload["presentation_counts"] = {
+        "structural": len(structural_groups),
+        "structural_kinds": len(
+            {str(_as_mapping(group).get("category", "")) for group in structural_groups}
+        ),
+        "suggestions": len(suggestions_payload),
+        "suggestions_by_family": {
+            family: sum(
+                1
+                for suggestion in suggestions_payload
+                if str(suggestion.get("finding_family", "")) == family
+            )
+            for family in ("clones", "structural", "metrics")
+        },
+    }
     return {
         "meta": meta_payload,
         "inventory": inventory_payload,
         "findings": findings_payload,
         "metrics": metrics_payload,
         "derived": {
-            "suggestions": _build_derived_suggestions(suggestions),
+            "suggestions": suggestions_payload,
             "overview": overview_payload,
             "hotlists": hotlists_payload,
             "module_map": _build_derived_module_map(metrics_payload),
@@ -134,6 +163,14 @@ def build_report_body(
             ),
         },
     }
+
+
+def _lane_is_trusted(trust: TrustVector | None, lane: str) -> bool:
+    return bool(
+        trust is not None
+        and trust.root_verified
+        and any(item.name == lane and item.status == "trusted" for item in trust.lanes)
+    )
 
 
 def _source_facts(
@@ -160,7 +197,26 @@ def _baseline_projection(
     new_function_group_keys: Collection[str] | None,
     new_block_group_keys: Collection[str] | None,
 ) -> dict[str, object]:
-    trusted_lanes = () if trust is None else trust.lanes
+    trust_by_lane = {} if trust is None else {item.name: item for item in trust.lanes}
+    enabled_lanes = tuple(sorted(bundle.contract.enabled_lanes))
+    trusted_lanes = [
+        {
+            "name": name,
+            "status": (
+                trust_by_lane[name].status
+                if name in trust_by_lane and trust is not None and trust.root_verified
+                else "unavailable"
+            ),
+            "reason": (
+                trust_by_lane[name].reason
+                if name in trust_by_lane and trust is not None and trust.root_verified
+                else "baseline_missing"
+                if container is None
+                else "root_unverified"
+            ),
+        }
+        for name in enabled_lanes
+    ]
     all_lanes_trusted = bool(
         trust is not None
         and trust.root_verified
@@ -179,7 +235,13 @@ def _baseline_projection(
         {
             "lane": lane,
             "identity": identity,
-            "is_new": identity in new_keys,
+            "novelty": (
+                "unavailable"
+                if not _lane_is_trusted(trust, lane)
+                else "new"
+                if identity in new_keys
+                else "known"
+            ),
         }
         for lane, identities, new_keys in (
             (
@@ -195,7 +257,7 @@ def _baseline_projection(
         )
         for identity in identities
     ]
-    enabled = frozenset(bundle.contract.enabled_lanes)
+    enabled = frozenset(enabled_lanes)
     return {
         "state": state,
         "baseline_scope_id": (
@@ -204,14 +266,7 @@ def _baseline_projection(
         "root_digest_or_null": (
             None if container is None else container.meta.root_digest.value
         ),
-        "sorted_lane_trust": [
-            {
-                "name": item.name,
-                "status": item.status,
-                "reason": item.reason,
-            }
-            for item in sorted(trusted_lanes, key=lambda row: row.name)
-        ],
+        "sorted_lane_trust": [dict(item) for item in trusted_lanes],
         "sorted_novelty_facts": novelty_facts,
         "disabled_capabilities": [
             name for name in _ALL_OBSERVATION_LANES if name not in enabled
@@ -232,7 +287,10 @@ def finalize_report_document(
 ) -> dict[str, object]:
     """Attach contracts, comparison/evaluation facts, then seal the envelope."""
 
-    evaluation_contract = build_evaluation_contract(gate_config)
+    evaluation_contract = build_evaluation_contract(
+        gate_config,
+        enabled_lanes=observation_bundle.contract.enabled_lanes,
+    )
     evaluation = build_evaluation_payload(
         contract=evaluation_contract,
         config=gate_config,
@@ -310,6 +368,7 @@ def build_report_document(
         metrics=metrics,
         suggestions=suggestions,
         structural_findings=structural_findings,
+        baseline_trust=baseline_trust,
     )
     return finalize_report_document(
         body=body,

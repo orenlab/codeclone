@@ -149,6 +149,7 @@ def _normalize_metrics_families(
     )
 
     dependencies = _as_mapping(metrics_map.get("dependencies"))
+    dependencies_comparison = _as_mapping(dependencies.get("summary"))
     dependency_edges = sorted(
         (
             {
@@ -265,6 +266,7 @@ def _normalize_metrics_families(
         item["suppression_source"] = str(first_binding.get("source", ""))
 
     health = _as_mapping(metrics_map.get("health"))
+    health_comparison = _as_mapping(health.get("summary"))
     health_dimensions = {
         str(key): _as_int(value)
         for key, value in sorted(_as_mapping(health.get("dimensions")).items())
@@ -561,6 +563,10 @@ def _normalize_metrics_families(
                 "average": round(_as_float(complexity_summary.get("average")), 2),
                 "max": _as_int(complexity_summary.get("max")),
                 "high_risk": _as_int(complexity_summary.get("high_risk")),
+                "baseline_diff_available": bool(
+                    complexity_summary.get("baseline_diff_available")
+                ),
+                "new_high_risk": _as_int(complexity_summary.get("new_high_risk")),
             },
             "items": complexity_items,
             "items_truncated": False,
@@ -571,6 +577,10 @@ def _normalize_metrics_families(
                 "average": round(_as_float(coupling_summary.get("average")), 2),
                 "max": _as_int(coupling_summary.get("max")),
                 "high_risk": _as_int(coupling_summary.get("high_risk")),
+                "baseline_diff_available": bool(
+                    coupling_summary.get("baseline_diff_available")
+                ),
+                "new_high_risk": _as_int(coupling_summary.get("new_high_risk")),
             },
             "items": coupling_items,
             "items_truncated": False,
@@ -593,6 +603,10 @@ def _normalize_metrics_families(
                 "max_depth": _as_int(dependencies.get("max_depth")),
                 "avg_depth": round(_as_float(dependencies.get("avg_depth")), 2),
                 "p95_depth": _as_int(dependencies.get("p95_depth")),
+                "baseline_diff_available": bool(
+                    dependencies_comparison.get("baseline_diff_available")
+                ),
+                "new_cycles": _as_int(dependencies_comparison.get("new_cycles")),
             },
             "items": dependency_edges,
             "cycles": dependency_cycles,
@@ -610,6 +624,10 @@ def _normalize_metrics_families(
                 ),
                 "suppressed": len(dead_suppressed_items)
                 or _as_int(dead_code_summary.get("suppressed")),
+                "baseline_diff_available": bool(
+                    dead_code_summary.get("baseline_diff_available")
+                ),
+                "new_items": _as_int(dead_code_summary.get("new_items")),
             },
             "items": dead_items,
             "suppressed_items": dead_suppressed_items,
@@ -620,6 +638,10 @@ def _normalize_metrics_families(
                 "score": _as_int(health.get("score")),
                 "grade": str(health.get("grade", "")),
                 "dimensions": health_dimensions,
+                "baseline_diff_available": bool(
+                    health_comparison.get("baseline_diff_available")
+                ),
+                "delta": _as_int(health_comparison.get("delta")),
             },
             "items": [],
             "items_truncated": False,

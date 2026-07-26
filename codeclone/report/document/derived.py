@@ -423,7 +423,25 @@ def _build_derived_suggestions(
             "finding_id": _suggestion_finding_id(suggestion),
             "title": suggestion.title,
             "summary": suggestion.fact_summary,
+            "severity": suggestion.severity,
+            "category": suggestion.category,
+            "location": suggestion.location,
             "location_label": suggestion.location_label or suggestion.location,
+            "priority": suggestion.priority,
+            "finding_family": suggestion.finding_family,
+            "finding_kind": suggestion.finding_kind,
+            "subject_key": suggestion.subject_key,
+            "fact_kind": suggestion.fact_kind,
+            "fact_count": suggestion.fact_count,
+            "spread_files": suggestion.spread_files,
+            "spread_functions": suggestion.spread_functions,
+            "clone_type": suggestion.clone_type,
+            "confidence": suggestion.confidence,
+            "source_kind": suggestion.source_kind,
+            "source_breakdown": [
+                [source_kind, count]
+                for source_kind, count in suggestion.source_breakdown
+            ],
             "representative_locations": _representative_location_rows(suggestion),
             "action": {
                 "effort": suggestion.effort,

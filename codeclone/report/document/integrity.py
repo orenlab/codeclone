@@ -15,14 +15,26 @@ from hashlib import sha256
 
 from ...cache.integrity import canonical_json
 from ...contracts import (
+    GATE_LANE_MATRIX_VERSION,
+    HEALTH_INPUT_MANIFEST_VERSION,
     REPORT_ANALYSIS_FACTS_DIGEST_DOMAIN,
     REPORT_COMPARISON_DIGEST_DOMAIN,
     REPORT_ENVELOPE_DIGEST_DOMAIN,
     REPORT_EVALUATION_DIGEST_DOMAIN,
 )
-from ...models import EvaluationContract, ReportDigest, ReportDigestKind
+from ...models import (
+    EvaluationContract,
+    ObservationLaneName,
+    ReportDigest,
+    ReportDigestKind,
+)
 from ...utils.coerce import as_mapping as _as_mapping
-from ..gates.evaluator import GateResult, MetricGateConfig
+from ..gates.evaluator import (
+    HEALTH_INPUT_LANES,
+    GateResult,
+    MetricGateConfig,
+    active_gate_lane_requirements,
+)
 
 _DIGEST_VERSION = "1"
 
@@ -62,7 +74,11 @@ def _observation_wire(value: str) -> dict[str, object]:
     }
 
 
-def build_evaluation_contract(config: MetricGateConfig) -> EvaluationContract:
+def build_evaluation_contract(
+    config: MetricGateConfig,
+    *,
+    enabled_lanes: tuple[ObservationLaneName, ...] = (),
+) -> EvaluationContract:
     """Build the report-owned evaluation identity from normalized gate policy."""
 
     thresholds_digest = sha256(
@@ -72,6 +88,15 @@ def build_evaluation_contract(config: MetricGateConfig) -> EvaluationContract:
         health_algorithm_revision="1",
         gate_algorithm_revision="1",
         gate_thresholds_digest=thresholds_digest,
+        gate_lane_matrix_version=GATE_LANE_MATRIX_VERSION,
+        health_input_manifest_version=HEALTH_INPUT_MANIFEST_VERSION,
+        health_input_lanes=tuple(
+            lane for lane in HEALTH_INPUT_LANES if lane in frozenset(enabled_lanes)
+        ),
+        active_gate_lane_requirements=active_gate_lane_requirements(
+            config=config,
+            enabled_lanes=enabled_lanes,
+        ),
     )
 
 
@@ -89,6 +114,8 @@ def build_evaluation_payload(
         "outcome": {
             "exit_code": result.exit_code,
             "reasons": list(result.reasons),
+            "required_lanes": list(result.required_lanes),
+            "unavailable_lanes": list(result.unavailable_lanes),
         },
     }
 

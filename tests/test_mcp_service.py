@@ -82,6 +82,17 @@ from tests.test_cli_inprocess import _write_native_baseline
 
 _PID_ALIVE = "codeclone.surfaces.mcp._workspace_intent_pid.is_agent_pid_alive"
 _TEST_BASELINE_SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
+_TEST_GATE_LANES = (
+    "adoption_counts",
+    "api_surface",
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -216,6 +227,20 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
         new_block=frozenset(),
         metrics_diff=None,
     )
+
+
+def _trusted_gate_facts() -> dict[str, object]:
+    return {
+        "baseline": {
+            "sorted_lane_trust": [
+                {"name": lane, "status": "trusted", "reason": "compatible"}
+                for lane in _TEST_GATE_LANES
+            ]
+        },
+        "source_facts": {
+            "observation_contract": {"enabled_lanes": list(_TEST_GATE_LANES)}
+        },
+    }
 
 
 def _blast_radius_report_document(digest: str = "digest-a") -> dict[str, object]:
@@ -424,6 +449,7 @@ def _patch_contract_report_document(
     complexity_path: str = "pkg/b.py",
 ) -> dict[str, object]:
     report_document = copy.deepcopy(_blast_radius_report_document(digest))
+    report_document.update(_trusted_gate_facts())
     report_document["meta"] = {
         "baseline": {
             "loaded": bool(baseline_status),
@@ -3278,7 +3304,7 @@ def test_mcp_service_lists_findings_and_hotspots(tmp_path: Path) -> None:
     assert first["id"] == first["short_id"]
     assert str(first["canonical_id"]).startswith("clone:function:")
     assert first["html_anchor"] == f"finding-{first['canonical_id']}"
-    assert first["novelty"] in {"new", "known"}
+    assert first["novelty"] in {"known", "new", "unavailable"}
     assert first["kind"] == "function_clone"
 
     finding = service.get_finding(finding_id=str(first["id"]))
@@ -9304,7 +9330,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={"metrics": 1},
+        report_document={**_trusted_gate_facts(), "metrics": {}},
         summary={},
         changed_paths=(),
         changed_projection=None,
@@ -9333,7 +9359,7 @@ def test_mcp_service_helper_branches_for_empty_gate_and_missing_remediation(
         root=tmp_path,
         request=request,
         comparison_settings=(),
-        report_document={"meta": {}},
+        report_document={**_trusted_gate_facts(), "meta": {}},
         summary={},
         changed_paths=(),
         changed_projection=None,
