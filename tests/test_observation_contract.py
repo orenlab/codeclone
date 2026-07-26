@@ -12,6 +12,10 @@ from dataclasses import replace
 import orjson
 import pytest
 
+from codeclone.contracts import (
+    GATE_LANE_MATRIX_VERSION,
+    HEALTH_INPUT_MANIFEST_VERSION,
+)
 from codeclone.models import (
     AdoptionCount,
     DeadCodeObservation,
@@ -28,6 +32,7 @@ from codeclone.observations.contracts import (
 )
 from codeclone.observations.lanes import build_observation_lanes
 from codeclone.observations.projection import build_observation_bundle
+from codeclone.report.gates.evaluator import HEALTH_INPUT_LANES
 from tests._ast_metrics_helpers import module_registry_context
 
 
@@ -119,11 +124,37 @@ def test_evaluation_contract_cannot_change_observation_identity() -> None:
         health_algorithm_revision="1",
         gate_algorithm_revision="1",
         gate_thresholds_digest="1" * 64,
+        gate_lane_matrix_version=GATE_LANE_MATRIX_VERSION,
+        health_input_manifest_version=HEALTH_INPUT_MANIFEST_VERSION,
+        health_input_lanes=HEALTH_INPUT_LANES,
+        active_gate_lane_requirements=(),
     )
     after = replace(before, gate_thresholds_digest="2" * 64)
 
     assert before != after
     assert bundle.digest() == bundle.observation_digest
+    with pytest.raises(ValueError, match="matrix versions"):
+        replace(before, gate_lane_matrix_version="")
+    with pytest.raises(ValueError, match="health input lanes"):
+        replace(
+            before,
+            health_input_lanes=("module_identity", "clones.functions"),
+        )
+    with pytest.raises(ValueError, match="gate requirements"):
+        replace(
+            before,
+            active_gate_lane_requirements=(
+                ("z", ("module_identity",)),
+                ("a", ("module_identity",)),
+            ),
+        )
+    with pytest.raises(ValueError, match="active gate lanes"):
+        replace(
+            before,
+            active_gate_lane_requirements=(
+                ("gate", ("module_identity", "clones.functions")),
+            ),
+        )
 
 
 def test_observation_bundle_digest_is_input_order_independent() -> None:
@@ -195,12 +226,20 @@ def test_observation_models_reject_invalid_counts_and_evaluation_contracts() -> 
             health_algorithm_revision="",
             gate_algorithm_revision="1",
             gate_thresholds_digest="1" * 64,
+            gate_lane_matrix_version=GATE_LANE_MATRIX_VERSION,
+            health_input_manifest_version=HEALTH_INPUT_MANIFEST_VERSION,
+            health_input_lanes=HEALTH_INPUT_LANES,
+            active_gate_lane_requirements=(),
         )
     with pytest.raises(ValueError, match="64 lowercase hex"):
         EvaluationContract(
             health_algorithm_revision="1",
             gate_algorithm_revision="1",
             gate_thresholds_digest="x" * 64,
+            gate_lane_matrix_version=GATE_LANE_MATRIX_VERSION,
+            health_input_manifest_version=HEALTH_INPUT_MANIFEST_VERSION,
+            health_input_lanes=HEALTH_INPUT_LANES,
+            active_gate_lane_requirements=(),
         )
     with pytest.raises(ValueError, match="non-negative"):
         DeadCodeObservation(

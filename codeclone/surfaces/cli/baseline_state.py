@@ -274,6 +274,9 @@ def resolve_metrics_baseline_state(
             trusted_for_diff=state.trusted_for_diff,
         )
 
+    if args.ci:
+        args.fail_on_new_metrics = True
+
     if (
         not metrics_baseline_exists
         or not clone_baseline_state.trusted_for_diff
@@ -307,9 +310,6 @@ def resolve_metrics_baseline_state(
                 state=state,
                 console=console,
             )
-    if args.ci and state.loaded:
-        args.fail_on_new_metrics = True
-
     return MetricsBaselineState(
         baseline=state.baseline,
         loaded=state.loaded,

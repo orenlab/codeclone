@@ -29,6 +29,7 @@ from codeclone.surfaces.mcp.session import (
     MCPServiceContractError,
 )
 from tests._ast_metrics_helpers import worker_registry_context
+from tests._report_fixtures import build_test_report_document
 
 
 def process_file(
@@ -138,11 +139,14 @@ def test_html_report_escapes_user_content(tmp_path: Path) -> None:
             },
         ]
     }
-    html = build_html_report(
+    report_document = build_test_report_document(
         func_groups=func_groups,
         block_groups={},
         segment_groups={},
-        block_group_facts=build_block_group_facts({}),
+        block_facts=build_block_group_facts({}),
+    )
+    html = build_html_report(
+        report_document=report_document,
         title="Security",
     )
     assert "<script>alert(1)</script>" not in html
@@ -156,7 +160,7 @@ def test_html_report_escapes_title_and_does_not_emit_raw_script(tmp_path: Path) 
     module = tmp_path / "mod.py"
     module.write_text("def f():\n    return 1\n", encoding="utf-8")
     payload = "<img src=x onerror=alert(1)>"
-    html = build_html_report(
+    report_document = build_test_report_document(
         func_groups={
             "k": [
                 {
@@ -170,7 +174,10 @@ def test_html_report_escapes_title_and_does_not_emit_raw_script(tmp_path: Path) 
         },
         block_groups={},
         segment_groups={},
-        block_group_facts=build_block_group_facts({}),
+        block_facts=build_block_group_facts({}),
+    )
+    html = build_html_report(
+        report_document=report_document,
         title=payload,
     )
     assert payload not in html
@@ -280,7 +287,7 @@ def test_html_report_does_not_use_unescaped_user_payload_in_script_context(
     module = tmp_path / "mod.py"
     module.write_text("def f():\n    return 1\n", encoding="utf-8")
     payload = "</script><script>alert(1)</script>"
-    html = build_html_report(
+    report_document = build_test_report_document(
         func_groups={
             "k": [
                 {
@@ -294,7 +301,10 @@ def test_html_report_does_not_use_unescaped_user_payload_in_script_context(
         },
         block_groups={},
         segment_groups={},
-        block_group_facts=build_block_group_facts({}),
+        block_facts=build_block_group_facts({}),
+    )
+    html = build_html_report(
+        report_document=report_document,
     )
     assert payload not in html
     assert "</script><script>" not in html

@@ -313,6 +313,16 @@ def enforce_gating(
         )
         sys.exit(metrics_baseline_failure_code)
 
+    if gate_result.exit_code == int(ExitCode.CONTRACT_ERROR):
+        unavailable_lanes = ", ".join(gate_result.unavailable_lanes)
+        detail = (
+            f"Required baseline lanes are unavailable: {unavailable_lanes}."
+            if unavailable_lanes
+            else "Required gate evidence is unavailable."
+        )
+        printer.print(ui.fmt_contract_error(detail))
+        sys.exit(ExitCode.CONTRACT_ERROR)
+
     if bool_attr(args, "fail_on_untested_hotspots"):
         if analysis.coverage_join is None:
             printer.print(

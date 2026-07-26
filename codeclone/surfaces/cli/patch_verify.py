@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from ... import ui_messages as ui
 from ...budget.patch_contract import (
@@ -16,14 +16,10 @@ from ...budget.patch_contract import (
 )
 from ...contracts import ExitCode
 from ...core._types import AnalysisResult
-from ...report.gates.evaluator import (
-    GateResult,
-    GateState,
-    MetricGateConfig,
-    evaluate_gate_state,
-    gate_state_from_project_metrics,
-)
+from ...report.gates.evaluator import GateResult, MetricGateConfig
 from ...utils.coerce import as_int as _as_int
+from ...utils.coerce import as_mapping as _as_mapping
+from ...utils.coerce import as_sequence as _as_sequence
 from .baseline_state import CloneBaselineState
 from .post_run import DiffContext
 from .types import CLIArgsLike, PrinterLike
@@ -64,7 +60,7 @@ def _health_delta(metrics_diff: object | None) -> int:
     return _as_int(getattr(metrics_diff, "health_delta", 0), 0)
 
 
-def _metric_gate_config(
+def patch_gate_config(
     *,
     args: CLIArgsLike,
     strictness: StrictnessProfile,
@@ -120,36 +116,19 @@ def _metric_gate_config(
     )
 
 
-def _gate_state(
-    *,
-    analysis: AnalysisResult,
-    diff_context: DiffContext,
-) -> GateState:
-    clone_total = analysis.func_clones_count + analysis.block_clones_count
-    if analysis.project_metrics is None:
-        return GateState(
-            clone_new_count=diff_context.new_clones_count,
-            clone_total=clone_total,
-        )
-    return gate_state_from_project_metrics(
-        project_metrics=analysis.project_metrics,
-        coverage_join=analysis.coverage_join,
-        metrics_diff=diff_context.metrics_diff,
-        clone_new_count=diff_context.new_clones_count,
-        clone_total=clone_total,
-    )
-
-
-def _evaluate_patch_gates(
-    *,
-    args: CLIArgsLike,
-    strictness: StrictnessProfile,
-    analysis: AnalysisResult,
-    diff_context: DiffContext,
+def _gate_result_from_report_document(
+    report_document: Mapping[str, object],
 ) -> GateResult:
-    return evaluate_gate_state(
-        state=_gate_state(analysis=analysis, diff_context=diff_context),
-        config=_metric_gate_config(args=args, strictness=strictness),
+    evaluation = _as_mapping(report_document.get("evaluation"))
+    outcome = _as_mapping(evaluation.get("outcome"))
+    if not outcome:
+        return GateResult(
+            exit_code=int(ExitCode.CONTRACT_ERROR),
+            reasons=("report:evaluation:missing",),
+        )
+    return GateResult(
+        exit_code=_as_int(outcome.get("exit_code"), int(ExitCode.CONTRACT_ERROR)),
+        reasons=tuple(str(item) for item in _as_sequence(outcome.get("reasons"))),
     )
 
 
@@ -194,6 +173,7 @@ def render_patch_verify(
     console: PrinterLike,
     args: CLIArgsLike,
     strictness: str,
+    report_document: Mapping[str, object],
     analysis: AnalysisResult,
     diff_context: DiffContext,
     baseline_state: CloneBaselineState,
@@ -214,12 +194,7 @@ def render_patch_verify(
         )
         return int(ExitCode.CONTRACT_ERROR)
 
-    gate_result = _evaluate_patch_gates(
-        args=args,
-        strictness=validated_strictness,
-        analysis=analysis,
-        diff_context=diff_context,
-    )
+    gate_result = _gate_result_from_report_document(report_document)
     violations = _contract_violations(
         diff_context=diff_context,
         gate_result=gate_result,

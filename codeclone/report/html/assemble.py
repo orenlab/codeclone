@@ -8,13 +8,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING
+from collections.abc import Mapping
 
 from ... import __version__
 from ...contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from ...domain.quality import CONFIDENCE_HIGH
-from ...findings.structural.detectors import normalize_structural_findings
 from ...utils import coerce as _coerce
 from ..messages.chrome import (
     BADGE_COPY,
@@ -67,47 +65,22 @@ from .template import FONT_CSS_URL, REPORT_TEMPLATE
 from .widgets.icons import BRAND_LOGO, ICONS, section_icon_html
 from .widgets.snippets import _FileCache, _pygments_css
 
-if TYPE_CHECKING:
-    from ...models import GroupMapLike, MetricsDiff, StructuralFindingGroup, Suggestion
-
 
 def build_html_report(
     *,
-    func_groups: GroupMapLike,
-    block_groups: GroupMapLike,
-    segment_groups: GroupMapLike,
-    block_group_facts: dict[str, dict[str, str]],
-    new_function_group_keys: Collection[str] | None = None,
-    new_block_group_keys: Collection[str] | None = None,
-    report_meta: Mapping[str, object] | None = None,
-    metrics: Mapping[str, object] | None = None,
-    suggestions: Sequence[Suggestion] | None = None,
-    structural_findings: Sequence[StructuralFindingGroup] | None = None,
-    report_document: Mapping[str, object] | None = None,
-    metrics_diff: MetricsDiff | None = None,
+    report_document: Mapping[str, object],
     title: str = "CodeClone Report",
     context_lines: int = 3,
     max_snippet_lines: int = 220,
 ) -> str:
     """Build a self-contained HTML report string.
 
-    This is the sole public entry point. The signature is frozen.
+    This is the sole public entry point. Canonical facts have one input owner.
     """
     file_cache = _FileCache()
 
     ctx = build_context(
-        func_groups=func_groups,
-        block_groups=block_groups,
-        segment_groups=segment_groups,
-        block_group_facts=block_group_facts,
-        new_function_group_keys=new_function_group_keys,
-        new_block_group_keys=new_block_group_keys,
-        report_meta=report_meta,
-        metrics=metrics,
-        suggestions=suggestions,
-        structural_findings=structural_findings,
         report_document=report_document,
-        metrics_diff=metrics_diff,
         file_cache=file_cache,
         context_lines=context_lines,
         max_snippet_lines=max_snippet_lines,
@@ -151,9 +124,7 @@ def build_html_report(
             _as_mapping(ctx.derived_map.get("review_queue")).get("summary")
         ).get("total")
     )
-    structural_count = len(
-        tuple(normalize_structural_findings(ctx.structural_findings))
-    )
+    structural_count = len(ctx.structural_findings)
     coverage_join_summary = _as_mapping(
         _as_mapping(ctx.metrics_map.get("coverage_join")).get("summary")
     )

@@ -34,8 +34,9 @@ TEXT_SECTION_COVERAGE_JOIN: Final = "COVERAGE JOIN (top 10)"
 TEXT_SECTION_OVERLOADED_MODULES: Final = "OVERLOADED MODULES (top 10)"
 TEXT_SECTION_SECURITY_SURFACES: Final = "SECURITY SURFACES (top 10)"
 TEXT_BASELINE_UNTRUSTED_NOTE: Final = (
-    "Note: baseline is untrusted; all groups are treated as NEW."
+    "Note: unavailable baseline lanes produce UNAVAILABLE novelty, never NEW."
 )
+TEXT_SECTION_BASELINE_LANE_TRUST: Final = "BASELINE LANE TRUST"
 
 TEXT_OVERVIEW_FAMILIES: Final = "Families:"
 TEXT_OVERVIEW_SOURCE_SCOPE: Final = "Source scope breakdown:"

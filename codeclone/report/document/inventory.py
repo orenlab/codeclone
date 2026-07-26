@@ -115,14 +115,6 @@ def _build_inventory_payload(
     }
 
 
-def _baseline_is_trusted(meta: Mapping[str, object]) -> bool:
-    baseline = _as_mapping(meta.get("baseline"))
-    return (
-        baseline.get("loaded") is True
-        and str(baseline.get("status", "")).strip().lower() == "ok"
-    )
-
-
 def _build_meta_payload(
     raw_meta: Mapping[str, object] | None,
     *,

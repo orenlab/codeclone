@@ -6,12 +6,19 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
-from ...contracts import DEFAULT_COVERAGE_MIN, ExitCode
+from ...contracts import (
+    DEFAULT_COVERAGE_MIN,
+    GATE_LANE_MATRIX_VERSION,
+    HEALTH_INPUT_MANIFEST_VERSION,
+    ExitCode,
+)
 from ...metrics.registry import METRIC_FAMILIES
+from ...models import ObservationLaneName
+from ...observability import span
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
@@ -45,6 +52,8 @@ class MetricGateConfig:
 class GateResult:
     exit_code: int
     reasons: tuple[str, ...]
+    required_lanes: tuple[ObservationLaneName, ...] = ()
+    unavailable_lanes: tuple[ObservationLaneName, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +79,76 @@ class GateState:
     diff_typing_param_permille_delta: int = 0
     diff_typing_return_permille_delta: int = 0
     diff_docstring_permille_delta: int = 0
+
+
+HEALTH_INPUT_LANES: tuple[ObservationLaneName, ...] = (
+    "clones.blocks",
+    "clones.functions",
+    "coupling_cohesion_observations",
+    "dead_code",
+    "dependencies",
+    "module_identity",
+    "risk_observations",
+)
+
+_COMPARISON_GATE_NAMES = frozenset(
+    {
+        "adoption_regression",
+        "api_compatibility",
+        "clone_novelty",
+        "complexity_delta",
+        "coupling_cohesion_delta",
+        "dead_code_delta",
+        "dependency_delta",
+        "health_delta",
+    }
+)
+
+
+def active_gate_lane_requirements(
+    *,
+    config: MetricGateConfig,
+    enabled_lanes: Collection[str],
+) -> tuple[tuple[str, tuple[ObservationLaneName, ...]], ...]:
+    """Return the sole versioned mapping from active gates to evidence lanes."""
+
+    enabled = frozenset(enabled_lanes)
+    rows: dict[str, tuple[ObservationLaneName, ...]] = {}
+    if config.fail_on_new:
+        rows["clone_novelty"] = ("clones.blocks", "clones.functions")
+    if config.fail_complexity >= 0:
+        rows["complexity_current"] = ("risk_observations",)
+    if config.fail_coupling >= 0 or config.fail_cohesion >= 0:
+        rows["coupling_cohesion_current"] = ("coupling_cohesion_observations",)
+    if config.fail_on_new_metrics:
+        rows["complexity_delta"] = ("risk_observations",)
+        rows["coupling_cohesion_delta"] = ("coupling_cohesion_observations",)
+        rows["dependency_delta"] = ("dependencies",)
+        rows["dead_code_delta"] = ("dead_code",)
+        rows["health_delta"] = HEALTH_INPUT_LANES
+    if config.fail_cycles:
+        rows["dependency_cycles_current"] = ("dependencies",)
+    if config.fail_dead_code:
+        rows["dead_code_current"] = ("dead_code",)
+    if config.fail_health >= 0:
+        rows["health_current"] = HEALTH_INPUT_LANES
+    if "adoption_counts" in enabled and (
+        config.fail_on_typing_regression or config.fail_on_docstring_regression
+    ):
+        rows["adoption_regression"] = ("adoption_counts",)
+    if "adoption_counts" in enabled and (
+        config.min_typing_coverage >= 0 or config.min_docstring_coverage >= 0
+    ):
+        rows["adoption_threshold"] = ("adoption_counts",)
+    if "api_surface" in enabled and config.fail_on_api_break:
+        rows["api_compatibility"] = ("api_surface",)
+    if "adoption_counts" in enabled and config.fail_on_untested_hotspots:
+        rows["coverage_hotspots"] = ("adoption_counts",)
+    return tuple(sorted(rows.items()))
+
+
+def gate_lane_contract_versions() -> tuple[str, str]:
+    return GATE_LANE_MATRIX_VERSION, HEALTH_INPUT_MANIFEST_VERSION
 
 
 def summarize_metrics_diff(metrics_diff: object | None) -> dict[str, object] | None:
@@ -497,14 +576,68 @@ _GATE_REASON_BUILDERS: dict[str, Callable[..., tuple[str, ...]]] = {
 }
 
 
-def evaluate_gate_state(
+def _evaluate_gate_state_result(
     *,
     state: GateState,
     config: MetricGateConfig,
+    lane_trust: Mapping[str, str] | None = None,
+    enabled_lanes: Collection[str] = (),
 ) -> GateResult:
+    requirements = active_gate_lane_requirements(
+        config=config,
+        enabled_lanes=enabled_lanes,
+    )
+    required_lanes = tuple(
+        sorted({lane for _gate, lanes in requirements for lane in lanes})
+    )
+    enabled = frozenset(enabled_lanes)
+    trust = lane_trust or {}
+    unavailable_lanes = tuple(
+        sorted(
+            {
+                lane
+                for gate_name, lanes in requirements
+                for lane in lanes
+                if lane not in enabled
+                or (
+                    gate_name in _COMPARISON_GATE_NAMES and trust.get(lane) != "trusted"
+                )
+            }
+        )
+    )
+    if unavailable_lanes:
+        return GateResult(
+            exit_code=int(ExitCode.CONTRACT_ERROR),
+            reasons=tuple(f"lane:unavailable:{lane}" for lane in unavailable_lanes),
+            required_lanes=required_lanes,
+            unavailable_lanes=unavailable_lanes,
+        )
+
+    effective_config = replace(
+        config,
+        fail_on_typing_regression=(
+            config.fail_on_typing_regression and "adoption_counts" in enabled
+        ),
+        fail_on_docstring_regression=(
+            config.fail_on_docstring_regression and "adoption_counts" in enabled
+        ),
+        fail_on_api_break=config.fail_on_api_break and "api_surface" in enabled,
+        fail_on_untested_hotspots=(
+            config.fail_on_untested_hotspots and "adoption_counts" in enabled
+        ),
+        min_typing_coverage=(
+            config.min_typing_coverage if "adoption_counts" in enabled else -1
+        ),
+        min_docstring_coverage=(
+            config.min_docstring_coverage if "adoption_counts" in enabled else -1
+        ),
+    )
     reasons = [
         f"metric:{reason}"
-        for reason in metric_gate_reasons_for_state(state=state, config=config)
+        for reason in metric_gate_reasons_for_state(
+            state=state,
+            config=effective_config,
+        )
     ]
 
     if config.fail_on_new and state.clone_new_count > 0:
@@ -517,8 +650,35 @@ def evaluate_gate_state(
         return GateResult(
             exit_code=int(ExitCode.GATING_FAILURE),
             reasons=tuple(reasons),
+            required_lanes=required_lanes,
         )
-    return GateResult(exit_code=int(ExitCode.SUCCESS), reasons=())
+    return GateResult(
+        exit_code=int(ExitCode.SUCCESS),
+        reasons=(),
+        required_lanes=required_lanes,
+    )
+
+
+def evaluate_gate_state(
+    *,
+    state: GateState,
+    config: MetricGateConfig,
+    lane_trust: Mapping[str, str] | None = None,
+    enabled_lanes: Collection[str] = (),
+) -> GateResult:
+    """Evaluate one typed gate request under the sole report observer owner."""
+
+    with span(name="report.evaluate") as evaluation_span:
+        result = _evaluate_gate_state_result(
+            state=state,
+            config=config,
+            lane_trust=lane_trust,
+            enabled_lanes=enabled_lanes,
+        )
+        passed = result.exit_code == int(ExitCode.SUCCESS)
+        evaluation_span.set_counter("report_gate_pass", int(passed))
+        evaluation_span.set_counter("report_gate_fail", int(not passed))
+        return result
 
 
 # codeclone: ignore[dead-code]
@@ -539,19 +699,35 @@ def evaluate_gates(
     *,
     report_document: Mapping[str, object],
     config: MetricGateConfig,
-    baseline_status: str | None = None,
     metrics_diff: object | None = None,
     clone_new_count: int | None = None,
     clone_total: int | None = None,
 ) -> GateResult:
-    _ = baseline_status
     state = _gate_state_from_report_document(
         report_document=report_document,
         metrics_diff=metrics_diff,
         clone_new_count=clone_new_count,
         clone_total=clone_total,
     )
-    return evaluate_gate_state(state=state, config=config)
+    baseline = _as_mapping(report_document.get("baseline"))
+    lane_trust_rows = _as_sequence(baseline.get("sorted_lane_trust"))
+    lane_trust = {
+        str(row.get("name", "")): str(row.get("status", ""))
+        for item in lane_trust_rows
+        for row in (_as_mapping(item),)
+        if str(row.get("name", "")).strip()
+    }
+    source_facts = _as_mapping(report_document.get("source_facts"))
+    observation_contract = _as_mapping(source_facts.get("observation_contract"))
+    return evaluate_gate_state(
+        state=state,
+        config=config,
+        lane_trust=lane_trust,
+        enabled_lanes=tuple(
+            str(item)
+            for item in _as_sequence(observation_contract.get("enabled_lanes"))
+        ),
+    )
 
 
 def _gate_state_from_report_document(
@@ -666,11 +842,14 @@ def _permille(numerator: int, denominator: int) -> int:
 
 
 __all__ = [
+    "HEALTH_INPUT_LANES",
     "GateResult",
     "GateState",
     "MetricGateConfig",
+    "active_gate_lane_requirements",
     "evaluate_gate_state",
     "evaluate_gates",
+    "gate_lane_contract_versions",
     "gate_state_from_project_metrics",
     "metric_gate_reasons",
     "metric_gate_reasons_for_state",

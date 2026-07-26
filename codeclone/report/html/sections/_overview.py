@@ -831,25 +831,27 @@ def render_overview_panel(ctx: ReportContext) -> str:
     coupling_summary = _as_mapping(ctx.coupling_map.get("summary"))
     cohesion_summary = _as_mapping(ctx.cohesion_map.get("summary"))
     dead_code_summary = _as_mapping(ctx.dead_code_map.get("summary"))
+    dependencies_summary = _as_mapping(ctx.dependencies_map.get("summary"))
+    health_summary = _as_mapping(ctx.health_map.get("summary"))
     dep_cycles = _as_sequence(ctx.dependencies_map.get("cycles"))
 
     complexity_high_risk = _as_int(complexity_summary.get("high_risk"))
     coupling_high_risk = _as_int(coupling_summary.get("high_risk"))
     cohesion_low = _as_int(cohesion_summary.get("low_cohesion"))
     dependency_cycle_count = len(dep_cycles)
-    dependency_max_depth = _as_int(ctx.dependencies_map.get("max_depth"))
+    dependency_max_depth = _as_int(dependencies_summary.get("max_depth"))
     dead_total = _as_int(dead_code_summary.get("total"))
     dead_high_conf = _as_int(
         dead_code_summary.get("high_confidence", dead_code_summary.get("critical"))
     )
     dead_suppressed = _as_int(dead_code_summary.get("suppressed", 0))
 
-    health_score_raw = ctx.health_map.get("score")
+    health_score_raw = health_summary.get("score")
     health_score_known = (
         health_score_raw is not None and str(health_score_raw).strip() != ""
     )
     health_score = _as_float(health_score_raw) if health_score_known else -1.0
-    health_grade = str(ctx.health_map.get("grade", "n/a"))
+    health_grade = str(health_summary.get("grade", "n/a"))
 
     # Overview answer
     def _answer_and_tone() -> tuple[str, Tone]:
@@ -879,35 +881,44 @@ def render_overview_panel(ctx: ReportContext) -> str:
 
     overview_answer, overview_tone = _answer_and_tone()
 
-    # -- MetricsDiff deltas --
-    md = ctx.metrics_diff
-    _new_complexity = len(md.new_high_risk_functions) if md else None
-    _new_coupling = len(md.new_high_coupling_classes) if md else None
-    _new_dead = len(md.new_dead_code) if md else None
-    _new_cycles = len(md.new_cycles) if md else None
-    _health_delta = md.health_delta if md else None
-    structural_count = len(ctx.structural_findings)
-    structural_kind_count = len({g.finding_kind for g in ctx.structural_findings})
-    clone_suggestion_count = sum(
-        1 for suggestion in ctx.suggestions if suggestion.finding_family == "clones"
+    # Canonical comparison and count facts; no raw MetricsDiff proxy.
+    _new_complexity = (
+        _as_int(complexity_summary.get("new_high_risk"))
+        if complexity_summary.get("baseline_diff_available") is True
+        else None
     )
-    structural_suggestion_count = sum(
-        1 for suggestion in ctx.suggestions if suggestion.finding_family == "structural"
+    _new_coupling = (
+        _as_int(coupling_summary.get("new_high_risk"))
+        if coupling_summary.get("baseline_diff_available") is True
+        else None
     )
-    metrics_suggestion_count = sum(
-        1 for suggestion in ctx.suggestions if suggestion.finding_family == "metrics"
+    _new_dead = (
+        _as_int(dead_code_summary.get("new_items"))
+        if dead_code_summary.get("baseline_diff_available") is True
+        else None
     )
-
-    # Clone group novelty — show delta only when baseline comparison is active.
-    # MetricsDiff presence is the reliable indicator of a loaded baseline.
-    _new_clones: int | None = None
-    if md is not None:
-        _new_clones = sum(
-            1 for gk, _ in ctx.func_sorted if gk in ctx.new_func_keys
-        ) + sum(1 for gk, _ in ctx.block_sorted if gk in ctx.new_block_keys)
-
+    _new_cycles = (
+        _as_int(dependencies_summary.get("new_cycles"))
+        if dependencies_summary.get("baseline_diff_available") is True
+        else None
+    )
+    _health_delta = (
+        _as_int(health_summary.get("delta"))
+        if health_summary.get("baseline_diff_available") is True
+        else None
+    )
+    presentation_counts = _as_mapping(ctx.overview_data.get("presentation_counts"))
+    suggestion_counts = _as_mapping(presentation_counts.get("suggestions_by_family"))
+    structural_count = _as_int(presentation_counts.get("structural"))
+    structural_kind_count = _as_int(presentation_counts.get("structural_kinds"))
+    suggestions_total = _as_int(presentation_counts.get("suggestions"))
+    clone_suggestion_count = _as_int(suggestion_counts.get("clones"))
+    structural_suggestion_count = _as_int(suggestion_counts.get("structural"))
+    metrics_suggestion_count = _as_int(suggestion_counts.get("metrics"))
+    _new_clones = _as_int(ctx.clone_summary.get("new"))
     _baseline_ok = (
-        '<span class="kpi-micro kpi-micro--baselined">\u2713 baselined</span>'
+        '<span class="kpi-micro kpi-micro--baselined">'
+        '\u2713 <span class="kpi-micro-lbl">baselined</span></span>'
     )
 
     def _baselined_detail(
@@ -915,22 +926,12 @@ def render_overview_panel(ctx: ReportContext) -> str:
         delta: int | None,
         detail: str,
     ) -> tuple[str, str]:
-        """Return (detail_html, value_tone) accounting for baseline state.
-
-        When baseline is loaded and all items are accepted debt, tone
-        becomes 'muted' and a '✓ baselined' pill is appended.
-        When baseline is loaded but new regressions exist, the accepted
-        count is shown alongside the existing detail.
-        """
+        """Return detail and tone from canonical comparison availability."""
         if delta is None or total == 0:
             return detail, "good" if total == 0 else "bad"
         if delta == 0:
             return detail + _baseline_ok, "muted"
-        baselined = total - delta
-        extra = ""
-        if baselined > 0:
-            extra = _micro_badges(("baselined", baselined))
-        return detail + extra, "bad"
+        return detail + _micro_badges(("new", delta)), "bad"
 
     # KPI cards — compute detail + tone with baseline awareness
     _clone_detail, _clone_tone = _baselined_detail(
@@ -1029,14 +1030,14 @@ def render_overview_panel(ctx: ReportContext) -> str:
         ),
         _stat_card(
             KPI_SUGGESTIONS,
-            len(ctx.suggestions),
+            suggestions_total,
             detail=_micro_badges(
                 ("clone", clone_suggestion_count),
                 ("struct", structural_suggestion_count),
                 ("metric", metrics_suggestion_count),
             ),
             tip=KPI_TIP_SUGGESTIONS,
-            value_tone="good" if not ctx.suggestions else "warn",
+            value_tone="good" if suggestions_total == 0 else "warn",
         ),
     ]
 

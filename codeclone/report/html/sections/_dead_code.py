@@ -32,8 +32,8 @@ def _dead_row(
     item: Mapping[str, object], ctx: ReportContext
 ) -> tuple[str, str, str, str, str]:
     return (
-        ctx.bare_qualname(str(item.get("qualname", "")), str(item.get("filepath", ""))),
-        str(item.get("filepath", "")),
+        str(item.get("qualname", "")),
+        str(item.get("relative_path", "")),
         str(item.get("start_line", "")),
         str(item.get("kind", "")),
         str(item.get("confidence", "")),

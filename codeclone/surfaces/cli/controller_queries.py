@@ -99,10 +99,12 @@ def run_post_analysis_controller_query(
         return None
     from .patch_verify import render_patch_verify
 
+    assert report_document is not None
     return render_patch_verify(
         console=console_factory(),
         args=args,
         strictness=str(getattr(args, "strictness", "ci") or "ci"),
+        report_document=report_document,
         analysis=analysis_result,
         diff_context=diff_context,
         baseline_state=baseline_state,

@@ -268,11 +268,8 @@ def render_quality_panel(ctx: ReportContext) -> str:
     cx_rows_data = _as_sequence(ctx.complexity_map.get("functions"))
     cx_rows = [
         (
-            ctx.bare_qualname(
-                str(_as_mapping(r).get("qualname", "")),
-                str(_as_mapping(r).get("filepath", "")),
-            ),
-            str(_as_mapping(r).get("filepath", "")),
+            str(_as_mapping(r).get("qualname", "")),
+            str(_as_mapping(r).get("relative_path", "")),
             str(_as_mapping(r).get("cyclomatic_complexity", "")),
             str(_as_mapping(r).get("nesting_depth", "")),
             str(_as_mapping(r).get("risk", "")),
@@ -291,11 +288,8 @@ def render_quality_panel(ctx: ReportContext) -> str:
     cp_rows_data = _as_sequence(ctx.coupling_map.get("classes"))
     cp_rows = [
         (
-            ctx.bare_qualname(
-                str(_as_mapping(r).get("qualname", "")),
-                str(_as_mapping(r).get("filepath", "")),
-            ),
-            str(_as_mapping(r).get("filepath", "")),
+            str(_as_mapping(r).get("qualname", "")),
+            str(_as_mapping(r).get("relative_path", "")),
             str(_as_mapping(r).get("cbo", "")),
             str(_as_mapping(r).get("risk", "")),
             _render_coupled_cell(_as_mapping(r)),
@@ -315,11 +309,8 @@ def render_quality_panel(ctx: ReportContext) -> str:
     ch_rows_data = _as_sequence(ctx.cohesion_map.get("classes"))
     ch_rows = [
         (
-            ctx.bare_qualname(
-                str(_as_mapping(r).get("qualname", "")),
-                str(_as_mapping(r).get("filepath", "")),
-            ),
-            str(_as_mapping(r).get("filepath", "")),
+            str(_as_mapping(r).get("qualname", "")),
+            str(_as_mapping(r).get("relative_path", "")),
             str(_as_mapping(r).get("lcom4", "")),
             str(_as_mapping(r).get("risk", "")),
             str(_as_mapping(r).get("method_count", "")),

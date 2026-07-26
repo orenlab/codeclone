@@ -25,6 +25,7 @@ import codeclone.surfaces.cli.attrs as cli_attrs
 import codeclone.surfaces.cli.baseline_state as cli_baselines_mod
 import codeclone.surfaces.cli.changed_scope as cli_changed_scope
 import codeclone.surfaces.cli.console as cli_console
+import codeclone.surfaces.cli.post_run as cli_post_run
 import codeclone.surfaces.cli.report_meta as cli_meta_mod
 import codeclone.surfaces.cli.reports_output as cli_reports
 import codeclone.surfaces.cli.runtime as cli_runtime
@@ -52,7 +53,7 @@ from codeclone.core.worker import (
 from codeclone.core.worker import (
     process_file as _worker_process_file,
 )
-from codeclone.models import HealthScore, ProjectMetrics
+from codeclone.models import HealthScore, LaneTrust, ProjectMetrics, TrustVector
 from tests._assertions import assert_contains_all, assert_contains_none
 from tests._ast_metrics_helpers import module_registry_context, worker_registry_context
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
@@ -75,6 +76,61 @@ class _RecordingPrinter:
 
     def print(self, *objects: object, **kwargs: object) -> None:
         self.lines.append(" ".join(str(obj) for obj in objects))
+
+
+@pytest.mark.parametrize(
+    ("trusted_lane", "expected_func", "expected_block"),
+    [
+        ("clones.functions", {"function:new"}, set()),
+        ("clones.blocks", set(), {"block:new"}),
+    ],
+)
+def test_diff_context_respects_independent_clone_lane_trust(
+    trusted_lane: str,
+    expected_func: set[str],
+    expected_block: set[str],
+    tmp_path: Path,
+) -> None:
+    baseline = SimpleNamespace(
+        diff=lambda _func_groups, _block_groups: (
+            {"function:new"},
+            {"block:new"},
+        )
+    )
+    baseline_state = SimpleNamespace(trusted_for_diff=True, baseline=baseline)
+    metrics_baseline_state = SimpleNamespace(
+        trusted_for_diff=False,
+        baseline=SimpleNamespace(),
+    )
+    trust = TrustVector(
+        root_verified=True,
+        lanes=tuple(
+            LaneTrust(
+                name=lane,
+                status="trusted" if lane == trusted_lane else "unavailable",
+                reason="compatible" if lane == trusted_lane else "runtime_lane_unknown",
+            )
+            for lane in ("clones.blocks", "clones.functions")
+        ),
+    )
+
+    diff = cli_post_run.build_diff_context(
+        analysis=cast(
+            Any,
+            SimpleNamespace(
+                func_groups={},
+                block_groups={},
+                project_metrics=None,
+            ),
+        ),
+        baseline_path=tmp_path / "baseline.json",
+        baseline_state=cast(Any, baseline_state),
+        metrics_baseline_state=cast(Any, metrics_baseline_state),
+        baseline_trust=trust,
+    )
+
+    assert diff.new_func == expected_func
+    assert diff.new_block == expected_block
 
 
 def test_report_baseline_trust_rejects_invalid_scope_id() -> None:
@@ -1455,6 +1511,34 @@ def test_enforce_gating_uses_precomputed_changed_scope_success(
     )
 
     assert observed == {}
+
+
+def test_enforce_gating_exits_two_for_required_unavailable_lane() -> None:
+    cli.console = cli._make_console(no_color=True)
+    with pytest.raises(SystemExit) as exc:
+        cli._enforce_gating(
+            args=Namespace(
+                fail_on_untested_hotspots=False,
+                fail_threshold=-1,
+                verbose=False,
+            ),
+            analysis=cast(Any, SimpleNamespace(coverage_join=None)),
+            processing=cast(Any, Namespace(source_read_failures=[])),
+            source_read_contract_failure=False,
+            baseline_failure_code=None,
+            metrics_baseline_failure_code=None,
+            new_func=set(),
+            new_block=set(),
+            gate_result=GatingResult(
+                exit_code=2,
+                reasons=("lane:unavailable:clones.functions",),
+                required_lanes=("clones.functions",),
+                unavailable_lanes=("clones.functions",),
+            ),
+            html_report_path=None,
+        )
+
+    assert exc.value.code == 2
 
 
 def test_main_impl_prints_changed_scope_when_changed_projection_is_available(

@@ -26,10 +26,12 @@ from codeclone.contracts import (
 from codeclone.contracts.errors import FileProcessingError
 from codeclone.findings.ids import clone_group_id, structural_group_id
 from codeclone.models import (
+    LaneTrust,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
     SuppressedCloneGroup,
+    TrustVector,
 )
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import (
@@ -98,11 +100,75 @@ def build_html_report(
         if block_group_facts is not None
         else build_block_group_facts(block_groups)
     )
+    provided_document = kwargs.pop("report_document", None)
+    new_function_group_keys = kwargs.pop("new_function_group_keys", None)
+    new_block_group_keys = kwargs.pop("new_block_group_keys", None)
+    report_meta = kwargs.pop("report_meta", None)
+    metrics = kwargs.pop("metrics", None)
+    suggestions = kwargs.pop("suggestions", None)
+    structural_findings = kwargs.pop("structural_findings", None)
+    kwargs.pop("metrics_diff", None)
+    if report_meta is None:
+        location_paths = [
+            str(item.get("filepath", ""))
+            for groups in (func_groups, block_groups, segment_groups)
+            for items in groups.values()
+            for item in items
+            if Path(str(item.get("filepath", ""))).is_absolute()
+        ]
+        if location_paths:
+            report_meta = {"scan_root": str(Path(location_paths[0]).parent)}
+    resolved_report_meta = dict(report_meta or {})
+    if metrics is not None and "metrics_computed" not in resolved_report_meta:
+        resolved_report_meta["metrics_computed"] = sorted(metrics)
+    report_meta = resolved_report_meta
+    baseline_is_trusted = bool(
+        report_meta
+        and report_meta.get("baseline_loaded") is True
+        and report_meta.get("baseline_status") == "ok"
+    )
+    baseline_trust = (
+        TrustVector(
+            root_verified=baseline_is_trusted,
+            lanes=(
+                LaneTrust(
+                    name="clones.blocks",
+                    status="trusted" if baseline_is_trusted else "unavailable",
+                    reason=(
+                        "compatible" if baseline_is_trusted else "required_contract"
+                    ),
+                ),
+                LaneTrust(
+                    name="clones.functions",
+                    status="trusted" if baseline_is_trusted else "unavailable",
+                    reason=(
+                        "compatible" if baseline_is_trusted else "required_contract"
+                    ),
+                ),
+            ),
+        )
+        if new_function_group_keys is not None or new_block_group_keys is not None
+        else None
+    )
+    report_document = (
+        provided_document
+        if provided_document is not None
+        else build_report_document(
+            func_groups=func_groups,
+            block_groups=block_groups,
+            segment_groups=segment_groups,
+            block_facts=resolved_block_group_facts,
+            new_function_group_keys=new_function_group_keys,
+            new_block_group_keys=new_block_group_keys,
+            meta=report_meta,
+            metrics=metrics,
+            suggestions=suggestions,
+            structural_findings=structural_findings,
+            baseline_trust=baseline_trust,
+        )
+    )
     return _core_build_html_report(
-        func_groups=func_groups,
-        block_groups=block_groups,
-        segment_groups=segment_groups,
-        block_group_facts=resolved_block_group_facts,
+        report_document=report_document,
         **kwargs,
     )
 
@@ -325,7 +391,7 @@ def test_html_report_renders_novelty_tabs_and_group_flags(tmp_path: Path) -> Non
         html,
         'data-group-key="new-func" data-novelty="new"',
         'data-group-key="known-func" data-novelty="known"',
-        "Split is based on baseline",
+        "Per-lane baseline trust: 2 trusted, 7 unavailable.",
     )
 
 
@@ -348,8 +414,8 @@ def test_html_report_renders_untrusted_baseline_novelty_note(tmp_path: Path) -> 
         new_function_group_keys={"new-func"},
         report_meta={"baseline_loaded": False, "baseline_status": "missing"},
     )
-    assert "Baseline is not loaded or not trusted" in html
-    assert 'data-group-key="new-func" data-novelty="new"' in html
+    assert "Per-lane baseline trust: 0 trusted, 9 unavailable." in html
+    assert 'data-group-key="new-func" data-novelty="unavailable"' in html
 
 
 def test_html_report_renders_block_novelty_tabs_and_group_flags(tmp_path: Path) -> None:
@@ -1529,19 +1595,50 @@ def _metrics_payload(
     dep_p95_depth: object = 3,
     dead_suppressed: object = 0,
 ) -> dict[str, object]:
-    suppressed_items: list[dict[str, object]] = []
-    if isinstance(dead_suppressed, int) and dead_suppressed > 0:
-        suppressed_items = [
-            {
-                "qualname": "pkg.mod:suppressed_unused",
-                "filepath": "/outside/project/pkg/mod.py",
-                "start_line": 70,
-                "end_line": 71,
-                "kind": "function",
-                "confidence": "high",
-                "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
-            }
-        ]
+    active_total = (
+        int(dead_total)
+        if isinstance(dead_total, (int, str))
+        and not isinstance(dead_total, bool)
+        and str(dead_total).isdigit()
+        else 0
+    )
+    high_confidence_total = (
+        int(dead_critical)
+        if isinstance(dead_critical, (int, str))
+        and not isinstance(dead_critical, bool)
+        and str(dead_critical).isdigit()
+        else 0
+    )
+    suppressed_total = (
+        int(dead_suppressed)
+        if isinstance(dead_suppressed, (int, str))
+        and not isinstance(dead_suppressed, bool)
+        and str(dead_suppressed).isdigit()
+        else 0
+    )
+    dead_items = [
+        {
+            "qualname": f"pkg.mod:unused_{index}",
+            "filepath": "/outside/project/pkg/mod.py",
+            "start_line": 50 + index * 2,
+            "end_line": 51 + index * 2,
+            "kind": "function",
+            "confidence": "high" if index < high_confidence_total else "medium",
+        }
+        for index in range(active_total)
+    ]
+    suppressed_items: list[dict[str, object]] = [
+        {
+            "qualname": f"pkg.mod:suppressed_unused_{index}",
+            "filepath": "/outside/project/pkg/mod.py",
+            "start_line": 70 + index * 2,
+            "end_line": 71 + index * 2,
+            "kind": "function",
+            "confidence": "high",
+            "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
+        }
+        for index in range(suppressed_total)
+    ]
     return {
         "complexity": {
             "functions": [
@@ -1639,16 +1736,7 @@ def _metrics_payload(
             ],
         },
         "dead_code": {
-            "items": [
-                {
-                    "qualname": "pkg.mod:unused",
-                    "filepath": "/outside/project/pkg/mod.py",
-                    "start_line": 50,
-                    "end_line": 60,
-                    "kind": "function",
-                    "confidence": "high",
-                }
-            ],
+            "items": dead_items,
             "suppressed_items": suppressed_items,
             "summary": {
                 "total": dead_total,
@@ -1713,7 +1801,7 @@ def test_html_report_metrics_warn_branches_and_dependency_svg() -> None:
     assert "Grade B" in html
     assert "Cycles: 0; avg depth: 2.5; p95 depth: 3; max dependency depth: 9." in html
     assert "pkg.mod.func" in html
-    assert "outside/project/pkg/mod.py" in html
+    assert "mod.py" in html
 
 
 def test_html_report_metrics_risk_branches() -> None:
@@ -1949,7 +2037,7 @@ def test_html_report_overview_shows_partial_baselined_clone_badge(
     _assert_html_contains(html, "kpi-micro--baselined", "baselined")
 
 
-def test_html_report_renders_overloaded_modules_from_legacy_god_modules_key() -> None:
+def test_html_report_does_not_alias_legacy_god_modules_key() -> None:
     payload = _metrics_payload(
         health_score=72,
         health_grade="B",
@@ -1973,7 +2061,7 @@ def test_html_report_renders_overloaded_modules_from_legacy_god_modules_key() ->
         metrics=payload,
     )
 
-    _assert_html_contains(html, "Overloaded Modules")
+    assert "Overloaded Modules" not in html
 
 
 def test_html_report_renders_run_snapshot_from_canonical_inventory() -> None:
@@ -2445,7 +2533,7 @@ def test_html_report_security_surfaces_add_review_context_and_coverage_overlap()
         },
         "items": [
             {
-                "relative_path": "pkg/client.py",
+                "filepath": "pkg/client.py",
                 "qualname": "pkg.client:run_case",
                 "start_line": 40,
                 "end_line": 44,
@@ -2519,6 +2607,7 @@ def test_html_report_security_surfaces_prefers_report_document_family_paths() ->
                 "category": "dynamic_loading",
                 "capability": "importlib_import",
                 "module": "pkg.client",
+                "filepath": "pkg/client.py",
                 "qualname": "pkg.client",
                 "start_line": 3,
                 "end_line": 3,
@@ -2530,55 +2619,18 @@ def test_html_report_security_surfaces_prefers_report_document_family_paths() ->
             },
         ],
     }
-    report_document = {
-        "metrics": {
-            "families": {
-                "security_surfaces": {
-                    "summary": {
-                        "items": 1,
-                        "modules": 1,
-                        "exact_items": 1,
-                        "category_count": 1,
-                        "categories": {"dynamic_loading": 1},
-                        "by_source_kind": {
-                            "production": 1,
-                            "tests": 0,
-                            "fixtures": 0,
-                            "other": 0,
-                        },
-                        "production": 1,
-                        "tests": 0,
-                        "fixtures": 0,
-                        "other": 0,
-                        "report_only": True,
-                    },
-                    "items": [
-                        {
-                            "category": "dynamic_loading",
-                            "capability": "importlib_import",
-                            "module": "pkg.client",
-                            "qualname": "pkg.client",
-                            "relative_path": "pkg/client.py",
-                            "source_kind": "production",
-                            "start_line": 3,
-                            "end_line": 3,
-                            "location_scope": "module",
-                            "classification_mode": "exact_import",
-                            "evidence_kind": "import",
-                            "evidence_symbol": "importlib",
-                        }
-                    ],
-                }
-            }
-        }
-    }
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/outside/project"},
+        metrics=metrics,
+    )
 
     html = build_html_report(
         func_groups={},
         block_groups={},
         segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=metrics,
         report_document=report_document,
     )
 
@@ -2829,7 +2881,7 @@ def test_html_report_quality_coverage_join_edge_states() -> None:
         },
         "items": [
             {
-                "relative_path": "pkg/mod.py",
+                "filepath": "pkg/mod.py",
                 "qualname": "pkg.mod:run",
                 "start_line": 10,
                 "end_line": 10,
@@ -2999,9 +3051,8 @@ def test_html_report_metrics_without_health_score_uses_info_overview() -> None:
         ),
     )
     assert "metrics were skipped for this run" not in html
-    assert (
-        "clone groups; 2 dead-code items (0 suppressed); 0 dependency cycles." in html
-    )
+    assert "Health 0/100 (n/a);" in html
+    assert "2 dead-code items (0 suppressed); 0 dependency cycles." in html
     assert "High Complexity" in html
     assert '<span class="kpi-micro-val">2.5</span>' in html
     assert '<span class="kpi-micro-lbl">avg</span>' in html
@@ -3047,7 +3098,7 @@ def test_html_report_renders_directory_hotspots_from_canonical_report() -> None:
     )
 
 
-def test_html_report_direct_path_skips_directory_hotspots_cluster() -> None:
+def test_html_report_canonical_path_includes_directory_hotspots_cluster() -> None:
     html = build_html_report(
         func_groups={},
         block_groups={},
@@ -3066,7 +3117,7 @@ def test_html_report_direct_path_skips_directory_hotspots_cluster() -> None:
             dead_critical=0,
         ),
     )
-    assert "Hotspots by Directory" not in html
+    assert "Hotspots by Directory" in html
 
 
 def test_html_report_directory_hotspots_use_test_scope_roots() -> None:
@@ -3479,7 +3530,7 @@ def test_html_report_provenance_badges_cover_mismatch_and_untrusted_metrics() ->
         '<span class="prov-badge-lbl">Generator mismatch</span>',
         '<span class="prov-badge-val">untrusted</span>',
         '<span class="prov-badge-lbl">Metrics baseline</span>',
-        '<span class="prov-badge-val">N/A</span>',
+        '<span class="prov-badge-val">miss</span>',
         '<span class="prov-badge-lbl">Cache</span>',
     )
 
@@ -3534,10 +3585,10 @@ def test_html_report_provenance_handles_non_boolean_baseline_loaded() -> None:
     )
     _assert_html_contains(
         html,
-        '<span class="prov-badge-val">2.0</span>',
+        f'<span class="prov-badge-val">{REPORT_SCHEMA_VERSION}</span>',
         '<span class="prov-badge-lbl">Schema</span>',
     )
-    assert '<span class="prov-badge-lbl">Baseline</span>' not in html
+    assert '<span class="prov-badge-val">untrusted</span>' in html
 
 
 def test_html_report_footer_uses_report_issue_link_text() -> None:
@@ -4005,7 +4056,7 @@ def test_html_report_overview_uses_canonical_report_overview_hotlists() -> None:
         "Suggestions",
         "source-kind-badge source-kind-fixtures",
         "source-kind-badge source-kind-production",
-        'breakdown-count">1</span>',
+        'families-count">1</span>',
         # Structural findings use the shared finding_card chrome (Stage 4)
         "finding-card finding-card--info sf-card",
         'data-sf-group="true"',
@@ -4225,14 +4276,21 @@ def _render_module_map_report(
     *,
     metrics: dict[str, object] | None = None,
 ) -> str:
-    return build_html_report(
+    resolved_metrics = metrics if metrics is not None else _module_map_metrics()
+    report_document = build_report_document(
         func_groups={},
         block_groups={},
         segment_groups={},
-        report_meta={"scan_root": "/outside/project"},
-        metrics=metrics if metrics is not None else _module_map_metrics(),
-        report_document={"derived": {"module_map": module_map}},
+        meta={
+            "scan_root": "/outside/project",
+            "metrics_computed": sorted(resolved_metrics),
+        },
+        metrics=resolved_metrics,
     )
+    derived = dict(cast(dict[str, object], report_document["derived"]))
+    derived["module_map"] = module_map
+    report_document["derived"] = derived
+    return _core_build_html_report(report_document=report_document)
 
 
 def _module_map_panel_slice(html: str) -> str:

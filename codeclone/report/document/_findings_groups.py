@@ -156,7 +156,7 @@ def _build_clone_groups(
     *,
     groups: GroupMapLike,
     kind: Literal["function", "block", "segment"],
-    baseline_trusted: bool,
+    lane_trusted: bool,
     new_keys: Collection[str] | None,
     block_facts: Mapping[str, Mapping[str, str]],
     scan_root: str,
@@ -172,7 +172,7 @@ def _build_clone_groups(
         )
         novelty = _clone_novelty(
             group_key=group_key,
-            baseline_trusted=baseline_trusted,
+            lane_trusted=lane_trusted,
             new_keys=new_key_set,
         )
         locations = tuple(
@@ -216,6 +216,13 @@ def _build_clone_groups(
                 "clone_kind": kind,
                 "clone_type": clone_type,
                 "novelty": novelty,
+                "novelty_reason": (
+                    "not_baseline_governed"
+                    if kind == "segment"
+                    else None
+                    if lane_trusted
+                    else "lane_unavailable"
+                ),
                 "count": len(items),
                 "source_scope": source_scope,
                 "spread": {

@@ -61,7 +61,7 @@ def test_unknown_vocabulary_rejected_while_disabled() -> None:
 
 
 def test_vocabulary_version_and_phase39_stage_inventory() -> None:
-    assert OBSERVER_VOCABULARY_VERSION == "2"
+    assert OBSERVER_VOCABULARY_VERSION == "3"
     assert {
         "semantics.events",
         "config.resolve",
@@ -76,6 +76,7 @@ def test_vocabulary_version_and_phase39_stage_inventory() -> None:
     } <= SPAN_NAMES
     assert "spans_dropped" in COUNTER_KEYS
     assert "events_by_kind.security_observation" in COUNTER_KEYS
+    assert "report_novelty_unavailable" in COUNTER_KEYS
 
 
 def test_production_literal_observer_calls_use_closed_vocabulary() -> None:

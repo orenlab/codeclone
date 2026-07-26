@@ -30,8 +30,10 @@
       "functions": 1,
       "blocks": 0,
       "segments": 0,
-      "new": 1,
-      "known": 0
+      "instances": 2,
+      "new": 0,
+      "known": 0,
+      "unavailable": 1
     },
     "suppressed": {
       "dead_code": 0
