@@ -31,7 +31,6 @@ from codeclone.models import (
     Suggestion,
     SuppressedCloneGroup,
 )
-from codeclone.report.document.builder import build_report_document
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import (
     build_html_report as _core_build_html_report,
@@ -65,6 +64,9 @@ from tests._report_fixtures import (
 )
 from tests._report_fixtures import (
     REPEATED_STMT_HASH as _REPEATED_STMT_HASH,
+)
+from tests._report_fixtures import (
+    build_test_report_document as build_report_document,
 )
 
 _REPEATED_BLOCK_GROUP_KEY = repeated_block_group_key()

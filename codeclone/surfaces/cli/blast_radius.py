@@ -28,8 +28,9 @@ _MAX_RENDERED_ITEMS = 20
 
 def _report_run_id(report_document: Mapping[str, object]) -> str:
     integrity = _as_mapping(report_document.get("integrity"))
-    digest = _as_mapping(integrity.get("digest"))
-    value = str(digest.get("value", "")).strip()
+    digests = _as_mapping(integrity.get("digests"))
+    envelope = _as_mapping(digests.get("envelope"))
+    value = str(envelope.get("value", "")).strip()
     return value or "cli-blast-radius"
 
 

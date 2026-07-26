@@ -1150,7 +1150,7 @@ def test_emit_cli_analysis_completed_if_enabled_writes_audit_row(
     digest = "f" * 64
     report_document = {
         "report_schema_version": REPORT_SCHEMA_VERSION,
-        "integrity": {"digest": {"value": digest}},
+        "integrity": {"digests": {"comparison": {"value": digest}}},
         "meta": {"runtime": {"analysis_mode": "full"}, "health_score": 91},
         "inventory": {"file_registry": {"items": ["pkg/a.py"]}},
         "findings": {"total": 0},

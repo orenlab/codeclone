@@ -111,8 +111,9 @@ def analysis_fingerprint_from_report(report_document: dict[str, object]) -> str:
 
 def report_digest_from_report(report_document: dict[str, object]) -> str | None:
     integrity = as_mapping(report_document.get("integrity"))
-    digest = as_mapping(integrity.get("digest"))
-    value = str(digest.get("value", "")).strip()
+    digests = as_mapping(integrity.get("digests"))
+    comparison = as_mapping(digests.get("comparison"))
+    value = str(comparison.get("value", "")).strip()
     return value or None
 
 

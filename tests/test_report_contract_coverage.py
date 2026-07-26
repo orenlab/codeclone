@@ -43,7 +43,6 @@ from codeclone.report.document._findings_groups import (
     _csv_values,
     _structural_group_assessment,
 )
-from codeclone.report.document.builder import build_report_document
 from codeclone.report.document.derived import (
     _combined_impact_scope,
     _suggestion_finding_id,
@@ -109,6 +108,7 @@ from codeclone.report.renderers.text import (
 )
 from codeclone.utils import coerce as _coerce
 from tests._assertions import assert_contains_all, assert_mapping_entries
+from tests._report_fixtures import build_test_report_document as build_report_document
 
 
 def _rich_report_document() -> dict[str, object]:

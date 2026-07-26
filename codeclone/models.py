@@ -88,6 +88,21 @@ DigestDomain = Literal[
     "codeclone.source-observations.v1",
     "codeclone.source-content.v1",
 ]
+ReportDigestKind = Literal[
+    "source_observations",
+    "analysis_facts",
+    "comparison",
+    "evaluation",
+    "report_envelope",
+]
+ReportReadFailureKind = Literal[
+    "duplicate_key",
+    "incompatible_schema",
+    "invalid_json",
+    "invalid_shape",
+    "too_large",
+    "unreadable",
+]
 
 CONFIG_VALUE_UNSET = object()
 
@@ -367,6 +382,34 @@ class DigestObject:
             character not in "0123456789abcdef" for character in self.value
         ):
             raise ValueError("sha256 digest values must be 64 lowercase hex characters")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReportDigest:
+    kind: ReportDigestKind
+    algorithm: Literal["sha256"]
+    digest_version: Literal["1"]
+    value: str
+
+    def __post_init__(self) -> None:
+        if len(self.value) != 64 or any(
+            character not in "0123456789abcdef" for character in self.value
+        ):
+            raise ValueError("report digest values must be 64 lowercase hex characters")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReportReadSuccess:
+    document: dict[str, object]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ReportReadFailure:
+    reason: ReportReadFailureKind
+    detail: str
+
+
+ReportReadResult = ReportReadSuccess | ReportReadFailure
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1555,9 +1598,8 @@ class ObservationContract:
             raise ValueError("module_identity is required for native observations")
 
 
-# Dormant until report-v3 evaluation identity consumes it; 39O/O1 removes this.
 @dataclass(frozen=True, slots=True, kw_only=True)
-class EvaluationContract:  # codeclone: ignore[dead-code]
+class EvaluationContract:
     health_algorithm_revision: str
     gate_algorithm_revision: str
     gate_thresholds_digest: str
@@ -2120,6 +2162,38 @@ class DigestObjectInput(BaseModel):
     domain: DigestDomain
     algorithm: Literal["sha256"]
     value: str
+
+
+class ReportDigestInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    kind: ReportDigestKind
+    algorithm: Literal["sha256"]
+    digest_version: Literal["1"]
+    value: str
+
+
+class ReportIntegrityInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    canonicalization: dict[str, JsonValue]
+    digests: dict[str, ReportDigestInput]
+
+
+class ReportDocumentV3Input(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    report_schema_version: str
+    meta: dict[str, JsonValue]
+    contracts: dict[str, JsonValue]
+    source_facts: dict[str, JsonValue]
+    baseline: dict[str, JsonValue]
+    evaluation: dict[str, JsonValue]
+    inventory: dict[str, JsonValue]
+    findings: dict[str, JsonValue]
+    metrics: dict[str, JsonValue]
+    derived: dict[str, JsonValue]
+    integrity: ReportIntegrityInput
 
 
 class BaselinePublishLockInput(BaseModel):

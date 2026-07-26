@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from collections.abc import Callable, Iterator, Mapping
@@ -33,6 +32,7 @@ from codeclone.memory.project import (
 from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
 from codeclone.report.meta import current_report_timestamp_utc
 from codeclone.utils.json_io import read_json_object
+from tests._report_fixtures import build_test_report_document
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -229,12 +229,15 @@ def load_memory_init_report_document(
     items = registry_items or ["pkg/a.py"]
     first_item = items[0]
     return {
-        "meta": {"scan_root": str(fallback_root.resolve())},
+        "meta": {"runtime": {"scan_root_absolute": str(fallback_root.resolve())}},
         "integrity": {
-            "digest": {
-                "value": "a" * 64,
-                "algorithm": "sha256",
-                "verified": True,
+            "digests": {
+                "comparison": {
+                    "value": "a" * 64,
+                    "algorithm": "sha256",
+                    "digest_version": "1",
+                    "kind": "comparison",
+                }
             }
         },
         "inventory": {"file_registry": {"items": items}},
@@ -292,20 +295,17 @@ def git_repo_with_cached_report(
 
     report_path = root / ".codeclone" / "report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text("{}", encoding="utf-8")
-    report_document: dict[str, object] = {
-        "meta": {"scan_root": str(root.resolve())},
-        "inventory": {"file_registry": {"items": registry_items}},
-    }
-    digest_payload = json.dumps(report_document, sort_keys=True, separators=(",", ":"))
-    digest_value = hashlib.sha256(digest_payload.encode("utf-8")).hexdigest()
-    report_document["integrity"] = {
-        "digest": {
-            "value": digest_value,
-            "algorithm": "sha256",
-            "verified": True,
-        }
-    }
+    report_document = build_test_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(root.resolve())},
+        inventory={"file_list": registry_items},
+    )
+    report_path.write_text(
+        json.dumps(report_document, sort_keys=True),
+        encoding="utf-8",
+    )
     return root, report_path, report_document
 
 

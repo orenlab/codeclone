@@ -459,6 +459,10 @@ class MCPSession(
                 new_block=new_block,
                 metrics_diff=metrics_diff,
                 include_report_document=True,
+                baseline_container=clone_baseline_state.baseline.container,
+                baseline_scope_id=(
+                    None if baseline_scope_id is None else str(baseline_scope_id)
+                ),
             )
             report_document = report_artifacts.report_document
             if report_document is None:

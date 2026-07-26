@@ -32,13 +32,14 @@ def cached_report_untrusted_reason(
 ) -> str | None:
     """Return a human-readable reason when a cached report must not be reused."""
     meta = as_mapping(report_document.get("meta"))
-    scan_root_raw = str(meta.get("scan_root", "")).strip()
+    runtime = as_mapping(meta.get("runtime"))
+    scan_root_raw = str(runtime.get("scan_root_absolute", "")).strip()
     if not scan_root_raw:
-        return "cached report missing meta.scan_root"
+        return "cached report missing meta.runtime.scan_root_absolute"
     try:
         scan_root = Path(scan_root_raw).expanduser().resolve()
     except OSError:
-        return "cached report meta.scan_root is invalid"
+        return "cached report meta.runtime.scan_root_absolute is invalid"
     if scan_root != root_path.resolve():
         return "cached report scan_root does not match init root"
 

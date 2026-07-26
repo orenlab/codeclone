@@ -29,7 +29,6 @@ from ...audit import (
     EVENT_WORKSPACE_CONFLICT,
     EVENT_WORKSPACE_GC,
 )
-from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
 from ._blast_radius import blast_radius_to_payload
@@ -783,12 +782,7 @@ class _MCPSessionIntentMixin:
         return intent.report_digest != self._report_digest_value(record)
 
     def _report_digest_value(self, record: MCPRunRecord) -> str:
-        integrity = _as_mapping(record.report_document.get("integrity"))
-        digest = _as_mapping(integrity.get("digest"))
-        value = str(digest.get("value", "")).strip()
-        if value:
-            return value
-        return record.run_id
+        return _helpers._report_digest(record.report_document)
 
     def _workspace_record_from_intent(
         self,

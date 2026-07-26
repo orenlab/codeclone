@@ -870,7 +870,9 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
                     generated_at
                     or _text(
                         _as_mapping(
-                            _as_mapping(payload.get("integrity")).get("digest")
+                            _as_mapping(
+                                _as_mapping(payload.get("integrity")).get("digests")
+                            ).get("envelope")
                         ).get("value")
                     )[:12],
                 )
@@ -898,9 +900,11 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
             "analysisMode": analysis_mode,
             "reportMode": _text(meta.get("report_mode")),
             "canonicalDigestSha256": _text(
-                _as_mapping(_as_mapping(payload.get("integrity")).get("digest")).get(
-                    "value"
-                )
+                _as_mapping(
+                    _as_mapping(
+                        _as_mapping(payload.get("integrity")).get("digests")
+                    ).get("envelope")
+                ).get("value")
             ),
             **({"reportGeneratedAtUtc": generated_at} if generated_at else {}),
         },
@@ -917,7 +921,7 @@ def render_sarif_report_document(payload: Mapping[str, object]) -> str:
 
 def to_sarif_report(
     *,
-    report_document: Mapping[str, object] | None = None,
+    report_document: Mapping[str, object],
     meta: Mapping[str, object],
     inventory: Mapping[str, object] | None = None,
     func_groups: GroupMapLike,
@@ -931,25 +935,7 @@ def to_sarif_report(
     suggestions: Collection[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
 ) -> str:
-    payload = report_document
-    if payload is None:
-        from ..document.builder import build_report_document
-
-        payload = build_report_document(
-            func_groups=func_groups,
-            block_groups=block_groups,
-            segment_groups=segment_groups,
-            meta=meta,
-            inventory=inventory,
-            block_facts=block_facts or {},
-            new_function_group_keys=new_function_group_keys,
-            new_block_group_keys=new_block_group_keys,
-            new_segment_group_keys=new_segment_group_keys,
-            metrics=metrics,
-            suggestions=tuple(suggestions or ()),
-            structural_findings=tuple(structural_findings or ()),
-        )
-    return render_sarif_report_document(payload)
+    return render_sarif_report_document(report_document)
 
 
 __all__ = [

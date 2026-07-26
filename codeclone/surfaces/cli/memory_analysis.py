@@ -11,6 +11,11 @@ from pathlib import Path
 from typing import Literal
 
 from ... import __version__
+from ...api.report import (
+    ReportArtifactFailure,
+    ReportArtifactRef,
+    load_report_artifact,
+)
 from ...cache.store import Cache
 from ...config.argparse_builder import build_parser
 from ...config.pyproject_loader import load_pyproject_config
@@ -23,7 +28,6 @@ from ...core.pipeline import analyze
 from ...core.reporting import report
 from ...memory.report_trust import assess_cached_report_trust
 from ...report.html import build_html_report
-from ...utils.json_io import read_json_object
 from . import baseline_state as cli_baseline_state
 from . import execution as cli_execution
 from . import post_run as cli_post_run
@@ -51,14 +55,30 @@ def load_report_for_memory_init(
     from_report: Path | None,
 ) -> LoadedMemoryReport:
     if from_report is not None:
+        result = load_report_artifact(from_report.resolve())
+        if isinstance(result, ReportArtifactFailure):
+            raise ValueError(
+                f"stored report rejected ({result.reason}): {result.detail}"
+            )
+        if not isinstance(result, ReportArtifactRef):
+            raise TypeError("stored report reader returned an unknown result")
         return LoadedMemoryReport(
-            document=read_json_object(from_report.resolve()),
+            document=result.document,
             source="explicit_report",
         )
 
     default_path = root_path / DEFAULT_JSON_REPORT_PATH
     if default_path.is_file():
-        report_document = read_json_object(default_path)
+        result = load_report_artifact(default_path)
+        if isinstance(result, ReportArtifactFailure):
+            return LoadedMemoryReport(
+                document=run_memory_analysis_report(root_path=root_path),
+                source="fresh_analysis",
+                rejected_cache_reason=f"report_reader:{result.reason}",
+            )
+        if not isinstance(result, ReportArtifactRef):
+            raise TypeError("stored report reader returned an unknown result")
+        report_document = result.document
         trust = assess_cached_report_trust(
             root_path=root_path,
             report_path=default_path,
@@ -190,6 +210,8 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
         coverage_adoption_diff_available=diff_context.coverage_adoption_diff_available,
         api_surface_diff_available=diff_context.api_surface_diff_available,
         include_report_document=True,
+        baseline_container=baseline_state.baseline.container,
+        baseline_scope_id=getattr(args, "baseline_scope_id", None),
     )
     if artifacts.report_document is None:
         msg = "Memory init analysis did not produce a canonical report document."

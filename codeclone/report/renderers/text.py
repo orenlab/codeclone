@@ -736,7 +736,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     suggestions_payload = _as_sequence(derived.get("suggestions"))
     integrity = _as_mapping(payload.get("integrity"))
     canonicalization = _as_mapping(integrity.get("canonicalization"))
-    digest = _as_mapping(integrity.get("digest"))
+    digest = _as_mapping(_as_mapping(integrity.get("digests")).get("envelope"))
     findings_groups = _as_mapping(findings.get("groups"))
     clone_groups = _as_mapping(findings_groups.get("clones"))
     suppressed_clone_groups = _as_mapping(clone_groups.get("suppressed"))

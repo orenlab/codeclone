@@ -21,7 +21,7 @@ from codeclone.memory.report_trust import (
 
 def _base_report_document(*, root: Path, items: list[str]) -> dict[str, object]:
     return {
-        "meta": {"scan_root": str(root)},
+        "meta": {"runtime": {"scan_root_absolute": str(root)}},
         "inventory": {"file_registry": {"items": items}},
     }
 
@@ -131,7 +131,7 @@ def test_cached_report_untrusted_reason_scan_root_mismatch(tmp_path: Path) -> No
         root_path=root,
         report_path=root / "report.json",
         report_document=_base_report_document(root=root, items=["pkg/a.py"])
-        | {"meta": {"scan_root": str(other)}},
+        | {"meta": {"runtime": {"scan_root_absolute": str(other)}}},
     )
     assert reason == "cached report scan_root does not match init root"
 

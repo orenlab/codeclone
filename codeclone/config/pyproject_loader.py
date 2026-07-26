@@ -133,43 +133,31 @@ def load_pyproject_config(
             "Invalid pyproject payload at "
             f"{config_path}: 'tool.codeclone' must be object"
         )
-
-    unknown = sorted(
-        set(codeclone_obj.keys())
-        - set(config_key_specs)
-        - {MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY}
+    codeclone_table = copy_str_key_table(
+        codeclone_obj,
+        key="tool.codeclone",
+        config_path=config_path,
     )
-    if unknown:
-        raise ConfigValidationError(
-            "Unknown key(s) in tool.codeclone: " + ", ".join(unknown)
-        )
 
-    validated: dict[str, object] = {}
-    for key in sorted(codeclone_obj.keys()):
-        if key in {MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY}:
-            continue
-        value = validate_config_value(
-            key=key,
-            value=codeclone_obj[key],
-            config_key_specs=config_key_specs,
-        )
-        validated[key] = normalize_path_config_value(
-            key=key,
-            value=value,
-            root_path=root_path,
-            path_config_keys=path_config_keys,
-        )
+    validated = _validate_known_config_table(
+        table=codeclone_table,
+        config_key_specs=config_key_specs,
+        nested_keys=frozenset((MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY)),
+        unknown_error_prefix="Unknown key(s) in tool.codeclone: ",
+        root_path=root_path,
+        path_config_keys=path_config_keys,
+    )
 
     _apply_foundation_config_boundary(validated)
 
-    memory_obj = codeclone_obj.get(MEMORY_NESTED_TABLE_KEY)
+    memory_obj = codeclone_table.get(MEMORY_NESTED_TABLE_KEY)
     if memory_obj is not None:
         validated[MEMORY_NESTED_TABLE_KEY] = _validate_nested_memory_table(
             memory_obj=memory_obj,
             root_path=root_path,
             config_path=config_path,
         )
-    analytics_obj = codeclone_obj.get(ANALYTICS_NESTED_TABLE_KEY)
+    analytics_obj = codeclone_table.get(ANALYTICS_NESTED_TABLE_KEY)
     if analytics_obj is not None:
         validated[ANALYTICS_NESTED_TABLE_KEY] = _validate_nested_analytics_table(
             analytics_obj=analytics_obj,
@@ -219,9 +207,14 @@ def _validate_nested_analytics_table(
             "Invalid pyproject payload at "
             f"{config_path}: 'tool.codeclone.analytics' must be object"
         )
+    analytics_table = copy_str_key_table(
+        analytics_obj,
+        key="tool.codeclone.analytics",
+        config_path=config_path,
+    )
     normalized: dict[str, object] = {}
-    for key in sorted(analytics_obj.keys()):
-        value = analytics_obj[key]
+    for key in sorted(analytics_table):
+        value = analytics_table[key]
         if key in ANALYTICS_PATH_CONFIG_KEYS and isinstance(value, str):
             normalized[key] = normalize_path_config_value(
                 key=key,
@@ -245,41 +238,61 @@ def _validate_nested_memory_table(
             "Invalid pyproject payload at "
             f"{config_path}: 'tool.codeclone.memory' must be object"
         )
-    unknown = sorted(
-        set(memory_obj.keys())
-        - set(MEMORY_CONFIG_KEY_SPECS)
-        - {SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY}
+    memory_table = copy_str_key_table(
+        memory_obj,
+        key="tool.codeclone.memory",
+        config_path=config_path,
     )
-    if unknown:
-        raise ConfigValidationError(
-            "Unknown key(s) in tool.codeclone.memory: " + ", ".join(unknown)
-        )
-    validated: dict[str, object] = {}
-    for key in sorted(memory_obj.keys()):
-        if key in {SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY}:
-            continue
-        value = validate_config_value(
-            key=key,
-            value=memory_obj[key],
-            config_key_specs=MEMORY_CONFIG_KEY_SPECS,
-        )
-        validated[key] = normalize_path_config_value(
-            key=key,
-            value=value,
-            root_path=root_path,
-            path_config_keys=MEMORY_PATH_CONFIG_KEYS,
-        )
-    semantic_obj = memory_obj.get(SEMANTIC_NESTED_TABLE_KEY)
+    validated = _validate_known_config_table(
+        table=memory_table,
+        config_key_specs=MEMORY_CONFIG_KEY_SPECS,
+        nested_keys=frozenset((SEMANTIC_NESTED_TABLE_KEY, INGEST_NESTED_TABLE_KEY)),
+        unknown_error_prefix="Unknown key(s) in tool.codeclone.memory: ",
+        root_path=root_path,
+        path_config_keys=MEMORY_PATH_CONFIG_KEYS,
+    )
+    semantic_obj = memory_table.get(SEMANTIC_NESTED_TABLE_KEY)
     if semantic_obj is not None:
         validated[SEMANTIC_NESTED_TABLE_KEY] = _validate_nested_semantic_table(
             semantic_obj=semantic_obj,
             config_path=config_path,
         )
-    ingest_obj = memory_obj.get(INGEST_NESTED_TABLE_KEY)
+    ingest_obj = memory_table.get(INGEST_NESTED_TABLE_KEY)
     if ingest_obj is not None:
         validated[INGEST_NESTED_TABLE_KEY] = _validate_nested_ingest_table(
             ingest_obj=ingest_obj,
             config_path=config_path,
+        )
+    return validated
+
+
+def _validate_known_config_table(
+    *,
+    table: dict[str, object],
+    config_key_specs: Mapping[str, ConfigKeySpec],
+    nested_keys: frozenset[str],
+    unknown_error_prefix: str,
+    root_path: Path,
+    path_config_keys: Set[str] | frozenset[str],
+) -> dict[str, object]:
+    unknown = sorted(set(table) - set(config_key_specs) - nested_keys)
+    if unknown:
+        raise ConfigValidationError(unknown_error_prefix + ", ".join(unknown))
+
+    validated: dict[str, object] = {}
+    for key in sorted(table):
+        if key in nested_keys:
+            continue
+        value = validate_config_value(
+            key=key,
+            value=table[key],
+            config_key_specs=config_key_specs,
+        )
+        validated[key] = normalize_path_config_value(
+            key=key,
+            value=value,
+            root_path=root_path,
+            path_config_keys=path_config_keys,
         )
     return validated
 

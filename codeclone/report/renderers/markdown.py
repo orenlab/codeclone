@@ -257,7 +257,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     health_snapshot = _as_mapping(overview.get("health_snapshot"))
     inventory_files = _as_mapping(inventory.get("files"))
     inventory_code = _as_mapping(inventory.get("code"))
-    digest = _as_mapping(integrity.get("digest"))
+    digest = _as_mapping(_as_mapping(integrity.get("digests")).get("envelope"))
     canonicalization = _as_mapping(integrity.get("canonicalization"))
     family_summary = _as_mapping(findings_summary.get("families"))
     severity_summary = _as_mapping(findings_summary.get("severity"))
@@ -642,7 +642,7 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
 
 def to_markdown_report(
     *,
-    report_document: Mapping[str, object] | None = None,
+    report_document: Mapping[str, object],
     meta: Mapping[str, object],
     inventory: Mapping[str, object] | None = None,
     func_groups: GroupMapLike,
@@ -657,26 +657,7 @@ def to_markdown_report(
     suggestions: Collection[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
 ) -> str:
-    payload = report_document
-    if payload is None:
-        from ..document.builder import build_report_document
-
-        payload = build_report_document(
-            func_groups=func_groups,
-            block_groups=block_groups,
-            segment_groups=segment_groups,
-            meta=meta,
-            inventory=inventory,
-            block_facts=block_facts or {},
-            new_function_group_keys=new_function_group_keys,
-            new_block_group_keys=new_block_group_keys,
-            new_segment_group_keys=new_segment_group_keys,
-            suppressed_clone_groups=suppressed_clone_groups,
-            metrics=metrics,
-            suggestions=tuple(suggestions or ()),
-            structural_findings=tuple(structural_findings or ()),
-        )
-    return render_markdown_report_document(payload)
+    return render_markdown_report_document(report_document)
 
 
 __all__ = [

@@ -221,10 +221,13 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
 def _blast_radius_report_document(digest: str = "digest-a") -> dict[str, object]:
     return {
         "integrity": {
-            "digest": {
-                "value": digest,
-                "algorithm": "sha256",
-                "verified": True,
+            "digests": {
+                "comparison": {
+                    "value": digest,
+                    "algorithm": "sha256",
+                    "digest_version": "1",
+                    "kind": "comparison",
+                }
             }
         },
         "inventory": {
@@ -6035,7 +6038,7 @@ def test_mcp_service_manage_change_intent_additional_edges(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = CodeCloneMCPService(history_limit=2)
-    service._runs.register(_blast_radius_run_record(tmp_path, digest=""))
+    service._runs.register(_blast_radius_run_record(tmp_path))
 
     with pytest.raises(MCPServiceContractError, match="requires intent text"):
         service.manage_change_intent(
@@ -12989,7 +12992,7 @@ def test_mcp_state_optional_payload_and_pruning_edges(tmp_path: Path) -> None:
     assert payload["run_id"] == "summary-"
     assert "workspace_hygiene" not in payload
 
-    stale = _dummy_run_record(tmp_path, "stale-run")
+    stale = _blast_radius_run_record(tmp_path, run_id="stale-run")
     service._runs.register(stale)
     declared = service.manage_change_intent(
         action="declare",
