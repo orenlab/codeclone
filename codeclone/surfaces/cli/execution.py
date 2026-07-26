@@ -9,7 +9,6 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import replace
 from pathlib import Path
 from typing import TypeVar
 
@@ -29,7 +28,6 @@ from ...contracts.errors import CacheError
 from ...core._types import AnalysisResult, BootstrapResult, DiscoveryResult
 from ...core._types import ProcessingResult as PipelineProcessingResult
 from ...core.reporting import GatingResult
-from ...models import MetricsDiff
 from ...observability import SpanHandle, is_observability_enabled, span
 from ...observability.analysis_phases import apply_pipeline_process_phase_counters
 from . import state as cli_state
@@ -270,7 +268,6 @@ def run_analysis_stages(
 def enforce_gating(
     *,
     args: object,
-    boot: BootstrapResult,
     analysis: AnalysisResult,
     processing: PipelineProcessingResult,
     source_read_contract_failure: bool,
@@ -278,13 +275,11 @@ def enforce_gating(
     metrics_baseline_failure_code: ExitCode | None,
     new_func: set[str],
     new_block: set[str],
-    metrics_diff: MetricsDiff | None,
+    gate_result: GatingResult,
     html_report_path: str | None,
-    gate_fn: Callable[..., GatingResult],
     parse_metric_reason_entry_fn: Callable[[str], tuple[str, str]],
     print_gating_failure_block_fn: Callable[..., None],
     print_verbose_clone_hashes_fn: Callable[..., None],
-    clone_threshold_total: int | None = None,
 ) -> None:
     printer = require_status_console(cli_state.get_console())
 
@@ -335,26 +330,6 @@ def enforce_gating(
                 )
             )
             sys.exit(ExitCode.CONTRACT_ERROR)
-
-    gating_analysis = analysis
-    if clone_threshold_total is not None:
-        preserved_block_count = min(
-            max(analysis.block_clones_count, 0),
-            max(clone_threshold_total, 0),
-        )
-        gating_analysis = replace(
-            analysis,
-            func_clones_count=max(clone_threshold_total - preserved_block_count, 0),
-            block_clones_count=preserved_block_count,
-        )
-
-    gate_result = gate_fn(
-        boot=boot,
-        analysis=gating_analysis,
-        new_func=new_func,
-        new_block=new_block,
-        metrics_diff=metrics_diff,
-    )
 
     metric_reasons = [
         reason[len("metric:") :]

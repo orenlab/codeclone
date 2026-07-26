@@ -17,6 +17,12 @@ from ..models import (
     CompatibilityVerdict,
     ContractVerdict,
 )
+from . import REPORT_SCHEMA_VERSION
+
+REPORT_SCHEMA_CONTRACT: Final = "REPORT_SCHEMA_VERSION"
+REPORT_V3_COMPATIBILITY_POLICIES: Final[dict[str, CompatibilityPolicy]] = {
+    REPORT_SCHEMA_CONTRACT: CompatibilityPolicy(kind="exact"),
+}
 
 LEGACY_COMPATIBILITY_OWNERS: Final[tuple[tuple[str, str], ...]] = (
     ("codeclone.cache.store.Cache._load_and_validate", "39J"),
@@ -90,10 +96,24 @@ def check_contract_compatibility(
     )
 
 
+def check_report_v3_compatibility(actual: str | None) -> CompatibilityVerdict:
+    """Apply the sole exact report-v3 schema policy."""
+
+    actual_contracts = {} if actual is None else {REPORT_SCHEMA_CONTRACT: actual}
+    return check_contract_compatibility(
+        {REPORT_SCHEMA_CONTRACT: REPORT_SCHEMA_VERSION},
+        actual_contracts,
+        REPORT_V3_COMPATIBILITY_POLICIES,
+    )
+
+
 __all__ = [
     "LEGACY_COMPATIBILITY_OWNERS",
+    "REPORT_SCHEMA_CONTRACT",
+    "REPORT_V3_COMPATIBILITY_POLICIES",
     "CompatibilityPolicy",
     "CompatibilityVerdict",
     "ContractVerdict",
     "check_contract_compatibility",
+    "check_report_v3_compatibility",
 ]

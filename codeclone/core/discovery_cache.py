@@ -471,12 +471,13 @@ def _api_surface_from_cache_dict(value: object) -> ModuleApiSurface | None:
     row, module, filepath = row_info
     all_declared_raw = row.get("all_declared", [])
     symbols_raw = row.get("symbols", [])
-    if (
-        not isinstance(all_declared_raw, list)
-        or not isinstance(symbols_raw, list)
-        or not all(isinstance(item, str) for item in all_declared_raw)
-    ):
+    if not isinstance(all_declared_raw, list) or not isinstance(symbols_raw, list):
         return None
+    all_declared: list[str] = []
+    for item in all_declared_raw:
+        if not isinstance(item, str):
+            return None
+        all_declared.append(item)
     symbols: list[PublicSymbol] = []
     for item in symbols_raw:
         parsed = _public_symbol_from_cache_dict(item)
@@ -486,7 +487,7 @@ def _api_surface_from_cache_dict(value: object) -> ModuleApiSurface | None:
     return ModuleApiSurface(
         module=module,
         filepath=filepath,
-        all_declared=tuple(sorted(set(all_declared_raw))) or None,
+        all_declared=tuple(sorted(set(all_declared))) or None,
         symbols=tuple(sorted(symbols, key=lambda item: item.qualname)),
     )
 

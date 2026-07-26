@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from statistics import fmean, median, pstdev
-from typing import Literal, TypeGuard, cast
+from typing import Literal, TypeGuard
 
 from codeclone import __version__ as codeclone_version
 from codeclone.baseline import current_python_tag
@@ -624,6 +624,10 @@ def _scenario_profile(profile: BenchmarkProfile) -> tuple[Scenario, ...]:
     return core + report_scenarios + diagnostic_scenarios
 
 
+def _is_benchmark_profile(value: str) -> TypeGuard[BenchmarkProfile]:
+    return value in {"smoke", "extended", "diagnostic"}
+
+
 def _cgroup_value(path: Path) -> str | None:
     try:
         content = path.read_text(encoding="utf-8").strip()
@@ -884,9 +888,9 @@ def main() -> int:
     workspace.mkdir(parents=True, exist_ok=True)
 
     scenario_profile = str(args.scenario_profile)
-    if scenario_profile not in {"smoke", "extended", "diagnostic"}:
+    if not _is_benchmark_profile(scenario_profile):
         raise SystemExit(f"unknown scenario profile: {scenario_profile}")
-    scenarios = _scenario_profile(cast(BenchmarkProfile, scenario_profile))
+    scenarios = _scenario_profile(scenario_profile)
     scenario_results = [
         _scenario_result(
             scenario=scenario,

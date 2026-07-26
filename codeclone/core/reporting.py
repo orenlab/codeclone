@@ -7,9 +7,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection, Mapping
+from uuid import UUID
 
+from ..baseline.container_trust import evaluate_container_trust
+from ..baseline.trust import current_python_tag
 from ..contracts import DEFAULT_COVERAGE_MIN
-from ..models import MetricsDiff
+from ..models import BaselineContainerV3, MetricsDiff, TrustVector
+from ..observability import span
 from ..report.gates.evaluator import GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
 from ..report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
@@ -47,10 +51,111 @@ def _load_sarif_report_renderer() -> Callable[..., str]:
     return to_sarif_report
 
 
-def _load_report_document_builder() -> Callable[..., dict[str, object]]:
-    from ..report.document.builder import build_report_document
+def _load_report_body_builder() -> Callable[..., dict[str, object]]:
+    from ..report.document.builder import build_report_body
 
-    return build_report_document
+    return build_report_body
+
+
+def _load_report_document_finalizer() -> Callable[..., dict[str, object]]:
+    from ..report.document.builder import finalize_report_document
+
+    return finalize_report_document
+
+
+def resolve_report_baseline_trust(
+    container: BaselineContainerV3 | None,
+    *,
+    baseline_scope_id: str | None,
+) -> TrustVector | None:
+    """Consume the sole baseline trust owner for report-v3 provenance."""
+
+    if container is None or baseline_scope_id is None:
+        return None
+    try:
+        scope_id = UUID(baseline_scope_id)
+    except ValueError:
+        return None
+    return evaluate_container_trust(
+        container,
+        python_tag=current_python_tag(),
+        baseline_scope_id=scope_id,
+    )
+
+
+def _metrics_for_report(
+    *,
+    analysis: AnalysisResult,
+    metrics_diff: object | None,
+    coverage_adoption_diff_available: bool,
+    api_surface_diff_available: bool,
+) -> Mapping[str, object] | None:
+    validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
+    return (
+        _enrich_metrics_report_payload(
+            metrics_payload=analysis.metrics_payload,
+            metrics_diff=validated_metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
+        )
+        if analysis.metrics_payload is not None
+        else None
+    )
+
+
+def build_report_body_for_analysis(
+    *,
+    discovery: DiscoveryResult,
+    processing: ProcessingResult,
+    analysis: AnalysisResult,
+    report_meta: Mapping[str, object],
+    new_func: Collection[str],
+    new_block: Collection[str],
+    metrics_diff: object | None = None,
+    coverage_adoption_diff_available: bool = False,
+    api_surface_diff_available: bool = False,
+) -> dict[str, object]:
+    """Construct the report body once before the single gate evaluation."""
+
+    report_inventory = {
+        "files": {
+            "total_found": discovery.files_found,
+            "analyzed": processing.files_analyzed,
+            "cached": discovery.cache_hits,
+            "skipped": processing.files_skipped,
+            "source_io_skipped": len(processing.source_read_failures),
+        },
+        "code": {
+            "parsed_lines": processing.analyzed_lines + discovery.cached_lines,
+            "functions": processing.analyzed_functions + discovery.cached_functions,
+            "methods": processing.analyzed_methods + discovery.cached_methods,
+            "classes": processing.analyzed_classes + discovery.cached_classes,
+        },
+        "file_list": list(discovery.all_file_paths),
+    }
+    with span(name="report.build"):
+        return _load_report_body_builder()(
+            func_groups=analysis.func_groups,
+            block_groups=analysis.block_groups_report,
+            segment_groups=analysis.segment_groups,
+            suppressed_clone_groups=analysis.suppressed_clone_groups,
+            meta=report_meta,
+            inventory=report_inventory,
+            block_facts=analysis.block_group_facts,
+            new_function_group_keys=new_func,
+            new_block_group_keys=new_block,
+            new_segment_group_keys=set(analysis.segment_groups.keys()),
+            metrics=_metrics_for_report(
+                analysis=analysis,
+                metrics_diff=metrics_diff,
+                coverage_adoption_diff_available=coverage_adoption_diff_available,
+                api_surface_diff_available=api_surface_diff_available,
+            ),
+            suggestions=analysis.suggestions,
+            structural_findings=(
+                analysis.structural_findings if analysis.structural_findings else None
+            ),
+        )
 
 
 def report(
@@ -67,6 +172,12 @@ def report(
     coverage_adoption_diff_available: bool = False,
     api_surface_diff_available: bool = False,
     include_report_document: bool = False,
+    report_body: Mapping[str, object] | None = None,
+    baseline_container: BaselineContainerV3 | None = None,
+    baseline_trust: TrustVector | None = None,
+    baseline_scope_id: str | None = None,
+    gate_config: MetricGateConfig | None = None,
+    gate_result: GateResult | None = None,
 ) -> ReportArtifacts:
     contents: dict[str, str | None] = {
         "html": None,
@@ -109,45 +220,56 @@ def report(
         )
     )
     if needs_report_document:
-        build_report_document = _load_report_document_builder()
-        validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
-        metrics_for_report = (
-            _enrich_metrics_report_payload(
-                metrics_payload=analysis.metrics_payload,
-                metrics_diff=validated_metrics_diff,
+        resolved_body = (
+            dict(report_body)
+            if report_body is not None
+            else build_report_body_for_analysis(
+                discovery=discovery,
+                processing=processing,
+                analysis=analysis,
+                report_meta=report_meta,
+                new_func=new_func,
+                new_block=new_block,
+                metrics_diff=metrics_diff,
                 coverage_adoption_diff_available=coverage_adoption_diff_available,
                 api_surface_diff_available=api_surface_diff_available,
             )
-            if analysis.metrics_payload is not None
-            else None
         )
-        report_document = build_report_document(
-            func_groups=analysis.func_groups,
-            block_groups=analysis.block_groups_report,
-            segment_groups=analysis.segment_groups,
-            suppressed_clone_groups=analysis.suppressed_clone_groups,
-            meta=report_meta,
-            inventory=report_inventory,
-            block_facts=analysis.block_group_facts,
+        if (gate_config is None) != (gate_result is None):
+            raise ValueError("gate config and result must be supplied together")
+        if gate_config is None or gate_result is None:
+            gate_config, gate_result = gate_with_config(
+                boot=boot,
+                analysis=analysis,
+                new_func=new_func,
+                new_block=new_block,
+                metrics_diff=_coerce_metrics_diff(metrics_diff),
+            )
+        resolved_baseline_trust = (
+            baseline_trust
+            if baseline_trust is not None
+            else resolve_report_baseline_trust(
+                baseline_container,
+                baseline_scope_id=baseline_scope_id,
+            )
+        )
+        report_document = _load_report_document_finalizer()(
+            body=resolved_body,
+            observation_bundle=analysis.observation_bundle,
+            baseline_container=baseline_container,
+            baseline_trust=resolved_baseline_trust,
+            gate_config=gate_config,
+            gate_result=gate_result,
             new_function_group_keys=new_func,
             new_block_group_keys=new_block,
-            new_segment_group_keys=set(analysis.segment_groups.keys()),
-            metrics=metrics_for_report,
-            suggestions=analysis.suggestions,
-            structural_findings=structural_findings,
         )
 
     if boot.output_paths.html and html_builder is not None:
-        validated_metrics_diff = _coerce_metrics_diff(metrics_diff)
-        metrics_for_html = (
-            _enrich_metrics_report_payload(
-                metrics_payload=analysis.metrics_payload,
-                metrics_diff=validated_metrics_diff,
-                coverage_adoption_diff_available=coverage_adoption_diff_available,
-                api_surface_diff_available=api_surface_diff_available,
-            )
-            if analysis.metrics_payload is not None
-            else None
+        metrics_for_html = _metrics_for_report(
+            analysis=analysis,
+            metrics_diff=metrics_diff,
+            coverage_adoption_diff_available=coverage_adoption_diff_available,
+            api_surface_diff_available=api_surface_diff_available,
         )
         contents["html"] = html_builder(
             func_groups=analysis.func_groups,
@@ -219,15 +341,8 @@ def report(
     )
 
 
-def gate(
-    *,
-    boot: BootstrapResult,
-    analysis: AnalysisResult,
-    new_func: Collection[str],
-    new_block: Collection[str],
-    metrics_diff: MetricsDiff | None,
-) -> GatingResult:
-    config = MetricGateConfig(
+def _gate_config(boot: BootstrapResult) -> MetricGateConfig:
+    return MetricGateConfig(
         fail_complexity=boot.args.fail_complexity,
         fail_coupling=boot.args.fail_coupling,
         fail_cohesion=boot.args.fail_cohesion,
@@ -251,8 +366,24 @@ def gate(
         fail_on_new=bool(getattr(boot.args, "fail_on_new", False)),
         fail_threshold=int(getattr(boot.args, "fail_threshold", -1)),
     )
+
+
+def gate_with_config(
+    *,
+    boot: BootstrapResult,
+    analysis: AnalysisResult,
+    new_func: Collection[str],
+    new_block: Collection[str],
+    metrics_diff: MetricsDiff | None,
+    clone_threshold_total: int | None = None,
+) -> tuple[MetricGateConfig, GatingResult]:
+    config = _gate_config(boot)
     clone_new_count = len(tuple(new_func)) + len(tuple(new_block))
-    clone_total = analysis.func_clones_count + analysis.block_clones_count
+    clone_total = (
+        analysis.func_clones_count + analysis.block_clones_count
+        if clone_threshold_total is None
+        else max(clone_threshold_total, 0)
+    )
     if analysis.project_metrics is None:
         state = GateState(clone_new_count=clone_new_count, clone_total=clone_total)
     else:
@@ -264,4 +395,22 @@ def gate(
             clone_total=clone_total,
         )
     result = _evaluate_gate_state(state=state, config=config)
-    return GatingResult(exit_code=result.exit_code, reasons=result.reasons)
+    return config, result
+
+
+def gate(
+    *,
+    boot: BootstrapResult,
+    analysis: AnalysisResult,
+    new_func: Collection[str],
+    new_block: Collection[str],
+    metrics_diff: MetricsDiff | None,
+) -> GatingResult:
+    _config, result = gate_with_config(
+        boot=boot,
+        analysis=analysis,
+        new_func=new_func,
+        new_block=new_block,
+        metrics_diff=metrics_diff,
+    )
+    return result

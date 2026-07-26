@@ -8,15 +8,16 @@ import ast
 import json
 from collections.abc import Callable, Collection, Mapping, Sequence
 from copy import deepcopy
-from hashlib import sha256
 from pathlib import Path
 from typing import cast
 
 import pytest
 
+import codeclone.api.report as report_api_mod
 import codeclone.report.merge as merge_mod
 import codeclone.report.overview as overview_mod
 import codeclone.report.renderers.text as text_renderer_mod
+from codeclone.api.report import ReportArtifactFailure, load_report_artifact
 from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import CACHE_VERSION, REPORT_SCHEMA_VERSION
 from codeclone.findings.clones.grouping import (
@@ -25,14 +26,17 @@ from codeclone.findings.clones.grouping import (
     build_segment_groups,
 )
 from codeclone.models import (
+    ReportDigest,
     StructuralFindingGroup,
     StructuralFindingOccurrence,
     Suggestion,
     SuppressedCloneGroup,
 )
 from codeclone.report.blocks import prepare_block_report_groups
-from codeclone.report.document.builder import build_report_document
-from codeclone.report.document.integrity import _build_integrity_payload
+from codeclone.report.document.integrity import (
+    _build_integrity_payload,
+    verify_report_integrity,
+)
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html.sections._structural import (
     _finding_why_template_html,
@@ -71,6 +75,122 @@ from tests._report_fixtures import (
     repeated_block_group_key,
     write_repeated_assert_source,
 )
+from tests._report_fixtures import (
+    build_test_report_document as build_report_document,
+)
+
+
+def test_report_artifact_door_rejects_foreign_schema_after_shape_validation(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "foreign.json"
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(tmp_path)},
+        inventory={"file_registry": {"items": ["pkg/module.py"]}},
+    )
+    document["report_schema_version"] = "4.0"
+    report.write_text(json.dumps(document), encoding="utf-8")
+
+    result = load_report_artifact(report)
+
+    assert isinstance(result, ReportArtifactFailure)
+    assert result.reason == "incompatible_schema"
+
+
+def test_report_artifact_door_rejects_oversize_before_json_parsing(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "oversize.json"
+    report.write_bytes(b"{}")
+
+    result = load_report_artifact(report, limit_bytes=1)
+
+    assert isinstance(result, ReportArtifactFailure)
+    assert result.reason == "too_large"
+
+
+def test_report_artifact_door_rejects_unreadable_path(tmp_path: Path) -> None:
+    result = load_report_artifact(tmp_path / "missing.json")
+
+    assert isinstance(result, ReportArtifactFailure)
+    assert result.reason == "unreadable"
+
+
+def test_report_artifact_door_rejects_invalid_json(tmp_path: Path) -> None:
+    report = tmp_path / "invalid.json"
+    report.write_bytes(b"\xff")
+
+    result = load_report_artifact(report)
+
+    assert isinstance(result, ReportArtifactFailure)
+    assert result.reason == "invalid_json"
+
+
+def test_report_artifact_door_rejects_authenticated_shape_mismatch(
+    tmp_path: Path,
+) -> None:
+    report = tmp_path / "tampered.json"
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": str(tmp_path)},
+    )
+    derived = cast(dict[str, object], document["derived"])
+    derived["review_queue"] = [{"id": "tampered"}]
+    report.write_text(json.dumps(document), encoding="utf-8")
+
+    result = load_report_artifact(report)
+
+    assert isinstance(result, ReportArtifactFailure)
+    assert result.reason == "invalid_shape"
+    assert result.detail == "report envelope digest mismatch"
+
+
+def test_report_reader_rejects_non_mapping_model_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NonMappingProjection:
+        report_schema_version = REPORT_SCHEMA_VERSION
+
+        @staticmethod
+        def model_dump(*, mode: str) -> list[object]:
+            assert mode == "json"
+            return []
+
+    report = tmp_path / "report.json"
+    report.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        "codeclone.report.document.reader.ReportDocumentV3Input.model_validate_json",
+        staticmethod(lambda _raw: _NonMappingProjection()),
+    )
+
+    result = load_report_artifact(report)
+
+    assert isinstance(result, ReportArtifactFailure)
+    assert result.reason == "invalid_shape"
+    assert result.detail == "report document must be a JSON object"
+
+
+def test_report_artifact_door_rejects_unknown_reader_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        report_api_mod,
+        "read_report_document_v3",
+        lambda *_args, **_kwargs: object(),
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="stored report reader returned an unknown result",
+    ):
+        load_report_artifact(tmp_path / "report.json")
 
 
 def to_json_report(
@@ -104,38 +224,6 @@ def to_json_report(
         structural_findings=structural_findings or (),
     )
     return render_json_report_document(payload)
-
-
-def _expected_integrity_canonical_payload(
-    payload: Mapping[str, object],
-) -> dict[str, object]:
-    inventory = dict(cast(Mapping[str, object], payload["inventory"]))
-    files = dict(cast(Mapping[str, object], inventory.get("files", {})))
-    for key in ("analyzed", "cached", "source_io_skipped"):
-        files.pop(key, None)
-    inventory["files"] = files
-    inventory.pop("cache", None)
-    return {
-        "report_schema_version": payload["report_schema_version"],
-        "meta": {
-            key: value
-            for key, value in cast(Mapping[str, object], payload["meta"]).items()
-            if key != "runtime"
-        },
-        "inventory": inventory,
-        "findings": payload["findings"],
-        "metrics": payload["metrics"],
-    }
-
-
-def _canonical_digest(payload: Mapping[str, object]) -> str:
-    canonical_json = json.dumps(
-        payload,
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    ).encode("utf-8")
-    return sha256(canonical_json).hexdigest()
 
 
 def to_text_report(
@@ -420,13 +508,16 @@ def test_report_output_formats(
         scan_root="/repo",
     )
     report_out = to_json_report(groups, groups, {}, meta)
+    report_document = json.loads(report_out)
     markdown_out = to_markdown_report(
+        report_document=report_document,
         meta=meta,
         func_groups=groups,
         block_groups=groups,
         segment_groups={},
     )
     sarif_out = to_sarif_report(
+        report_document=report_document,
         meta=meta,
         func_groups=groups,
         block_groups=groups,
@@ -552,6 +643,12 @@ def test_report_sarif_uses_representative_and_related_locations() -> None:
     }
     sarif_payload = json.loads(
         to_sarif_report(
+            report_document=build_report_document(
+                func_groups=groups,
+                block_groups={},
+                segment_groups={},
+                meta={"codeclone_version": "2.0.0b2", "scan_root": "/repo"},
+            ),
             meta={"codeclone_version": "2.0.0b2", "scan_root": "/repo"},
             func_groups=groups,
             block_groups={},
@@ -774,6 +871,10 @@ def test_report_json_compact_v21_contract() -> None:
     assert set(payload) == {
         "report_schema_version",
         "meta",
+        "contracts",
+        "source_facts",
+        "baseline",
+        "evaluation",
         "inventory",
         "findings",
         "metrics",
@@ -918,31 +1019,161 @@ def test_report_json_integrity_matches_canonical_sections() -> None:
             {"codeclone_version": "1.4.0"},
         )
     )
-    canonical_payload = _expected_integrity_canonical_payload(payload)
     assert payload["integrity"]["canonicalization"] == {
-        "version": "2",
-        "scope": "canonical_only",
-        "sections": [
-            "report_schema_version",
-            "meta",
-            "inventory",
-            "findings",
-            "metrics",
-        ],
-        "excluded": [
-            "meta.runtime",
-            "inventory.cache",
-            "inventory.files.analyzed",
-            "inventory.files.cached",
-            "inventory.files.source_io_skipped",
-            "findings.*.display_facts",
-        ],
+        "version": "3",
+        "serializer": "orjson.OPT_SORT_KEYS",
+        "envelope_null_sentinel": "integrity.digests.envelope.value",
     }
-    assert payload["integrity"]["digest"] == {
-        "verified": True,
-        "algorithm": "sha256",
-        "value": _canonical_digest(canonical_payload),
+    assert set(payload["integrity"]["digests"]) == {
+        "observation",
+        "analysis_facts",
+        "comparison",
+        "evaluation",
+        "envelope",
     }
+    assert verify_report_integrity(payload) is None
+
+
+def test_report_json_integrity_tiers_change_only_for_declared_inputs() -> None:
+    source_facts: Mapping[str, object] = {"facts": ["one"]}
+    baseline: Mapping[str, object] = {
+        "state": "trusted",
+        "baseline_scope_id": "scope-a",
+        "root_digest_or_null": "b" * 64,
+        "sorted_lane_trust": [],
+        "sorted_novelty_facts": [],
+    }
+    evaluation: Mapping[str, object] = {"outcome": {"exit_code": 0, "reasons": []}}
+
+    def _digests(
+        *,
+        next_source_facts: Mapping[str, object] = source_facts,
+        next_baseline: Mapping[str, object] = baseline,
+        next_evaluation: Mapping[str, object] = evaluation,
+    ) -> Mapping[str, object]:
+        integrity = _build_integrity_payload(
+            report_schema_version=REPORT_SCHEMA_VERSION,
+            observation_digest="a" * 64,
+            source_facts=next_source_facts,
+            baseline=next_baseline,
+            evaluation=next_evaluation,
+        )
+        digests = integrity["digests"]
+        assert isinstance(digests, dict)
+        return digests
+
+    original = _digests()
+    source_changed = _digests(next_source_facts={"facts": ["two"]})
+    baseline_changed = _digests(next_baseline={**baseline, "state": "untrusted"})
+    evaluation_changed = _digests(
+        next_evaluation={"outcome": {"exit_code": 3, "reasons": ["gate"]}}
+    )
+
+    assert original["observation"] == source_changed["observation"]
+    assert original["analysis_facts"] != source_changed["analysis_facts"]
+    assert original["analysis_facts"] == baseline_changed["analysis_facts"]
+    assert original["comparison"] != baseline_changed["comparison"]
+    assert original["comparison"] == evaluation_changed["comparison"]
+    assert original["evaluation"] != evaluation_changed["evaluation"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    ("f" * 63, "f" * 63 + "G"),
+)
+def test_report_digest_rejects_noncanonical_sha256(value: str) -> None:
+    with pytest.raises(
+        ValueError,
+        match="report digest values must be 64 lowercase hex characters",
+    ):
+        ReportDigest(
+            kind="comparison",
+            algorithm="sha256",
+            digest_version="1",
+            value=value,
+        )
+
+
+def test_report_digest_accepts_canonical_sha256() -> None:
+    digest = ReportDigest(
+        kind="comparison",
+        algorithm="sha256",
+        digest_version="1",
+        value="f" * 64,
+    )
+
+    assert digest.value == "f" * 64
+
+
+def test_report_json_envelope_sentinel_authenticates_nonsemantic_fields() -> None:
+    payload = json.loads(to_json_report({}, {}, {}, {"codeclone_version": "1.4.0"}))
+    changed = deepcopy(payload)
+    changed["derived"]["review_queue"] = [{"id": "changed"}]
+
+    assert verify_report_integrity(changed) == "report envelope digest mismatch"
+
+
+def test_report_json_integrity_rejects_incomplete_or_malformed_digest_tiers() -> None:
+    payload = json.loads(to_json_report({}, {}, {}, {"codeclone_version": "1.4.0"}))
+
+    missing_tier = deepcopy(payload)
+    del missing_tier["integrity"]["digests"]["evaluation"]
+    assert (
+        verify_report_integrity(missing_tier)
+        == "report digest set must contain exactly five named tiers"
+    )
+
+    missing_observation = deepcopy(payload)
+    missing_observation["integrity"]["digests"]["observation"]["value"] = None
+    assert (
+        verify_report_integrity(missing_observation)
+        == "report observation digest is missing"
+    )
+
+    missing_schema = deepcopy(payload)
+    missing_schema["report_schema_version"] = None
+    assert verify_report_integrity(missing_schema) == "report schema version is missing"
+
+    mismatched_analysis = deepcopy(payload)
+    mismatched_analysis["integrity"]["digests"]["analysis_facts"]["value"] = "0" * 64
+    assert (
+        verify_report_integrity(mismatched_analysis)
+        == "report analysis_facts digest mismatch"
+    )
+
+
+def test_report_json_integrity_has_no_v2_digest_alias() -> None:
+    payload = json.loads(to_json_report({}, {}, {}, {"codeclone_version": "1.4.0"}))
+
+    assert "digest" not in payload["integrity"]
+
+
+def test_report_json_analysis_facts_authenticate_analysis_contract() -> None:
+    payload_a = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "design_complexity_threshold": 20},
+        )
+    )
+    payload_b = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "design_complexity_threshold": 21},
+        )
+    )
+
+    assert (
+        payload_a["source_facts"]["analysis_contract"]
+        != payload_b["source_facts"]["analysis_contract"]
+    )
+    assert (
+        payload_a["integrity"]["digests"]["analysis_facts"]
+        != payload_b["integrity"]["digests"]["analysis_facts"]
+    )
 
 
 def test_report_json_integrity_ignores_cache_execution_provenance() -> None:
@@ -974,36 +1205,44 @@ def test_report_json_integrity_ignores_cache_execution_provenance() -> None:
             },
         )
     )
-    cache_off_payload = deepcopy(payload)
-    cache_off_inventory = cast(
-        dict[str, object],
-        cache_off_payload["inventory"],
-    )
-    cache_off_inventory["cache"] = {
-        "path": ".codeclone/cache.json",
-        "path_scope": "relative",
-        "used": False,
-        "status": "disabled",
-        "schema_version": None,
-    }
-    cache_off_files = cast(dict[str, object], cache_off_inventory["files"])
-    cache_off_files.update(
-        {
-            "analyzed": 2,
-            "cached": 0,
-            "source_io_skipped": 0,
-        }
-    )
-    cache_off_payload["integrity"] = _build_integrity_payload(
-        report_schema_version=str(cache_off_payload["report_schema_version"]),
-        meta=cast(Mapping[str, object], cache_off_payload["meta"]),
-        inventory=cast(Mapping[str, object], cache_off_payload["inventory"]),
-        findings=cast(Mapping[str, object], cache_off_payload["findings"]),
-        metrics=cast(Mapping[str, object], cache_off_payload["metrics"]),
+    cache_off_payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {
+                "codeclone_version": "1.4.0",
+                "cache_used": False,
+                "cache_status": "disabled",
+                "cache_schema_version": CACHE_VERSION,
+            },
+            inventory={
+                "files": {
+                    "total_found": 2,
+                    "analyzed": 2,
+                    "cached": 0,
+                    "skipped": 0,
+                    "source_io_skipped": 0,
+                },
+                "code": {
+                    "functions": 0,
+                    "methods": 0,
+                    "classes": 0,
+                    "parsed_lines": 12,
+                },
+            },
+        )
     )
 
     assert payload["inventory"] != cache_off_payload["inventory"]
-    assert payload["integrity"]["digest"] == cache_off_payload["integrity"]["digest"]
+    assert (
+        payload["integrity"]["digests"]["analysis_facts"]
+        == cache_off_payload["integrity"]["digests"]["analysis_facts"]
+    )
+    assert (
+        payload["integrity"]["digests"]["envelope"]
+        != cache_off_payload["integrity"]["digests"]["envelope"]
+    )
 
 
 def test_report_json_integrity_ignores_derived_changes() -> None:
@@ -1086,7 +1325,14 @@ def test_report_json_integrity_ignores_derived_changes() -> None:
     payload_a = json.loads(to_json_report(*base_args, suggestions=(suggestion_a,)))
     payload_b = json.loads(to_json_report(*base_args, suggestions=(suggestion_b,)))
     assert payload_a["derived"]["suggestions"] != payload_b["derived"]["suggestions"]
-    assert payload_a["integrity"]["digest"] == payload_b["integrity"]["digest"]
+    assert (
+        payload_a["integrity"]["digests"]["analysis_facts"]
+        == payload_b["integrity"]["digests"]["analysis_facts"]
+    )
+    assert (
+        payload_a["integrity"]["digests"]["envelope"]
+        != payload_b["integrity"]["digests"]["envelope"]
+    )
 
 
 def test_report_json_integrity_ignores_display_facts_changes() -> None:
@@ -1139,7 +1385,14 @@ def test_report_json_integrity_ignores_display_facts_changes() -> None:
         payload_a["findings"]["groups"]["clones"]["blocks"][0]["display_facts"]
         != payload_b["findings"]["groups"]["clones"]["blocks"][0]["display_facts"]
     )
-    assert payload_a["integrity"]["digest"] == payload_b["integrity"]["digest"]
+    assert (
+        payload_a["integrity"]["digests"]["analysis_facts"]
+        == payload_b["integrity"]["digests"]["analysis_facts"]
+    )
+    assert (
+        payload_a["integrity"]["digests"]["envelope"]
+        != payload_b["integrity"]["digests"]["envelope"]
+    )
 
 
 def test_report_json_includes_sorted_block_facts() -> None:
@@ -1433,7 +1686,46 @@ def test_report_json_integrity_ignores_runtime_report_timestamp() -> None:
         payload_a["meta"]["runtime"]["report_generated_at_utc"]
         != payload_b["meta"]["runtime"]["report_generated_at_utc"]
     )
-    assert payload_a["integrity"]["digest"] == payload_b["integrity"]["digest"]
+    for name in ("observation", "analysis_facts", "comparison", "evaluation"):
+        assert (
+            payload_a["integrity"]["digests"][name]
+            == payload_b["integrity"]["digests"][name]
+        )
+    assert (
+        payload_a["integrity"]["digests"]["envelope"]
+        != payload_b["integrity"]["digests"]["envelope"]
+    )
+
+
+def test_report_json_semantic_digests_ignore_checkout_directory() -> None:
+    payload_a = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "scan_root": "/checkout/one"},
+            inventory={"file_list": ["/checkout/one/pkg/module.py"]},
+        )
+    )
+    payload_b = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "scan_root": "/checkout/two"},
+            inventory={"file_list": ["/checkout/two/pkg/module.py"]},
+        )
+    )
+
+    for name in ("observation", "analysis_facts", "comparison", "evaluation"):
+        assert (
+            payload_a["integrity"]["digests"][name]
+            == payload_b["integrity"]["digests"][name]
+        )
+    assert (
+        payload_a["integrity"]["digests"]["envelope"]
+        != payload_b["integrity"]["digests"]["envelope"]
+    )
 
 
 def test_report_json_hotlists_reference_existing_finding_ids() -> None:
@@ -2849,6 +3141,13 @@ def test_text_and_markdown_report_include_suppressed_golden_fixture_clones() -> 
         suppressed_clone_groups=(suppressed_group,),
     )
     markdown = to_markdown_report(
+        report_document=build_report_document(
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+            meta={"codeclone_version": "1.4.0", "scan_root": "/root"},
+            suppressed_clone_groups=(suppressed_group,),
+        ),
         meta={"codeclone_version": "1.4.0", "scan_root": "/root"},
         func_groups={},
         block_groups={},

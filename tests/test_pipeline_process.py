@@ -40,7 +40,7 @@ from codeclone.core.parallelism import (
     process,
 )
 from codeclone.core.pipeline import analyze
-from codeclone.core.reporting import report
+from codeclone.core.reporting import GatingResult, report
 from codeclone.metrics.coverage_join import CoverageJoinParseError
 from codeclone.models import (
     CacheDependentPayload,
@@ -577,7 +577,15 @@ def _build_report_case(
     boot = BootstrapResult(
         root=tmp_path,
         config=NormalizationConfig(),
-        args=Namespace(),
+        args=Namespace(
+            fail_complexity=-1,
+            fail_coupling=-1,
+            fail_cohesion=-1,
+            fail_cycles=False,
+            fail_dead_code=False,
+            fail_health=-1,
+            fail_on_new_metrics=False,
+        ),
         output_paths=OutputPaths(
             json=tmp_path / "report.json" if json_out else None,
             md=tmp_path / "report.md" if md_out else None,
@@ -996,6 +1004,28 @@ def test_report_json_only_does_not_import_markdown_or_sarif(
     assert artifacts.json is not None
     assert artifacts.md is None
     assert artifacts.sarif is None
+
+
+def test_report_requires_gate_config_and_result_as_one_evaluation(
+    tmp_path: Path,
+) -> None:
+    boot, discovery, processing, analysis = _build_report_case(tmp_path, json_out=True)
+
+    with pytest.raises(
+        ValueError,
+        match="gate config and result must be supplied together",
+    ):
+        report(
+            boot=boot,
+            discovery=discovery,
+            processing=processing,
+            analysis=analysis,
+            report_meta={},
+            new_func=(),
+            new_block=(),
+            report_body={},
+            gate_result=GatingResult(exit_code=0, reasons=()),
+        )
 
 
 def test_analyze_skips_suppressed_dead_code_scan_when_dead_code_is_disabled(

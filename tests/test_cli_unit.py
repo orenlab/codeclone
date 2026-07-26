@@ -41,12 +41,11 @@ from codeclone.contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.core._types import (
     AnalysisResult,
-    BootstrapResult,
     DiscoveryResult,
     FileProcessResult,
     ProcessingResult,
 )
-from codeclone.core.reporting import GatingResult
+from codeclone.core.reporting import GatingResult, resolve_report_baseline_trust
 from codeclone.core.worker import (
     _install_module_registry,
 )
@@ -76,6 +75,16 @@ class _RecordingPrinter:
 
     def print(self, *objects: object, **kwargs: object) -> None:
         self.lines.append(" ".join(str(obj) for obj in objects))
+
+
+def test_report_baseline_trust_rejects_invalid_scope_id() -> None:
+    assert (
+        resolve_report_baseline_trust(
+            cast(Any, object()),
+            baseline_scope_id="not-a-uuid",
+        )
+        is None
+    )
 
 
 def _baseline_state_args(**overrides: object) -> SimpleNamespace:
@@ -1347,7 +1356,7 @@ def test_run_analysis_stages_prints_source_read_failures_when_failed_files_are_e
     assert printed == [(), ("pkg/mod.py: unreadable",)]
 
 
-def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
+def test_enforce_gating_uses_precomputed_changed_scope_threshold_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli.console = cli._make_console(no_color=True)
@@ -1370,15 +1379,6 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
         observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
-    def _fake_gate(**kwargs: object) -> GatingResult:
-        gate_analysis = cast("AnalysisResult", kwargs["analysis"])
-        observed["clone_threshold_total"] = gate_analysis.func_clones_count
-        return GatingResult(
-            exit_code=3,
-            reasons=("clone:threshold:2:1",),
-        )
-
-    monkeypatch.setattr(cli, "gate", _fake_gate)
     monkeypatch.setattr(
         cli,
         "_print_gating_failure_block",
@@ -1390,7 +1390,6 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
     with pytest.raises(SystemExit) as exc:
         cli._enforce_gating(
             args=Namespace(fail_threshold=1, verbose=False),
-            boot=cast("BootstrapResult", object()),
             analysis=analysis,
             processing=cast(Any, Namespace(source_read_failures=[])),
             source_read_contract_failure=False,
@@ -1398,13 +1397,14 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
             metrics_baseline_failure_code=None,
             new_func=set(),
             new_block=set(),
-            metrics_diff=None,
+            gate_result=GatingResult(
+                exit_code=3,
+                reasons=("clone:threshold:2:1",),
+            ),
             html_report_path=None,
-            clone_threshold_total=2,
         )
 
     assert exc.value.code == 3
-    assert observed["clone_threshold_total"] == 2
     assert observed["code"] == "threshold"
     assert observed["entries"] == (
         ("clone_groups_total", 2),
@@ -1412,7 +1412,7 @@ def test_enforce_gating_rewrites_clone_threshold_for_changed_scope(
     )
 
 
-def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_limit(
+def test_enforce_gating_uses_precomputed_changed_scope_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli.console = cli._make_console(no_color=True)
@@ -1435,12 +1435,6 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
         observation_bundle=TEST_OBSERVATION_BUNDLE,
     )
 
-    def _fake_gate(**kwargs: object) -> GatingResult:
-        gate_analysis = cast("AnalysisResult", kwargs["analysis"])
-        observed["clone_threshold_total"] = gate_analysis.func_clones_count
-        return GatingResult(exit_code=0, reasons=())
-
-    monkeypatch.setattr(cli, "gate", _fake_gate)
     monkeypatch.setattr(
         cli,
         "_print_gating_failure_block",
@@ -1449,7 +1443,6 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
 
     cli._enforce_gating(
         args=Namespace(fail_threshold=5, verbose=False),
-        boot=cast("BootstrapResult", object()),
         analysis=analysis,
         processing=cast(Any, Namespace(source_read_failures=[])),
         source_read_contract_failure=False,
@@ -1457,12 +1450,11 @@ def test_enforce_gating_drops_rewritten_threshold_when_changed_scope_is_within_l
         metrics_baseline_failure_code=None,
         new_func=set(),
         new_block=set(),
-        metrics_diff=None,
+        gate_result=GatingResult(exit_code=0, reasons=()),
         html_report_path=None,
-        clone_threshold_total=2,
     )
 
-    assert observed == {"clone_threshold_total": 2}
+    assert observed == {}
 
 
 def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
@@ -1488,6 +1480,7 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
         ],
     )
     observed: dict[str, object] = {}
+    gate_result = GatingResult(exit_code=0, reasons=())
 
     monkeypatch.setattr(cli, "load_pyproject_config", lambda _root: {})
     monkeypatch.setattr(
@@ -1552,9 +1545,23 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
     )
     monkeypatch.setattr(cli_meta_mod, "_build_report_meta", lambda **_kwargs: {})
     monkeypatch.setattr(cli, "_print_summary", lambda **_kwargs: None)
-    monkeypatch.setattr(
-        cli, "report", lambda **_kwargs: SimpleNamespace(report_document={})
-    )
+    monkeypatch.setattr(cli, "build_report_body_for_analysis", lambda **_kwargs: {})
+    gate_calls = 0
+
+    def _gate_once(**_kwargs: object) -> tuple[object, GatingResult]:
+        nonlocal gate_calls
+        gate_calls += 1
+        return object(), gate_result
+
+    def _report(**kwargs: object) -> SimpleNamespace:
+        observed["report_gate_result"] = kwargs["gate_result"]
+        return SimpleNamespace(report_document={})
+
+    def _enforce(**kwargs: object) -> None:
+        observed["enforce_gate_result"] = kwargs["gate_result"]
+
+    monkeypatch.setattr(cli, "gate_with_config", _gate_once)
+    monkeypatch.setattr(cli, "report", _report)
     monkeypatch.setattr(
         cli,
         "_changed_clone_gate_from_report",
@@ -1574,7 +1581,7 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
         lambda **kwargs: observed.update(kwargs),
     )
     monkeypatch.setattr(cli, "_write_report_outputs", lambda **_kwargs: None)
-    monkeypatch.setattr(cli, "_enforce_gating", lambda **_kwargs: None)
+    monkeypatch.setattr(cli, "_enforce_gating", _enforce)
 
     cli._main_impl()
 
@@ -1582,6 +1589,9 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
     assert observed["quiet"] is True
     assert changed_scope.paths_count == 1
     assert changed_scope.findings_total == 3
+    assert gate_calls == 1
+    assert observed["report_gate_result"] is gate_result
+    assert observed["enforce_gate_result"] is gate_result
 
 
 def test_make_console_caps_width_to_layout_limit(
@@ -1615,6 +1625,20 @@ def test_make_console_caps_width_to_layout_limit(
     assert len(created) == 1
     assert isinstance(console, _DummyConsole)
     assert console.width == ui.CLI_LAYOUT_MAX_WIDTH
+
+
+@pytest.mark.parametrize(
+    "report_document",
+    (
+        {},
+        {"integrity": {}},
+        {"integrity": {"digests": {}}},
+    ),
+)
+def test_report_digest_from_document_requires_comparison_tier(
+    report_document: dict[str, object],
+) -> None:
+    assert cli._report_digest_from_document(report_document) == ""
 
 
 def test_banner_title_without_root_returns_single_line() -> None:
@@ -2365,7 +2389,6 @@ def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli.console = cli._make_console(no_color=True)
-    monkeypatch.setattr(cli, "gate", lambda **_kwargs: GatingResult(0, ()))
     with pytest.raises(SystemExit) as exc:
         cli._enforce_gating(
             args=Namespace(
@@ -2373,7 +2396,6 @@ def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
                 fail_threshold=-1,
                 verbose=False,
             ),
-            boot=cast("BootstrapResult", object()),
             analysis=cast(Any, SimpleNamespace(coverage_join=None)),
             processing=cast(Any, Namespace(source_read_failures=[])),
             source_read_contract_failure=False,
@@ -2381,7 +2403,7 @@ def test_enforce_gating_requires_coverage_input_for_hotspot_gate(
             metrics_baseline_failure_code=None,
             new_func=set(),
             new_block=set(),
-            metrics_diff=None,
+            gate_result=GatingResult(0, ()),
             html_report_path=None,
         )
     assert exc.value.code == 2
@@ -2391,7 +2413,6 @@ def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     cli.console = cli._make_console(no_color=True)
-    monkeypatch.setattr(cli, "gate", lambda **_kwargs: GatingResult(0, ()))
     with pytest.raises(SystemExit) as exc:
         cli._enforce_gating(
             args=Namespace(
@@ -2399,7 +2420,6 @@ def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
                 fail_threshold=-1,
                 verbose=False,
             ),
-            boot=cast("BootstrapResult", object()),
             analysis=cast(
                 Any,
                 SimpleNamespace(
@@ -2415,7 +2435,7 @@ def test_enforce_gating_requires_valid_coverage_input_for_hotspot_gate(
             metrics_baseline_failure_code=None,
             new_func=set(),
             new_block=set(),
-            metrics_diff=None,
+            gate_result=GatingResult(0, ()),
             html_report_path=None,
         )
     assert exc.value.code == 2
@@ -2669,12 +2689,15 @@ def test_main_impl_prints_metric_gate_reasons_and_exits_gating_failure(
     _patch_main_pipeline_stubs(monkeypatch)
     monkeypatch.setattr(
         cli,
-        "gate",
-        lambda **_kwargs: GatingResult(
-            exit_code=3,
-            reasons=(
-                "metric:Health score regressed vs metrics baseline: delta=-1.",
-                "metric:Complexity threshold exceeded: max CC=21, threshold=20.",
+        "gate_with_config",
+        lambda **_kwargs: (
+            object(),
+            GatingResult(
+                exit_code=3,
+                reasons=(
+                    "metric:Health score regressed vs metrics baseline: delta=-1.",
+                    "metric:Complexity threshold exceeded: max CC=21, threshold=20.",
+                ),
             ),
         ),
     )

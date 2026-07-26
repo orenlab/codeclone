@@ -30,8 +30,13 @@ from ...core.bootstrap import bootstrap
 from ...core.discovery import discover
 from ...core.parallelism import process
 from ...core.pipeline import analyze
-from ...core.reporting import gate, report
-from ...models import MetricsDiff
+from ...core.reporting import (
+    GatingResult,
+    build_report_body_for_analysis,
+    gate,
+    gate_with_config,
+    report,
+)
 from ...observability import bootstrap as start_observability
 from ...observability import operation, span
 from ...report.html import build_html_report
@@ -324,7 +329,6 @@ def _run_analysis_stages(
 def _enforce_gating(
     *,
     args: object,
-    boot: BootstrapResult,
     analysis: AnalysisResult,
     processing: PipelineProcessingResult,
     source_read_contract_failure: bool,
@@ -332,14 +336,12 @@ def _enforce_gating(
     metrics_baseline_failure_code: ExitCode | None,
     new_func: set[str],
     new_block: set[str],
-    metrics_diff: MetricsDiff | None,
+    gate_result: GatingResult,
     html_report_path: str | None,
-    clone_threshold_total: int | None = None,
 ) -> None:
     _set_console(console)
     cli_execution.enforce_gating(
         args=args,
-        boot=boot,
         analysis=analysis,
         processing=processing,
         source_read_contract_failure=source_read_contract_failure,
@@ -347,13 +349,11 @@ def _enforce_gating(
         metrics_baseline_failure_code=metrics_baseline_failure_code,
         new_func=new_func,
         new_block=new_block,
-        metrics_diff=metrics_diff,
+        gate_result=gate_result,
         html_report_path=html_report_path,
-        gate_fn=gate,
         parse_metric_reason_entry_fn=_parse_metric_reason_entry,
         print_gating_failure_block_fn=_print_gating_failure_block,
         print_verbose_clone_hashes_fn=_print_verbose_clone_hashes,
-        clone_threshold_total=clone_threshold_total,
     )
 
 
@@ -585,6 +585,48 @@ def _main_impl() -> None:
             )
 
         with span(name="pipeline.report"):
+            report_body = build_report_body_for_analysis(
+                discovery=discovery_result,
+                processing=processing_result,
+                analysis=analysis_result,
+                report_meta=report_meta,
+                new_func=diff_context.new_func,
+                new_block=diff_context.new_block,
+                metrics_diff=diff_context.metrics_diff,
+                coverage_adoption_diff_available=(
+                    diff_context.coverage_adoption_diff_available
+                ),
+                api_surface_diff_available=diff_context.api_surface_diff_available,
+            )
+            changed_clone_gate = resolve_changed_clone_gate(
+                args=args,
+                report_document=report_body,
+                changed_paths=changed_paths,
+                changed_clone_gate_from_report_fn=_changed_clone_gate_from_report,
+            )
+            gate_new_func = (
+                set(changed_clone_gate.new_func)
+                if changed_clone_gate
+                else diff_context.new_func
+            )
+            gate_new_block = (
+                set(changed_clone_gate.new_block)
+                if changed_clone_gate
+                else diff_context.new_block
+            )
+            gate_config, gate_result = gate_with_config(
+                boot=boot,
+                analysis=analysis_result,
+                new_func=gate_new_func,
+                new_block=gate_new_block,
+                metrics_diff=diff_context.metrics_diff,
+                clone_threshold_total=(
+                    changed_clone_gate.total_clone_groups
+                    if changed_clone_gate
+                    else None
+                ),
+            )
+            baseline_container = baseline_state.baseline.container
             report_artifacts = report(
                 boot=boot,
                 discovery=discovery_result,
@@ -602,6 +644,11 @@ def _main_impl() -> None:
                 include_report_document=(
                     bool(changed_paths) or _controller_query_mode(args)
                 ),
+                report_body=report_body,
+                baseline_container=baseline_container,
+                baseline_scope_id=getattr(args, "baseline_scope_id", None),
+                gate_config=gate_config,
+                gate_result=gate_result,
             )
     _emit_cli_analysis_completed_if_enabled(
         args=args,
@@ -620,12 +667,6 @@ def _main_impl() -> None:
     )
     if controller_exit_code is not None:
         sys.exit(controller_exit_code)
-    changed_clone_gate = resolve_changed_clone_gate(
-        args=args,
-        report_document=report_artifacts.report_document,
-        changed_paths=changed_paths,
-        changed_clone_gate_from_report_fn=_changed_clone_gate_from_report,
-    )
     maybe_print_changed_scope_snapshot(
         args=args,
         changed_clone_gate=changed_clone_gate,
@@ -641,27 +682,15 @@ def _main_impl() -> None:
 
     _enforce_gating(
         args=args,
-        boot=boot,
         analysis=analysis_result,
         processing=processing_result,
         source_read_contract_failure=source_read_contract_failure,
         baseline_failure_code=baseline_state.failure_code,
         metrics_baseline_failure_code=metrics_baseline_state.failure_code,
-        new_func=(
-            set(changed_clone_gate.new_func)
-            if changed_clone_gate
-            else diff_context.new_func
-        ),
-        new_block=(
-            set(changed_clone_gate.new_block)
-            if changed_clone_gate
-            else diff_context.new_block
-        ),
-        metrics_diff=diff_context.metrics_diff,
+        new_func=gate_new_func,
+        new_block=gate_new_block,
+        gate_result=gate_result,
         html_report_path=html_report_path,
-        clone_threshold_total=(
-            changed_clone_gate.total_clone_groups if changed_clone_gate else None
-        ),
     )
 
     notice_new_clones_count = (
@@ -747,10 +776,13 @@ def _report_digest_from_document(report_document: dict[str, object]) -> str:
     integrity = report_document.get("integrity")
     if not isinstance(integrity, dict):
         return ""
-    digest = integrity.get("digest")
-    if not isinstance(digest, dict):
+    digests = integrity.get("digests")
+    if not isinstance(digests, dict):
         return ""
-    return str(digest.get("value", "")).strip()
+    comparison = digests.get("comparison")
+    if not isinstance(comparison, dict):
+        return ""
+    return str(comparison.get("value", "")).strip()
 
 
 def main() -> None:

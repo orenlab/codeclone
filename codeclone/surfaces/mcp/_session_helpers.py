@@ -659,8 +659,9 @@ def _metrics_computed(analysis_mode: AnalysisMode) -> tuple[str, ...]:
 
 def _report_digest(report_document: Mapping[str, object]) -> str:
     integrity = _as_mapping(report_document.get("integrity"))
-    digest = _as_mapping(integrity.get("digest"))
-    value = digest.get("value")
+    digests = _as_mapping(integrity.get("digests"))
+    comparison = _as_mapping(digests.get("comparison"))
+    value = comparison.get("value")
     if not isinstance(value, str) or not value:
         raise MCPServiceError("Canonical report digest is missing.")
     return value

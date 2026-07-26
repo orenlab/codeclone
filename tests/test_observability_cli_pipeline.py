@@ -353,8 +353,10 @@ def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
         "pipeline.process",
         "pipeline.analyze",
         "pipeline.report",
+        "report.build",
     } <= names
     assert len({row[1] for row in rows}) == 1
+    assert sum(row[0] == "report.build" for row in rows) == 1
 
     conn = open_observability_store(observability_store_path(repo))
     try:

@@ -168,7 +168,9 @@ def render_meta_panel(ctx: ReportContext) -> str:
         meta.get("computed_metric_families"),
     )
     integrity_canon = _as_mapping(integrity_map.get("canonicalization"))
-    integrity_digest = _as_mapping(integrity_map.get("digest"))
+    integrity_digest = _as_mapping(
+        _as_mapping(integrity_map.get("digests")).get("envelope")
+    )
     canonical_sections = ", ".join(
         str(i) for i in _as_sequence(integrity_canon.get("sections")) if str(i).strip()
     )

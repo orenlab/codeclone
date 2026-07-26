@@ -76,7 +76,7 @@ def test_cached_report_untrusted_reason_missing_scan_root(tmp_path: Path) -> Non
         report_path=root / "report.json",
         report_document={"meta": {}},
     )
-    assert reason == "cached report missing meta.scan_root"
+    assert reason == "cached report missing meta.runtime.scan_root_absolute"
 
 
 def test_cached_report_untrusted_reason_inventory_empty(tmp_path: Path) -> None:
@@ -87,7 +87,7 @@ def test_cached_report_untrusted_reason_inventory_empty(tmp_path: Path) -> None:
         root_path=root,
         report_path=root / "report.json",
         report_document={
-            "meta": {"scan_root": str(root)},
+            "meta": {"runtime": {"scan_root_absolute": str(root)}},
             "inventory": {"file_registry": {"items": []}},
         },
     )
@@ -113,6 +113,8 @@ def test_cached_report_untrusted_reason_invalid_scan_root(
     reason = cached_report_untrusted_reason(
         root_path=root,
         report_path=root / "report.json",
-        report_document={"meta": {"scan_root": "/does/not/matter"}},
+        report_document={
+            "meta": {"runtime": {"scan_root_absolute": "/does/not/matter"}}
+        },
     )
-    assert reason == "cached report meta.scan_root is invalid"
+    assert reason == "cached report meta.runtime.scan_root_absolute is invalid"
