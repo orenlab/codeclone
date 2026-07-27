@@ -27,22 +27,28 @@ from ..metrics.dependencies import (
 )
 from ..metrics.health import HealthInputs, compute_health
 from ..models import (
+    AdoptionColumnarPayload,
     AdoptionObservationPayload,
     ApiParamSpec,
+    ApiSurfaceColumnarPayload,
     ApiSurfaceObservationPayload,
     ApiSurfaceSnapshot,
     BaselineContainerV3,
     CloneObservationPayload,
     ContainerReadFailure,
     ContainerReadSuccess,
+    DeadCodeColumnarPayload,
     DeadCodeObservationPayload,
+    DependencyColumnarPayload,
     DependencyObservationPayload,
     ImportObservation,
+    IntegerColumnarPayload,
     IntegerObservationPayload,
     MetricsDiff,
     MetricsSnapshot,
     ModuleApiSurface,
     ModuleDep,
+    ModuleIdentityColumnarPayload,
     ModuleIdentityObservationPayload,
     ObservationLaneName,
     ProjectMetrics,
@@ -56,6 +62,14 @@ from ._metrics_baseline_contract import (
 from .container import read_container_v3
 from .container_trust import map_container_read_failure, unavailable_container_lanes
 from .diff import diff_metrics
+from .lanes import (
+    decode_adoption_lane,
+    decode_api_surface_lane,
+    decode_dead_code_lane,
+    decode_dependency_lane,
+    decode_integer_lane,
+    decode_module_identity_lane,
+)
 from .trust import current_python_tag
 
 
@@ -204,10 +218,25 @@ def _lane_payload(
     container: BaselineContainerV3,
     name: ObservationLaneName,
 ) -> object | None:
+    """Return one lane as typed rows, decoding the columnar wire on the way."""
+
     try:
-        return container.lanes[name].payload
+        payload = container.lanes[name].payload
     except KeyError:
         return None
+    if isinstance(payload, IntegerColumnarPayload):
+        return decode_integer_lane(payload)
+    if isinstance(payload, DeadCodeColumnarPayload):
+        return decode_dead_code_lane(payload)
+    if isinstance(payload, AdoptionColumnarPayload):
+        return decode_adoption_lane(payload)
+    if isinstance(payload, DependencyColumnarPayload):
+        return decode_dependency_lane(payload)
+    if isinstance(payload, ModuleIdentityColumnarPayload):
+        return decode_module_identity_lane(payload)
+    if isinstance(payload, ApiSurfaceColumnarPayload):
+        return decode_api_surface_lane(payload)
+    return payload
 
 
 def _integer_lane(

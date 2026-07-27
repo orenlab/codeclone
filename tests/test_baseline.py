@@ -27,10 +27,11 @@ from codeclone.models import (
     ContainerInspectionResult,
     ContainerReadSuccess,
     DigestObject,
-    IntegerObservationPayload,
+    IntegerColumnarPayload,
     LaneTrust,
     ObservationBundle,
     ObservationContract,
+    ThinIdentityTable,
     TrustVector,
 )
 from codeclone.observations.contracts import build_observation_contract
@@ -262,7 +263,16 @@ def test_baseline_rejects_wrong_clone_payload_and_unverified_root(
     function_lane = container.lanes["clones.functions"]
     wrong_function_lane = replace(
         function_lane,
-        payload=IntegerObservationPayload(observations=(), entity_population=0),
+        payload=IntegerColumnarPayload(
+            identities=ThinIdentityTable(paths=()),
+            qualnames=(),
+            dimensions=(),
+            identity=(),
+            qualname=(),
+            dimension=(),
+            numerator=(),
+            entity_population=0,
+        ),
     )
     wrong_lanes = BaselineLaneIndex(
         rows=tuple(

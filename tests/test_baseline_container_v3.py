@@ -34,6 +34,7 @@ from codeclone.baseline.container_digest import (
 from codeclone.baseline.container_trust import evaluate_lane_trust
 from codeclone.baseline.lanes import (
     BaselineLaneValidationError,
+    decode_module_identity_lane,
     descriptor_from_input,
     lane_from_input,
     lane_payload_is_opaque,
@@ -54,7 +55,7 @@ from codeclone.models import (
     ContractIndex,
     DigestObject,
     EpochTransitionEvidence,
-    ModuleIdentityObservationPayload,
+    ModuleIdentityColumnarPayload,
     ObservabilityConfig,
     ObservationBundle,
     ObservationContractInput,
@@ -315,7 +316,7 @@ def test_build_container_has_native_digest_tree_and_golden_identity(
 ) -> None:
     container = _container(monkeypatch)
     module_lane = container.lanes["module_identity"]
-    assert isinstance(module_lane.payload, ModuleIdentityObservationPayload)
+    assert isinstance(module_lane.payload, ModuleIdentityColumnarPayload)
 
     assert module_lane.required
     assert container.source.module_identity_manifest_digest is (
@@ -1416,8 +1417,8 @@ def test_analysis_scope_digest_uses_only_sorted_analyzed_inventory(
 ) -> None:
     container = _container(monkeypatch)
     payload = container.lanes["module_identity"].payload
-    assert isinstance(payload, ModuleIdentityObservationPayload)
-    entries = payload.module_registry
+    assert isinstance(payload, ModuleIdentityColumnarPayload)
+    entries = decode_module_identity_lane(payload).module_registry
 
     assert compute_analysis_scope_digest(entries) == compute_analysis_scope_digest(
         tuple(reversed(entries))
@@ -1546,3 +1547,49 @@ def test_outdated_lane_stays_opaque_trusted_bytes_and_still_fails_the_gate(
     assert result.exit_code == 2
     assert "risk_observations" in result.unavailable_lanes
     assert "lane:unavailable:risk_observations" in result.reasons
+
+
+def test_outdated_module_identity_lane_is_opaque_not_a_container_defect(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """B+ holds for the lane the consistency check depends on."""
+
+    container = _container(monkeypatch)
+    document = _document(container)
+    _set_lane_nested_fields(
+        document, "module_identity", "descriptor", {"payload_schema": "2"}
+    )
+    descriptor = _object_dict(
+        _object_dict(_object_dict(document["lanes"])["module_identity"])["descriptor"]
+    )
+    contract = _object_dict(document["observation_contract"])
+    contract["descriptors"] = [
+        descriptor if _object_dict(item)["name"] == "module_identity" else item
+        for item in _object_list(contract["descriptors"])
+    ]
+    document["observation_contract"] = contract
+    _rehash_lane(document, "module_identity")
+
+    result = _write_and_read(tmp_path, name="outdated.json", document=document)
+
+    assert isinstance(result, ContainerReadSuccess)
+    assert lane_payload_is_opaque(result.container.lanes["module_identity"])
+
+
+def test_outdated_lane_payload_must_still_be_a_json_object(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    container = _container(monkeypatch)
+    document = _document(container)
+    lane = _object_dict(_object_dict(document["lanes"])["module_identity"])
+    descriptor = _object_dict(lane["descriptor"])
+    descriptor["payload_schema"] = "2"
+    lane["descriptor"] = descriptor
+    lane["payload"] = ["not", "an", "object"]
+
+    with pytest.raises(BaselineLaneValidationError, match="must be a JSON object"):
+        lane_from_input(
+            "module_identity",
+            BaselineLaneInput.model_validate_json(orjson.dumps(lane)),
+        )
