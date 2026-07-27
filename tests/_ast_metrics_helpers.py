@@ -156,6 +156,7 @@ def write_native_v3_baseline_fixture(
         module_name="pkg.mod",
     )[1]
     bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=registry,
         function_clone_keys=tuple(sorted(function_clone_keys)),
         block_clone_keys=tuple(sorted(block_clone_keys)),

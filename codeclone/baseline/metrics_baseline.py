@@ -210,20 +210,25 @@ def _lane_payload(
         return None
 
 
-def _integer_rows(
+def _integer_lane(
     container: BaselineContainerV3,
     name: ObservationLaneName,
-) -> tuple[tuple[str, str, int], ...]:
+) -> tuple[tuple[tuple[str, str, int], ...], int]:
+    """Return the lane rows plus the entity population they were observed from."""
+
     payload = _lane_payload(container, name)
     if not isinstance(payload, IntegerObservationPayload):
-        return ()
-    return tuple(
-        (item.entity, item.dimension, item.numerator) for item in payload.observations
+        return (), 0
+    rows = tuple(
+        (item.qualname, item.dimension, item.numerator) for item in payload.observations
     )
+    return rows, payload.entity_population
 
 
-def _qualname(entity: str) -> str:
-    return entity.rsplit(":", 1)[-1]
+def _average(values: tuple[int, ...], population: int) -> float:
+    """Average over the observed population: absence is zero, so sums are complete."""
+
+    return sum(values) / population if population else 0.0
 
 
 def _permille(rows: tuple[tuple[int, int], ...]) -> int:
@@ -233,31 +238,33 @@ def _permille(rows: tuple[tuple[int, int], ...]) -> int:
 
 
 def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
-    risk_rows = _integer_rows(container, "risk_observations")
-    class_rows = _integer_rows(container, "coupling_cohesion_observations")
-    complexities = tuple(
-        value for _entity, dim, value in risk_rows if dim == "cyclomatic_complexity"
+    risk_rows, risk_population = _integer_lane(container, "risk_observations")
+    class_rows, class_population = _integer_lane(
+        container, "coupling_cohesion_observations"
     )
-    coupling = tuple(value for _entity, dim, value in class_rows if dim == "cbo")
-    cohesion = tuple(value for _entity, dim, value in class_rows if dim == "lcom4")
+    complexities = tuple(
+        value for _qualname, dim, value in risk_rows if dim == "cyclomatic_complexity"
+    )
+    coupling = tuple(value for _qualname, dim, value in class_rows if dim == "cbo")
+    cohesion = tuple(value for _qualname, dim, value in class_rows if dim == "lcom4")
     high_risk = tuple(
         sorted(
-            _qualname(entity)
-            for entity, dim, value in risk_rows
+            qualname
+            for qualname, dim, value in risk_rows
             if dim == "cyclomatic_complexity" and value > COMPLEXITY_RISK_MEDIUM_MAX
         )
     )
     high_coupling = tuple(
         sorted(
-            _qualname(entity)
-            for entity, dim, value in class_rows
+            qualname
+            for qualname, dim, value in class_rows
             if dim == "cbo" and value > COUPLING_RISK_MEDIUM_MAX
         )
     )
     low_cohesion = tuple(
         sorted(
-            _qualname(entity)
-            for entity, dim, value in class_rows
+            qualname
+            for qualname, dim, value in class_rows
             if dim == "lcom4" and value > COHESION_RISK_MEDIUM_MAX
         )
     )
@@ -344,15 +351,13 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
                 if isinstance(block_clones, CloneObservationPayload)
                 else 0
             ),
-            complexity_avg=(
-                sum(complexities) / len(complexities) if complexities else 0.0
-            ),
+            complexity_avg=_average(complexities, risk_population),
             complexity_max=max(complexities, default=0),
             high_risk_functions=len(high_risk),
-            coupling_avg=sum(coupling) / len(coupling) if coupling else 0.0,
+            coupling_avg=_average(coupling, class_population),
             coupling_max=max(coupling, default=0),
             high_risk_classes=len(high_coupling),
-            cohesion_avg=sum(cohesion) / len(cohesion) if cohesion else 0.0,
+            cohesion_avg=_average(cohesion, class_population),
             low_cohesion_classes=len(low_cohesion),
             dependency_cycles=len(cycles),
             dependency_max_depth=graph_depth,

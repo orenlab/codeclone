@@ -26,6 +26,7 @@ from ..models import (
     ObservationLaneDescriptor,
     ObservationLaneDescriptorInput,
     ObservationLaneName,
+    OpaqueLanePayload,
     SemanticAuthorityObservationPayload,
     parse_adoption_observation_payload,
     parse_api_surface_observation_payload,
@@ -36,6 +37,7 @@ from ..models import (
     parse_module_identity_observation_payload,
     parse_semantic_authority_observation_payload,
 )
+from ..observations.contracts import lane_payload_schema
 from .container_digest import canonical_value_bytes, compute_lane_digest_components
 
 _LANE_NAMES: Final[frozenset[str]] = frozenset(
@@ -84,19 +86,24 @@ def descriptor_from_input(
     )
 
 
-def _expected_payload_schema(name: ObservationLaneName) -> str:
-    return "2" if name == "module_identity" else "1"
-
-
 def validate_descriptor(descriptor: ObservationLaneDescriptor) -> None:
+    """Check one descriptor for internal consistency only.
+
+    Schema currency is deliberately *not* checked here: an artifact is read
+    against its own recorded descriptors, and a lane whose payload schema is
+    no longer the current one is kept opaque and reported by lane trust.
+    """
+
     if descriptor.descriptor_version != BASELINE_LANE_DESCRIPTOR_VERSION:
         raise BaselineLaneValidationError(
             f"unsupported descriptor version for {descriptor.name}"
         )
-    if descriptor.payload_schema != _expected_payload_schema(descriptor.name):
-        raise BaselineLaneValidationError(
-            f"unsupported payload schema for {descriptor.name}"
-        )
+
+
+def lane_payload_is_opaque(lane: BaselineLane) -> bool:
+    """Return whether the lane payload was left unparsed by the reader."""
+
+    return isinstance(lane.payload, dict)
 
 
 def _validate_payload_round_trip(raw: object, payload: object) -> None:
@@ -235,7 +242,27 @@ def lane_from_input(
     validate_descriptor(descriptor)
     if name == "module_identity" and not value.required:
         raise BaselineLaneValidationError("module_identity must remain required")
-    payload = payload_from_input(name, value.payload)
+    payload: (
+        AdoptionObservationPayload
+        | ApiSurfaceObservationPayload
+        | CloneObservationPayload
+        | DeadCodeObservationPayload
+        | DependencyObservationPayload
+        | IntegerObservationPayload
+        | ModuleIdentityObservationPayload
+        | SemanticAuthorityObservationPayload
+        | OpaqueLanePayload
+    )
+    if descriptor.payload_schema != lane_payload_schema(name):
+        # Outdated schema: keep the recorded bytes, do not parse them into a
+        # model that no longer describes them. Lane trust reports the state.
+        if not isinstance(value.payload, dict):
+            raise BaselineLaneValidationError(
+                f"lane payload for {name} must be a JSON object"
+            )
+        payload = value.payload
+    else:
+        payload = payload_from_input(name, value.payload)
     return BaselineLane(
         name=name,
         required=value.required,
@@ -261,6 +288,7 @@ __all__ = [
     "is_observation_lane_name",
     "lane_from_input",
     "lane_is_required",
+    "lane_payload_is_opaque",
     "payload_from_input",
     "validate_descriptor",
 ]

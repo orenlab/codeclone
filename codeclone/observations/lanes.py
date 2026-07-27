@@ -71,12 +71,16 @@ def _lane_payload(
     if name == "dead_code":
         return DeadCodeObservationPayload(candidates=facts.dead_code)
     if name == "risk_observations":
-        return IntegerObservationPayload(observations=facts.risk_observations)
+        return IntegerObservationPayload(
+            observations=facts.risk_observations,
+            entity_population=facts.risk_entity_population,
+        )
     if name == "adoption_counts":
         return AdoptionObservationPayload(counts=facts.adoption_counts)
     if name == "coupling_cohesion_observations":
         return IntegerObservationPayload(
-            observations=facts.coupling_cohesion_observations
+            observations=facts.coupling_cohesion_observations,
+            entity_population=facts.coupling_cohesion_entity_population,
         )
     if bundle.semantic is None:
         raise ObservationContractError(

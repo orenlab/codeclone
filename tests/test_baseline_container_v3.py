@@ -36,6 +36,7 @@ from codeclone.baseline.lanes import (
     BaselineLaneValidationError,
     descriptor_from_input,
     lane_from_input,
+    lane_payload_is_opaque,
     payload_from_input,
     validate_descriptor,
 )
@@ -65,6 +66,11 @@ from codeclone.models import (
 from codeclone.observability import bootstrap, operation, shutdown
 from codeclone.observations.lanes import build_observation_lanes
 from codeclone.observations.projection import build_observation_bundle
+from codeclone.report.gates.evaluator import (
+    GateState,
+    MetricGateConfig,
+    evaluate_gate_state,
+)
 from tests._ast_metrics_helpers import module_registry_context
 
 _SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
@@ -92,6 +98,7 @@ def _bundle() -> ObservationBundle:
         known_internal_modules=("pkg.hidden",),
     )[1]
     return build_observation_bundle(
+        scan_root=Path("."),
         module_registry=registry,
         function_clone_keys=(f"{'a' * 64}|0-19",),
         block_clone_keys=("|".join(("b" * 64,) * 4),),
@@ -854,13 +861,22 @@ def test_future_major_malformed_type_and_descriptor_taxonomy(
         for item in descriptors
     ]
     descriptor_document["observation_contract"] = contract
-    descriptor_path = tmp_path / "invalid-descriptor.json"
+    descriptor_path = tmp_path / "outdated-descriptor.json"
     descriptor_path.write_bytes(_authenticated_document(descriptor_document))
     descriptor_result = read_container_v3(
         descriptor_path,
         limit_bytes=descriptor_path.stat().st_size,
     )
-    _assert_read_failure(descriptor_result, "inconsistent_container")
+    # An artifact is read against its own recorded descriptors: a lane whose
+    # payload schema is not the current one is opaque, not a read failure.
+    assert isinstance(descriptor_result, ContainerReadSuccess)
+    outdated = descriptor_result.container.lanes["api_surface"]
+    assert lane_payload_is_opaque(outdated)
+    assert all(
+        not lane_payload_is_opaque(lane)
+        for name, lane in descriptor_result.container.lanes.items()
+        if name != "api_surface"
+    )
 
 
 def test_reader_handles_transition_and_rejects_format_and_generator(
@@ -1300,6 +1316,19 @@ def test_container_domain_models_reject_invalid_closed_invariants(
         )
 
     valid_function_id = f"{'a' * 64}|0-19"
+    with pytest.raises(ValueError, match="entity populations must be non-negative"):
+        StructuralObservationFacts(
+            function_clone_keys=(),
+            block_clone_keys=(),
+            dependencies=(),
+            api_surface=(),
+            dead_code=(),
+            risk_observations=(),
+            risk_entity_population=-1,
+            adoption_counts=(),
+            coupling_cohesion_observations=(),
+            coupling_cohesion_entity_population=0,
+        )
     with pytest.raises(ValueError, match="sorted and unique"):
         StructuralObservationFacts(
             function_clone_keys=(valid_function_id, valid_function_id),
@@ -1308,8 +1337,10 @@ def test_container_domain_models_reject_invalid_closed_invariants(
             api_surface=(),
             dead_code=(),
             risk_observations=(),
+            risk_entity_population=0,
             adoption_counts=(),
             coupling_cohesion_observations=(),
+            coupling_cohesion_entity_population=0,
         )
 
     with pytest.raises(ValueError):
@@ -1460,3 +1491,58 @@ def test_reader_has_no_legacy_or_persisted_trust_path() -> None:
     assert "hashlib" not in sources["container_trust.py"]
     assert "hashlib" not in sources["lanes.py"]
     assert sources["container_digest.py"].count("import hashlib") == 1
+
+
+def test_outdated_lane_stays_opaque_trusted_bytes_and_still_fails_the_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The B+ chain: outdated schema → opaque → unavailable → exit 2."""
+
+    container = _container(monkeypatch)
+    old_lane = container.lanes["risk_observations"]
+    outdated_descriptor = replace(old_lane.descriptor, payload_schema="1")
+    outdated_lane = replace(old_lane, descriptor=outdated_descriptor, payload={})
+    outdated_lane = replace(outdated_lane, digest=compute_lane_digest(outdated_lane))
+    changed = _replace_lane(container, "risk_observations", outdated_lane)
+    changed = replace(
+        changed,
+        meta=replace(changed.meta, root_digest=compute_root_digest(changed)),
+    )
+    runtime = RuntimeContracts(
+        python_tag="cp314",
+        baseline_scope_id=_SCOPE_ID,
+        lane_descriptors=container.observation_contract.descriptors,
+    )
+
+    # The lane is opaque, its bytes still authenticate, and the root holds.
+    assert lane_payload_is_opaque(changed.lanes["risk_observations"])
+    vector = evaluate_lane_trust(changed, runtime)
+    assert vector.root_verified
+    states = {item.name: (item.status, item.reason) for item in vector.lanes}
+    assert states["risk_observations"] == ("unavailable", "payload_schema_outdated")
+    # Every other lane keeps comparing.
+    assert all(
+        state == ("trusted", "compatible")
+        for name, state in states.items()
+        if name != "risk_observations"
+    )
+
+    # A requested gate that needs the opaque lane still exits 2 — no weakening.
+    result = evaluate_gate_state(
+        state=GateState(),
+        config=MetricGateConfig(
+            fail_complexity=-1,
+            fail_coupling=-1,
+            fail_cohesion=-1,
+            fail_cycles=False,
+            fail_dead_code=False,
+            fail_health=-1,
+            fail_on_new_metrics=True,
+            fail_on_new=False,
+        ),
+        lane_trust={name: status for name, (status, _reason) in states.items()},
+        enabled_lanes=tuple(changed.lanes),
+    )
+    assert result.exit_code == 2
+    assert "risk_observations" in result.unavailable_lanes
+    assert "lane:unavailable:risk_observations" in result.reasons

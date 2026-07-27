@@ -4,11 +4,11 @@
     "api_surface": "31bcc921a45958b1ecc6d836cc871d91c65fa49f4c0f98e8d6a3ca42dd406be8",
     "clones.blocks": "d1d94df3154c7f4b14432f453afa74ce14aa7701b9a116bf0a16ff06bb863497",
     "clones.functions": "1dda12bfdc46314ed6aff588c6364551b98e3eef3660089582e5869f71a253a0",
-    "coupling_cohesion_observations": "01f0f3aafdc2ef11ab6b475011c91e7efcee6cb6368ed0fddc1392c5f5ac8f18",
+    "coupling_cohesion_observations": "c91258ca8df72dde22f0f05524cc34d6f9fd43b96623905ac7f7212bfc286b13",
     "dead_code": "18ad3e620865923014b8e3d20233ba73ebfacc9ea343b35d6547ced98a294575",
     "dependencies": "579b4d5d97d6d1b607b3f1bddacdfb1b7485a7320b0d3c19fa7552bb1e097f93",
     "module_identity": "00c6d0f3edebfd8fe9552b6a432e28239b8d3b2b0419a8a41581841ccb5e7f7e",
-    "risk_observations": "a552bb32023cebd9ce57a2564c78f9554e64736f426fb7dd9df18b9b3e4bf33a"
+    "risk_observations": "c1897eda9d93fbd44f97849ba5a521065374c65f32b78c4ebb508ad079522b4a"
   },
-  "root": "6b83167a47726b8f969b65fe6d245713fd74f4001a4bec0775527b0f3b8d51fc"
+  "root": "29d709c53aee7d595ccf1503ee2af9f9d520fd7446bbee6e9007996ba825ff70"
 }

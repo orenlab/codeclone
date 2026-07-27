@@ -1670,16 +1670,21 @@ class DeadCodeObservation:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IntegerObservation:
-    entity: str
+    source: ResolvedSourceIdentity
+    qualname: str
     dimension: str
     numerator: int
-    denominator: int | None
 
     def __post_init__(self) -> None:
         if self.numerator < 0:
             raise ValueError("observation numerators must be non-negative")
-        if self.denominator is not None and self.denominator <= 0:
-            raise ValueError("observation denominators must be positive")
+        path = self.source.file.path
+        if not path or path.startswith("/"):
+            raise ValueError("observation source paths must be repository-relative")
+        if not self.qualname:
+            raise ValueError("observation qualnames must be non-empty")
+        if ":" in self.qualname:
+            raise ValueError("observation qualnames must not be glued identities")
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1731,10 +1736,17 @@ class StructuralObservationFacts:
     api_surface: tuple[ApiSymbolObservation, ...]
     dead_code: tuple[DeadCodeObservation, ...]
     risk_observations: tuple[IntegerObservation, ...]
+    risk_entity_population: int
     adoption_counts: tuple[AdoptionCount, ...]
     coupling_cohesion_observations: tuple[IntegerObservation, ...]
+    coupling_cohesion_entity_population: int
 
     def __post_init__(self) -> None:
+        if (
+            self.risk_entity_population < 0
+            or self.coupling_cohesion_entity_population < 0
+        ):
+            raise ValueError("observation entity populations must be non-negative")
         for keys in (self.function_clone_keys, self.block_clone_keys):
             if keys != tuple(sorted(set(keys))):
                 raise ValueError("clone observation keys must be sorted and unique")
@@ -1782,6 +1794,20 @@ class DeadCodeObservationPayload:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class IntegerObservationPayload:
     observations: tuple[IntegerObservation, ...]
+    entity_population: int
+
+    def __post_init__(self) -> None:
+        if self.entity_population < 0:
+            raise ValueError("observation entity population must be non-negative")
+        rows_per_dimension: dict[str, int] = {}
+        for item in self.observations:
+            rows_per_dimension[item.dimension] = (
+                rows_per_dimension.get(item.dimension, 0) + 1
+            )
+        if any(count > self.entity_population for count in rows_per_dimension.values()):
+            raise ValueError(
+                "observation rows per dimension cannot exceed the entity population"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1920,6 +1946,7 @@ LaneTrustReason = Literal[
     "descriptor_version",
     "lane_digest_mismatch",
     "payload_schema",
+    "payload_schema_outdated",
     "python_tag",
     "required_contract",
     "root_digest_mismatch",
@@ -2028,6 +2055,12 @@ class ContractIndex(Mapping[str, str]):
         return len(self.rows)
 
 
+# A lane whose recorded payload schema is not the current one stays opaque: the
+# bytes remain authenticated by the lane digest, but they are never parsed into
+# a model that no longer describes them.
+OpaqueLanePayload = dict[str, JsonValue]
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class BaselineLane:
     name: ObservationLaneName
@@ -2044,6 +2077,7 @@ class BaselineLane:
         | IntegerObservationPayload
         | AdoptionObservationPayload
         | SemanticAuthorityObservationPayload
+        | OpaqueLanePayload
     )
 
     def __post_init__(self) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import replace
+from pathlib import Path
 
 import orjson
 import pytest
@@ -21,9 +22,12 @@ from codeclone.models import (
     DeadCodeObservation,
     DigestObject,
     EvaluationContract,
+    FileIdentity,
     IntegerObservation,
+    IntegerObservationPayload,
     ModuleDep,
     ModuleRegistryHandle,
+    ResolvedSourceIdentity,
 )
 from codeclone.observations.contracts import (
     ObservationContractError,
@@ -44,7 +48,9 @@ def _registry() -> ModuleRegistryHandle:
     )[1]
 
 
-TEST_OBSERVATION_BUNDLE = build_observation_bundle(module_registry=_registry())
+TEST_OBSERVATION_BUNDLE = build_observation_bundle(
+    scan_root=Path("."), module_registry=_registry()
+)
 
 _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
     "adoption_counts": (
@@ -55,16 +61,19 @@ _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
     "clones.functions": (
         "7f87a5ec435e59c109da4cdf8eaf57441795e48a3d6431dfae3abb874c9f9c23"
     ),
-    "coupling_cohesion_observations": (
-        "4e12a7194990b24db7f494bb8b2ca0ae752fda85eaec81f89696649253cd2cbe"
-    ),
     "dead_code": "845f17059d61b386e07822620c6f5387e37f52a1192a0471ce85d245d81564d8",
     "dependencies": "cf680b2291c90af360cf33045736d00cb5cd2e47d6f2446ca28abb6f843e272c",
-    "risk_observations": (
-        "33ae8dc7727ede84f90673aac6e9ae04dfee8c2508a602c34546079a5140416c"
-    ),
     "semantic_authority": (
         "af551458e4577c554d38b66386ccf53ea0cdd7dd6dae0327203a24aa60acac68"
+    ),
+}
+# 39U bumped exactly these two lanes to payload schema "2".
+_BUMPED_DESCRIPTOR_DIGESTS = {
+    "coupling_cohesion_observations": (
+        "157ae814a6f05b33b6181bfc409f4ef31f4e13832dceb0ea044fb75fa869dca2"
+    ),
+    "risk_observations": (
+        "b40b0d362f530b2006393558ae770d82926e03484aef14b773bc4cd4b8022aa4"
     ),
 }
 
@@ -76,6 +85,7 @@ def _descriptor_digest(descriptor: object) -> str:
 
 def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
     bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         collect_api_surface=False,
     )
@@ -90,7 +100,9 @@ def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
     )
 
 
-def test_only_module_identity_advances_its_payload_schema() -> None:
+def test_only_the_two_infected_lanes_and_module_identity_advance_payload_schema() -> (
+    None
+):
     contract = build_observation_contract(
         collect_metrics=True,
         collect_dependencies=True,
@@ -99,19 +111,30 @@ def test_only_module_identity_advances_its_payload_schema() -> None:
         collect_semantic_authority=True,
     )
     descriptors = {descriptor.name: descriptor for descriptor in contract.descriptors}
-    module_identity = descriptors.pop("module_identity")
 
-    assert module_identity.payload_schema == "2"
+    assert {
+        name
+        for name, descriptor in descriptors.items()
+        if descriptor.payload_schema == "2"
+    } == {"coupling_cohesion_observations", "module_identity", "risk_observations"}
+
+    module_identity = descriptors.pop("module_identity")
     assert _descriptor_digest(replace(module_identity, payload_schema="1")) == (
         "85ccbadac461be9e606b4d76c3e1ec52a56adf1cbaaa61d4ade0deee1659c3b6"
     )
+    bumped = {
+        name: _descriptor_digest(descriptors.pop(name))
+        for name in ("coupling_cohesion_observations", "risk_observations")
+    }
+    assert bumped == _BUMPED_DESCRIPTOR_DIGESTS
+    assert {descriptor.payload_schema for descriptor in descriptors.values()} == {"1"}
     assert {
         name: _descriptor_digest(descriptor) for name, descriptor in descriptors.items()
     } == _ACCEPTED_V1_DESCRIPTOR_DIGESTS
 
 
 def test_missing_emitted_lane_is_a_typed_contract_failure() -> None:
-    bundle = build_observation_bundle(module_registry=_registry())
+    bundle = build_observation_bundle(scan_root=Path("."), module_registry=_registry())
     lanes = build_observation_lanes(bundle)
 
     with pytest.raises(ObservationContractError, match="missing="):
@@ -119,7 +142,7 @@ def test_missing_emitted_lane_is_a_typed_contract_failure() -> None:
 
 
 def test_evaluation_contract_cannot_change_observation_identity() -> None:
-    bundle = build_observation_bundle(module_registry=_registry())
+    bundle = build_observation_bundle(scan_root=Path("."), module_registry=_registry())
     before = EvaluationContract(
         health_algorithm_revision="1",
         gate_algorithm_revision="1",
@@ -163,11 +186,13 @@ def test_observation_bundle_digest_is_input_order_independent() -> None:
     block_c = "|".join(("c" * 64, "1" * 64, "2" * 64, "3" * 64))
     block_d = "|".join(("d" * 64, "4" * 64, "5" * 64, "6" * 64))
     first = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         function_clone_keys=(function_b, function_a),
         block_clone_keys=(block_d, block_c),
     )
     second = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         function_clone_keys=(function_a, function_b),
         block_clone_keys=(block_c, block_d),
@@ -258,19 +283,54 @@ def test_observation_models_reject_invalid_counts_and_evaluation_contracts() -> 
             runtime_marker_count=0,
             source_markers=(("z", "1"), ("a", "1")),
         )
+    source = ResolvedSourceIdentity(
+        file=FileIdentity(path="pkg/mod.py"),
+        python_module=None,
+    )
     with pytest.raises(ValueError, match="numerators"):
         IntegerObservation(
-            entity="pkg.mod:run",
+            source=source,
+            qualname="run",
             dimension="risk",
             numerator=-1,
-            denominator=None,
         )
-    with pytest.raises(ValueError, match="denominators"):
+    with pytest.raises(ValueError, match="repository-relative"):
         IntegerObservation(
-            entity="pkg.mod:run",
+            source=ResolvedSourceIdentity(
+                file=FileIdentity(path="/abs/pkg/mod.py"),
+                python_module=None,
+            ),
+            qualname="run",
             dimension="risk",
-            numerator=0,
-            denominator=0,
+            numerator=1,
+        )
+    with pytest.raises(ValueError, match="glued identities"):
+        IntegerObservation(
+            source=source,
+            qualname="pkg.mod:run",
+            dimension="risk",
+            numerator=1,
+        )
+    with pytest.raises(ValueError, match="non-empty"):
+        IntegerObservation(
+            source=source,
+            qualname="",
+            dimension="risk",
+            numerator=1,
+        )
+    with pytest.raises(ValueError, match="entity population must be non-negative"):
+        IntegerObservationPayload(observations=(), entity_population=-1)
+    with pytest.raises(ValueError, match="entity population"):
+        IntegerObservationPayload(
+            observations=(
+                IntegerObservation(
+                    source=source,
+                    qualname="run",
+                    dimension="risk",
+                    numerator=1,
+                ),
+            ),
+            entity_population=0,
         )
     with pytest.raises(ValueError, match="non-negative/positive"):
         AdoptionCount(scope="pkg.mod", feature="typing", numerator=0, denominator=0)
@@ -314,6 +374,7 @@ def test_dependency_sources_resolve_by_path_or_fail_typed() -> None:
         candidate_targets=("pkg.dep",),
     )
     bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         module_deps=(path_dependency,),
     )
@@ -321,6 +382,7 @@ def test_dependency_sources_resolve_by_path_or_fail_typed() -> None:
 
     with pytest.raises(ObservationContractError, match="dependency source"):
         build_observation_bundle(
+            scan_root=Path("."),
             module_registry=_registry(),
             module_deps=(replace(path_dependency, source="missing.py"),),
         )
@@ -331,3 +393,21 @@ def test_duplicate_emitted_lanes_are_a_typed_contract_failure() -> None:
     lanes = build_observation_lanes(bundle)
     with pytest.raises(ObservationContractError, match="sorted and duplicate-free"):
         validate_emitted_lanes(bundle.contract, (lanes[0], lanes[0]))
+
+
+def test_observation_sources_must_exist_in_the_module_registry() -> None:
+    with pytest.raises(
+        ObservationContractError, match="absent from the module registry"
+    ):
+        build_observation_bundle(
+            scan_root=Path("."),
+            module_registry=_registry(),
+            units=(
+                {
+                    "filepath": "pkg/ghost.py",
+                    "qualname": "pkg.ghost:run",
+                    "cyclomatic_complexity": 1,
+                    "nesting_depth": 0,
+                },
+            ),
+        )

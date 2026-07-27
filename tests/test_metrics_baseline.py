@@ -25,6 +25,7 @@ from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     ApiSurfaceObservationPayload,
     ApiSymbolObservation,
+    ClassMetrics,
     ContainerInspectionResult,
     DeadItem,
     DigestObject,
@@ -52,6 +53,7 @@ def _bundle() -> ObservationBundle:
         module_name="pkg.mod",
     )[1]
     return build_observation_bundle(
+        scan_root=Path("."),
         module_registry=registry,
         function_clone_keys=(f"{'a' * 64}|0-19",),
         block_clone_keys=("|".join(("b" * 64,) * 4),),
@@ -336,8 +338,7 @@ def test_metrics_baseline_fallback_projections_remain_typed(
     assert diff.new_high_risk_functions == ("pkg.mod:hot",)
 
     container = build_container(_bundle(), _SCOPE_ID)
-    assert metrics_mod._integer_rows(container, "dependencies") == ()
-    assert metrics_mod._qualname("plain") == "plain"
+    assert metrics_mod._integer_lane(container, "dependencies") == ((), 0)
     assert (
         container_trust_mod.map_container_read_failure(
             "lane_digest_mismatch",
@@ -366,6 +367,7 @@ def test_metrics_baseline_fallback_projections_remain_typed(
         module_name="pkg.mod",
     )[1]
     limited_bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=registry,
         collect_dependencies=False,
         collect_api_surface=False,
@@ -481,3 +483,85 @@ def test_metrics_baseline_required_contract_reason_is_schema_mismatch(
             baseline_scope_id=_SCOPE_ID,
         )
     assert python_error.value.status == MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
+
+
+def _class_metric(qualname: str, *, cbo: int, lcom4: int, methods: int) -> ClassMetrics:
+    return ClassMetrics(
+        qualname=qualname,
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=9,
+        cbo=cbo,
+        lcom4=lcom4,
+        method_count=methods,
+        instance_var_count=0,
+        risk_coupling="low",
+        risk_cohesion="low",
+    )
+
+
+def test_lane_averages_over_entity_population_equal_the_pre_39u_row_averages() -> None:
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    units = (
+        {
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:flat",
+            "cyclomatic_complexity": 3,
+            "nesting_depth": 0,
+        },
+        {
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:deep",
+            "cyclomatic_complexity": 7,
+            "nesting_depth": 2,
+        },
+    )
+    class_metrics = (
+        _class_metric("pkg.mod:Lonely", cbo=0, lcom4=1, methods=0),
+        _class_metric("pkg.mod:Coupled", cbo=4, lcom4=3, methods=2),
+    )
+    container = build_container(
+        build_observation_bundle(
+            scan_root=Path("."),
+            module_registry=registry,
+            units=units,
+            class_metrics=class_metrics,
+        ),
+        _SCOPE_ID,
+    )
+
+    risk_rows, risk_population = metrics_mod._integer_lane(
+        container, "risk_observations"
+    )
+    class_rows, class_population = metrics_mod._integer_lane(
+        container, "coupling_cohesion_observations"
+    )
+    rows = risk_rows + class_rows
+
+    # The population is the observed entity count, never the surviving-row count.
+    assert (risk_population, class_population) == (len(units), len(class_metrics))
+    # Absence-is-zero: no row observes nothing, and the zero-valued ones are gone.
+    assert all(value for _qualname, _dimension, value in rows)
+    assert len(risk_rows) == 3
+    assert len(class_rows) == 4
+    # Identity is structured: the consumer reads bare qualnames, never glued strings.
+    assert {qualname for qualname, _dimension, _value in rows} == {
+        "flat",
+        "deep",
+        "Lonely",
+        "Coupled",
+    }
+
+    for dimension, population, pre_39u_values in (
+        ("cyclomatic_complexity", risk_population, (3, 7)),
+        ("nesting_depth", risk_population, (0, 2)),
+        ("cbo", class_population, (0, 4)),
+        ("lcom4", class_population, (1, 3)),
+    ):
+        surviving = tuple(value for _qualname, name, value in rows if name == dimension)
+        assert metrics_mod._average(surviving, population) == sum(pre_39u_values) / len(
+            pre_39u_values
+        )

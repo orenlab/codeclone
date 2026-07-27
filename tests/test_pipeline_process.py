@@ -358,6 +358,7 @@ def _dependency_lane_bytes(
     discovery: DiscoveryResult,
 ) -> bytes:
     bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=discovery.module_registry,
         module_deps=result.module_deps,
         collect_metrics=False,

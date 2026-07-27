@@ -41,6 +41,13 @@ _METRICS_ENABLED: tuple[ObservationLaneName, ...] = (
     "coupling_cohesion_observations",
     "risk_observations",
 )
+_PAYLOAD_SCHEMA_2: frozenset[ObservationLaneName] = frozenset(
+    {
+        "coupling_cohesion_observations",
+        "module_identity",
+        "risk_observations",
+    }
+)
 
 
 def _required_contracts(name: ObservationLaneName) -> tuple[tuple[str, str], ...]:
@@ -69,11 +76,17 @@ def _algorithm_revision(name: ObservationLaneName) -> str:
     return OBSERVATION_DIGEST_VERSION
 
 
+def lane_payload_schema(name: ObservationLaneName) -> str:
+    """Return the per-lane payload schema version — the sole owner of that fact."""
+
+    return "2" if name in _PAYLOAD_SCHEMA_2 else "1"
+
+
 def _descriptor(name: ObservationLaneName) -> ObservationLaneDescriptor:
     return ObservationLaneDescriptor(
         name=name,
         descriptor_version=BASELINE_LANE_DESCRIPTOR_VERSION,
-        payload_schema="2" if name == "module_identity" else "1",
+        payload_schema=lane_payload_schema(name),
         algorithm_revision=_algorithm_revision(name),
         canonicalization_version=WIRE_VERSION,
         required_contracts=_required_contracts(name),
@@ -129,5 +142,6 @@ def validate_emitted_lanes(
 __all__ = [
     "ObservationContractError",
     "build_observation_contract",
+    "lane_payload_schema",
     "validate_emitted_lanes",
 ]

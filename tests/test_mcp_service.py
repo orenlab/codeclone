@@ -4152,6 +4152,12 @@ def test_mcp_service_production_triage_decorates_only_returned_hotspots(
 
 def test_mcp_service_run_store_evicts_old_runs(tmp_path: Path) -> None:
     first_root, second_root = _two_clone_fixture_roots(tmp_path)
+    # Identical trees now hash identically whatever the directory is named, so the
+    # two runs must differ by content for eviction to be observable at all.
+    second_root.joinpath("pkg", "extra.py").write_text(
+        "def gamma(value: int) -> int:\n    return value * 2\n",
+        "utf-8",
+    )
     service = CodeCloneMCPService(history_limit=1)
 
     first = service.analyze_repository(

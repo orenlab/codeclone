@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 from collections import Counter
 from collections.abc import Sequence
+from pathlib import Path
 
 import orjson
 
@@ -37,10 +38,35 @@ from ..models import (
     SemanticAuthorityResult,
     StructuralObservationFacts,
 )
+from ..paths.module_identity import repository_relative_path
 from ..utils.coerce import as_int, as_str
 from .contracts import ObservationContractError, build_observation_contract
 
 _OBSERVATION_DIGEST_DOMAIN = b"codeclone.source-observations.v1\x00"
+
+
+def _observation_source(
+    filepath: str,
+    registry: ModuleRegistryHandle,
+    scan_root: Path,
+) -> ResolvedSourceIdentity:
+    relative = repository_relative_path(root=scan_root, path=Path(filepath))
+    entry = registry.entries_by_path.get(relative)
+    if entry is None:
+        raise ObservationContractError(
+            f"observation source is absent from the module registry: {relative}"
+        )
+    return entry.identity
+
+
+def _bare_qualname(qualname: str) -> str:
+    """Split the producer-glued ``module:qualname`` — the sole split site."""
+
+    return qualname.rsplit(":", 1)[-1]
+
+
+def _integer_observation_sort_key(row: IntegerObservation) -> tuple[str, str, str]:
+    return (row.source.file.path, row.qualname, row.dimension)
 
 
 def _source_identity(
@@ -171,27 +197,26 @@ def _dead_code_observations(
 
 def _risk_observations(
     units: Sequence[GroupItemLike],
+    registry: ModuleRegistryHandle,
+    scan_root: Path,
 ) -> tuple[IntegerObservation, ...]:
     rows: list[IntegerObservation] = []
     for unit in units:
-        entity = f"{as_str(unit.get('filepath'))}:{as_str(unit.get('qualname'))}"
-        rows.extend(
-            (
+        source = _observation_source(as_str(unit.get("filepath")), registry, scan_root)
+        qualname = _bare_qualname(as_str(unit.get("qualname")))
+        for dimension in ("cyclomatic_complexity", "nesting_depth"):
+            numerator = max(0, as_int(unit.get(dimension)))
+            if not numerator:
+                continue
+            rows.append(
                 IntegerObservation(
-                    entity=entity,
-                    dimension="cyclomatic_complexity",
-                    numerator=max(0, as_int(unit.get("cyclomatic_complexity"))),
-                    denominator=None,
-                ),
-                IntegerObservation(
-                    entity=entity,
-                    dimension="nesting_depth",
-                    numerator=max(0, as_int(unit.get("nesting_depth"))),
-                    denominator=None,
-                ),
+                    source=source,
+                    qualname=qualname,
+                    dimension=dimension,
+                    numerator=numerator,
+                )
             )
-        )
-    return tuple(sorted(rows, key=lambda row: (row.entity, row.dimension)))
+    return tuple(sorted(rows, key=_integer_observation_sort_key))
 
 
 def _adoption_counts(
@@ -234,39 +259,30 @@ def _adoption_counts(
 
 def _coupling_cohesion_observations(
     class_metrics: Sequence[ClassMetrics],
+    registry: ModuleRegistryHandle,
+    scan_root: Path,
 ) -> tuple[IntegerObservation, ...]:
     rows: list[IntegerObservation] = []
     for item in class_metrics:
-        entity = f"{item.filepath}:{item.qualname}"
-        rows.extend(
-            (
+        source = _observation_source(item.filepath, registry, scan_root)
+        qualname = _bare_qualname(item.qualname)
+        for dimension, numerator in (
+            ("cbo", item.cbo),
+            ("lcom4", item.lcom4),
+            ("methods", item.method_count),
+            ("instance_variables", item.instance_var_count),
+        ):
+            if not numerator:
+                continue
+            rows.append(
                 IntegerObservation(
-                    entity=entity,
-                    dimension="cbo",
-                    numerator=item.cbo,
-                    denominator=None,
-                ),
-                IntegerObservation(
-                    entity=entity,
-                    dimension="lcom4",
-                    numerator=item.lcom4,
-                    denominator=None,
-                ),
-                IntegerObservation(
-                    entity=entity,
-                    dimension="methods",
-                    numerator=item.method_count,
-                    denominator=None,
-                ),
-                IntegerObservation(
-                    entity=entity,
-                    dimension="instance_variables",
-                    numerator=item.instance_var_count,
-                    denominator=None,
-                ),
+                    source=source,
+                    qualname=qualname,
+                    dimension=dimension,
+                    numerator=numerator,
+                )
             )
-        )
-    return tuple(sorted(rows, key=lambda row: (row.entity, row.dimension)))
+    return tuple(sorted(rows, key=_integer_observation_sort_key))
 
 
 def _observation_digest(
@@ -297,6 +313,7 @@ def _observation_digest(
 
 def build_observation_bundle(
     *,
+    scan_root: Path,
     module_registry: ModuleRegistryHandle,
     function_clone_keys: Sequence[str] = (),
     block_clone_keys: Sequence[str] = (),
@@ -346,14 +363,24 @@ def build_observation_bundle(
             if collect_dead_code
             else ()
         ),
-        risk_observations=(_risk_observations(units) if collect_metrics else ()),
+        risk_observations=(
+            _risk_observations(units, module_registry, scan_root)
+            if collect_metrics
+            else ()
+        ),
+        risk_entity_population=len(units) if collect_metrics else 0,
         adoption_counts=(
             _adoption_counts(typing_modules, docstring_modules)
             if collect_metrics
             else ()
         ),
         coupling_cohesion_observations=(
-            _coupling_cohesion_observations(class_metrics) if collect_metrics else ()
+            _coupling_cohesion_observations(class_metrics, module_registry, scan_root)
+            if collect_metrics
+            else ()
+        ),
+        coupling_cohesion_entity_population=(
+            len(class_metrics) if collect_metrics else 0
         ),
     )
     analysis_scope = tuple(

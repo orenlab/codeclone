@@ -69,7 +69,9 @@ def build_test_report_document(
         filepath="pkg/module.py",
         module_name="pkg.module",
     )
-    observation_bundle = build_observation_bundle(module_registry=registry)
+    observation_bundle = build_observation_bundle(
+        scan_root=Path("."), module_registry=registry
+    )
     gate_config = MetricGateConfig(
         fail_complexity=-1,
         fail_coupling=-1,
