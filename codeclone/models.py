@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Final, Literal, TypedDict
 from uuid import UUID
@@ -44,6 +44,11 @@ ModuleIdentityStrategy = ImportMountOrigin
 PythonModuleOrigin = Literal["import_mount"]
 PythonModuleNodeKind = Literal["module_file", "regular_package"]
 ModuleInternality = Literal["analyzed", "known_internal_not_analyzed"]
+ApiParameterKind = Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
+ApiSymbolKind = Literal["function", "class", "method", "constant"]
+ApiVisibility = Literal["all", "name"]
+ImportSyntaxKind = Literal["import", "from_import"]
+DeadCodeCandidateKind = Literal["function", "class", "method", "import"]
 DependencyResolution = Literal[
     "analyzed",
     "known_internal_not_analyzed",
@@ -296,6 +301,478 @@ class PythonModuleIdentity:
 class ResolvedSourceIdentity:
     file: FileIdentity
     python_module: PythonModuleIdentity | None
+
+
+def derive_python_module_identity(path: str) -> PythonModuleIdentity:
+    """Rebuild a module identity from its repository-relative path.
+
+    Sole owner of the derivation rule: everything except the path itself is a
+    function of the path, so the wire stores paths and exceptions only.
+    """
+
+    stem = path[:-3] if path.endswith(".py") else path
+    is_package = path.endswith("/__init__.py")
+    if is_package:
+        stem = stem[: -len("/__init__")]
+    module = stem.replace("/", ".")
+    return PythonModuleIdentity(
+        module=module,
+        package=module if is_package else module.rpartition(".")[0],
+        is_package=is_package,
+        mount_path=".",
+        origin="import_mount",
+        node_kind="regular_package" if is_package else "module_file",
+    )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ThinIdentityTable:
+    """Sorted paths plus the exceptions the derivation rule cannot produce."""
+
+    paths: tuple[str, ...]
+    module_null: tuple[int, ...] = ()
+    node_kind_exc: tuple[tuple[int, PythonModuleNodeKind], ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.paths != tuple(sorted(set(self.paths))):
+            raise ValueError("identity table paths must be sorted and unique")
+        if any(path.startswith("/") or not path for path in self.paths):
+            raise ValueError("identity table paths must be repository-relative")
+        _validate_ascending_indices(self.module_null, len(self.paths), "module_null")
+        _validate_ascending_indices(
+            tuple(index for index, _kind in self.node_kind_exc),
+            len(self.paths),
+            "node_kind_exc",
+        )
+        if set(self.module_null) & {index for index, _kind in self.node_kind_exc}:
+            raise ValueError("a null-module identity cannot carry a node kind")
+
+    def identity(self, index: int) -> ResolvedSourceIdentity:
+        path = self.paths[index]
+        if index in frozenset(self.module_null):
+            return ResolvedSourceIdentity(
+                file=FileIdentity(path=path), python_module=None
+            )
+        module = derive_python_module_identity(path)
+        for exception_index, kind in self.node_kind_exc:
+            if exception_index == index:
+                module = replace(
+                    module, node_kind=kind, is_package=kind == "regular_package"
+                )
+                break
+        return ResolvedSourceIdentity(
+            file=FileIdentity(path=path), python_module=module
+        )
+
+
+def _validate_ascending_indices(
+    indices: tuple[int, ...],
+    row_count: int,
+    label: str,
+) -> None:
+    if indices != tuple(sorted(set(indices))):
+        raise ValueError(f"{label} indices must be strictly ascending and unique")
+    if any(index < 0 or index >= row_count for index in indices):
+        raise ValueError(f"{label} indices must be inside the row range")
+
+
+def _validate_sorted_table(values: tuple[str, ...], label: str) -> None:
+    if values != tuple(sorted(set(values))):
+        raise ValueError(f"{label} table must be sorted and duplicate-free")
+
+
+def _validate_column_references(
+    column: tuple[int, ...],
+    table_size: int,
+    label: str,
+) -> None:
+    if any(index < 0 or index >= table_size for index in column):
+        raise ValueError(f"{label} column references a value outside its table")
+
+
+def _validate_equal_column_lengths(columns: dict[str, int]) -> int:
+    sizes = set(columns.values())
+    if len(sizes) != 1:
+        raise ValueError(f"columnar lane requires equal column lengths: {columns}")
+    return sizes.pop()
+
+
+def _validate_columnar_frame(
+    *,
+    tables: Mapping[str, tuple[str, ...]],
+    columns: Mapping[str, int],
+    references: Mapping[str, tuple[tuple[int, ...], int]],
+) -> int:
+    """Validate the shape shared by every columnar lane and return the row count."""
+
+    for label, values in tables.items():
+        _validate_sorted_table(values, label)
+    rows = _validate_equal_column_lengths(dict(columns))
+    for label, (column, size) in references.items():
+        _validate_column_references(column, size, label)
+    return rows
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AdoptionColumnarPayload:
+    """Wire form of the adoption lane (payload schema 2)."""
+
+    scopes: tuple[str, ...]
+    features: tuple[str, ...]
+    scope: tuple[int, ...]
+    feature: tuple[int, ...]
+    numerator: tuple[int, ...]
+    denominator: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        rows = _validate_columnar_frame(
+            tables={"scopes": self.scopes, "features": self.features},
+            columns={
+                "scope": len(self.scope),
+                "feature": len(self.feature),
+                "numerator": len(self.numerator),
+                "denominator": len(self.denominator),
+            },
+            references={
+                "scope": (self.scope, len(self.scopes)),
+                "feature": (self.feature, len(self.features)),
+            },
+        )
+        for row in range(rows):
+            if self.denominator[row] <= 0 or self.numerator[row] < 0:
+                raise ValueError("adoption counts require non-negative/positive values")
+            if self.numerator[row] > self.denominator[row]:
+                raise ValueError("adoption numerator cannot exceed denominator")
+        order = tuple(
+            (self.scopes[self.scope[row]], self.features[self.feature[row]])
+            for row in range(rows)
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("columnar rows must be sorted")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeadCodeMarkerException:
+    """One dead-code row whose runtime markers differ from the lane default."""
+
+    row: int
+    runtime_marker_count: int
+    source_markers: tuple[tuple[str, str], ...]
+
+    def __post_init__(self) -> None:
+        if self.runtime_marker_count < 0:
+            raise ValueError("dead-code observation counts must be non-negative")
+        if self.source_markers != tuple(sorted(set(self.source_markers))):
+            raise ValueError("dead-code source markers must be sorted and unique")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DeadCodeColumnarPayload:
+    """Wire form of the dead-code lane (payload schema 2)."""
+
+    prefixes: tuple[str, ...]
+    kinds: tuple[str, ...]
+    prefix: tuple[int, ...]
+    qualname: tuple[str, ...]
+    kind: tuple[int, ...]
+    reference_count: tuple[int, ...]
+    reachable_true: tuple[int, ...] = ()
+    markers: tuple[DeadCodeMarkerException, ...] = ()
+
+    def __post_init__(self) -> None:
+        rows = _validate_columnar_frame(
+            tables={"prefixes": self.prefixes, "kinds": self.kinds},
+            columns={
+                "prefix": len(self.prefix),
+                "qualname": len(self.qualname),
+                "kind": len(self.kind),
+                "reference_count": len(self.reference_count),
+            },
+            references={
+                "prefix": (self.prefix, len(self.prefixes)),
+                "kind": (self.kind, len(self.kinds)),
+            },
+        )
+        if any(value < 0 for value in self.reference_count):
+            raise ValueError("dead-code observation counts must be non-negative")
+        _validate_ascending_indices(self.reachable_true, rows, "reachable_true")
+        _validate_ascending_indices(
+            tuple(item.row for item in self.markers), rows, "markers"
+        )
+        order = tuple(
+            (
+                self.prefixes[self.prefix[row]],
+                self.qualname[row],
+                self.kinds[self.kind[row]],
+            )
+            for row in range(rows)
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("columnar rows must be sorted")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DigestMeta:
+    """The one algorithm/domain pair shared by every digest in a lane."""
+
+    algorithm: Literal["sha256"]
+    domain: DigestDomain
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApiParameterDef:
+    """One unique parameter definition referenced by the parameter-list table."""
+
+    name: str
+    kind: ApiParameterKind
+    has_default: bool
+    annotation_digest: int | None
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ApiSurfaceColumnarPayload:
+    """Wire form of the api-surface lane (payload schema 2)."""
+
+    identities: ThinIdentityTable
+    digests: tuple[str, ...]
+    digest_meta: DigestMeta | None
+    symbol_kinds: tuple[str, ...]
+    visibilities: tuple[str, ...]
+    parameter_defs: tuple[ApiParameterDef, ...]
+    parameter_lists: tuple[tuple[int, ...], ...]
+    owner: tuple[int, ...]
+    name: tuple[str, ...]
+    symbol_kind: tuple[int, ...]
+    visibility: tuple[int, ...]
+    returns_digest: tuple[int | None, ...]
+    parameters: tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if self.digests and self.digest_meta is None:
+            raise ValueError("digest values require their algorithm and domain")
+        _validate_sorted_table(self.digests, "digests")
+        _validate_sorted_table(self.symbol_kinds, "symbol_kinds")
+        _validate_sorted_table(self.visibilities, "visibilities")
+        rows = _validate_equal_column_lengths(
+            {
+                "owner": len(self.owner),
+                "name": len(self.name),
+                "symbol_kind": len(self.symbol_kind),
+                "visibility": len(self.visibility),
+                "returns_digest": len(self.returns_digest),
+                "parameters": len(self.parameters),
+            }
+        )
+        _validate_column_references(self.owner, len(self.identities.paths), "owner")
+        _validate_column_references(
+            self.symbol_kind, len(self.symbol_kinds), "symbol_kind"
+        )
+        _validate_column_references(
+            self.visibility, len(self.visibilities), "visibility"
+        )
+        _validate_column_references(
+            self.parameters, len(self.parameter_lists), "parameters"
+        )
+        _validate_column_references(
+            tuple(value for value in self.returns_digest if value is not None),
+            len(self.digests),
+            "returns_digest",
+        )
+        definition_keys = tuple(
+            (
+                item.name,
+                item.kind,
+                item.has_default,
+                -1 if item.annotation_digest is None else item.annotation_digest,
+            )
+            for item in self.parameter_defs
+        )
+        if definition_keys != tuple(sorted(set(definition_keys))):
+            raise ValueError("parameter_defs table must be sorted and duplicate-free")
+        _validate_column_references(
+            tuple(
+                item.annotation_digest
+                for item in self.parameter_defs
+                if item.annotation_digest is not None
+            ),
+            len(self.digests),
+            "annotation_digest",
+        )
+        if self.parameter_lists != tuple(sorted(set(self.parameter_lists))):
+            raise ValueError("parameter_lists table must be sorted and duplicate-free")
+        for definition_list in self.parameter_lists:
+            _validate_column_references(
+                definition_list, len(self.parameter_defs), "parameter_lists"
+            )
+        order = tuple(
+            (self.identities.paths[self.owner[row]], self.name[row])
+            for row in range(rows)
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("columnar rows must be sorted")
+
+
+def _null_first(value: str | None) -> tuple[int, str]:
+    """Total order over an optional string: null sorts before any value."""
+
+    return (0, "") if value is None else (1, value)
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DependencyColumnarPayload:
+    """Wire form of the dependency lane (payload schema 3)."""
+
+    identities: ThinIdentityTable
+    modules: tuple[str, ...]
+    resolutions: tuple[str, ...]
+    syntax_kinds: tuple[str, ...]
+    source: tuple[int, ...]
+    requested_module: tuple[int | None, ...]
+    requested_names: tuple[tuple[int, ...], ...]
+    resolution: tuple[int, ...]
+    resolved_target: tuple[int | None, ...]
+    syntax_kind: tuple[int, ...]
+    level: tuple[int, ...]
+    inventory_expansion: tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        _validate_sorted_table(self.modules, "modules")
+        _validate_sorted_table(self.resolutions, "resolutions")
+        _validate_sorted_table(self.syntax_kinds, "syntax_kinds")
+        rows = _validate_equal_column_lengths(
+            {
+                "source": len(self.source),
+                "requested_module": len(self.requested_module),
+                "requested_names": len(self.requested_names),
+                "resolution": len(self.resolution),
+                "resolved_target": len(self.resolved_target),
+                "syntax_kind": len(self.syntax_kind),
+                "level": len(self.level),
+            }
+        )
+        _validate_column_references(self.source, len(self.identities.paths), "source")
+        _validate_column_references(
+            self.resolution, len(self.resolutions), "resolution"
+        )
+        _validate_column_references(
+            self.syntax_kind, len(self.syntax_kinds), "syntax_kind"
+        )
+        for label, column in (
+            ("requested_module", self.requested_module),
+            ("resolved_target", self.resolved_target),
+        ):
+            _validate_column_references(
+                tuple(value for value in column if value is not None),
+                len(self.modules),
+                label,
+            )
+        for names in self.requested_names:
+            _validate_column_references(names, len(self.modules), "requested_names")
+        if any(value < 0 for value in self.level):
+            raise ValueError("dependency import level must be non-negative")
+        _validate_ascending_indices(
+            self.inventory_expansion, rows, "inventory_expansion"
+        )
+        order = tuple(
+            (
+                self.identities.paths[self.source[row]],
+                _null_first(
+                    None
+                    if (reference := self.requested_module[row]) is None
+                    else self.modules[reference]
+                ),
+                tuple(self.modules[name] for name in self.requested_names[row]),
+                self.syntax_kinds[self.syntax_kind[row]],
+                self.level[row],
+                self.resolutions[self.resolution[row]],
+                _null_first(
+                    None
+                    if (target := self.resolved_target[row]) is None
+                    else self.modules[target]
+                ),
+                row in frozenset(self.inventory_expansion),
+            )
+            for row in range(rows)
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("columnar rows must be sorted")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleEntryException:
+    """One registry entry whose analyzed state differs from the lane default."""
+
+    row: int
+    analyzed: bool
+    internality: ModuleInternality
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ModuleIdentityColumnarPayload:
+    """Wire form of the module-identity lane (payload schema 3)."""
+
+    identities: ThinIdentityTable
+    manifest: ModuleIdentityManifest
+    manifest_digest: DigestObject
+    registry_digest: DigestObject
+    package_prefixes: tuple[PackagePrefix, ...]
+    other: tuple[ModuleEntryException, ...] = ()
+
+    def __post_init__(self) -> None:
+        _validate_ascending_indices(
+            tuple(item.row for item in self.other), len(self.identities.paths), "other"
+        )
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class IntegerColumnarPayload:
+    """Wire form of the two integer observation lanes (payload schema 3)."""
+
+    identities: ThinIdentityTable
+    qualnames: tuple[str, ...]
+    dimensions: tuple[str, ...]
+    identity: tuple[int, ...]
+    qualname: tuple[int, ...]
+    dimension: tuple[int, ...]
+    numerator: tuple[int, ...]
+    entity_population: int
+
+    def __post_init__(self) -> None:
+        rows = _validate_columnar_frame(
+            tables={"qualnames": self.qualnames, "dimensions": self.dimensions},
+            columns={
+                "identity": len(self.identity),
+                "qualname": len(self.qualname),
+                "dimension": len(self.dimension),
+                "numerator": len(self.numerator),
+            },
+            references={
+                "identity": (self.identity, len(self.identities.paths)),
+                "qualname": (self.qualname, len(self.qualnames)),
+                "dimension": (self.dimension, len(self.dimensions)),
+            },
+        )
+        if any(value < 0 for value in self.numerator):
+            raise ValueError("observation numerators must be non-negative")
+        if self.entity_population < 0:
+            raise ValueError("observation entity population must be non-negative")
+        order = tuple(
+            (
+                self.identities.paths[self.identity[row]],
+                self.qualnames[self.qualname[row]],
+                self.dimensions[self.dimension[row]],
+            )
+            for row in range(rows)
+        )
+        if order != tuple(sorted(order)):
+            raise ValueError("columnar rows must be sorted")
+        counts: dict[int, int] = {}
+        for index in self.dimension:
+            counts[index] = counts.get(index, 0) + 1
+        if any(count > self.entity_population for count in counts.values()):
+            raise ValueError(
+                "observation rows per dimension cannot exceed the entity population"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1000,7 +1477,7 @@ class ModuleDep:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ImportObservation:
     source: ResolvedSourceIdentity
-    syntax_kind: Literal["import", "from_import"]
+    syntax_kind: ImportSyntaxKind
     level: int
     requested_module: str | None
     requested_names: tuple[str, ...]
@@ -1637,7 +2114,7 @@ class EvaluationContract:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ApiParameterObservation:
     name: str
-    kind: Literal["pos_only", "pos_or_kw", "vararg", "kw_only", "kwarg"]
+    kind: ApiParameterKind
     has_default: bool
     annotation_digest: DigestObject | None
 
@@ -1646,8 +2123,8 @@ class ApiParameterObservation:
 class ApiSymbolObservation:
     owner: ResolvedSourceIdentity
     symbol: str
-    symbol_kind: Literal["function", "class", "method", "constant"]
-    visibility: Literal["all", "name"]
+    symbol_kind: ApiSymbolKind
+    visibility: ApiVisibility
     parameters: tuple[ApiParameterObservation, ...]
     returns_digest: DigestObject | None
 
@@ -1655,7 +2132,7 @@ class ApiSymbolObservation:
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DeadCodeObservation:
     entity: str
-    candidate_kind: Literal["function", "class", "method", "import"]
+    candidate_kind: DeadCodeCandidateKind
     reference_count: int
     reachable: bool
     runtime_marker_count: int
@@ -1821,14 +2298,12 @@ class SemanticAuthorityObservationPayload:
 
 
 _CLONE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(CloneObservationPayload)
-_MODULE_IDENTITY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(
-    ModuleIdentityObservationPayload
-)
-_DEPENDENCY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(DependencyObservationPayload)
-_API_SURFACE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(ApiSurfaceObservationPayload)
-_DEAD_CODE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(DeadCodeObservationPayload)
-_INTEGER_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(IntegerObservationPayload)
-_ADOPTION_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(AdoptionObservationPayload)
+_ADOPTIONCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(AdoptionColumnarPayload)
+_APISURFACECOLUMNARPAYLOAD_ADAPTER = TypeAdapter(ApiSurfaceColumnarPayload)
+_DEADCODECOLUMNARPAYLOAD_ADAPTER = TypeAdapter(DeadCodeColumnarPayload)
+_DEPENDENCYCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(DependencyColumnarPayload)
+_INTEGERCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(IntegerColumnarPayload)
+_MODULEIDENTITYCOLUMNARPAYLOAD_ADAPTER = TypeAdapter(ModuleIdentityColumnarPayload)
 _SEMANTIC_AUTHORITY_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(
     SemanticAuthorityObservationPayload
 )
@@ -1838,36 +2313,30 @@ def parse_clone_observation_payload(value: object) -> CloneObservationPayload:
     return _CLONE_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
 
 
-def parse_module_identity_observation_payload(
+def parse_adoption_columnar_payload(value: object) -> AdoptionColumnarPayload:
+    return _ADOPTIONCOLUMNARPAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_api_surface_columnar_payload(value: object) -> ApiSurfaceColumnarPayload:
+    return _APISURFACECOLUMNARPAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_dead_code_columnar_payload(value: object) -> DeadCodeColumnarPayload:
+    return _DEADCODECOLUMNARPAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_dependency_columnar_payload(value: object) -> DependencyColumnarPayload:
+    return _DEPENDENCYCOLUMNARPAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_integer_columnar_payload(value: object) -> IntegerColumnarPayload:
+    return _INTEGERCOLUMNARPAYLOAD_ADAPTER.validate_python(value)
+
+
+def parse_module_identity_columnar_payload(
     value: object,
-) -> ModuleIdentityObservationPayload:
-    return _MODULE_IDENTITY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
-
-
-def parse_dependency_observation_payload(
-    value: object,
-) -> DependencyObservationPayload:
-    return _DEPENDENCY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
-
-
-def parse_api_surface_observation_payload(
-    value: object,
-) -> ApiSurfaceObservationPayload:
-    return _API_SURFACE_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
-
-
-def parse_dead_code_observation_payload(
-    value: object,
-) -> DeadCodeObservationPayload:
-    return _DEAD_CODE_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
-
-
-def parse_integer_observation_payload(value: object) -> IntegerObservationPayload:
-    return _INTEGER_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
-
-
-def parse_adoption_observation_payload(value: object) -> AdoptionObservationPayload:
-    return _ADOPTION_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
+) -> ModuleIdentityColumnarPayload:
+    return _MODULEIDENTITYCOLUMNARPAYLOAD_ADAPTER.validate_python(value)
 
 
 def parse_semantic_authority_observation_payload(
@@ -1876,19 +2345,24 @@ def parse_semantic_authority_observation_payload(
     return _SEMANTIC_AUTHORITY_OBSERVATION_PAYLOAD_ADAPTER.validate_python(value)
 
 
+# The closed set a lane payload may take on the wire: seven columnar forms, the
+# two record forms that stay, and the opaque form of an outdated lane.
+LanePayload = (
+    AdoptionColumnarPayload
+    | ApiSurfaceColumnarPayload
+    | CloneObservationPayload
+    | DeadCodeColumnarPayload
+    | DependencyColumnarPayload
+    | IntegerColumnarPayload
+    | ModuleIdentityColumnarPayload
+    | SemanticAuthorityObservationPayload
+)
+
+
 @dataclass(frozen=True, slots=True, kw_only=True)
 class ObservationLane:
     descriptor: ObservationLaneDescriptor
-    payload: (
-        CloneObservationPayload
-        | ModuleIdentityObservationPayload
-        | DependencyObservationPayload
-        | ApiSurfaceObservationPayload
-        | DeadCodeObservationPayload
-        | IntegerObservationPayload
-        | AdoptionObservationPayload
-        | SemanticAuthorityObservationPayload
-    )
+    payload: LanePayload
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2068,17 +2542,9 @@ class BaselineLane:
     descriptor: ObservationLaneDescriptor
     observation_digest: DigestObject
     digest: DigestObject
-    payload: (
-        CloneObservationPayload
-        | ModuleIdentityObservationPayload
-        | DependencyObservationPayload
-        | ApiSurfaceObservationPayload
-        | DeadCodeObservationPayload
-        | IntegerObservationPayload
-        | AdoptionObservationPayload
-        | SemanticAuthorityObservationPayload
-        | OpaqueLanePayload
-    )
+    # Only a lane read back from disk may be opaque: an outdated schema keeps
+    # its authenticated bytes instead of being parsed into a stale model.
+    payload: LanePayload | OpaqueLanePayload
 
     def __post_init__(self) -> None:
         if self.name != self.descriptor.name:

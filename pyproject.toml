@@ -217,7 +217,7 @@ omit = [
 [tool.codeclone]
 baseline = "codeclone.baseline.json"
 baseline_scope_id = "019f7fa1-8866-7242-b0bf-0ff282cafbcb"
-max_baseline_size_mb = 16
+max_baseline_size_mb = 3
 min_loc = 6
 min_stmt = 4
 fail_on_new = true

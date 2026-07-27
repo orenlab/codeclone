@@ -35,6 +35,7 @@ from ..models import (
     DigestObjectInput,
     EpochTransitionEvidence,
     EpochTransitionEvidenceInput,
+    ModuleIdentityColumnarPayload,
     ModuleIdentityObservationPayload,
     NativeSourceBinding,
     NativeSourceBindingInput,
@@ -54,6 +55,7 @@ from .container_digest import (
 from .lanes import (
     BaselineLaneValidationError,
     build_baseline_lane,
+    decode_module_identity_lane,
     descriptor_from_input,
     is_observation_lane_name,
     lane_from_input,
@@ -106,23 +108,30 @@ def _container_contracts(bundle: ObservationBundle) -> ContractIndex:
 
 def _module_identity_payload(
     container: BaselineContainerV3,
-) -> ModuleIdentityObservationPayload:
+) -> ModuleIdentityObservationPayload | None:
+    """Decode the module-identity lane, or report it as unreadable-by-schema.
+
+    An outdated lane is opaque by the per-lane schema contract: its bytes stay
+    authenticated, it is simply not parsable into today's models. That is a
+    trust state, not a container defect, so it is reported as absent here and
+    judged by lane trust.
+    """
+
     payload = container.lanes["module_identity"].payload
-    if not isinstance(payload, ModuleIdentityObservationPayload):
+    if isinstance(payload, dict):
+        return None
+    if not isinstance(payload, ModuleIdentityColumnarPayload):
         raise ValueError("module_identity lane has the wrong payload type")
-    return payload
+    # Decode-then-verify: the build path checks the lane it just encoded, so a
+    # publication is itself a round-trip proof for this lane.
+    return decode_module_identity_lane(payload)
 
 
 def _validate_container_consistency(container: BaselineContainerV3) -> None:
     module_identity = _module_identity_payload(container)
     source = container.source
-    if module_identity.manifest_digest != source.module_identity_manifest_digest:
-        raise ValueError("source manifest digest does not match module_identity")
-    if module_identity.registry_digest != source.module_registry_digest:
-        raise ValueError("source registry digest does not match module_identity")
-    actual_scope = compute_analysis_scope_digest(module_identity.module_registry)
-    if actual_scope != source.analysis_scope_digest:
-        raise ValueError("analysis scope digest does not match module_identity")
+    if module_identity is not None:
+        _validate_module_identity_consistency(module_identity, container)
     if any(
         lane.observation_digest != source.observation_digest
         for _name, lane in container.lanes.rows
@@ -135,6 +144,21 @@ def _validate_container_consistency(container: BaselineContainerV3) -> None:
         for key, value in descriptor.required_contracts:
             if container.contracts.get(key) != value:
                 raise ValueError(f"container contract {key} is inconsistent")
+
+
+def _validate_module_identity_consistency(
+    module_identity: ModuleIdentityObservationPayload,
+    container: BaselineContainerV3,
+) -> None:
+    source = container.source
+    if module_identity.manifest_digest != source.module_identity_manifest_digest:
+        raise ValueError("source manifest digest does not match module_identity")
+    if module_identity.registry_digest != source.module_registry_digest:
+        raise ValueError("source registry digest does not match module_identity")
+    if compute_analysis_scope_digest(module_identity.module_registry) != (
+        source.analysis_scope_digest
+    ):
+        raise ValueError("analysis scope digest does not match module_identity")
 
 
 def build_container(
@@ -158,11 +182,12 @@ def build_container(
             )
             for lane in observation_lanes
         )
-        module_payload = next(
+        module_wire = next(
             lane.payload for _name, lane in lanes if lane.name == "module_identity"
         )
-        if not isinstance(module_payload, ModuleIdentityObservationPayload):
+        if not isinstance(module_wire, ModuleIdentityColumnarPayload):
             raise ValueError("module_identity lane has the wrong payload type")
+        module_payload = decode_module_identity_lane(module_wire)
         analyzed_paths = tuple(
             sorted(
                 entry.identity.file.path

@@ -6,29 +6,55 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
+from typing import TypeVar
 
 import orjson
 import pytest
 
 import codeclone.observations.lanes as lanes_mod
+from codeclone.baseline.lanes import (
+    BaselineLaneValidationError,
+    decode_adoption_lane,
+    decode_api_surface_lane,
+    decode_dead_code_lane,
+    decode_dependency_lane,
+    decode_integer_lane,
+    decode_module_identity_lane,
+)
 from codeclone.models import (
+    AdoptionColumnarPayload,
+    ApiParameterDef,
     ApiParamSpec,
-    ApiSurfaceObservationPayload,
+    ApiSurfaceColumnarPayload,
+    ApiSymbolObservation,
     ClassMetrics,
     CloneObservationPayload,
     DeadCandidate,
-    IntegerObservationPayload,
+    DeadCodeColumnarPayload,
+    DeadCodeMarkerException,
+    DependencyColumnarPayload,
+    DigestObject,
+    FileIdentity,
+    IntegerColumnarPayload,
+    LanePayload,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
-    ModuleIdentityObservationPayload,
+    ModuleIdentityColumnarPayload,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
     ObservationBundle,
+    ObservationLaneName,
     PublicSymbol,
+    ResolvedSourceIdentity,
     RuntimeReachabilityFact,
+    ThinIdentityTable,
+    derive_python_module_identity,
 )
+from codeclone.observations.contracts import ObservationContractError
 from codeclone.observations.lanes import (
     build_observation_lanes,
     canonical_observation_lane_bytes,
@@ -177,8 +203,8 @@ def test_raw_lanes_are_closed_policy_free_and_component_structured() -> None:
 
     assert tuple(by_name) == tuple(sorted(by_name))
     api_payload = by_name["api_surface"].payload
-    assert isinstance(api_payload, ApiSurfaceObservationPayload)
-    symbol = api_payload.symbols[0]
+    assert isinstance(api_payload, ApiSurfaceColumnarPayload)
+    symbol = decode_api_surface_lane(api_payload).symbols[0]
     assert tuple(parameter.name for parameter in symbol.parameters) == (
         "left",
         "right",
@@ -211,14 +237,15 @@ def test_module_identity_lane_preserves_canonical_inventory_facts() -> None:
     lanes = {lane.descriptor.name: lane for lane in build_observation_lanes(bundle)}
     payload = lanes["module_identity"].payload
 
-    assert isinstance(payload, ModuleIdentityObservationPayload)
+    assert isinstance(payload, ModuleIdentityColumnarPayload)
+    decoded = decode_module_identity_lane(payload)
     assert payload.manifest_digest is registry.manifest_digest
     assert payload.manifest_digest != payload.registry_digest
-    assert payload.module_registry == tuple(
+    assert decoded.module_registry == tuple(
         entry for _path, entry in registry.entries_by_path.rows
     )
-    assert tuple(entry.analyzed for entry in payload.module_registry) == (False, True)
-    assert tuple(entry.internality for entry in payload.module_registry) == (
+    assert tuple(entry.analyzed for entry in decoded.module_registry) == (False, True)
+    assert tuple(entry.internality for entry in decoded.module_registry) == (
         "known_internal_not_analyzed",
         "analyzed",
     )
@@ -326,15 +353,470 @@ def test_zero_observations_are_absent_while_the_population_still_counts_them() -
 
     risk = lanes["risk_observations"].payload
     coupling = lanes["coupling_cohesion_observations"].payload
-    assert isinstance(risk, IntegerObservationPayload)
-    assert isinstance(coupling, IntegerObservationPayload)
+    assert isinstance(risk, IntegerColumnarPayload)
+    assert isinstance(coupling, IntegerColumnarPayload)
+    risk_rows = decode_integer_lane(risk)
+    coupling_rows = decode_integer_lane(coupling)
 
     # The zero-valued nesting_depth row is absent; the observed function still counts.
     assert tuple(
-        (item.qualname, item.dimension, item.numerator) for item in risk.observations
+        (item.qualname, item.dimension, item.numerator)
+        for item in risk_rows.observations
     ) == (("flat", "cyclomatic_complexity", 1),)
     assert risk.entity_population == 1
 
     # A class whose every dimension is zero emits nothing and stays in the population.
-    assert coupling.observations == ()
+    assert coupling_rows.observations == ()
     assert coupling.entity_population == 1
+
+
+def _columnar_bundle() -> ObservationBundle:
+    """A bundle whose seven columnar lanes all carry rows."""
+
+    return _bundle()
+
+
+def _lane_bytes(bundle: ObservationBundle) -> dict[str, bytes]:
+    return {
+        lane.descriptor.name: canonical_observation_lane_bytes(lane)
+        for lane in build_observation_lanes(bundle)
+    }
+
+
+def test_columnar_lanes_are_input_order_independent_and_stable() -> None:
+    bundle = _columnar_bundle()
+    facts = bundle.structural
+    reversed_bundle = replace(
+        bundle,
+        structural=replace(
+            facts,
+            dependencies=tuple(reversed(facts.dependencies)),
+            api_surface=tuple(reversed(facts.api_surface)),
+            dead_code=tuple(reversed(facts.dead_code)),
+            risk_observations=tuple(reversed(facts.risk_observations)),
+            adoption_counts=tuple(reversed(facts.adoption_counts)),
+            coupling_cohesion_observations=tuple(
+                reversed(facts.coupling_cohesion_observations)
+            ),
+        ),
+    )
+
+    first = _lane_bytes(bundle)
+    assert first == _lane_bytes(bundle)
+    assert first == _lane_bytes(reversed_bundle)
+
+
+_Payload = TypeVar("_Payload")
+
+
+def _payload(
+    lanes: Mapping[ObservationLaneName, LanePayload],
+    name: ObservationLaneName,
+    expected: type[_Payload],
+) -> _Payload:
+    """Fetch one lane payload already narrowed to its wire model."""
+
+    payload = lanes[name]
+    assert isinstance(payload, expected), name
+    return payload
+
+
+def test_columnar_lanes_round_trip_every_row_and_derive_every_identity() -> None:
+    lanes = {
+        lane.descriptor.name: lane.payload
+        for lane in build_observation_lanes(_columnar_bundle())
+    }
+    facts = _columnar_bundle().structural
+
+    risk = _payload(lanes, "risk_observations", IntegerColumnarPayload)
+    coupling = _payload(lanes, "coupling_cohesion_observations", IntegerColumnarPayload)
+    dead = _payload(lanes, "dead_code", DeadCodeColumnarPayload)
+    deps = _payload(lanes, "dependencies", DependencyColumnarPayload)
+    api = _payload(lanes, "api_surface", ApiSurfaceColumnarPayload)
+    adoption = _payload(lanes, "adoption_counts", AdoptionColumnarPayload)
+
+    assert sorted(decode_integer_lane(risk).observations, key=repr) == sorted(
+        facts.risk_observations, key=repr
+    )
+    assert sorted(decode_integer_lane(coupling).observations, key=repr) == sorted(
+        facts.coupling_cohesion_observations, key=repr
+    )
+    assert sorted(decode_dead_code_lane(dead).candidates, key=repr) == sorted(
+        facts.dead_code, key=repr
+    )
+    assert sorted(decode_dependency_lane(deps).observations, key=repr) == sorted(
+        facts.dependencies, key=repr
+    )
+    assert sorted(decode_api_surface_lane(api).symbols, key=repr) == sorted(
+        facts.api_surface, key=repr
+    )
+    assert sorted(decode_adoption_lane(adoption).counts, key=repr) == sorted(
+        facts.adoption_counts, key=repr
+    )
+
+    # The identity rule reproduces every recorded identity from its path alone.
+    for table in (
+        risk.identities,
+        coupling.identities,
+        deps.identities,
+        api.identities,
+    ):
+        for position, path in enumerate(table.paths):
+            assert table.identity(position).file.path == path
+
+    # The glued strings are rebuilt from their split components.
+    for row, symbol in enumerate(decode_api_surface_lane(api).symbols):
+        owner = symbol.owner.python_module
+        assert owner is not None
+        assert symbol.symbol == f"{owner.module}:{api.name[row]}"
+    for row, candidate in enumerate(decode_dead_code_lane(dead).candidates):
+        prefix = dead.prefixes[dead.prefix[row]]
+        assert candidate.entity == f"{prefix}:{dead.qualname[row]}"
+
+
+def _integer_payload(
+    *,
+    qualnames: tuple[str, ...] = ("run",),
+    dimensions: tuple[str, ...] = ("cbo",),
+    identity: tuple[int, ...] = (0,),
+    qualname: tuple[int, ...] = (0,),
+    dimension: tuple[int, ...] = (0,),
+    numerator: tuple[int, ...] = (1,),
+    entity_population: int = 1,
+) -> IntegerColumnarPayload:
+    return IntegerColumnarPayload(
+        identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+        qualnames=qualnames,
+        dimensions=dimensions,
+        identity=identity,
+        qualname=qualname,
+        dimension=dimension,
+        numerator=numerator,
+        entity_population=entity_population,
+    )
+
+
+def test_columnar_canonical_form_rejects_each_malformed_shape() -> None:
+    _integer_payload()
+
+    with pytest.raises(ValueError, match="sorted and duplicate-free"):
+        _integer_payload(qualnames=("run", "run"))
+    with pytest.raises(ValueError, match="sorted and duplicate-free"):
+        _integer_payload(dimensions=("lcom4", "cbo"))
+    with pytest.raises(ValueError, match="equal column lengths"):
+        _integer_payload(numerator=(1, 2))
+    with pytest.raises(ValueError, match="outside its table"):
+        _integer_payload(qualname=(7,))
+    with pytest.raises(ValueError, match="entity population"):
+        _integer_payload(entity_population=0)
+    with pytest.raises(ValueError, match="non-negative"):
+        _integer_payload(numerator=(-1,))
+    with pytest.raises(ValueError, match="must be sorted"):
+        _integer_payload(
+            qualnames=("alpha", "beta"),
+            qualname=(1, 0),
+            identity=(0, 0),
+            dimension=(0, 0),
+            numerator=(1, 1),
+            entity_population=2,
+        )
+    with pytest.raises(ValueError, match="strictly ascending"):
+        DeadCodeColumnarPayload(
+            prefixes=("pkg.mod",),
+            kinds=("function",),
+            prefix=(0, 0),
+            qualname=("a", "b"),
+            kind=(0, 0),
+            reference_count=(0, 0),
+            reachable_true=(1, 0),
+        )
+    with pytest.raises(ValueError, match="digest values require"):
+        ApiSurfaceColumnarPayload(
+            identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+            digests=("a" * 64,),
+            digest_meta=None,
+            symbol_kinds=("function",),
+            visibilities=("all",),
+            parameter_defs=(),
+            parameter_lists=((),),
+            owner=(0,),
+            name=("run",),
+            symbol_kind=(0,),
+            visibility=(0,),
+            returns_digest=(None,),
+            parameters=(0,),
+        )
+
+
+def _identity(path: str, *, module: str | None) -> ResolvedSourceIdentity:
+    return ResolvedSourceIdentity(
+        file=FileIdentity(path=path),
+        python_module=(
+            None
+            if module is None
+            else replace(derive_python_module_identity(path), module=module)
+        ),
+    )
+
+
+def test_identity_table_refuses_conflicting_and_unencodable_identities() -> None:
+    first = _identity("pkg/mod.py", module="pkg.mod")
+    second = _identity("pkg/mod.py", module=None)
+    with pytest.raises(ObservationContractError, match="conflicting identities"):
+        lanes_mod._identity_table([first, second])
+
+    # A module name the path cannot produce is a lossy encoding, not an exception.
+    with pytest.raises(ObservationContractError, match="cannot be encoded"):
+        lanes_mod._identity_table([_identity("pkg/mod.py", module="other.name")])
+
+
+def test_api_surface_lane_refuses_two_digest_domains() -> None:
+    owner = _identity("pkg/mod.py", module="pkg.mod")
+
+    def symbol(name: str, digest: DigestObject) -> ApiSymbolObservation:
+        return ApiSymbolObservation(
+            owner=owner,
+            symbol=f"pkg.mod:{name}",
+            symbol_kind="function",
+            visibility="all",
+            parameters=(),
+            returns_digest=digest,
+        )
+
+    symbols = (
+        symbol(
+            "alpha",
+            DigestObject(domain="ccapi1:sig", algorithm="sha256", value="a" * 64),
+        ),
+        symbol(
+            "beta",
+            DigestObject(
+                domain="codeclone.source-observations.v1",
+                algorithm="sha256",
+                value="b" * 64,
+            ),
+        ),
+    )
+
+    with pytest.raises(ObservationContractError, match="one digest domain"):
+        lanes_mod._encode_api_surface_lane(symbols)
+
+
+def test_columnar_models_reject_the_remaining_malformed_shapes() -> None:
+    with pytest.raises(ValueError, match="non-negative/positive"):
+        AdoptionColumnarPayload(
+            scopes=("pkg.mod",),
+            features=("typing",),
+            scope=(0,),
+            feature=(0,),
+            numerator=(1,),
+            denominator=(0,),
+        )
+    with pytest.raises(ValueError, match="cannot exceed"):
+        AdoptionColumnarPayload(
+            scopes=("pkg.mod",),
+            features=("typing",),
+            scope=(0,),
+            feature=(0,),
+            numerator=(3,),
+            denominator=(2,),
+        )
+    with pytest.raises(ValueError, match="must be sorted"):
+        AdoptionColumnarPayload(
+            scopes=("a", "b"),
+            features=("typing",),
+            scope=(1, 0),
+            feature=(0, 0),
+            numerator=(1, 1),
+            denominator=(2, 2),
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        DeadCodeColumnarPayload(
+            prefixes=("pkg.mod",),
+            kinds=("function",),
+            prefix=(0,),
+            qualname=("a",),
+            kind=(0,),
+            reference_count=(-1,),
+        )
+    with pytest.raises(ValueError, match="must be sorted"):
+        DeadCodeColumnarPayload(
+            prefixes=("pkg.mod",),
+            kinds=("function",),
+            prefix=(0, 0),
+            qualname=("b", "a"),
+            kind=(0, 0),
+            reference_count=(0, 0),
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        DeadCodeMarkerException(row=0, runtime_marker_count=-1, source_markers=())
+    with pytest.raises(ValueError, match="sorted and unique"):
+        DeadCodeMarkerException(
+            row=0, runtime_marker_count=1, source_markers=(("z", "1"), ("a", "1"))
+        )
+    with pytest.raises(ValueError, match="paths must be sorted"):
+        ThinIdentityTable(paths=("b.py", "a.py"))
+    with pytest.raises(ValueError, match="repository-relative"):
+        ThinIdentityTable(paths=("/abs.py",))
+    with pytest.raises(ValueError, match="cannot carry a node kind"):
+        ThinIdentityTable(
+            paths=("pkg/mod.py",),
+            module_null=(0,),
+            node_kind_exc=((0, "module_file"),),
+        )
+
+    with pytest.raises(ValueError, match="parameter_defs table"):
+        _api_payload(
+            parameter_defs=(
+                ApiParameterDef(
+                    name="b",
+                    kind="pos_or_kw",
+                    has_default=False,
+                    annotation_digest=None,
+                ),
+                ApiParameterDef(
+                    name="a",
+                    kind="pos_or_kw",
+                    has_default=False,
+                    annotation_digest=None,
+                ),
+            )
+        )
+    with pytest.raises(ValueError, match="parameter_lists table"):
+        _api_payload(parameter_lists=((), ()))
+    with pytest.raises(ValueError, match="must be sorted"):
+        _api_payload(
+            owner=(0, 0),
+            name=("b", "a"),
+            symbol_kind=(0, 0),
+            visibility=(0, 0),
+            returns_digest=(None, None),
+            parameters=(0, 0),
+        )
+
+
+def _api_payload(
+    *,
+    parameter_defs: tuple[ApiParameterDef, ...] = (),
+    parameter_lists: tuple[tuple[int, ...], ...] = ((),),
+    owner: tuple[int, ...] = (0,),
+    name: tuple[str, ...] = ("run",),
+    symbol_kind: tuple[int, ...] = (0,),
+    visibility: tuple[int, ...] = (0,),
+    returns_digest: tuple[int | None, ...] = (None,),
+    parameters: tuple[int, ...] = (0,),
+) -> ApiSurfaceColumnarPayload:
+    return ApiSurfaceColumnarPayload(
+        identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+        digests=(),
+        digest_meta=None,
+        symbol_kinds=("function",),
+        visibilities=("all",),
+        parameter_defs=parameter_defs,
+        parameter_lists=parameter_lists,
+        owner=owner,
+        name=name,
+        symbol_kind=symbol_kind,
+        visibility=visibility,
+        returns_digest=returns_digest,
+        parameters=parameters,
+    )
+
+
+def test_decoder_rejects_values_outside_a_closed_vocabulary() -> None:
+    with pytest.raises(BaselineLaneValidationError, match="unknown dead-code"):
+        decode_dead_code_lane(
+            DeadCodeColumnarPayload(
+                prefixes=("pkg.mod",),
+                kinds=("mystery",),
+                prefix=(0,),
+                qualname=("run",),
+                kind=(0,),
+                reference_count=(0,),
+            )
+        )
+
+
+def test_thin_identity_table_serves_null_modules_and_kind_exceptions() -> None:
+    table = ThinIdentityTable(
+        paths=("pkg/__init__.py", "pkg/mod.py", "scripts/tool.py"),
+        module_null=(2,),
+        node_kind_exc=((1, "regular_package"),),
+    )
+
+    package = table.identity(0).python_module
+    assert package is not None
+    assert (package.module, package.is_package, package.node_kind) == (
+        "pkg",
+        True,
+        "regular_package",
+    )
+    forced = table.identity(1).python_module
+    assert forced is not None
+    assert (forced.node_kind, forced.is_package) == ("regular_package", True)
+    assert table.identity(2).python_module is None
+
+
+def test_dependency_decode_derives_empty_candidates_without_a_target() -> None:
+    payload = DependencyColumnarPayload(
+        identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+        modules=(),
+        resolutions=("unresolved_relative",),
+        syntax_kinds=("from_import",),
+        source=(0,),
+        requested_module=(None,),
+        requested_names=((),),
+        resolution=(0,),
+        resolved_target=(None,),
+        syntax_kind=(0,),
+        level=(1,),
+    )
+    observation = decode_dependency_lane(payload).observations[0]
+
+    assert observation.candidate_targets == ()
+    assert observation.resolved_target is None
+    assert observation.resolution == "unresolved_relative"
+
+
+def _dependency_payload(
+    *,
+    source: tuple[int, ...] = (0,),
+    requested_module: tuple[int | None, ...] = (0,),
+    requested_names: tuple[tuple[int, ...], ...] = ((),),
+    resolution: tuple[int, ...] = (0,),
+    resolved_target: tuple[int | None, ...] = (0,),
+    syntax_kind: tuple[int, ...] = (0,),
+    level: tuple[int, ...] = (0,),
+) -> DependencyColumnarPayload:
+    return DependencyColumnarPayload(
+        identities=ThinIdentityTable(paths=("pkg/mod.py",)),
+        modules=("alpha", "beta"),
+        resolutions=("analyzed",),
+        syntax_kinds=("from_import",),
+        source=source,
+        requested_module=requested_module,
+        requested_names=requested_names,
+        resolution=resolution,
+        resolved_target=resolved_target,
+        syntax_kind=syntax_kind,
+        level=level,
+    )
+
+
+def test_dependency_columnar_form_rejects_bad_levels_and_unsorted_rows() -> None:
+    _dependency_payload()
+
+    with pytest.raises(ValueError, match="level must be non-negative"):
+        _dependency_payload(level=(-1,))
+    with pytest.raises(ValueError, match="must be sorted"):
+        _dependency_payload(
+            source=(0, 0),
+            requested_module=(1, 0),
+            requested_names=((), ()),
+            resolution=(0, 0),
+            resolved_target=(0, 0),
+            syntax_kind=(0, 0),
+            level=(0, 0),
+        )
+    with pytest.raises(ValueError, match="outside its table"):
+        _dependency_payload(requested_names=((9,),))

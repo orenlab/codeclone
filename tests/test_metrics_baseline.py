@@ -32,6 +32,8 @@ from codeclone.models import (
     FileIdentity,
     HealthScore,
     ImportObservation,
+    IntegerColumnarPayload,
+    IntegerObservationPayload,
     LaneTrust,
     ObservationBundle,
     ObservationContract,
@@ -40,6 +42,7 @@ from codeclone.models import (
     TrustVector,
 )
 from codeclone.observations.contracts import build_observation_contract
+from codeclone.observations.lanes import _encode_api_surface_lane
 from codeclone.observations.projection import build_observation_bundle
 from tests._ast_metrics_helpers import module_registry_context
 from tests.test_baseline import _write_container
@@ -432,7 +435,12 @@ def test_metrics_baseline_fallback_projections_remain_typed(
         lanes=replace(
             container.lanes,
             rows=tuple(
-                (name, replace(lane, payload=api_payload))
+                (
+                    name,
+                    replace(
+                        lane, payload=_encode_api_surface_lane(api_payload.symbols)
+                    ),
+                )
                 if name == "api_surface"
                 else (name, lane)
                 for name, lane in container.lanes.rows
@@ -565,3 +573,49 @@ def test_lane_averages_over_entity_population_equal_the_pre_39u_row_averages() -
         assert metrics_mod._average(surviving, population) == sum(pre_39u_values) / len(
             pre_39u_values
         )
+
+
+def test_consumers_receive_decoded_rows_never_columns() -> None:
+    """The decode boundary is invisible: consumers still get typed row models."""
+
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    units = (
+        {
+            "filepath": "pkg/mod.py",
+            "qualname": "pkg.mod:run",
+            "cyclomatic_complexity": 4,
+            "nesting_depth": 2,
+        },
+    )
+    class_metrics = (_class_metric("pkg.mod:Thing", cbo=3, lcom4=2, methods=1),)
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=registry,
+        units=units,
+        class_metrics=class_metrics,
+    )
+    container = build_container(bundle, _SCOPE_ID)
+
+    # The stored lane is columnar; what the consumer reads is not.
+    assert isinstance(
+        container.lanes["risk_observations"].payload, IntegerColumnarPayload
+    )
+    risk_payload = metrics_mod._lane_payload(container, "risk_observations")
+    assert isinstance(risk_payload, IntegerObservationPayload)
+    assert sorted(risk_payload.observations, key=repr) == sorted(
+        bundle.structural.risk_observations, key=repr
+    )
+
+    rows, population = metrics_mod._integer_lane(container, "risk_observations")
+    assert population == len(units)
+    assert ("run", "cyclomatic_complexity", 4) in rows
+    assert ("run", "nesting_depth", 2) in rows
+
+    class_rows, class_population = metrics_mod._integer_lane(
+        container, "coupling_cohesion_observations"
+    )
+    assert class_population == len(class_metrics)
+    assert ("Thing", "cbo", 3) in class_rows

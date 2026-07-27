@@ -52,28 +52,34 @@ TEST_OBSERVATION_BUNDLE = build_observation_bundle(
     scan_root=Path("."), module_registry=_registry()
 )
 
+# The three lanes still on the record wire — byte-identical since 39U.
 _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
-    "adoption_counts": (
-        "26c87d090b1e6f745df028d8266471b99a7dd3742d5f55c66df8c7bc001f88ee"
-    ),
-    "api_surface": "8efe1f19bf4d29d1abb654af4a3601ada7861960b46f8130cd22d52fa5f15609",
     "clones.blocks": "1d178dfa537ab09521500e1170b954c058e3de3564597d30911c561d89282cf1",
     "clones.functions": (
         "7f87a5ec435e59c109da4cdf8eaf57441795e48a3d6431dfae3abb874c9f9c23"
     ),
-    "dead_code": "845f17059d61b386e07822620c6f5387e37f52a1192a0471ce85d245d81564d8",
-    "dependencies": "cf680b2291c90af360cf33045736d00cb5cd2e47d6f2446ca28abb6f843e272c",
     "semantic_authority": (
         "af551458e4577c554d38b66386ccf53ea0cdd7dd6dae0327203a24aa60acac68"
     ),
 }
-# 39U bumped exactly these two lanes to payload schema "2".
+# 39W moved exactly these seven lanes to a columnar payload.
 _BUMPED_DESCRIPTOR_DIGESTS = {
+    "adoption_counts": (
+        "b6822dde2c2e756cbe9bf3feae7952e8df00e06b70b366df1dac789455ad281c"
+    ),
+    "api_surface": ("6f7eaffe2cecaa421e5dc8704d4eaf1256ffc203b9fcfba794a04f4792341f98"),
     "coupling_cohesion_observations": (
-        "157ae814a6f05b33b6181bfc409f4ef31f4e13832dceb0ea044fb75fa869dca2"
+        "a16cf9ee22d10c2055903f98e20064cb87d0a113e436348a56f398df127e10cd"
+    ),
+    "dead_code": ("4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9"),
+    "dependencies": (
+        "ddeecb67b70d63f71d90552c6672516c3d4f6ddfc7a97fa1eef8c7070b32ef0e"
+    ),
+    "module_identity": (
+        "82a2f1b42a396307381f2c16193c76464b41b832a9a366497e21314d6375b0ed"
     ),
     "risk_observations": (
-        "b40b0d362f530b2006393558ae770d82926e03484aef14b773bc4cd4b8022aa4"
+        "536593990a541fda3126bfb8a44863e9fb7b586a63d996a3ea2eb7032c62f992"
     ),
 }
 
@@ -100,9 +106,7 @@ def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
     )
 
 
-def test_only_the_two_infected_lanes_and_module_identity_advance_payload_schema() -> (
-    None
-):
+def test_exactly_the_seven_columnar_lanes_advance_their_payload_schema() -> None:
     contract = build_observation_contract(
         collect_metrics=True,
         collect_dependencies=True,
@@ -113,18 +117,42 @@ def test_only_the_two_infected_lanes_and_module_identity_advance_payload_schema(
     descriptors = {descriptor.name: descriptor for descriptor in contract.descriptors}
 
     assert {
+        name: descriptor.payload_schema
+        for name, descriptor in descriptors.items()
+        if descriptor.payload_schema != "1"
+    } == {
+        "adoption_counts": "2",
+        "api_surface": "2",
+        "coupling_cohesion_observations": "3",
+        "dead_code": "2",
+        "dependencies": "3",
+        "module_identity": "3",
+        "risk_observations": "3",
+    }
+    # Both clone descriptors, and the semantic lane, stay on the record wire.
+    assert {
         name
         for name, descriptor in descriptors.items()
-        if descriptor.payload_schema == "2"
-    } == {"coupling_cohesion_observations", "module_identity", "risk_observations"}
+        if descriptor.payload_schema == "1"
+    } == {"clones.blocks", "clones.functions", "semantic_authority"}
 
-    module_identity = descriptors.pop("module_identity")
-    assert _descriptor_digest(replace(module_identity, payload_schema="1")) == (
-        "85ccbadac461be9e606b4d76c3e1ec52a56adf1cbaaa61d4ade0deee1659c3b6"
+    # module_identity carries only a new schema: normalised back, its descriptor
+    # digest is the frozen pre-39U value.
+    assert (
+        _descriptor_digest(replace(descriptors["module_identity"], payload_schema="1"))
+        == "85ccbadac461be9e606b4d76c3e1ec52a56adf1cbaaa61d4ade0deee1659c3b6"
     )
     bumped = {
         name: _descriptor_digest(descriptors.pop(name))
-        for name in ("coupling_cohesion_observations", "risk_observations")
+        for name in (
+            "adoption_counts",
+            "api_surface",
+            "coupling_cohesion_observations",
+            "dead_code",
+            "dependencies",
+            "module_identity",
+            "risk_observations",
+        )
     }
     assert bumped == _BUMPED_DESCRIPTOR_DIGESTS
     assert {descriptor.payload_schema for descriptor in descriptors.values()} == {"1"}

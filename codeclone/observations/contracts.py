@@ -8,7 +8,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Final
 
 from ..contracts import (
     API_SURFACE_SIGNATURE_VERSION,
@@ -41,13 +42,16 @@ _METRICS_ENABLED: tuple[ObservationLaneName, ...] = (
     "coupling_cohesion_observations",
     "risk_observations",
 )
-_PAYLOAD_SCHEMA_2: frozenset[ObservationLaneName] = frozenset(
-    {
-        "coupling_cohesion_observations",
-        "module_identity",
-        "risk_observations",
-    }
-)
+# The seven columnar lanes; anything absent stays on the record wire ("1").
+_PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
+    "adoption_counts": "2",
+    "api_surface": "2",
+    "coupling_cohesion_observations": "3",
+    "dead_code": "2",
+    "dependencies": "3",
+    "module_identity": "3",
+    "risk_observations": "3",
+}
 
 
 def _required_contracts(name: ObservationLaneName) -> tuple[tuple[str, str], ...]:
@@ -79,7 +83,7 @@ def _algorithm_revision(name: ObservationLaneName) -> str:
 def lane_payload_schema(name: ObservationLaneName) -> str:
     """Return the per-lane payload schema version — the sole owner of that fact."""
 
-    return "2" if name in _PAYLOAD_SCHEMA_2 else "1"
+    return _PAYLOAD_SCHEMAS.get(name, "1")
 
 
 def _descriptor(name: ObservationLaneName) -> ObservationLaneDescriptor:
