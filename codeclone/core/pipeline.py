@@ -388,6 +388,7 @@ def analyze(
     with span(name="observations.build") as observation_span:
         try:
             observation_bundle = build_observation_bundle(
+                scan_root=boot.root,
                 module_registry=discovery.module_registry,
                 function_clone_keys=tuple(func_groups),
                 block_clone_keys=tuple(block_groups),

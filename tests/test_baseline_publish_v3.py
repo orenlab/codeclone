@@ -37,6 +37,7 @@ from codeclone.models import (
     BaselineContainerV3,
     BaselinePublishLock,
     BaselineTargetKind,
+    ClassMetrics,
     CloneObservationPayload,
     ContainerReadSuccess,
     EpochTransitionEvidence,
@@ -45,7 +46,10 @@ from codeclone.models import (
 )
 from codeclone.observability import bootstrap, operation, shutdown
 from codeclone.observations.projection import build_observation_bundle
-from tests._ast_metrics_helpers import module_registry_context
+from tests._ast_metrics_helpers import (
+    build_test_module_registry,
+    module_registry_context,
+)
 
 _SCOPE_ID = UUID("019f7fa1-8866-7242-b0bf-0ff282cafbcb")
 _OTHER_SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
@@ -59,6 +63,7 @@ def _bundle(*, function_id: str = _FUNCTION_ID) -> ObservationBundle:
         module_name="pkg.mod",
     )[1]
     return build_observation_bundle(
+        scan_root=Path("."),
         module_registry=registry,
         function_clone_keys=(function_id,),
         block_clone_keys=(_BLOCK_ID,),
@@ -119,6 +124,93 @@ def _read_published(path: Path) -> ContainerReadSuccess:
     result = read_container_v3(path, limit_bytes=path.stat().st_size)
     assert isinstance(result, ContainerReadSuccess)
     return result
+
+
+def _checkout_bundle(root: Path) -> ObservationBundle:
+    """Build a bundle from a real checkout, using that root's absolute unit paths."""
+
+    package = root / "pkg"
+    package.mkdir(parents=True)
+    package.joinpath("__init__.py").write_text("", "utf-8")
+    package.joinpath("mod.py").write_text(
+        "class Thing:\n    def run(self, value: int) -> int:\n        return value\n",
+        "utf-8",
+    )
+    absolute = str(package / "mod.py")
+    return build_observation_bundle(
+        scan_root=root,
+        module_registry=build_test_module_registry(root=root),
+        function_clone_keys=(_FUNCTION_ID,),
+        block_clone_keys=(_BLOCK_ID,),
+        units=(
+            {
+                "filepath": absolute,
+                "qualname": "pkg.mod:Thing.run",
+                "cyclomatic_complexity": 2,
+                "nesting_depth": 1,
+            },
+        ),
+        class_metrics=(
+            ClassMetrics(
+                qualname="pkg.mod:Thing",
+                filepath=absolute,
+                start_line=1,
+                end_line=3,
+                cbo=2,
+                lcom4=1,
+                method_count=1,
+                instance_var_count=0,
+                risk_coupling="low",
+                risk_cohesion="low",
+            ),
+        ),
+    )
+
+
+def _string_values(value: object) -> tuple[str, ...]:
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, dict):
+        return tuple(
+            item
+            for key, nested in value.items()
+            for item in (key, *_string_values(nested))
+        )
+    if isinstance(value, list):
+        return tuple(item for nested in value for item in _string_values(nested))
+    return ()
+
+
+def test_publication_from_differently_named_checkouts_is_byte_identical(
+    tmp_path: Path,
+) -> None:
+    first = canonical_container_bytes(
+        build_container(_checkout_bundle(tmp_path / "alpha-checkout"), _SCOPE_ID)
+    )
+    second = canonical_container_bytes(
+        build_container(_checkout_bundle(tmp_path / "b"), _SCOPE_ID)
+    )
+
+    assert first == second
+
+
+def test_published_artifact_carries_no_machine_strings(tmp_path: Path) -> None:
+    root = tmp_path / "checkout"
+    payload = canonical_container_bytes(
+        build_container(_checkout_bundle(root), _SCOPE_ID)
+    )
+    values = _string_values(orjson.loads(payload))
+
+    for machine_string in (
+        "/Users/",
+        "/home/",
+        str(Path.home()),
+        Path.home().name,
+        socket.gethostname(),
+        str(tmp_path),
+    ):
+        assert not any(machine_string in value for value in values), machine_string
+    assert not any(value.startswith(os.sep) for value in values)
 
 
 def test_fresh_publication_has_no_fabricated_transition(tmp_path: Path) -> None:

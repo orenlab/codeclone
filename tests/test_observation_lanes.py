@@ -18,6 +18,7 @@ from codeclone.models import (
     ClassMetrics,
     CloneObservationPayload,
     DeadCandidate,
+    IntegerObservationPayload,
     ModuleApiSurface,
     ModuleDep,
     ModuleDocstringCoverage,
@@ -56,6 +57,7 @@ def _contains_float(value: object) -> bool:
 
 def _bundle() -> ObservationBundle:
     return build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         function_clone_keys=(f"{'a' * 64}|0-19",),
         block_clone_keys=("|".join(("b" * 64,) * 4),),
@@ -205,7 +207,7 @@ def test_module_identity_lane_preserves_canonical_inventory_facts() -> None:
         module_name="pkg.mod",
         known_internal_modules=("pkg.hidden",),
     )[1]
-    bundle = build_observation_bundle(module_registry=registry)
+    bundle = build_observation_bundle(scan_root=Path("."), module_registry=registry)
     lanes = {lane.descriptor.name: lane for lane in build_observation_lanes(bundle)}
     payload = lanes["module_identity"].payload
 
@@ -243,6 +245,7 @@ def test_invalid_fp_v1_clone_key_is_rejected(
 ) -> None:
     with pytest.raises(ValueError, match=message):
         build_observation_bundle(
+            scan_root=Path("."),
             module_registry=_registry(),
             function_clone_keys=function_keys,
             block_clone_keys=block_keys,
@@ -253,6 +256,7 @@ def test_canonical_fp_v2_clone_ids_are_preserved_byte_for_byte() -> None:
     function_id = f"{'a' * 64}|20+"
     block_id = "|".join(("b" * 64, "c" * 64, "d" * 64, "e" * 64))
     bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         function_clone_keys=(function_id,),
         block_clone_keys=(block_id,),
@@ -269,6 +273,7 @@ def test_canonical_fp_v2_clone_ids_are_preserved_byte_for_byte() -> None:
 
 def test_api_facts_outside_canonical_registry_scope_are_absent() -> None:
     bundle = build_observation_bundle(
+        scan_root=Path("."),
         module_registry=_registry(),
         api_modules=(
             ModuleApiSurface(
@@ -288,3 +293,48 @@ def test_api_facts_outside_canonical_registry_scope_are_absent() -> None:
     )
 
     assert bundle.structural.api_surface == ()
+
+
+def test_zero_observations_are_absent_while_the_population_still_counts_them() -> None:
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        units=(
+            {
+                "filepath": "pkg/mod.py",
+                "qualname": "pkg.mod:flat",
+                "cyclomatic_complexity": 1,
+                "nesting_depth": 0,
+            },
+        ),
+        class_metrics=(
+            ClassMetrics(
+                qualname="pkg.mod:Empty",
+                filepath="pkg/mod.py",
+                start_line=1,
+                end_line=2,
+                cbo=0,
+                lcom4=0,
+                method_count=0,
+                instance_var_count=0,
+                risk_coupling="low",
+                risk_cohesion="low",
+            ),
+        ),
+    )
+    lanes = {lane.descriptor.name: lane for lane in build_observation_lanes(bundle)}
+
+    risk = lanes["risk_observations"].payload
+    coupling = lanes["coupling_cohesion_observations"].payload
+    assert isinstance(risk, IntegerObservationPayload)
+    assert isinstance(coupling, IntegerObservationPayload)
+
+    # The zero-valued nesting_depth row is absent; the observed function still counts.
+    assert tuple(
+        (item.qualname, item.dimension, item.numerator) for item in risk.observations
+    ) == (("flat", "cyclomatic_complexity", 1),)
+    assert risk.entity_population == 1
+
+    # A class whose every dimension is zero emits nothing and stays in the population.
+    assert coupling.observations == ()
+    assert coupling.entity_population == 1

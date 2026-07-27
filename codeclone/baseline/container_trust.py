@@ -25,6 +25,7 @@ from ..models import (
 from ..observability import span
 from ..observations.contracts import build_observation_contract
 from .container_digest import compute_lane_digest, compute_root_digest
+from .lanes import lane_payload_is_opaque
 
 _StatusT = TypeVar("_StatusT")
 
@@ -50,6 +51,10 @@ def _semantic_reason(
     if actual.descriptor_version != expected.descriptor_version:
         return "descriptor_version"
     if actual.payload_schema != expected.payload_schema:
+        # The reader keeps an outdated lane opaque instead of failing the whole
+        # container; say so, so the operator reads "regenerate", not "corrupt".
+        if lane_payload_is_opaque(lane):
+            return "payload_schema_outdated"
         return "payload_schema"
     if actual.algorithm_revision != expected.algorithm_revision:
         return "algorithm_revision"

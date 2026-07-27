@@ -48,6 +48,7 @@ def _bundle() -> ObservationBundle:
         module_name="pkg.mod",
     )[1]
     return build_observation_bundle(
+        scan_root=Path("."),
         module_registry=registry,
         function_clone_keys=(_FUNCTION_ID,),
         block_clone_keys=(_BLOCK_ID,),
@@ -261,7 +262,7 @@ def test_baseline_rejects_wrong_clone_payload_and_unverified_root(
     function_lane = container.lanes["clones.functions"]
     wrong_function_lane = replace(
         function_lane,
-        payload=IntegerObservationPayload(observations=()),
+        payload=IntegerObservationPayload(observations=(), entity_population=0),
     )
     wrong_lanes = BaselineLaneIndex(
         rows=tuple(
