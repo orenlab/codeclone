@@ -820,3 +820,101 @@ def test_dependency_columnar_form_rejects_bad_levels_and_unsorted_rows() -> None
         )
     with pytest.raises(ValueError, match="outside its table"):
         _dependency_payload(requested_names=((9,),))
+
+
+def _mixed_mechanism_bundle() -> ObservationBundle:
+    """A bundle whose dependency shelf carries both mechanisms."""
+
+    bundle = _bundle()
+    facts = bundle.structural
+    static_dep = facts.dependencies[0]
+    return replace(
+        bundle,
+        structural=replace(
+            facts,
+            dependencies=(
+                static_dep,
+                replace(
+                    static_dep,
+                    syntax_kind="import",
+                    requested_module="pkg.plugin",
+                    requested_names=(),
+                    resolved_target="pkg.plugin",
+                    candidate_targets=("pkg.plugin",),
+                    mechanism="dynamic",
+                ),
+                replace(
+                    static_dep,
+                    syntax_kind="import",
+                    resolution="unresolved_dynamic",
+                    requested_module=None,
+                    requested_names=(),
+                    resolved_target=None,
+                    candidate_targets=(),
+                    mechanism="dynamic",
+                ),
+            ),
+        ),
+    )
+
+
+def _dependency_lane_payload(bundle: ObservationBundle) -> DependencyColumnarPayload:
+    lane = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "dependencies"
+    )
+    payload = lane.payload
+    assert isinstance(payload, DependencyColumnarPayload)
+    return payload
+
+
+def test_dependency_mechanism_survives_the_columnar_round_trip() -> None:
+    bundle = _mixed_mechanism_bundle()
+    payload = _dependency_lane_payload(bundle)
+
+    # The discriminator rides as an exception list, so only dynamic rows are
+    # named and the static majority costs nothing on the wire.
+    assert payload.mechanism_dynamic != ()
+    assert len(payload.mechanism_dynamic) == 2
+
+    decoded = decode_dependency_lane(payload)
+    mechanisms = [row.mechanism for row in decoded.observations]
+    assert mechanisms.count("dynamic") == 2
+    assert mechanisms.count("static") == 1
+
+    # Bijection: the opaque row keeps no target and no candidates, and the
+    # resolved dynamic row keeps both.
+    opaque = [
+        row for row in decoded.observations if row.resolution == "unresolved_dynamic"
+    ]
+    assert len(opaque) == 1
+    assert opaque[0].mechanism == "dynamic"
+    assert opaque[0].resolved_target is None
+    assert opaque[0].candidate_targets == ()
+    resolved_dynamic = [
+        row
+        for row in decoded.observations
+        if row.mechanism == "dynamic" and row.resolution != "unresolved_dynamic"
+    ]
+    assert len(resolved_dynamic) == 1
+    assert resolved_dynamic[0].resolved_target == "pkg.plugin"
+    assert resolved_dynamic[0].candidate_targets == ("pkg.plugin",)
+
+
+def test_dependency_mechanism_is_order_independent_and_byte_stable() -> None:
+    bundle = _mixed_mechanism_bundle()
+    facts = bundle.structural
+    reversed_bundle = replace(
+        bundle,
+        structural=replace(facts, dependencies=tuple(reversed(facts.dependencies))),
+    )
+
+    first = _lane_bytes(bundle)["dependencies"]
+    again = _lane_bytes(bundle)["dependencies"]
+    shuffled = _lane_bytes(reversed_bundle)["dependencies"]
+
+    assert first == again == shuffled
+    # A wire that lost the discriminator would collide with the static-only
+    # encoding; it must not.
+    assert first != _lane_bytes(_bundle())["dependencies"]

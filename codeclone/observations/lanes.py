@@ -301,6 +301,7 @@ def _encode_dependency_lane(
             _null_first(item.requested_module),
             item.requested_names,
             item.syntax_kind,
+            item.mechanism,
             item.level,
             item.resolution,
             _null_first(item.resolved_target),
@@ -331,6 +332,11 @@ def _encode_dependency_lane(
         level=tuple(item.level for item in rows),
         inventory_expansion=tuple(
             position for position, item in enumerate(rows) if item.inventory_expansion
+        ),
+        mechanism_dynamic=tuple(
+            position
+            for position, item in enumerate(rows)
+            if item.mechanism == "dynamic"
         ),
     )
 

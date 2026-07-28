@@ -444,6 +444,7 @@ def _module_dep_dict_from_model(dep: ModuleDep) -> ModuleDepDict:
         requested_module=dep.requested_module,
         requested_names=list(dep.requested_names),
         candidate_targets=list(dep.candidate_targets),
+        mechanism=dep.mechanism,
     )
 
 

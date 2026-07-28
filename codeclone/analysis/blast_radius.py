@@ -28,6 +28,9 @@ REVIEW_REASON_KNOWN_BASELINE_DEBT: Final = "known baseline debt outside declared
 REVIEW_REASON_GOLDEN_FIXTURE_SURFACE: Final = "golden fixture clone suppression surface"
 REVIEW_REASON_SECURITY_BOUNDARY: Final = "report-only security boundary inventory"
 REVIEW_REASON_REPORT_ONLY_DESIGN: Final = "report-only design signal"
+REVIEW_REASON_DYNAMIC_FRONTIER: Final = (
+    "import frontier under-approximated at an opaque dynamic load"
+)
 BOUNDARY_REASON_AFFECTED_NOT_ALLOWED: Final = (
     "affected by blast radius but outside declared edit scope"
 )
@@ -174,6 +177,28 @@ def _dependency_edges(
     families = _as_mapping(metrics.get("families"))
     dependencies = _as_mapping(families.get("dependencies"))
     return tuple(_as_mapping(item) for item in _as_sequence(dependencies.get("items")))
+
+
+def _opaque_dynamic_load_paths(
+    report_document: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Files holding a dynamic load whose argument stayed opaque.
+
+    Read straight from the document's own section; the frontier's
+    under-approximation is decided once, upstream, never recomputed here.
+    """
+
+    metrics = _as_mapping(report_document.get("metrics"))
+    families = _as_mapping(metrics.get("families"))
+    dependencies = _as_mapping(families.get("dependencies"))
+    paths: set[str] = set()
+    for raw in _as_sequence(dependencies.get("dynamic_boundaries")):
+        site = _as_mapping(raw)
+        source = _as_mapping(site.get("source"))
+        path = _normalize_relative_path(_as_mapping(source.get("file")).get("path"))
+        if path:
+            paths.add(path)
+    return tuple(sorted(paths))
 
 
 def _dependency_cycles(
@@ -458,6 +483,16 @@ def _compute_change_boundaries(
             category="explicit_forbidden",
             severity="hard",
         )
+    for path in _opaque_dynamic_load_paths(report_document):
+        # Advisory only: an opaque site resolves to no target, so it never
+        # entered the import graph and must not widen the radius here either.
+        if path in blast_zone_paths:
+            _append_review_entry(
+                review_entries,
+                path=path,
+                reason=REVIEW_REASON_DYNAMIC_FRONTIER,
+                category="dynamic_frontier_boundary",
+            )
     for group in _all_finding_groups(report_document):
         if str(group.get("novelty", "")).strip() != "known":
             continue
@@ -641,6 +676,7 @@ __all__ = [
     "GUARDRAIL_HIGH_RADIUS_APPROVAL",
     "GUARDRAIL_REVIEW_DEPENDENTS",
     "MAX_CONTEXT_ITEMS",
+    "REVIEW_REASON_DYNAMIC_FRONTIER",
     "REVIEW_REASON_GOLDEN_FIXTURE_SURFACE",
     "REVIEW_REASON_KNOWN_BASELINE_DEBT",
     "REVIEW_REASON_REPORT_ONLY_DESIGN",

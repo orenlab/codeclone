@@ -226,6 +226,7 @@ def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
         return False
     detail_keys = {
         "resolution",
+        "mechanism",
         "inventory_expansion",
         "level",
         "requested_module",
@@ -248,8 +249,10 @@ def _is_module_dep_dict(value: object) -> TypeGuard[ModuleDepDict]:
             "known_internal_not_analyzed",
             "external",
             "unresolved_relative",
+            "unresolved_dynamic",
             "ambiguous",
         }
+        and value.get("mechanism") in {"static", "dynamic"}
         and isinstance(inventory_expansion, bool)
         and isinstance(level, int)
         and not isinstance(level, bool)

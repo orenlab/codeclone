@@ -585,6 +585,17 @@ def build_implementation_context(
             budget=entry_budget,
         )
 
+    if {"imports", "importers", "tests"}.intersection(include_set):
+        _attach_bounded(
+            structural_context,
+            key="dynamic_boundaries",
+            items=_dynamic_boundaries(
+                record,
+                selected_modules=selected_modules,
+            ),
+            budget=entry_budget,
+        )
+
     if "public_surface" in include_set:
         _attach_bounded(
             structural_context,
@@ -1294,6 +1305,47 @@ def _dependency_rows(record: MCPRunRecord) -> tuple[dict[str, object], ...]:
                 str(row["target"]),
                 str(row["import_type"]),
                 _as_int(row["line"]),
+            ),
+        )
+    )
+
+
+def _dynamic_boundaries(
+    record: MCPRunRecord,
+    *,
+    selected_modules: frozenset[str],
+) -> tuple[dict[str, object], ...]:
+    """Subject sites where the import frontier is honestly under-approximated.
+
+    Read straight from the document's own section; this surface selects, it
+    never re-decides which sites are opaque.
+    """
+
+    families = _report_families(record)
+    dependencies = _as_mapping(families.get("dependencies"))
+    rows: list[dict[str, object]] = []
+    for raw in _as_sequence(dependencies.get("dynamic_boundaries")):
+        site = _as_mapping(raw)
+        source = _as_mapping(site.get("source"))
+        path = str(_as_mapping(source.get("file")).get("path", "")).strip()
+        if not path or _path_to_module(path) not in selected_modules:
+            continue
+        rows.append(
+            {
+                "source": dict(source),
+                "syntax_kind": str(site.get("syntax_kind", "")),
+                "reason": str(site.get("reason", "")),
+                "evidence": "structural",
+            }
+        )
+    return tuple(
+        sorted(
+            rows,
+            key=lambda row: (
+                str(
+                    _as_mapping(_as_mapping(row["source"]).get("file")).get("path", "")
+                ),
+                str(row["syntax_kind"]),
             ),
         )
     )

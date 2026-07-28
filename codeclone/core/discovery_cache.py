@@ -522,7 +522,9 @@ def _module_dep_target_is_valid(
     resolution: DependencyResolution,
     target: str,
 ) -> bool:
-    return resolution == "unresolved_relative" or bool(target)
+    # Unresolved rows legitimately carry no target: a relative import that
+    # escapes the package, and a dynamic load whose argument stayed opaque.
+    return resolution in {"unresolved_relative", "unresolved_dynamic"} or bool(target)
 
 
 def _module_dep_from_cache_row(dep_row: ModuleDepDict) -> ModuleDep | None:
@@ -533,6 +535,7 @@ def _module_dep_from_cache_row(dep_row: ModuleDepDict) -> ModuleDep | None:
         requested_module = dep_row["requested_module"]
         requested_names = dep_row["requested_names"]
         candidate_targets = dep_row["candidate_targets"]
+        mechanism = dep_row["mechanism"]
     except KeyError:
         return None
     import_type = dep_row["import_type"]
@@ -553,6 +556,7 @@ def _module_dep_from_cache_row(dep_row: ModuleDepDict) -> ModuleDep | None:
         requested_module=requested_module,
         requested_names=tuple(requested_names),
         candidate_targets=tuple(candidate_targets),
+        mechanism=mechanism,
     )
 
 

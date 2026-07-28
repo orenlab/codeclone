@@ -238,8 +238,49 @@ def _append_module_dep(
             requested_module=observation.requested_module,
             requested_names=observation.requested_names,
             candidate_targets=observation.candidate_targets,
+            mechanism=observation.mechanism,
         )
     )
+
+
+def _append_dynamic_load_deps(
+    *,
+    events: tuple[SemanticEvent, ...],
+    source: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
+    state: _ModuleWalkState,
+) -> None:
+    """Project dynamic-load events into dependency facts.
+
+    Detection stays upstream in the semantics event layer; this only consumes
+    what the detector already saw, and resolves literals through the same
+    classifier as static imports.
+    """
+
+    for event in events:
+        argument = event.dynamic_load
+        if argument is None:
+            continue
+        target = argument.module
+        _append_module_dep(
+            observation=ImportObservation(
+                source=source,
+                syntax_kind="import",
+                level=0,
+                requested_module=target,
+                requested_names=(),
+                resolution=(
+                    "unresolved_dynamic"
+                    if target is None
+                    else _classify_import_target(target, registry)
+                ),
+                candidate_targets=() if target is None else (target,),
+                resolved_target=target,
+                mechanism="dynamic",
+            ),
+            line=event.location[1],
+            state=state,
+        )
 
 
 def _collect_import_node(
@@ -1417,6 +1458,12 @@ def _collect_module_walk_data(
     )
     if collect_referenced_names:
         state.referenced_names.update(_collect_dynamic_getattr_names(tree))
+    _append_dynamic_load_deps(
+        events=event_collector.events,
+        source=source,
+        registry=registry,
+        state=state,
+    )
 
     deps_sorted = tuple(
         sorted(

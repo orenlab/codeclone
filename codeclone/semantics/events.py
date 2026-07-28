@@ -11,6 +11,7 @@ from typing import TypeAlias
 
 from ..analysis.ast_helpers import ast_node_end_line, ast_node_start_line
 from ..models import (
+    DynamicLoadArgument,
     EventKind,
     FactRef,
     SecuritySurfaceCategory,
@@ -19,6 +20,12 @@ from ..models import (
 
 _ImportRule: TypeAlias = tuple[str, SecuritySurfaceCategory, str]
 _CallRule: TypeAlias = tuple[str, SecuritySurfaceCategory, str, bool]
+
+# The mechanisms this phase projects into dependency evidence. runpy stays a
+# named follow-up: category alone is too broad a gate.
+_DYNAMIC_LOAD_CAPABILITIES: frozenset[str] = frozenset(
+    {"builtin_import", "import_module", "import_spec_from_file"}
+)
 
 _BUILTIN_RULES: dict[str, tuple[SecuritySurfaceCategory, str]] = {
     "__import__": ("dynamic_loading", "builtin_import"),
@@ -236,6 +243,33 @@ class SemanticEventCollector:
         self._ordinals[qualname] = ordinal
         return f"{qualname}#{ordinal:06d}"
 
+    @staticmethod
+    def _dynamic_load_argument(
+        node: ast.AST,
+        capability: str,
+    ) -> DynamicLoadArgument | None:
+        """Read the module argument of a dynamic-load call, or record opacity."""
+
+        if capability not in _DYNAMIC_LOAD_CAPABILITIES or not isinstance(
+            node, ast.Call
+        ):
+            return None
+        argument = (
+            node.args[0]
+            if node.args
+            else next(
+                (keyword.value for keyword in node.keywords if keyword.arg == "name"),
+                None,
+            )
+        )
+        if (
+            isinstance(argument, ast.Constant)
+            and isinstance(argument.value, str)
+            and argument.value
+        ):
+            return DynamicLoadArgument(module=argument.value)
+        return DynamicLoadArgument(module=None)
+
     def _emit(
         self,
         *,
@@ -247,6 +281,7 @@ class SemanticEventCollector:
         guards: tuple[str, ...],
         resolution: str = "resolved",
         output: bool = False,
+        dynamic_load: DynamicLoadArgument | None = None,
     ) -> None:
         start_line = ast_node_start_line(node)
         if start_line is None:
@@ -262,6 +297,7 @@ class SemanticEventCollector:
                 guards=guards,
                 location=(self._filepath, start_line),
                 resolution="resolved" if resolution == "resolved" else "unavailable",
+                dynamic_load=dynamic_load,
             )
         )
 
@@ -356,6 +392,7 @@ class SemanticEventCollector:
             node=node,
             qualname=qualname,
             guards=guards,
+            dynamic_load=self._dynamic_load_argument(node, capability),
         )
 
     def _observe_import(

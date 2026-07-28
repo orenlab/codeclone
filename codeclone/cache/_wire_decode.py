@@ -19,6 +19,7 @@ from ..models import (
     CacheNeutralUnit,
     ClassMetricsDict,
     DeadCandidateDict,
+    DependencyMechanism,
     DependencyResolution,
     DigestObject,
     EventKind,
@@ -128,8 +129,13 @@ def _is_dependency_resolution(value: object) -> TypeGuard[DependencyResolution]:
         "known_internal_not_analyzed",
         "external",
         "unresolved_relative",
+        "unresolved_dynamic",
         "ambiguous",
     }
+
+
+def _is_dependency_mechanism(value: object) -> TypeGuard[DependencyMechanism]:
+    return isinstance(value, str) and value in {"static", "dynamic"}
 
 
 def _is_module_dep_import_type(
@@ -1224,7 +1230,7 @@ def _decode_wire_class_metric(
 
 def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     row = _as_list(value)
-    if row is None or len(row) not in {4, 10}:
+    if row is None or len(row) not in {4, 11}:
         return None
     source = _as_str(row[0])
     target = _as_str(row[1])
@@ -1253,6 +1259,7 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     requested_module_raw = row[7]
     requested_names_raw = _as_list(row[8])
     candidate_targets_raw = _as_list(row[9])
+    mechanism = row[10]
     requested_names = (
         None
         if requested_names_raw is None
@@ -1265,6 +1272,7 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     )
     if (
         not _is_dependency_resolution(resolution)
+        or not _is_dependency_mechanism(mechanism)
         or not isinstance(inventory_expansion, bool)
         or level is None
         or isinstance(level, bool)
@@ -1283,6 +1291,7 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
         requested_module=requested_module_raw,
         requested_names=[item for item in requested_names if item is not None],
         candidate_targets=[item for item in candidate_targets if item is not None],
+        mechanism=mechanism,
     )
 
 

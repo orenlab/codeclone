@@ -269,6 +269,7 @@ _RESOLUTIONS: Final[tuple[DependencyResolution, ...]] = (
     "analyzed",
     "external",
     "known_internal_not_analyzed",
+    "unresolved_dynamic",
     "unresolved_relative",
 )
 
@@ -292,6 +293,7 @@ def decode_dependency_lane(
     """Rebuild the typed import observations from their columnar wire form."""
 
     expanded = frozenset(payload.inventory_expansion)
+    dynamic = frozenset(payload.mechanism_dynamic)
 
     def module(reference: int | None) -> str | None:
         return None if reference is None else payload.modules[reference]
@@ -321,6 +323,7 @@ def decode_dependency_lane(
                 ),
                 resolved_target=module(payload.resolved_target[row]),
                 inventory_expansion=row in expanded,
+                mechanism="dynamic" if row in dynamic else "static",
             )
             for row in range(len(payload.source))
         )

@@ -98,10 +98,12 @@ def _dependency_observations(
             candidate_targets=dependency.candidate_targets,
             resolved_target=(
                 None
-                if dependency.resolution == "unresolved_relative"
+                if dependency.resolution
+                in {"unresolved_relative", "unresolved_dynamic"}
                 else dependency.target
             ),
             inventory_expansion=dependency.inventory_expansion,
+            mechanism=dependency.mechanism,
         )
         for dependency in dependencies
     )
@@ -111,6 +113,7 @@ def _dependency_observations(
             key=lambda row: (
                 row.source.file.path,
                 row.syntax_kind,
+                row.mechanism,
                 row.level,
                 row.requested_module or "",
                 row.requested_names,
