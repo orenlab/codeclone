@@ -521,6 +521,10 @@ def _normalize_metrics_families(
             {
                 "item_kind": str(item_map.get("item_kind", "")).strip(),
                 "sink_identity": str(item_map.get("sink_identity", "")).strip(),
+                "violation_id": str(item_map.get("violation_id", "")).strip(),
+                "contract_id": str(item_map.get("contract_id", "")).strip(),
+                "kind": str(item_map.get("kind", "")).strip(),
+                "canonical_owner": str(item_map.get("canonical_owner", "")).strip(),
                 "authority_status": str(item_map.get("authority_status", "")).strip(),
                 "producer_root_ids": sorted(
                     str(value)
@@ -537,6 +541,21 @@ def _normalize_metrics_families(
                 "shared_fact": str(item_map.get("shared_fact", "")).strip(),
                 "independence": bool(item_map.get("independence")),
                 "semantic_divergence": bool(item_map.get("semantic_divergence")),
+                "suppressed": bool(item_map.get("suppressed")),
+                "locations": [
+                    {
+                        "relative_path": _contract_path(
+                            location_map.get("relative_path", ""),
+                            scan_root=scan_root,
+                        )[0]
+                        or "",
+                        "start_line": _as_int(location_map.get("start_line")),
+                        "end_line": _as_int(location_map.get("end_line")),
+                        "qualname": str(location_map.get("qualname", "")).strip(),
+                    }
+                    for location in _as_sequence(item_map.get("locations"))
+                    for location_map in (_as_mapping(location),)
+                ],
                 "sink_statuses": [
                     str(value) for value in _as_sequence(item_map.get("sink_statuses"))
                 ],
@@ -549,9 +568,34 @@ def _normalize_metrics_families(
         ),
         key=lambda item: (
             item["item_kind"],
+            item["contract_id"],
             item["sink_identity"],
+            item["kind"],
             item["candidate_id"],
         ),
+    )
+    semantic_authority_registry = sorted(
+        (
+            {
+                "contract_id": str(item_map.get("contract_id", "")).strip(),
+                "canonical_owner": str(item_map.get("canonical_owner", "")).strip(),
+                "allowed_adapters": sorted(
+                    str(value)
+                    for value in _as_sequence(item_map.get("allowed_adapters"))
+                ),
+                "forbidden_raw_inputs": sorted(
+                    str(value)
+                    for value in _as_sequence(item_map.get("forbidden_raw_inputs"))
+                ),
+                "required_provenance": sorted(
+                    str(value)
+                    for value in _as_sequence(item_map.get("required_provenance"))
+                ),
+            }
+            for item in _as_sequence(semantic_authority.get("registry"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: str(item["contract_id"]),
     )
     semantic_authority_contracts: list[dict[str, object]] = sorted(
         [
@@ -827,12 +871,31 @@ def _normalize_metrics_families(
             "summary": {
                 "enabled": bool(semantic_authority_summary.get("enabled")),
                 "report_only": bool(semantic_authority_summary.get("report_only")),
+                "enforcement_enabled": bool(
+                    semantic_authority_summary.get("enforcement_enabled")
+                ),
                 "algorithm_revision": str(
                     semantic_authority_summary.get("algorithm_revision", "")
+                ),
+                "registry_version": str(
+                    semantic_authority_summary.get("registry_version", "")
+                ),
+                "registry_contracts": _as_int(
+                    semantic_authority_summary.get("registry_contracts")
                 ),
                 "contracts": _as_int(semantic_authority_summary.get("contracts")),
                 "sinks": _as_int(semantic_authority_summary.get("sinks")),
                 "candidates": _as_int(semantic_authority_summary.get("candidates")),
+                "governed_sinks": _as_int(
+                    semantic_authority_summary.get("governed_sinks")
+                ),
+                "violations": _as_int(semantic_authority_summary.get("violations")),
+                "active_violations": _as_int(
+                    semantic_authority_summary.get("active_violations")
+                ),
+                "suppressed_violations": _as_int(
+                    semantic_authority_summary.get("suppressed_violations")
+                ),
                 "scc_count": _as_int(semantic_authority_summary.get("scc_count")),
                 "fixpoint_iterations": _as_int(
                     semantic_authority_summary.get("fixpoint_iterations")
@@ -849,6 +912,7 @@ def _normalize_metrics_families(
                 },
             },
             "items": semantic_authority_items,
+            "registry": semantic_authority_registry,
             "contract_ir": semantic_authority_contracts,
             "items_truncated": False,
         }

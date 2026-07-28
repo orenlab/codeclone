@@ -438,6 +438,9 @@ def _gate_config(boot: BootstrapResult) -> MetricGateConfig:
             getattr(boot.args, "fail_on_docstring_regression", False)
         ),
         fail_on_api_break=bool(getattr(boot.args, "fail_on_api_break", False)),
+        fail_on_authority_violation=bool(
+            getattr(boot.args, "fail_on_authority_violation", False)
+        ),
         fail_on_untested_hotspots=bool(
             getattr(boot.args, "fail_on_untested_hotspots", False)
         ),

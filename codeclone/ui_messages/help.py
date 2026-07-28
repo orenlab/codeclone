@@ -146,6 +146,10 @@ HELP_FAIL_ON_API_BREAK = (
     "Exit with code 3 if public API removals or signature breaks are detected\n"
     "relative to the metrics baseline."
 )
+HELP_FAIL_ON_AUTHORITY_VIOLATION = (
+    "Exit with code 3 if a governed semantic contract has an authority violation.\n"
+    "Requires a reviewed [[tool.codeclone.authority]] registry entry."
+)
 HELP_FAIL_ON_UNTESTED_HOTSPOTS = (
     "Exit with code 3 if medium/high-risk functions measured by Coverage Join\n"
     "fall below the joined coverage threshold.\nRequires --coverage."

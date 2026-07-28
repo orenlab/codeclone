@@ -51,6 +51,7 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     "dependencies": "4",
     "module_identity": "3",
     "risk_observations": "3",
+    "semantic_authority": "2",
 }
 
 

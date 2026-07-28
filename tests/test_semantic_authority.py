@@ -16,6 +16,8 @@ from codeclone.analysis.units import extract_units_and_stats_from_source
 from codeclone.contracts import AUTHORITY_ANALYSIS_REVISION
 from codeclone.models import (
     AuthorityCandidateLevel,
+    AuthorityRegistry,
+    AuthorityRegistryEntry,
     EventKind,
     FactRef,
     FunctionContractSummary,
@@ -28,6 +30,33 @@ from codeclone.semantics.authority import (
     authority_candidate_score,
     build_semantic_authority,
 )
+from codeclone.semantics.registry import (
+    AuthorityRegistryError,
+    parse_authority_registry,
+)
+
+_HASH_ROOT = "operation:canonical_operation:hashlib.sha256"
+_STRIP_ROOT = "operation:pure_builtin:strip"
+
+
+def _authority_registry(
+    *,
+    owner: str,
+    required_provenance: tuple[str, ...] = (_HASH_ROOT,),
+    adapters: tuple[str, ...] = (),
+) -> AuthorityRegistry:
+    return AuthorityRegistry(
+        version="1",
+        entries=(
+            AuthorityRegistryEntry(
+                contract_id="example.contract/v1",
+                canonical_owner=owner,
+                allowed_adapters=adapters,
+                forbidden_raw_inputs=(),
+                required_provenance=required_provenance,
+            ),
+        ),
+    )
 
 
 def _event(
@@ -99,7 +128,6 @@ def test_candidate_levels_have_a_closed_integer_order() -> None:
         "overlapping_transform_chain",
         "divergent_projection",
     )
-
     assert tuple(authority_candidate_score(level) for level in levels) == (
         5,
         4,
@@ -107,6 +135,238 @@ def test_candidate_levels_have_a_closed_integer_order() -> None:
         2,
         1,
     )
+
+
+def test_authority_registry_is_closed_sorted_and_versioned() -> None:
+    registry = parse_authority_registry(
+        [
+            {
+                "contract_id": "example.contract/v1",
+                "canonical_owner": "pkg.mod:owner",
+                "allowed_adapters": ["pkg.mod:adapter"],
+                "forbidden_raw_inputs": ["raw:payload"],
+                "required_provenance": [_HASH_ROOT],
+            }
+        ]
+    )
+
+    assert registry.version == "1"
+    assert registry.entries[0].contract_id == "example.contract/v1"
+    assert parse_authority_registry(registry) is registry
+    assert parse_authority_registry(None).entries == ()
+    with pytest.raises(AuthorityRegistryError, match="unknown"):
+        parse_authority_registry(
+            [
+                {
+                    "contract_id": "example.contract/v1",
+                    "canonical_owner": "pkg.mod:owner",
+                    "allowed_adapters": [],
+                    "forbidden_raw_inputs": [],
+                    "required_provenance": [_HASH_ROOT],
+                    "extra": True,
+                }
+            ]
+        )
+    with pytest.raises(AuthorityRegistryError, match="sorted"):
+        parse_authority_registry(
+            [
+                {
+                    "contract_id": "example.contract/v1",
+                    "canonical_owner": "pkg.mod:owner",
+                    "allowed_adapters": ["pkg.mod:z", "pkg.mod:a"],
+                    "forbidden_raw_inputs": [],
+                    "required_provenance": [_HASH_ROOT],
+                }
+            ]
+        )
+
+
+def test_authority_registry_rejects_every_noncanonical_boundary() -> None:
+    def row(**overrides: object) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "contract_id": "example.contract/v1",
+            "canonical_owner": "pkg.mod:owner",
+            "allowed_adapters": [],
+            "forbidden_raw_inputs": [],
+            "required_provenance": [_HASH_ROOT],
+        }
+        payload.update(overrides)
+        return payload
+
+    missing = row()
+    del missing["required_provenance"]
+    invalid_cases: tuple[tuple[object, str], ...] = (
+        ("not-a-sequence", "array of tables"),
+        (["not-a-table"], "must be a table"),
+        ([missing], "missing authority registry key"),
+        ([row(contract_id=" ")], "non-empty string"),
+        ([row(contract_id="invalid")], "<name>/v<positive-int>"),
+        ([row(canonical_owner="invalid")], "module:symbol identity"),
+        ([row(allowed_adapters="pkg.mod:adapter")], r"list\[str\]"),
+        ([row(allowed_adapters=["invalid"])], "module:symbol identities"),
+        ([row(allowed_adapters=["pkg.mod:owner"])], "repeat canonical_owner"),
+        (
+            [
+                row(
+                    contract_id="z.contract/v1",
+                    canonical_owner="pkg.mod:z_owner",
+                ),
+                row(
+                    contract_id="a.contract/v1",
+                    canonical_owner="pkg.mod:a_owner",
+                ),
+            ],
+            "sorted by contract_id",
+        ),
+        (
+            [
+                row(),
+                row(canonical_owner="pkg.mod:other"),
+            ],
+            "contract_id values must be unique",
+        ),
+        (
+            [
+                row(),
+                row(contract_id="example.other/v1"),
+            ],
+            "canonical_owner values must be unique",
+        ),
+    )
+
+    for value, message in invalid_cases:
+        with pytest.raises(AuthorityRegistryError, match=message):
+            parse_authority_registry(value)
+
+
+def test_governed_adapter_is_legal_and_suppression_does_not_legalize_shadow() -> None:
+    owner_name = "pkg.mod:owner"
+    adapter_name = "pkg.mod:adapter"
+    shadow_name = "pkg.mod:shadow"
+    owner = _summary(owner_name, _event(owner_name, ordinal=1))
+    adapter = _summary(adapter_name, _event(adapter_name, ordinal=1))
+    shadow = _summary(shadow_name, _event(shadow_name, ordinal=1))
+    result = build_semantic_authority(
+        (shadow, adapter, owner),
+        (_relationship(adapter_name, owner_name, line=1),),
+        registry=_authority_registry(owner=owner_name, adapters=(adapter_name,)),
+        suppressed_rules={
+            shadow_name: frozenset({"duplicate-responsibility"}),
+        },
+    )
+
+    statuses = {
+        sink.sink_identity: sink.authority_status for sink in result.governed_sinks
+    }
+    assert statuses[owner_name] == "authoritative"
+    assert statuses[adapter_name] == "adapter"
+    assert statuses[shadow_name] == "shadow"
+    shadow_violations = tuple(
+        item for item in result.violations if item.sink_identity == shadow_name
+    )
+    assert shadow_violations
+    assert all(item.suppressed for item in shadow_violations)
+    assert not any(item.sink_identity == adapter_name for item in result.violations)
+
+
+def test_enforcement_emits_all_six_closed_violation_kinds() -> None:
+    owner_name = "pkg.mod:owner"
+    owner = _summary(owner_name, _event(owner_name, ordinal=1))
+    first_name = "pkg.mod:first"
+    second_name = "pkg.mod:second"
+    exact_result = build_semantic_authority(
+        (
+            owner,
+            _summary(first_name, _event(first_name, ordinal=1)),
+            _summary(second_name, _event(second_name, ordinal=1)),
+        ),
+        (),
+        registry=_authority_registry(owner=owner_name),
+    )
+
+    projection_name = "pkg.mod:projection"
+    projection = _summary(
+        projection_name,
+        _event(projection_name, ordinal=1),
+        _event(
+            projection_name,
+            ordinal=2,
+            kind="resolve_identity",
+            subject="str.strip",
+        ),
+    )
+    projection_result = build_semantic_authority(
+        (owner, projection),
+        (),
+        registry=_authority_registry(owner=owner_name),
+    )
+
+    mixed_name = "pkg.mod:mixed"
+    mixed = _summary(
+        mixed_name,
+        _event(mixed_name, ordinal=1),
+        _event(
+            mixed_name,
+            ordinal=2,
+            kind="resolve_identity",
+            subject="str.strip",
+        ),
+    )
+    mixed_result = build_semantic_authority(
+        (owner, mixed),
+        (_relationship(mixed_name, owner_name, line=1),),
+        registry=_authority_registry(owner=owner_name),
+    )
+
+    failed_owner = _summary(
+        owner_name,
+        _event(owner_name, ordinal=1),
+        unresolved=True,
+    )
+    failure_result = build_semantic_authority(
+        (failed_owner, _summary(first_name, _event(first_name, ordinal=1))),
+        (),
+        registry=_authority_registry(owner=owner_name),
+    )
+
+    different_name = "pkg.mod:different"
+    different = _summary(
+        different_name,
+        _event(
+            different_name,
+            ordinal=1,
+            kind="resolve_identity",
+            subject="str.strip",
+        ),
+    )
+    canonicalization_result = build_semantic_authority(
+        (owner, different),
+        (),
+        registry=_authority_registry(
+            owner=owner_name,
+            required_provenance=(_HASH_ROOT, _STRIP_ROOT),
+        ),
+    )
+
+    kinds = {
+        violation.kind
+        for result in (
+            exact_result,
+            projection_result,
+            mixed_result,
+            failure_result,
+            canonicalization_result,
+        )
+        for violation in result.violations
+    }
+    assert kinds == {
+        "multiple_independent_producers",
+        "shadow_projection",
+        "owner_bypass",
+        "reconstructed_contract",
+        "divergent_failure_semantics",
+        "divergent_canonicalization",
+    }
 
 
 def test_exact_independent_producers_are_report_only_shadow_candidates() -> None:

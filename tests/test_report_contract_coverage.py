@@ -623,6 +623,7 @@ def test_report_document_rich_invariants_and_renderers() -> None:
         "all",
         "clones",
         "structural",
+        "authority",
         "complexity",
         "cohesion",
         "coupling",
@@ -649,6 +650,7 @@ def test_report_document_rich_invariants_and_renderers() -> None:
     assert cast("dict[str, int]", all_rows[0]["kind_breakdown"]) == {
         "clones": 3,
         "structural": 1,
+        "authority": 0,
         "dead_code": 1,
         "complexity": 2,
         "coupling": 1,
@@ -908,6 +910,7 @@ def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
             "kind_breakdown": {
                 "clones": 1,
                 "structural": 0,
+                "authority": 0,
                 "dead_code": 0,
                 "complexity": 0,
                 "coupling": 0,
@@ -935,6 +938,7 @@ def test_directory_hotspots_collapses_test_scope_roots_for_overview() -> None:
             "kind_breakdown": {
                 "clones": 0,
                 "structural": 0,
+                "authority": 0,
                 "dead_code": 0,
                 "complexity": 0,
                 "coupling": 0,

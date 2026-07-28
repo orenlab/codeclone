@@ -26,6 +26,7 @@ FAMILY_CLONES: Final = "clones"
 FAMILY_STRUCTURAL: Final = "structural"
 FAMILY_DEAD_CODE: Final = "dead_code"
 FAMILY_DESIGN: Final = "design"
+FAMILY_AUTHORITY: Final = "authority"
 FAMILY_METRICS: Final = "metrics"
 
 CATEGORY_CLONE: Final = "clone"
@@ -46,6 +47,7 @@ FINDING_KIND_CYCLE: Final = "cycle"
 FINDING_KIND_UNTESTED_HOTSPOT: Final = "untested_hotspot"
 FINDING_KIND_COVERAGE_HOTSPOT: Final = "coverage_hotspot"
 FINDING_KIND_COVERAGE_SCOPE_GAP: Final = "coverage_scope_gap"
+FINDING_KIND_AUTHORITY_VIOLATION: Final = "authority_violation"
 
 DESIGN_KIND_INSTANCE_INDEPENDENT_METHOD: Final = "instance_independent_method"
 
@@ -81,12 +83,14 @@ __all__ = [
     "CLONE_NOVELTY_NEW",
     "CLONE_NOVELTY_UNAVAILABLE",
     "DESIGN_KIND_INSTANCE_INDEPENDENT_METHOD",
+    "FAMILY_AUTHORITY",
     "FAMILY_CLONE",
     "FAMILY_CLONES",
     "FAMILY_DEAD_CODE",
     "FAMILY_DESIGN",
     "FAMILY_METRICS",
     "FAMILY_STRUCTURAL",
+    "FINDING_KIND_AUTHORITY_VIOLATION",
     "FINDING_KIND_CLASS_HOTSPOT",
     "FINDING_KIND_CLONE_GROUP",
     "FINDING_KIND_COVERAGE_HOTSPOT",

@@ -560,6 +560,15 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         pyproject_type=bool,
     ),
     _option(
+        dest="fail_on_authority_violation",
+        group="Quality gates",
+        cli_kind="bool_optional",
+        flags=("--fail-on-authority-violation",),
+        default=False,
+        help_text=ui.HELP_FAIL_ON_AUTHORITY_VIOLATION,
+        pyproject_type=bool,
+    ),
+    _option(
         dest="fail_on_untested_hotspots",
         group="Quality gates",
         cli_kind="bool_optional",

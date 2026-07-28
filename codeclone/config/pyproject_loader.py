@@ -16,6 +16,7 @@ from ..findings.clones.golden_fixtures import (
     normalize_golden_fixture_patterns,
 )
 from ..models import ConfigKeySpec, FoundationConfig, FoundationConfigInput
+from ..semantics.registry import AuthorityRegistryError, parse_authority_registry
 from .analytics_specs import (
     ANALYTICS_NESTED_TABLE_KEY,
     ANALYTICS_PATH_CONFIG_KEYS,
@@ -142,7 +143,9 @@ def load_pyproject_config(
     validated = _validate_known_config_table(
         table=codeclone_table,
         config_key_specs=config_key_specs,
-        nested_keys=frozenset((MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY)),
+        nested_keys=frozenset(
+            (MEMORY_NESTED_TABLE_KEY, ANALYTICS_NESTED_TABLE_KEY, "authority")
+        ),
         unknown_error_prefix="Unknown key(s) in tool.codeclone: ",
         root_path=root_path,
         path_config_keys=path_config_keys,
@@ -164,6 +167,12 @@ def load_pyproject_config(
             root_path=root_path,
             config_path=config_path,
         )
+    authority_obj = codeclone_table.get("authority")
+    if authority_obj is not None:
+        try:
+            validated["authority"] = parse_authority_registry(authority_obj)
+        except AuthorityRegistryError as exc:
+            raise ConfigValidationError(str(exc)) from exc
     return validated
 
 

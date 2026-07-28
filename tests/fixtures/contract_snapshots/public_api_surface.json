@@ -16,6 +16,10 @@
       "signature": "(self, request: 'MCPAnalysisRequest') -> 'dict[str, object]'"
     },
     {
+      "name": "check_authority",
+      "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'normal') -> 'dict[str, object]'"
+    },
+    {
       "name": "check_clones",
       "signature": "(self, *, run_id: 'str | None' = None, root: 'str | None' = None, path: 'str | None' = None, clone_type: 'str | None' = None, source_kind: 'str | None' = None, max_results: 'int' = 10, detail_level: 'DetailLevel' = 'summary') -> 'dict[str, object]'"
     },

@@ -154,6 +154,37 @@ def test_current_state_gate_requires_enabled_lane_not_baseline_trust() -> None:
     assert result.unavailable_lanes == ()
 
 
+def test_authority_gate_distinguishes_unavailable_lane_from_violations() -> None:
+    config = MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=False,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+        fail_on_authority_violation=True,
+    )
+
+    unavailable = evaluate_gate_state(
+        state=GateState(authority_violations=1),
+        config=config,
+        enabled_lanes=(),
+    )
+    violated = evaluate_gate_state(
+        state=GateState(authority_violations=1),
+        config=config,
+        lane_trust={"semantic_authority": "unavailable"},
+        enabled_lanes=("semantic_authority",),
+    )
+
+    assert unavailable.exit_code == 2
+    assert unavailable.unavailable_lanes == ("semantic_authority",)
+    assert violated.exit_code == 3
+    assert violated.unavailable_lanes == ()
+    assert violated.reasons == ("metric:Semantic authority violations detected: 1.",)
+
+
 def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
     enabled_lanes = TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
     config = MetricGateConfig(
@@ -167,6 +198,7 @@ def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
         fail_on_typing_regression=True,
         fail_on_docstring_regression=True,
         fail_on_api_break=True,
+        fail_on_authority_violation=True,
         fail_on_untested_hotspots=True,
         min_typing_coverage=900,
         min_docstring_coverage=800,
@@ -182,6 +214,7 @@ def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
         "adoption_regression",
         "adoption_threshold",
         "api_compatibility",
+        "authority_current",
         "clone_novelty",
         "complexity_current",
         "complexity_delta",
@@ -195,7 +228,7 @@ def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
         "health_current",
         "health_delta",
     }
-    assert gate_lane_contract_versions() == ("1", "1")
+    assert gate_lane_contract_versions() == ("2", "1")
 
 
 def _report_document() -> dict[str, object]:

@@ -22,6 +22,7 @@ from ..domain.findings import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
+    FAMILY_AUTHORITY,
     FAMILY_CLONE,
     FAMILY_CLONES,
     FAMILY_DEAD_CODE,
@@ -101,6 +102,10 @@ def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, objec
             _as_mapping,
             _as_sequence(_as_mapping(groups.get(FAMILY_DESIGN)).get("groups")),
         ),
+        *map(
+            _as_mapping,
+            _as_sequence(_as_mapping(groups.get(FAMILY_AUTHORITY)).get("groups")),
+        ),
     ]
 
 
@@ -108,6 +113,7 @@ _DIRECTORY_HOTSPOT_BUCKETS: tuple[str, ...] = (
     "all",
     "clones",
     "structural",
+    FAMILY_AUTHORITY,
     CATEGORY_COMPLEXITY,
     CATEGORY_COHESION,
     CATEGORY_COUPLING,
@@ -117,6 +123,7 @@ _DIRECTORY_HOTSPOT_BUCKETS: tuple[str, ...] = (
 _DIRECTORY_KIND_BREAKDOWN_KEYS: tuple[str, ...] = (
     "clones",
     "structural",
+    FAMILY_AUTHORITY,
     CATEGORY_DEAD_CODE,
     CATEGORY_COMPLEXITY,
     CATEGORY_COUPLING,
@@ -154,6 +161,8 @@ def _directory_bucket_keys(group: Mapping[str, object]) -> tuple[str, ...]:
         return ("all", "structural")
     if family == FAMILY_DEAD_CODE:
         return ("all", CATEGORY_DEAD_CODE)
+    if family == FAMILY_AUTHORITY:
+        return ("all", FAMILY_AUTHORITY)
     if family == FAMILY_DESIGN and category in {
         CATEGORY_COMPLEXITY,
         CATEGORY_COUPLING,
@@ -173,6 +182,8 @@ def _directory_kind_breakdown_key(group: Mapping[str, object]) -> str | None:
         return "structural"
     if family == FAMILY_DEAD_CODE:
         return CATEGORY_DEAD_CODE
+    if family == FAMILY_AUTHORITY:
+        return FAMILY_AUTHORITY
     if family == FAMILY_DESIGN and category in {
         CATEGORY_COMPLEXITY,
         CATEGORY_COUPLING,
@@ -476,6 +487,14 @@ def serialize_finding_group_card(group: Mapping[str, object]) -> dict[str, objec
         title = "Remove or explicitly keep unused code"
         confidence = str(group.get("confidence", "medium")).strip() or "medium"
         summary = f"{category or 'symbol'} with {confidence} confidence"
+    elif family == FAMILY_AUTHORITY:
+        title = "Restore canonical semantic authority"
+        contract_id = str(facts.get("contract_id", "")).strip()
+        owner = str(facts.get("canonical_owner", "")).strip()
+        summary = (
+            f"{category or 'authority violation'} for {contract_id}; "
+            f"canonical owner: {owner}"
+        )
     elif family == FAMILY_DESIGN:
         if category == CATEGORY_COMPLEXITY:
             title = "Reduce high-complexity function"

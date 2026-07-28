@@ -23,6 +23,7 @@ class _GatingArgs(Protocol):
     fail_on_typing_regression: bool
     fail_on_docstring_regression: bool
     fail_on_api_break: bool
+    fail_on_authority_violation: bool
     fail_on_untested_hotspots: bool
     fail_complexity: int
     fail_coupling: int
@@ -89,6 +90,8 @@ def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
         return "docstring_coverage_delta", trimmed.rsplit("=", maxsplit=1)[1]
     if trimmed.startswith(gate_msgs.GATE_REASON_API_BREAKING):
         return "api_breaking_changes", tail(gate_msgs.GATE_REASON_API_BREAKING)
+    if trimmed.startswith(gate_msgs.GATE_REASON_AUTHORITY_VIOLATIONS):
+        return "authority_violations", tail(gate_msgs.GATE_REASON_AUTHORITY_VIOLATIONS)
     coverage_detail = _parse_two_part_metric_detail(
         trimmed,
         prefix=gate_msgs.GATE_REASON_COVERAGE_HOTSPOTS,
@@ -162,6 +165,9 @@ def policy_context(*, args: _GatingArgs, gate_kind: str) -> str:
                 else None,
                 "fail-on-api-break"
                 if bool(getattr(args, "fail_on_api_break", False))
+                else None,
+                "fail-on-authority-violation"
+                if bool(getattr(args, "fail_on_authority_violation", False))
                 else None,
                 "fail-on-untested-hotspots"
                 if bool(getattr(args, "fail_on_untested_hotspots", False))

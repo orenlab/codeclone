@@ -375,6 +375,10 @@ def _flatten_findings(findings: Mapping[str, object]) -> list[Mapping[str, objec
             _as_mapping,
             _as_sequence(_as_mapping(groups.get("design")).get("groups")),
         ),
+        *map(
+            _as_mapping,
+            _as_sequence(_as_mapping(groups.get("authority")).get("groups")),
+        ),
     ]
     return flat_groups
 
@@ -715,6 +719,21 @@ def _append_findings_sections(
         groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
         fact_keys=("lcom4", "method_count", "instance_var_count", "fan_out", "risk"),
     )
+    lines.append("")
+    _append_single_item_findings(
+        lines,
+        title=proj.TEXT_SECTION_AUTHORITY_FINDINGS,
+        groups=_as_sequence(
+            _as_mapping(findings_groups.get("authority")).get("groups")
+        ),
+        fact_keys=(
+            "contract_id",
+            "violation_kind",
+            "canonical_owner",
+            "authority_status",
+            "resolution_state",
+        ),
+    )
 
 
 def render_text_report_document(payload: Mapping[str, object]) -> str:
@@ -758,7 +777,7 @@ def render_text_report_document(payload: Mapping[str, object]) -> str:
     ]
     if "suppressed" in findings_clones:
         clone_summary_keys.append("suppressed")
-    suppressed_summary_keys: list[str] = ["dead_code"]
+    suppressed_summary_keys: list[str] = ["dead_code", "authority"]
     if "clones" in findings_suppressed:
         suppressed_summary_keys.append("clones")
 

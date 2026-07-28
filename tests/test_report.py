@@ -40,6 +40,7 @@ from codeclone.report.document.integrity import (
     verify_report_integrity,
 )
 from codeclone.report.explain import build_block_group_facts
+from codeclone.report.html.assemble import build_html_report
 from codeclone.report.html.sections._structural import (
     _finding_why_template_html,
     build_structural_findings_html_panel,
@@ -101,6 +102,105 @@ def _trusted_clone_lanes() -> TrustVector:
             ),
         ),
     )
+
+
+def test_authority_findings_and_all_renderers_share_canonical_facts() -> None:
+    violation = {
+        "item_kind": "violation",
+        "violation_id": "1" * 64,
+        "contract_id": "example.contract/v1",
+        "kind": "owner_bypass",
+        "sink_identity": "pkg.mod:shadow",
+        "canonical_owner": "pkg.mod:owner",
+        "authority_status": "shadow",
+        "producer_root_ids": ["producer:pkg.mod:shadow"],
+        "effect_signature": "2" * 64,
+        "resolution_state": "resolved",
+        "producers": ["pkg.mod:shadow"],
+        "suppressed": False,
+        "locations": [
+            {
+                "relative_path": "pkg/mod.py",
+                "start_line": 10,
+                "end_line": 12,
+                "qualname": "pkg.mod:shadow",
+            }
+        ],
+        "algorithm_revision": "1",
+    }
+    payload = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo"},
+        metrics={
+            "semantic_authority": {
+                "summary": {
+                    "enabled": True,
+                    "report_only": False,
+                    "enforcement_enabled": True,
+                    "algorithm_revision": "1",
+                    "registry_version": "1",
+                    "registry_contracts": 1,
+                    "contracts": 2,
+                    "sinks": 2,
+                    "candidates": 1,
+                    "governed_sinks": 2,
+                    "violations": 2,
+                    "active_violations": 1,
+                    "suppressed_violations": 1,
+                    "scc_count": 2,
+                    "fixpoint_iterations": 1,
+                    "sinks_by_status": {"authoritative": 1, "shadow": 1},
+                },
+                "items": [
+                    violation,
+                    {
+                        **violation,
+                        "violation_id": "3" * 64,
+                        "suppressed": True,
+                    },
+                ],
+                "registry": [],
+                "contract_ir": [],
+            }
+        },
+    )
+
+    findings = cast("dict[str, object]", payload["findings"])
+    authority = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", findings["groups"])["authority"],
+    )
+    groups = cast("list[dict[str, object]]", authority["groups"])
+    assert [group["category"] for group in groups] == ["owner_bypass"]
+    assert cast("dict[str, int]", findings["summary"])["total"] == 1
+    assert (
+        cast(
+            "dict[str, int]",
+            cast("dict[str, object]", findings["summary"])["suppressed"],
+        )["authority"]
+        == 1
+    )
+
+    markdown = render_markdown_report_document(payload)
+    text = render_text_report_document(payload)
+    sarif = json.loads(render_sarif_report_document(payload))
+    html = build_html_report(report_document=payload)
+    assert_contains_all(
+        markdown,
+        "Authority Findings",
+        "example.contract/v1",
+        "owner_bypass",
+    )
+    assert_contains_all(
+        text,
+        "AUTHORITY FINDINGS",
+        "example.contract/v1",
+        "owner_bypass",
+    )
+    assert sarif["runs"][0]["results"][0]["ruleId"] == "CAUTH001"
+    assert_contains_all(html, "Authority", "example.contract/v1", "owner_bypass")
 
 
 def test_report_artifact_door_rejects_foreign_schema_after_shape_validation(

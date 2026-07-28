@@ -283,6 +283,10 @@ CHECK_DEAD_CODE: Final = (
     "this narrower tool instead of list_findings when you only need "
     "dead-code findings."
 )
+CHECK_AUTHORITY: Final = (
+    "Return active canonical semantic-authority violation findings for one run, "
+    "with deterministic ordering and bounded detail."
+)
 
 GENERATE_PR_SUMMARY: Final = (
     "Generate a PR-friendly CodeClone summary for changed files. Prefer "
@@ -386,6 +390,7 @@ TITLE_CHECK_CLONES: Final = "Check Clones"
 TITLE_CHECK_COUPLING: Final = "Check Coupling"
 TITLE_CHECK_COHESION: Final = "Check Cohesion"
 TITLE_CHECK_DEAD_CODE: Final = "Check Dead Code"
+TITLE_CHECK_AUTHORITY: Final = "Check Semantic Authority"
 TITLE_GENERATE_PR_SUMMARY: Final = "Generate PR Summary"
 TITLE_MARK_FINDING_REVIEWED: Final = "Mark Finding Reviewed"
 TITLE_LIST_REVIEWED_FINDINGS: Final = "List Reviewed Findings"

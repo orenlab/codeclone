@@ -64,6 +64,7 @@ def _metrics_flags_requested(args: object) -> bool:
         or bool_attr(args, "fail_on_typing_regression")
         or bool_attr(args, "fail_on_docstring_regression")
         or bool_attr(args, "fail_on_api_break")
+        or bool_attr(args, "fail_on_authority_violation")
         or bool_attr(args, "fail_on_untested_hotspots")
         or int_attr(args, "min_typing_coverage", -1) >= 0
         or int_attr(args, "min_docstring_coverage", -1) >= 0
@@ -109,6 +110,8 @@ def configure_metrics_mode(
         set_bool_attr(args, "skip_dependencies", False)
     if bool_attr(args, "fail_on_api_break"):
         set_bool_attr(args, "api_surface", True)
+    if bool_attr(args, "fail_on_authority_violation"):
+        set_bool_attr(args, "semantic_authority", True)
 
 
 def resolve_cache_path(
@@ -196,6 +199,7 @@ def gating_mode_enabled(args: object) -> bool:
         or bool_attr(args, "fail_on_typing_regression")
         or bool_attr(args, "fail_on_docstring_regression")
         or bool_attr(args, "fail_on_api_break")
+        or bool_attr(args, "fail_on_authority_violation")
         or int_attr(args, "min_typing_coverage", -1) >= 0
         or int_attr(args, "min_docstring_coverage", -1) >= 0
     )

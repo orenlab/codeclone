@@ -3620,6 +3620,95 @@ def test_cli_semantic_authority_requests_metrics_without_baseline(
     assert summary["report_only"] is True
 
 
+def test_cli_semantic_authority_matches_parallel_and_sequential(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    for index in range(16):
+        suppression = (
+            "  # codeclone: ignore[duplicate-responsibility]" if index == 1 else ""
+        )
+        (tmp_path / f"module_{index:02d}.py").write_text(
+            f"def digest(value: bytes) -> str:{suppression}\n    return value.hex()\n",
+            "utf-8",
+        )
+    (tmp_path / "pyproject.toml").write_text(
+        """
+[tool.codeclone]
+
+[[tool.codeclone.authority]]
+contract_id = "example.digest/v1"
+canonical_owner = "module_00:digest"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = ["module_00:digest"]
+""".lstrip(),
+        "utf-8",
+    )
+    sequential_report = tmp_path / "sequential.json"
+    parallel_report = tmp_path / "parallel.json"
+
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--processes",
+            "1",
+            "--cache-path",
+            str(tmp_path / "sequential-cache.json"),
+            "--semantic-authority",
+            "--json",
+            str(sequential_report),
+            "--no-progress",
+        ],
+    )
+    _ = capsys.readouterr()
+    _run_main(
+        monkeypatch,
+        [
+            str(tmp_path),
+            "--processes",
+            "2",
+            "--cache-path",
+            str(tmp_path / "parallel-cache.json"),
+            "--semantic-authority",
+            "--json",
+            str(parallel_report),
+            "--no-progress",
+        ],
+    )
+    _ = capsys.readouterr()
+
+    sequential = json.loads(sequential_report.read_text("utf-8"))
+    parallel = json.loads(parallel_report.read_text("utf-8"))
+    sequential_metrics = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", sequential["metrics"])["families"],
+    )["semantic_authority"]
+    parallel_metrics = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", parallel["metrics"])["families"],
+    )["semantic_authority"]
+    sequential_findings = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", sequential["findings"])["groups"],
+    )["authority"]
+    parallel_findings = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", parallel["findings"])["groups"],
+    )["authority"]
+
+    assert sequential_metrics == parallel_metrics
+    assert sequential_findings == parallel_findings
+    summary = cast(
+        "dict[str, object]",
+        cast("dict[str, object]", sequential_metrics)["summary"],
+    )
+    assert summary["registry_contracts"] == 1
+    assert cast("int", summary["sinks"]) > 0
+
+
 def test_cli_summary_no_color_has_no_ansi(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

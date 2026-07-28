@@ -24,6 +24,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--fail-on-typing-regression | --no-fail-on-typing-regression]
                  [--fail-on-docstring-regression | --no-fail-on-docstring-regression]
                  [--fail-on-api-break | --no-fail-on-api-break]
+                 [--fail-on-authority-violation | --no-fail-on-authority-violation]
                  [--fail-on-untested-hotspots | --no-fail-on-untested-hotspots]
                  [--min-typing-coverage PERCENT]
                  [--min-docstring-coverage PERCENT] [--coverage-min PERCENT]
@@ -143,6 +144,9 @@ Quality gates:
   --fail-on-api-break, --no-fail-on-api-break
                         Exit with code 3 if public API removals or signature breaks are detected
                         relative to the metrics baseline.
+  --fail-on-authority-violation, --no-fail-on-authority-violation
+                        Exit with code 3 if a governed semantic contract has an authority violation.
+                        Requires a reviewed [[tool.codeclone.authority]] registry entry.
   --fail-on-untested-hotspots, --no-fail-on-untested-hotspots
                         Exit with code 3 if medium/high-risk functions measured by Coverage Join
                         fall below the joined coverage threshold.

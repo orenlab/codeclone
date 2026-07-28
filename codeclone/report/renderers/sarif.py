@@ -22,11 +22,13 @@ from ...domain.findings import (
     CATEGORY_DEPENDENCY,
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
+    FAMILY_AUTHORITY,
     FAMILY_CLONE,
     FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
     FAMILY_STRUCTURAL,
+    FINDING_KIND_AUTHORITY_VIOLATION,
     FINDING_KIND_CLASS_HOTSPOT,
     FINDING_KIND_CLONE_GROUP,
     FINDING_KIND_COVERAGE_HOTSPOT,
@@ -130,6 +132,7 @@ def _flatten_findings(payload: Mapping[str, object]) -> list[Mapping[str, object
     structural = _as_mapping(groups.get(FAMILY_STRUCTURAL))
     dead_code = _as_mapping(groups.get(FAMILY_DEAD_CODE))
     design = _as_mapping(groups.get(FAMILY_DESIGN))
+    authority = _as_mapping(groups.get(FAMILY_AUTHORITY))
     return [
         *map(_as_mapping, _as_sequence(clones.get("functions"))),
         *map(_as_mapping, _as_sequence(clones.get("blocks"))),
@@ -137,6 +140,7 @@ def _flatten_findings(payload: Mapping[str, object]) -> list[Mapping[str, object
         *map(_as_mapping, _as_sequence(structural.get("groups"))),
         *map(_as_mapping, _as_sequence(dead_code.get("groups"))),
         *map(_as_mapping, _as_sequence(design.get("groups"))),
+        *map(_as_mapping, _as_sequence(authority.get("groups"))),
     ]
 
 
@@ -335,6 +339,18 @@ def _design_rule_spec(category: str, kind: str) -> _RuleSpec:
     )
 
 
+def _authority_rule_spec() -> _RuleSpec:
+    return _RuleSpec(
+        "CAUTH001",
+        sarif_msgs.RULE_AUTHORITY_VIOLATION_SHORT,
+        sarif_msgs.RULE_AUTHORITY_VIOLATION_FULL,
+        "error",
+        FAMILY_AUTHORITY,
+        FINDING_KIND_AUTHORITY_VIOLATION,
+        CONFIDENCE_HIGH,
+    )
+
+
 def _rule_spec(group: Mapping[str, object]) -> _RuleSpec:
     family = _text(group.get("family"))
     category = _text(group.get("category"))
@@ -345,6 +361,8 @@ def _rule_spec(group: Mapping[str, object]) -> _RuleSpec:
         return _structural_rule_spec(kind)
     if family == FAMILY_DEAD_CODE:
         return _dead_code_rule_spec(category)
+    if family == FAMILY_AUTHORITY:
+        return _authority_rule_spec()
     return _design_rule_spec(category, kind)
 
 
@@ -441,6 +459,17 @@ def _design_result_message(
     return f"Dependency cycle ({len(modules)} modules): {' -> '.join(modules)}."
 
 
+def _authority_result_message(group: Mapping[str, object]) -> str:
+    facts = _as_mapping(group.get("facts"))
+    kind = _text(facts.get("violation_kind")) or _text(group.get("category"))
+    contract_id = _text(facts.get("contract_id"))
+    owner = _text(facts.get("canonical_owner"))
+    return (
+        f"Semantic authority violation ({kind}) for {contract_id}; "
+        f"canonical owner is {owner}."
+    )
+
+
 def _result_message(group: Mapping[str, object]) -> str:
     family = _text(group.get("family"))
     category = _text(group.get("category"))
@@ -469,6 +498,8 @@ def _result_message(group: Mapping[str, object]) -> str:
             qualname=qualname,
             relative_path=_text(first_item.get("relative_path")),
         )
+    if family == FAMILY_AUTHORITY:
+        return _authority_result_message(group)
     return _design_result_message(
         category=category,
         facts=_as_mapping(group.get("facts")),
@@ -505,6 +536,12 @@ def _location_message(
             "Unused symbol declaration"
             if related_id is None
             else f"Related declaration #{related_id}"
+        )
+    if family == FAMILY_AUTHORITY:
+        return (
+            "Authority violation location"
+            if related_id is None
+            else f"Related authority location #{related_id}"
         )
     if category == CATEGORY_DEPENDENCY:
         return (
@@ -665,6 +702,18 @@ def _result_properties(group: Mapping[str, object]) -> dict[str, object]:
         return _design_result_properties(
             props,
             facts=_as_mapping(group.get("facts")),
+        )
+    if family == FAMILY_AUTHORITY:
+        facts = _as_mapping(group.get("facts"))
+        props.update(
+            {
+                "contractId": _text(facts.get("contract_id")),
+                "violationKind": _text(facts.get("violation_kind")),
+                "canonicalOwner": _text(facts.get("canonical_owner")),
+                "authorityStatus": _text(facts.get("authority_status")),
+                "resolutionState": _text(facts.get("resolution_state")),
+                "algorithmRevision": _text(facts.get("algorithm_revision")),
+            }
         )
     return props
 

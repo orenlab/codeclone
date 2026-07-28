@@ -18,7 +18,7 @@ import codeclone.config.pyproject_loader as loader_mod
 import codeclone.config.resolver as resolver_mod
 import codeclone.config.spec as spec_mod
 from codeclone.config.pyproject_loader import ConfigValidationError
-from codeclone.models import ConfigKeySpec
+from codeclone.models import AuthorityRegistry, ConfigKeySpec
 
 
 def _write_pyproject(path: Path, content: str) -> None:
@@ -163,6 +163,41 @@ def test_load_pyproject_config_unknown_key_rejected(
         lambda _path: {"tool": {"codeclone": {"unknown_option": 1}}},
     )
     with pytest.raises(ConfigValidationError, match="Unknown key\\(s\\)"):
+        loader_mod.load_pyproject_config(tmp_path)
+
+
+def test_load_pyproject_config_validates_authority_registry_once(
+    tmp_path: Path,
+) -> None:
+    _write_pyproject(
+        tmp_path / "pyproject.toml",
+        """
+[[tool.codeclone.authority]]
+contract_id = "example.contract/v1"
+canonical_owner = "pkg.mod:owner"
+allowed_adapters = ["pkg.mod:adapter"]
+forbidden_raw_inputs = ["raw:payload"]
+required_provenance = ["operation:canonical_operation:hashlib.sha256"]
+""",
+    )
+
+    loaded = loader_mod.load_pyproject_config(tmp_path)
+
+    assert isinstance(loaded["authority"], AuthorityRegistry)
+    assert loaded["authority"].entries[0].canonical_owner == "pkg.mod:owner"
+
+    _write_pyproject(
+        tmp_path / "pyproject.toml",
+        """
+[[tool.codeclone.authority]]
+contract_id = "example.contract/v1"
+canonical_owner = "pkg.mod:owner"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = []
+""",
+    )
+    with pytest.raises(ConfigValidationError, match="must not be empty"):
         loader_mod.load_pyproject_config(tmp_path)
 
 

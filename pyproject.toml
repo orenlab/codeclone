@@ -225,6 +225,8 @@ fail_cycles = true
 fail_dead_code = true
 fail_health = 80
 fail_on_new_metrics = true
+semantic_authority = true
+fail_on_authority_violation = true
 api_surface = true
 golden_fixture_paths = ["tests/fixtures/golden_*"]
 min_typing_coverage = 99
@@ -235,6 +237,47 @@ audit_enabled = true
 audit_path = ".codeclone/db/audit.sqlite3"
 audit_payloads = "full"    # "off" | "compact" | "full"
 audit_retention_days = 30
+
+[[tool.codeclone.authority]]
+contract_id = "baseline.publication/v1"
+canonical_owner = "codeclone.baseline.publish:publish_baseline"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = ["codeclone.baseline.publish:publish_baseline"]
+
+[[tool.codeclone.authority]]
+contract_id = "clone.fingerprint_wire/v1"
+canonical_owner = "codeclone.analysis.wire:emit_wire"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = ["codeclone.analysis.wire:emit_wire"]
+
+[[tool.codeclone.authority]]
+contract_id = "compatibility.verdict/v1"
+canonical_owner = "codeclone.contracts.compatibility:check_contract_compatibility"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = [
+    "codeclone.contracts.compatibility:check_contract_compatibility",
+]
+
+[[tool.codeclone.authority]]
+contract_id = "python.module_identity/v2"
+canonical_owner = "codeclone.paths.module_identity.resolver:resolve_source_identity"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = [
+    "codeclone.paths.module_identity.resolver:resolve_source_identity",
+]
+
+[[tool.codeclone.authority]]
+contract_id = "report.run_identity/v1"
+canonical_owner = "codeclone.report.document.integrity:_build_integrity_payload"
+allowed_adapters = []
+forbidden_raw_inputs = []
+required_provenance = [
+    "codeclone.report.document.integrity:_build_integrity_payload",
+]
 
 [tool.codeclone.memory]
 projection_rebuild_policy = "enqueue_when_stale"              # off | enqueue_when_stale

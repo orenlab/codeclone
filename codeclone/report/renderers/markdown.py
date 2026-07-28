@@ -314,7 +314,13 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 md_msgs.MD_LABEL_FAMILIES,
                 ", ".join(
                     f"{name}={_text(family_summary.get(name))}"
-                    for name in ("clones", "structural", "dead_code", "design")
+                    for name in (
+                        "clones",
+                        "structural",
+                        "dead_code",
+                        "design",
+                        "authority",
+                    )
                 ),
             ),
             (
@@ -369,7 +375,13 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
                 md_msgs.MD_LABEL_BY_FAMILY,
                 ", ".join(
                     f"{name}={_text(family_summary.get(name))}"
-                    for name in ("clones", "structural", "dead_code", "design")
+                    for name in (
+                        "clones",
+                        "structural",
+                        "dead_code",
+                        "design",
+                        "authority",
+                    )
                 ),
             ),
             (
@@ -482,6 +494,14 @@ def render_markdown_report_document(payload: Mapping[str, object]) -> str:
     _append_findings_section(
         lines,
         groups=_as_sequence(_as_mapping(findings_groups.get("design")).get("groups")),
+    )
+
+    _append_anchor(lines, *_anchor("authority-findings"))
+    _append_findings_section(
+        lines,
+        groups=_as_sequence(
+            _as_mapping(findings_groups.get("authority")).get("groups")
+        ),
     )
 
     _append_anchor(lines, *_anchor("metrics"))

@@ -19,6 +19,7 @@ from ...domain.findings import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
     CLONE_KIND_SEGMENT,
+    FAMILY_AUTHORITY,
     FAMILY_CLONE,
     FAMILY_CLONES,
     FAMILY_DEAD_CODE,
@@ -138,12 +139,29 @@ def _combined_impact_scope(groups: Sequence[Mapping[str, object]]) -> str:
 
 def _top_risks(
     *,
+    authority_groups: Sequence[Mapping[str, object]],
     dead_code_groups: Sequence[Mapping[str, object]],
     design_groups: Sequence[Mapping[str, object]],
     structural_groups: Sequence[Mapping[str, object]],
     clone_groups: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
     risks: list[dict[str, object]] = []
+
+    if authority_groups:
+        count = len(authority_groups)
+        risks.append(
+            {
+                "kind": "family_summary",
+                "family": FAMILY_AUTHORITY,
+                "count": count,
+                "scope": _combined_impact_scope(authority_groups),
+                "label": (
+                    "1 semantic authority violation"
+                    if count == 1
+                    else f"{count} semantic authority violations"
+                ),
+            }
+        )
 
     if dead_code_groups:
         label = (
@@ -266,11 +284,15 @@ def _build_derived_overview(
         _as_mapping(groups.get(FAMILY_DEAD_CODE)).get("groups")
     )
     design_groups = _as_sequence(_as_mapping(groups.get("design")).get("groups"))
+    authority_groups = _as_sequence(
+        _as_mapping(groups.get(FAMILY_AUTHORITY)).get("groups")
+    )
     flat_groups = [
         *clone_groups,
         *structural_groups,
         *dead_code_groups,
         *design_groups,
+        *authority_groups,
     ]
     dominant_kind_counts: Counter[str] = Counter(
         str(
@@ -285,6 +307,7 @@ def _build_derived_overview(
     overview: dict[str, object] = {
         "families": dict(_as_mapping(summary.get("families"))),
         "top_risks": _top_risks(
+            authority_groups=[_as_mapping(group) for group in authority_groups],
             dead_code_groups=[_as_mapping(group) for group in dead_code_groups],
             design_groups=[_as_mapping(group) for group in design_groups],
             structural_groups=[_as_mapping(group) for group in structural_groups],
@@ -454,12 +477,19 @@ def _build_derived_suggestions(
 
 _REVIEW_QUEUE_SCHEMA_VERSION: Final = "2"
 _REVIEW_SEVERITIES: Final = ("critical", "warning", "info")
-_REVIEW_FAMILIES: Final = ("clones", "structural", "dead_code", "design")
+_REVIEW_FAMILIES: Final = (
+    "clones",
+    "structural",
+    "dead_code",
+    "design",
+    "authority",
+)
 _REVIEW_FAMILY_BY_FINDING: Final = {
     FAMILY_CLONE: "clones",
     FAMILY_STRUCTURAL: "structural",
     FAMILY_DEAD_CODE: "dead_code",
     FAMILY_DESIGN: "design",
+    FAMILY_AUTHORITY: "authority",
 }
 _REVIEW_FAMILY_BY_SUGGESTION: Final = {
     FAMILY_CLONES: "clones",
@@ -488,7 +518,12 @@ def _flatten_finding_groups(
         for key in ("functions", "blocks", "segments")
         for group in _as_sequence(clones.get(key))
     ]
-    for family_key in (FAMILY_STRUCTURAL, FAMILY_DEAD_CODE, "design"):
+    for family_key in (
+        FAMILY_STRUCTURAL,
+        FAMILY_DEAD_CODE,
+        "design",
+        FAMILY_AUTHORITY,
+    ):
         flat.extend(
             _as_mapping(group)
             for group in _as_sequence(_as_mapping(groups.get(family_key)).get("groups"))
@@ -512,6 +547,13 @@ def _finding_review_title(group: Mapping[str, object]) -> str:
         return f"Unused {category}: {qualname}" if qualname else f"Unused {category}"
     if family == FAMILY_DESIGN:
         return f"{_humanize(category)}: {qualname}" if qualname else _humanize(category)
+    if family == FAMILY_AUTHORITY:
+        contract_id = str(_as_mapping(group.get("facts")).get("contract_id", ""))
+        return (
+            f"{_humanize(category)}: {contract_id}"
+            if contract_id
+            else _humanize(category)
+        )
     return _humanize(category)
 
 
@@ -699,7 +741,8 @@ def _build_derived_review_queue(
 ) -> dict[str, object]:
     """Prioritised cross-family review queue projected over canonical findings.
 
-    Every finding in ``findings.groups`` (clones, structural, dead-code, design)
+    Every finding in ``findings.groups`` (clones, structural, dead-code, design,
+    authority)
     becomes one review item, enriched with the matching suggestion's remediation
     steps when one exists (the suggestion wins on title/summary/location).
     Findings without a suggestion carry ``has_action=False``. The summary carries

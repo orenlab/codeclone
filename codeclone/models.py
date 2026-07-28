@@ -1808,6 +1808,14 @@ AuthorityCandidateLevel = Literal[
     "divergent_projection",
 ]
 AuthorityResolutionState = Literal["resolved", "unavailable"]
+AuthorityViolationKind = Literal[
+    "multiple_independent_producers",
+    "shadow_projection",
+    "owner_bypass",
+    "reconstructed_contract",
+    "divergent_failure_semantics",
+    "divergent_canonicalization",
+]
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1853,12 +1861,64 @@ class AuthorityCandidate:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityRegistryEntry:
+    contract_id: str
+    canonical_owner: str
+    allowed_adapters: tuple[str, ...]
+    forbidden_raw_inputs: tuple[str, ...]
+    required_provenance: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityRegistry:
+    version: str
+    entries: tuple[AuthorityRegistryEntry, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityGovernedSink:
+    contract_id: str
+    sink_identity: str
+    authority_status: AuthorityStatus
+    producer_root_ids: tuple[str, ...]
+    effect_signature: str
+    resolution_state: AuthorityResolutionState
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityViolationLocation:
+    relative_path: str
+    start_line: int
+    end_line: int
+    qualname: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class AuthorityViolation:
+    violation_id: str
+    contract_id: str
+    kind: AuthorityViolationKind
+    sink_identity: str
+    canonical_owner: str
+    authority_status: AuthorityStatus
+    producer_root_ids: tuple[str, ...]
+    effect_signature: str
+    resolution_state: AuthorityResolutionState
+    producers: tuple[str, ...]
+    suppressed: bool
+    locations: tuple[AuthorityViolationLocation, ...]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SemanticAuthorityResult:
     algorithm_revision: str
     contract_ir: ContractIRBuildResult
     graph: AuthorityGraph
     sinks: tuple[AuthoritySinkResult, ...]
     candidates: tuple[AuthorityCandidate, ...]
+    registry: AuthorityRegistry | None = None
+    governed_sinks: tuple[AuthorityGovernedSink, ...] = ()
+    violations: tuple[AuthorityViolation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -2326,8 +2386,19 @@ class AdoptionObservationPayload:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class SemanticAuthorityObservation:
+    contract_id: str
+    sink_identity: str
+    authority_status: AuthorityStatus
+    producer_root_ids: tuple[str, ...]
+    effect_signature: str
+    resolution_state: AuthorityResolutionState
+    algorithm_revision: str
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SemanticAuthorityObservationPayload:
-    result: SemanticAuthorityResult
+    observations: tuple[SemanticAuthorityObservation, ...]
 
 
 _CLONE_OBSERVATION_PAYLOAD_ADAPTER = TypeAdapter(CloneObservationPayload)

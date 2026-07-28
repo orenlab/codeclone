@@ -391,7 +391,7 @@ def test_phase39d3_contract_ir_has_exact_owners_and_no_reexports() -> None:
     )
 
 
-def test_phase39d4_authority_has_one_behavior_owner_and_no_enforcement_reader() -> None:
+def test_phase39d5_authority_has_one_behavior_owner_and_one_gate_reader() -> None:
     root = Path(__file__).resolve().parents[1]
     _assert_phase39_models_have_exact_owner(
         root=root,
@@ -424,7 +424,7 @@ def test_phase39d4_authority_has_one_behavior_owner_and_no_enforcement_reader() 
         if "semantic_authority" in path.read_text("utf-8")
         or "AuthorityStatus" in path.read_text("utf-8")
     ]
-    assert violations == []
+    assert violations == ["codeclone/report/gates/evaluator.py"]
 
 
 def _string_mapping(value: object, *, field: str) -> dict[str, object]:

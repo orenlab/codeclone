@@ -9,6 +9,11 @@ from ._base import MCPToolSchema, SimpleMCPTool, run_kw
 
 TOOLS = (
     SimpleMCPTool(
+        name="check_authority",
+        schema=MCPToolSchema(title="Check Semantic Authority"),
+        runner=lambda session, params: run_kw(session.check_authority, params),
+    ),
+    SimpleMCPTool(
         name="check_complexity",
         schema=MCPToolSchema(title="Check Complexity"),
         runner=lambda session, params: run_kw(session.check_complexity, params),

@@ -11,7 +11,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from typing import Final
 
-from ...domain.findings import FAMILY_CLONES, FAMILY_DEAD_CODE, FAMILY_STRUCTURAL
+from ...domain.findings import (
+    FAMILY_AUTHORITY,
+    FAMILY_CLONES,
+    FAMILY_DEAD_CODE,
+    FAMILY_STRUCTURAL,
+)
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ...utils.payload_narrow import is_record_mapping
@@ -27,6 +32,7 @@ _FINDINGS_SECTION_FAMILIES: Final = frozenset(
         FAMILY_STRUCTURAL,
         FAMILY_DEAD_CODE,
         "design",
+        FAMILY_AUTHORITY,
     }
 )
 
@@ -48,7 +54,7 @@ def validate_findings_section_family(family: str) -> str:
     if normalized not in _FINDINGS_SECTION_FAMILIES:
         raise MCPServiceContractError(
             "Invalid family for findings section. "
-            "Use clone, structural, dead_code, or design."
+            "Use clone, structural, dead_code, design, or authority."
         )
     return normalized
 
@@ -102,6 +108,7 @@ _GROUP_COLLECTORS: Final[dict[str, _GroupCollector]] = {
     FAMILY_STRUCTURAL: lambda root: _nested_groups(root, FAMILY_STRUCTURAL),
     FAMILY_DEAD_CODE: lambda root: _nested_groups(root, FAMILY_DEAD_CODE),
     "design": lambda root: _nested_groups(root, "design"),
+    FAMILY_AUTHORITY: lambda root: _nested_groups(root, FAMILY_AUTHORITY),
 }
 
 
@@ -136,7 +143,8 @@ def findings_section_payload(
         return {
             "summary": summary,
             "_hint": (
-                "Use family=clone|structural|dead_code|design with offset/limit "
+                "Use family=clone|structural|dead_code|design|authority with "
+                "offset/limit "
                 "to paginate finding groups. Prefer list_findings for filtered "
                 "agent triage."
             ),

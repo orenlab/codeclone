@@ -40,6 +40,7 @@ class MetricGateConfig:
     fail_on_typing_regression: bool = False
     fail_on_docstring_regression: bool = False
     fail_on_api_break: bool = False
+    fail_on_authority_violation: bool = False
     fail_on_untested_hotspots: bool = False
     min_typing_coverage: int = -1
     min_docstring_coverage: int = -1
@@ -71,6 +72,7 @@ class GateState:
     coverage_join_status: str = ""
     coverage_hotspots: int = 0
     api_breaking_changes: int = 0
+    authority_violations: int = 0
     diff_new_high_risk_functions: int = 0
     diff_new_high_coupling_classes: int = 0
     diff_new_cycles: int = 0
@@ -144,6 +146,8 @@ def active_gate_lane_requirements(
         rows["api_compatibility"] = ("api_surface",)
     if "adoption_counts" in enabled and config.fail_on_untested_hotspots:
         rows["coverage_hotspots"] = ("adoption_counts",)
+    if config.fail_on_authority_violation:
+        rows["authority_current"] = ("semantic_authority",)
     return tuple(sorted(rows.items()))
 
 
@@ -271,6 +275,11 @@ def gate_state_from_project_metrics(
             int(coverage_join.coverage_hotspots) if coverage_join is not None else 0
         ),
         api_breaking_changes=_as_int(diff_summary.get("api_breaking_changes"), 0),
+        authority_violations=(
+            len(project_metrics.semantic_authority.violations)
+            if project_metrics.semantic_authority is not None
+            else 0
+        ),
         diff_new_high_risk_functions=_as_int(
             diff_summary.get("new_high_risk_functions"),
             0,
@@ -639,6 +648,12 @@ def _evaluate_gate_state_result(
             config=effective_config,
         )
     ]
+    if config.fail_on_authority_violation and state.authority_violations > 0:
+        reasons.append(
+            "metric:"
+            + gate_msgs.GATE_REASON_AUTHORITY_VIOLATIONS
+            + f"{state.authority_violations}."
+        )
 
     if config.fail_on_new and state.clone_new_count > 0:
         reasons.append("clone:new")
@@ -767,6 +782,9 @@ def _gate_state_from_report_document(
     api_surface_summary = _as_mapping(
         _as_mapping(families.get("api_surface")).get("summary")
     )
+    semantic_authority_summary = _as_mapping(
+        _as_mapping(families.get("semantic_authority")).get("summary")
+    )
     coverage_join_summary = _as_mapping(
         _as_mapping(families.get("coverage_join")).get("summary")
     )
@@ -805,6 +823,10 @@ def _gate_state_from_report_document(
             _as_int(diff_summary.get("api_breaking_changes"), 0)
             if prefer_diff_summary
             else _as_int(api_surface_summary.get("breaking"), 0)
+        ),
+        authority_violations=_as_int(
+            semantic_authority_summary.get("violations"),
+            0,
         ),
         diff_new_high_risk_functions=_as_int(
             diff_summary.get("new_high_risk_functions"),

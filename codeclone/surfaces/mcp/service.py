@@ -173,6 +173,9 @@ class _QueryServiceMixin:
     def check_dead_code(self: _RunDictService, **params: object) -> dict[str, object]:
         return self._run_dict("check_dead_code", **params)
 
+    def check_authority(self: _RunDictService, **params: object) -> dict[str, object]:
+        return self._run_dict("check_authority", **params)
+
 
 class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
     def __init__(
@@ -325,6 +328,13 @@ def _apply_public_method_signatures() -> None:
             _kwonly("min_severity", "str | None", None),
             _kwonly("max_results", "int", 10),
             _kwonly("detail_level", "DetailLevel", "summary"),
+        ),
+        "check_authority": (
+            _kwonly("run_id", "str | None", None),
+            _kwonly("root", "str | None", None),
+            _kwonly("path", "str | None", None),
+            _kwonly("max_results", "int", 10),
+            _kwonly("detail_level", "DetailLevel", "normal"),
         ),
         "compare_runs": (
             _kwonly("before_run_id", "str"),

@@ -350,7 +350,7 @@ FamilyParam = Annotated[
             "metrics_detail: complexity, coupling, cohesion, dependencies, "
             "dead_code, api_surface, security_surfaces, semantic_authority, "
             "overloaded_modules, health, coverage_adoption, coverage_join. "
-            "findings: clone, structural, dead_code, or design."
+            "findings: clone, structural, dead_code, design, or authority."
         )
     ),
 ]
@@ -378,7 +378,7 @@ LimitParam = Annotated[
 ]
 FindingFamilyParam = Annotated[
     str,
-    Field(description="all, clone, structural, dead_code, or design."),
+    Field(description="all, clone, structural, dead_code, design, or authority."),
 ]
 CategoryParam = Annotated[str | None, Field(description="Finding category filter.")]
 SeverityParam = Annotated[str | None, Field(description="critical, warning, or info.")]
@@ -386,7 +386,10 @@ SourceKindParam = Annotated[
     str | None,
     Field(description="production, tests, fixtures, mixed, or other."),
 ]
-NoveltyParam = Annotated[str, Field(description="all, new, or known vs baseline.")]
+NoveltyParam = Annotated[
+    str,
+    Field(description="all, new, known, or unavailable vs baseline."),
+]
 SortByParam = Annotated[
     str,
     Field(description="default, priority, severity, or spread."),

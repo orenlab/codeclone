@@ -45,6 +45,10 @@ REMEDIATION_DEPENDENCY_CYCLE: Final = (
     "Break the cycle or invert dependencies so modules no longer depend "
     "on each other circularly."
 )
+REMEDIATION_AUTHORITY: Final = (
+    "Route the governed semantic contract through its canonical owner or an "
+    "allowed adapter, and remove the independent reconstruction."
+)
 
 RULE_FUNCTION_CLONE_SHORT: Final = "Function clone group"
 RULE_FUNCTION_CLONE_FULL: Final = (
@@ -105,6 +109,10 @@ RULE_DEPENDENCY_CYCLE_SHORT: Final = "Dependency cycle"
 RULE_DEPENDENCY_CYCLE_FULL: Final = (
     "A dependency cycle was detected between project modules."
 )
+RULE_AUTHORITY_VIOLATION_SHORT: Final = "Semantic authority violation"
+RULE_AUTHORITY_VIOLATION_FULL: Final = (
+    "A governed semantic contract bypasses or diverges from its canonical owner."
+)
 
 REMEDIATION_BY_RULE_ID: Final[dict[str, str]] = {
     "CCLONE001": REMEDIATION_CLONE,
@@ -121,4 +129,5 @@ REMEDIATION_BY_RULE_ID: Final[dict[str, str]] = {
     "CDESIGN002": REMEDIATION_COMPLEXITY,
     "CDESIGN003": REMEDIATION_COUPLING,
     "CDESIGN004": REMEDIATION_DEPENDENCY_CYCLE,
+    "CAUTH001": REMEDIATION_AUTHORITY,
 }
