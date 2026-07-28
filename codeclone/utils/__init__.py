@@ -8,4 +8,4 @@
 
 from __future__ import annotations
 
-__all__ = ["coerce", "git_diff", "json_io", "schema_validation"]
+__all__ = ["coerce", "git_diff", "json_io"]
