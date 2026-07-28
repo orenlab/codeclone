@@ -66,7 +66,7 @@ TRAJECTORY_PROJECTION_VERSION: Final = "trajectory-v3"
 TRAJECTORY_PROJECTION_VERSION_V1: Final = "trajectory-v1"
 TRAJECTORY_QUALITY_SCORE_VERSION: Final = "2"
 EXPERIENCE_DISTILLATION_VERSION: Final = "experience-v1"
-# IDE governance HMAC attestation protocol version (VS Code Memory channel).
+# IDE governance HMAC attestation protocol version (IDE Memory channels).
 IDE_GOVERNANCE_PROTOCOL_VERSION: Final = 2
 
 # Corpus analytics store (.codeclone/analytics/corpus_clustering.sqlite3) and

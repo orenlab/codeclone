@@ -24,7 +24,9 @@ from .sqlite_store import SqliteEngineeringMemoryStore
 IDE_GOVERNANCE_TICKET_TTL_SECONDS = 120
 IDE_GOVERNANCE_MIN_KEY_BYTES = 32
 IDE_GOVERNANCE_MAX_COMMIT_ATTEMPTS = 100
-IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset({"CodeClone VS Code", "CodeClone JetBrains"})
+IDE_GOVERNANCE_ALLOWED_CLIENTS = frozenset(
+    {"CodeClone VS Code", "CodeClone JetBrains", "Enacta"}
+)
 
 GovernanceDecision = Literal["approve", "reject", "archive"]
 GovernanceAction = Literal[
@@ -33,13 +35,25 @@ GovernanceAction = Literal[
     "commit_governance",
 ]
 
+
+def allowed_governance_clients() -> str:
+    """Name the governance channels once, in deterministic order.
+
+    Every user-facing mention derives from the allowed-client set, so adding an
+    IDE is one edit and no message can fall out of date.
+    """
+
+    names = sorted(IDE_GOVERNANCE_ALLOWED_CLIENTS)
+    return f"{', '.join(names[:-1])} or {names[-1]}" if len(names) > 1 else names[0]
+
+
 GOVERNANCE_MODE_UNAVAILABLE_MESSAGE = (
     "This action is only available through a CodeClone IDE governance channel "
-    "(VS Code or JetBrains plugin)."
+    f"({allowed_governance_clients()})."
 )
 GOVERNANCE_MODE_UNAVAILABLE_NEXT_STEP = (
-    "Use the CodeClone Memory view in VS Code or the JetBrains plugin Memory tab "
-    "to approve or reject draft records."
+    "Use the Memory view of a CodeClone IDE governance channel "
+    f"({allowed_governance_clients()}) to approve or reject draft records."
 )
 
 
@@ -268,7 +282,8 @@ def _require_governance_channel(
             reason="governance_key_missing",
             message=(
                 "IDE governance channel is active but no session key is registered. "
-                "Reconnect the CodeClone IDE plugin (VS Code or JetBrains)."
+                f"Reconnect a CodeClone IDE governance channel "
+                f"({allowed_governance_clients()})."
             ),
         )
     if (
@@ -558,6 +573,7 @@ __all__ = [
     "IDE_GOVERNANCE_TICKET_TTL_SECONDS",
     "IdeGovernanceSessionState",
     "IdeGovernanceTicket",
+    "allowed_governance_clients",
     "commit_governance",
     "compute_governance_proof",
     "compute_statement_digest",

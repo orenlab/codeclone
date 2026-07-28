@@ -1628,7 +1628,7 @@ def build_parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=False,
         help=(
-            "Enable the VS Code IDE governance channel for human "
+            "Enable the IDE governance channel for human "
             "approve/reject/archive via manage_engineering_memory. "
             "Agent launchers must not pass this flag."
         ),

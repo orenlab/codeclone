@@ -686,7 +686,7 @@ ManageMemoryActionParam = Annotated[
             "refresh_from_run, rebuild_semantic_index, rebuild_trajectories, "
             "enqueue_projection_rebuild, projection_rebuild_status, "
             "run_projection_jobs_once. "
-            "IDE channel only (VS Code): "
+            "IDE channel only (VS Code, JetBrains or Enacta): "
             "register_ide_governance, "
             "prepare_governance, commit_governance. approve/reject/archive are not "
             "available through MCP."
@@ -710,7 +710,8 @@ IdeGovernanceKeyParam = Annotated[
     str | None,
     Field(
         description=(
-            "Session-bound IDE governance key (hex, >=32 bytes). VS Code only."
+            "Session-bound IDE governance key (hex, >=32 bytes). "
+            "IDE governance channels only."
         ),
     ),
 ]
