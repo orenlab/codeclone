@@ -545,15 +545,12 @@ def _finding_review_title(group: Mapping[str, object]) -> str:
         return f"{base} ({_as_int(group.get('count'))} occurrences)"
     if family == FAMILY_DEAD_CODE:
         return f"Unused {category}: {qualname}" if qualname else f"Unused {category}"
-    if family == FAMILY_DESIGN:
-        return f"{_humanize(category)}: {qualname}" if qualname else _humanize(category)
+    detail = qualname
     if family == FAMILY_AUTHORITY:
-        contract_id = str(_as_mapping(group.get("facts")).get("contract_id", ""))
-        return (
-            f"{_humanize(category)}: {contract_id}"
-            if contract_id
-            else _humanize(category)
-        )
+        detail = str(_as_mapping(group.get("facts")).get("contract_id", ""))
+    if family in (FAMILY_DESIGN, FAMILY_AUTHORITY):
+        title = _humanize(category)
+        return f"{title}: {detail}" if detail else title
     return _humanize(category)
 
 
