@@ -48,7 +48,7 @@ _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     "api_surface": "2",
     "coupling_cohesion_observations": "3",
     "dead_code": "2",
-    "dependencies": "3",
+    "dependencies": "4",
     "module_identity": "3",
     "risk_observations": "3",
 }

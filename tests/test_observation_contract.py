@@ -73,7 +73,7 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     ),
     "dead_code": ("4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9"),
     "dependencies": (
-        "ddeecb67b70d63f71d90552c6672516c3d4f6ddfc7a97fa1eef8c7070b32ef0e"
+        "6905c36fbcd905398648439c59ef31746a7ff9561e3b7f8b20c023511d70599b"
     ),
     "module_identity": (
         "82a2f1b42a396307381f2c16193c76464b41b832a9a366497e21314d6375b0ed"
@@ -125,7 +125,7 @@ def test_exactly_the_seven_columnar_lanes_advance_their_payload_schema() -> None
         "api_surface": "2",
         "coupling_cohesion_observations": "3",
         "dead_code": "2",
-        "dependencies": "3",
+        "dependencies": "4",
         "module_identity": "3",
         "risk_observations": "3",
     }

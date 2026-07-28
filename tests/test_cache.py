@@ -1314,7 +1314,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.0"
+    assert Cache._CACHE_VERSION == "3.1"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1330,7 +1330,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.0"
+    assert old_document["v"] == "3.1"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -2959,6 +2959,7 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
                 "import_type": "from_import",
                 "line": 1,
                 "resolution": "analyzed",
+                "mechanism": "static",
                 "inventory_expansion": False,
                 "level": 1,
                 "requested_module": "b",
@@ -2967,6 +2968,38 @@ def test_cache_type_predicates_reject_non_dict_variants() -> None:
             }
         )
         is True
+    )
+    # The mechanism discriminator is a required member of the detail block:
+    # an otherwise complete row without it is refused, and the discriminator
+    # alone never rides a base row that would silently drop it.
+    assert (
+        _is_module_dep_dict(
+            {
+                "source": "a",
+                "target": "b",
+                "import_type": "from_import",
+                "line": 1,
+                "resolution": "analyzed",
+                "inventory_expansion": False,
+                "level": 1,
+                "requested_module": "b",
+                "requested_names": ["VALUE"],
+                "candidate_targets": ["b"],
+            }
+        )
+        is False
+    )
+    assert (
+        _is_module_dep_dict(
+            {
+                "source": "a",
+                "target": "b",
+                "import_type": "import",
+                "line": 1,
+                "mechanism": "dynamic",
+            }
+        )
+        is False
     )
     assert (
         _is_module_dep_dict(
@@ -3035,4 +3068,28 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.0"
+    assert CACHE_VERSION == "3.1"
+
+
+def test_wire_module_dep_row_requires_a_known_mechanism() -> None:
+    valid = [
+        "pkg.mod",
+        "pkg.dep",
+        "from_import",
+        3,
+        "analyzed",
+        False,
+        1,
+        "dep",
+        ["VALUE"],
+        ["pkg.dep"],
+        "static",
+    ]
+    assert _decode_wire_module_dep(list(valid)) is not None
+
+    # A row carrying an unknown discriminator is refused outright rather than
+    # silently defaulted to "static", which would invent a static edge.
+    assert _decode_wire_module_dep([*valid[:10], "guessed"]) is None
+    # The pre-mechanism row length no longer decodes: the version gate is what
+    # invalidates old caches, not an absent-tolerant fallback here.
+    assert _decode_wire_module_dep(valid[:10]) is None

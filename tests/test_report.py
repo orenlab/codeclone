@@ -67,6 +67,9 @@ from codeclone.report.segments import (
 from codeclone.report.types import GroupMap
 from tests._assertions import assert_contains_all, assert_mapping_entries
 from tests._report_access import (
+    _dict_at,
+)
+from tests._report_access import (
     report_clone_groups as _clone_groups,
 )
 from tests._report_access import (
@@ -3658,3 +3661,55 @@ def test_html_panel_explains_local_non_overlapping_structural_findings() -> None
     assert "local, report-only refactoring hints" in html
     assert "Occurrences (2)" in html
     assert "All occurrences belong to 1 function in 1 file." in html
+
+
+def test_document_carries_opaque_dynamic_sites_as_their_own_section() -> None:
+    document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        metrics={
+            "dependencies": {
+                "observations": [
+                    {
+                        "source": {
+                            "file": {"path": "pkg/loader.py"},
+                            "python_module": {
+                                "module": "pkg.loader",
+                                "package": "pkg",
+                                "is_package": False,
+                                "mount_path": "pkg/loader.py",
+                                "origin": "analyzed",
+                                "node_kind": "module",
+                            },
+                        },
+                        "syntax_kind": "import",
+                        "resolution": "unresolved_dynamic",
+                        "resolved_target": None,
+                    },
+                    {
+                        "source": {
+                            "file": {"path": "pkg/module.py"},
+                            "python_module": None,
+                        },
+                        "syntax_kind": "from_import",
+                        "resolution": "analyzed",
+                        "resolved_target": "pkg.loader",
+                    },
+                ],
+            },
+        },
+    )
+
+    dependencies = _dict_at(document, "metrics", "families", "dependencies")
+    sites = dependencies["dynamic_boundaries"]
+    assert isinstance(sites, list)
+
+    # The section must be populated, not merely present: an always-empty key
+    # would let every consumer stay green while reporting nothing.
+    assert len(sites) == 1
+    assert sites[0]["source"]["file"]["path"] == "pkg/loader.py"
+    assert sites[0]["source"]["python_module"]["module"] == "pkg.loader"
+    assert sites[0]["reason"] == "dynamic_load_argument_opaque"
+    # Resolved edges are ordinary dependencies and never become boundaries.
+    assert all(site["source"]["file"]["path"] != "pkg/module.py" for site in sites)

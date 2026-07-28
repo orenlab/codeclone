@@ -77,6 +77,7 @@ from codeclone.surfaces.mcp.session import (
 )
 from codeclone.utils import coerce as _coerce
 from tests._mcp_fixtures import write_quality_fixture as _write_shared_quality_fixture
+from tests._report_access import _dict_at
 from tests.memory_fixtures import cli_memory_repo
 from tests.test_cli_inprocess import _write_native_baseline
 
@@ -14766,3 +14767,143 @@ def test_context_governance_helper_edges() -> None:
     )
 
     assert mcp_context_governance_mod._continuation_payload({}, {}) is None
+
+
+def _dynamic_loading_context(
+    tmp_path: Path,
+    *,
+    loader_body: str,
+    subject: str,
+) -> dict[str, object]:
+    _write_context_module(tmp_path, "pkg/plugin.py", "VALUE = 1\n")
+    _write_context_module(tmp_path, "pkg/loader.py", loader_body)
+    service = CodeCloneMCPService(history_limit=4)
+    summary = service.analyze_repository(
+        MCPAnalysisRequest(
+            root=str(tmp_path),
+            respect_pyproject=False,
+            cache_policy="off",
+            min_loc=1,
+            min_stmt=1,
+        )
+    )
+    context = service.get_implementation_context(
+        root=str(tmp_path),
+        paths=[subject],
+        include=["imports", "module_role"],
+        detail_level="normal",
+        budget=20,
+        run_id=str(summary["run_id"]),
+    )
+    structural = context["structural_context"]
+    assert isinstance(structural, dict)
+    return structural
+
+
+def test_mcp_service_implementation_context_reports_dynamic_frontier(
+    tmp_path: Path,
+) -> None:
+    structural = _dynamic_loading_context(
+        tmp_path,
+        loader_body=(
+            "import importlib\n\n"
+            "def known() -> object:\n"
+            "    return importlib.import_module('pkg.plugin')\n\n"
+            "def probe(name: str) -> object:\n"
+            "    return importlib.import_module(name)\n"
+        ),
+        subject="pkg/loader.py",
+    )
+
+    # The resolved dynamic load is an ordinary frontier edge.
+    related = structural.get("related_modules", [])
+    assert isinstance(related, list)
+    assert any(
+        str(row.get("module")) == "pkg.plugin"
+        for row in related
+        if isinstance(row, dict)
+    )
+
+    # The opaque site is named as an honest under-approximation, carrying the
+    # structured portable identity rather than a glued string or an abs path.
+    boundaries = structural["dynamic_boundaries"]
+    assert isinstance(boundaries, list)
+    assert len(boundaries) == 1
+    site = boundaries[0]
+    assert site["source"]["file"]["path"] == "pkg/loader.py"
+    assert site["reason"] == "dynamic_load_argument_opaque"
+    assert "dynamic_boundaries_summary" in structural
+
+
+def _blast_radius_document_with_opaque_dynamic_site() -> dict[str, object]:
+    document = _blast_radius_report_document()
+    dependencies = _dict_at(document, "metrics", "families", "dependencies")
+    # pkg/c.py only loads something dynamically with an opaque argument, so it
+    # never earned an import edge.
+    dependencies["dynamic_boundaries"] = [
+        {
+            "source": {
+                "file": {"path": "pkg/c.py"},
+                "python_module": {"module": "pkg.c"},
+            },
+            "syntax_kind": "import",
+            "reason": "dynamic_load_argument_opaque",
+        },
+    ]
+    return document
+
+
+def test_mcp_blast_radius_opaque_dynamic_site_never_widens_the_radius() -> None:
+    baseline = mcp_blast_radius_mod.compute_blast_radius(
+        run_id="abcdef12",
+        report_document=_blast_radius_report_document(),
+        files=("pkg/a.py",),
+        depth="direct",
+    )
+    with_site = mcp_blast_radius_mod.compute_blast_radius(
+        run_id="abcdef12",
+        report_document=_blast_radius_document_with_opaque_dynamic_site(),
+        files=("pkg/a.py",),
+        depth="direct",
+    )
+
+    # An opaque site resolves to no target, so it must never enter the graph.
+    assert with_site.direct_dependents == baseline.direct_dependents
+    assert with_site.transitive_dependents == baseline.transitive_dependents
+    assert with_site.radius_level == baseline.radius_level
+
+
+def test_mcp_blast_radius_lists_opaque_dynamic_site_as_advisory() -> None:
+    result = mcp_blast_radius_mod.compute_blast_radius(
+        run_id="abcdef12",
+        report_document=_blast_radius_document_with_opaque_dynamic_site(),
+        files=("pkg/c.py",),
+        depth="direct",
+    )
+
+    advisories = [
+        entry
+        for entry in result.review_context
+        if entry["category"] == "dynamic_frontier_boundary"
+    ]
+    assert [entry["path"] for entry in advisories] == ["pkg/c.py"]
+    assert advisories[0]["severity"] == "context"
+    assert "under-approximated" in advisories[0]["reason"]
+
+
+def test_mcp_implementation_context_omits_dynamic_boundaries_of_other_modules(
+    tmp_path: Path,
+) -> None:
+    structural = _dynamic_loading_context(
+        tmp_path,
+        loader_body=(
+            "import importlib\n\n"
+            "def probe(name: str) -> object:\n"
+            "    return importlib.import_module(name)\n"
+        ),
+        subject="pkg/plugin.py",
+    )
+
+    # pkg/loader.py holds the only opaque site; asking about pkg/plugin.py must
+    # not inherit another module's under-approximation.
+    assert structural["dynamic_boundaries"] == []

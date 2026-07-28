@@ -54,8 +54,12 @@ DependencyResolution = Literal[
     "known_internal_not_analyzed",
     "external",
     "unresolved_relative",
+    "unresolved_dynamic",
     "ambiguous",
 ]
+# How the import edge is expressed in source: a static statement, or a dynamic
+# load call captured by the sole dynamic-loading detector.
+DependencyMechanism = Literal["static", "dynamic"]
 PackagePrefixNodeKind = Literal["namespace_package", "synthetic_prefix"]
 AnalysisMountOrigin = Literal["analysis_only"]
 PortablePathIssueKind = Literal[
@@ -620,7 +624,7 @@ def _null_first(value: str | None) -> tuple[int, str]:
 
 @dataclass(frozen=True, slots=True, kw_only=True)
 class DependencyColumnarPayload:
-    """Wire form of the dependency lane (payload schema 3)."""
+    """Wire form of the dependency lane (payload schema 4)."""
 
     identities: ThinIdentityTable
     modules: tuple[str, ...]
@@ -634,6 +638,7 @@ class DependencyColumnarPayload:
     syntax_kind: tuple[int, ...]
     level: tuple[int, ...]
     inventory_expansion: tuple[int, ...] = ()
+    mechanism_dynamic: tuple[int, ...] = ()
 
     def __post_init__(self) -> None:
         _validate_sorted_table(self.modules, "modules")
@@ -673,6 +678,8 @@ class DependencyColumnarPayload:
         _validate_ascending_indices(
             self.inventory_expansion, rows, "inventory_expansion"
         )
+        _validate_ascending_indices(self.mechanism_dynamic, rows, "mechanism_dynamic")
+        dynamic = frozenset(self.mechanism_dynamic)
         order = tuple(
             (
                 self.identities.paths[self.source[row]],
@@ -683,6 +690,7 @@ class DependencyColumnarPayload:
                 ),
                 tuple(self.modules[name] for name in self.requested_names[row]),
                 self.syntax_kinds[self.syntax_kind[row]],
+                "dynamic" if row in dynamic else "static",
                 self.level[row],
                 self.resolutions[self.resolution[row]],
                 _null_first(
@@ -957,6 +965,7 @@ class ModuleDepDictBase(TypedDict):
 
 class ModuleDepDict(ModuleDepDictBase, total=False):
     resolution: DependencyResolution
+    mechanism: DependencyMechanism
     inventory_expansion: bool
     level: int
     requested_module: str | None
@@ -1472,6 +1481,7 @@ class ModuleDep:
     requested_module: str | None = None
     requested_names: tuple[str, ...] = ()
     candidate_targets: tuple[str, ...] = ()
+    mechanism: DependencyMechanism = "static"
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1485,15 +1495,22 @@ class ImportObservation:
     candidate_targets: tuple[str, ...]
     resolved_target: str | None
     inventory_expansion: bool = False
+    mechanism: DependencyMechanism = "static"
 
     def __post_init__(self) -> None:
         if self.candidate_targets != tuple(sorted(set(self.candidate_targets))):
             raise ValueError("import candidate targets must be sorted and unique")
-        if self.resolution == "unresolved_relative":
+        # Two resolutions legitimately name non-resolution: a relative import
+        # that escapes its package, and a dynamic load whose argument is opaque.
+        if self.resolution in {"unresolved_relative", "unresolved_dynamic"}:
             if self.resolved_target is not None:
-                raise ValueError("unresolved relative imports cannot have a target")
+                raise ValueError("unresolved imports cannot have a target")
+            if self.candidate_targets:
+                raise ValueError("unresolved imports cannot have candidate targets")
         elif not self.resolved_target:
             raise ValueError("resolved import observations require a target")
+        if self.resolution == "unresolved_dynamic" and self.mechanism != "dynamic":
+            raise ValueError("only a dynamic load can be unresolved_dynamic")
 
 
 @dataclass(frozen=True, slots=True)
@@ -1613,6 +1630,21 @@ class FactRef:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class DynamicLoadArgument:
+    """What the detector could read from a dynamic-load call argument.
+
+    An AST constant string yields the requested module; anything else stays
+    honestly opaque. There is nothing in between.
+    """
+
+    module: str | None
+
+    def __post_init__(self) -> None:
+        if self.module is not None and not self.module:
+            raise ValueError("a resolved dynamic-load argument cannot be empty")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class SemanticEvent:
     event_id: str
     kind: EventKind
@@ -1622,6 +1654,7 @@ class SemanticEvent:
     guards: tuple[str, ...]
     location: tuple[str, int]
     resolution: SemanticEventResolution
+    dynamic_load: DynamicLoadArgument | None = None
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

@@ -168,6 +168,26 @@ def _normalize_metrics_families(
             item["line"],
         ),
     )
+    # Sites where a dynamic load kept an opaque argument resolve to no target,
+    # so they can never appear as an import edge. Carrying them as their own
+    # section keeps the frontier's under-approximation visible to every
+    # consumer from one key, instead of each surface rediscovering it.
+    dynamic_boundaries = sorted(
+        (
+            {
+                "source": dict(_as_mapping(observation.get("source"))),
+                "syntax_kind": str(observation.get("syntax_kind", "")),
+                "reason": "dynamic_load_argument_opaque",
+            }
+            for raw in _as_sequence(dependencies.get("observations"))
+            for observation in (_as_mapping(raw),)
+            if str(observation.get("resolution", "")).strip() == "unresolved_dynamic"
+        ),
+        key=lambda row: (
+            str(_as_mapping(_as_mapping(row["source"]).get("file")).get("path", "")),
+            str(row["syntax_kind"]),
+        ),
+    )
     dependency_cycles = _normalize_nested_string_rows(dependencies.get("cycles"))
     longest_chains = _normalize_nested_string_rows(dependencies.get("longest_chains"))
 
@@ -611,6 +631,7 @@ def _normalize_metrics_families(
             "items": dependency_edges,
             "cycles": dependency_cycles,
             "longest_chains": longest_chains,
+            "dynamic_boundaries": dynamic_boundaries,
             "items_truncated": False,
         },
         FAMILY_DEAD_CODE: {

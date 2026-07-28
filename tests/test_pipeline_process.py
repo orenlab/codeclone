@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import builtins
 from argparse import Namespace
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
@@ -49,6 +49,7 @@ from codeclone.models import (
     DepGraph,
     DigestObject,
     HealthScore,
+    ModuleDep,
     ProjectMetrics,
     RehydratedCacheNeutral,
     SemanticFileFacts,
@@ -1163,3 +1164,172 @@ def test_analyze_coverage_join_parse_error_sets_invalid_status(
     result = analyze(boot=boot, discovery=discovery, processing=processing)
     assert result.coverage_join is not None
     assert result.coverage_join.status == "invalid"
+
+
+def _processed_package(
+    tmp_path: Path,
+    modules: Mapping[str, str],
+) -> ProcessingResult:
+    """Analyse a one-package repository with semantics enabled."""
+
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", "utf-8")
+    for name, body in modules.items():
+        (package / name).write_text(body, "utf-8")
+    boot = _build_boot(tmp_path, processes=1)
+    boot.args.skip_metrics = False
+    boot.args.semantic_authority = True
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    discovery = core_discovery.discover(boot=boot, cache=cache)
+    return process(boot=boot, discovery=discovery, cache=cache)
+
+
+def _dynamic_load_deps(
+    tmp_path: Path,
+    source: str,
+) -> tuple[ModuleDep, ...]:
+    result = _processed_package(
+        tmp_path,
+        {"plugin.py": "VALUE = 1\n", "loader.py": source},
+    )
+    return tuple(dep for dep in result.module_deps if dep.source == "pkg.loader")
+
+
+def test_literal_dynamic_load_resolves_through_existing_machinery(
+    tmp_path: Path,
+) -> None:
+    deps = _dynamic_load_deps(
+        tmp_path,
+        "import importlib\n"
+        "\n"
+        "\n"
+        "def internal() -> object:\n"
+        "    return importlib.import_module('pkg.plugin')\n"
+        "\n"
+        "\n"
+        "def external() -> object:\n"
+        "    return importlib.import_module('orjson')\n",
+    )
+    dynamic = {dep.target: dep for dep in deps if dep.mechanism == "dynamic"}
+
+    # The internal target is resolved by the same classifier the static
+    # statements use — a dynamic edge is a real edge, not a second graph.
+    assert dynamic["pkg.plugin"].resolution == "analyzed"
+    assert dynamic["pkg.plugin"].requested_module == "pkg.plugin"
+    assert dynamic["orjson"].resolution == "external"
+
+    # The static import of importlib itself keeps the static discriminator.
+    static = {dep.target: dep for dep in deps if dep.mechanism == "static"}
+    assert static["importlib"].resolution == "external"
+
+
+def test_opaque_dynamic_load_keeps_the_site_without_inventing_a_target(
+    tmp_path: Path,
+) -> None:
+    deps = _dynamic_load_deps(
+        tmp_path,
+        "import importlib\n"
+        "\n"
+        "\n"
+        "def probe(name: str) -> object:\n"
+        "    return importlib.import_module(name)\n",
+    )
+    opaque = [dep for dep in deps if dep.resolution == "unresolved_dynamic"]
+
+    assert len(opaque) == 1
+    assert opaque[0].mechanism == "dynamic"
+    assert opaque[0].target == ""
+    assert opaque[0].candidate_targets == ()
+    assert opaque[0].requested_module is None
+
+
+def test_unlisted_dynamic_mechanisms_produce_no_dependency_record(
+    tmp_path: Path,
+) -> None:
+    deps = _dynamic_load_deps(
+        tmp_path,
+        "import runpy\n"
+        "\n"
+        "\n"
+        "def run() -> object:\n"
+        "    return runpy.run_module('pkg.plugin')\n",
+    )
+
+    # runpy executes a module; it is not an import edge, and the capability
+    # gate must not turn it into one.
+    assert [dep.target for dep in deps if dep.mechanism == "dynamic"] == []
+    assert [dep.target for dep in deps if dep.mechanism == "static"] == ["runpy"]
+
+
+def test_builtin_import_and_spec_from_file_literals_follow_decision_one(
+    tmp_path: Path,
+) -> None:
+    deps = _dynamic_load_deps(
+        tmp_path,
+        "import importlib.util\n"
+        "\n"
+        "\n"
+        "def builtin() -> object:\n"
+        "    return __import__('pkg.plugin')\n"
+        "\n"
+        "\n"
+        "def from_file() -> object:\n"
+        "    return importlib.util.spec_from_file_location('pkg.plugin', 'p.py')\n",
+    )
+    dynamic = sorted(
+        (dep for dep in deps if dep.mechanism == "dynamic"),
+        key=lambda dep: dep.line,
+    )
+
+    # Both mechanisms must produce their own edge; a set comparison alone
+    # would stay green if only one of them fired.
+    assert len(dynamic) == 2
+    assert [dep.target for dep in dynamic] == ["pkg.plugin", "pkg.plugin"]
+    assert [dep.resolution for dep in dynamic] == ["analyzed", "analyzed"]
+
+
+def test_overloads_and_property_pairs_do_not_break_semantic_authority(
+    tmp_path: Path,
+) -> None:
+    result = _processed_package(
+        tmp_path,
+        {
+            "shapes.py": (
+                "from typing import overload\n"
+                "\n"
+                "\n"
+                "@overload\n"
+                "def widen(value: int) -> int: ...\n"
+                "\n"
+                "\n"
+                "@overload\n"
+                "def widen(value: str) -> str: ...\n"
+                "\n"
+                "\n"
+                "def widen(value: int | str) -> int | str:\n"
+                "    return value\n"
+                "\n"
+                "\n"
+                "class Holder:\n"
+                "    @property\n"
+                "    def label(self) -> str:\n"
+                "        return self._label\n"
+                "\n"
+                "    @label.setter\n"
+                "    def label(self, value: str) -> None:\n"
+                "        self._label = value\n"
+            ),
+        },
+    )
+
+    # A qualname shared by overload stubs or by a property/setter pair must not
+    # abort the run: stubs are declarations, and a genuinely shared qualname
+    # carries no contract rather than an arbitrary one.
+    assert result.semantic_authority is not None
+    contracts = {
+        contract.function
+        for contract in result.semantic_authority.contract_ir.contracts
+    }
+    assert "pkg.shapes:widen" in contracts
+    assert "pkg.shapes:Holder.label" not in contracts

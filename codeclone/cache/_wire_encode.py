@@ -171,6 +171,7 @@ def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
             tuple(dep.get("requested_names", ())),
             tuple(dep.get("candidate_targets", ())),
             dep.get("inventory_expansion", False),
+            dep.get("mechanism", ""),
         ),
     )
     if module_deps:
@@ -190,6 +191,7 @@ def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
                     dep["requested_module"],
                     dep["requested_names"],
                     dep["candidate_targets"],
+                    dep["mechanism"],
                 )
             except KeyError:
                 # A pre-revision row is retained only so its neutral lane can
