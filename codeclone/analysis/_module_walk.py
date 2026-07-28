@@ -1105,6 +1105,27 @@ def _cohesion_ignored_method_names(
     return frozenset(ignored)
 
 
+def _is_typing_overload_stub(
+    node: _qualnames.FunctionNode,
+    *,
+    overload_aliases: frozenset[str],
+) -> bool:
+    """True for a `@overload` declaration, which has no implementation body.
+
+    Every overload of one function shares that function's qualname, so a stub
+    is not a second function — treating it as one makes the qualname ambiguous
+    downstream.
+    """
+
+    for decorator in node.decorator_list:
+        name = _decorator_expr_name(decorator)
+        if name is None:
+            continue
+        if name in overload_aliases or name.rsplit(".", 1)[-1] == "overload":
+            return True
+    return False
+
+
 def _is_non_runtime_candidate(
     node: _qualnames.FunctionNode,
     *,

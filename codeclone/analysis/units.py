@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import partial
 from hashlib import sha256 as _sha256
 from typing import TypeVar
@@ -47,6 +47,7 @@ from ._module_walk import (
     _collect_dead_candidates,
     _collect_function_relationship_facts,
     _collect_module_walk_data,
+    _is_typing_overload_stub,
 )
 from .class_metrics import _class_metrics_for_node, _node_line_span
 from .fingerprint import _cfg_fingerprint_and_complexity, bucket_loc
@@ -116,6 +117,31 @@ def _collect_timed_clone_units(
         items = collect()
     phase_ledger.add_volume(volume_key, len(items))
     return items
+
+
+def _uniquely_named_summaries(
+    summaries: Sequence[FunctionContractSummary],
+) -> tuple[FunctionContractSummary, ...]:
+    """Drop summaries whose qualname cannot name a single function.
+
+    A property and its setter share one qualname, as do definitions guarded by
+    a conditional. The contract layer keys on qualname and rightly refuses
+    duplicates, so such a qualname carries no contract at all — asserting
+    either half would attribute a contract nobody wrote.
+    """
+
+    seen: dict[str, FunctionContractSummary] = {}
+    ambiguous: set[str] = set()
+    for summary in summaries:
+        if summary.function in seen:
+            ambiguous.add(summary.function)
+            continue
+        seen[summary.function] = summary
+    return tuple(
+        summary
+        for function, summary in sorted(seen.items())
+        if function not in ambiguous
+    )
 
 
 def extract_units_and_stats_from_source(
@@ -243,14 +269,18 @@ def extract_units_and_stats_from_source(
             qualname,
             phase_ledger=phase_ledger,
         )
-        function_contract_summaries.append(
-            summarize_function_contract(
-                function=qualname,
-                node=node,
-                graph=graph,
-                events=_walk.semantic_events,
+        if not _is_typing_overload_stub(
+            node,
+            overload_aliases=frozenset(non_runtime_decorator_aliases),
+        ):
+            function_contract_summaries.append(
+                summarize_function_contract(
+                    function=qualname,
+                    node=node,
+                    graph=graph,
+                    events=_walk.semantic_events,
+                )
             )
-        )
         if unit_shape is None:
             continue
         phase_ledger.add_volume(AnalysisVolumeKey.UNITS_ELIGIBLE)
@@ -455,11 +485,8 @@ def extract_units_and_stats_from_source(
             security_surfaces=security_surfaces,
             semantic_facts=SemanticFileFacts(
                 events=semantic_events,
-                function_contract_summaries=tuple(
-                    sorted(
-                        function_contract_summaries,
-                        key=lambda summary: summary.function,
-                    )
+                function_contract_summaries=_uniquely_named_summaries(
+                    function_contract_summaries
                 ),
             ),
             referenced_qualnames=referenced_qualnames,

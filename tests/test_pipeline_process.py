@@ -1287,3 +1287,49 @@ def test_builtin_import_and_spec_from_file_literals_follow_decision_one(
     assert len(dynamic) == 2
     assert [dep.target for dep in dynamic] == ["pkg.plugin", "pkg.plugin"]
     assert [dep.resolution for dep in dynamic] == ["analyzed", "analyzed"]
+
+
+def test_overloads_and_property_pairs_do_not_break_semantic_authority(
+    tmp_path: Path,
+) -> None:
+    result = _processed_package(
+        tmp_path,
+        {
+            "shapes.py": (
+                "from typing import overload\n"
+                "\n"
+                "\n"
+                "@overload\n"
+                "def widen(value: int) -> int: ...\n"
+                "\n"
+                "\n"
+                "@overload\n"
+                "def widen(value: str) -> str: ...\n"
+                "\n"
+                "\n"
+                "def widen(value: int | str) -> int | str:\n"
+                "    return value\n"
+                "\n"
+                "\n"
+                "class Holder:\n"
+                "    @property\n"
+                "    def label(self) -> str:\n"
+                "        return self._label\n"
+                "\n"
+                "    @label.setter\n"
+                "    def label(self, value: str) -> None:\n"
+                "        self._label = value\n"
+            ),
+        },
+    )
+
+    # A qualname shared by overload stubs or by a property/setter pair must not
+    # abort the run: stubs are declarations, and a genuinely shared qualname
+    # carries no contract rather than an arbitrary one.
+    assert result.semantic_authority is not None
+    contracts = {
+        contract.function
+        for contract in result.semantic_authority.contract_ir.contracts
+    }
+    assert "pkg.shapes:widen" in contracts
+    assert "pkg.shapes:Holder.label" not in contracts

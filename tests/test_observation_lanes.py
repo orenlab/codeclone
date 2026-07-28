@@ -37,7 +37,9 @@ from codeclone.models import (
     DeadCodeMarkerException,
     DependencyColumnarPayload,
     DigestObject,
+    DynamicLoadArgument,
     FileIdentity,
+    ImportObservation,
     IntegerColumnarPayload,
     LanePayload,
     ModuleApiSurface,
@@ -918,3 +920,55 @@ def test_dependency_mechanism_is_order_independent_and_byte_stable() -> None:
     # A wire that lost the discriminator would collide with the static-only
     # encoding; it must not.
     assert first != _lane_bytes(_bundle())["dependencies"]
+
+
+def _static_observation() -> ImportObservation:
+    return _bundle().structural.dependencies[0]
+
+
+def test_unresolved_import_observations_refuse_a_target_or_candidates() -> None:
+    base = _static_observation()
+
+    with pytest.raises(ValueError, match="cannot have a target"):
+        replace(
+            base,
+            resolution="unresolved_dynamic",
+            mechanism="dynamic",
+            resolved_target="pkg.plugin",
+            candidate_targets=(),
+        )
+    with pytest.raises(ValueError, match="cannot have candidate targets"):
+        replace(
+            base,
+            resolution="unresolved_dynamic",
+            mechanism="dynamic",
+            resolved_target=None,
+            candidate_targets=("pkg.plugin",),
+        )
+
+
+def test_resolved_import_observation_requires_a_target() -> None:
+    with pytest.raises(ValueError, match="require a target"):
+        replace(_static_observation(), resolved_target=None, candidate_targets=())
+
+
+def test_only_a_dynamic_load_can_be_unresolved_dynamic() -> None:
+    # A static import statement always names something; if it resolved to
+    # nothing it is unresolved_relative, never unresolved_dynamic.
+    with pytest.raises(ValueError, match="only a dynamic load"):
+        replace(
+            _static_observation(),
+            resolution="unresolved_dynamic",
+            mechanism="static",
+            resolved_target=None,
+            candidate_targets=(),
+        )
+
+
+def test_dynamic_load_argument_is_either_a_name_or_honestly_absent() -> None:
+    assert DynamicLoadArgument(module=None).module is None
+    assert DynamicLoadArgument(module="pkg.plugin").module == "pkg.plugin"
+
+    # An empty string is neither: it would claim a resolved import of nothing.
+    with pytest.raises(ValueError, match="cannot be empty"):
+        DynamicLoadArgument(module="")
