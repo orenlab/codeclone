@@ -33,6 +33,7 @@ from ..models import (
 from ..observability import record_counter, span
 from ..semantics.authority import build_semantic_authority
 from ..semantics.events import event_counter_key
+from ..semantics.registry import parse_authority_registry
 from ._types import (
     DEFAULT_BATCH_SIZE,
     DEFAULT_RUNTIME_PROCESSES,
@@ -70,6 +71,34 @@ def _should_use_parallel(files_count: int, processes: int) -> bool:
     return files_count >= _parallel_min_files(processes)
 
 
+def _build_authority_result(
+    *,
+    boot: BootstrapResult,
+    summaries: Sequence[FunctionContractSummary],
+    relationship_facts: Sequence[FunctionRelationshipFacts],
+    dead_candidates: Sequence[DeadCandidate],
+) -> SemanticAuthorityResult | None:
+    registry = parse_authority_registry(getattr(boot.args, "authority", ()))
+    enabled = bool(
+        getattr(boot.args, "semantic_authority", False)
+        or getattr(boot.args, "fail_on_authority_violation", False)
+        or registry.entries
+    )
+    if not enabled:
+        return None
+    suppressed_rules = {
+        candidate.qualname: frozenset(candidate.suppressed_rules)
+        for candidate in dead_candidates
+        if candidate.suppressed_rules
+    }
+    return build_semantic_authority(
+        summaries,
+        relationship_facts,
+        registry=registry,
+        suppressed_rules=suppressed_rules,
+    )
+
+
 def process(
     *,
     boot: BootstrapResult,
@@ -80,7 +109,6 @@ def process(
     on_parallel_fallback: Callable[[Exception], None] | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> ProcessingResult:
-    authority_enabled = bool(getattr(boot.args, "semantic_authority", False))
     semantic_authority: SemanticAuthorityResult | None = None
     files_to_process = discovery.files_to_process
     registry = discovery.module_registry
@@ -100,11 +128,12 @@ def process(
             flow_span.set_counter("functions_summarized", 0)
             flow_span.set_counter("unresolved_flow_functions", 0)
         with span(name="semantics.authority.build") as authority_span:
-            if authority_enabled:
-                semantic_authority = build_semantic_authority(
-                    discovery.cached_function_contract_summaries,
-                    discovery.cached_function_relationship_facts,
-                )
+            semantic_authority = _build_authority_result(
+                boot=boot,
+                summaries=discovery.cached_function_contract_summaries,
+                relationship_facts=discovery.cached_function_relationship_facts,
+                dead_candidates=discovery.cached_dead_candidates,
+            )
             authority_span.set_counter("ir_nodes", 0)
             authority_span.set_counter("scc_count", 0)
             authority_span.set_counter("fixpoint_iterations", 0)
@@ -443,11 +472,12 @@ def process(
         registry_span.set_counter("facts_bound", len(source_stats_by_file))
 
     with span(name="semantics.authority.build") as authority_span:
-        if authority_enabled:
-            semantic_authority = build_semantic_authority(
-                all_function_contract_summaries,
-                all_function_relationship_facts,
-            )
+        semantic_authority = _build_authority_result(
+            boot=boot,
+            summaries=all_function_contract_summaries,
+            relationship_facts=all_function_relationship_facts,
+            dead_candidates=all_dead_candidates,
+        )
         authority_span.set_counter(
             "ir_nodes",
             len(semantic_authority.contract_ir.contracts)

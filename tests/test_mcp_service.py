@@ -230,6 +230,70 @@ def _dummy_run_record(root: Path, run_id: str) -> MCPRunRecord:
     )
 
 
+def test_check_authority_returns_active_canonical_findings(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    record = replace(
+        _dummy_run_record(tmp_path, "authority1234567890"),
+        report_document={
+            "findings": {
+                "summary": {"total": 1},
+                "groups": {
+                    "clones": {"functions": [], "blocks": [], "segments": []},
+                    "structural": {"groups": []},
+                    "dead_code": {"groups": []},
+                    "design": {"groups": []},
+                    "authority": {
+                        "groups": [
+                            {
+                                "id": "authority:example.contract/v1:abc",
+                                "family": "authority",
+                                "category": "owner_bypass",
+                                "kind": "authority_violation",
+                                "severity": "warning",
+                                "confidence": "high",
+                                "priority": 2.0,
+                                "count": 1,
+                                "novelty": "unavailable",
+                                "source_scope": {
+                                    "dominant_kind": "production",
+                                    "impact_scope": "runtime",
+                                },
+                                "spread": {"files": 1, "functions": 1},
+                                "items": [
+                                    {
+                                        "relative_path": "pkg/mod.py",
+                                        "qualname": "pkg.mod:shadow",
+                                        "start_line": 10,
+                                        "end_line": 12,
+                                    }
+                                ],
+                                "facts": {
+                                    "contract_id": "example.contract/v1",
+                                    "canonical_owner": "pkg.mod:owner",
+                                },
+                            }
+                        ]
+                    },
+                },
+            }
+        },
+    )
+    service._runs.register(record)
+
+    payload = service.check_authority(
+        run_id="authority",
+        detail_level="full",
+    )
+
+    assert payload["check"] == "authority"
+    assert payload["total"] == 1
+    item = cast("list[dict[str, object]]", payload["items"])[0]
+    assert item["category"] == "owner_bypass"
+    assert cast("dict[str, object]", item["facts"])["contract_id"] == (
+        "example.contract/v1"
+    )
+
+
 def _trusted_gate_facts() -> dict[str, object]:
     return {
         "baseline": {

@@ -22,6 +22,7 @@ TAB_DEPENDENCIES: Final = "Dependencies"
 TAB_DEAD_CODE: Final = "Dead Code"
 TAB_SUGGESTIONS: Final = "Suggestions"
 TAB_FINDINGS: Final = "Findings"
+TAB_AUTHORITY: Final = "Authority"
 
 TABLIST_ARIA_LABEL: Final = "Report sections"
 BADGE_BUTTON_LABEL: Final = "Get Badge"

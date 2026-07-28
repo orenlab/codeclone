@@ -14,7 +14,8 @@
       "clones": 1,
       "structural": 0,
       "dead_code": 0,
-      "design": 0
+      "design": 0,
+      "authority": 0
     },
     "severity": {
       "critical": 0,

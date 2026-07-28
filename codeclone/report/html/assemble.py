@@ -34,6 +34,7 @@ from ..messages.chrome import (
     MODAL_FINDING_TITLE,
     PROVENANCE_ARIA_LABEL,
     PROVENANCE_TITLE_PREFIX,
+    TAB_AUTHORITY,
     TAB_CLONES,
     TAB_DEAD_CODE,
     TAB_DEPENDENCIES,
@@ -51,6 +52,7 @@ from ._context import _meta_pick, build_context
 from .assets.css import build_css
 from .assets.js import build_js
 from .primitives.escape import _escape_html
+from .sections._authority import render_authority_panel
 from .sections._clones import render_clones_panel
 from .sections._coupling import render_quality_panel
 from .sections._dead_code import render_dead_code_panel
@@ -96,6 +98,7 @@ def build_html_report(
     dead_code_html = render_dead_code_panel(ctx)
     suggestions_html = render_suggestions_panel(ctx)
     structural_html = render_structural_panel(ctx)
+    authority_html = render_authority_panel(ctx)
     meta_html = render_meta_panel(ctx)
 
     # -- Tab counters --
@@ -125,6 +128,10 @@ def build_html_report(
         ).get("total")
     )
     structural_count = len(ctx.structural_findings)
+    authority_summary = _as_mapping(
+        _as_mapping(ctx.metrics_map.get("semantic_authority")).get("summary")
+    )
+    authority_count = _as_int(authority_summary.get("active_violations"))
     coverage_join_summary = _as_mapping(
         _as_mapping(ctx.metrics_map.get("coverage_join")).get("summary")
     )
@@ -159,6 +166,7 @@ def build_html_report(
         "dead-code": "dead-code",
         "suggestions": "suggestions",
         "structural-findings": "structural-findings",
+        "authority": "authority",
     }
     tab_defs = [
         ("overview", TAB_OVERVIEW, overview_html, ""),
@@ -204,6 +212,12 @@ def build_html_report(
             TAB_FINDINGS,
             structural_html,
             _tab_badge(structural_count, "structural findings"),
+        ),
+        (
+            "authority",
+            TAB_AUTHORITY,
+            authority_html,
+            _tab_badge(authority_count, "authority violations"),
         ),
     ]
 

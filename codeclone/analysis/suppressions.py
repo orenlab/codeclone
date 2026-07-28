@@ -16,9 +16,11 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
 DEAD_CODE_RULE_ID: Final[str] = "dead-code"
+DUPLICATE_RESPONSIBILITY_RULE_ID: Final[str] = "duplicate-responsibility"
 SUPPORTED_RULE_IDS: Final[frozenset[str]] = frozenset(
     {
         DEAD_CODE_RULE_ID,
+        DUPLICATE_RESPONSIBILITY_RULE_ID,
         "clone-cohort-drift",
         "clone-guard-exit-divergence",
     }
@@ -37,6 +39,7 @@ _RULE_ID_PATTERN: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 __all__ = [
     "DEAD_CODE_RULE_ID",
+    "DUPLICATE_RESPONSIBILITY_RULE_ID",
     "INLINE_CODECLONE_SUPPRESSION_SOURCE",
     "SUPPORTED_RULE_IDS",
     "DeclarationKind",

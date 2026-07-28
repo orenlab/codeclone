@@ -33,6 +33,7 @@ from ._session_shared import (
     CATEGORY_COUPLING,
     CONFIDENCE_MEDIUM,
     EFFORT_MODERATE,
+    FAMILY_AUTHORITY,
     FAMILY_CLONES,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
@@ -65,6 +66,7 @@ _NON_CLONE_FINDING_FAMILIES = (
     FAMILY_STRUCTURAL,
     FAMILY_DEAD_CODE,
     FAMILY_DESIGN,
+    FAMILY_AUTHORITY,
 )
 _EXTRA_FINDING_FAMILIES_BY_MODE = {
     "clones_only": (),
@@ -1907,6 +1909,41 @@ class _MCPSessionFindingMixin:
         return self._granular_payload(
             record=record,
             check="dead_code",
+            items=findings,
+            detail_level=validated_detail,
+            max_results=max_results,
+            path=path,
+        )
+
+    def check_authority(
+        self,
+        *,
+        run_id: str | None = None,
+        root: str | None = None,
+        path: str | None = None,
+        max_results: int = 10,
+        detail_level: DetailLevel = "normal",
+    ) -> dict[str, object]:
+        validated_detail = _helpers._validate_choice(
+            "detail_level",
+            detail_level,
+            _VALID_DETAIL_LEVELS,
+        )
+        record = self._resolve_granular_record(
+            run_id=run_id,
+            root=root,
+            analysis_mode="full",
+        )
+        findings = self._query_findings(
+            record=record,
+            family="authority",
+            detail_level=validated_detail,
+            changed_paths=self._path_filter_tuple(path),
+            sort_by="priority",
+        )
+        return self._granular_payload(
+            record=record,
+            check="authority",
             items=findings,
             detail_level=validated_detail,
             max_results=max_results,

@@ -25,6 +25,7 @@ GATE_REASON_DOCSTRING_REGRESSION: Final = (
 )
 GATE_REASON_API_BREAKING: Final = "Public API breaking changes vs metrics baseline: "
 GATE_REASON_COVERAGE_HOTSPOTS: Final = "Coverage hotspots detected: "
+GATE_REASON_AUTHORITY_VIOLATIONS: Final = "Semantic authority violations detected: "
 GATE_REASON_CYCLES_DETECTED: Final = "Dependency cycles detected: "
 GATE_REASON_DEAD_CODE_DETECTED: Final = "Dead code detected (high confidence): "
 GATE_REASON_COMPLEXITY_THRESHOLD: Final = "Complexity threshold exceeded: "

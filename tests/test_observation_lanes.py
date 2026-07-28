@@ -30,8 +30,13 @@ from codeclone.models import (
     ApiParamSpec,
     ApiSurfaceColumnarPayload,
     ApiSymbolObservation,
+    AuthorityGovernedSink,
+    AuthorityGraph,
+    AuthorityRegistry,
+    AuthorityRegistryEntry,
     ClassMetrics,
     CloneObservationPayload,
+    ContractIRBuildResult,
     DeadCandidate,
     DeadCodeColumnarPayload,
     DeadCodeMarkerException,
@@ -53,6 +58,8 @@ from codeclone.models import (
     PublicSymbol,
     ResolvedSourceIdentity,
     RuntimeReachabilityFact,
+    SemanticAuthorityObservationPayload,
+    SemanticAuthorityResult,
     ThinIdentityTable,
     derive_python_module_identity,
 )
@@ -81,6 +88,68 @@ def _contains_float(value: object) -> bool:
     if isinstance(value, list):
         return any(_contains_float(item) for item in value)
     return False
+
+
+def test_semantic_authority_lane_is_the_compact_d10_projection_only() -> None:
+    result = SemanticAuthorityResult(
+        algorithm_revision="1",
+        contract_ir=ContractIRBuildResult(
+            contracts=(),
+            sccs=(),
+            fixpoint_iterations=1,
+        ),
+        graph=AuthorityGraph(nodes=(), edges=()),
+        sinks=(),
+        candidates=(),
+        registry=AuthorityRegistry(
+            version="1",
+            entries=(
+                AuthorityRegistryEntry(
+                    contract_id="example.contract/v1",
+                    canonical_owner="pkg.mod:owner",
+                    allowed_adapters=(),
+                    forbidden_raw_inputs=(),
+                    required_provenance=("producer:pkg.mod:owner",),
+                ),
+            ),
+        ),
+        governed_sinks=(
+            AuthorityGovernedSink(
+                contract_id="example.contract/v1",
+                sink_identity="pkg.mod:owner",
+                authority_status="authoritative",
+                producer_root_ids=("producer:pkg.mod:owner",),
+                effect_signature="1" * 64,
+                resolution_state="resolved",
+            ),
+        ),
+    )
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        semantic_authority=result,
+    )
+    semantic_lane = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "semantic_authority"
+    )
+
+    assert semantic_lane.descriptor.payload_schema == "2"
+    assert isinstance(semantic_lane.payload, SemanticAuthorityObservationPayload)
+    assert orjson.loads(orjson.dumps(semantic_lane.payload)) == {
+        "observations": [
+            {
+                "algorithm_revision": "1",
+                "authority_status": "authoritative",
+                "contract_id": "example.contract/v1",
+                "effect_signature": "1" * 64,
+                "producer_root_ids": ["producer:pkg.mod:owner"],
+                "resolution_state": "resolved",
+                "sink_identity": "pkg.mod:owner",
+            }
+        ]
+    }
 
 
 def _bundle() -> ObservationBundle:

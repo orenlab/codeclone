@@ -52,14 +52,11 @@ TEST_OBSERVATION_BUNDLE = build_observation_bundle(
     scan_root=Path("."), module_registry=_registry()
 )
 
-# The three lanes still on the record wire — byte-identical since 39U.
+# The two clone lanes still on the record wire — byte-identical since 39U.
 _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
     "clones.blocks": "1d178dfa537ab09521500e1170b954c058e3de3564597d30911c561d89282cf1",
     "clones.functions": (
         "7f87a5ec435e59c109da4cdf8eaf57441795e48a3d6431dfae3abb874c9f9c23"
-    ),
-    "semantic_authority": (
-        "af551458e4577c554d38b66386ccf53ea0cdd7dd6dae0327203a24aa60acac68"
     ),
 }
 # 39W moved exactly these seven lanes to a columnar payload.
@@ -106,7 +103,7 @@ def test_observation_contract_is_closed_and_semantic_absence_is_real() -> None:
     )
 
 
-def test_exactly_the_seven_columnar_lanes_advance_their_payload_schema() -> None:
+def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
     contract = build_observation_contract(
         collect_metrics=True,
         collect_dependencies=True,
@@ -128,13 +125,14 @@ def test_exactly_the_seven_columnar_lanes_advance_their_payload_schema() -> None
         "dependencies": "4",
         "module_identity": "3",
         "risk_observations": "3",
+        "semantic_authority": "2",
     }
-    # Both clone descriptors, and the semantic lane, stay on the record wire.
+    # Both clone descriptors stay on the record wire.
     assert {
         name
         for name, descriptor in descriptors.items()
         if descriptor.payload_schema == "1"
-    } == {"clones.blocks", "clones.functions", "semantic_authority"}
+    } == {"clones.blocks", "clones.functions"}
 
     # module_identity carries only a new schema: normalised back, its descriptor
     # digest is the frozen pre-39U value.
@@ -155,6 +153,12 @@ def test_exactly_the_seven_columnar_lanes_advance_their_payload_schema() -> None
         )
     }
     assert bumped == _BUMPED_DESCRIPTOR_DIGESTS
+    semantic = descriptors.pop("semantic_authority")
+    assert semantic.payload_schema == "2"
+    assert (
+        _descriptor_digest(semantic)
+        == "3401d89134a48d3a39fb02d96b8910eab6ff752891e9ad0a2ce98451d5fb60f5"
+    )
     assert {descriptor.payload_schema for descriptor in descriptors.values()} == {"1"}
     assert {
         name: _descriptor_digest(descriptor) for name, descriptor in descriptors.items()

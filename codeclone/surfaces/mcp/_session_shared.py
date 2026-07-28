@@ -67,6 +67,9 @@ from ...domain.findings import (
     FAMILY_DESIGN,
     FAMILY_STRUCTURAL,
 )
+from ...domain.findings import (
+    FAMILY_AUTHORITY as FAMILY_AUTHORITY,
+)
 from ...domain.quality import (
     CONFIDENCE_HIGH,
     CONFIDENCE_LOW,
@@ -124,8 +127,15 @@ HotlistKind = Literal[
     "production_hotspots",
     "test_fixture_hotspots",
 ]
-FindingFamilyFilter = Literal["all", "clone", "structural", "dead_code", "design"]
-FindingNoveltyFilter = Literal["all", "new", "known"]
+FindingFamilyFilter = Literal[
+    "all",
+    "clone",
+    "structural",
+    "dead_code",
+    "design",
+    "authority",
+]
+FindingNoveltyFilter = Literal["all", "new", "known", "unavailable"]
 FindingSort = Literal["default", "priority", "severity", "spread"]
 DetailLevel = Literal["summary", "normal", "full"]
 ComparisonFocus = Literal["all", "clones", "structural", "metrics"]
@@ -245,9 +255,9 @@ _CONFIDENCE_WEIGHT: Final[dict[str, float]] = {
 _VALID_ANALYSIS_MODES = frozenset({"full", "clones_only"})
 _VALID_CACHE_POLICIES = frozenset({"reuse", "off"})
 _VALID_FINDING_FAMILIES = frozenset(
-    {"all", "clone", "structural", "dead_code", "design"}
+    {"all", "clone", "structural", "dead_code", "design", "authority"}
 )
-_VALID_FINDING_NOVELTY = frozenset({"all", "new", "known"})
+_VALID_FINDING_NOVELTY = frozenset({"all", "new", "known", "unavailable"})
 _VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
 _VALID_DETAIL_LEVELS = frozenset({"summary", "normal", "full"})
 _VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
@@ -353,6 +363,7 @@ _VALID_METRICS_DETAIL_FAMILIES = frozenset(
         "dead_code",
         "api_surface",
         "security_surfaces",
+        "semantic_authority",
         "god_modules",
         "overloaded_modules",
         "health",

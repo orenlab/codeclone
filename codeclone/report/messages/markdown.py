@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Final
 
 from ...domain.findings import (
+    FAMILY_AUTHORITY,
     FAMILY_CLONE,
     FAMILY_DEAD_CODE,
     FAMILY_STRUCTURAL,
@@ -63,6 +64,7 @@ MD_HEADING_CLONE: Final = "{category} clone group{suffix}"
 MD_HEADING_STRUCTURAL: Final = "Structural finding: {category}"
 MD_HEADING_DEAD_CODE: Final = "Dead code: {category}"
 MD_HEADING_DESIGN: Final = "Design finding: {category}"
+MD_HEADING_AUTHORITY: Final = "Authority violation: {category}"
 
 MD_ANCHORS: Final[tuple[tuple[str, str, int], ...]] = (
     ("overview", "Overview", 2),
@@ -75,6 +77,7 @@ MD_ANCHORS: Final[tuple[tuple[str, str, int], ...]] = (
     ("structural-findings", "Structural Findings", 3),
     ("dead-code-findings", "Dead Code Findings", 3),
     ("design-findings", "Design Findings", 3),
+    ("authority-findings", "Authority Findings", 3),
     ("metrics", "Metrics", 2),
     ("health", "Health", 3),
     ("complexity", "Complexity", 3),
@@ -98,6 +101,8 @@ def finding_heading(*, family: str, category: str, clone_type: str = "") -> str:
         return MD_HEADING_STRUCTURAL.format(category=category)
     if family == FAMILY_DEAD_CODE:
         return MD_HEADING_DEAD_CODE.format(category=category)
+    if family == FAMILY_AUTHORITY:
+        return MD_HEADING_AUTHORITY.format(category=category)
     return MD_HEADING_DESIGN.format(category=category)
 
 

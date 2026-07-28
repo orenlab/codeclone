@@ -1268,6 +1268,27 @@ def build_mcp_server(
         )
 
     @tool(
+        title=mcp_tools.TITLE_CHECK_AUTHORITY,
+        description=mcp_tools.CHECK_AUTHORITY,
+        annotations=read_only_tool,
+        structured_output=True,
+    )
+    def check_authority(
+        run_id: RunIdParam = None,
+        root: OptionalRootParam = None,
+        path: PathFilterParam = None,
+        max_results: LimitParam = 10,
+        detail_level: DetailLevelParam = "normal",
+    ) -> dict[str, object]:
+        return service.check_authority(
+            run_id=run_id,
+            root=root,
+            path=path,
+            max_results=max_results,
+            detail_level=detail_level,
+        )
+
+    @tool(
         title=mcp_tools.TITLE_GENERATE_PR_SUMMARY,
         description=mcp_tools.GENERATE_PR_SUMMARY,
         annotations=read_only_tool,

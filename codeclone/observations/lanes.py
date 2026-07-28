@@ -36,6 +36,7 @@ from ..models import (
     ObservationLane,
     ObservationLaneDescriptor,
     ResolvedSourceIdentity,
+    SemanticAuthorityObservation,
     SemanticAuthorityObservationPayload,
     ThinIdentityTable,
     _null_first,
@@ -417,7 +418,20 @@ def _lane_payload(
         raise ObservationContractError(
             "semantic_authority lane requires the accepted semantic result"
         )
-    return SemanticAuthorityObservationPayload(result=bundle.semantic)
+    return SemanticAuthorityObservationPayload(
+        observations=tuple(
+            SemanticAuthorityObservation(
+                contract_id=item.contract_id,
+                sink_identity=item.sink_identity,
+                authority_status=item.authority_status,
+                producer_root_ids=item.producer_root_ids,
+                effect_signature=item.effect_signature,
+                resolution_state=item.resolution_state,
+                algorithm_revision=bundle.semantic.algorithm_revision,
+            )
+            for item in bundle.semantic.governed_sinks
+        )
+    )
 
 
 def build_observation_lanes(
@@ -461,7 +475,7 @@ def observation_lane_item_count(lane: ObservationLane) -> int:
     if isinstance(payload, AdoptionColumnarPayload):
         return len(payload.scope)
     if isinstance(payload, SemanticAuthorityObservationPayload):
-        return len(payload.result.sinks) + len(payload.result.candidates)
+        return len(payload.observations)
     raise ObservationContractError(f"lane payload has no row count: {type(payload)}")
 
 

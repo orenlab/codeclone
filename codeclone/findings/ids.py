@@ -23,7 +23,12 @@ def design_group_id(category: str, subject_key: str) -> str:
     return f"design:{category}:{subject_key}"
 
 
+def authority_group_id(contract_id: str, violation_id: str) -> str:
+    return f"authority:{contract_id}:{violation_id}"
+
+
 __all__ = [
+    "authority_group_id",
     "clone_group_id",
     "dead_code_group_id",
     "design_group_id",

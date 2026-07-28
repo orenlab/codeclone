@@ -104,6 +104,7 @@ class CLIArgsLike(Protocol):
     fail_on_typing_regression: bool
     fail_on_docstring_regression: bool
     fail_on_api_break: bool
+    fail_on_authority_violation: bool
     fail_on_untested_hotspots: bool
     min_typing_coverage: int
     min_docstring_coverage: int

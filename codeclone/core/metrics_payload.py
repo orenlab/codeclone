@@ -85,26 +85,96 @@ def _semantic_authority_payload(
         }
         for candidate in result.candidates
     ]
+    governed_sink_items: list[dict[str, object]] = [
+        {
+            "item_kind": "governed_sink",
+            "contract_id": sink.contract_id,
+            "sink_identity": sink.sink_identity,
+            "authority_status": sink.authority_status,
+            "producer_root_ids": list(sink.producer_root_ids),
+            "effect_signature": sink.effect_signature,
+            "resolution_state": sink.resolution_state,
+            "algorithm_revision": result.algorithm_revision,
+        }
+        for sink in result.governed_sinks
+    ]
+    violation_items: list[dict[str, object]] = [
+        {
+            "item_kind": "violation",
+            "violation_id": violation.violation_id,
+            "contract_id": violation.contract_id,
+            "kind": violation.kind,
+            "sink_identity": violation.sink_identity,
+            "canonical_owner": violation.canonical_owner,
+            "authority_status": violation.authority_status,
+            "producer_root_ids": list(violation.producer_root_ids),
+            "effect_signature": violation.effect_signature,
+            "resolution_state": violation.resolution_state,
+            "producers": list(violation.producers),
+            "suppressed": violation.suppressed,
+            "locations": [
+                {
+                    "relative_path": location.relative_path,
+                    "start_line": location.start_line,
+                    "end_line": location.end_line,
+                    "qualname": location.qualname,
+                }
+                for location in violation.locations
+            ],
+            "algorithm_revision": result.algorithm_revision,
+        }
+        for violation in result.violations
+    ]
+    registry_entries = (
+        []
+        if result.registry is None
+        else [
+            {
+                "contract_id": entry.contract_id,
+                "canonical_owner": entry.canonical_owner,
+                "allowed_adapters": list(entry.allowed_adapters),
+                "forbidden_raw_inputs": list(entry.forbidden_raw_inputs),
+                "required_provenance": list(entry.required_provenance),
+            }
+            for entry in result.registry.entries
+        ]
+    )
+    active_violations = sum(not item.suppressed for item in result.violations)
     return {
         "summary": {
             "enabled": True,
-            "report_only": True,
+            "report_only": not registry_entries,
+            "enforcement_enabled": bool(registry_entries),
             "algorithm_revision": result.algorithm_revision,
+            "registry_version": (
+                "" if result.registry is None else result.registry.version
+            ),
+            "registry_contracts": len(registry_entries),
             "contracts": len(result.contract_ir.contracts),
             "sinks": len(result.sinks),
             "candidates": len(result.candidates),
+            "governed_sinks": len(result.governed_sinks),
+            "violations": len(result.violations),
+            "active_violations": active_violations,
+            "suppressed_violations": len(result.violations) - active_violations,
             "scc_count": len(result.contract_ir.sccs),
             "fixpoint_iterations": result.contract_ir.fixpoint_iterations,
             "sinks_by_status": status_counts,
         },
         "items": sorted(
-            [*sink_items, *candidate_items],
+            [
+                *sink_items,
+                *candidate_items,
+                *governed_sink_items,
+                *violation_items,
+            ],
             key=lambda item: (
                 str(item["item_kind"]),
                 str(item.get("sink_identity", "")),
                 str(item.get("candidate_id", "")),
             ),
         ),
+        "registry": registry_entries,
         "contract_ir": [
             {
                 "function": contract.function,
