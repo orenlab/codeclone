@@ -188,10 +188,7 @@ If a step cannot proceed, the response includes `next_step` and/or `user_action_
 ### Analyze a repository
 
 ```python
-result = analyze_repository(
-    root="/absolute/path/to/repo",
-    cache_policy="reuse"
-)
+result = analyze_repository(root="/absolute/path/to/repo", cache_policy="reuse")
 print(f"Run ID: {result['run_id']}")
 print(f"Health: {result['health_score']}")
 print(f"Report: {result['artifacts']['report_path']}")
@@ -203,7 +200,7 @@ print(f"Report: {result['artifacts']['report_path']}")
 intent = start_controlled_change(
     root="/absolute/path/to/repo",
     scope={"allowed_files": ["src/services/auth.py"]},
-    intent="refactor service authentication"
+    intent="refactor service authentication",
 )
 print(f"Intent ID: {intent['intent_id']}")
 print(f"Edit allowed: {intent['edit_allowed']}")
@@ -214,7 +211,7 @@ print(f"Blast radius: {intent['blast_radius']}")
 
 ```python
 triage = get_production_triage(run_id="latest")
-for hotspot in triage['hotspots']:
+for hotspot in triage["hotspots"]:
     print(f"{hotspot['path']}: {hotspot['issue']}")
 ```
 
@@ -224,7 +221,7 @@ for hotspot in triage['hotspots']:
 receipt = finish_controlled_change(
     intent_id="abcd1234",
     changed_files=["src/services/auth.py"],
-    after_run_id="run_xyz789"
+    after_run_id="run_xyz789",
 )
 print(f"Status: {receipt['status']}")
 print(f"Scope check: {receipt['scope_check']['status']}")

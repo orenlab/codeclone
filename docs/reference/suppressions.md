@@ -47,8 +47,7 @@ are supported:
 
   ```python
   # codeclone: ignore[dead-code]
-  def legacy_entrypoint() -> None:
-      ...
+  def legacy_entrypoint() -> None: ...
   ```
 
 - **Inline** — as a trailing comment on the declaration/header line:

@@ -93,10 +93,12 @@ Claim validation before review is an MCP-only capability (`validate_review_claim
 
 ```python
 # Get implementation context for release scope
-get_implementation_context(root=..., scope={"packages": ["codeclone.surfaces.mcp", ...]})
+get_implementation_context(
+    root=..., scope={"packages": ["codeclone.surfaces.mcp", ...]}
+)
 
 # Confirm no unverified dependencies
-check_patch_contract(mode='verify', scope=..., before_run_id=..., after_run_id=...)
+check_patch_contract(mode="verify", scope=..., before_run_id=..., after_run_id=...)
 ```
 
 All receipts must include:

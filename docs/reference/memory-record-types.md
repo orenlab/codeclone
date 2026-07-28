@@ -49,7 +49,7 @@ manage_engineering_memory(
     action="record_candidate",
     record_type="risk_note",
     statement="Database migration requires fsync per commit; loss-intolerant stores use FULL, ephemeral intents use NORMAL.",
-    subject_path="codeclone/memory/schema.py"
+    subject_path="codeclone/memory/schema.py",
 )
 ```
 
@@ -57,10 +57,7 @@ Or batch memory candidates after `finish_controlled_change`:
 
 ```python
 finish_controlled_change(
-    intent_id="...",
-    changed_files=[...],
-    after_run_id="...",
-    propose_memory=True
+    intent_id="...", changed_files=[...], after_run_id="...", propose_memory=True
 )
 ```
 
@@ -73,7 +70,9 @@ get_relevant_memory(root="/path/to/repo", scope=[...])
 Query memory for specific lanes or paths:
 
 ```python
-query_engineering_memory(root="/path/to/repo", mode="for_path", path="codeclone/memory/...")
+query_engineering_memory(
+    root="/path/to/repo", mode="for_path", path="codeclone/memory/..."
+)
 ```
 
 ## Record types

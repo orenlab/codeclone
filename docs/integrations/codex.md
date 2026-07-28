@@ -61,7 +61,7 @@ result = analyze_repository(root="/abs/path/to/repo")
 response = start_controlled_change(
     root="/abs/path/to/repo",
     scope={"allowed_files": ["src/module.py", "tests/"]},
-    intent="Fix concurrency bug in worker queue"
+    intent="Fix concurrency bug in worker queue",
 )
 
 if response.status == "active" and response.edit_allowed:
@@ -69,26 +69,18 @@ if response.status == "active" and response.edit_allowed:
     pass
 elif response.status == "queued":
     # Another agent is editing; wait for promotion
-    manage_change_intent(
-        action="promote",
-        intent_id=response.intent_id
-    )
+    manage_change_intent(action="promote", intent_id=response.intent_id)
 ```
 
 ### During edit: Inspect blast radius and context
 
 ```python
 # Query structural dependents before editing (uses the latest run)
-blast = get_blast_radius(
-    files=["src/module.py"]
-)
+blast = get_blast_radius(files=["src/module.py"])
 # Review blast.do_not_touch and blast.direct_dependents
 
 # Get implementation context for precise code facts
-context = get_implementation_context(
-    root="/abs/path/to/repo",
-    paths=["src/module.py"]
-)
+context = get_implementation_context(root="/abs/path/to/repo", paths=["src/module.py"])
 ```
 
 ### Post-edit: Verify and finalize
@@ -101,7 +93,7 @@ after_run = analyze_repository(root="/abs/path/to/repo")
 finish_response = finish_controlled_change(
     intent_id="intent-<id>",
     changed_files=["src/module.py", "tests/test_module.py"],
-    after_run_id=after_run.run_id
+    after_run_id=after_run.run_id,
 )
 
 if finish_response.status == "accepted":
@@ -119,10 +111,7 @@ elif finish_response.status == "violated":
 
 ```python
 # Generate a deterministic review receipt
-receipt = create_review_receipt(
-    intent_id="intent-<id>",
-    run_id="<before-run-id>"
-)
+receipt = create_review_receipt(intent_id="intent-<id>", run_id="<before-run-id>")
 
 # Fetch durably stored patch trail
 trail = get_patch_trail(run_id="<run-id>")
