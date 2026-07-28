@@ -477,9 +477,10 @@ def _enforcement(
                     ),
                 )
             )
-            if function == entry.canonical_owner or status == "unavailable":
-                continue
-            if status == "adapter":
+            if function == entry.canonical_owner or status in (
+                "adapter",
+                "unavailable",
+            ):
                 continue
             candidate = _candidate_for_sink(function, candidates=candidates)
             producers = candidate.producers if candidate is not None else (function,)
