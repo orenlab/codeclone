@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -3589,6 +3590,40 @@ def test_cli_health_stable_across_warm_cache_with_semantic_authority(
     assert warm_health["score"] == cold_health["score"]
     assert warm_health["grade"] == cold_health["grade"]
     assert warm_health["dimensions"] == cold_health["dimensions"]
+
+
+def test_cli_analyzes_a_src_layout_repository(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A conventional src layout must analyze, not abort on identity encoding.
+
+    src layout names modules relative to the src mount, so the observation
+    wire has to carry that mount. Before it did, every run over such a
+    repository aborted with an unencodable-identity contract error.
+    """
+    fixture = Path(__file__).parent / "fixtures" / "module_identity" / "src_layout"
+    for entry in fixture.iterdir():
+        target = tmp_path / entry.name
+        if entry.is_dir():
+            shutil.copytree(entry, target)
+        else:
+            shutil.copy2(entry, target)
+
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[],
+    )
+
+    source_facts = cast(dict[str, object], payload["source_facts"])
+    manifest = cast(dict[str, object], source_facts["module_identity_manifest"])
+    mounts = cast(list[dict[str, object]], manifest["import_mounts"])
+    assert [mount["path"] for mount in mounts] == ["src"]
+
+    inventory = cast(dict[str, object], payload["inventory"])
+    files = cast(dict[str, object], inventory["files"])
+    assert cast(int, files["analyzed"]) > 0
 
 
 def test_cli_api_surface_ignores_non_api_warm_cache(
