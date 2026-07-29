@@ -15,6 +15,11 @@ from collections.abc import Callable, Sequence
 from typing import TypeGuard, TypeVar
 
 from ...utils.iterutils import chunked
+from ..store import (
+    MEMORY_ID_CANDIDATE_LIMIT,
+    count_id_prefix_matches,
+    memory_id_prefix_clauses,
+)
 from .models import (
     Experience,
     ExperienceEvidence,
@@ -286,6 +291,38 @@ def find_experience(
     return _hydrate_experience_rows(conn, [row])[0]
 
 
+def resolve_experience_id_prefix(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    prefix: str,
+    limit: int = MEMORY_ID_CANDIDATE_LIMIT,
+) -> tuple[list[Experience], int]:
+    """Resolve a short experience id to canonical experiences plus the exact total.
+
+    find_experience matches on id alone; resolution adds project_id so a
+    prefix can never surface another project's experience. Candidates go
+    through the same batch hydration as list_experiences, so they are
+    ordinary Experience entities.
+    """
+    _use_row_factory(conn)
+    clauses, params = memory_id_prefix_clauses(prefix=prefix, project_id=project_id)
+    where = " AND ".join(clauses)
+    total = count_id_prefix_matches(
+        conn,
+        table="memory_experiences",
+        where=where,
+        params=params,
+    )
+    if total == 0:
+        return [], 0
+    rows = conn.execute(
+        f"SELECT * FROM memory_experiences WHERE {where} ORDER BY id LIMIT ?",
+        [*params, limit],
+    ).fetchall()
+    return _hydrate_experience_rows(conn, rows), total
+
+
 def _row_to_facet(row: sqlite3.Row) -> ExperienceFacet:
     return ExperienceFacet(
         facet_kind=_facet_kind(str(row["facet_kind"])),
@@ -360,4 +397,5 @@ __all__ = [
     "list_experiences",
     "list_experiences_for_subject_family",
     "replace_experiences",
+    "resolve_experience_id_prefix",
 ]

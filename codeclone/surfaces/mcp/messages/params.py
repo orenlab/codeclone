@@ -590,7 +590,10 @@ MemoryRecordIdParam = Annotated[
     Field(
         description=(
             "Record id for mode=get or IDE governance actions; trajectory id for "
-            "mode=trajectory_get; experience id for mode=experience_get."
+            "mode=trajectory_get; experience id for mode=experience_get. Query "
+            "modes also accept a short id truncated to at least 8 hex characters "
+            "after the family prefix (mem-, traj-, exp-) and answer ambiguous "
+            "with candidates; governance actions require the full id."
         ),
     ),
 ]

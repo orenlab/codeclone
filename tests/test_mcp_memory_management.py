@@ -589,3 +589,66 @@ def test_mcp_get_relevant_memory_wraps_memory_contract_errors(
                 root=str(root.resolve()),
                 scope=("pkg/mod.py",),
             )
+
+
+def test_mcp_manage_memory_governance_requires_a_full_record_id(
+    tmp_path: Path,
+) -> None:
+    """D5: read paths resolve short ids, write paths do not.
+
+    Approving a prefix-resolved target is a wrong-target hazard, so governance
+    keeps exact matching. The failure must be the plain exact-lookup miss —
+    proof that no prefix scan was attempted on a mutation path.
+    """
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(
+            history_limit=2,
+            ide_governance_channel=True,
+        )
+        root_str = str(root.resolve())
+        recorded = service.manage_engineering_memory(
+            root=root_str,
+            action="record_candidate",
+            record_type="architecture_decision",
+            statement="governance rejects short ids",
+            subject_path="pkg/mod.py",
+        )
+        record_id = str(recorded["record_id"])
+        short_id = record_id[: len("mem-") + 8]
+        assert short_id != record_id
+        service.manage_engineering_memory(
+            root=root_str,
+            action="register_ide_governance",
+            ide_governance_key=secrets.token_hex(32),
+            client_name="CodeClone VS Code",
+            client_version="1.0",
+        )
+        refused = service.manage_engineering_memory(
+            root=root_str,
+            action="prepare_governance",
+            record_id=short_id,
+            decision="approve",
+        )
+        assert refused["status"] == "not_found"
+        assert refused["record_id"] == short_id
+        # The full id still works, so the refusal is about the short form.
+        prepared = service.manage_engineering_memory(
+            root=root_str,
+            action="prepare_governance",
+            record_id=record_id,
+            decision="approve",
+        )
+        assert prepared["status"] == "ok"
+
+
+def test_mcp_manage_memory_promote_experience_requires_a_full_id(
+    tmp_path: Path,
+) -> None:
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=2)
+        with pytest.raises(MCPServiceContractError, match="not found"):
+            service.manage_engineering_memory(
+                root=str(root.resolve()),
+                action="promote_experience",
+                experience_id="exp-abcd1234",
+            )

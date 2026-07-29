@@ -28,6 +28,11 @@ from ...utils.iterutils import chunked
 from ...utils.json_io import json_text
 from ..models import MemoryProject
 from ..search_index import SearchMatchMode, tokenize_query
+from ..store import (
+    MEMORY_ID_CANDIDATE_LIMIT,
+    count_id_prefix_matches,
+    memory_id_prefix_clauses,
+)
 from .models import (
     TRAJECTORY_PROJECTION_VERSION,
     Trajectory,
@@ -753,6 +758,37 @@ def find_trajectory(conn: sqlite3.Connection, trajectory_id: str) -> Trajectory 
     )
 
 
+def resolve_trajectory_id_prefix(
+    conn: sqlite3.Connection,
+    *,
+    project_id: str,
+    prefix: str,
+    limit: int = MEMORY_ID_CANDIDATE_LIMIT,
+) -> tuple[list[Trajectory], int]:
+    """Resolve a short trajectory id to canonical trajectories plus the exact total.
+
+    find_trajectory matches on id alone; resolution adds project_id so a
+    prefix can never surface another project's trajectory. Candidates are
+    hydrated through find_trajectories_by_ids, so they are ordinary
+    Trajectory entities built by the one row mapping this lane already owns.
+    """
+    clauses, params = memory_id_prefix_clauses(prefix=prefix, project_id=project_id)
+    where = " AND ".join(clauses)
+    total = count_id_prefix_matches(
+        conn,
+        table="memory_trajectories",
+        where=where,
+        params=params,
+    )
+    if total == 0:
+        return [], 0
+    rows = conn.execute(
+        f"SELECT id FROM memory_trajectories WHERE {where} ORDER BY id LIMIT ?",
+        [*params, limit],
+    ).fetchall()
+    return find_trajectories_by_ids(conn, [str(row[0]) for row in rows]), total
+
+
 def find_trajectories_by_ids(
     conn: sqlite3.Connection,
     ids: Sequence[str],
@@ -1208,6 +1244,7 @@ __all__ = [
     "load_trajectory_patch_trails",
     "rebuild_trajectories_from_audit",
     "rebuild_trajectories_incremental",
+    "resolve_trajectory_id_prefix",
     "search_trajectories",
     "upsert_trajectory",
     "upsert_trajectory_patch_trail",
