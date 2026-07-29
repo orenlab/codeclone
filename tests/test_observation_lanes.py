@@ -56,6 +56,7 @@ from codeclone.models import (
     ObservationBundle,
     ObservationLaneName,
     PublicSymbol,
+    PythonModuleIdentity,
     ResolvedSourceIdentity,
     RuntimeReachabilityFact,
     SemanticAuthorityObservationPayload,
@@ -639,6 +640,68 @@ def test_identity_table_refuses_conflicting_and_unencodable_identities() -> None
     # A module name the path cannot produce is a lossy encoding, not an exception.
     with pytest.raises(ObservationContractError, match="cannot be encoded"):
         lanes_mod._identity_table([_identity("pkg/mod.py", module="other.name")])
+
+
+def _mounted_identity(
+    path: str,
+    *,
+    module: str,
+    package: str,
+    is_package: bool,
+    mount_path: str,
+    module_prefix: str = "",
+) -> ResolvedSourceIdentity:
+    del module_prefix
+    return ResolvedSourceIdentity(
+        file=FileIdentity(path=path),
+        python_module=PythonModuleIdentity(
+            module=module,
+            package=package,
+            is_package=is_package,
+            mount_path=mount_path,
+            origin="import_mount",
+            node_kind="regular_package" if is_package else "module_file",
+        ),
+    )
+
+
+def test_identity_table_encodes_non_root_import_mounts() -> None:
+    """Modules named relative to a non-root mount must survive the thin wire.
+
+    Under a src layout the importable name is ``acme``, not ``src.acme`` — the
+    mount is the naming origin, so the wire has to carry it as an exception
+    instead of assuming every module is named after its full path.
+    """
+    identities = [
+        _mounted_identity(
+            "src/acme/__init__.py",
+            module="acme",
+            package="acme",
+            is_package=True,
+            mount_path="src",
+        ),
+        _mounted_identity(
+            "src/acme/service.py",
+            module="acme.service",
+            package="acme",
+            is_package=False,
+            mount_path="src",
+        ),
+    ]
+
+    table, index = lanes_mod._identity_table(identities)
+
+    for identity in identities:
+        assert table.identity(index[identity.file.path]) == identity
+
+
+def test_identity_table_keeps_root_mount_rows_free_of_exceptions() -> None:
+    """The default mount stays the contract: root-mount rows encode unchanged."""
+    identities = [_identity("pkg/mod.py", module="pkg.mod")]
+
+    table, _index = lanes_mod._identity_table(identities)
+
+    assert table.mount_exc == ()
 
 
 def test_api_surface_lane_refuses_two_digest_domains() -> None:

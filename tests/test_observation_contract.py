@@ -60,23 +60,30 @@ _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
     ),
 }
 # 39W moved exactly these seven lanes to a columnar payload.
+# Every lane embedding the identity table moved one payload_schema when the
+# table gained the mount dimension (mount_exc exception rows): the payload
+# canonicalizer serializes that field even when empty. Schema change under
+# controller authorization + the maintainer's standing schema-bump
+# ratification; not test-greening. The normalise-to-"1" assertion below
+# still pins the frozen pre-39U value, proving only the schema changed and
+# MODULE_IDENTITY_VERSION did not.
 _BUMPED_DESCRIPTOR_DIGESTS = {
     "adoption_counts": (
         "b6822dde2c2e756cbe9bf3feae7952e8df00e06b70b366df1dac789455ad281c"
     ),
-    "api_surface": ("6f7eaffe2cecaa421e5dc8704d4eaf1256ffc203b9fcfba794a04f4792341f98"),
+    "api_surface": ("6984b79d4ec54f79f8225e05a32263eadbf18a9d13b751b289446c11edfdb0c6"),
     "coupling_cohesion_observations": (
-        "a16cf9ee22d10c2055903f98e20064cb87d0a113e436348a56f398df127e10cd"
+        "816c2065a00abc0f2baccb24976883522dbe69c42ca8218f704ed19ca454a713"
     ),
     "dead_code": ("4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9"),
     "dependencies": (
-        "6905c36fbcd905398648439c59ef31746a7ff9561e3b7f8b20c023511d70599b"
+        "0dab4d2031e715d4cda07f98ec1ab0c89b400a480dd023587a2ef0cbc171f561"
     ),
     "module_identity": (
-        "82a2f1b42a396307381f2c16193c76464b41b832a9a366497e21314d6375b0ed"
+        "5f9bd18f992e823d0419c6f40e6a1fccef722170062a2906d6eeede524e77fbb"
     ),
     "risk_observations": (
-        "536593990a541fda3126bfb8a44863e9fb7b586a63d996a3ea2eb7032c62f992"
+        "6c717f3f3d4aae7fcb4168fa39583fa182679aae1902e64c5bf3d71c7e86b2be"
     ),
 }
 
@@ -119,12 +126,12 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         if descriptor.payload_schema != "1"
     } == {
         "adoption_counts": "2",
-        "api_surface": "2",
-        "coupling_cohesion_observations": "3",
+        "api_surface": "3",
+        "coupling_cohesion_observations": "4",
         "dead_code": "2",
-        "dependencies": "4",
-        "module_identity": "3",
-        "risk_observations": "3",
+        "dependencies": "5",
+        "module_identity": "4",
+        "risk_observations": "4",
         "semantic_authority": "2",
     }
     # Both clone descriptors stay on the record wire.

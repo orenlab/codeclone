@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from dataclasses import FrozenInstanceError, asdict
+from pathlib import Path
 
 import pytest
 
@@ -299,3 +301,142 @@ def test_duplicate_function_summaries_are_rejected() -> None:
     summary = _summary("pkg:duplicate", ())
     with pytest.raises(ValueError, match="duplicate function summary"):
         build_contract_ir((summary, summary), ())
+
+
+_GUARD_TOKEN_PROBE = """
+from codeclone.models import SemanticEvent
+from codeclone.semantics.ir import _guard_tokens
+
+event = SemanticEvent(
+    event_id="f#000001",
+    kind="call",
+    subject="json:dumps",
+    inputs=(),
+    output=None,
+    guards=(
+        "cond_alpha:1:true",
+        "cond_beta:2:true",
+        "cond_gamma:3:true",
+        "cond_delta:4:true",
+    ),
+    location=("pkg/mod.py", 1),
+    resolution="resolved",
+)
+print(sorted(_guard_tokens((event,)).items()))
+"""
+
+_TIED_GUARD_SOURCE = """LIMIT = 3
+
+
+def claim(payload: dict) -> tuple[dict, bool]:
+    core: dict = {"valid": bool(payload.get("valid"))}
+    truncated = False
+    items: list = []
+    for raw in payload.get("rows", ()):
+        if isinstance(raw, dict):
+            entry = dict(raw)
+            if entry is not None:
+                items.append(entry)
+    if items:
+        bounded = items[:LIMIT]
+        core["items"] = bounded
+        if len(items) > LIMIT:
+            truncated = True
+            core["items_truncated"] = True
+    return core, truncated
+"""
+
+
+def _run_with_hash_seed(args: list[str], seed: int) -> str:
+    result = subprocess.run(
+        [sys.executable, *args],
+        capture_output=True,
+        text=True,
+        check=True,
+        env={**os.environ, "PYTHONHASHSEED": str(seed)},
+    )
+    return result.stdout
+
+
+def test_guard_tokens_do_not_depend_on_set_iteration_order() -> None:
+    """Guard ordinals must be assigned by a total, content-derived key.
+
+    Several guard bases can first appear in the same event. Ordering them by
+    first-appearance index alone leaves those ties to set iteration order,
+    which varies with string hash randomization per process — and that
+    instability propagates into effect_signature, the observation digest, and
+    ultimately makes the baseline artifact non-reproducible.
+    """
+    seen = {_run_with_hash_seed(["-c", _GUARD_TOKEN_PROBE], seed) for seed in range(8)}
+
+    assert len(seen) == 1, f"guard tokens varied across hash seeds: {sorted(seen)}"
+
+
+def test_contract_ir_is_reproducible_across_hash_seeds(tmp_path: Path) -> None:
+    """Two analyses of one identical tree must agree on contract_ir."""
+    (tmp_path / "mod.py").write_text(_TIED_GUARD_SOURCE, "utf-8")
+    report = tmp_path / "report.json"
+
+    digests = set()
+    for seed in range(6):
+        _run_with_hash_seed(
+            [
+                "-c",
+                "import sys; from codeclone.main import main; sys.exit(main())",
+                str(tmp_path),
+                "--semantic-authority",
+                "--json",
+                str(report),
+                "--no-progress",
+            ],
+            seed,
+        )
+        payload = json.loads(report.read_text("utf-8"))
+        contract_ir = payload["source_facts"]["semantic"]["contract_ir"]
+        digests.add(
+            hashlib.sha256(
+                json.dumps(contract_ir, sort_keys=True).encode("utf-8")
+            ).hexdigest()
+        )
+
+    assert len(digests) == 1, f"contract_ir varied across hash seeds: {sorted(digests)}"
+
+
+def test_baseline_publication_is_byte_reproducible_across_hash_seeds(
+    tmp_path: Path,
+) -> None:
+    """The landing ceremony's repeat-publication gate, as a standing test.
+
+    Any non-determinism reaching the observation digest makes the baseline
+    artifact unreproducible and silently rewrites it — including its
+    created_at — on every publication. Seeds must vary across processes for
+    this to mean anything: within one process the hash order is already
+    fixed, so same-process publications agree even when the content is not
+    actually deterministic.
+    """
+    (tmp_path / "mod.py").write_text(_TIED_GUARD_SOURCE, "utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\n"
+        'baseline_scope_id = "019f7fa1-8866-7242-b0bf-0ff282cafbcb"\n',
+        "utf-8",
+    )
+    baseline_path = tmp_path / "codeclone.baseline.json"
+
+    digests = set()
+    for seed in range(4):
+        _run_with_hash_seed(
+            [
+                "-c",
+                "import sys; from codeclone.main import main; sys.exit(main())",
+                str(tmp_path),
+                "--semantic-authority",
+                "--no-progress",
+                "--baseline",
+                str(baseline_path),
+                "--update-baseline",
+            ],
+            seed,
+        )
+        digests.add(hashlib.sha256(baseline_path.read_bytes()).hexdigest())
+
+    assert len(digests) == 1, f"baseline artifact varied across hash seeds: {digests}"

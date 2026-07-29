@@ -307,26 +307,67 @@ class ResolvedSourceIdentity:
     python_module: PythonModuleIdentity | None
 
 
-def derive_python_module_identity(path: str) -> PythonModuleIdentity:
-    """Rebuild a module identity from its repository-relative path.
+def derive_python_module_identity(
+    path: str,
+    *,
+    mount_path: str = ".",
+    module_prefix: str = "",
+) -> PythonModuleIdentity:
+    """Rebuild a module identity from its path and the mount that names it.
 
-    Sole owner of the derivation rule: everything except the path itself is a
-    function of the path, so the wire stores paths and exceptions only.
+    Sole owner of the derivation rule: everything except the path and its
+    import mount is a function of those two, so the wire stores paths and
+    exceptions only. The root mount with an empty prefix is the default, which
+    is why root-layout repositories still encode with no mount exceptions.
     """
 
     stem = path[:-3] if path.endswith(".py") else path
     is_package = path.endswith("/__init__.py")
     if is_package:
         stem = stem[: -len("/__init__")]
-    module = stem.replace("/", ".")
+    if mount_path != ".":
+        marker = f"{mount_path}/"
+        if stem.startswith(marker):
+            stem = stem[len(marker) :]
+    segments = [part for part in module_prefix.split(".") if part]
+    segments.extend(part for part in stem.split("/") if part)
+    module = ".".join(segments)
     return PythonModuleIdentity(
         module=module,
         package=module if is_package else module.rpartition(".")[0],
         is_package=is_package,
-        mount_path=".",
+        mount_path=mount_path,
         origin="import_mount",
         node_kind="regular_package" if is_package else "module_file",
     )
+
+
+def python_module_mount_row(
+    path: str,
+    module: PythonModuleIdentity,
+) -> tuple[str, str] | None:
+    """Return the (mount_path, module_prefix) the default derivation lacks.
+
+    ``None`` means the default root mount already reproduces the identity, so
+    the row needs no exception. This is the inverse of
+    :func:`derive_python_module_identity` and lives beside it so the
+    derivation rule keeps exactly one owner.
+    """
+
+    stem = path[:-3] if path.endswith(".py") else path
+    if path.endswith("/__init__.py"):
+        stem = stem[: -len("/__init__")]
+    mount_path = module.mount_path
+    if mount_path != ".":
+        marker = f"{mount_path}/"
+        if stem.startswith(marker):
+            stem = stem[len(marker) :]
+    relative_count = len([part for part in stem.split("/") if part])
+    module_segments = [part for part in module.module.split(".") if part]
+    prefix = ".".join(module_segments[: max(0, len(module_segments) - relative_count)])
+    if mount_path == "." and not prefix:
+        return None
+    return mount_path, prefix
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -336,6 +377,7 @@ class ThinIdentityTable:
     paths: tuple[str, ...]
     module_null: tuple[int, ...] = ()
     node_kind_exc: tuple[tuple[int, PythonModuleNodeKind], ...] = ()
+    mount_exc: tuple[tuple[int, str, str], ...] = ()
 
     def __post_init__(self) -> None:
         if self.paths != tuple(sorted(set(self.paths))):
@@ -350,6 +392,13 @@ class ThinIdentityTable:
         )
         if set(self.module_null) & {index for index, _kind in self.node_kind_exc}:
             raise ValueError("a null-module identity cannot carry a node kind")
+        _validate_ascending_indices(
+            tuple(index for index, _mount, _prefix in self.mount_exc),
+            len(self.paths),
+            "mount_exc",
+        )
+        if set(self.module_null) & {index for index, _m, _p in self.mount_exc}:
+            raise ValueError("a null-module identity cannot carry an import mount")
 
     def identity(self, index: int) -> ResolvedSourceIdentity:
         path = self.paths[index]
@@ -357,7 +406,14 @@ class ThinIdentityTable:
             return ResolvedSourceIdentity(
                 file=FileIdentity(path=path), python_module=None
             )
-        module = derive_python_module_identity(path)
+        mount_path, module_prefix = ".", ""
+        for exception_index, exc_mount, exc_prefix in self.mount_exc:
+            if exception_index == index:
+                mount_path, module_prefix = exc_mount, exc_prefix
+                break
+        module = derive_python_module_identity(
+            path, mount_path=mount_path, module_prefix=module_prefix
+        )
         for exception_index, kind in self.node_kind_exc:
             if exception_index == index:
                 module = replace(
