@@ -79,6 +79,7 @@ if TYPE_CHECKING:
     from ..embedding import EmbeddingProvider
     from ..semantic import SemanticIndex
     from ..semantic.models import SemanticHit, SemanticIndexStatus
+    from ..trajectory.models import Trajectory
 
 QueryMode = Literal[
     "search",
@@ -1149,6 +1150,168 @@ def _handle_status_mode(
     return {"mode": mode, "status": "ok", "payload": payload}
 
 
+MEMORY_ID_HEX_LENGTH = 32
+MEMORY_ID_MIN_PREFIX_HEX = 8
+MEMORY_ID_CANDIDATE_PREVIEW_CHARS = 80
+_MEMORY_ID_HEX_ALPHABET = frozenset("0123456789abcdef")
+_RECORD_ID_FAMILY = "mem"
+_TRAJECTORY_ID_FAMILY = "traj"
+_EXPERIENCE_ID_FAMILY = "exp"
+
+
+def _classify_memory_id(
+    value: str,
+    *,
+    family: str,
+    mode: str,
+) -> tuple[str, bool]:
+    """Classify one id request against its lane's family.
+
+    Returns the normalized id and whether it is a full id (exact lookup) as
+    opposed to a resolvable prefix. Only malformed *requests* raise: "nothing
+    matched" is a legitimate answer about the store, not a contract
+    violation, and is reported by the caller as a not_found status.
+    """
+    normalized = value.strip().lower()
+    given_family, separator, hex_part = normalized.partition("-")
+    if not separator or given_family != family:
+        given = given_family if separator else normalized
+        raise MemoryContractError(
+            f"mode={mode} requires an id of family {family!r} "
+            f"(form {family}-<hex>); got {given!r}."
+        )
+    if not hex_part or not _MEMORY_ID_HEX_ALPHABET.issuperset(hex_part):
+        raise MemoryContractError(
+            f"mode={mode} id {value!r} is malformed: {family}- must be followed "
+            f"by hex characters."
+        )
+    if len(hex_part) > MEMORY_ID_HEX_LENGTH:
+        raise MemoryContractError(
+            f"mode={mode} id {value!r} is malformed: at most "
+            f"{MEMORY_ID_HEX_LENGTH} hex characters may follow {family}-."
+        )
+    if len(hex_part) < MEMORY_ID_MIN_PREFIX_HEX:
+        raise MemoryContractError(
+            f"mode={mode} id prefix {value!r} is too short: at least "
+            f"{MEMORY_ID_MIN_PREFIX_HEX} hex characters must follow {family}-."
+        )
+    return normalized, len(hex_part) == MEMORY_ID_HEX_LENGTH
+
+
+def _id_candidate(
+    *,
+    candidate_id: str,
+    kind: str,
+    status: str,
+    statement: str,
+) -> dict[str, object]:
+    """The one candidate shape; lanes only choose which of their fields feed it."""
+    return {
+        "id": candidate_id,
+        "kind": kind,
+        "status": status,
+        "preview": _statement_preview(
+            statement,
+            max_chars=MEMORY_ID_CANDIDATE_PREVIEW_CHARS,
+        ),
+    }
+
+
+def _record_id_candidates(records: Sequence[MemoryRecord]) -> list[dict[str, object]]:
+    return [
+        _id_candidate(
+            candidate_id=record.id,
+            kind=record.type,
+            status=record.status,
+            statement=record.statement,
+        )
+        for record in records
+    ]
+
+
+def _trajectory_id_candidates(
+    trajectories: Sequence[Trajectory],
+) -> list[dict[str, object]]:
+    return [
+        _id_candidate(
+            candidate_id=trajectory.id,
+            kind=trajectory.quality_tier,
+            status=trajectory.outcome,
+            statement=trajectory.summary,
+        )
+        for trajectory in trajectories
+    ]
+
+
+def _experience_id_candidates(
+    experiences: Sequence[Experience],
+) -> list[dict[str, object]]:
+    return [
+        _id_candidate(
+            candidate_id=experience.id,
+            kind=experience.signal,
+            status=experience.status,
+            statement=experience.statement,
+        )
+        for experience in experiences
+    ]
+
+
+def _prepare_memory_id_lookup(
+    value: str,
+    *,
+    mode: str,
+    family: str,
+    project_id: str,
+    resolve: Callable[..., tuple[Sequence[object], int]],
+    to_candidates: Callable[..., list[dict[str, object]]],
+    not_found_key: str,
+) -> tuple[str, dict[str, object] | None] | dict[str, object]:
+    """Turn one id request into either an id to serve or a terminal response.
+
+    Returns ``(lookup_id, resolution)`` to proceed with — ``resolution`` is
+    ``None`` for full ids so their responses keep their exact shape — or a
+    complete terminal response dict. Shared by all three get lanes so
+    classification, ambiguity, and the not_found shape stay identical; only
+    the family, the lane's resolver and entity fields, and the echoed payload
+    key differ.
+    """
+    normalized, is_exact = _classify_memory_id(value, family=family, mode=mode)
+    if is_exact:
+        return normalized, None
+    candidates, total = resolve(project_id=project_id, prefix=normalized)
+    if total == 0:
+        # Indistinguishable from an unknown full id on purpose: a prefix must
+        # not reveal that something exists which this lane would not serve.
+        return {
+            "mode": mode,
+            "status": "not_found",
+            "payload": {not_found_key: value},
+        }
+    candidate_payloads = to_candidates(candidates)
+    if total > 1:
+        return {
+            "mode": mode,
+            "status": "ambiguous",
+            "payload": {
+                "requested": value,
+                "candidate_count": total,
+                "candidates": candidate_payloads,
+            },
+        }
+    resolved_id = str(candidate_payloads[0]["id"])
+    return resolved_id, {"requested": value, "resolved": resolved_id}
+
+
+def _payload_with_resolution(
+    payload: dict[str, object],
+    resolution: dict[str, object] | None,
+) -> dict[str, object]:
+    if resolution is not None:
+        payload["resolution"] = resolution
+    return payload
+
+
 def _handle_get_mode(
     store: SqliteEngineeringMemoryStore,
     *,
@@ -1158,7 +1321,19 @@ def _handle_get_mode(
 ) -> dict[str, object]:
     if not record_id:
         raise MemoryContractError("mode=get requires record_id.")
-    record = store.find_record(record_id)
+    prepared = _prepare_memory_id_lookup(
+        record_id,
+        mode=mode,
+        family=_RECORD_ID_FAMILY,
+        project_id=project_id,
+        resolve=store.resolve_record_id_prefix,
+        to_candidates=_record_id_candidates,
+        not_found_key="record_id",
+    )
+    if isinstance(prepared, dict):
+        return prepared
+    lookup_id, resolution = prepared
+    record = store.find_record(lookup_id)
     if record is None or record.project_id != project_id:
         return {
             "mode": mode,
@@ -1171,15 +1346,18 @@ def _handle_get_mode(
         "mode": mode,
         "status": "ok",
         "detail_level": "full",
-        "payload": {
-            "record": _serialize_record_summary(
-                record=record,
-                subjects=subjects,
-                evidence_count=len(evidence),
-                detail_level="full",
-            ),
-            "evidence": [_serialize_evidence(item) for item in evidence],
-        },
+        "payload": _payload_with_resolution(
+            {
+                "record": _serialize_record_summary(
+                    record=record,
+                    subjects=subjects,
+                    evidence_count=len(evidence),
+                    detail_level="full",
+                ),
+                "evidence": [_serialize_evidence(item) for item in evidence],
+            },
+            resolution,
+        ),
     }
 
 
@@ -1277,14 +1455,26 @@ def _handle_trajectory_get_mode(
         mode=mode,
         field="record_id containing trajectory_id",
     )
-    trajectory = store.find_trajectory(trajectory_id)
+    prepared = _prepare_memory_id_lookup(
+        trajectory_id,
+        mode=mode,
+        family=_TRAJECTORY_ID_FAMILY,
+        project_id=project_id,
+        resolve=store.resolve_trajectory_id_prefix,
+        to_candidates=_trajectory_id_candidates,
+        not_found_key="trajectory_id",
+    )
+    if isinstance(prepared, dict):
+        return prepared
+    lookup_id, resolution = prepared
+    trajectory = store.find_trajectory(lookup_id)
     if trajectory is None or trajectory.project_id != project_id:
         return {
             "mode": mode,
             "status": "not_found",
             "payload": {"trajectory_id": trajectory_id},
         }
-    patch_trail_payload = store.load_trajectory_patch_trail(trajectory_id)
+    patch_trail_payload = store.load_trajectory_patch_trail(lookup_id)
     if detail_level == "full":
         trajectory_payload = serialize_trajectory_detail(
             trajectory,
@@ -1300,7 +1490,10 @@ def _handle_trajectory_get_mode(
         "mode": mode,
         "status": "ok",
         "detail_level": detail_level,
-        "payload": {"trajectory": trajectory_payload},
+        "payload": _payload_with_resolution(
+            {"trajectory": trajectory_payload},
+            resolution,
+        ),
     }
 
 
@@ -1316,7 +1509,19 @@ def _handle_experience_get_mode(
         mode=mode,
         field="record_id containing experience_id",
     )
-    experience = store.find_experience(experience_id)
+    prepared = _prepare_memory_id_lookup(
+        experience_id,
+        mode=mode,
+        family=_EXPERIENCE_ID_FAMILY,
+        project_id=project_id,
+        resolve=store.resolve_experience_id_prefix,
+        to_candidates=_experience_id_candidates,
+        not_found_key="experience_id",
+    )
+    if isinstance(prepared, dict):
+        return prepared
+    lookup_id, resolution = prepared
+    experience = store.find_experience(lookup_id)
     if experience is None or experience.project_id != project_id:
         return {
             "mode": mode,
@@ -1327,12 +1532,15 @@ def _handle_experience_get_mode(
         "mode": mode,
         "status": "ok",
         "detail_level": "full",
-        "payload": {
-            "experience": _serialize_experience(
-                experience,
-                detail_level="full",
-            )
-        },
+        "payload": _payload_with_resolution(
+            {
+                "experience": _serialize_experience(
+                    experience,
+                    detail_level="full",
+                )
+            },
+            resolution,
+        ),
     }
 
 

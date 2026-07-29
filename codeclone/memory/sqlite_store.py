@@ -70,6 +70,11 @@ from .search_index import (
     fts_match_expression,
     tokenize_query,
 )
+from .store import (
+    MEMORY_ID_CANDIDATE_LIMIT,
+    count_id_prefix_matches,
+    memory_id_prefix_clauses,
+)
 from .trajectory.models import (
     Trajectory,
     TrajectoryListItem,
@@ -510,6 +515,71 @@ class SqliteEngineeringMemoryStore:
         if row is None:
             return None
         return _record_from_row(row)
+
+    def resolve_record_id_prefix(
+        self,
+        *,
+        project_id: str,
+        prefix: str,
+        limit: int = MEMORY_ID_CANDIDATE_LIMIT,
+    ) -> tuple[list[MemoryRecord], int]:
+        """Resolve a short record id to canonical records plus the exact total.
+
+        Reuses the canonical filters find_record applies, so a record this
+        store would refuse to serve is also invisible to resolution, and the
+        same row mapping, so candidates are ordinary MemoryRecord entities.
+        """
+        clauses, params = memory_id_prefix_clauses(
+            prefix=prefix,
+            project_id=project_id,
+        )
+        _append_canonical_record_filters(clauses, params)
+        where = " AND ".join(clauses)
+        total = count_id_prefix_matches(
+            self._conn,
+            table="memory_records",
+            where=where,
+            params=params,
+        )
+        if total == 0:
+            return [], 0
+        rows = self._conn.execute(
+            f"SELECT * FROM memory_records WHERE {where} ORDER BY id LIMIT ?",
+            [*params, limit],
+        ).fetchall()
+        return [_record_from_row(row) for row in rows], total
+
+    def resolve_trajectory_id_prefix(
+        self,
+        *,
+        project_id: str,
+        prefix: str,
+        limit: int = MEMORY_ID_CANDIDATE_LIMIT,
+    ) -> tuple[list[Trajectory], int]:
+        from .trajectory.store import resolve_trajectory_id_prefix
+
+        return resolve_trajectory_id_prefix(
+            self._conn,
+            project_id=project_id,
+            prefix=prefix,
+            limit=limit,
+        )
+
+    def resolve_experience_id_prefix(
+        self,
+        *,
+        project_id: str,
+        prefix: str,
+        limit: int = MEMORY_ID_CANDIDATE_LIMIT,
+    ) -> tuple[list[Experience], int]:
+        from .experience.store import resolve_experience_id_prefix
+
+        return resolve_experience_id_prefix(
+            self._conn,
+            project_id=project_id,
+            prefix=prefix,
+            limit=limit,
+        )
 
     def find_by_identity_key(self, project_id: str, key: str) -> MemoryRecord | None:
         clauses = ["project_id=?", "identity_key=?"]

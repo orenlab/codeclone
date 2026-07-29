@@ -178,7 +178,7 @@ def test_memory_retrieval_continuation_pages_experiences_and_exact_get(
             project_id=project.id,
             experiences=[
                 _experience(
-                    project.id, experience_id=f"exp-cont-0{index}", support=10 - index
+                    project.id, experience_id=f"exp-{index:032x}", support=10 - index
                 )
                 for index in range(3)
             ],
@@ -205,17 +205,20 @@ def test_memory_retrieval_continuation_pages_experiences_and_exact_get(
             backend="sqlite",
             db_path="unused",
             mode="experience_get",
-            record_id="exp-cont-01",
+            record_id=f"exp-{1:032x}",
         )
 
     assert page["status"] == "ok"
     assert page["response_complete"] is True
     items = cast("list[dict[str, object]]", page["items"])
-    assert [item["id"] for item in items] == ["exp-cont-01", "exp-cont-02"]
+    assert [item["id"] for item in items] == [
+        f"exp-{1:032x}",
+        f"exp-{2:032x}",
+    ]
     assert fetched["status"] == "ok"
     payload = cast("dict[str, object]", fetched["payload"])
     experience = cast("dict[str, object]", payload["experience"])
-    assert experience["id"] == "exp-cont-01"
+    assert experience["id"] == f"exp-{1:032x}"
     assert experience["evidence_trajectory_ids"] == []
 
 
