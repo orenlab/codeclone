@@ -3537,6 +3537,60 @@ def test_cli_public_api_breaking_count_stable_across_warm_cache(
     assert_contains_all(warm_out, "1 breaking")
 
 
+def _health_and_file_counts(
+    payload: dict[str, object],
+) -> tuple[dict[str, object], int, int]:
+    metrics = cast(dict[str, object], payload["metrics"])
+    summary = cast(dict[str, object], metrics["summary"])
+    health = cast(dict[str, object], summary["health"])
+    inventory = cast(dict[str, object], payload["inventory"])
+    files = cast(dict[str, object], inventory["files"])
+    return health, int(cast(int, files["analyzed"])), int(cast(int, files["cached"]))
+
+
+def test_cli_health_stable_across_warm_cache_with_semantic_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A warm run must score the same health as a cold run on an identical tree.
+
+    Cache hits are still analyzed files — their facts come back off the wire,
+    semantic events included. Dropping them from the health denominator makes
+    clone density and analysis coverage collapse purely because a previous run
+    happened, which is the warm-cache health collapse this pins.
+    """
+    (tmp_path / "pkg.py").write_text(
+        "def run(alpha: int, beta: int) -> int:\n    return alpha + beta\n",
+        "utf-8",
+    )
+    cache_path = tmp_path / "cache.json"
+    args = ["--semantic-authority", "--cache-path", str(cache_path)]
+
+    cold_payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=args,
+    )
+    warm_payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=args,
+    )
+
+    cold_health, cold_analyzed, cold_cached = _health_and_file_counts(cold_payload)
+    warm_health, warm_analyzed, warm_cached = _health_and_file_counts(warm_payload)
+
+    # The second run must genuinely be warm, or the test proves nothing.
+    assert cold_analyzed > 0
+    assert cold_cached == 0
+    assert warm_analyzed == 0
+    assert warm_cached == cold_analyzed
+
+    assert warm_health["score"] == cold_health["score"]
+    assert warm_health["grade"] == cold_health["grade"]
+    assert warm_health["dimensions"] == cold_health["dimensions"]
+
+
 def test_cli_api_surface_ignores_non_api_warm_cache(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
