@@ -724,9 +724,19 @@ class _MCPSessionWorkflowMixin:
         receipt_error: str | None = None
         if create_receipt:
             try:
+                # gh #57 family A: the receipt's evidence inputs are exactly the
+                # inputs this finish attested — the after-run the verification
+                # consumed, falling back to the intent's run only when the
+                # profile required no after-run (docs-only / non-Python), plus
+                # the attested outcome itself.  Passing record.run_id
+                # unconditionally sourced reviewed evidence, provenance, health
+                # and generated_at from the pre-fix before-run.
                 receipt_payload = _receipt_session(self).create_review_receipt(
-                    run_id=record.run_id,
+                    run_id=(
+                        after_run_id if after_run_id is not None else record.run_id
+                    ),
                     intent_id=intent_id,
+                    verification_accepted=verify_status in _ACCEPTED_STATUSES,
                 )
             except MCPServiceContractError as exc:
                 receipt_error = str(exc)
