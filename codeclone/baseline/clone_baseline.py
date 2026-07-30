@@ -19,9 +19,14 @@ from ..models import (
     CloneObservationPayload,
     ContainerReadFailure,
     ContainerReadSuccess,
+    LaneTrust,
 )
 from .container import read_container_v3
-from .container_trust import map_container_read_failure, unavailable_container_lanes
+from .container_trust import (
+    map_container_read_failure,
+    unavailable_container_lanes,
+    unavailable_lanes_after_version_checks,
+)
 from .diff import diff_clone_groups
 from .trust import MAX_BASELINE_SIZE_BYTES, BaselineStatus
 
@@ -144,6 +149,45 @@ class Baseline:
                 "Baseline fingerprint version mismatch.",
                 status=BaselineStatus.MISMATCH_FINGERPRINT_VERSION,
             )
+
+    def unavailable_lanes(
+        self,
+        *,
+        current_python_tag: str,
+        baseline_scope_id: UUID,
+    ) -> tuple[LaneTrust, ...]:
+        """Report untrusted lanes instead of condemning the whole container.
+
+        Container-level trust stays fail-closed: a missing container, a root
+        digest mismatch, and schema or fingerprint drift all still raise. Only
+        per-lane staleness is returned, so the caller can weigh it against the
+        gates it actually runs. ``verify_compatibility`` is deliberately left
+        alone; it remains the all-or-nothing contract its callers depend on.
+        """
+
+        return unavailable_lanes_after_version_checks(
+            self.container,
+            python_tag=current_python_tag,
+            baseline_scope_id=baseline_scope_id,
+            missing_message="Baseline container is not loaded.",
+            missing_status=BaselineStatus.MISSING_FIELDS,
+            root_message="Baseline root digest mismatch.",
+            integrity_status=BaselineStatus.INTEGRITY_FAILED,
+            version_checks=(
+                (
+                    self.schema_version,
+                    BASELINE_SCHEMA_VERSION,
+                    "Baseline schema version mismatch.",
+                    BaselineStatus.MISMATCH_SCHEMA_VERSION,
+                ),
+                (
+                    self.fingerprint_version,
+                    BASELINE_FINGERPRINT_VERSION,
+                    "Baseline fingerprint version mismatch.",
+                    BaselineStatus.MISMATCH_FINGERPRINT_VERSION,
+                ),
+            ),
+        )
 
     def diff(
         self,

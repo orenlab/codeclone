@@ -17,6 +17,9 @@ from ..models import BaselineContainerV3, MetricsDiff, TrustVector
 from ..observability import span
 from ..report.gates.evaluator import GateResult, GateState
 from ..report.gates.evaluator import MetricGateConfig as _MetricGateConfig
+from ..report.gates.evaluator import (
+    active_gate_lane_requirements as _active_gate_lane_requirements,
+)
 from ..report.gates.evaluator import evaluate_gate_state as _evaluate_gate_state
 from ..report.gates.evaluator import (
     gate_state_from_project_metrics as _gate_state_from_metrics,
@@ -422,34 +425,67 @@ def report(
     )
 
 
-def _gate_config(boot: BootstrapResult) -> MetricGateConfig:
+def build_gate_config(args: object) -> MetricGateConfig:
+    """Project the sole gate policy object from parsed CLI arguments.
+
+    Gate policy is a function of the arguments alone, so baseline trust
+    resolution can build it before bootstrap results are threaded anywhere,
+    and weigh untrusted lanes against the gates that are actually active.
+    """
+
     return MetricGateConfig(
-        fail_complexity=boot.args.fail_complexity,
-        fail_coupling=boot.args.fail_coupling,
-        fail_cohesion=boot.args.fail_cohesion,
-        fail_cycles=boot.args.fail_cycles,
-        fail_dead_code=boot.args.fail_dead_code,
-        fail_health=boot.args.fail_health,
-        fail_on_new_metrics=boot.args.fail_on_new_metrics,
+        fail_complexity=getattr(args, "fail_complexity", -1),
+        fail_coupling=getattr(args, "fail_coupling", -1),
+        fail_cohesion=getattr(args, "fail_cohesion", -1),
+        fail_cycles=getattr(args, "fail_cycles", False),
+        fail_dead_code=getattr(args, "fail_dead_code", False),
+        fail_health=getattr(args, "fail_health", -1),
+        fail_on_new_metrics=getattr(args, "fail_on_new_metrics", False),
         fail_on_typing_regression=bool(
-            getattr(boot.args, "fail_on_typing_regression", False)
+            getattr(args, "fail_on_typing_regression", False)
         ),
         fail_on_docstring_regression=bool(
-            getattr(boot.args, "fail_on_docstring_regression", False)
+            getattr(args, "fail_on_docstring_regression", False)
         ),
-        fail_on_api_break=bool(getattr(boot.args, "fail_on_api_break", False)),
+        fail_on_api_break=bool(getattr(args, "fail_on_api_break", False)),
         fail_on_authority_violation=bool(
-            getattr(boot.args, "fail_on_authority_violation", False)
+            getattr(args, "fail_on_authority_violation", False)
         ),
         fail_on_untested_hotspots=bool(
-            getattr(boot.args, "fail_on_untested_hotspots", False)
+            getattr(args, "fail_on_untested_hotspots", False)
         ),
-        min_typing_coverage=int(getattr(boot.args, "min_typing_coverage", -1)),
-        min_docstring_coverage=int(getattr(boot.args, "min_docstring_coverage", -1)),
-        coverage_min=int(getattr(boot.args, "coverage_min", DEFAULT_COVERAGE_MIN)),
-        fail_on_new=bool(getattr(boot.args, "fail_on_new", False)),
-        fail_threshold=int(getattr(boot.args, "fail_threshold", -1)),
+        min_typing_coverage=int(getattr(args, "min_typing_coverage", -1)),
+        min_docstring_coverage=int(getattr(args, "min_docstring_coverage", -1)),
+        coverage_min=int(getattr(args, "coverage_min", DEFAULT_COVERAGE_MIN)),
+        fail_on_new=bool(getattr(args, "fail_on_new", False)),
+        fail_threshold=int(getattr(args, "fail_threshold", -1)),
     )
+
+
+def gate_required_lanes(
+    *,
+    args: object,
+    enabled_lanes: Collection[str],
+) -> frozenset[str]:
+    """Return every lane the currently active gates read.
+
+    Gate policy lives here, behind the versioned gate-to-lane matrix, so no
+    surface has to re-derive which gate reads which lane. Callers receive plain
+    lane names and only ever intersect them.
+    """
+
+    return frozenset(
+        lane
+        for _gate, lanes in _active_gate_lane_requirements(
+            config=build_gate_config(args),
+            enabled_lanes=enabled_lanes,
+        )
+        for lane in lanes
+    )
+
+
+def _gate_config(boot: BootstrapResult) -> MetricGateConfig:
+    return build_gate_config(boot.args)
 
 
 def gate_with_config(

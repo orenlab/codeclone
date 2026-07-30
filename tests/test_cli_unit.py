@@ -232,6 +232,7 @@ def test_clone_baseline_missing_scope_fails_closed(
         baseline_exists=True,
         observation_bundle=TEST_OBSERVATION_BUNDLE,
         console=printer,
+        required_lanes=frozenset(),
     )
 
     assert state.status is baseline_mod.BaselineStatus.MISMATCH_SCOPE_ID
@@ -263,6 +264,7 @@ def test_metrics_corruption_preserves_typed_gate_behavior(
         metrics_baseline_exists=True,
         clone_baseline_state=clone_state,
         console=printer,
+        required_lanes=frozenset(),
     )
 
     assert state.status is metrics_baseline_mod.MetricsBaselineStatus.INVALID_JSON
@@ -284,6 +286,7 @@ def test_skip_metrics_rejects_native_publication(tmp_path: Path) -> None:
                 updated_path=None,
             ),
             console=_RecordingPrinter(),
+            required_lanes=frozenset(),
         )
 
 
@@ -1601,6 +1604,9 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
                 segment_clones_count=0,
                 suppressed_segment_groups=0,
                 project_metrics=None,
+                observation_bundle=SimpleNamespace(
+                    contract=SimpleNamespace(enabled_lanes=()),
+                ),
             ),
         ),
     )

@@ -35,7 +35,7 @@ from .types import CLIArgsLike, require_status_console
 
 if TYPE_CHECKING:
     from ...core._types import AnalysisResult
-    from ...models import ObservationBundle
+    from ...models import LaneTrust, ObservationBundle
 
 __all__ = [
     "CloneBaselineState",
@@ -47,6 +47,7 @@ __all__ = [
     "_probe_metrics_baseline_section",
     "_resolve_clone_baseline_state",
     "_resolve_metrics_baseline_state",
+    "gate_blocking_lanes",
     "probe_metrics_baseline_section",
     "recover_baseline_publish_lock",
     "resolve_clone_baseline_state",
@@ -75,6 +76,50 @@ def recover_baseline_publish_lock(
 
 class _PrinterLike(Protocol):
     def print(self, *objects: object, **kwargs: object) -> None: ...
+
+
+def gate_blocking_lanes(
+    unavailable: tuple[LaneTrust, ...],
+    *,
+    required_lanes: frozenset[str],
+) -> tuple[str, ...]:
+    """Return the untrusted lanes that an active gate actually reads.
+
+    ``required_lanes`` is resolved once by the gate layer, behind the versioned
+    gate-to-lane matrix, so this surface never re-derives gate policy — it only
+    intersects. A non-empty answer means the run must stay fail-closed.
+    """
+
+    return tuple(sorted({item.name for item in unavailable} & required_lanes))
+
+
+def _clone_opaque_lanes(
+    baseline: Baseline,
+    *,
+    scope_id: UUID | None,
+    required_lanes: frozenset[str],
+) -> tuple[LaneTrust, ...]:
+    """Return lanes safe to degrade, or raise the canonical compatibility error.
+
+    Raising is delegated to ``verify_compatibility`` so a gate-relevant opaque
+    lane fails closed with exactly the wording operators already know.
+    """
+
+    if scope_id is None:
+        raise BaselineValidationError(
+            "baseline_scope_id is required for baseline gating.",
+            status=BaselineStatus.MISMATCH_SCOPE_ID,
+        )
+    opaque_lanes = baseline.unavailable_lanes(
+        current_python_tag=current_python_tag(),
+        baseline_scope_id=scope_id,
+    )
+    if gate_blocking_lanes(opaque_lanes, required_lanes=required_lanes):
+        baseline.verify_compatibility(
+            current_python_tag=current_python_tag(),
+            baseline_scope_id=scope_id,
+        )
+    return opaque_lanes
 
 
 class _BaselineArgs(Protocol):
@@ -131,6 +176,7 @@ def resolve_clone_baseline_state(
     baseline_exists: bool,
     observation_bundle: ObservationBundle,
     console: _PrinterLike,
+    required_lanes: frozenset[str],
 ) -> CloneBaselineState:
     baseline = Baseline(baseline_path)
     baseline_loaded = False
@@ -158,14 +204,10 @@ def resolve_clone_baseline_state(
         else:
             if not args.update_baseline:
                 try:
-                    if scope_id is None:
-                        raise BaselineValidationError(
-                            "baseline_scope_id is required for baseline gating.",
-                            status=BaselineStatus.MISMATCH_SCOPE_ID,
-                        )
-                    baseline.verify_compatibility(
-                        current_python_tag=current_python_tag(),
-                        baseline_scope_id=scope_id,
+                    opaque_lanes = _clone_opaque_lanes(
+                        baseline,
+                        scope_id=scope_id,
+                        required_lanes=required_lanes,
                     )
                 except BaselineValidationError as exc:
                     baseline_status = coerce_baseline_status(exc.status)
@@ -178,6 +220,8 @@ def resolve_clone_baseline_state(
                     baseline_loaded = True
                     baseline_status = BaselineStatus.OK
                     baseline_trusted_for_diff = True
+                    if opaque_lanes:
+                        console.print(ui.fmt_baseline_lanes_opaque(opaque_lanes))
     elif not args.update_baseline:
         console.print(ui.fmt_path(ui.WARN_BASELINE_MISSING, baseline_path))
 
@@ -257,6 +301,7 @@ def resolve_metrics_baseline_state(
     metrics_baseline_exists: bool,
     clone_baseline_state: CloneBaselineState,
     console: _PrinterLike,
+    required_lanes: frozenset[str],
 ) -> MetricsBaselineState:
     state = _MetricsBaselineRuntime(baseline=MetricsBaseline(metrics_baseline_path))
     scope_id = _required_scope_id(
@@ -292,10 +337,19 @@ def resolve_metrics_baseline_state(
     else:
         try:
             state.baseline.load(max_size_bytes=args.max_baseline_size_mb * 1024 * 1024)
-            state.baseline.verify_compatibility(
-                runtime_python_tag=current_python_tag(),
-                baseline_scope_id=scope_id,
-            )
+            if gate_blocking_lanes(
+                state.baseline.unavailable_lanes(
+                    runtime_python_tag=current_python_tag(),
+                    baseline_scope_id=scope_id,
+                ),
+                required_lanes=required_lanes,
+            ):
+                # An active gate reads one of these lanes, so the run must
+                # fail closed with the established wording.
+                state.baseline.verify_compatibility(
+                    runtime_python_tag=current_python_tag(),
+                    baseline_scope_id=scope_id,
+                )
         except BaselineValidationError as exc:
             state.status = coerce_metrics_baseline_status(exc.status)
             console.print(ui.fmt_invalid_baseline(exc))
@@ -305,6 +359,9 @@ def resolve_metrics_baseline_state(
             state.loaded = True
             state.status = MetricsBaselineStatus.OK
             state.trusted_for_diff = True
+            # Metrics lanes live in the same v3 container as the clone lanes,
+            # so the clone resolver has already named any opaque lane; saying
+            # it twice would read as two separate defects.
             _enforce_metrics_gate_schema_requirements(
                 args=args,
                 state=state,
@@ -384,6 +441,7 @@ def _resolve_clone_baseline_state(
     baseline_path: Path,
     baseline_exists: bool,
     analysis: AnalysisResult,
+    required_lanes: frozenset[str],
 ) -> _CloneBaselineState:
     return resolve_clone_baseline_state(
         args=args,
@@ -391,6 +449,7 @@ def _resolve_clone_baseline_state(
         baseline_exists=baseline_exists,
         observation_bundle=analysis.observation_bundle,
         console=require_status_console(cli_state.get_console()),
+        required_lanes=required_lanes,
     )
 
 
@@ -400,6 +459,7 @@ def _resolve_metrics_baseline_state(
     metrics_baseline_path: Path,
     metrics_baseline_exists: bool,
     clone_baseline_state: CloneBaselineState,
+    required_lanes: frozenset[str],
 ) -> _MetricsBaselineState:
     return resolve_metrics_baseline_state(
         args=args,
@@ -407,4 +467,5 @@ def _resolve_metrics_baseline_state(
         metrics_baseline_exists=metrics_baseline_exists,
         clone_baseline_state=clone_baseline_state,
         console=require_status_console(cli_state.get_console()),
+        required_lanes=required_lanes,
     )
