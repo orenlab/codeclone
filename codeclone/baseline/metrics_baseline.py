@@ -44,6 +44,7 @@ from ..models import (
     ImportObservation,
     IntegerColumnarPayload,
     IntegerObservationPayload,
+    LaneTrust,
     MetricsDiff,
     MetricsSnapshot,
     ModuleApiSurface,
@@ -60,7 +61,11 @@ from ._metrics_baseline_contract import (
     coerce_metrics_baseline_status,
 )
 from .container import read_container_v3
-from .container_trust import map_container_read_failure, unavailable_container_lanes
+from .container_trust import (
+    map_container_read_failure,
+    unavailable_container_lanes,
+    unavailable_lanes_after_version_checks,
+)
 from .diff import diff_metrics
 from .lanes import (
     decode_adoption_lane,
@@ -198,6 +203,42 @@ class MetricsBaseline:
                 "Metrics baseline Python tag mismatch.",
                 status=MetricsBaselineStatus.MISMATCH_PYTHON_VERSION,
             )
+
+    def unavailable_lanes(
+        self,
+        *,
+        runtime_python_tag: str,
+        baseline_scope_id: UUID,
+    ) -> tuple[LaneTrust, ...]:
+        """Report untrusted lanes instead of condemning the whole container.
+
+        The clone-lane twin of this method carries the full rationale; the
+        contract is identical. ``verify_compatibility`` is left alone.
+        """
+
+        return unavailable_lanes_after_version_checks(
+            self.container,
+            python_tag=runtime_python_tag,
+            baseline_scope_id=baseline_scope_id,
+            missing_message="Metrics baseline container is missing.",
+            missing_status=MetricsBaselineStatus.MISSING_FIELDS,
+            root_message="Metrics baseline root digest mismatch.",
+            integrity_status=MetricsBaselineStatus.INTEGRITY_FAILED,
+            version_checks=(
+                (
+                    self.schema_version,
+                    BASELINE_SCHEMA_VERSION,
+                    "Metrics baseline schema mismatch.",
+                    MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION,
+                ),
+                (
+                    self.python_tag,
+                    runtime_python_tag,
+                    "Metrics baseline Python tag mismatch.",
+                    MetricsBaselineStatus.MISMATCH_PYTHON_VERSION,
+                ),
+            ),
+        )
 
     def diff(self, current: ProjectMetrics) -> MetricsDiff:
         container = self.container

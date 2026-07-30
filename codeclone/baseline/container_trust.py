@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hmac
+from collections.abc import Sequence
 from typing import TypeVar
 from uuid import UUID
 
@@ -204,6 +205,39 @@ def unavailable_container_lanes(
     return tuple(item for item in vector.lanes if item.status != "trusted")
 
 
+def unavailable_lanes_after_version_checks(
+    container: BaselineContainerV3 | None,
+    *,
+    python_tag: str,
+    baseline_scope_id: UUID,
+    missing_message: str,
+    missing_status: str,
+    root_message: str,
+    integrity_status: str,
+    version_checks: Sequence[tuple[str | None, str, str, str]],
+) -> tuple[LaneTrust, ...]:
+    """Authenticate the container, enforce whole-container versions, report lanes.
+
+    Container-level trust stays fail-closed: a missing container, a root digest
+    mismatch, and any failed version check all raise. Only per-lane staleness is
+    returned, so the caller can weigh it against the gates it actually runs.
+    """
+
+    unavailable = unavailable_container_lanes(
+        container,
+        python_tag=python_tag,
+        baseline_scope_id=baseline_scope_id,
+        missing_message=missing_message,
+        missing_status=missing_status,
+        root_message=root_message,
+        integrity_status=integrity_status,
+    )
+    for actual, expected, message, status in version_checks:
+        if actual != expected:
+            raise BaselineValidationError(message, status=status)
+    return unavailable
+
+
 def runtime_contracts_for_container(
     container: BaselineContainerV3,
     *,
@@ -240,4 +274,5 @@ __all__ = [
     "map_container_read_failure",
     "runtime_contracts_for_container",
     "unavailable_container_lanes",
+    "unavailable_lanes_after_version_checks",
 ]

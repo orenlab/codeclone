@@ -25,7 +25,7 @@ from ...core.bootstrap import bootstrap
 from ...core.discovery import discover
 from ...core.parallelism import process
 from ...core.pipeline import analyze
-from ...core.reporting import report
+from ...core.reporting import gate_required_lanes, report
 from ...memory.report_trust import assess_cached_report_trust
 from ...report.html import build_html_report
 from . import baseline_state as cli_baseline_state
@@ -161,17 +161,23 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
             rich_progress_symbols_fn=_rich_progress_symbols,
         )
     )
+    baseline_required_lanes = gate_required_lanes(
+        args=args,
+        enabled_lanes=analysis_result.observation_bundle.contract.enabled_lanes,
+    )
     baseline_state = cli_baseline_state._resolve_clone_baseline_state(
         args=args,
         baseline_path=baseline_inputs.baseline_path,
         baseline_exists=baseline_inputs.baseline_exists,
         analysis=analysis_result,
+        required_lanes=baseline_required_lanes,
     )
     metrics_baseline_state = cli_baseline_state._resolve_metrics_baseline_state(
         args=args,
         metrics_baseline_path=baseline_inputs.metrics_baseline_path,
         metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
         clone_baseline_state=baseline_state,
+        required_lanes=baseline_required_lanes,
     )
     cache_status, cache_schema_version = cli_runtime._resolve_cache_status(cache)
     report_meta = cli_meta_mod.build_cli_report_meta(

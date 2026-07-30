@@ -18,7 +18,7 @@ This document specifies the output contracts for CodeClone's command-line interf
 | Code | Meaning | Trigger |
 |------|---------|---------|
 | 0 | Success | Analysis completed, no gate failures |
-| 2 | Contract error | Invalid baseline, configuration, version mismatch, unreadable sources in CI mode |
+| 2 | Contract error | Invalid baseline, configuration, version mismatch, unreadable sources in CI mode, or an untrusted baseline lane that an active gate reads |
 | 3 | Gating failure | New clones found, threshold exceeded, metrics regression, quality gate violation |
 | 5 | Internal error | Unexpected exception (unhandled error, environment issue) |
 
@@ -134,10 +134,36 @@ graph TD
 
 - Baseline file does not exist when `--fail-on-new` is enabled
 - Baseline is corrupted or unreadable
-- Baseline schema version does not match `BASELINE_SCHEMA_VERSION` ("2.1")
+- Baseline root digest does not authenticate the container
+- Baseline schema version does not match `BASELINE_SCHEMA_VERSION` ("3.0")
+- Baseline fingerprint version does not match `BASELINE_FINGERPRINT_VERSION` ("2")
 - Baseline exceeds `DEFAULT_MAX_BASELINE_SIZE_MB` (5 MB)
 
 **Remediation:** Use `--update-baseline` to regenerate, or remove the baseline and re-run.
+
+### Untrusted baseline lanes (per-lane degradation)
+
+Baseline trust is per lane, not per file. A container whose root digest
+authenticates may still carry individual lanes the current runtime cannot read
+— most often after a lane payload schema bump, reported as
+`payload_schema_outdated`. One such lane does not condemn the whole baseline.
+
+The CLI resolves each untrusted lane against the versioned gate-to-lane matrix
+(`active_gate_lane_requirements`), the single authority on which gate reads
+which lane:
+
+| Condition | Behaviour |
+|-----------|-----------|
+| No untrusted lanes | Unchanged; the baseline is fully trusted |
+| Untrusted lane that **no** active gate reads | Run completes. The lane is named on stdout as opaque and its comparisons report `baseline_diff_available: false` |
+| Untrusted lane that an active gate **does** read | Contract error, exit code 2, fail-closed |
+
+Novelty for an opaque lane is reported as unavailable, never as zero: a
+degraded lane must not be mistaken for a clean one. Lanes that remain trusted
+keep their baseline comparisons in the same run.
+
+**Remediation:** Use `--update-baseline` to regenerate the baseline so every
+lane matches the current runtime contract.
 
 ### Invalid cache (contract error, exit code 2)
 

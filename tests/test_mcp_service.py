@@ -8239,6 +8239,273 @@ def test_mcp_service_review_receipt_edge_helpers(tmp_path: Path) -> None:
         service.create_review_receipt(run_id="otherroot", intent_id=intent_id)
 
 
+def _receipt_run_without_gate_relevant_findings(
+    root: Path,
+    *,
+    run_id: str,
+    digest: str,
+    health: int = 90,
+    generated_at: str = "2026-05-23T12:00:00Z",
+) -> MCPRunRecord:
+    """Build a run whose sole gate-relevant finding (``clone:function:g1``) is gone.
+
+    Models the gh #57 instance-1 shape: the patch being finished removed the
+    only gate-relevant finding, so the after-run legitimately has none.
+    """
+    record = _patch_contract_run_record(
+        root,
+        run_id=run_id,
+        digest=digest,
+        include_regression=False,
+        complexity=6,
+        health=health,
+    )
+    report_document = copy.deepcopy(record.report_document)
+    findings = cast("dict[str, object]", report_document["findings"])
+    groups = cast("dict[str, object]", findings["groups"])
+    clones = cast("dict[str, object]", groups["clones"])
+    clones["functions"] = []
+    meta = cast("dict[str, object]", report_document["meta"])
+    meta["runtime"] = {"report_generated_at_utc": generated_at}
+    return replace(
+        record,
+        report_document=report_document,
+        func_clones_count=0,
+    )
+
+
+def test_mcp_finish_receipt_sources_evidence_from_the_attested_after_run(
+    tmp_path: Path,
+) -> None:
+    """gh #57 family A: receipt evidence is the after-run the finish verified.
+
+    Before the fix the receipt was generated from ``record.run_id`` — the
+    intent's *before*-run — so reviewed-evidence counts, provenance, health and
+    ``generated_at`` were all pre-fix, and the sole gate-relevant finding the
+    patch had just removed was still counted as unreviewed.
+    """
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id="before1234567890",
+            digest="before-digest",
+            include_regression=False,
+            complexity=6,
+            health=88,
+        )
+    )
+    intent_id = str(
+        service.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["pkg/a.py"]},
+            intent="remove the sole gate-relevant finding",
+        )["intent_id"]
+    )
+    service._runs.register(
+        _receipt_run_without_gate_relevant_findings(
+            tmp_path,
+            run_id="after1234567890",
+            digest="after-digest",
+            health=95,
+            generated_at="2026-05-24T09:00:00Z",
+        )
+    )
+
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+        after_run_id="after123",
+    )
+
+    assert finished["status"] in {"accepted", "accepted_with_external_changes"}
+    receipt = cast("dict[str, object]", finished["receipt"])
+    content = str(receipt["content"])
+    assert {
+        "receipt_run_id": receipt["run_id"],
+        "verdict": receipt["verdict"],
+        "reviewed_line": "**Reviewed:** 0 / 0 gate-relevant findings" in content,
+        "after_health": "**Health:** 95/100" in content,
+        "after_digest": "`sha256:after-digest`" in content,
+        "after_generated_at": "2026-05-24T09:00:00Z" in content,
+        "before_digest_absent": "before-digest" not in content,
+    } == {
+        "receipt_run_id": "after123",
+        "verdict": "clean",
+        "reviewed_line": True,
+        "after_health": True,
+        "after_digest": True,
+        "after_generated_at": True,
+        "before_digest_absent": True,
+    }
+
+
+def test_receipt_verdict_cannot_contradict_an_accepted_verification() -> None:
+    """gh #57 family B: the attested finish outcome is a verdict input.
+
+    Without it a receipt could assert ``needs_attention``/``incomplete`` on a
+    contract basis for a finish the controller had already accepted.
+    """
+    verdict = mcp_review_receipt_mod.receipt_verdict
+    statuses = mcp_review_receipt_mod.ReceiptPatchStatus
+    assert {
+        "accepted_but_violated": verdict(
+            reviewed_count=1,
+            gate_relevant_count=1,
+            patch_status=statuses.VIOLATED.value,
+            human_decision_count=0,
+            verification_accepted=True,
+        ),
+        "accepted_but_not_checked": verdict(
+            reviewed_count=0,
+            gate_relevant_count=0,
+            patch_status=statuses.NOT_CHECKED.value,
+            human_decision_count=0,
+            verification_accepted=True,
+        ),
+        "human_decision_still_escalates": verdict(
+            reviewed_count=0,
+            gate_relevant_count=0,
+            patch_status=statuses.ACCEPTED.value,
+            human_decision_count=1,
+            verification_accepted=True,
+        ),
+        "unreviewed_findings_still_incomplete": verdict(
+            reviewed_count=0,
+            gate_relevant_count=2,
+            patch_status=statuses.ACCEPTED.value,
+            human_decision_count=0,
+            verification_accepted=True,
+        ),
+        "standalone_receipt_unchanged": verdict(
+            reviewed_count=1,
+            gate_relevant_count=1,
+            patch_status=statuses.VIOLATED.value,
+            human_decision_count=0,
+        ),
+    } == {
+        "accepted_but_violated": "clean",
+        "accepted_but_not_checked": "clean",
+        "human_decision_still_escalates": "needs_attention",
+        "unreviewed_findings_still_incomplete": "incomplete",
+        "standalone_receipt_unchanged": "needs_attention",
+    }
+
+
+def test_receipt_structural_delta_uses_attested_pair_and_refuses_incomparable(
+    tmp_path: Path,
+) -> None:
+    """gh #57 family C: the comparison base is attested, never a neighbour.
+
+    Phase 1 pins that an arbitrary same-root store neighbour can no longer
+    fabricate regressions.  Phase 2 pins the typed refusal sanctioned by
+    ``mem-d67159cc``: a non-comparable attested pair yields
+    ``verdict="not_comparable"`` with a stated reason and no numeric delta.
+    """
+    service = CodeCloneMCPService(history_limit=4)
+    before = _patch_contract_run_record(
+        tmp_path,
+        run_id="before1234567890",
+        digest="before-digest",
+        include_regression=False,
+        complexity=6,
+        health=90,
+    )
+    service._runs.register(before)
+    intent_id = str(
+        service.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["pkg/a.py"]},
+            intent="edit pkg.a",
+        )["intent_id"]
+    )
+    service.manage_change_intent(
+        action="check",
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+    # Registered between the attested before-run and the attested after-run,
+    # this is exactly what _previous_run_for_root used to pick.  Its empty
+    # finding set makes every after-run finding look like a fresh regression.
+    service._runs.register(
+        _receipt_run_without_gate_relevant_findings(
+            tmp_path,
+            run_id="neighbour1234567",
+            digest="neighbour-digest",
+        )
+    )
+    service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id="after1234567890",
+            digest="after-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        )
+    )
+
+    receipt = service.create_review_receipt(
+        run_id="after123",
+        intent_id=intent_id,
+        format="json",
+    )
+    delta, patch = _payload_dicts(receipt, ("structural_delta", "patch_contract"))
+    assert {
+        "available": delta["available"],
+        "verdict": delta["verdict"],
+        "regressions": delta["regressions"],
+        "patch_status": patch["status"],
+        "contract_violations": patch["contract_violations"],
+    } == {
+        "available": True,
+        "verdict": "stable",
+        "regressions": 0,
+        "patch_status": "accepted",
+        "contract_violations": [],
+    }
+
+    incomparable = CodeCloneMCPService(history_limit=4)
+    incomparable._runs.register(before)
+    incomparable_intent = str(
+        incomparable.start_controlled_change(
+            root=str(tmp_path),
+            scope={"allowed_files": ["pkg/a.py"]},
+            intent="edit pkg.a under different analysis settings",
+        )["intent_id"]
+    )
+    incomparable.manage_change_intent(
+        action="check",
+        intent_id=incomparable_intent,
+        changed_files=["pkg/a.py"],
+    )
+    incomparable._runs.register(
+        replace(
+            _patch_contract_run_record(
+                tmp_path,
+                run_id="after1234567890",
+                digest="after-digest",
+                include_regression=False,
+                complexity=6,
+                health=90,
+            ),
+            comparison_settings=("coverage_join",),
+        )
+    )
+
+    refused = incomparable.create_review_receipt(
+        run_id="after123",
+        intent_id=incomparable_intent,
+        format="json",
+    )
+    refused_delta = cast("dict[str, object]", refused["structural_delta"])
+    assert refused_delta == {
+        "available": False,
+        "verdict": "not_comparable",
+        "reason": "different_analysis_settings",
+    }
+
+
 def test_mcp_service_branch_helpers_on_real_runs(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

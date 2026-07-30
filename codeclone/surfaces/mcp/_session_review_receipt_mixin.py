@@ -81,6 +81,10 @@ class _MCPSessionReviewReceiptMixin:
         format: str = "markdown",
         include_blast_radius: bool = True,
         include_patch_contract: bool = True,
+        # Internal-only: the attested outcome of the finish that requested this
+        # receipt (gh #57 family B).  The MCP tool wrapper does not expose it,
+        # so standalone tool calls keep deriving the verdict from the contract.
+        verification_accepted: bool | None = None,
     ) -> dict[str, object]:
         output_format = self._validated_receipt_format(format)
         record = self._runs.get(run_id)
@@ -93,6 +97,7 @@ class _MCPSessionReviewReceiptMixin:
         verification_profile = derive_verification_profile_section(changed_paths)
         structural_delta = self._receipt_structural_delta(
             record,
+            intent=intent,
             structural_checks_applicable=bool(
                 verification_profile.get("structural_checks_applicable", True)
             ),
@@ -139,6 +144,7 @@ class _MCPSessionReviewReceiptMixin:
                 ),
                 patch_status=patch_status,
                 human_decision_count=len(human_decisions),
+                verification_accepted=verification_accepted,
             ),
         }
         if output_format == "json":
@@ -389,10 +395,30 @@ class _MCPSessionReviewReceiptMixin:
                 return finding
         return None
 
+    def _attested_before_run(
+        self,
+        *,
+        record: MCPRunRecord,
+        intent: IntentRecord | None,
+    ) -> MCPRunRecord | None:
+        """Return the comparison base attested by the change intent, or ``None``.
+
+        gh #57 family C: a receipt's structural delta may only ever describe the
+        run pair the verification actually used — after = the receipt's own run,
+        before = the intent's run.  An arbitrary same-root store neighbour
+        (``_previous_run_for_root``) is not evidence about this patch: comparing
+        against one fabricated ``structural_regressions`` violations in durable
+        receipts for changes the controller had already accepted.
+        """
+        if intent is None or intent.run_id == record.run_id:
+            return None
+        return self._runs.get(intent.run_id)
+
     def _receipt_structural_delta(
         self,
         record: MCPRunRecord,
         *,
+        intent: IntentRecord | None,
         structural_checks_applicable: bool = True,
     ) -> dict[str, object]:
         if not structural_checks_applicable:
@@ -403,7 +429,7 @@ class _MCPSessionReviewReceiptMixin:
                 "health_delta": None,
                 "verdict": "not_applicable",
             }
-        previous = _finding_session(self)._previous_run_for_root(record)
+        previous = self._attested_before_run(record=record, intent=intent)
         if previous is None:
             return {
                 "available": False,
@@ -417,6 +443,17 @@ class _MCPSessionReviewReceiptMixin:
             after_run_id=record.run_id,
             focus="all",
         )
+        if not bool(compare_payload.get("comparable")):
+            # Typed refusal rather than a numeric delta over a pair that cannot
+            # be differenced.  Controller sanction mem-d67159cc: an additive
+            # `not_comparable` verdict plus a stated reason inside this
+            # section's existing non-numeric idiom (available:false /
+            # not_applicable / not_available), so RECEIPT_VERSION stays "1".
+            return {
+                "available": False,
+                "verdict": "not_comparable",
+                "reason": str(compare_payload.get("reason", "")),
+            }
         return {
             "available": bool(compare_payload.get("comparable")),
             "regressions": len(
