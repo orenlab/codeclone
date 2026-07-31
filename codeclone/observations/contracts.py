@@ -16,6 +16,7 @@ from ..contracts import (
     AUTHORITY_ANALYSIS_REVISION,
     BASELINE_FINGERPRINT_VERSION,
     BASELINE_LANE_DESCRIPTOR_VERSION,
+    DESIGN_METRICS_ALGORITHM_REVISION,
     MODULE_IDENTITY_VERSION,
     OBSERVATION_DIGEST_VERSION,
     WIRE_VERSION,
@@ -42,12 +43,21 @@ _METRICS_ENABLED: tuple[ObservationLaneName, ...] = (
     "coupling_cohesion_observations",
     "risk_observations",
 )
+#: The lanes carrying per-entity design metrics. They share one algorithm
+#: revision because they moved together in 39Y: the same population change and
+#: the same recalibration decide what both of them observe.
+_DESIGN_METRIC_LANES: frozenset[ObservationLaneName] = frozenset(
+    {"coupling_cohesion_observations", "risk_observations"}
+)
 # The seven columnar lanes; anything absent stays on the record wire ("1").
 _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     "adoption_counts": "2",
     "api_surface": "2",
     "coupling_cohesion_observations": "3",
-    "dead_code": "2",
+    # 39Y cycle 2b: one coordinated bump per the P1-7 consolidation ruling,
+    # carrying rule-3 abstentions, live-root reasons, and the observation-kind
+    # discriminator Y9 extends.
+    "dead_code": "3",
     "dependencies": "4",
     "module_identity": "3",
     "risk_observations": "3",
@@ -78,6 +88,8 @@ def _algorithm_revision(name: ObservationLaneName) -> str:
         return API_SURFACE_SIGNATURE_VERSION
     if name == "semantic_authority":
         return AUTHORITY_ANALYSIS_REVISION
+    if name in _DESIGN_METRIC_LANES:
+        return DESIGN_METRICS_ALGORITHM_REVISION
     return OBSERVATION_DIGEST_VERSION
 
 

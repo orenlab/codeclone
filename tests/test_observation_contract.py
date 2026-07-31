@@ -14,6 +14,7 @@ import orjson
 import pytest
 
 from codeclone.contracts import (
+    DESIGN_METRICS_ALGORITHM_REVISION,
     GATE_LANE_MATRIX_VERSION,
     HEALTH_INPUT_MANIFEST_VERSION,
     OBSERVATION_DIGEST_VERSION,
@@ -69,8 +70,18 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
         "b6822dde2c2e756cbe9bf3feae7952e8df00e06b70b366df1dac789455ad281c"
     ),
     "api_surface": ("6f7eaffe2cecaa421e5dc8704d4eaf1256ffc203b9fcfba794a04f4792341f98"),
+    # SANCTIONED golden change, 39Y item 3. The two design-metric lanes moved
+    # to DESIGN_METRICS_ALGORITHM_REVISION "2": their metric VALUES changed
+    # meaning (metric facts are no longer gated by clone floors, CBO counts the
+    # imported-domain and resolved-instantiation lanes, and the coupling risk
+    # bands were re-derived), while their payload SHAPE did not, so this is an
+    # algorithm_revision bump and not a payload_schema bump. Confinement was
+    # proven before repinning: exactly these two descriptor digests move and
+    # the other eight stay byte-identical to the values pinned here.
+    # Pre-bump digest was
+    # a16cf9ee22d10c2055903f98e20064cb87d0a113e436348a56f398df127e10cd.
     "coupling_cohesion_observations": (
-        "a16cf9ee22d10c2055903f98e20064cb87d0a113e436348a56f398df127e10cd"
+        "de3044bcd67ad05e1b8041e396b9e1301481d85bd5210e1071542800d159e96c"
     ),
     # SANCTIONED golden change, 39Y cycle 2b. Brief section 6, P1-7
     # consolidation ruling: rule-3 abstentions, live-root reasons and the Y9
@@ -85,8 +96,11 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     "module_identity": (
         "82a2f1b42a396307381f2c16193c76464b41b832a9a366497e21314d6375b0ed"
     ),
+    # SANCTIONED golden change, 39Y item 3 — the second half of the same
+    # design-metric revision bump. Pre-bump digest was
+    # 536593990a541fda3126bfb8a44863e9fb7b586a63d996a3ea2eb7032c62f992.
     "risk_observations": (
-        "536593990a541fda3126bfb8a44863e9fb7b586a63d996a3ea2eb7032c62f992"
+        "87ad484a34465ba557a01ba4c594e738226ffe5cae469456efe5a0b5fbe33ddb"
     ),
 }
 
@@ -174,6 +188,52 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
     assert {
         name: _descriptor_digest(descriptor) for name, descriptor in descriptors.items()
     } == _ACCEPTED_V1_DESCRIPTOR_DIGESTS
+
+
+def test_design_metric_lanes_carry_their_own_algorithm_revision() -> None:
+    """Exactly the two design-metric lanes ride DESIGN_METRICS_ALGORITHM_REVISION.
+
+    The revision is separate from OBSERVATION_DIGEST_VERSION so that changing
+    how a metric is computed invalidates only the lanes whose values moved. If
+    it were shared, this bump would also have invalidated adoption_counts and
+    dead_code, whose values did not change at all.
+    """
+
+    contract = build_observation_contract(
+        collect_metrics=True,
+        collect_dependencies=True,
+        collect_dead_code=True,
+        collect_api_surface=True,
+        collect_semantic_authority=True,
+    )
+    by_revision: dict[str, set[str]] = {}
+    for descriptor in contract.descriptors:
+        by_revision.setdefault(descriptor.algorithm_revision, set()).add(
+            descriptor.name
+        )
+
+    # Both revisions must be live and distinct in the contract the runtime
+    # actually built. Comparing the two constants directly is a tautology the
+    # type checker settles statically (both are Literals), so it could never
+    # fail at runtime; reading the descriptors makes the guard real. If a
+    # revision vanished, or the two collapsed onto one value, the lane
+    # assertions below would pass vacuously.
+    design_revision_lanes = by_revision.get(DESIGN_METRICS_ALGORITHM_REVISION, set())
+    plain_revision_lanes = by_revision.get(OBSERVATION_DIGEST_VERSION, set())
+    assert design_revision_lanes and plain_revision_lanes
+    assert design_revision_lanes.isdisjoint(plain_revision_lanes)
+    assert {
+        descriptor.name
+        for descriptor in contract.descriptors
+        if descriptor.algorithm_revision == DESIGN_METRICS_ALGORITHM_REVISION
+    } >= {"coupling_cohesion_observations", "risk_observations"}
+    # The lanes that kept the plain observation revision must not have moved.
+    assert by_revision[OBSERVATION_DIGEST_VERSION] == {
+        "adoption_counts",
+        "api_surface",
+        "dead_code",
+        "semantic_authority",
+    }
 
 
 def test_dead_code_bump_leaves_every_other_lane_descriptor_byte_identical() -> None:

@@ -21,6 +21,8 @@ from codeclone.baseline.metrics_baseline import (
     MetricsBaselineStatus,
     probe_metrics_baseline_section,
 )
+from codeclone.baseline.trust import current_python_tag
+from codeclone.contracts import METRICS_BASELINE_SCHEMA_VERSION
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     ApiSurfaceObservationPayload,
@@ -37,6 +39,7 @@ from codeclone.models import (
     LaneTrust,
     ObservationBundle,
     ObservationContract,
+    ObservationLaneDescriptor,
     ProjectMetrics,
     ResolvedSourceIdentity,
     TrustVector,
@@ -48,6 +51,11 @@ from tests._ast_metrics_helpers import module_registry_context
 from tests.test_baseline import _write_container
 
 _SCOPE_ID = UUID("018f4b8e-5a5f-7d35-9c21-4af5d18df420")
+
+#: The two lanes that carry per-entity design metrics and share one revision.
+_DESIGN_METRIC_LANES = frozenset(
+    {"coupling_cohesion_observations", "risk_observations"}
+)
 
 
 def _bundle() -> ObservationBundle:
@@ -287,7 +295,101 @@ def test_metrics_baseline_compares_lane_descriptors_to_current_runtime(
             runtime_python_tag="cp314",
             baseline_scope_id=_SCOPE_ID,
         )
-    assert error.value.status == MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
+    assert error.value.status == MetricsBaselineStatus.INCOMPATIBLE_METRICS_CONTRACT
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ["algorithm_revision", "payload_schema", "descriptor_version"],
+)
+def test_stale_metrics_baseline_presents_as_incompatible_metrics_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field_name: str,
+) -> None:
+    """A metrics contract bump must never read as a regression in user code.
+
+    39Y item 3 bumps the design-metric lanes' ``algorithm_revision`` because CBO
+    and the risk bands changed meaning, so every baseline written before that
+    bump is stale by construction. The operator has to be told the contract
+    moved -- typed, so surfaces can say "regenerate" instead of presenting
+    metric deltas the user's code did not cause.
+    """
+
+    baseline = MetricsBaseline(_write_container(tmp_path, monkeypatch))
+    baseline.load()
+
+    def _stale_runtime_contract(
+        *,
+        collect_metrics: bool,
+        collect_dependencies: bool,
+        collect_dead_code: bool,
+        collect_api_surface: bool,
+        collect_semantic_authority: bool,
+    ) -> ObservationContract:
+        contract = build_observation_contract(
+            collect_metrics=collect_metrics,
+            collect_dependencies=collect_dependencies,
+            collect_dead_code=collect_dead_code,
+            collect_api_surface=collect_api_surface,
+            collect_semantic_authority=collect_semantic_authority,
+        )
+
+        def _stale(item: ObservationLaneDescriptor) -> ObservationLaneDescriptor:
+            # Named fields rather than ``**{field_name: ...}``: the descriptor
+            # carries a Literal-typed lane name and a tuple-typed field, so
+            # dynamic kwargs erase exactly the types this contract relies on.
+            if field_name == "algorithm_revision":
+                return replace(item, algorithm_revision="stale")
+            if field_name == "payload_schema":
+                return replace(item, payload_schema="stale")
+            return replace(item, descriptor_version="stale")
+
+        descriptors = tuple(
+            _stale(item) if item.name in _DESIGN_METRIC_LANES else item
+            for item in contract.descriptors
+        )
+        return replace(contract, descriptors=descriptors)
+
+    monkeypatch.setattr(
+        "codeclone.baseline.container_trust.build_observation_contract",
+        _stale_runtime_contract,
+    )
+
+    with pytest.raises(BaselineValidationError) as error:
+        baseline.verify_compatibility(
+            runtime_python_tag="cp314",
+            baseline_scope_id=_SCOPE_ID,
+        )
+
+    assert error.value.status == MetricsBaselineStatus.INCOMPATIBLE_METRICS_CONTRACT
+    # An untrusted baseline projects no snapshot, so nothing downstream can
+    # turn a contract bump into new-finding claims.
+    assert baseline.snapshot is None
+
+
+def test_incompatible_metrics_contract_does_not_swallow_identity_mismatches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scope and interpreter mismatches keep their own statuses."""
+
+    baseline = MetricsBaseline(_write_container(tmp_path, monkeypatch))
+    baseline.load()
+
+    with pytest.raises(BaselineValidationError) as scope_error:
+        baseline.verify_compatibility(
+            runtime_python_tag="cp314",
+            baseline_scope_id=UUID("018f4b8e-5a5f-7d35-9c21-000000000000"),
+        )
+    assert scope_error.value.status == MetricsBaselineStatus.MISMATCH_SCOPE_ID
+
+    with pytest.raises(BaselineValidationError) as python_error:
+        baseline.verify_compatibility(
+            runtime_python_tag="cp313",
+            baseline_scope_id=_SCOPE_ID,
+        )
+    assert python_error.value.status == MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
 
 
 def test_metrics_baseline_unloaded_inspection_and_root_states_fail_closed(
@@ -619,3 +721,38 @@ def test_consumers_receive_decoded_rows_never_columns() -> None:
     )
     assert class_population == len(class_metrics)
     assert ("Thing", "cbo", 3) in class_rows
+
+
+def test_metrics_baseline_schema_version_is_provenance_not_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The stamp is reported, never enforced — pinned so the comment stays true.
+
+    ``METRICS_BASELINE_SCHEMA_VERSION`` reads like a compatibility gate, and a
+    comment once claimed 1.2 values "must not be diffed" against current ones.
+    Nothing branches on it: comparability is decided by the per-lane
+    ``algorithm_revision`` / ``payload_schema`` pair and then by
+    ``BASELINE_SCHEMA_VERSION``. Wiring a second gate for the same decision
+    would create two authorities for one question, so the constant stays a
+    provenance stamp and this test keeps that statement honest — if someone
+    later makes it authoritative, the first assertion fails and the comment,
+    the consumers and this test have to be revisited together.
+    """
+
+    baseline = MetricsBaseline(_write_container(tmp_path, monkeypatch))
+    baseline.load()
+
+    # Moving the stamp alone changes no verdict: the artifact stays compatible.
+    monkeypatch.setattr(
+        "codeclone.baseline.metrics_baseline.METRICS_BASELINE_SCHEMA_VERSION",
+        "9.9",
+        raising=False,
+    )
+    baseline.verify_compatibility(
+        runtime_python_tag=current_python_tag(),
+        baseline_scope_id=_SCOPE_ID,
+    )
+
+    # The constant reaches exactly one surface, and it is a report line.
+    assert METRICS_BASELINE_SCHEMA_VERSION == "1.3"

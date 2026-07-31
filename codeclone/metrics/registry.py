@@ -9,8 +9,9 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TypeGuard
 
+from ..contracts import COMPLEXITY_RISK_LOW_MAX
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
-from ..domain.quality import RISK_HIGH
+from ..domain.quality import RISK_HIGH, RISK_LOW
 from ..models import (
     ApiSurfaceSnapshot,
     DeadItem,
@@ -77,9 +78,13 @@ _EMPTY_HEALTH_SCORE = compute_health(
         complexity_avg=0.0,
         complexity_max=0,
         high_risk_functions=0,
+        elevated_complexity_functions=0,
+        complexity_function_population=0,
         coupling_avg=0.0,
         coupling_max=0,
         high_risk_classes=0,
+        elevated_coupling_classes=0,
+        coupling_class_population=0,
         cohesion_avg=0.0,
         low_cohesion_classes=0,
         dependency_cycles=0,
@@ -417,6 +422,13 @@ def _build_complexity_result(context: MetricProjectContext) -> MetricResult:
         "complexity_avg": complexity_avg,
         "complexity_max": complexity_max,
         "high_risk_functions": high_risk_functions,
+        # Shares, not counts, are what the health dimension spends, so the
+        # elevated tail and its denominator travel with the family. The tails
+        # nest: an extreme function is also an elevated one.
+        "elevated_complexity_functions": sum(
+            1 for value in complexities if value > COMPLEXITY_RISK_LOW_MAX
+        ),
+        "complexity_function_population": len(complexities),
     }
 
 
@@ -469,10 +481,18 @@ def _build_coupling_result(context: MetricProjectContext) -> MetricResult:
         value_attr="cbo",
         risk_attr="risk_coupling",
     )
+    classes = tuple(context.class_metrics)
     return {
         "coupling_avg": coupling_avg,
         "coupling_max": coupling_max,
         "high_risk_classes": high_risk_classes,
+        # Tail shares of the health dimension. Counted from the risk band the
+        # class already carries, so the bands stay the single owner of where a
+        # tail begins.
+        "coupling_class_population": len(classes),
+        "elevated_coupling_classes": sum(
+            str(getattr(metric, "risk_coupling", "")) != RISK_LOW for metric in classes
+        ),
     }
 
 
@@ -712,9 +732,25 @@ def _build_health_result(context: MetricProjectContext) -> MetricResult:
             high_risk_functions=len(
                 _result_tuple_str(complexity, "high_risk_functions")
             ),
+            elevated_complexity_functions=_result_int(
+                complexity,
+                "elevated_complexity_functions",
+            ),
+            complexity_function_population=_result_int(
+                complexity,
+                "complexity_function_population",
+            ),
             coupling_avg=_result_float(coupling, "coupling_avg"),
             coupling_max=_result_int(coupling, "coupling_max"),
             high_risk_classes=len(_result_tuple_str(coupling, "high_risk_classes")),
+            elevated_coupling_classes=_result_int(
+                coupling,
+                "elevated_coupling_classes",
+            ),
+            coupling_class_population=_result_int(
+                coupling,
+                "coupling_class_population",
+            ),
             cohesion_avg=_result_float(cohesion, "cohesion_avg"),
             low_cohesion_classes=len(
                 _result_tuple_str(cohesion, "low_cohesion_classes")

@@ -15,7 +15,9 @@ from uuid import UUID
 from ..contracts import (
     BASELINE_SCHEMA_VERSION,
     COHESION_RISK_MEDIUM_MAX,
+    COMPLEXITY_RISK_LOW_MAX,
     COMPLEXITY_RISK_MEDIUM_MAX,
+    COUPLING_RISK_LOW_MAX,
     COUPLING_RISK_MEDIUM_MAX,
 )
 from ..contracts.errors import BaselineValidationError
@@ -71,6 +73,24 @@ from .lanes import (
     decode_module_identity_lane,
 )
 from .trust import current_python_tag
+
+#: Lane-trust reasons that mean "this artifact was produced by a different
+#: version of the observation contract itself". Each is a declared version
+#: moving, never a corrupted or foreign artifact: the operator must regenerate,
+#: and no surface may present the difference as a finding about the analyzed
+#: code. Deliberately narrow — integrity, scope and interpreter mismatches are
+#: not contract drift, and ``required_contract`` (an identity contract such as
+#: the fingerprint version) and ``runtime_lane_unknown`` (a lane this runtime
+#: does not have at all) keep their own established statuses.
+_METRICS_CONTRACT_REASONS: frozenset[str] = frozenset(
+    {
+        "algorithm_revision",
+        "canonicalization_version",
+        "descriptor_version",
+        "payload_schema",
+        "payload_schema_outdated",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +202,8 @@ class MetricsBaseline:
                 status = MetricsBaselineStatus.MISMATCH_SCOPE_ID
             elif any(item.reason == "python_tag" for item in unavailable):
                 status = MetricsBaselineStatus.MISMATCH_PYTHON_VERSION
+            elif all(item.reason in _METRICS_CONTRACT_REASONS for item in unavailable):
+                status = MetricsBaselineStatus.INCOMPATIBLE_METRICS_CONTRACT
             else:
                 status = MetricsBaselineStatus.MISMATCH_SCHEMA_VERSION
             raise BaselineValidationError(
@@ -383,9 +405,17 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
             complexity_avg=_average(complexities, risk_population),
             complexity_max=max(complexities, default=0),
             high_risk_functions=len(high_risk),
+            elevated_complexity_functions=sum(
+                value > COMPLEXITY_RISK_LOW_MAX for value in complexities
+            ),
+            complexity_function_population=risk_population,
             coupling_avg=_average(coupling, class_population),
             coupling_max=max(coupling, default=0),
             high_risk_classes=len(high_coupling),
+            elevated_coupling_classes=sum(
+                value > COUPLING_RISK_LOW_MAX for value in coupling
+            ),
+            coupling_class_population=class_population,
             cohesion_avg=_average(cohesion, class_population),
             low_cohesion_classes=len(low_cohesion),
             dependency_cycles=len(cycles),

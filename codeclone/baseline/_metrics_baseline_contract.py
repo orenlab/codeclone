@@ -22,6 +22,12 @@ class MetricsBaselineStatus(str, Enum):
     MISMATCH_SCOPE_ID = "mismatch_scope_id"
     MISMATCH_SCHEMA_VERSION = "mismatch_schema_version"
     MISMATCH_PYTHON_VERSION = "mismatch_python_version"
+    # The artifact is intact and belongs to this project and interpreter, but
+    # its lanes were produced by a different metrics contract, so its values
+    # describe a different computation. Distinct from the mismatches around it
+    # because the honest operator instruction is "regenerate the metrics
+    # baseline" — never "your code regressed".
+    INCOMPATIBLE_METRICS_CONTRACT = "incompatible_metrics_contract"
     GENERATOR_MISMATCH = "generator_mismatch"
     INTEGRITY_MISSING = "integrity_missing"
     INTEGRITY_FAILED = "integrity_failed"

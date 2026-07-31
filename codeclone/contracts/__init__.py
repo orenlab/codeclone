@@ -29,6 +29,17 @@ CONTRACT_IR_VERSION: Final = "1"
 AUTHORITY_ANALYSIS_REVISION: Final = "1"
 AUTHORITY_REGISTRY_VERSION: Final = "1"
 OBSERVATION_DIGEST_VERSION: Final = "1"
+# Algorithm revision of the two lanes that carry per-entity design metrics
+# (``risk_observations``, ``coupling_cohesion_observations``). Separate from
+# OBSERVATION_DIGEST_VERSION so a change in how these metrics are *computed*
+# invalidates only the lanes whose values moved. Revision "2" covers the 39Y
+# changes: every defined function now carries a complexity fact (clone-lane
+# floors no longer gate the population), CBO counts the imported-domain and
+# resolved-instantiation edge lanes, and the coupling risk bands were
+# re-derived from the measured distribution. Values from revision "1" are not
+# comparable with revision "2" values, so a baseline carrying the old revision
+# is untrusted rather than diffed.
+DESIGN_METRICS_ALGORITHM_REVISION: Final = "2"
 BASELINE_LANE_DESCRIPTOR_VERSION: Final = "1"
 BASELINE_LANE_DIGEST_DOMAIN: Final = "codeclone.baseline.lane.v1\0"
 BASELINE_ROOT_DIGEST_DOMAIN: Final = "codeclone.baseline.root.v1\0"
@@ -72,7 +83,20 @@ NEAR_MISS_MAX_EDIT_STATEMENTS: Final = 1
 # this one bump instead of adding a second.
 CACHE_VERSION: Final = "3.2"
 REPORT_SCHEMA_VERSION: Final = "3.0"
-METRICS_BASELINE_SCHEMA_VERSION: Final = "1.2"
+# Human-readable provenance stamp for a metrics artifact, reported to the
+# operator and nothing more. It is NOT the compatibility authority and must not
+# be described as one: no code branches on it. Whether a stored artifact may be
+# compared with current values is decided in exactly one place,
+# ``MetricsBaseline.verify_compatibility`` — per-lane ``algorithm_revision`` and
+# ``payload_schema`` first (a stale design-metric lane raises
+# INCOMPATIBLE_METRICS_CONTRACT), then ``BASELINE_SCHEMA_VERSION`` and the
+# Python tag. That check is finer than this string: it names the lane that
+# moved instead of failing the whole artifact.
+#
+# 1.3 records that the design-metric lanes moved to
+# DESIGN_METRICS_ALGORITHM_REVISION "2"; the refusal to diff 1.2 values against
+# current ones is delivered by the lane revision, not by this constant.
+METRICS_BASELINE_SCHEMA_VERSION: Final = "1.3"
 ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.7"
 # Semantic retrieval index. Derived, rebuildable sidecar — NOT
 # covered by ENGINEERING_MEMORY_SCHEMA_VERSION. Bump to invalidate the index
@@ -148,9 +172,71 @@ DEFAULT_TEXT_REPORT_PATH: Final = ".codeclone/report.txt"
 
 COMPLEXITY_RISK_LOW_MAX: Final = 10
 COMPLEXITY_RISK_MEDIUM_MAX: Final = 20
-COUPLING_RISK_LOW_MAX: Final = 5
-COUPLING_RISK_MEDIUM_MAX: Final = 10
+# Coupling risk bands, derived from the measured CBO distribution of a
+# reference corpus (915 classes; avg 1.44, p50 0, p90 4, p95 7, p99 14,
+# max 27) under the resolution-gated edge contract in ``metrics/coupling.py``.
+# Both edges are percentiles of that distribution, so a class leaves a band
+# only by being more coupled than a declared share of real classes:
+#   low    -- the bulk, at or below the upper decile (p90);
+#   medium -- the decile-to-ventile band (p90 .. p95);
+#   high   -- the upper ventile, the 5% tail.
+# p90 and p95 measured identically (4 and 7) on the production-only subset of
+# the same corpus, so the edges describe the shape of the distribution rather
+# than the filter applied to it. Owning test:
+# tests/test_metrics_health_recalibration.py, which recomputes both percentiles
+# from the recorded histogram.
+COUPLING_RISK_LOW_MAX: Final = 4
+COUPLING_RISK_MEDIUM_MAX: Final = 7
 COHESION_RISK_MEDIUM_MAX: Final = 3
+
+# Coupling health dimension: four bounded terms whose weights spend exactly the
+# 100 points of the dimension, and the complexity dimension above uses the same
+# four-term shape for the same reason. The complexity formula it replaced
+# (100 - avg*2.5 - max*1.2 - high*8) was a function of the single worst
+# function: on the measured post-norm distribution of this repository one
+# 34-complexity function alone spent 40.8 points and five high-risk functions
+# spent 40, pinning the dimension at 12 while the typical function sits at
+# complexity 3. Its reference shares are MEASURED, not chosen - production
+# functions under the Y9 norm CFG (n=5194, avg 2.9692, p90/p95/p99 = 6/8/15,
+# max 34) put 146 above COMPLEXITY_RISK_LOW_MAX (28.11 per mille) and 5 above
+# COMPLEXITY_RISK_MEDIUM_MAX (0.96, rounded to 1). The complexity BANDS are
+# unchanged: 10 and 20 were reviewed and kept.
+#
+# Bounding is the point. The previous coupling formula
+# (100 - avg*7 - max*2 - high*8) let one 27-collaborator class cost 54 points
+# and 16 high-risk classes cost 128, which pinned the dimension at 0 on the
+# reference distribution: it measured a single outlier, not the project, and
+# could not move when the code improved.
+#
+# Two terms are shares rather than counts, so the dimension does not punish a
+# project for being large; the reference share of each is implied by the band
+# percentile above (a p90 edge leaves 100 per mille above it, a p95 edge 50),
+# so bands and score share one derivation instead of two measurements.
+HEALTH_COMPLEXITY_TYPICAL_WEIGHT: Final = 30
+HEALTH_COMPLEXITY_ELEVATED_WEIGHT: Final = 30
+HEALTH_COMPLEXITY_EXTREME_WEIGHT: Final = 30
+HEALTH_COMPLEXITY_OUTLIER_WEIGHT: Final = 10
+HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE: Final = 28
+HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE: Final = 1
+HEALTH_COMPLEXITY_TAIL_SATURATION_MULTIPLE: Final = 4
+HEALTH_COMPLEXITY_OUTLIER_SATURATION_MULTIPLE: Final = 3
+HEALTH_COUPLING_TYPICAL_WEIGHT: Final = 30
+HEALTH_COUPLING_ELEVATED_WEIGHT: Final = 30
+HEALTH_COUPLING_EXTREME_WEIGHT: Final = 30
+HEALTH_COUPLING_OUTLIER_WEIGHT: Final = 10
+HEALTH_COUPLING_ELEVATED_REFERENCE_PERMILLE: Final = 100
+HEALTH_COUPLING_EXTREME_REFERENCE_PERMILLE: Final = 50
+# A tail this many times its reference share spends that term completely: at
+# 4x, 40% of classes are above the low band and 20% above the medium band, so
+# elevated coupling is the dominant mode rather than a tail. It also places the
+# reference distribution at a quarter of each tail term, leaving both room to
+# worsen and room to improve.
+HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE: Final = 4
+# The single-worst-class term saturates once the maximum reaches this multiple
+# of the high-risk band edge above it. Past that point the dimension stops
+# responding to one class's magnitude, which is exactly the defect this
+# replaces.
+HEALTH_COUPLING_OUTLIER_SATURATION_MULTIPLE: Final = 3
 HEALTH_DEPENDENCY_CYCLE_PENALTY: Final = 25
 HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY: Final = 4
 HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER: Final = 2.0
@@ -245,10 +331,27 @@ __all__ = [
     "DEFAULT_SEGMENT_MIN_LOC",
     "DEFAULT_SEGMENT_MIN_STMT",
     "DEFAULT_TEXT_REPORT_PATH",
+    "DESIGN_METRICS_ALGORITHM_REVISION",
     "DOCS_URL",
     "ENGINEERING_MEMORY_SCHEMA_VERSION",
     "EXPERIENCE_DISTILLATION_VERSION",
     "GATE_LANE_MATRIX_VERSION",
+    "HEALTH_COMPLEXITY_ELEVATED_REFERENCE_PERMILLE",
+    "HEALTH_COMPLEXITY_ELEVATED_WEIGHT",
+    "HEALTH_COMPLEXITY_EXTREME_REFERENCE_PERMILLE",
+    "HEALTH_COMPLEXITY_EXTREME_WEIGHT",
+    "HEALTH_COMPLEXITY_OUTLIER_SATURATION_MULTIPLE",
+    "HEALTH_COMPLEXITY_OUTLIER_WEIGHT",
+    "HEALTH_COMPLEXITY_TAIL_SATURATION_MULTIPLE",
+    "HEALTH_COMPLEXITY_TYPICAL_WEIGHT",
+    "HEALTH_COUPLING_ELEVATED_REFERENCE_PERMILLE",
+    "HEALTH_COUPLING_ELEVATED_WEIGHT",
+    "HEALTH_COUPLING_EXTREME_REFERENCE_PERMILLE",
+    "HEALTH_COUPLING_EXTREME_WEIGHT",
+    "HEALTH_COUPLING_OUTLIER_SATURATION_MULTIPLE",
+    "HEALTH_COUPLING_OUTLIER_WEIGHT",
+    "HEALTH_COUPLING_TAIL_SATURATION_MULTIPLE",
+    "HEALTH_COUPLING_TYPICAL_WEIGHT",
     "HEALTH_DEPENDENCY_CYCLE_PENALTY",
     "HEALTH_DEPENDENCY_DEPTH_AVG_MULTIPLIER",
     "HEALTH_DEPENDENCY_DEPTH_LEVEL_PENALTY",
