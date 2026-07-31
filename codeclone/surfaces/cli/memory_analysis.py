@@ -193,7 +193,6 @@ def run_memory_analysis_report(*, root_path: Path) -> dict[str, object]:
         metrics_baseline_state=metrics_baseline_state,
         analysis_result=analysis_result,
         args=args,
-        metrics_computed=cli_runtime._metrics_computed(args),
         analysis_started_at_utc=started,
         report_generated_at_utc=started,
     )

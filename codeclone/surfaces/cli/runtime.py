@@ -139,23 +139,6 @@ def resolve_cache_path(
     return cache_path
 
 
-def metrics_computed(args: object) -> tuple[str, ...]:
-    if bool_attr(args, "skip_metrics"):
-        return ()
-
-    computed = ["complexity", "coupling", "cohesion", "health"]
-    if not bool_attr(args, "skip_dependencies"):
-        computed.append("dependencies")
-    if not bool_attr(args, "skip_dead_code"):
-        computed.append("dead_code")
-    computed.append("coverage_adoption")
-    if bool_attr(args, "api_surface"):
-        computed.append("api_surface")
-    if bool(optional_text_attr(args, "coverage_xml")):
-        computed.append("coverage_join")
-    return tuple(computed)
-
-
 def resolve_report_cache_path(cache_path: Path) -> Path:
     try:
         return cache_path.resolve()
@@ -252,10 +235,6 @@ def _print_failed_files(failed_files: tuple[str, ...] | list[str]) -> None:
         failed_files=tuple(failed_files),
         console=require_status_console(cli_state.get_console()),
     )
-
-
-def _metrics_computed(args: object) -> tuple[str, ...]:
-    return metrics_computed(args)
 
 
 def _resolve_cache_status(cache: Cache) -> tuple[CacheStatus, str | None]:

@@ -4484,3 +4484,131 @@ def test_parse_metric_reason_entry_contract(
     reason: str, expected: tuple[str, str]
 ) -> None:
     assert parse_metric_reason_entry(reason) == expected
+
+
+_AUTHORITY_MODULE = """\
+def publish_baseline(payload: dict[str, int]) -> dict[str, int]:
+    result = dict(payload)
+    result["published"] = 1
+    return result
+
+
+def caller(payload: dict[str, int]) -> dict[str, int]:
+    return publish_baseline(payload)
+"""
+
+
+def _write_authority_project(tmp_path: Path, *, authority: bool) -> None:
+    (tmp_path / "pkg").mkdir(exist_ok=True)
+    (tmp_path / "pkg" / "__init__.py").write_text("", "utf-8")
+    (tmp_path / "pkg" / "mod.py").write_text(_AUTHORITY_MODULE, "utf-8")
+    config = [
+        "[tool.codeclone]",
+        f'baseline_scope_id = "{_TEST_BASELINE_SCOPE_ID}"',
+    ]
+    if authority:
+        config += [
+            "semantic_authority = true",
+            "",
+            "[[tool.codeclone.authority]]",
+            'contract_id = "baseline.publication/v1"',
+            'canonical_owner = "pkg.mod:publish_baseline"',
+            "allowed_adapters = []",
+            "forbidden_raw_inputs = []",
+            'required_provenance = ["pkg.mod:publish_baseline"]',
+        ]
+    (tmp_path / "pyproject.toml").write_text("\n".join(config) + "\n", "utf-8")
+
+
+def test_cli_declares_the_authority_family_configured_in_pyproject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A configured registry must reach the report as a computed family.
+
+    The declaration was hand-listed from run switches, so it could not name
+    semantic_authority; the HTML context filters families by that declaration,
+    which made a governed repository render as if no registry existed.
+    """
+
+    _write_authority_project(tmp_path, authority=True)
+
+    payload = _run_json_report(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, extra_args=()
+    )
+
+    meta = cast(dict[str, object], payload["meta"])
+    declared = cast(list[str], meta["computed_metric_families"])
+    assert "semantic_authority" in declared
+
+    families = cast(
+        dict[str, object], cast(dict[str, object], payload["metrics"])["families"]
+    )
+    authority_summary = cast(
+        dict[str, object],
+        cast(dict[str, object], families["semantic_authority"])["summary"],
+    )
+    assert authority_summary["enforcement_enabled"] is True
+    assert authority_summary["registry_contracts"] == 1
+
+
+def test_cli_omits_the_authority_family_without_a_registry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_authority_project(tmp_path, authority=False)
+
+    payload = _run_json_report(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, extra_args=("--fail-cycles",)
+    )
+
+    meta = cast(dict[str, object], payload["meta"])
+    declared = cast(list[str], meta["computed_metric_families"])
+    assert declared, "the run computed metrics, so it must declare families"
+    assert "semantic_authority" not in declared
+
+
+def test_cli_declares_every_family_the_run_computed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Families the switches cannot predict are declared; skips still subtract."""
+
+    _write_authority_project(tmp_path, authority=False)
+
+    payload = _run_json_report(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, extra_args=("--fail-cycles",)
+    )
+    declared = cast(
+        list[str],
+        cast(dict[str, object], payload["meta"])["computed_metric_families"],
+    )
+    assert "security_surfaces" in declared
+    assert "overloaded_modules" in declared
+    assert "api_surface" not in declared
+
+    skipped = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=(
+            "--skip-dependencies",
+            "--skip-dead-code",
+            "--api-surface",
+        ),
+    )
+    skipped_declared = cast(
+        list[str],
+        cast(dict[str, object], skipped["meta"])["computed_metric_families"],
+    )
+    assert "dependencies" not in skipped_declared
+    assert "dead_code" not in skipped_declared
+    assert "api_surface" in skipped_declared
+
+
+def test_cli_declares_no_families_without_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_authority_project(tmp_path, authority=False)
+
+    payload = _run_json_report(
+        tmp_path=tmp_path, monkeypatch=monkeypatch, extra_args=("--skip-metrics",)
+    )
+
+    assert cast(dict[str, object], payload["meta"])["computed_metric_families"] == []

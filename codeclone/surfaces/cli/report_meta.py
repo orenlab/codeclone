@@ -39,7 +39,6 @@ def build_cli_report_meta(
     metrics_baseline_state: MetricsBaselineState,
     analysis_result: AnalysisResult,
     args: CLIArgsLike,
-    metrics_computed: tuple[str, ...],
     analysis_started_at_utc: str | None,
     report_generated_at_utc: str,
 ) -> ReportMeta:
@@ -63,7 +62,12 @@ def build_cli_report_meta(
         health_score=(project_metrics.health.total if project_metrics else None),
         health_grade=(project_metrics.health.grade if project_metrics else None),
         analysis_mode=("clones_only" if args.skip_metrics else "full"),
-        metrics_computed=metrics_computed,
+        metrics_computed=_report_meta.computed_metric_families(
+            metrics_payload=analysis_result.metrics_payload,
+            skip_dependencies=args.skip_dependencies,
+            skip_dead_code=args.skip_dead_code,
+            api_surface=args.api_surface,
+        ),
         min_loc=args.min_loc,
         min_stmt=args.min_stmt,
         block_min_loc=args.block_min_loc,

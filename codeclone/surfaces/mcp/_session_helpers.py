@@ -642,21 +642,6 @@ def _build_cache(
     return cache
 
 
-def _metrics_computed(analysis_mode: AnalysisMode) -> tuple[str, ...]:
-    return (
-        ()
-        if analysis_mode == "clones_only"
-        else (
-            "complexity",
-            "coupling",
-            "cohesion",
-            "health",
-            "dependencies",
-            "dead_code",
-        )
-    )
-
-
 def _report_digest(report_document: Mapping[str, object]) -> str:
     integrity = _as_mapping(report_document.get("integrity"))
     digests = _as_mapping(integrity.get("digests"))

@@ -4872,3 +4872,71 @@ def test_clone_health_note_sentences_omit_unavailable_facts() -> None:
     assert sentences[1] == "Instances: 2 duplicated fragments."
     assert not any("Segment groups" in sentence for sentence in sentences)
     assert not any("Accepted groups" in sentence for sentence in sentences)
+
+
+def test_html_report_authority_panel_reports_the_configured_registry(
+    tmp_path: Path,
+) -> None:
+    """A configured registry must never be rendered as an absent one.
+
+    The panel reads the semantic_authority family, and the HTML context drops
+    families the run did not declare. Declaring the families the way production
+    declares them is therefore part of this assertion, not a fixture detail.
+    """
+
+    payload = _metrics_payload(
+        health_score=88,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    payload["semantic_authority"] = {
+        "summary": {
+            "enabled": True,
+            "report_only": False,
+            "enforcement_enabled": True,
+            "registry_version": "1",
+            "registry_contracts": 5,
+            "governed_sinks": 1,
+            "violations": 0,
+            "active_violations": 0,
+            "suppressed_violations": 0,
+        },
+        "items": [
+            {
+                "item_kind": "governed_sink",
+                "contract_id": "baseline.publication/v1",
+                "sink_identity": "pkg.mod:publish",
+                "authority_status": "authoritative",
+                "resolution_state": "resolved",
+                "relative_path": "pkg/mod.py",
+            }
+        ],
+    }
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={
+            "scan_root": str(tmp_path),
+            "metrics_computed": sorted(payload),
+        },
+        metrics=payload,
+    )
+
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": str(tmp_path)},
+        report_document=report_document,
+    )
+
+    assert "0 active violations across 5 governed contracts" in html
+    assert "no registry is configured" not in html

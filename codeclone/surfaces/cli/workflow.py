@@ -153,7 +153,6 @@ _validate_report_ui_flags = cli_reports_output._validate_report_ui_flags
 _write_report_outputs = cli_reports_output._write_report_outputs
 
 _configure_metrics_mode = cli_runtime._configure_metrics_mode
-_metrics_computed = cli_runtime._metrics_computed
 _print_failed_files = cli_runtime._print_failed_files
 _resolve_cache_path_impl = cli_runtime._resolve_cache_path
 _resolve_cache_status = cli_runtime._resolve_cache_status
@@ -554,7 +553,6 @@ def _main_impl() -> None:
             metrics_baseline_state=metrics_baseline_state,
             analysis_result=analysis_result,
             args=args,
-            metrics_computed=_metrics_computed(args),
             analysis_started_at_utc=analysis_started_at_utc,
             report_generated_at_utc=report_generated_at_utc,
         )

@@ -21,6 +21,7 @@ from ...memory.ide_governance import IdeGovernanceSessionState
 from ...observability import is_observability_enabled, span
 from ...observability.analysis_phases import apply_pipeline_process_phase_counters
 from ...report.meta import build_report_meta as _build_report_meta
+from ...report.meta import computed_metric_families as _computed_metric_families
 from ...report.meta import current_report_timestamp_utc as _current_report_timestamp_utc
 from . import _session_helpers as _helpers
 from ._blast_radius import BlastRadiusResult
@@ -393,7 +394,10 @@ class MCPSession(
                 else None
             ),
             analysis_mode=request.analysis_mode,
-            metrics_computed=_helpers._metrics_computed(request.analysis_mode),
+            metrics_computed=_computed_metric_families(
+                metrics_payload=analysis_result.metrics_payload,
+                api_surface=bool(getattr(args, "api_surface", False)),
+            ),
             min_loc=_as_int(args.min_loc, DEFAULT_MIN_LOC),
             min_stmt=_as_int(args.min_stmt, DEFAULT_MIN_STMT),
             block_min_loc=_as_int(args.block_min_loc, DEFAULT_BLOCK_MIN_LOC),

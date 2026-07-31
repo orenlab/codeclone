@@ -1604,6 +1604,9 @@ def test_main_impl_prints_changed_scope_when_changed_projection_is_available(
                 segment_clones_count=0,
                 suppressed_segment_groups=0,
                 project_metrics=None,
+                # The report meta now declares metric families from the payload
+                # the analysis emitted, so the stub must carry that evidence.
+                metrics_payload=None,
                 observation_bundle=SimpleNamespace(
                     contract=SimpleNamespace(enabled_lanes=()),
                 ),
@@ -2407,85 +2410,6 @@ def test_probe_metrics_baseline_section_for_non_object_payload(tmp_path: Path) -
     probe = cli_baselines_mod._probe_metrics_baseline_section(path)
     assert probe.has_metrics_section is True
     assert probe.payload is None
-
-
-def test_metrics_computed_respects_skip_switches() -> None:
-    assert cli_runtime._metrics_computed(
-        Namespace(
-            skip_metrics=False,
-            skip_dependencies=True,
-            skip_dead_code=True,
-        )
-    ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
-    assert cli_runtime._metrics_computed(
-        Namespace(
-            skip_metrics=False,
-            skip_dependencies=False,
-            skip_dead_code=False,
-        )
-    ) == (
-        "complexity",
-        "coupling",
-        "cohesion",
-        "health",
-        "dependencies",
-        "dead_code",
-        "coverage_adoption",
-    )
-
-
-def test_metrics_computed_includes_api_surface_only_when_enabled() -> None:
-    assert cli_runtime._metrics_computed(
-        Namespace(
-            skip_metrics=False,
-            skip_dependencies=True,
-            skip_dead_code=True,
-            api_surface=False,
-        )
-    ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
-    assert cli_runtime._metrics_computed(
-        Namespace(
-            skip_metrics=False,
-            skip_dependencies=True,
-            skip_dead_code=True,
-            api_surface=True,
-        )
-    ) == (
-        "complexity",
-        "coupling",
-        "cohesion",
-        "health",
-        "coverage_adoption",
-        "api_surface",
-    )
-
-
-def test_metrics_computed_includes_coverage_join_only_with_xml() -> None:
-    assert cli_runtime._metrics_computed(
-        Namespace(
-            skip_metrics=False,
-            skip_dependencies=True,
-            skip_dead_code=True,
-            api_surface=False,
-            coverage_xml=None,
-        )
-    ) == ("complexity", "coupling", "cohesion", "health", "coverage_adoption")
-    assert cli_runtime._metrics_computed(
-        Namespace(
-            skip_metrics=False,
-            skip_dependencies=True,
-            skip_dead_code=True,
-            api_surface=False,
-            coverage_xml="coverage.xml",
-        )
-    ) == (
-        "complexity",
-        "coupling",
-        "cohesion",
-        "health",
-        "coverage_adoption",
-        "coverage_join",
-    )
 
 
 def test_enforce_gating_requires_coverage_input_for_hotspot_gate(

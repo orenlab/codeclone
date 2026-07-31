@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import sys
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from ..baseline.clone_baseline import Baseline
 from ..baseline.trust import current_python_tag
@@ -20,6 +20,7 @@ from ..contracts import (
 from ..contracts.schemas import ReportMeta
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
     from pathlib import Path
 
     from ..baseline.metrics_baseline import MetricsBaseline
@@ -29,6 +30,46 @@ def current_report_timestamp_utc() -> str:
     return (
         datetime.now(timezone.utc).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
+
+
+#: Families the metrics payload always carries a key for, so their presence says
+#: nothing about whether the run computed them -- a switch does. Every other
+#: family is payload-decided: it appears only when the analysis produced it, so
+#: it needs no entry here and a new one is declared the moment it is emitted.
+_SKIPPABLE_METRIC_FAMILIES: Final = {
+    "dependencies": "skip_dependencies",
+    "dead_code": "skip_dead_code",
+}
+_OPT_IN_METRIC_FAMILIES: Final = ("api_surface",)
+
+
+def computed_metric_families(
+    *,
+    metrics_payload: Mapping[str, object] | None,
+    skip_dependencies: bool = False,
+    skip_dead_code: bool = False,
+    api_surface: bool = False,
+) -> tuple[str, ...]:
+    """Declare which metric families this run computed.
+
+    The emitted payload is the source of truth: it already states what the
+    analysis produced, including the families no switch can predict such as
+    ``semantic_authority``. Re-listing families by hand is what left
+    ``semantic_authority`` out of the declaration while the document carried it,
+    and consumers filter the report by this declaration -- so the only thing the
+    run switches still do here is subtract what they explicitly turned off.
+    """
+
+    if metrics_payload is None:
+        return ()
+    families = {str(name) for name in metrics_payload}
+    if skip_dependencies:
+        families.discard("dependencies")
+    if skip_dead_code:
+        families.discard("dead_code")
+    if not api_surface:
+        families.difference_update(_OPT_IN_METRIC_FAMILIES)
+    return tuple(sorted(families))
 
 
 def build_report_meta(
