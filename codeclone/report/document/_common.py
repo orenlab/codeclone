@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 from ...contracts import (
     DEFAULT_REPORT_DESIGN_COHESION_THRESHOLD,
@@ -25,7 +25,13 @@ from ...domain.findings import (
     FAMILY_DEAD_CODE,
 )
 from ...domain.quality import (
+    CONFIDENCE_HIGH,
+    CONFIDENCE_LOW,
+    CONFIDENCE_MEDIUM,
     EFFORT_WEIGHT,
+    RISK_HIGH,
+    RISK_LOW,
+    RISK_MEDIUM,
     SEVERITY_RANK,
 )
 from ...findings.structural.detectors import normalize_structural_findings
@@ -198,6 +204,48 @@ def _item_sort_key(item: Mapping[str, object]) -> tuple[str, int, int, str]:
         _as_int(item.get("start_line")),
         _as_int(item.get("end_line")),
         str(item.get("qualname", "")),
+    )
+
+
+#: Operational rank vocabularies, worst first. A value outside the vocabulary
+#: ranks below every known one rather than sorting alphabetically into the top.
+_RISK_RANK: Final[dict[str, int]] = {RISK_HIGH: 3, RISK_MEDIUM: 2, RISK_LOW: 1}
+_CONFIDENCE_RANK: Final[dict[str, int]] = {
+    "critical": 4,
+    CONFIDENCE_HIGH: 3,
+    CONFIDENCE_MEDIUM: 2,
+    CONFIDENCE_LOW: 1,
+}
+
+
+def _operational_sort_key(
+    item: Mapping[str, object],
+    *,
+    rank_field: str = "risk",
+    rank_vocabulary: Mapping[str, int] = _RISK_RANK,
+    metric_field: str | None = None,
+) -> tuple[int, int, str, str, int, int]:
+    """Rank an operational report row: the row a reviewer must act on first.
+
+    Rank descending, then the metric that earned that rank descending, then the
+    stable ``(relative_path, qualname)`` tiebreak the report is aligned on. Line
+    numbers close the key so the order stays total: rows of equal operational
+    weight in one file cannot swap between runs.
+
+    Ordering the quality tables by file path instead buried every high-risk row
+    below the fifty rows the report renders, so the tables opened on whatever
+    the alphabet put first.
+    """
+
+    rank = rank_vocabulary.get(str(item.get(rank_field, "")).strip().lower(), 0)
+    metric = _as_int(item.get(metric_field)) if metric_field is not None else 0
+    return (
+        -rank,
+        -metric,
+        str(item.get("relative_path", "")),
+        str(item.get("qualname", "")),
+        _as_int(item.get("start_line")),
+        _as_int(item.get("end_line")),
     )
 
 

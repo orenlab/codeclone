@@ -7,7 +7,7 @@
 import importlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
@@ -4940,3 +4940,186 @@ def test_html_report_authority_panel_reports_the_configured_registry(
 
     assert "0 active violations across 5 governed contracts" in html
     assert "no registry is configured" not in html
+
+
+def _ordering_metrics_payload() -> dict[str, object]:
+    """Quality rows whose alphabetical order is the reverse of their urgency."""
+
+    return {
+        "complexity": {
+            "functions": [
+                {
+                    "qualname": "aaa.helper:tiny",
+                    "filepath": "/repo/aaa/helper.py",
+                    "start_line": 1,
+                    "end_line": 3,
+                    "cyclomatic_complexity": 2,
+                    "nesting_depth": 1,
+                    "risk": "low",
+                },
+                {
+                    "qualname": "mmm.mid:moderate",
+                    "filepath": "/repo/mmm/mid.py",
+                    "start_line": 1,
+                    "end_line": 40,
+                    "cyclomatic_complexity": 14,
+                    "nesting_depth": 3,
+                    "risk": "medium",
+                },
+                {
+                    "qualname": "zzz.core:monster",
+                    "filepath": "/repo/zzz/core.py",
+                    "start_line": 1,
+                    "end_line": 200,
+                    "cyclomatic_complexity": 61,
+                    "nesting_depth": 7,
+                    "risk": "high",
+                },
+                {
+                    "qualname": "zzz.core:heavy",
+                    "filepath": "/repo/zzz/core.py",
+                    "start_line": 210,
+                    "end_line": 300,
+                    "cyclomatic_complexity": 33,
+                    "nesting_depth": 5,
+                    "risk": "high",
+                },
+            ],
+            "summary": {"total": 4, "average": 27.5, "max": 61, "high_risk": 2},
+        },
+        "coupling": {
+            "classes": [
+                {
+                    "qualname": "aaa.helper:Small",
+                    "filepath": "/repo/aaa/helper.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "cbo": 1,
+                    "risk": "low",
+                },
+                {
+                    "qualname": "zzz.core:Hub",
+                    "filepath": "/repo/zzz/core.py",
+                    "start_line": 1,
+                    "end_line": 80,
+                    "cbo": 27,
+                    "risk": "high",
+                },
+            ],
+            "summary": {"total": 2, "average": 14.0, "max": 27, "high_risk": 1},
+        },
+        "cohesion": {
+            "classes": [
+                {
+                    "qualname": "aaa.helper:Small",
+                    "filepath": "/repo/aaa/helper.py",
+                    "start_line": 1,
+                    "end_line": 10,
+                    "lcom4": 1,
+                    "risk": "low",
+                    "method_count": 2,
+                    "instance_var_count": 2,
+                },
+                {
+                    "qualname": "zzz.core:Hub",
+                    "filepath": "/repo/zzz/core.py",
+                    "start_line": 1,
+                    "end_line": 80,
+                    "lcom4": 6,
+                    "risk": "high",
+                    "method_count": 9,
+                    "instance_var_count": 1,
+                },
+            ],
+            "summary": {"total": 2, "average": 3.5, "max": 6, "low_cohesion": 1},
+        },
+        "dead_code": {
+            "items": [
+                {
+                    "qualname": "aaa.helper:maybe_unused",
+                    "filepath": "/repo/aaa/helper.py",
+                    "start_line": 20,
+                    "end_line": 22,
+                    "kind": "function",
+                    "confidence": "medium",
+                },
+                {
+                    "qualname": "zzz.core:definitely_unused",
+                    "filepath": "/repo/zzz/core.py",
+                    "start_line": 400,
+                    "end_line": 402,
+                    "kind": "function",
+                    "confidence": "high",
+                },
+            ],
+            "suppressed_items": [],
+            "summary": {"total": 2, "critical": 1, "suppressed": 0},
+        },
+        "health": {"score": 70, "grade": "B", "dimensions": {"coverage": 99}},
+    }
+
+
+def _ordering_document() -> dict[str, Any]:
+    return build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={"scan_root": "/repo", "metrics_computed": ["complexity"]},
+        metrics=_ordering_metrics_payload(),
+    )
+
+
+def _family_items(document: Mapping[str, Any], family: str) -> list[Mapping[str, Any]]:
+    families = document["metrics"]["families"]
+    return list(families[family]["items"])
+
+
+def test_document_orders_quality_rows_by_operational_rank() -> None:
+    """The worst row must be first: risk, then the metric that earned it.
+
+    Ordered by file path, the first complexity row of this repository was a
+    low-risk script with CC 2 while high-risk functions sat far below the
+    fifty-row cut the report renders.
+    """
+
+    document = _ordering_document()
+
+    complexity = _family_items(document, "complexity")
+    assert [item["qualname"] for item in complexity] == [
+        "zzz.core:monster",
+        "zzz.core:heavy",
+        "mmm.mid:moderate",
+        "aaa.helper:tiny",
+    ]
+    assert [item["qualname"] for item in _family_items(document, "coupling")] == [
+        "zzz.core:Hub",
+        "aaa.helper:Small",
+    ]
+    assert [item["qualname"] for item in _family_items(document, "cohesion")] == [
+        "zzz.core:Hub",
+        "aaa.helper:Small",
+    ]
+    assert [item["qualname"] for item in _family_items(document, "dead_code")] == [
+        "zzz.core:definitely_unused",
+        "aaa.helper:maybe_unused",
+    ]
+
+
+def test_html_quality_table_renders_document_order_as_is() -> None:
+    """Renderers present the canonical order; they never re-decide it."""
+
+    document = _ordering_document()
+    html = build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": "/repo"},
+        report_document=document,
+    )
+
+    expected = [item["qualname"] for item in _family_items(document, "complexity")]
+    # Read the complexity table body itself, not the summary cards above it.
+    table = html[html.index("<th>Nesting") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    rendered = re.findall(r'<td class="col-name">([^<]+)</td>', body)
+    assert rendered == expected

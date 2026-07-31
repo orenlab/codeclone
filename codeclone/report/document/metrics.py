@@ -33,8 +33,10 @@ from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from ..derived import normalized_source_kind as _normalized_source_kind
 from ._common import (
+    _CONFIDENCE_RANK,
     _contract_path,
     _normalize_nested_string_rows,
+    _operational_sort_key,
     _optional_str,
 )
 
@@ -79,11 +81,8 @@ def _normalize_metrics_families(
             for item in _as_sequence(complexity.get("functions"))
             for item_map in (_as_mapping(item),)
         ),
-        key=lambda item: (
-            item["relative_path"],
-            item["start_line"],
-            item["end_line"],
-            item["qualname"],
+        key=lambda item: _operational_sort_key(
+            item, metric_field="cyclomatic_complexity"
         ),
     )
 
@@ -112,12 +111,7 @@ def _normalize_metrics_families(
             for item in _as_sequence(coupling.get("classes"))
             for item_map in (_as_mapping(item),)
         ),
-        key=lambda item: (
-            item["relative_path"],
-            item["start_line"],
-            item["end_line"],
-            item["qualname"],
-        ),
+        key=lambda item: _operational_sort_key(item, metric_field="cbo"),
     )
 
     cohesion = _as_mapping(metrics_map.get(CATEGORY_COHESION))
@@ -140,12 +134,7 @@ def _normalize_metrics_families(
             for item in _as_sequence(cohesion.get("classes"))
             for item_map in (_as_mapping(item),)
         ),
-        key=lambda item: (
-            item["relative_path"],
-            item["start_line"],
-            item["end_line"],
-            item["qualname"],
-        ),
+        key=lambda item: _operational_sort_key(item, metric_field="lcom4"),
     )
 
     dependencies = _as_mapping(metrics_map.get("dependencies"))
@@ -245,12 +234,10 @@ def _normalize_metrics_families(
             for item in _as_sequence(dead_code.get("items"))
             for item_map in (_as_mapping(item),)
         ),
-        key=lambda item: (
-            item["relative_path"],
-            item["start_line"],
-            item["end_line"],
-            item["qualname"],
-            item["kind"],
+        key=lambda item: _operational_sort_key(
+            item,
+            rank_field="confidence",
+            rank_vocabulary=_CONFIDENCE_RANK,
         ),
     )
     dead_suppressed_items = sorted(
