@@ -30,6 +30,7 @@ class _GatingArgs(Protocol):
     fail_cohesion: int
     fail_cycles: bool
     fail_dead_code: bool
+    fail_on_unresolved_dead_code: bool
     fail_health: int
     min_typing_coverage: int
     min_docstring_coverage: int
@@ -110,6 +111,11 @@ def parse_metric_reason_entry(reason: str) -> tuple[str, str]:
             gate_msgs.GATE_REASON_DEAD_CODE_DETECTED
         ).replace(gate_msgs.GATE_SUFFIX_ITEMS, "")
 
+    if trimmed.startswith(gate_msgs.GATE_REASON_UNRESOLVED_DEAD_CODE):
+        return "unresolved_external_override", tail(
+            gate_msgs.GATE_REASON_UNRESOLVED_DEAD_CODE
+        ).replace(gate_msgs.GATE_SUFFIX_ITEMS, "")
+
     threshold_prefixes: tuple[tuple[str, str], ...] = (
         (gate_msgs.GATE_REASON_COMPLEXITY_THRESHOLD, "complexity_max"),
         (gate_msgs.GATE_REASON_COUPLING_THRESHOLD, "coupling_max"),
@@ -153,6 +159,9 @@ def policy_context(*, args: _GatingArgs, gate_kind: str) -> str:
                 "fail-cycles" if bool(getattr(args, "fail_cycles", False)) else None,
                 "fail-dead-code"
                 if bool(getattr(args, "fail_dead_code", False))
+                else None,
+                "fail-on-unresolved-dead-code"
+                if bool(getattr(args, "fail_on_unresolved_dead_code", False))
                 else None,
                 f"fail-health={getattr(args, 'fail_health', -1)}"
                 if int(getattr(args, "fail_health", -1)) >= 0

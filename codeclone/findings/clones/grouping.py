@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from ...utils.coerce import as_int
+
 if TYPE_CHECKING:
     from ...models import GroupItemsLike, GroupMap
 
@@ -33,6 +35,52 @@ def _filter_groups_by_size(
         for group_key, grouped_items in groups.items()
         if len(grouped_items) >= min_occurrences
     }
+
+
+def is_clone_eligible(
+    *,
+    loc: int,
+    stmt_count: int,
+    min_loc: int,
+    min_stmt: int,
+) -> bool:
+    """Return whether a unit of this shape may enter the function clone lane.
+
+    Clone eligibility contract (39Y Y5): the ``min_loc`` / ``min_stmt`` floors
+    are a *clone-lane* predicate. They decide which units are large enough for
+    a duplicate to be worth reporting; they never decide which functions carry
+    metric facts. This module is the single owner of the predicate — the
+    extractor gates blocks, segments and structural findings on it, and the
+    clone lane filters with it — so the two lanes cannot drift apart.
+    """
+
+    return loc >= min_loc and stmt_count >= min_stmt
+
+
+def clone_eligible_units(
+    units: GroupItemsLike,
+    *,
+    min_loc: int,
+    min_stmt: int,
+) -> list[dict[str, object]]:
+    """Reduce emitted unit facts to the clone lane's population.
+
+    Unit facts exist for every defined function, so the clone lane applies its
+    floors here instead of at fact emission. Eligibility is re-derived from the
+    ``loc`` / ``stmt_count`` each unit already carries, which is what keeps a
+    warm (cache-served) run identical to a cold one.
+    """
+
+    return [
+        dict(unit)
+        for unit in units
+        if is_clone_eligible(
+            loc=as_int(unit["loc"]),
+            stmt_count=as_int(unit["stmt_count"]),
+            min_loc=min_loc,
+            min_stmt=min_stmt,
+        )
+    ]
 
 
 def build_groups(units: GroupItemsLike) -> GroupMap:

@@ -1,4 +1,9 @@
 {
+  "bc": [
+    "codeclone.cache.binding-context.v1",
+    "sha256",
+    "afe73d06dcb8de446c73d9c70a1d8ce13cfa87233f60f8fb5337fc31b418020b"
+  ],
   "cb": "1",
   "d": {},
   "dp": [

@@ -28,6 +28,12 @@ GATE_REASON_COVERAGE_HOTSPOTS: Final = "Coverage hotspots detected: "
 GATE_REASON_AUTHORITY_VIOLATIONS: Final = "Semantic authority violations detected: "
 GATE_REASON_CYCLES_DETECTED: Final = "Dependency cycles detected: "
 GATE_REASON_DEAD_CODE_DETECTED: Final = "Dead code detected (high confidence): "
+# Names the flag inline: this failure and a plain dead-code failure need
+# different remediation (evidence vs deletion), so CI output must never leave
+# an operator guessing which predicate tripped.
+GATE_REASON_UNRESOLVED_DEAD_CODE: Final = (
+    "Unresolved dead-code overrides (--fail-on-unresolved-dead-code): "
+)
 GATE_REASON_COMPLEXITY_THRESHOLD: Final = "Complexity threshold exceeded: "
 GATE_REASON_COUPLING_THRESHOLD: Final = "Coupling threshold exceeded: "
 GATE_REASON_COHESION_THRESHOLD: Final = "Cohesion threshold exceeded: "

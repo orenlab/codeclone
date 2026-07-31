@@ -177,6 +177,8 @@ def rehydrate_cache_neutral(
                 terminal_kind=item.terminal_kind,
                 try_finally_profile=item.try_finally_profile,
                 side_effect_order_profile=item.side_effect_order_profile,
+                statement_sequence=item.statement_sequence,
+                unreachable_statements=item.unreachable_statements,
             )
             for item in payload.units
         ),

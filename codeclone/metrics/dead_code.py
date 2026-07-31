@@ -6,16 +6,25 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Literal
 
 from ..analysis.suppressions import DEAD_CODE_RULE_ID
 from ..domain.findings import SYMBOL_KIND_FUNCTION, SYMBOL_KIND_METHOD
 from ..domain.quality import CONFIDENCE_HIGH, CONFIDENCE_MEDIUM
-from ..models import DeadCandidate, DeadItem, RuntimeReachabilityFact
+from ..models import (
+    ClassMetrics,
+    DeadCandidate,
+    DeadItem,
+    FunctionRelationshipFacts,
+    LivenessClassification,
+    ModuleRegistryHandle,
+    RuntimeReachabilityFact,
+    UnresolvedOverrideItem,
+)
 from ..paths import is_test_filepath
 
-_TEST_NAME_PREFIXES = ("test_", "pytest_")
 _DYNAMIC_METHOD_PREFIXES = ("visit_",)
 _MODULE_RUNTIME_HOOK_NAMES = {"__getattr__", "__dir__"}
 _DYNAMIC_HOOK_NAMES = {
@@ -38,18 +47,116 @@ def find_unused(
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str] = frozenset(),
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = (),
+    function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = (),
+    test_reference_sources: Mapping[str, tuple[str, ...]] | None = None,
+    module_registry: ModuleRegistryHandle | None = None,
+    class_metrics: tuple[ClassMetrics, ...] = (),
 ) -> tuple[DeadItem, ...]:
+    """Dead symbols only. Rule-3 abstentions are excluded by construction."""
+    return classify_liveness(
+        definitions=definitions,
+        referenced_names=referenced_names,
+        referenced_qualnames=referenced_qualnames,
+        runtime_reachability=runtime_reachability,
+        function_relationship_facts=function_relationship_facts,
+        test_reference_sources=test_reference_sources,
+        module_registry=module_registry,
+        class_metrics=class_metrics,
+    ).dead_items
+
+
+def classify_liveness(
+    *,
+    definitions: tuple[DeadCandidate, ...],
+    referenced_names: frozenset[str],
+    referenced_qualnames: frozenset[str] = frozenset(),
+    runtime_reachability: tuple[RuntimeReachabilityFact, ...] = (),
+    function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = (),
+    test_reference_sources: Mapping[str, tuple[str, ...]] | None = None,
+    module_registry: ModuleRegistryHandle | None = None,
+    class_metrics: tuple[ClassMetrics, ...] = (),
+) -> LivenessClassification:
+    """Tri-state liveness: ``live`` (omitted), ``dead``, or abstained.
+
+    Implements the rule-3 decision table. Evidence rows 1 and 3 (a
+    receiver-type-proven reference, a runtime edge) are read from
+    ``referenced_qualnames``, the owning class's ``self_dispatched_methods``,
+    and ``runtime_reachability``; row 2 from the owning class's
+    ``decorator_evidenced_methods``. Name-only matching is never evidence for
+    a method whose owner carries an unresolved external base.
+
+    A ``self.<name>()`` call inside the declaring class is row-1 evidence:
+    ``self`` binds only the declaring class or a subclass, so the receiver
+    type is proven and the reference is method-specific. Without it, ordinary
+    private helpers of any externally-based class abstained for want of a
+    receiver the caller never had to name.
+
+    Every evidence row resolves to ``live`` (the symbol is omitted). Only the
+    absence of all of them abstains; only a symbol outside rule 3 can be dead.
+    """
     items: list[DeadItem] = []
+    abstentions: list[UnresolvedOverrideItem] = []
     runtime_reachable_qualnames = _runtime_reachable_qualnames(runtime_reachability)
+    opaque_base_classes = {
+        metric.qualname: metric
+        for metric in class_metrics
+        if metric.has_unresolved_external_base
+    }
+    decorator_evidence_qualnames = frozenset(
+        method_qualname
+        for metric in class_metrics
+        for method_qualname in metric.decorator_evidenced_methods
+    )
+    self_dispatch_qualnames = frozenset(
+        method_qualname
+        for metric in class_metrics
+        for method_qualname in metric.self_dispatched_methods
+    )
+    sources_by_target = (
+        collect_test_reference_sources(function_relationship_facts)
+        if test_reference_sources is None
+        else {
+            target: tuple(sorted(set(sources)))
+            for target, sources in sorted(test_reference_sources.items())
+        }
+    )
     for symbol in definitions:
+        governing_base = _governing_opaque_base(
+            symbol,
+            opaque_base_classes=opaque_base_classes,
+        )
         if _should_skip_dead_candidate(
             symbol,
             referenced_names=referenced_names,
             referenced_qualnames=referenced_qualnames,
             runtime_reachable_qualnames=runtime_reachable_qualnames,
+            self_dispatch_qualnames=self_dispatch_qualnames,
+            module_registry=module_registry,
+            governed_by_opaque_base=governing_base is not None,
         ):
             continue
 
+        if governing_base is not None:
+            # A governed method never reaches the dead branch: row-2 evidence
+            # (@override, a framework hook) proves the base dispatches here and
+            # makes it LIVE, and without evidence it abstains. Denying only the
+            # abstention would fall through below and report @override as dead,
+            # inverting the row.
+            if symbol.qualname not in decorator_evidence_qualnames:
+                abstentions.append(
+                    UnresolvedOverrideItem(
+                        qualname=symbol.qualname,
+                        filepath=symbol.filepath,
+                        start_line=symbol.start_line,
+                        end_line=symbol.end_line,
+                        kind=symbol.kind,
+                        class_qualname=governing_base.qualname,
+                        base_names=governing_base.base_names,
+                    )
+                )
+            continue
+
+        sources = sources_by_target.get(symbol.qualname, ())
         items.append(
             DeadItem(
                 qualname=symbol.qualname,
@@ -61,22 +168,53 @@ def find_unused(
                     symbol,
                     referenced_names=referenced_names,
                 ),
+                reason="test_only_reference" if sources else "unreferenced",
+                test_reference_sources=sources,
             )
         )
 
-    items_sorted = tuple(
-        sorted(
-            items,
-            key=lambda item: (
-                item.filepath,
-                item.start_line,
-                item.end_line,
-                item.qualname,
-                item.kind,
-            ),
-        )
+    return LivenessClassification(
+        dead_items=tuple(sorted(items, key=_liveness_item_sort_key)),
+        unresolved_overrides=tuple(sorted(abstentions, key=_liveness_item_sort_key)),
     )
-    return items_sorted
+
+
+def _liveness_item_sort_key(
+    item: DeadItem | UnresolvedOverrideItem,
+) -> tuple[str, int, int, str, str]:
+    return (
+        item.filepath,
+        item.start_line,
+        item.end_line,
+        item.qualname,
+        item.kind,
+    )
+
+
+def _governing_opaque_base(
+    symbol: DeadCandidate,
+    *,
+    opaque_base_classes: Mapping[str, ClassMetrics],
+) -> ClassMetrics | None:
+    """The opaque-base fact that governs ``symbol``, when rule 3 applies.
+
+    Rule 3 covers public and protected METHODS only. A name-mangled private
+    (``__x``, not ``__x__``) is excluded by the decision table: an external
+    base cannot override it under Python's identity rules, so it stays
+    ordinary dead-eligible code. Classes themselves are never governed.
+    """
+    if symbol.kind != SYMBOL_KIND_METHOD:
+        return None
+    if _is_name_mangled_private(symbol.local_name):
+        return None
+    class_qualname, separator, _method = symbol.qualname.rpartition(".")
+    if not separator:
+        return None
+    return opaque_base_classes.get(class_qualname)
+
+
+def _is_name_mangled_private(name: str) -> bool:
+    return name.startswith("__") and not name.endswith("__")
 
 
 def find_suppressed_unused(
@@ -85,6 +223,9 @@ def find_suppressed_unused(
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str] = frozenset(),
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = (),
+    function_relationship_facts: tuple[FunctionRelationshipFacts, ...] = (),
+    module_registry: ModuleRegistryHandle | None = None,
+    class_metrics: tuple[ClassMetrics, ...] = (),
 ) -> tuple[DeadItem, ...]:
     suppressed_definitions = tuple(
         replace(symbol, suppressed_rules=())
@@ -98,14 +239,20 @@ def find_suppressed_unused(
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
         runtime_reachability=runtime_reachability,
+        function_relationship_facts=function_relationship_facts,
+        module_registry=module_registry,
+        class_metrics=class_metrics,
     )
 
 
-def _is_non_actionable_candidate(symbol: DeadCandidate) -> bool:
-    # pytest entrypoints and fixtures are discovered by naming conventions.
-    if symbol.local_name.startswith(_TEST_NAME_PREFIXES):
-        return True
-    if is_test_filepath(symbol.filepath):
+def _is_non_actionable_candidate(
+    symbol: DeadCandidate,
+    *,
+    module_registry: ModuleRegistryHandle | None,
+) -> bool:
+    # Test symbols are non-actionable because of their source lane, not because
+    # a production symbol happens to use a pytest-like name.
+    if is_test_filepath(symbol.filepath, module_registry=module_registry):
         return True
 
     # Module-level dynamic hooks (PEP 562) are invoked by import/runtime lookup.
@@ -127,13 +274,29 @@ def _should_skip_dead_candidate(
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
     runtime_reachable_qualnames: frozenset[str],
+    self_dispatch_qualnames: frozenset[str] = frozenset(),
+    module_registry: ModuleRegistryHandle | None,
+    governed_by_opaque_base: bool = False,
 ) -> bool:
+    # The bare-name clause is the ONLY behavioural difference rule 3 makes
+    # here, and only for a method governed by an opaque external base. A bare
+    # name is not method-specific evidence: popular names like get/save/close
+    # would revive half a project through an unrelated receiver. Every other
+    # path is byte-identical to the pre-rule-3 predicate.
+    name_match_is_evidence = not governed_by_opaque_base
+    # Self-dispatch is qualname-keyed, so it is admitted for every candidate
+    # rather than only for governed ones. Outside rule 3 it is inert: the same
+    # call already put the bare name into referenced_names.
     return (
         DEAD_CODE_RULE_ID in symbol.suppressed_rules
-        or _is_non_actionable_candidate(symbol)
+        or _is_non_actionable_candidate(
+            symbol,
+            module_registry=module_registry,
+        )
         or symbol.qualname in referenced_qualnames
         or symbol.qualname in runtime_reachable_qualnames
-        or symbol.local_name in referenced_names
+        or symbol.qualname in self_dispatch_qualnames
+        or (name_match_is_evidence and symbol.local_name in referenced_names)
     )
 
 
@@ -159,3 +322,24 @@ def _runtime_reachable_qualnames(
         for fact in facts
         if fact.confidence in {CONFIDENCE_HIGH, CONFIDENCE_MEDIUM}
     )
+
+
+def collect_test_reference_sources(
+    facts: tuple[FunctionRelationshipFacts, ...],
+) -> dict[str, tuple[str, ...]]:
+    sources_by_target: dict[str, set[str]] = {}
+    for function_facts in facts:
+        for relationship in function_facts.relationships:
+            if (
+                relationship.origin_lane != "test"
+                or relationship.resolution_status != "resolved"
+                or relationship.target_qualname is None
+            ):
+                continue
+            sources_by_target.setdefault(relationship.target_qualname, set()).add(
+                relationship.source_qualname
+            )
+    return {
+        target: tuple(sorted(sources))
+        for target, sources in sorted(sources_by_target.items())
+    }

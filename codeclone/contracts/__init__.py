@@ -10,8 +10,18 @@ from enum import IntEnum
 from typing import Final
 
 BASELINE_SCHEMA_VERSION: Final = "3.0"
-BASELINE_FINGERPRINT_VERSION: Final = "2"
-WIRE_VERSION: Final = "1"
+# Version "3" carries two changes that land together and are not separable:
+# the norm CFG (post-terminator statements become real unreachable blocks, and
+# exception dispatch, `finally` routing and context-manager suppression become
+# ordinary edges) and binding-aware symbol emission in the wire. The hash
+# domain moves with it (`ccfp3:fn`), so a function whose normalization did not
+# change still cannot collide across generations.
+BASELINE_FINGERPRINT_VERSION: Final = "3"
+# Version "2" emits every Name and Attribute by the role its symbol is bound
+# to, in every expression position, replacing the four position-based
+# preservation sites. Alpha-renaming a local no longer moves the wire, and a
+# resolved import keeps its canonical identity where the old wire erased it.
+WIRE_VERSION: Final = "2"
 MODULE_IDENTITY_VERSION: Final = "2"
 PORTABLE_PATH_PROFILE_VERSION: Final = "1"
 SEMANTIC_EVENT_VERSION: Final = "1"
@@ -30,8 +40,37 @@ REPORT_ENVELOPE_DIGEST_DOMAIN: Final = "codeclone.report.envelope.v1\0"
 GATE_LANE_MATRIX_VERSION: Final = "2"
 HEALTH_INPUT_MANIFEST_VERSION: Final = "1"
 OBSERVER_VOCABULARY_VERSION: Final = "3"
+LIVENESS_POLICY_VERSION: Final = "1"
+SOURCE_KIND_POLICY_VERSION: Final = "1"
+# Statement-level unreachability (39Y Y9). Version "1" is ONE predicate over
+# ONE graph: a statement cannot run exactly when its block is not reachable
+# from ``CFG.entry`` by directed traversal of ``Block.successors``. There is no
+# separate clause for code after a terminator and none for a literal guard —
+# the norm CFG builder already expresses both structurally, by emitting the
+# post-terminator tail as a block with no incoming edge and by suppressing the
+# edge into a branch whose guard is a literal ``ast.Constant`` that forbids
+# entry. Exception dispatch, ``finally`` routing and context-manager
+# suppression are likewise ordinary edges, so traversal answers them too.
+# ``BlockOrigin`` names a cause for the reader and is evidence only: the block
+# is already decided unreachable before any origin is consulted, and no verdict
+# depends on it. No value inference and no propagation: the moment a name
+# lookup counts as evidence the rule stops being this declared predicate.
+STATEMENT_REACHABILITY_POLICY_VERSION: Final = "1"
+# Maximum number of inserted, deleted or replaced normalized statements between
+# two units that still group as the ``near_miss`` clone tier (39Y Y8). Integer
+# by contract: the tier carries no similarity score and no tunable floor. A
+# distance of zero is the exact tier's business and never enters near_miss.
+NEAR_MISS_MAX_EDIT_STATEMENTS: Final = 1
 
-CACHE_VERSION: Final = "3.1"
+# 3.2 adds the two rule-3 fact families: per-class base resolution and
+# per-method decorator evidence. Both gate the tri-state liveness verdict,
+# so a cache that lacked them would make the verdict depend on cache state.
+# It also carries the per-unit normalized statement sequence behind the
+# ``near_miss`` tier (39Y Y8): grouping runs over units that a warm run serves
+# straight off the wire, so a sequence that did not ride the cache would make a
+# warm run report zero near-miss pairs. Everything this phase sanctions rides
+# this one bump instead of adding a second.
+CACHE_VERSION: Final = "3.2"
 REPORT_SCHEMA_VERSION: Final = "3.0"
 METRICS_BASELINE_SCHEMA_VERSION: Final = "1.2"
 ENGINEERING_MEMORY_SCHEMA_VERSION: Final = "1.7"
@@ -218,9 +257,11 @@ __all__ = [
     "HEALTH_WEIGHTS",
     "IDE_GOVERNANCE_PROTOCOL_VERSION",
     "ISSUES_URL",
+    "LIVENESS_POLICY_VERSION",
     "MEMORY_PROJECTION_VERSION",
     "METRICS_BASELINE_SCHEMA_VERSION",
     "MODULE_IDENTITY_VERSION",
+    "NEAR_MISS_MAX_EDIT_STATEMENTS",
     "OBSERVER_VOCABULARY_VERSION",
     "PATCH_TRAIL_SCHEMA_VERSION",
     "PORTABLE_PATH_PROFILE_VERSION",
@@ -228,6 +269,8 @@ __all__ = [
     "REPOSITORY_URL",
     "SEMANTIC_INDEX_FORMAT_VERSION",
     "SEMANTIC_PROJECTION_REVISION_VERSION",
+    "SOURCE_KIND_POLICY_VERSION",
+    "STATEMENT_REACHABILITY_POLICY_VERSION",
     "TRAJECTORY_PROJECTION_VERSION",
     "TRAJECTORY_PROJECTION_VERSION_V1",
     "TRAJECTORY_QUALITY_SCORE_VERSION",

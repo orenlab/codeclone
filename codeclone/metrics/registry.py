@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import TypeGuard
 
 from ..domain.findings import CATEGORY_COHESION, CATEGORY_COMPLEXITY, CATEGORY_COUPLING
@@ -15,7 +15,9 @@ from ..models import (
     ApiSurfaceSnapshot,
     DeadItem,
     DepGraph,
+    GroupItemLike,
     HealthScore,
+    LiveRootReason,
     MetricProjectContext,
     ModuleDep,
     ModuleDocstringCoverage,
@@ -23,11 +25,14 @@ from ..models import (
     ProjectMetrics,
     RuntimeReachabilityFact,
     SemanticAuthorityResult,
+    UnreachableStatementFinding,
+    UnreachableStatementItem,
+    UnresolvedOverrideItem,
 )
 from ..utils.coerce import as_int as _as_int
 from ..utils.coerce import as_str as _as_str
 from ._base import MetricAggregate, MetricFamily, MetricResult
-from .dead_code import find_unused
+from .dead_code import classify_liveness
 from .dependencies import build_dep_graph
 from .health import HealthInputs, compute_health
 
@@ -148,6 +153,9 @@ def project_metrics_defaults() -> dict[str, object]:
         "dependency_max_depth": 0,
         "dependency_longest_chains": (),
         "dead_code": (),
+        "unresolved_overrides": (),
+        "unreachable_statements": (),
+        "live_root_reasons": (),
         "runtime_reachability": (),
         "health": _EMPTY_HEALTH_SCORE,
         "typing_param_total": 0,
@@ -191,6 +199,18 @@ def build_project_metrics(project_fields: dict[str, object]) -> ProjectMetrics:
             "dependency_longest_chains",
         ),
         dead_code=_result_dead_items(project_fields, "dead_code"),
+        unresolved_overrides=_result_unresolved_overrides(
+            project_fields,
+            "unresolved_overrides",
+        ),
+        unreachable_statements=_result_unreachable_statements(
+            project_fields,
+            "unreachable_statements",
+        ),
+        live_root_reasons=_result_live_root_reasons(
+            project_fields,
+            "live_root_reasons",
+        ),
         runtime_reachability=_result_runtime_reachability(
             project_fields,
             "runtime_reachability",
@@ -250,6 +270,58 @@ def _result_dead_items(
 ) -> tuple[DeadItem, ...]:
     value = result.get(key, ())
     return value if _is_tuple_of_dead_items(value) else ()
+
+
+def _is_tuple_of_unresolved_overrides(
+    value: object,
+) -> TypeGuard[tuple[UnresolvedOverrideItem, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, UnresolvedOverrideItem) for item in value
+    )
+
+
+def _is_tuple_of_live_root_reasons(
+    value: object,
+) -> TypeGuard[tuple[tuple[str, LiveRootReason], ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, tuple)
+        and len(item) == 2
+        and isinstance(item[0], str)
+        and item[1] in ("external_decorator", "export_root")
+        for item in value
+    )
+
+
+def _result_unresolved_overrides(
+    result: dict[str, object],
+    key: str,
+) -> tuple[UnresolvedOverrideItem, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_unresolved_overrides(value) else ()
+
+
+def _is_tuple_of_unreachable_statements(
+    value: object,
+) -> TypeGuard[tuple[UnreachableStatementFinding, ...]]:
+    return isinstance(value, tuple) and all(
+        isinstance(item, UnreachableStatementFinding) for item in value
+    )
+
+
+def _result_unreachable_statements(
+    result: dict[str, object],
+    key: str,
+) -> tuple[UnreachableStatementFinding, ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_unreachable_statements(value) else ()
+
+
+def _result_live_root_reasons(
+    result: dict[str, object],
+    key: str,
+) -> tuple[tuple[str, LiveRootReason], ...]:
+    value = result.get(key, ())
+    return value if _is_tuple_of_live_root_reasons(value) else ()
 
 
 def _result_module_deps(
@@ -502,18 +574,84 @@ def _aggregate_dependencies_family(results: list[MetricResult]) -> MetricAggrega
     )
 
 
+def _collect_unreachable_statements(
+    units: Sequence[GroupItemLike],
+) -> tuple[UnreachableStatementFinding, ...]:
+    """Locate every per-unit reachability fact in the repository.
+
+    Deliberately not gated on ``skip_dead_code``: reachability is proven by a
+    function's own control flow and needs no reference graph, so the switch
+    that silences the symbol lane has no authority over this one.
+    """
+
+    findings: list[UnreachableStatementFinding] = []
+    for unit in units:
+        qualname = unit.get("qualname")
+        filepath = unit.get("filepath")
+        facts = unit.get("unreachable_statements", ())
+        if (
+            not isinstance(qualname, str)
+            or not isinstance(filepath, str)
+            or not isinstance(facts, tuple)
+        ):
+            continue
+        findings.extend(
+            UnreachableStatementFinding(
+                qualname=qualname,
+                filepath=filepath,
+                reason=fact.reason,
+                start_line=fact.start_line,
+                end_line=fact.end_line,
+                statement_count=fact.statement_count,
+            )
+            for fact in facts
+            if isinstance(fact, UnreachableStatementItem)
+        )
+    return tuple(
+        sorted(
+            findings,
+            key=lambda item: (
+                item.filepath,
+                item.start_line,
+                item.end_line,
+                item.qualname,
+                item.reason,
+            ),
+        )
+    )
+
+
 def _build_dead_code_result(context: MetricProjectContext) -> MetricResult:
     dead_items: tuple[DeadItem, ...] = ()
+    unresolved_overrides: tuple[UnresolvedOverrideItem, ...] = ()
     if not context.skip_dead_code:
-        dead_items = find_unused(
+        # classify_liveness rather than find_unused: the abstention lane is
+        # the point of the rule-3 tri-state, and find_unused discards it by
+        # construction. Both lanes come from one classification pass, so the
+        # dead verdict and the abstention can never disagree.
+        classification = classify_liveness(
             definitions=tuple(context.dead_candidates),
             referenced_names=context.referenced_names,
             referenced_qualnames=context.referenced_qualnames,
             runtime_reachability=context.runtime_reachability,
+            test_reference_sources=context.test_reference_sources,
+            module_registry=context.module_registry,
+            class_metrics=context.class_metrics,
         )
+        dead_items = classification.dead_items
+        unresolved_overrides = classification.unresolved_overrides
     return {
+        "unreachable_statements": _collect_unreachable_statements(context.units),
         "dead_code": dead_items,
         "dead_items": dead_items,
+        "unresolved_overrides": unresolved_overrides,
+        "live_root_reasons": tuple(
+            sorted(
+                (candidate.qualname, candidate.live_root_reason)
+                for candidate in context.dead_candidates
+                if candidate.live_root_reason is not None
+            )
+        ),
         "runtime_reachability": tuple(context.runtime_reachability),
     }
 
@@ -529,9 +667,25 @@ def _compute_dead_code_family(context: MetricProjectContext) -> MetricResult:
 def _aggregate_dead_code_family(results: list[MetricResult]) -> MetricAggregate:
     result = _first_result(results)
     dead_items = result.get("dead_items")
+    unresolved_overrides = result.get("unresolved_overrides")
+    live_root_reasons = result.get("live_root_reasons")
     return MetricAggregate(
         project_fields={
             "dead_code": _result_dead_items(result, "dead_code"),
+            "unresolved_overrides": (
+                unresolved_overrides
+                if _is_tuple_of_unresolved_overrides(unresolved_overrides)
+                else ()
+            ),
+            "live_root_reasons": (
+                live_root_reasons
+                if _is_tuple_of_live_root_reasons(live_root_reasons)
+                else ()
+            ),
+            "unreachable_statements": _result_unreachable_statements(
+                result,
+                "unreachable_statements",
+            ),
             "runtime_reachability": _result_runtime_reachability(
                 result,
                 "runtime_reachability",
@@ -741,7 +895,11 @@ METRIC_FAMILIES: dict[str, MetricFamily] = {
         aggregate=_aggregate_dead_code_family,
         report_section="dead_code",
         baseline_key="dead_code_items",
-        gate_keys=("dead_code_high_confidence", "new_dead_code"),
+        gate_keys=(
+            "dead_code_high_confidence",
+            "unresolved_external_override",
+            "new_dead_code",
+        ),
         skippable_flag="skip_metrics",
     ),
     "health": MetricFamily(

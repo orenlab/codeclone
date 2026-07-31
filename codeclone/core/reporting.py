@@ -270,6 +270,7 @@ def build_report_body_for_analysis(
                 analysis.structural_findings if analysis.structural_findings else None
             ),
             baseline_trust=baseline_trust,
+            near_miss_pairs=analysis.near_miss_pairs,
         )
 
 
@@ -429,6 +430,9 @@ def _gate_config(boot: BootstrapResult) -> MetricGateConfig:
         fail_cohesion=boot.args.fail_cohesion,
         fail_cycles=boot.args.fail_cycles,
         fail_dead_code=boot.args.fail_dead_code,
+        fail_on_unresolved_dead_code=bool(
+            getattr(boot.args, "fail_on_unresolved_dead_code", False)
+        ),
         fail_health=boot.args.fail_health,
         fail_on_new_metrics=boot.args.fail_on_new_metrics,
         fail_on_typing_regression=bool(

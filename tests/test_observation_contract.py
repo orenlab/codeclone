@@ -16,9 +16,12 @@ import pytest
 from codeclone.contracts import (
     GATE_LANE_MATRIX_VERSION,
     HEALTH_INPUT_MANIFEST_VERSION,
+    OBSERVATION_DIGEST_VERSION,
 )
 from codeclone.models import (
     AdoptionCount,
+    DeadCandidate,
+    DeadCodeColumnarPayload,
     DeadCodeObservation,
     DigestObject,
     EvaluationContract,
@@ -27,6 +30,7 @@ from codeclone.models import (
     IntegerObservationPayload,
     ModuleDep,
     ModuleRegistryHandle,
+    ObservationBundle,
     ResolvedSourceIdentity,
 )
 from codeclone.observations.contracts import (
@@ -68,7 +72,13 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     "coupling_cohesion_observations": (
         "a16cf9ee22d10c2055903f98e20064cb87d0a113e436348a56f398df127e10cd"
     ),
-    "dead_code": ("4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9"),
+    # SANCTIONED golden change, 39Y cycle 2b. Brief section 6, P1-7
+    # consolidation ruling: rule-3 abstentions, live-root reasons and the Y9
+    # observation-kind discriminator all extend this one lane, so they land
+    # under ONE coordinated payload_schema bump ("2" -> "3") rather than three.
+    # Pre-bump digest was
+    # 4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9.
+    "dead_code": ("2fb31219707ab065986286f091ff3e90696d4186e8a5614bfcd6a620400b00ec"),
     "dependencies": (
         "6905c36fbcd905398648439c59ef31746a7ff9561e3b7f8b20c023511d70599b"
     ),
@@ -121,7 +131,8 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         "adoption_counts": "2",
         "api_surface": "2",
         "coupling_cohesion_observations": "3",
-        "dead_code": "2",
+        # 39Y cycle 2b: the single consolidated bump this phase owes.
+        "dead_code": "3",
         "dependencies": "4",
         "module_identity": "3",
         "risk_observations": "3",
@@ -163,6 +174,162 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
     assert {
         name: _descriptor_digest(descriptor) for name, descriptor in descriptors.items()
     } == _ACCEPTED_V1_DESCRIPTOR_DIGESTS
+
+
+def test_dead_code_bump_leaves_every_other_lane_descriptor_byte_identical() -> None:
+    """39Y cycle 2b owes exactly one lane bump — this proves it took only one.
+
+    A payload_schema bump rewrites that lane's descriptor digest and nothing
+    else. Pinning the other nine here makes an accidental second bump a test
+    failure rather than a silently rewritten baseline.
+    """
+    contract = build_observation_contract(
+        collect_metrics=True,
+        collect_dependencies=True,
+        collect_dead_code=True,
+        collect_api_surface=True,
+        collect_semantic_authority=True,
+    )
+    digests = {
+        descriptor.name: _descriptor_digest(descriptor)
+        for descriptor in contract.descriptors
+    }
+
+    unchanged = {
+        name: digest for name, digest in digests.items() if name != "dead_code"
+    }
+
+    assert unchanged == {
+        **_ACCEPTED_V1_DESCRIPTOR_DIGESTS,
+        **{
+            name: digest
+            for name, digest in _BUMPED_DESCRIPTOR_DIGESTS.items()
+            if name != "dead_code"
+        },
+        "semantic_authority": (
+            "3401d89134a48d3a39fb02d96b8910eab6ff752891e9ad0a2ce98451d5fb60f5"
+        ),
+    }
+    assert digests["dead_code"] == _BUMPED_DESCRIPTOR_DIGESTS["dead_code"]
+
+
+def _dead_code_payload(bundle: ObservationBundle) -> DeadCodeColumnarPayload:
+    payload = next(
+        lane.payload
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "dead_code"
+    )
+    assert isinstance(payload, DeadCodeColumnarPayload)
+    return payload
+
+
+def test_dead_code_lane_carries_reasons_abstentions_and_the_kind_axis() -> None:
+    """Every key the schema-3 bump added must be populated by real inputs.
+
+    A payload key nothing can populate is a dead key, so this drives all three
+    contents of the consolidated bump through the projection at once:
+    live-root reasons, rule-3 abstentions, and the Y9 observation-kind axis.
+    """
+    candidates = (
+        DeadCandidate(
+            qualname="pkg.mod:framework_handler",
+            local_name="framework_handler",
+            filepath="pkg/mod.py",
+            start_line=1,
+            end_line=2,
+            kind="function",
+            live_root_reason="external_decorator",
+        ),
+        DeadCandidate(
+            qualname="pkg.mod:Exported.method",
+            local_name="method",
+            filepath="pkg/mod.py",
+            start_line=4,
+            end_line=5,
+            kind="method",
+            live_root_reason="export_root",
+        ),
+        DeadCandidate(
+            qualname="pkg.mod:Handler.handle",
+            local_name="handle",
+            filepath="pkg/mod.py",
+            start_line=7,
+            end_line=8,
+            kind="method",
+        ),
+        DeadCandidate(
+            qualname="pkg.mod:plain_unused",
+            local_name="plain_unused",
+            filepath="pkg/mod.py",
+            start_line=10,
+            end_line=11,
+            kind="function",
+        ),
+    )
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        dead_candidates=candidates,
+        abstained_qualnames=frozenset({"pkg.mod:Handler.handle"}),
+    )
+    payload = _dead_code_payload(bundle)
+
+    # Rows sort by (prefix, qualname, kind): Exported.method, Handler.handle,
+    # framework_handler, plain_unused.
+    assert payload.qualname == (
+        "Exported.method",
+        "Handler.handle",
+        "framework_handler",
+        "plain_unused",
+    )
+    assert {(item.row, item.reason) for item in payload.live_roots} == {
+        (0, "export_root"),
+        (2, "external_decorator"),
+    }
+    assert payload.abstained == (1,)
+    # The Y9 axis is a real column today, carrying the only kind that exists.
+    assert payload.observation_kinds == ("symbol",)
+    assert payload.observation_kind == (0, 0, 0, 0)
+
+
+def test_a_live_root_is_never_also_recorded_as_an_abstention() -> None:
+    """The two states are mutually exclusive: a root is proven live.
+
+    Without this, a symbol held live by a root rule could still be counted as
+    an abstention, which would inflate the opt-in gate with symbols the
+    analysis is not actually unsure about.
+    """
+    candidate = DeadCandidate(
+        qualname="pkg.mod:rooted",
+        local_name="rooted",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=2,
+        kind="function",
+        live_root_reason="external_decorator",
+    )
+
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        dead_candidates=(candidate,),
+        abstained_qualnames=frozenset({"pkg.mod:rooted"}),
+    )
+    payload = _dead_code_payload(bundle)
+
+    assert payload.abstained == ()
+    assert {item.reason for item in payload.live_roots} == {"external_decorator"}
+    with pytest.raises(ValueError, match="cannot also carry a live root"):
+        DeadCodeObservation(
+            entity="pkg.mod:rooted",
+            candidate_kind="function",
+            reference_count=0,
+            reachable=False,
+            runtime_marker_count=0,
+            live_root_reason="external_decorator",
+            abstained=True,
+        )
 
 
 def test_missing_emitted_lane_is_a_typed_contract_failure() -> None:

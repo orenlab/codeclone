@@ -65,6 +65,45 @@ def _encode_units(entry: CacheFactsDict, wire: dict[str, object]) -> None:
             ]
             for unit in units
         ]
+        # Own top-level key, never a defaulted field on the positional unit
+        # row: the row decodes optionals through ``.get(default)``, so a
+        # sequence carried there would read as "no statements" on a stale entry
+        # and a warm run would silently report zero near-miss pairs. As its own
+        # key its ABSENCE rejects the entry instead, and rejection just means
+        # the file is re-analysed (39Y Y8).
+        wire["us"] = [
+            [
+                unit["qualname"],
+                unit["start_line"],
+                [
+                    field
+                    for element in unit.get("statement_sequence", ())
+                    for field in (element[0], element[1], element[2])
+                ],
+            ]
+            for unit in units
+        ]
+        # Same reasoning one lane over (39Y Y9): the CFG is built only on the
+        # analysed path, so a warm run cannot recompute reachability. Carried
+        # as its own key, an entry written before the fact existed is rejected
+        # rather than decoding into units that merely look fully reachable.
+        wire["ur"] = [
+            [
+                unit["qualname"],
+                unit["start_line"],
+                [
+                    field
+                    for fact in unit.get("unreachable_statements", ())
+                    for field in (
+                        fact.reason,
+                        fact.start_line,
+                        fact.end_line,
+                        fact.statement_count,
+                    )
+                ],
+            ]
+            for unit in units
+        ]
 
 
 def _encode_blocks(entry: CacheFactsDict, wire: dict[str, object]) -> None:
@@ -126,6 +165,71 @@ def _append_coupled_classes_row(
         rows.append([metric["qualname"], coupled_classes])
 
 
+def _append_instantiation_candidates_row(
+    metric: ClassMetricsDict,
+    *,
+    rows: list[list[object]],
+) -> None:
+    """CACHE_VERSION 3.2: imported call targets awaiting project resolution.
+
+    A class that calls no imported binding is omitted, so trees that never had
+    a candidate keep encoding byte-identically.
+    """
+    candidates = _normalized_optional_string_list(
+        metric.get("instantiation_candidates", [])
+    )
+    if candidates:
+        rows.append([metric["qualname"], candidates])
+
+
+def _append_class_base_row(
+    metric: ClassMetricsDict,
+    *,
+    rows: list[list[object]],
+) -> None:
+    """CACHE_VERSION 3.2: declared bases and the rule-3 opacity flag.
+
+    A class that declares no base is omitted - it has nothing to resolve, and
+    the flag cannot be true without a base - so 3.1-shaped trees keep encoding
+    byte-identically.
+    """
+    base_names = _normalized_optional_string_list(metric.get("base_names", []))
+    if base_names:
+        rows.append(
+            [
+                metric["qualname"],
+                base_names,
+                bool(metric.get("has_unresolved_external_base", False)),
+            ]
+        )
+
+
+def _append_decorator_evidence_row(
+    metric: ClassMetricsDict,
+    *,
+    rows: list[list[object]],
+) -> None:
+    """CACHE_VERSION 3.2: methods of this class with an explicit contract."""
+    evidenced = _normalized_optional_string_list(
+        metric.get("decorator_evidenced_methods", [])
+    )
+    if evidenced:
+        rows.append([metric["qualname"], evidenced])
+
+
+def _append_self_dispatch_row(
+    metric: ClassMetricsDict,
+    *,
+    rows: list[list[object]],
+) -> None:
+    """CACHE_VERSION 3.2: methods of this class called through ``self``."""
+    dispatched = _normalized_optional_string_list(
+        metric.get("self_dispatched_methods", [])
+    )
+    if dispatched:
+        rows.append([metric["qualname"], dispatched])
+
+
 def _encode_class_metrics(entry: CacheFactsDict, wire: dict[str, object]) -> None:
     class_metrics = sorted(
         entry["class_metrics"],
@@ -137,6 +241,13 @@ def _encode_class_metrics(entry: CacheFactsDict, wire: dict[str, object]) -> Non
     )
     if class_metrics:
         coupled_classes_rows: list[list[object]] = []
+        # "bs"/"de"/"sd", not "cb": the top-level wire already spends "cb" on
+        # cache_content_binding_version, and a reader should never have to
+        # know which dict it is holding to read a key correctly.
+        class_base_rows: list[list[object]] = []
+        decorator_evidence_rows: list[list[object]] = []
+        self_dispatch_rows: list[list[object]] = []
+        instantiation_candidate_rows: list[list[object]] = []
         wire["cm"] = [
             [
                 metric["qualname"],
@@ -153,8 +264,23 @@ def _encode_class_metrics(entry: CacheFactsDict, wire: dict[str, object]) -> Non
         ]
         for metric in class_metrics:
             _append_coupled_classes_row(metric, rows=coupled_classes_rows)
+            _append_class_base_row(metric, rows=class_base_rows)
+            _append_decorator_evidence_row(metric, rows=decorator_evidence_rows)
+            _append_self_dispatch_row(metric, rows=self_dispatch_rows)
+            _append_instantiation_candidates_row(
+                metric,
+                rows=instantiation_candidate_rows,
+            )
         if coupled_classes_rows:
             wire["cc"] = coupled_classes_rows
+        if class_base_rows:
+            wire["bs"] = class_base_rows
+        if decorator_evidence_rows:
+            wire["de"] = decorator_evidence_rows
+        if self_dispatch_rows:
+            wire["sd"] = self_dispatch_rows
+        if instantiation_candidate_rows:
+            wire["ic"] = instantiation_candidate_rows
 
 
 def _encode_module_deps(entry: CacheFactsDict, wire: dict[str, object]) -> None:
@@ -225,8 +351,14 @@ def _encode_dead_candidates(entry: CacheFactsDict, wire: dict[str, object]) -> N
             ]
             suppressed_rules = candidate.get("suppressed_rules", [])
             normalized_rules = _normalized_optional_string_list(suppressed_rules)
-            if normalized_rules:
+            live_root_reason = candidate.get("live_root_reason", "")
+            # Positional tail. The reason needs slot 5 occupied to stay
+            # unambiguous, so an empty rules list is written when a row
+            # carries a reason but no suppressions.
+            if normalized_rules or live_root_reason:
                 encoded.append(normalized_rules)
+            if live_root_reason:
+                encoded.append(live_root_reason)
             encoded_dead_candidates.append(encoded)
         wire["dc"] = encoded_dead_candidates
 
@@ -463,6 +595,8 @@ def _neutral_facts(entry: CacheEntryV3) -> CacheFactsDict:
                 terminal_kind=item.terminal_kind,
                 try_finally_profile=item.try_finally_profile,
                 side_effect_order_profile=item.side_effect_order_profile,
+                statement_sequence=item.statement_sequence,
+                unreachable_statements=item.unreachable_statements,
             )
             for item in neutral.units
         ],
@@ -569,6 +703,7 @@ def _encode_wire_file_entry(entry: CacheEntryV3) -> dict[str, object]:
             else None
         ),
         "st": [entry.stat["mtime_ns"], entry.stat["size"]],
+        "bc": _digest_row(entry.binding_context_digest),
         "np": _digest_row(entry.module_neutral_profile),
         "dp": _digest_row(entry.module_dependent_profile),
         "n": neutral_wire,

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 
 from codeclone.analysis.normalizer import NormalizationConfig
@@ -19,8 +20,10 @@ from codeclone.models import (
     ModuleDep,
     ProjectMetrics,
     TrustVector,
+    UnresolvedOverrideItem,
 )
 from codeclone.report.gates.evaluator import (
+    GateResult,
     GateState,
     MetricGateConfig,
     active_gate_lane_requirements,
@@ -67,6 +70,141 @@ def _project_metrics() -> ProjectMetrics:
             ),
         ),
         health=HealthScore(total=90, grade="A", dimensions={"health": 90}),
+    )
+
+
+def _abstaining_project_metrics() -> ProjectMetrics:
+    """Project metrics whose only dead-code signal is a rule-3 abstention."""
+    return replace(
+        _project_metrics(),
+        dead_code=(),
+        unresolved_overrides=(
+            UnresolvedOverrideItem(
+                qualname="pkg.mod:Handler.handle",
+                filepath="pkg/mod.py",
+                start_line=10,
+                end_line=12,
+                kind="method",
+                class_qualname="pkg.mod:Handler",
+                base_names=("external_lib.Base",),
+            ),
+        ),
+    )
+
+
+def _gating_args(**overrides: object) -> Namespace:
+    defaults: dict[str, object] = {
+        "fail_complexity": -1,
+        "fail_coupling": -1,
+        "fail_cohesion": -1,
+        "fail_cycles": False,
+        "fail_dead_code": False,
+        "fail_on_unresolved_dead_code": False,
+        "fail_health": -1,
+        "fail_on_new_metrics": False,
+        "fail_on_typing_regression": False,
+        "fail_on_docstring_regression": False,
+        "fail_on_api_break": False,
+        "fail_on_authority_violation": False,
+        "fail_on_untested_hotspots": False,
+        "min_typing_coverage": -1,
+        "min_docstring_coverage": -1,
+        "coverage_min": 50,
+        "fail_on_new": False,
+        "fail_threshold": -1,
+    }
+    defaults.update(overrides)
+    return Namespace(**defaults)
+
+
+def _assert_gate(
+    result: GateResult,
+    *,
+    exit_code: int,
+    reasons: tuple[str, ...],
+) -> None:
+    """Assert exit code and reasons together so neither can drift alone."""
+    assert (result.exit_code, result.reasons) == (exit_code, reasons)
+
+
+def _cli_gate_result(
+    *,
+    tmp_path: Path,
+    project_metrics: ProjectMetrics,
+    args: Namespace,
+) -> GateResult:
+    boot = BootstrapResult(
+        root=tmp_path,
+        config=NormalizationConfig(),
+        args=args,
+        output_paths=OutputPaths(),
+        cache_path=tmp_path / "cache.json",
+    )
+    analysis = AnalysisResult(
+        func_groups={},
+        block_groups={},
+        block_groups_report={},
+        segment_groups={},
+        suppressed_segment_groups=0,
+        block_group_facts={},
+        func_clones_count=0,
+        block_clones_count=0,
+        segment_clones_count=0,
+        files_analyzed_or_cached=1,
+        project_metrics=project_metrics,
+        metrics_payload=None,
+        suggestions=(),
+        segment_groups_raw_digest="",
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+    )
+    return cli_gate(
+        boot=boot,
+        analysis=analysis,
+        new_func=set(),
+        new_block=set(),
+        metrics_diff=None,
+        baseline_trust=TrustVector(
+            root_verified=True,
+            lanes=tuple(
+                LaneTrust(name=lane, status="trusted", reason="compatible")
+                for lane in TEST_OBSERVATION_BUNDLE.contract.enabled_lanes
+            ),
+        ),
+    )
+
+
+def test_cli_path_gates_on_unresolved_overrides_in_both_directions(
+    tmp_path: Path,
+) -> None:
+    """39Y cycle 2b: the opt-in flag must work end-to-end through the CLI.
+
+    The evaluator-seam pins above proved the predicate; this proves the CLI
+    gate path actually carries the abstention count into GateState. Before
+    this cycle ``gate_state_from_project_metrics`` never populated
+    ``unresolved_external_override``, so the flag was inert in the real CLI
+    no matter what the operator asked for.
+    """
+    project_metrics = _abstaining_project_metrics()
+
+    off = _cli_gate_result(
+        tmp_path=tmp_path,
+        project_metrics=project_metrics,
+        args=_gating_args(fail_dead_code=True),
+    )
+    on = _cli_gate_result(
+        tmp_path=tmp_path,
+        project_metrics=project_metrics,
+        args=_gating_args(fail_on_unresolved_dead_code=True),
+    )
+
+    _assert_gate(off, exit_code=0, reasons=())
+    _assert_gate(
+        on,
+        exit_code=3,
+        reasons=(
+            "metric:Unresolved dead-code overrides "
+            "(--fail-on-unresolved-dead-code): 1 item(s).",
+        ),
     )
 
 
@@ -228,6 +366,137 @@ def test_gate_lane_matrix_covers_every_active_gate_family() -> None:
         "health_current",
         "health_delta",
     }
+    assert gate_lane_contract_versions() == ("2", "1")
+
+
+def _dead_code_gate_config(
+    *,
+    fail_dead_code: bool,
+    fail_on_unresolved_dead_code: bool,
+) -> MetricGateConfig:
+    """Arm the two dead-code predicates and nothing else."""
+    return MetricGateConfig(
+        fail_complexity=-1,
+        fail_coupling=-1,
+        fail_cohesion=-1,
+        fail_cycles=False,
+        fail_dead_code=fail_dead_code,
+        fail_health=-1,
+        fail_on_new_metrics=False,
+        fail_on_unresolved_dead_code=fail_on_unresolved_dead_code,
+    )
+
+
+def test_unresolved_override_abstentions_never_gate_while_flag_is_off() -> None:
+    """39Y brief section 6, OFF direction: abstention is not a gate input.
+
+    The maintainer ruling makes ``unresolved_external_override`` neither dead
+    nor live: excluded from default dead-code gates, never a gate regression.
+    Opting out is the default, so abstentions must neither raise the exit code
+    on their own nor inflate the count of the plain dead-code predicate.
+    """
+    config = _dead_code_gate_config(
+        fail_dead_code=True,
+        fail_on_unresolved_dead_code=False,
+    )
+    assert config.fail_on_unresolved_dead_code is False
+
+    abstentions_only = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0, unresolved_external_override=3),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+    alongside_dead_code = evaluate_gate_state(
+        state=GateState(dead_high_confidence=1, unresolved_external_override=3),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+
+    _assert_gate(abstentions_only, exit_code=0, reasons=())
+    # Distinct counts prove the two predicates never share a counter: the
+    # reported item count is the dead one alone, not dead + abstained.
+    _assert_gate(
+        alongside_dead_code,
+        exit_code=3,
+        reasons=("metric:Dead code detected (high confidence): 1 item(s).",),
+    )
+
+
+def test_unresolved_override_gate_fails_with_its_own_reason_and_count() -> None:
+    """39Y brief section 6, ON direction: opt-in gates on the exact count.
+
+    The reason names the flag inline because this failure and a plain
+    dead-code failure need different remediation (produce evidence vs delete
+    the symbol), so an operator must never have to guess which tripped.
+    """
+    config = _dead_code_gate_config(
+        fail_dead_code=False,
+        fail_on_unresolved_dead_code=True,
+    )
+
+    abstentions = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0, unresolved_external_override=3),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+    none_abstained = evaluate_gate_state(
+        state=GateState(dead_high_confidence=0, unresolved_external_override=0),
+        config=config,
+        enabled_lanes=("dead_code",),
+    )
+    both_predicates = evaluate_gate_state(
+        state=GateState(dead_high_confidence=1, unresolved_external_override=3),
+        config=_dead_code_gate_config(
+            fail_dead_code=True,
+            fail_on_unresolved_dead_code=True,
+        ),
+        enabled_lanes=("dead_code",),
+    )
+
+    assert abstentions.exit_code == 3
+    assert abstentions.reasons == (
+        "metric:Unresolved dead-code overrides "
+        "(--fail-on-unresolved-dead-code): 3 item(s).",
+    )
+    # The opt-in predicate reads the abstention lane, so it must declare the
+    # same evidence lane rather than gating on absent evidence.
+    assert abstentions.required_lanes == ("dead_code",)
+    assert abstentions.unavailable_lanes == ()
+    # Arming the flag is not itself a failure: zero abstentions still passes.
+    assert none_abstained.exit_code == 0
+    assert none_abstained.reasons == ()
+    # Both armed: two separately-worded reasons, each carrying its own count.
+    assert both_predicates.reasons == (
+        "metric:Dead code detected (high confidence): 1 item(s).",
+        "metric:Unresolved dead-code overrides "
+        "(--fail-on-unresolved-dead-code): 3 item(s).",
+    )
+
+
+def test_unresolved_override_flag_shares_the_dead_code_gate_family() -> None:
+    """The opt-in predicate must not move the versioned gate-to-lane matrix.
+
+    Both dead-code predicates read the same evidence lane, so the flag joins
+    the existing ``dead_code_current`` family. A new family key would change
+    the matrix this file pins above, which this flag is not chartered to move.
+    """
+    flag_only = active_gate_lane_requirements(
+        config=_dead_code_gate_config(
+            fail_dead_code=False,
+            fail_on_unresolved_dead_code=True,
+        ),
+        enabled_lanes=("dead_code",),
+    )
+    both = active_gate_lane_requirements(
+        config=_dead_code_gate_config(
+            fail_dead_code=True,
+            fail_on_unresolved_dead_code=True,
+        ),
+        enabled_lanes=("dead_code",),
+    )
+
+    assert flag_only == (("dead_code_current", ("dead_code",)),)
+    assert both == flag_only
     assert gate_lane_contract_versions() == ("2", "1")
 
 

@@ -58,6 +58,9 @@ from tests._report_access import (
     report_inventory_files as _report_inventory_files,
 )
 from tests._report_access import (
+    report_meta as _report_meta,
+)
+from tests._report_access import (
     report_meta_baseline as _report_meta_baseline,
 )
 from tests._report_access import (
@@ -1588,6 +1591,31 @@ def test_cli_reports_include_audit_metadata_ok(
         "Baseline schema",
     ):
         assert needle in html
+
+
+@pytest.mark.parametrize(
+    ("mode_flag", "expected_mode"),
+    [
+        ("--no-skip-metrics", "full"),
+        ("--skip-metrics", "clones_only"),
+        (None, "clones_only"),
+    ],
+)
+def test_cli_metrics_mode_resolution_is_preserved_in_report_metadata(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mode_flag: str | None,
+    expected_mode: str,
+) -> None:
+    _write_default_source(tmp_path)
+
+    payload = _run_json_report(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        extra_args=[] if mode_flag is None else [mode_flag],
+    )
+
+    assert _report_meta(payload)["analysis_mode"] == expected_mode
 
 
 def test_cli_reports_include_audit_metadata_missing_baseline(
@@ -4326,6 +4354,8 @@ def test_cli_dead_code_suppression_is_stable_between_plain_and_json_runs(
         "suppressed": suppressed_count,
         "baseline_diff_available": False,
         "new_items": 0,
+        "unresolved_external_override": 0,
+        "live_roots": 0,
     }
 
     _run_main(

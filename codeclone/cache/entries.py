@@ -278,6 +278,8 @@ def _unit_dict_from_model(unit: Unit, filepath: str) -> UnitDict:
         terminal_kind=unit.terminal_kind,
         try_finally_profile=unit.try_finally_profile,
         side_effect_order_profile=unit.side_effect_order_profile,
+        statement_sequence=unit.statement_sequence,
+        unreachable_statements=unit.unreachable_statements,
     )
 
 
@@ -429,6 +431,11 @@ def _class_metrics_dict_from_model(
         risk_coupling=metric.risk_coupling,
         risk_cohesion=metric.risk_cohesion,
         coupled_classes=sorted(set(metric.coupled_classes)),
+        instantiation_candidates=sorted(set(metric.instantiation_candidates)),
+        base_names=sorted(set(metric.base_names)),
+        has_unresolved_external_base=metric.has_unresolved_external_base,
+        decorator_evidenced_methods=sorted(set(metric.decorator_evidenced_methods)),
+        self_dispatched_methods=sorted(set(metric.self_dispatched_methods)),
     )
 
 
@@ -462,6 +469,8 @@ def _dead_candidate_dict_from_model(
     )
     if candidate.suppressed_rules:
         result["suppressed_rules"] = sorted(set(candidate.suppressed_rules))
+    if candidate.live_root_reason is not None:
+        result["live_root_reason"] = candidate.live_root_reason
     return result
 
 

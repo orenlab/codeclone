@@ -9,6 +9,10 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Literal
 
+from ...contracts import (
+    NEAR_MISS_MAX_EDIT_STATEMENTS,
+    STATEMENT_REACHABILITY_POLICY_VERSION,
+)
 from ...domain.findings import (
     CLONE_KIND_BLOCK,
     CLONE_KIND_FUNCTION,
@@ -16,6 +20,7 @@ from ...domain.findings import (
     FAMILY_CLONE,
     FAMILY_DEAD_CODE,
     FAMILY_STRUCTURAL,
+    FINDING_KIND_UNREACHABLE_STATEMENT,
 )
 from ...domain.quality import (
     CONFIDENCE_HIGH,
@@ -42,6 +47,7 @@ if TYPE_CHECKING:
     from ...models import (
         GroupItemLike,
         GroupMapLike,
+        NearMissPair,
         StructuralFindingGroup,
         SuppressedCloneGroup,
     )
@@ -475,6 +481,52 @@ def _build_structural_facts(
             }
 
 
+def build_near_miss_payload(
+    pairs: Sequence[NearMissPair] | None,
+    *,
+    scan_root: str,
+) -> dict[str, object]:
+    """Render the near-miss channel: pairs, evidence, and honest limitations.
+
+    The payload states its own standing rather than leaving a reader to infer
+    it. ``gate_relevant`` is false because these pairs never become clone-lane
+    keys, and ``novelty`` is ``untracked`` because a fact that reaches no
+    baseline lane can be neither ``new`` nor ``known`` — reporting either would
+    be a claim the baseline cannot support (39Y Y8).
+    """
+
+    rendered = [
+        {
+            "pair_key": pair.pair_key,
+            "edit_statements": pair.edit_statements,
+            "edit_kind": pair.edit_kind,
+            "members": [
+                {
+                    "relative_path": _contract_report_location_path(
+                        member.filepath,
+                        scan_root=scan_root,
+                    ),
+                    "qualname": member.qualname,
+                    "start_line": member.start_line,
+                    "end_line": member.end_line,
+                    "differing_start_line": member.differing_start_line,
+                    "differing_end_line": member.differing_end_line,
+                }
+                for member in pair.members
+            ],
+        }
+        for pair in sorted(pairs or (), key=lambda pair: pair.pair_key)
+    ]
+    return {
+        "tier": "near_miss",
+        "max_edit_statements": NEAR_MISS_MAX_EDIT_STATEMENTS,
+        "gate_relevant": False,
+        "novelty": "untracked",
+        "count": len(rendered),
+        "pairs": rendered,
+    }
+
+
 def _build_structural_groups(
     groups: Sequence[StructuralFindingGroup] | None,
     *,
@@ -606,8 +658,84 @@ def _build_dead_code_groups(
                 "facts": {
                     "kind": str(item_map.get("kind", "unknown")),
                     "confidence": confidence,
+                    "reason": str(item_map.get("reason", "unreferenced")),
+                    "test_reference_sources": sorted(
+                        {
+                            str(source)
+                            for source in _as_sequence(
+                                item_map.get("test_reference_sources")
+                            )
+                            if str(source)
+                        }
+                    ),
                 },
             }
         )
+    groups.extend(_build_unreachable_statement_groups(dead_code, scan_root=scan_root))
     groups.sort(key=lambda group: (-_as_float(group["priority"]), str(group["id"])))
+    return groups
+
+
+def _build_unreachable_statement_groups(
+    dead_code: Mapping[str, object],
+    *,
+    scan_root: str,
+) -> list[dict[str, object]]:
+    """Statement-level findings, joining the dead_code family (39Y Y9).
+
+    They ride the family that report, MCP and gates already understand and are
+    told apart by ``kind`` alone — the discriminator the dead_code lane's
+    payload schema already carries — so nothing here opens a new closed list.
+    """
+
+    groups: list[dict[str, object]] = []
+    for item in _as_sequence(dead_code.get("unreachable_statements")):
+        item_map = _as_mapping(item)
+        qualname = str(item_map.get("qualname", ""))
+        # The projected document, like the dead-symbol items beside it, carries
+        # an already-contracted relative path rather than the raw filepath.
+        filepath = str(item_map.get("relative_path", ""))
+        start_line = _as_int(item_map.get("start_line"))
+        end_line = _as_int(item_map.get("end_line"))
+        reason = str(item_map.get("reason", "unreachable_block"))
+        groups.append(
+            {
+                "id": dead_code_group_id(f"{qualname}#{start_line}-{end_line}"),
+                "family": FAMILY_DEAD_CODE,
+                # Sibling dead-code groups put the granular KIND here, never
+                # the family: ``category`` is what the renderers dispatch on.
+                # Naming the family instead dropped this group off the end of
+                # the SARIF closed list and published it as an unused symbol.
+                "category": FINDING_KIND_UNREACHABLE_STATEMENT,
+                "kind": FINDING_KIND_UNREACHABLE_STATEMENT,
+                # A statement that cannot run is proven, not estimated, so the
+                # pair is fixed rather than derived from a confidence ladder.
+                "severity": SEVERITY_WARNING,
+                "confidence": CONFIDENCE_HIGH,
+                "priority": _priority(SEVERITY_WARNING, EFFORT_EASY),
+                "count": 1,
+                "source_scope": _single_location_source_scope(
+                    filepath,
+                    scan_root=scan_root,
+                ),
+                "spread": {"files": 1, "functions": 1 if qualname else 0},
+                "items": [
+                    {
+                        "relative_path": _contract_report_location_path(
+                            filepath,
+                            scan_root=scan_root,
+                        ),
+                        "qualname": qualname,
+                        "start_line": start_line,
+                        "end_line": end_line,
+                    }
+                ],
+                "facts": {
+                    "reason": reason,
+                    "confidence": CONFIDENCE_HIGH,
+                    "statement_count": _as_int(item_map.get("statement_count")),
+                    "policy_version": STATEMENT_REACHABILITY_POLICY_VERSION,
+                },
+            }
+        )
     return groups

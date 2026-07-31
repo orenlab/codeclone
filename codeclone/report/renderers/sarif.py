@@ -35,6 +35,7 @@ from ...domain.findings import (
     FINDING_KIND_COVERAGE_SCOPE_GAP,
     FINDING_KIND_CYCLE,
     FINDING_KIND_FUNCTION_HOTSPOT,
+    FINDING_KIND_UNREACHABLE_STATEMENT,
     FINDING_KIND_UNUSED_SYMBOL,
     STRUCTURAL_KIND_CLONE_COHORT_DRIFT,
     STRUCTURAL_KIND_CLONE_GUARD_EXIT_DIVERGENCE,
@@ -264,6 +265,19 @@ def _dead_code_rule_spec(category: str) -> _RuleSpec:
             SEVERITY_WARNING,
             FAMILY_DEAD_CODE,
             FINDING_KIND_UNUSED_SYMBOL,
+            CONFIDENCE_HIGH,
+        )
+    if category == FINDING_KIND_UNREACHABLE_STATEMENT:
+        # The family's other kind. Reachability is decided by the CFG, not
+        # estimated from references, so this rule is high-precision by
+        # construction and must never share the unused-symbol wording.
+        return _RuleSpec(
+            "CDEAD005",
+            sarif_msgs.RULE_UNREACHABLE_STATEMENT_SHORT,
+            sarif_msgs.RULE_UNREACHABLE_STATEMENT_FULL,
+            SEVERITY_WARNING,
+            FAMILY_DEAD_CODE,
+            FINDING_KIND_UNREACHABLE_STATEMENT,
             CONFIDENCE_HIGH,
         )
     return _RuleSpec(

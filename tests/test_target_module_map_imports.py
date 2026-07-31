@@ -83,7 +83,7 @@ def test_extractor_canonical_helpers_live_in_analysis_modules() -> None:
         analysis_parser._declaration_token_index.__module__
         == "codeclone.analysis.parser"
     )
-    assert analysis_units._eligible_unit_shape.__module__ == "codeclone.analysis.units"
+    assert analysis_units._unit_shape.__module__ == "codeclone.analysis.units"
 
 
 def test_html_report_is_canonical_report_subpackage() -> None:

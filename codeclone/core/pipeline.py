@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 
-from ..contracts import DEFAULT_COVERAGE_MIN
+from ..contracts import DEFAULT_COVERAGE_MIN, DEFAULT_MIN_LOC, DEFAULT_MIN_STMT
 from ..findings.clones.golden_fixtures import (
     build_suppressed_clone_groups,
     split_clone_groups_for_golden_fixtures,
@@ -17,12 +18,18 @@ from ..findings.clones.grouping import (
     build_block_groups,
     build_groups,
     build_segment_groups,
+    clone_eligible_units,
 )
+from ..findings.clones.near_miss import build_near_miss_pairs
 from ..findings.structural.detectors import (
     build_clone_cohort_structural_findings,
 )
+from ..metrics.coupling import resolve_project_class_coupling
 from ..metrics.coverage_join import CoverageJoinParseError, build_coverage_join
-from ..metrics.dead_code import find_suppressed_unused
+from ..metrics.dead_code import (
+    collect_test_reference_sources,
+    find_suppressed_unused,
+)
 from ..metrics.registry import (
     METRIC_FAMILIES,
     build_project_metrics,
@@ -34,7 +41,9 @@ from ..models import (
     DeadCandidate,
     DeadItem,
     DepGraph,
+    FunctionRelationshipFacts,
     GroupItemLike,
+    LiveRootReason,
     MetricProjectContext,
     ModuleApiSurface,
     ModuleDep,
@@ -69,7 +78,10 @@ from ._types import (
     _should_collect_structural_findings,
 )
 from .bootstrap import _resolve_optional_runtime_path
-from .entrypoints import collect_project_entrypoint_qualnames
+from .entrypoints import (
+    collect_project_entrypoint_qualnames,
+    collect_project_export_root_evidence,
+)
 from .metrics_payload import build_metrics_report_payload
 
 
@@ -88,6 +100,28 @@ def _artifact_dead_items(
     return default
 
 
+def _with_export_root_reasons(
+    candidates: Sequence[DeadCandidate],
+    *,
+    evidence: Sequence[tuple[str, LiveRootReason]],
+) -> tuple[DeadCandidate, ...]:
+    """Fold whole-project export-root reasons onto the per-file candidates.
+
+    A candidate that already carries a walk-resolved reason keeps it: the
+    module walk saw direct evidence, which is the more specific fact.
+    """
+    if not evidence:
+        return tuple(candidates)
+    reason_by_qualname = dict(evidence)
+    return tuple(
+        replace(candidate, live_root_reason=reason)
+        if candidate.live_root_reason is None
+        and (reason := reason_by_qualname.get(candidate.qualname)) is not None
+        else candidate
+        for candidate in candidates
+    )
+
+
 def compute_project_metrics(
     *,
     units: Sequence[GroupItemLike],
@@ -97,6 +131,7 @@ def compute_project_metrics(
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
     runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
+    function_relationship_facts: Sequence[FunctionRelationshipFacts] = (),
     security_surfaces: Sequence[SecuritySurface] = (),
     typing_modules: Sequence[ModuleTypingCoverage] = (),
     docstring_modules: Sequence[ModuleDocstringCoverage] = (),
@@ -112,11 +147,18 @@ def compute_project_metrics(
 ) -> tuple[ProjectMetrics, DepGraph, tuple[DeadItem, ...]]:
     context = MetricProjectContext(
         units=tuple(units),
-        class_metrics=tuple(class_metrics),
+        # Resolving imported call targets needs the whole class index, so the
+        # coupling fold is applied here rather than per file. It is idempotent,
+        # which is what lets the pipeline fold once for its own consumers and
+        # still route through this entry point.
+        class_metrics=resolve_project_class_coupling(tuple(class_metrics)),
         module_deps=tuple(module_deps),
         dead_candidates=tuple(dead_candidates),
         referenced_names=referenced_names,
         referenced_qualnames=referenced_qualnames,
+        test_reference_sources=collect_test_reference_sources(
+            tuple(function_relationship_facts)
+        ),
         runtime_reachability=tuple(runtime_reachability),
         security_surfaces=tuple(security_surfaces),
         typing_modules=tuple(typing_modules),
@@ -189,8 +231,26 @@ def analyze(
         for pattern in getattr(boot.args, "golden_fixture_paths", ())
         if str(pattern).strip()
     )
+    # processing.units carries a metric fact per defined function; the clone
+    # lane takes only the units its floors accept (39Y Y5).
+    clone_lane_units = clone_eligible_units(
+        processing.units,
+        min_loc=int(getattr(boot.args, "min_loc", DEFAULT_MIN_LOC)),
+        min_stmt=int(getattr(boot.args, "min_stmt", DEFAULT_MIN_STMT)),
+    )
+    # The near-miss tier reads the same population as the exact tier but keeps
+    # its own channel: its pairs never become func_groups, so they reach no
+    # observation lane, no baseline novelty and no gate (39Y Y8). Confinement
+    # is what makes it gate-neutral; the opt-in below decides whether it runs
+    # at all, so a new finding kind never appears unrequested. The flag has
+    # exactly one owner: the ``near_miss`` OptionSpec in ``config/spec.py``.
+    near_miss_pairs = (
+        build_near_miss_pairs(clone_lane_units)
+        if bool(getattr(boot.args, "near_miss", False))
+        else ()
+    )
     func_split = split_clone_groups_for_golden_fixtures(
-        groups=build_groups(processing.units),
+        groups=build_groups(clone_lane_units),
         kind="function",
         golden_fixture_paths=golden_fixture_paths,
         scan_root=str(boot.root),
@@ -294,24 +354,44 @@ def analyze(
         *processing.structural_findings,
         *cohort_structural_findings,
     )
+    # Export roots are a whole-project fact, so they are resolved once here and
+    # folded onto the candidates. External-decorator reasons already ride the
+    # candidates from the module walk (and therefore the cache), which is what
+    # keeps the merged set identical on cold and warm runs.
+    export_root_evidence = collect_project_export_root_evidence(
+        module_deps=processing.module_deps,
+        referenced_qualnames=processing.referenced_qualnames,
+        dead_candidates=processing.dead_candidates,
+        module_registry=discovery.module_registry,
+    )
+    dead_candidates = _with_export_root_reasons(
+        processing.dead_candidates,
+        evidence=export_root_evidence,
+    )
+    # Same shape as the export-root fold above: whether an imported callable is
+    # a class is a whole-project fact, so it is resolved once and every
+    # consumer below reads the same coupling numbers.
+    class_metrics = resolve_project_class_coupling(processing.class_metrics)
     if not boot.args.skip_metrics:
         referenced_qualnames = frozenset(
             {
                 *processing.referenced_qualnames,
                 *collect_project_entrypoint_qualnames(
                     root=boot.root,
-                    dead_candidates=processing.dead_candidates,
+                    dead_candidates=dead_candidates,
                 ),
+                *(qualname for qualname, _reason in export_root_evidence),
             }
         )
         project_metrics, dep_graph, _ = compute_project_metrics(
             units=processing.units,
-            class_metrics=processing.class_metrics,
+            class_metrics=class_metrics,
             module_deps=processing.module_deps,
-            dead_candidates=processing.dead_candidates,
+            dead_candidates=dead_candidates,
             referenced_names=processing.referenced_names,
             referenced_qualnames=referenced_qualnames,
             runtime_reachability=processing.runtime_reachability,
+            function_relationship_facts=processing.function_relationship_facts,
             security_surfaces=processing.security_surfaces,
             typing_modules=processing.typing_modules,
             docstring_modules=processing.docstring_modules,
@@ -331,11 +411,14 @@ def analyze(
                 referenced_names=processing.referenced_names,
                 referenced_qualnames=referenced_qualnames,
                 runtime_reachability=processing.runtime_reachability,
+                function_relationship_facts=processing.function_relationship_facts,
+                class_metrics=class_metrics,
+                module_registry=discovery.module_registry,
             )
         suggestions = compute_suggestions(
             project_metrics=project_metrics,
             units=processing.units,
-            class_metrics=processing.class_metrics,
+            class_metrics=class_metrics,
             func_groups=func_groups,
             block_groups=block_groups_report,
             segment_groups=segment_groups,
@@ -372,7 +455,7 @@ def analyze(
             dep_graph=dep_graph,
             coverage_join=coverage_join,
             units=processing.units,
-            class_metrics=processing.class_metrics,
+            class_metrics=class_metrics,
             module_deps=processing.module_deps,
             module_registry=discovery.module_registry,
             runtime_reachability=processing.runtime_reachability,
@@ -385,6 +468,9 @@ def analyze(
     collect_api_surface = collect_metrics and bool(
         getattr(boot.args, "api_surface", False)
     )
+    unresolved_override_items = (
+        () if project_metrics is None else project_metrics.unresolved_overrides
+    )
     with span(name="observations.build") as observation_span:
         try:
             observation_bundle = build_observation_bundle(
@@ -394,12 +480,15 @@ def analyze(
                 block_clone_keys=tuple(block_groups),
                 module_deps=processing.module_deps,
                 api_modules=processing.api_modules,
-                dead_candidates=processing.dead_candidates,
+                dead_candidates=dead_candidates,
+                abstained_qualnames=frozenset(
+                    item.qualname for item in unresolved_override_items
+                ),
                 referenced_names=processing.referenced_names,
                 referenced_qualnames=processing.referenced_qualnames,
                 runtime_reachability=processing.runtime_reachability,
                 units=processing.units,
-                class_metrics=processing.class_metrics,
+                class_metrics=class_metrics,
                 typing_modules=processing.typing_modules,
                 docstring_modules=processing.docstring_modules,
                 semantic_authority=processing.semantic_authority,
@@ -463,4 +552,5 @@ def analyze(
         coverage_join=coverage_join,
         suppressed_dead_code_items=len(suppressed_dead_items),
         structural_findings=combined_structural_findings,
+        near_miss_pairs=near_miss_pairs,
     )

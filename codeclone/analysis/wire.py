@@ -16,6 +16,7 @@ from typing import Final, TypeGuard
 
 from ..contracts import WIRE_VERSION as WIRE_VERSION
 from ..meta_markers import CFG_META_PREFIX
+from .binding import BindingContext
 from .normalizer import NormalizationConfig
 
 
@@ -188,25 +189,44 @@ _WIRE_FIELDS: Final[dict[type[ast.AST], tuple[str, ...]]] = _build_wire_fields()
 
 _IDENTIFIER: Final = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _STRUCTURAL_INT_FIELDS: Final = frozenset({"conversion", "is_async", "level", "simple"})
+_COMPREHENSION_TYPES: Final = (
+    ast.ListComp,
+    ast.SetComp,
+    ast.DictComp,
+    ast.GeneratorExp,
+)
 
 
-def emit_wire(node: ast.AST, cfg: NormalizationConfig) -> str:
-    """Return the canonical normalized wire without mutating ``node``."""
+def emit_wire(
+    node: ast.AST,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    """Return the canonical normalized wire without mutating ``node``.
 
-    return _emit_node(node, cfg, preserve_symbol=False)
+    ``bindings`` is the lexical scope the node is written in. It is required
+    rather than defaulted: the wire now states what each symbol denotes, and a
+    caller that silently fell back to "no bindings" would publish names as
+    unknown globals without anyone noticing.
+    """
+
+    return _emit_node(node, cfg, bindings)
 
 
-def emit_wire_seq(nodes: Sequence[ast.AST], cfg: NormalizationConfig) -> str:
+def emit_wire_seq(
+    nodes: Sequence[ast.AST],
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
     """Return canonical wires joined with the legacy statement separator."""
 
-    return ";".join(emit_wire(node, cfg) for node in nodes)
+    return ";".join(emit_wire(node, cfg, bindings) for node in nodes)
 
 
 def _emit_node(
     node: ast.AST,
     cfg: NormalizationConfig,
-    *,
-    preserve_symbol: bool,
+    bindings: BindingContext,
 ) -> str:
     node_type = type(node)
     fields = _WIRE_FIELDS.get(node_type)
@@ -215,23 +235,23 @@ def _emit_node(
     _check_fields(node, fields)
 
     if isinstance(node, ast.AugAssign):
-        return _emit_aug_assign(node, cfg)
+        return _emit_aug_assign(node, cfg, bindings)
     if isinstance(node, ast.UnaryOp):
-        rewritten = _emit_negated_compare(node, cfg)
+        rewritten = _emit_negated_compare(node, cfg, bindings)
         if rewritten is not None:
             return rewritten
     if isinstance(node, ast.BinOp):
-        return _emit_bin_op(node, cfg)
+        return _emit_bin_op(node, cfg, bindings)
     if isinstance(node, ast.Name):
-        return _emit_name(node, cfg, preserve_symbol=preserve_symbol)
+        return _emit_name(node, cfg, bindings)
     if isinstance(node, ast.Attribute):
-        return _emit_attribute(node, cfg, preserve_symbol=preserve_symbol)
+        return _emit_attribute(node, cfg, bindings)
 
     parts: list[str] = [node_type.__name__, "("]
     for index, field in enumerate(fields):
         if index:
             parts.append(",")
-        parts.extend((field, "=", _emit_field(node, field, cfg)))
+        parts.extend((field, "=", _emit_field(node, field, cfg, bindings)))
     parts.append(")")
     return "".join(parts)
 
@@ -246,79 +266,144 @@ def _check_fields(node: ast.AST, fields: tuple[str, ...]) -> None:
         )
 
 
-def _emit_field(node: ast.AST, field: str, cfg: NormalizationConfig) -> str:
+def _emit_field(
+    node: ast.AST,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return _emit_function_field(node, field, cfg)
+        return _emit_function_field(node, field, cfg, bindings)
+    if isinstance(node, ast.Lambda):
+        return _emit_lambda_field(node, field, cfg, bindings)
+    if isinstance(node, ast.ClassDef):
+        return _emit_class_field(node, field, cfg, bindings)
+    if isinstance(node, _COMPREHENSION_TYPES):
+        return _emit_comprehension_field(node, field, cfg, bindings)
     if isinstance(node, ast.arg):
-        return _emit_arg_field(node, field, cfg)
+        return _emit_arg_field(node, field, cfg, bindings)
     if isinstance(node, ast.Constant):
         return _emit_constant(node.value, cfg)
-    if isinstance(node, ast.Call):
-        return _emit_call_field(node, field, cfg)
-    if isinstance(node, ast.MatchClass):
-        return _emit_match_class_field(node, field, cfg)
-    if isinstance(node, ast.MatchValue):
-        return _emit_preserved_expression(node.value, cfg)
-    if isinstance(node, ast.ExceptHandler):
-        return _emit_except_handler_field(node, field, cfg)
-    return _emit_capture_or_generic_field(node, field, cfg)
+    return _emit_capture_or_generic_field(node, field, cfg, bindings)
 
 
 def _emit_function_field(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     field: str,
     cfg: NormalizationConfig,
+    bindings: BindingContext,
 ) -> str:
     if field == "body":
         body = node.body
         if cfg.ignore_docstrings and body and _is_docstring(body[0]):
             body = body[1:]
-        return _emit_list(body, cfg)
+        return _emit_list(body, cfg, bindings.enter(node))
     if field == "returns" and cfg.ignore_type_annotations:
         return "None"
-    return _emit_generic_field(node, field, cfg)
+    # Decorators, defaults and annotations are evaluated where the definition
+    # is written, so they stay in the enclosing scope.
+    return _emit_generic_field(node, field, cfg, bindings)
 
 
-def _emit_arg_field(node: ast.arg, field: str, cfg: NormalizationConfig) -> str:
+def _emit_lambda_field(
+    node: ast.Lambda,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    if field == "body":
+        return _emit_node(node.body, cfg, bindings.enter(node))
+    return _emit_generic_field(node, field, cfg, bindings)
+
+
+def _emit_class_field(
+    node: ast.ClassDef,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    if field == "body":
+        return _emit_list(node.body, cfg, bindings.enter(node))
+    return _emit_generic_field(node, field, cfg, bindings)
+
+
+def _emit_comprehension_field(
+    node: ast.ListComp | ast.SetComp | ast.DictComp | ast.GeneratorExp,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    inner = bindings.enter(node)
+    if field == "generators":
+        return _emit_generators(node.generators, cfg, outer=bindings, inner=inner)
+    return _emit_value(vars(node).get(field), cfg, field=field, bindings=inner)
+
+
+def _emit_generators(
+    generators: Sequence[ast.comprehension],
+    cfg: NormalizationConfig,
+    *,
+    outer: BindingContext,
+    inner: BindingContext,
+) -> str:
+    # Python evaluates the leftmost iterable in the enclosing scope and
+    # everything else inside the comprehension; the wire says the same.
+    items = ",".join(
+        _emit_comprehension(
+            generator,
+            cfg,
+            inner=inner,
+            iter_bindings=outer if index == 0 else inner,
+        )
+        for index, generator in enumerate(generators)
+    )
+    return "[" + items + "]"
+
+
+def _emit_comprehension(
+    node: ast.comprehension,
+    cfg: NormalizationConfig,
+    *,
+    inner: BindingContext,
+    iter_bindings: BindingContext,
+) -> str:
+    node_type = type(node)
+    fields = _WIRE_FIELDS.get(node_type)
+    if fields is None:
+        raise WireUnsupportedNode(f"unsupported AST node: {node_type.__name__}")
+    _check_fields(node, fields)
+    parts: list[str] = [node_type.__name__, "("]
+    for index, field in enumerate(fields):
+        if index:
+            parts.append(",")
+        scope = iter_bindings if field == "iter" else inner
+        parts.extend(
+            (
+                field,
+                "=",
+                _emit_value(vars(node).get(field), cfg, field=field, bindings=scope),
+            )
+        )
+    parts.append(")")
+    return "".join(parts)
+
+
+def _emit_arg_field(
+    node: ast.arg,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
     if field == "annotation" and cfg.ignore_type_annotations:
         return "None"
-    return _emit_generic_field(node, field, cfg)
-
-
-def _emit_call_field(node: ast.Call, field: str, cfg: NormalizationConfig) -> str:
-    if field == "func":
-        return _emit_preserved_expression(node.func, cfg)
-    return _emit_generic_field(node, field, cfg)
-
-
-def _emit_match_class_field(
-    node: ast.MatchClass, field: str, cfg: NormalizationConfig
-) -> str:
-    if field == "cls":
-        return _emit_node(node.cls, cfg, preserve_symbol=True)
-    return _emit_generic_field(node, field, cfg)
-
-
-def _emit_except_handler_field(
-    node: ast.ExceptHandler, field: str, cfg: NormalizationConfig
-) -> str:
-    if field != "type":
-        return _emit_generic_field(node, field, cfg)
-    if node.type is None:
-        return "None"
-    return _emit_preserved_expression(node.type, cfg)
-
-
-def _emit_preserved_expression(node: ast.expr, cfg: NormalizationConfig) -> str:
-    return _emit_node(
-        node,
-        cfg,
-        preserve_symbol=isinstance(node, (ast.Name, ast.Attribute)),
-    )
+    return _emit_generic_field(node, field, cfg, bindings)
 
 
 def _emit_capture_or_generic_field(
-    node: ast.AST, field: str, cfg: NormalizationConfig
+    node: ast.AST,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
 ) -> str:
     if isinstance(node, (ast.MatchAs, ast.MatchStar)) and field == "name":
         return _emit_capture_name(vars(node).get(field), cfg)
@@ -328,19 +413,30 @@ def _emit_capture_or_generic_field(
         return "_CONST_"
     if isinstance(node, ast.TypeIgnore) and field == "tag":
         return "_CONST_"
-    return _emit_generic_field(node, field, cfg)
+    return _emit_generic_field(node, field, cfg, bindings)
 
 
-def _emit_generic_field(node: ast.AST, field: str, cfg: NormalizationConfig) -> str:
+def _emit_generic_field(
+    node: ast.AST,
+    field: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
     field_value = vars(node).get(field)
-    return _emit_value(field_value, cfg, field=field)
+    return _emit_value(field_value, cfg, field=field, bindings=bindings)
 
 
-def _emit_value(value: object, cfg: NormalizationConfig, *, field: str) -> str:
+def _emit_value(
+    value: object,
+    cfg: NormalizationConfig,
+    *,
+    field: str,
+    bindings: BindingContext,
+) -> str:
     if isinstance(value, ast.AST):
-        return _emit_node(value, cfg, preserve_symbol=False)
+        return _emit_node(value, cfg, bindings)
     if isinstance(value, list):
-        return _emit_list(value, cfg)
+        return _emit_list(value, cfg, bindings)
     if value is None:
         return "None"
     if value is True:
@@ -356,8 +452,14 @@ def _emit_value(value: object, cfg: NormalizationConfig, *, field: str) -> str:
     )
 
 
-def _emit_list(values: Sequence[object], cfg: NormalizationConfig) -> str:
-    items = ",".join(_emit_value(value, cfg, field="list") for value in values)
+def _emit_list(
+    values: Sequence[object],
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    items = ",".join(
+        _emit_value(value, cfg, field="list", bindings=bindings) for value in values
+    )
     return "[" + items + "]"
 
 
@@ -401,41 +503,88 @@ def _emit_constant(value: object, cfg: NormalizationConfig) -> str:
 def _emit_name(
     node: ast.Name,
     cfg: NormalizationConfig,
-    *,
-    preserve_symbol: bool,
+    bindings: BindingContext,
 ) -> str:
-    if (
-        preserve_symbol
-        or not cfg.normalize_names
-        or node.id.startswith(CFG_META_PREFIX)
-    ):
-        identifier = _emit_identifier(node.id)
-    else:
-        identifier = "_VAR_"
-    return f"Name(id={identifier})"
+    return f"Name(id={_symbol_identifier(node.id, cfg, bindings)})"
+
+
+def _symbol_identifier(
+    name: str,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    """Emit one root symbol by the role it is bound to (role table, section 2)."""
+
+    if not cfg.normalize_names or name.startswith(CFG_META_PREFIX):
+        return _emit_identifier(name)
+    binding = bindings.lookup(name)
+    if binding is None:
+        # No binding anywhere — a builtin or a name defined elsewhere. Unknown
+        # identity is preserved literally so two unknowns never merge.
+        return _emit_identifier(name)
+    if binding.role == "self":
+        return "_SELF_"
+    if binding.role == "cls":
+        return "_CLS_"
+    if binding.role == "import":
+        return _emit_identifier(binding.identity)
+    if binding.role == "local":
+        return "_VAR_"
+    return _emit_identifier(name)
 
 
 def _emit_attribute(
     node: ast.Attribute,
     cfg: NormalizationConfig,
-    *,
-    preserve_symbol: bool,
+    bindings: BindingContext,
 ) -> str:
-    preserve_value = preserve_symbol and isinstance(
-        node.value, (ast.Name, ast.Attribute)
-    )
-    value = _emit_node(node.value, cfg, preserve_symbol=preserve_value)
-    if preserve_symbol or not cfg.normalize_attributes:
-        attribute = _emit_identifier(node.attr)
-    else:
-        attribute = "_ATTR_"
-    return f"Attribute(value={value},attr={attribute})"
+    canonical = _canonical_chain_identity(node, cfg, bindings)
+    if canonical is not None:
+        return f"Name(id={_emit_identifier(canonical)})"
+    value = _emit_node(node.value, cfg, bindings)
+    # Attributes are always preserved: an attribute name is a symbol, not a
+    # variable, and erasing it is what made `json.dumps` and `yaml.dumps`
+    # indistinguishable (role table row 7).
+    return f"Attribute(value={value},attr={_emit_identifier(node.attr)})"
 
 
-def _emit_aug_assign(node: ast.AugAssign, cfg: NormalizationConfig) -> str:
-    target = _emit_node(node.target, cfg, preserve_symbol=False)
-    operation = _emit_node(node.op, cfg, preserve_symbol=False)
-    value = _emit_node(node.value, cfg, preserve_symbol=False)
+def _canonical_chain_identity(
+    node: ast.Attribute,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str | None:
+    """Return the dotted identity of an attribute chain rooted at an import.
+
+    A resolved identity always emits as a single ``Name`` holding its canonical
+    dotted path, whatever the syntax used to reach it, so ``json.dumps(x)``,
+    ``j.dumps(x)`` and a bare ``dumps(x)`` from ``from json import dumps`` all
+    produce the same callee wire.
+    """
+
+    if not cfg.normalize_names:
+        return None
+    attributes: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        attributes.append(current.attr)
+        current = current.value
+    if not isinstance(current, ast.Name) or current.id.startswith(CFG_META_PREFIX):
+        return None
+    binding = bindings.lookup(current.id)
+    if binding is None or binding.role != "import":
+        return None
+    attributes.reverse()
+    return ".".join((binding.identity, *attributes))
+
+
+def _emit_aug_assign(
+    node: ast.AugAssign,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    target = _emit_node(node.target, cfg, bindings)
+    operation = _emit_node(node.op, cfg, bindings)
+    value = _emit_node(node.value, cfg, bindings)
     return (
         "Assign(targets=["
         + target
@@ -449,7 +598,11 @@ def _emit_aug_assign(node: ast.AugAssign, cfg: NormalizationConfig) -> str:
     )
 
 
-def _emit_negated_compare(node: ast.UnaryOp, cfg: NormalizationConfig) -> str | None:
+def _emit_negated_compare(
+    node: ast.UnaryOp,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str | None:
     if not isinstance(node.op, ast.Not) or not isinstance(node.operand, ast.Compare):
         return None
     operand = node.operand
@@ -462,8 +615,8 @@ def _emit_negated_compare(node: ast.UnaryOp, cfg: NormalizationConfig) -> str | 
         operation_wire = "IsNot()"
     else:
         return None
-    left = _emit_node(operand.left, cfg, preserve_symbol=False)
-    comparator = _emit_node(operand.comparators[0], cfg, preserve_symbol=False)
+    left = _emit_node(operand.left, cfg, bindings)
+    comparator = _emit_node(operand.comparators[0], cfg, bindings)
     return (
         "Compare(left="
         + left
@@ -475,9 +628,13 @@ def _emit_negated_compare(node: ast.UnaryOp, cfg: NormalizationConfig) -> str | 
     )
 
 
-def _emit_bin_op(node: ast.BinOp, cfg: NormalizationConfig) -> str:
-    left = _emit_node(node.left, cfg, preserve_symbol=False)
-    right = _emit_node(node.right, cfg, preserve_symbol=False)
+def _emit_bin_op(
+    node: ast.BinOp,
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> str:
+    left = _emit_node(node.left, cfg, bindings)
+    right = _emit_node(node.right, cfg, bindings)
     if (
         isinstance(node.op, (ast.Add, ast.Mult, ast.BitOr, ast.BitAnd, ast.BitXor))
         and _is_proven_commutative_operand(node.left, node.op)
@@ -485,7 +642,7 @@ def _emit_bin_op(node: ast.BinOp, cfg: NormalizationConfig) -> str:
         and right < left
     ):
         left, right = right, left
-    operation = _emit_node(node.op, cfg, preserve_symbol=False)
+    operation = _emit_node(node.op, cfg, bindings)
     return f"BinOp(left={left},op={operation},right={right})"
 
 

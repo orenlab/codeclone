@@ -619,6 +619,33 @@ def test_render_dead_code_panel_derives_high_confidence_count_from_items() -> No
     assert "1 high-confidence items" in panel_html
 
 
+def test_render_dead_code_panel_shows_test_reference_reason_and_source() -> None:
+    ctx = _section_ctx(
+        dead_code_map={
+            "summary": {"total": 1, "high_confidence": 1, "suppressed": 0},
+            "items": [
+                {
+                    "qualname": "pkg.mod:held_by_tests",
+                    "relative_path": "pkg/mod.py",
+                    "start_line": 5,
+                    "kind": "function",
+                    "confidence": "high",
+                    "reason": "test_only_reference",
+                    "test_reference_sources": [
+                        "tests.test_mod:test_holds_production_symbol"
+                    ],
+                }
+            ],
+            "suppressed_items": [],
+        }
+    )
+
+    panel_html = render_dead_code_panel(cast(Any, ctx))
+
+    assert "test_only_reference" in panel_html
+    assert "tests.test_mod:test_holds_production_symbol" in panel_html
+
+
 def test_directory_hotspot_meta_omits_redundant_single_family_breakdown() -> None:
     assert _directory_kind_meta_parts({"clones": 8}, total_groups=8) == []
     assert _directory_kind_meta_parts(

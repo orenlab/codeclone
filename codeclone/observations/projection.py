@@ -37,6 +37,7 @@ from ..models import (
     RuntimeReachabilityFact,
     SemanticAuthorityResult,
     StructuralObservationFacts,
+    UnreachableStatementItem,
 )
 from ..paths.module_identity import repository_relative_path
 from ..utils.coerce import as_int, as_str
@@ -180,6 +181,7 @@ def _dead_code_observations(
     referenced_names: frozenset[str],
     referenced_qualnames: frozenset[str],
     runtime_reachability: Sequence[RuntimeReachabilityFact],
+    abstained_qualnames: frozenset[str] = frozenset(),
 ) -> tuple[DeadCodeObservation, ...]:
     runtime_counts = Counter(fact.target_qualname for fact in runtime_reachability)
     rows = (
@@ -192,9 +194,51 @@ def _dead_code_observations(
             ),
             reachable=runtime_counts[candidate.qualname] > 0,
             runtime_marker_count=runtime_counts[candidate.qualname],
+            live_root_reason=candidate.live_root_reason,
+            # An abstention outranks a root reason: the two are mutually
+            # exclusive by contract, and a candidate that is held live by a
+            # root is not an abstention in the first place.
+            abstained=(
+                candidate.live_root_reason is None
+                and candidate.qualname in abstained_qualnames
+            ),
         )
         for candidate in candidates
     )
+    return tuple(sorted(rows, key=lambda row: (row.entity, row.candidate_kind)))
+
+
+def _unreachable_statement_observations(
+    units: Sequence[GroupItemLike],
+) -> tuple[DeadCodeObservation, ...]:
+    """Statement-level rows for the dead_code lane (39Y Y9).
+
+    The entity carries the region span because a function can hold more than
+    one dead region and the lane keys rows by entity: without the span two
+    regions in one function would collapse into a single observation.
+    """
+
+    rows: list[DeadCodeObservation] = []
+    for unit in units:
+        qualname = unit.get("qualname")
+        facts = unit.get("unreachable_statements", ())
+        if not isinstance(qualname, str) or not isinstance(facts, tuple):
+            continue
+        rows.extend(
+            DeadCodeObservation(
+                entity=f"{qualname}#{fact.start_line}-{fact.end_line}",
+                candidate_kind="function",
+                # A region is proven dead by control flow, so the reference
+                # count that decides a symbol's fate says nothing here.
+                reference_count=0,
+                reachable=False,
+                runtime_marker_count=0,
+                source_markers=(("unreachable_reason", fact.reason),),
+                observation_kind="unreachable_statement",
+            )
+            for fact in facts
+            if isinstance(fact, UnreachableStatementItem)
+        )
     return tuple(sorted(rows, key=lambda row: (row.entity, row.candidate_kind)))
 
 
@@ -323,6 +367,7 @@ def build_observation_bundle(
     module_deps: Sequence[ModuleDep] = (),
     api_modules: Sequence[ModuleApiSurface] = (),
     dead_candidates: Sequence[DeadCandidate] = (),
+    abstained_qualnames: frozenset[str] = frozenset(),
     referenced_names: frozenset[str] = frozenset(),
     referenced_qualnames: frozenset[str] = frozenset(),
     runtime_reachability: Sequence[RuntimeReachabilityFact] = (),
@@ -357,11 +402,18 @@ def build_observation_bundle(
             else ()
         ),
         dead_code=(
-            _dead_code_observations(
-                dead_candidates,
-                referenced_names=referenced_names,
-                referenced_qualnames=referenced_qualnames,
-                runtime_reachability=runtime_reachability,
+            tuple(
+                sorted(
+                    _dead_code_observations(
+                        dead_candidates,
+                        referenced_names=referenced_names,
+                        referenced_qualnames=referenced_qualnames,
+                        runtime_reachability=runtime_reachability,
+                        abstained_qualnames=abstained_qualnames,
+                    )
+                    + _unreachable_statement_observations(units),
+                    key=lambda row: (row.entity, row.candidate_kind),
+                )
             )
             if collect_dead_code
             else ()

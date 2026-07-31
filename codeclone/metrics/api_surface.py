@@ -357,9 +357,13 @@ def _is_implicit_method_receiver(*, is_method: bool, index: int, name: str) -> b
 def _annotation_hash(node: ast.AST | None) -> str:
     if node is None:
         return ""
+    from ..analysis.binding import EMPTY_BINDINGS
     from ..analysis.wire import emit_wire
 
-    wire = emit_wire(node, _api_signature_wire_config()).encode("utf-8")
+    # An annotation is hashed on its own, outside any scope. The signature
+    # config preserves every name literally, so no binding evidence is
+    # consulted here and none is claimed.
+    wire = emit_wire(node, _api_signature_wire_config(), EMPTY_BINDINGS).encode("utf-8")
     return hashlib.sha256(_API_SIGNATURE_DOMAIN + wire).hexdigest()
 
 

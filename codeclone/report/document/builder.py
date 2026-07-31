@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from ...models import (
         BaselineContainerV3,
         GroupMapLike,
+        NearMissPair,
         ObservationBundle,
         StructuralFindingGroup,
         Suggestion,
@@ -76,6 +77,7 @@ def build_report_body(
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
     baseline_trust: TrustVector | None = None,
+    near_miss_pairs: Sequence[NearMissPair] | None = None,
 ) -> dict[str, object]:
     """Build canonical report facts before evaluation and integrity sealing."""
 
@@ -121,6 +123,7 @@ def build_report_body(
         suppressed_clone_groups=suppressed_clone_groups,
         design_thresholds=design_thresholds,
         scan_root=scan_root,
+        near_miss_pairs=near_miss_pairs,
     )
     overview_payload, hotlists_payload = _build_derived_overview(
         findings=findings_payload,
@@ -353,6 +356,7 @@ def build_report_document(
     metrics: Mapping[str, object] | None = None,
     suggestions: Sequence[Suggestion] | None = None,
     structural_findings: Sequence[StructuralFindingGroup] | None = None,
+    near_miss_pairs: Sequence[NearMissPair] | None = None,
 ) -> dict[str, object]:
     body = build_report_body(
         func_groups=func_groups,
@@ -369,6 +373,7 @@ def build_report_document(
         suggestions=suggestions,
         structural_findings=structural_findings,
         baseline_trust=baseline_trust,
+        near_miss_pairs=near_miss_pairs,
     )
     return finalize_report_document(
         body=body,

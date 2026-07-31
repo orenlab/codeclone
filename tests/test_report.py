@@ -1704,7 +1704,51 @@ def test_report_json_dead_code_summary_uses_high_confidence_key() -> None:
         "suppressed": 0,
         "baseline_diff_available": False,
         "new_items": 0,
+        # 39Y cycle 2b: abstentions ride beside the dead counts, never inside.
+        "unresolved_external_override": 0,
+        "live_roots": 0,
     }
+
+
+def test_report_json_dead_code_preserves_test_reference_reason_and_evidence() -> None:
+    payload = json.loads(
+        to_json_report(
+            {},
+            {},
+            {},
+            {"codeclone_version": "1.4.0", "scan_root": "/root"},
+            metrics={
+                "dead_code": {
+                    "items": [
+                        {
+                            "qualname": "pkg.mod:held_by_tests",
+                            "filepath": "/root/pkg/mod.py",
+                            "start_line": 10,
+                            "end_line": 12,
+                            "kind": "function",
+                            "confidence": "high",
+                            "reason": "test_only_reference",
+                            "test_reference_sources": [
+                                "tests.test_mod:test_second",
+                                "tests.test_mod:test_first",
+                                "tests.test_mod:test_second",
+                            ],
+                        }
+                    ],
+                }
+            },
+        )
+    )
+
+    item = payload["metrics"]["families"]["dead_code"]["items"][0]
+    assert item["reason"] == "test_only_reference"
+    assert item["test_reference_sources"] == [
+        "tests.test_mod:test_first",
+        "tests.test_mod:test_second",
+    ]
+    finding = payload["findings"]["groups"]["dead_code"]["groups"][0]
+    assert finding["facts"]["reason"] == "test_only_reference"
+    assert finding["facts"]["test_reference_sources"] == item["test_reference_sources"]
 
 
 def test_report_json_dead_code_suppressed_items_are_reported_separately() -> None:
@@ -1743,6 +1787,8 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
         "suppressed": 1,
         "baseline_diff_available": False,
         "new_items": 0,
+        "unresolved_external_override": 0,
+        "live_roots": 0,
     }
     suppressed_items = dead_code["suppressed_items"]
     assert suppressed_items == [
@@ -1753,6 +1799,8 @@ def test_report_json_dead_code_suppressed_items_are_reported_separately() -> Non
             "end_line": 41,
             "kind": "function",
             "confidence": "high",
+            "reason": "unreferenced",
+            "test_reference_sources": [],
             "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
             "suppression_rule": "dead-code",
             "suppression_source": "inline_codeclone",

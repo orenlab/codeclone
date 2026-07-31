@@ -17,10 +17,12 @@ from ..models import (
     DeadCandidate,
     DeadCandidateDict,
     DependencyResolution,
+    LiveRootReason,
     ModuleApiSurface,
     ModuleDep,
     ModuleDepDict,
     ModuleDocstringCoverage,
+    ModuleRegistryHandle,
     ModuleTypingCoverage,
     PublicSymbol,
     RuntimeReachabilityConfidence,
@@ -514,6 +516,19 @@ def _class_metric_from_cache_row(metric_row: ClassMetricsDict) -> ClassMetrics |
         risk_coupling=risk_coupling,
         risk_cohesion=risk_cohesion,
         coupled_classes=_as_sorted_str_tuple(metric_row.get("coupled_classes", [])),
+        instantiation_candidates=_as_sorted_str_tuple(
+            metric_row.get("instantiation_candidates", [])
+        ),
+        base_names=_as_sorted_str_tuple(metric_row.get("base_names", [])),
+        has_unresolved_external_base=bool(
+            metric_row.get("has_unresolved_external_base", False)
+        ),
+        decorator_evidenced_methods=_as_sorted_str_tuple(
+            metric_row.get("decorator_evidenced_methods", [])
+        ),
+        self_dispatched_methods=_as_sorted_str_tuple(
+            metric_row.get("self_dispatched_methods", [])
+        ),
     )
 
 
@@ -577,7 +592,17 @@ def _dead_candidate_from_cache_row(dead_row: DeadCandidateDict) -> DeadCandidate
         end_line=dead_row["end_line"],
         kind=kind,
         suppressed_rules=_as_sorted_str_tuple(dead_row.get("suppressed_rules", [])),
+        live_root_reason=_live_root_reason(dead_row.get("live_root_reason")),
     )
+
+
+def _live_root_reason(value: object) -> LiveRootReason | None:
+    """Narrow the cached reason back onto its closed set."""
+    if value == "external_decorator":
+        return "external_decorator"
+    if value == "export_root":
+        return "export_root"
+    return None
 
 
 def _security_surface_from_cache_row(
@@ -644,6 +669,7 @@ def load_cached_metrics_extended(
     entry: CacheEntryV3,
     *,
     filepath: str,
+    module_registry: ModuleRegistryHandle | None = None,
 ) -> tuple[
     tuple[ClassMetrics, ...],
     tuple[ModuleDep, ...],
@@ -680,12 +706,12 @@ def load_cached_metrics_extended(
     dead_candidates = tuple(dead_candidate_items)
     referenced_names = (
         frozenset()
-        if is_test_filepath(filepath)
+        if is_test_filepath(filepath, module_registry=module_registry)
         else frozenset(dependent.referenced_names)
     )
     referenced_qualnames = (
         frozenset()
-        if is_test_filepath(filepath)
+        if is_test_filepath(filepath, module_registry=module_registry)
         else frozenset(dependent.referenced_qualnames)
     )
     security_surface_rows = dependent.security_surfaces

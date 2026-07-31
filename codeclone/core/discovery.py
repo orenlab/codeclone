@@ -56,7 +56,10 @@ from .discovery_cache import (
     decode_cached_structural_finding_group as _decode_cached_structural_finding_group,
 )
 from .discovery_cache import (
-    load_cached_metrics_extended as _load_cached_metrics_extended,
+    # Explicit re-export: discovery is the public-ring seam for the cached
+    # metrics loader, so callers reach it here instead of importing the
+    # internal discovery_cache module directly.
+    load_cached_metrics_extended as load_cached_metrics_extended,
 )
 from .discovery_cache import usable_cached_source_stats as _usable_cached_source_stats
 
@@ -253,7 +256,9 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                 untracked_fallbacks += untracked_fallback
                 digest_verify_cost_us += verdict.digest_verify_cost_us
                 stat_fast_rejects += int(verdict.stat_fast_reject)
-                decision = cache.reuse_decision(content=verdict, entry=cached)
+                decision = cache.reuse_decision(
+                    content=verdict, entry=cached, runtime_path=filepath
+                )
                 neutral_hits += int(decision.neutral.hit)
                 dependent_misses += int(not decision.dependent.hit)
                 if decision.neutral.hit:
@@ -323,7 +328,11 @@ def discover(*, boot: BootstrapResult, cache: Cache) -> DiscoveryResult:
                             api_surface,
                             runtime_reachability,
                             security_surfaces,
-                        ) = _load_cached_metrics_extended(cached, filepath=filepath)
+                        ) = load_cached_metrics_extended(
+                            cached,
+                            filepath=filepath,
+                            module_registry=module_registry,
+                        )
                         cached_class_metrics.extend(class_metrics)
                         cached_module_deps.extend(module_deps)
                         cached_dead_candidates.extend(dead_candidates)

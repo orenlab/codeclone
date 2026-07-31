@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from typing import Literal, TypeVar
+from typing import TYPE_CHECKING, Literal, TypeVar
 
 from .entries import _as_risk_literal
 from .integrity import (
@@ -21,7 +21,11 @@ from .integrity import (
 )
 from .versioning import _DEFAULT_WIRE_UNIT_FLOW_PROFILES
 
+if TYPE_CHECKING:
+    from ..models import NearMissElement
+
 _DecodedItemT = TypeVar("_DecodedItemT")
+_WireFactT = TypeVar("_WireFactT")
 
 
 def _decode_wire_qualname_span(
@@ -190,6 +194,58 @@ def _decode_wire_named_sized_span(
     return row, qualname, start_line, end_line, size
 
 
+def decode_wire_unit_fact_row(
+    value: object,
+    *,
+    stride: int,
+    build: Callable[[list[object]], _WireFactT | None],
+) -> tuple[tuple[str, int], tuple[_WireFactT, ...]] | None:
+    """Decode one ``[qualname, start_line, [field, field, ...]]`` unit-fact row.
+
+    Every per-unit fact family the cache carries has this shape: the unit key,
+    then its facts flattened into one list because a sub-list per fact would
+    multiply the wire's structural overhead for a handful of scalars. Only the
+    stride and how a group of fields becomes a fact differ, so those are the
+    parameters and the framing is written once.
+
+    ``build`` returning ``None`` rejects the whole row, which rejects the cache
+    entry: a fact that cannot be decoded must never read as an absent fact.
+    """
+
+    row = _decode_wire_row(value, valid_lengths={3})
+    if row is None:
+        return None
+    qualname = _as_str(row[0])
+    start_line = _as_int(row[1])
+    fields = _as_list(row[2])
+    if qualname is None or start_line is None or fields is None:
+        return None
+    if len(fields) % stride:
+        return None
+    facts: list[_WireFactT] = []
+    for offset in range(0, len(fields), stride):
+        fact = build(fields[offset : offset + stride])
+        if fact is None:
+            return None
+        facts.append(fact)
+    return ((qualname, start_line), tuple(facts))
+
+
+def _decode_wire_unit_sequence_row(
+    value: object,
+) -> tuple[tuple[str, int], tuple[NearMissElement, ...]] | None:
+    """Decode one ``[qualname, start_line, [token, start, end, ...]]`` row."""
+
+    # A ``NearMissElement`` is exactly the ``(str, int, int)`` triple the
+    # qualname-span decoder already produces, so the element builder is that
+    # decoder rather than a second copy of it.
+    return decode_wire_unit_fact_row(
+        value,
+        stride=3,
+        build=_decode_wire_qualname_span,
+    )
+
+
 def _decode_wire_int_fields(
     row: list[object],
     *indexes: int,
@@ -304,4 +360,5 @@ __all__ = [
     "_decode_wire_str_fields",
     "_decode_wire_unit_core_fields",
     "_decode_wire_unit_flow_profiles",
+    "_decode_wire_unit_sequence_row",
 ]

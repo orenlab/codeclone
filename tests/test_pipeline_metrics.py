@@ -13,7 +13,7 @@ from typing import cast
 
 import pytest
 
-from codeclone.cache.reuse import source_content_digest
+from codeclone.cache.reuse import binding_context_digest, source_content_digest
 from codeclone.core._types import (
     _as_sorted_str_tuple,
     _class_metric_sort_key,
@@ -53,7 +53,7 @@ from codeclone.core.metrics_payload import (
     build_metrics_report_payload,
 )
 from codeclone.core.parallelism import _should_use_parallel
-from codeclone.core.pipeline import compute_project_metrics
+from codeclone.core.pipeline import _with_export_root_reasons, compute_project_metrics
 from codeclone.metrics.overloaded_modules import (
     _percentile_rank,
     _score_quantile,
@@ -77,6 +77,7 @@ from codeclone.models import (
     DigestObject,
     FunctionRelationshipFactsDict,
     HealthScore,
+    LiveRootReason,
     MetricsDiff,
     ModuleApiSurface,
     ModuleApiSurfaceDict,
@@ -96,6 +97,7 @@ from codeclone.models import (
     SemanticFileFacts,
     StructuralFindingGroupDict,
     UnitCoverageFact,
+    UnresolvedOverrideItem,
 )
 from codeclone.report.gates.evaluator import (
     MetricGateConfig,
@@ -130,6 +132,7 @@ def _cache_entry_v3(
 ) -> CacheEntryV3:
     return CacheEntryV3(
         cache_content_binding_version="1",
+        binding_context_digest=binding_context_digest(None),
         source_content_digest=source_content_digest(b"source"),
         git_blob_id_at_write=None,
         stat={"mtime_ns": 1, "size": 1},
@@ -415,6 +418,122 @@ def test_compute_project_metrics_uses_runtime_reachability_for_dead_code() -> No
     assert len(project_metrics.runtime_reachability) == 1
 
 
+def test_export_root_evidence_is_folded_onto_candidates_without_overwriting() -> None:
+    """39Y cycle 2b, content (b): the export_root half of the reason lane.
+
+    Export roots are a whole-project fact resolved after the per-file walk, so
+    they are merged in afterwards. A walk-resolved reason must win: the walk
+    saw the decorator directly, which is the more specific evidence.
+    """
+    plain = DeadCandidate(
+        qualname="pkg.mod:Exported.method",
+        local_name="method",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=2,
+        kind="method",
+    )
+    already_rooted = DeadCandidate(
+        qualname="pkg.mod:framework_handler",
+        local_name="framework_handler",
+        filepath="pkg/mod.py",
+        start_line=4,
+        end_line=5,
+        kind="function",
+        live_root_reason="external_decorator",
+    )
+    untouched = DeadCandidate(
+        qualname="pkg.mod:plain_unused",
+        local_name="plain_unused",
+        filepath="pkg/mod.py",
+        start_line=7,
+        end_line=8,
+        kind="function",
+    )
+    evidence: tuple[tuple[str, LiveRootReason], ...] = (
+        ("pkg.mod:Exported.method", "export_root"),
+        ("pkg.mod:framework_handler", "export_root"),
+    )
+
+    merged = _with_export_root_reasons(
+        (plain, already_rooted, untouched),
+        evidence=evidence,
+    )
+
+    assert [candidate.live_root_reason for candidate in merged] == [
+        "export_root",
+        "external_decorator",
+        None,
+    ]
+    # No evidence at all is an identity transform, not an empty rewrite.
+    assert _with_export_root_reasons((plain,), evidence=()) == (plain,)
+
+
+def test_metrics_payload_carries_abstentions_without_inflating_dead() -> None:
+    """39Y cycle 2b, content (a) and (b): both keys must carry real rows.
+
+    The counter is deliberately checked against the dead totals: an abstention
+    is neither dead nor live, so it must appear in its own count and leave
+    ``total``/``high_confidence`` untouched.
+    """
+    payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
+        project_metrics=replace(
+            _project_metrics(dead_confidence="high"),
+            unresolved_overrides=(
+                UnresolvedOverrideItem(
+                    qualname="pkg.mod:Handler.handle",
+                    filepath="pkg/mod.py",
+                    start_line=20,
+                    end_line=22,
+                    kind="method",
+                    class_qualname="pkg.mod:Handler",
+                    base_names=("external_lib.Base",),
+                ),
+            ),
+            live_root_reasons=(("pkg.mod:framework_handler", "external_decorator"),),
+        ),
+        units=(),
+        class_metrics=(),
+    )
+
+    dead_code = payload["dead_code"]
+    assert isinstance(dead_code, dict)
+    assert dead_code["unresolved_overrides"] == [
+        {
+            "qualname": "pkg.mod:Handler.handle",
+            "filepath": "pkg/mod.py",
+            "start_line": 20,
+            "end_line": 22,
+            "kind": "method",
+            "class_qualname": "pkg.mod:Handler",
+            "base_names": ["external_lib.Base"],
+            "reason": "unresolved_external_base",
+        }
+    ]
+    assert dead_code["live_root_reasons"] == [
+        {"qualname": "pkg.mod:framework_handler", "reason": "external_decorator"}
+    ]
+    summary = dead_code["summary"]
+    assert isinstance(summary, dict)
+    # Compared as one mapping: the abstention counts rise while the dead
+    # counts stay exactly where they were.
+    assert {
+        key: summary[key]
+        for key in (
+            "unresolved_external_override",
+            "live_roots",
+            "total",
+            "high_confidence",
+        )
+    } == {
+        "unresolved_external_override": 1,
+        "live_roots": 1,
+        "total": 1,
+        "high_confidence": 1,
+    }
+
+
 def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> None:
     payload = build_metrics_report_payload(
         module_registry=_TEST_MODULE_REGISTRY,
@@ -429,13 +548,24 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
                 end_line=12,
                 kind="function",
                 confidence="high",
+                reason="test_only_reference",
+                test_reference_sources=("tests.test_mod:test_suppressed_dead",),
             ),
         ),
     )
     dead_code = payload["dead_code"]
     assert isinstance(dead_code, dict)
     summary = dead_code["summary"]
-    assert summary == {"total": 1, "critical": 1, "high_confidence": 1, "suppressed": 1}
+    # 39Y cycle 2b: abstentions and live roots are counted beside the dead
+    # numbers, never inside them — zero here because this fixture has neither.
+    assert summary == {
+        "total": 1,
+        "critical": 1,
+        "high_confidence": 1,
+        "suppressed": 1,
+        "unresolved_external_override": 0,
+        "live_roots": 0,
+    }
     suppressed_items = dead_code["suppressed_items"]
     assert suppressed_items == [
         {
@@ -445,6 +575,8 @@ def test_build_metrics_report_payload_includes_suppressed_dead_code_items() -> N
             "end_line": 12,
             "kind": "function",
             "confidence": "high",
+            "reason": "test_only_reference",
+            "test_reference_sources": ["tests.test_mod:test_suppressed_dead"],
             "suppressed_by": [{"rule": "dead-code", "source": "inline_codeclone"}],
         }
     ]
@@ -889,6 +1021,58 @@ def test_load_cached_metrics_preserves_coupled_classes() -> None:
     )
     assert len(class_metrics) == 1
     assert class_metrics[0].coupled_classes == ("TypeA", "TypeB")
+
+
+def test_load_cached_metrics_preserves_instantiation_candidates() -> None:
+    """Candidates decode when present, and a row without them is not an error.
+
+    The second row is the shape every cache entry written before this lane
+    existed has: the absent key decodes to "no candidates recorded", which is
+    exactly what it means, rather than failing the entry.
+    """
+    entry = _cache_entry_v3(
+        class_metrics=(
+            {
+                "qualname": "pkg.mod:Caller",
+                "filepath": "pkg/mod.py",
+                "start_line": 1,
+                "end_line": 10,
+                "cbo": 0,
+                "lcom4": 1,
+                "method_count": 3,
+                "instance_var_count": 1,
+                "risk_coupling": "low",
+                "risk_cohesion": "low",
+                "instantiation_candidates": [
+                    "Widget|vendor:Widget",
+                    "Alpha|vendor:Alpha",
+                    "Widget|vendor:Widget",
+                ],
+            },
+            {
+                "qualname": "pkg.mod:Quiet",
+                "filepath": "pkg/mod.py",
+                "start_line": 12,
+                "end_line": 14,
+                "cbo": 0,
+                "lcom4": 1,
+                "method_count": 1,
+                "instance_var_count": 0,
+                "risk_coupling": "low",
+                "risk_cohesion": "low",
+            },
+        ),
+    )
+    class_metrics, _, _, _, _, *_ = _load_cached_metrics_extended(
+        entry,
+        filepath="pkg/mod.py",
+    )
+    assert len(class_metrics) == 2
+    assert class_metrics[0].instantiation_candidates == (
+        "Alpha|vendor:Alpha",
+        "Widget|vendor:Widget",
+    )
+    assert class_metrics[1].instantiation_candidates == ()
 
 
 def test_load_cached_metrics_preserves_dead_candidate_suppressions() -> None:

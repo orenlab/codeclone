@@ -282,6 +282,18 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         default=False,
         help_text=ui.HELP_AUDIT_JSON,
     ),
+    # 39Y Y8: the sole owner of the near-miss tier's opt-in. The tier is
+    # gate-neutral either way; this decides only whether the channel is
+    # produced at all.
+    _option(
+        dest="near_miss",
+        group="Analysis",
+        cli_kind="store_true",
+        flags=("--near-miss",),
+        default=False,
+        help_text=ui.HELP_NEAR_MISS,
+        pyproject_type=bool,
+    ),
     _option(
         dest="audit_enabled",
         group=None,
@@ -517,6 +529,15 @@ OPTIONS: Final[tuple[domain_models.OptionSpec, ...]] = (
         flags=("--fail-dead-code",),
         default=False,
         help_text=ui.HELP_FAIL_DEAD_CODE,
+        pyproject_type=bool,
+    ),
+    _option(
+        dest="fail_on_unresolved_dead_code",
+        group="Quality gates",
+        cli_kind="bool_optional",
+        flags=("--fail-on-unresolved-dead-code",),
+        default=False,
+        help_text=ui.HELP_FAIL_ON_UNRESOLVED_DEAD_CODE,
         pyproject_type=bool,
     ),
     _option(

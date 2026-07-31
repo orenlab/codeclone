@@ -21,6 +21,7 @@ from ..models import (
     ApiSymbolObservation,
     CloneObservationPayload,
     DeadCodeColumnarPayload,
+    DeadCodeLiveRootException,
     DeadCodeMarkerException,
     DeadCodeObservation,
     DependencyColumnarPayload,
@@ -131,16 +132,27 @@ def _encode_dead_code_lane(
     )
     prefixes = tuple(sorted({prefix for prefix, _qualname, _item in split}))
     kinds = tuple(sorted({item.candidate_kind for _prefix, _qualname, item in split}))
+    observation_kinds = tuple(
+        sorted({item.observation_kind for _prefix, _qualname, item in split})
+    )
     prefix_index = {value: position for position, value in enumerate(prefixes)}
     kind_index = {value: position for position, value in enumerate(kinds)}
+    observation_kind_index = {
+        value: position for position, value in enumerate(observation_kinds)
+    }
     rows = sorted(split, key=lambda row: (row[0], row[1], row[2].candidate_kind))
     return DeadCodeColumnarPayload(
         prefixes=prefixes,
         kinds=kinds,
+        observation_kinds=observation_kinds,
         prefix=tuple(prefix_index[prefix] for prefix, _qualname, _item in rows),
         qualname=tuple(qualname for _path, qualname, _item in rows),
         kind=tuple(
             kind_index[item.candidate_kind] for _prefix, _qualname, item in rows
+        ),
+        observation_kind=tuple(
+            observation_kind_index[item.observation_kind]
+            for _prefix, _qualname, item in rows
         ),
         reference_count=tuple(
             item.reference_count for _prefix, _qualname, item in rows
@@ -149,6 +161,16 @@ def _encode_dead_code_lane(
             position
             for position, (_prefix, _qualname, item) in enumerate(rows)
             if item.reachable
+        ),
+        abstained=tuple(
+            position
+            for position, (_prefix, _qualname, item) in enumerate(rows)
+            if item.abstained
+        ),
+        live_roots=tuple(
+            DeadCodeLiveRootException(row=position, reason=item.live_root_reason)
+            for position, (_prefix, _qualname, item) in enumerate(rows)
+            if item.live_root_reason is not None
         ),
         markers=tuple(
             DeadCodeMarkerException(

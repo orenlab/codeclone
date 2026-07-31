@@ -84,6 +84,7 @@ from .projection import (
     wire_filepath_from_runtime,
 )
 from .reuse import (
+    binding_context_digest,
     build_module_dependent_profile,
     build_module_neutral_profile,
     cache_reuse_decision,
@@ -136,6 +137,7 @@ def resolve_cache_status(cache: _CacheStatusLike) -> tuple[CacheStatus, str | No
 
 class Cache:
     __slots__ = (
+        "_binding_context_by_runtime_path",
         "_canonical_runtime_paths",
         "_collect_api_surface",
         "_dirty",
@@ -197,6 +199,7 @@ class Cache:
             collect_api_surface=collect_api_surface,
         )
         self._module_names_by_runtime_path: dict[str, str] = {}
+        self._binding_context_by_runtime_path: dict[str, DigestObject] = {}
         self.data: CacheData = _empty_cache_data(
             version=self._CACHE_VERSION,
             python_tag=current_python_tag(),
@@ -242,6 +245,15 @@ class Cache:
     def bind_module_registry(self, registry: ModuleRegistryHandle) -> None:
         if self.root is None:
             raise ValueError("cache module registry binding requires a project root")
+        # Each entry carries its own binding context, not the whole manifest:
+        # one module moving mount must invalidate that module, not the repo.
+        self._binding_context_by_runtime_path = {
+            str((self.root / entry.identity.file.path).resolve()): (
+                binding_context_digest(entry.identity.python_module)
+            )
+            for entry in registry.entries_by_path.values()
+            if entry.analyzed
+        }
         self._module_names_by_runtime_path = {
             str((self.root / entry.identity.file.path).resolve()): (
                 entry.identity.python_module.module
@@ -257,17 +269,30 @@ class Cache:
             collect_api_surface=self._collect_api_surface,
         )
 
+    def _binding_context_for(self, runtime_path: str) -> DigestObject:
+        """Binding context of one analysed file, or the module-less digest.
+
+        A path absent from the registry has no module identity to bind, and the
+        module-less digest is what such a file is written with, so the two
+        agree instead of silently never matching.
+        """
+
+        known = self._binding_context_by_runtime_path.get(runtime_path)
+        return known if known is not None else binding_context_digest(None)
+
     def reuse_decision(
         self,
         *,
         content: ContentIdentityVerdict,
         entry: CacheEntryV3,
+        runtime_path: str,
     ) -> CacheReuseDecision:
         return cache_reuse_decision(
             content=content,
             entry=entry,
             neutral_profile=self._module_neutral_profile,
             dependent_profile=self._module_dependent_profile,
+            binding_context=self._binding_context_for(runtime_path),
         )
 
     def _set_load_warning(self, message: str | None) -> None:
@@ -694,6 +719,7 @@ class Cache:
         entry = CacheEntryV3(
             cache_content_binding_version="1",
             source_content_digest=source_content_digest,
+            binding_context_digest=self._binding_context_for(runtime_path),
             git_blob_id_at_write=git_blob_id_at_write,
             stat=stat_sig,
             module_neutral_profile=self._module_neutral_profile,
@@ -719,6 +745,8 @@ class Cache:
                         terminal_kind=unit.terminal_kind,
                         try_finally_profile=unit.try_finally_profile,
                         side_effect_order_profile=unit.side_effect_order_profile,
+                        statement_sequence=unit.statement_sequence,
+                        unreachable_statements=unit.unreachable_statements,
                     )
                     for unit in units
                 ),

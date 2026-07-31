@@ -47,6 +47,9 @@ class MetricGateConfig:
     coverage_min: int = DEFAULT_COVERAGE_MIN
     fail_on_new: bool = False
     fail_threshold: int = -1
+    # Defaulted so the three constructors outside the CLI reporting path stay
+    # untouched; abstentions are opt-in and never gate by default.
+    fail_on_unresolved_dead_code: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +69,7 @@ class GateState:
     cohesion_max: int = 0
     dependency_cycles: int = 0
     dead_high_confidence: int = 0
+    unresolved_external_override: int = 0
     health_score: int = 0
     typing_param_permille: int = 0
     docstring_permille: int = 0
@@ -130,7 +134,10 @@ def active_gate_lane_requirements(
         rows["health_delta"] = HEALTH_INPUT_LANES
     if config.fail_cycles:
         rows["dependency_cycles_current"] = ("dependencies",)
-    if config.fail_dead_code:
+    # Both dead-code predicates read the same evidence lane, so they share the
+    # existing family rather than adding one: a new family key would change the
+    # versioned gate-to-lane matrix, which this flag is not chartered to move.
+    if config.fail_dead_code or config.fail_on_unresolved_dead_code:
         rows["dead_code_current"] = ("dead_code",)
     if config.fail_health >= 0:
         rows["health_current"] = HEALTH_INPUT_LANES
@@ -259,6 +266,10 @@ def gate_state_from_project_metrics(
             for item in project_metrics.dead_code
             if str(getattr(item, "confidence", "")).strip().lower() == "high"
         ),
+        # The CLI gate path reads project metrics, not the report document, so
+        # without this the opt-in --fail-on-unresolved-dead-code flag could
+        # never fire outside the MCP surface.
+        unresolved_external_override=len(tuple(project_metrics.unresolved_overrides)),
         health_score=max(int(project_metrics.health.total), 0),
         typing_param_permille=_permille(
             int(project_metrics.typing_param_annotated),
@@ -335,6 +346,7 @@ _GATE_REASON_ORDER = {
     "health_threshold": 40,
     "dependency_cycles": 50,
     "dead_code_high_confidence": 60,
+    "unresolved_external_override": 65,
     "new_high_risk_functions": 70,
     "new_high_coupling_classes": 80,
     "new_dependency_cycles": 90,
@@ -423,6 +435,18 @@ def _dead_code_high_confidence_reason(
     return _reason_if(
         config.fail_dead_code and state.dead_high_confidence > 0,
         f"{gate_msgs.GATE_REASON_DEAD_CODE_DETECTED}{state.dead_high_confidence}{gate_msgs.GATE_SUFFIX_ITEMS}.",
+    )
+
+
+def _unresolved_external_override_reason(
+    *,
+    state: GateState,
+    config: MetricGateConfig,
+) -> tuple[str, ...]:
+    return _reason_if(
+        config.fail_on_unresolved_dead_code and state.unresolved_external_override > 0,
+        f"{gate_msgs.GATE_REASON_UNRESOLVED_DEAD_CODE}"
+        f"{state.unresolved_external_override}{gate_msgs.GATE_SUFFIX_ITEMS}.",
     )
 
 
@@ -571,6 +595,7 @@ _GATE_REASON_BUILDERS: dict[str, Callable[..., tuple[str, ...]]] = {
     "health_threshold": _health_threshold_reason,
     "dependency_cycles": _dependency_cycles_reason,
     "dead_code_high_confidence": _dead_code_high_confidence_reason,
+    "unresolved_external_override": _unresolved_external_override_reason,
     "new_high_risk_functions": _new_high_risk_functions_reason,
     "new_high_coupling_classes": _new_high_coupling_classes_reason,
     "new_dependency_cycles": _new_dependency_cycles_reason,
@@ -806,6 +831,9 @@ def _gate_state_from_report_document(
         cohesion_max=_as_int(cohesion_summary.get("max"), 0),
         dependency_cycles=_as_int(dependencies_summary.get("cycles"), 0),
         dead_high_confidence=_as_int(dead_code_summary.get("high_confidence"), 0),
+        unresolved_external_override=_as_int(
+            dead_code_summary.get("unresolved_external_override"), 0
+        ),
         health_score=_as_int(health_summary.get("score"), 0),
         typing_param_permille=_as_int(
             coverage_adoption_summary.get("param_permille"), 0

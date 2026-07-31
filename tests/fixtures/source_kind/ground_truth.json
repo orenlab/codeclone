@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "domain": "source_kind",
+  "golden": true,
+  "layout_source_roots": {
+    "repo_root": ["."],
+    "nested_tests": ["."],
+    "in_package": ["src"],
+    "in_package_renamed": ["src"],
+    "in_package_cased": ["src"]
+  },
+  "cases": [
+    {"id": "ROOT-TESTING", "path": "repo_root/testing/case.py", "expected": {"source_kind": "tests"}},
+    {"id": "ROOT-TESTING-RENAMED", "path": "repo_root/testing/case_renamed.py", "expected": {"source_kind": "tests"}},
+    {"id": "ROOT-TEST-VOCAB", "path": "repo_root/test/case.py", "expected": {"source_kind": "tests"}},
+    {"id": "ROOT-CHECKS", "path": "repo_root/checks/case.py", "expected": {"source_kind": "production"}},
+    {"id": "NESTED-TESTING", "path": "nested_tests/tests/testing/helpers.py", "expected": {"source_kind": "tests"}},
+    {"id": "PACKAGE-TESTING", "path": "in_package/src/example/testing/helpers.py", "expected": {"source_kind": "production"}},
+    {"id": "PACKAGE-TESTING-RENAMED", "path": "in_package/src/example/testing/helpers_renamed.py", "expected": {"source_kind": "production"}},
+    {"id": "PACKAGE-TESTING-PKGRENAMED", "path": "in_package_renamed/src/library/testing/helpers.py", "expected": {"source_kind": "production"}},
+    {"id": "PACKAGE-TESTING-CASED", "path": "in_package_cased/src/MyPkg/testing/helpers.py", "expected": {"source_kind": "production"}},
+    {"id": "PACKAGE-CHECKS", "path": "in_package/src/example/checks/helpers.py", "expected": {"source_kind": "production"}}
+  ],
+  "rename_twins": [
+    ["PACKAGE-TESTING", "PACKAGE-TESTING-PKGRENAMED"],
+    ["PACKAGE-TESTING", "PACKAGE-TESTING-CASED"],
+    ["ROOT-TESTING", "ROOT-TEST-VOCAB"],
+    ["ROOT-TESTING", "ROOT-TESTING-RENAMED"]
+  ],
+  "negative_twins": [
+    ["ROOT-TESTING", "PACKAGE-TESTING"],
+    ["ROOT-TESTING", "ROOT-CHECKS"],
+    ["NESTED-TESTING", "PACKAGE-TESTING"],
+    ["PACKAGE-TESTING", "PACKAGE-CHECKS"]
+  ],
+  "twin_axes": {
+    "PACKAGE-TESTING|PACKAGE-TESTING-PKGRENAMED": "distribution package renamed example->library; the tests-named segment and the verdict are unchanged",
+    "PACKAGE-TESTING|PACKAGE-TESTING-CASED": "distribution package renamed example->MyPkg, mutating capitalization; module identity keys preserve case, so the verdict must not move",
+    "ROOT-TESTING|ROOT-TEST-VOCAB": "vocabulary member testing->test at the same repo-root position; verdict unchanged",
+    "ROOT-TESTING|ROOT-TESTING-RENAMED": "module-local identifiers renamed only; verdict unchanged",
+    "ROOT-TESTING|PACKAGE-TESTING": "identical directory name testing/, layout flips: repo-root tree vs inside a distributed package",
+    "ROOT-TESTING|ROOT-CHECKS": "identical repo-root layout, directory name flips: testing/ is in the vocabulary, checks/ is not",
+    "NESTED-TESTING|PACKAGE-TESTING": "both are a testing/ package nested one level deep; the top-level owner flips from a test tree (tests/) to a distributed package (example/)",
+    "PACKAGE-TESTING|PACKAGE-CHECKS": "identical in-package layout, directory name flips; both stay production, proving the rule never fires outside the vocabulary"
+  }
+}

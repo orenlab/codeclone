@@ -43,6 +43,7 @@ from ..derived import classify_source_kind
 if TYPE_CHECKING:
     from ...models import (
         GroupMapLike,
+        NearMissPair,
         StructuralFindingGroup,
         SuppressedCloneGroup,
     )
@@ -54,6 +55,7 @@ from ._findings_groups import (
     _build_dead_code_groups,
     _build_structural_groups,
     _build_suppressed_clone_groups,
+    build_near_miss_payload,
 )
 
 _SEMANTIC_AUTHORITY_METRICS_FAMILY = "semantic_authority"
@@ -268,6 +270,7 @@ def _build_findings_payload(
     suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None,
     design_thresholds: Mapping[str, object] | None,
     scan_root: str,
+    near_miss_pairs: Sequence[NearMissPair] | None = None,
 ) -> dict[str, object]:
     clone_functions = _build_clone_groups(
         groups=func_groups,
@@ -360,5 +363,12 @@ def _build_findings_payload(
             FAMILY_AUTHORITY: {
                 "groups": authority_groups,
             },
+            # Sibling of the clone lane, never a member of it: near-miss pairs
+            # must not become clone-lane keys, because those keys feed the
+            # baseline lane, novelty and the gates (39Y Y8).
+            "near_miss": build_near_miss_payload(
+                near_miss_pairs,
+                scan_root=scan_root,
+            ),
         },
     }

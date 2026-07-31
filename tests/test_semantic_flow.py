@@ -9,7 +9,7 @@ from __future__ import annotations
 import ast
 import subprocess
 import sys
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, asdict
 
 import pytest
 
@@ -17,10 +17,14 @@ from codeclone.analysis import _module_walk as module_walk_mod
 from codeclone.analysis.fingerprint import _cfg_fingerprint_and_complexity
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.units import extract_units_and_stats_from_source
+from codeclone.findings.clones.grouping import clone_eligible_units
 from codeclone.models import FunctionContractSummary
 from codeclone.qualnames import QualnameCollector
 from codeclone.semantics.flow import summarize_function_contract
-from tests._ast_metrics_helpers import module_registry_context
+from tests._ast_metrics_helpers import (
+    bindings_for_function_node,
+    module_registry_context,
+)
 
 
 def _summary(source: str) -> FunctionContractSummary:
@@ -45,6 +49,7 @@ def _summary(source: str) -> FunctionContractSummary:
         node,
         NormalizationConfig(),
         function,
+        bindings_for_function_node(node),
     )
     return summarize_function_contract(
         function=function,
@@ -150,7 +155,17 @@ def test_every_function_is_summarized_below_clone_threshold() -> None:
         )
     )
 
-    assert units == []
+    # Far below the clone floors the function is not a clone unit, yet both
+    # its semantic summary and its metric fact exist (39Y Y5).
+    assert (
+        clone_eligible_units(
+            [asdict(unit) for unit in units],
+            min_loc=100,
+            min_stmt=100,
+        )
+        == []
+    )
+    assert [unit.qualname for unit in units] == ["pkg.mod:tiny"]
     assert tuple(
         summary.function
         for summary in metrics.semantic_facts.function_contract_summaries

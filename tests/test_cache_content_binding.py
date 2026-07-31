@@ -19,6 +19,7 @@ import codeclone.paths.git_snapshot as git_snapshot_mod
 from codeclone.cache._wire_decode import _decode_wire_file_entry
 from codeclone.cache.integrity import sign_cache_payload
 from codeclone.cache.reuse import (
+    binding_context_digest,
     git_blob_identity_for_parsed_source,
     prove_cached_source_identity,
     source_content_digest,
@@ -75,6 +76,7 @@ def _entry(
     )
     return CacheEntryV3(
         cache_content_binding_version="1",
+        binding_context_digest=binding_context_digest(None),
         source_content_digest=source_content_digest(raw_source),
         git_blob_id_at_write=blob,
         stat=stat,
@@ -142,6 +144,7 @@ def test_dependency_observation_revision_misses_only_dependent_lane(
     )
 
     decision = cache_reuse.cache_reuse_decision(
+        binding_context=entry.binding_context_digest,
         content=ContentIdentityVerdict(
             hit=True,
             reason="digest_hit",

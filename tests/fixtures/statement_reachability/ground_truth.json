@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "domain": "statement_reachability",
+  "golden": true,
+  "cases": [
+    {"id": "UNREACHABLE-AFTER-RETURN", "path": "cases.py", "symbol": "after_return", "expected": {"unreachable": true}},
+    {"id": "UNREACHABLE-AFTER-RAISE", "path": "cases.py", "symbol": "after_raise", "expected": {"unreachable": true}},
+    {"id": "UNREACHABLE-IF-FALSE", "path": "cases.py", "symbol": "inside_false_branch", "expected": {"unreachable": true}},
+    {"id": "UNREACHABLE-AFTER-BREAK", "path": "cases.py", "symbol": "after_break", "expected": {"unreachable": true}},
+    {"id": "UNREACHABLE-EXHAUSTIVE", "path": "cases.py", "symbol": "after_exhaustive_return", "expected": {"unreachable": true}},
+    {"id": "REACHABLE-PARTIAL-RETURN", "path": "cases.py", "symbol": "after_partial_return", "expected": {"unreachable": false}},
+    {"id": "REACHABLE-AFTER-LOOP", "path": "cases.py", "symbol": "after_loop_without_break", "expected": {"unreachable": false}},
+    {"id": "REACHABLE-CONDITIONAL-BREAK", "path": "cases.py", "symbol": "after_conditional_break", "expected": {"unreachable": false}},
+    {"id": "REACHABLE-GUARDED-RAISE", "path": "cases.py", "symbol": "after_guarded_raise", "expected": {"unreachable": false}},
+    {"id": "R-UNREACHABLE-AFTER-RETURN", "path": "cases_renamed.py", "symbol": "past_result", "expected": {"unreachable": true}},
+    {"id": "R-UNREACHABLE-AFTER-RAISE", "path": "cases_renamed.py", "symbol": "past_error", "expected": {"unreachable": true}},
+    {"id": "R-UNREACHABLE-IF-FALSE", "path": "cases_renamed.py", "symbol": "inside_disabled_branch", "expected": {"unreachable": true}},
+    {"id": "R-UNREACHABLE-AFTER-BREAK", "path": "cases_renamed.py", "symbol": "past_stop", "expected": {"unreachable": true}},
+    {"id": "R-UNREACHABLE-EXHAUSTIVE", "path": "cases_renamed.py", "symbol": "past_complete_choice", "expected": {"unreachable": true}},
+    {"id": "R-REACHABLE-PARTIAL-RETURN", "path": "cases_renamed.py", "symbol": "past_partial_result", "expected": {"unreachable": false}},
+    {"id": "R-REACHABLE-AFTER-LOOP", "path": "cases_renamed.py", "symbol": "past_loop_without_stop", "expected": {"unreachable": false}},
+    {"id": "R-REACHABLE-CONDITIONAL-BREAK", "path": "cases_renamed.py", "symbol": "past_conditional_stop", "expected": {"unreachable": false}},
+    {"id": "R-REACHABLE-GUARDED-RAISE", "path": "cases_renamed.py", "symbol": "past_guarded_error", "expected": {"unreachable": false}},
+    {"id": "REACHABLE-CONSTANT-BINDING", "path": "cases.py", "symbol": "constant_binding", "expected": {"unreachable": false}},
+    {"id": "R-REACHABLE-CONSTANT-BINDING", "path": "cases_renamed.py", "symbol": "steady_binding", "expected": {"unreachable": false}}
+  ],
+  "rename_twins": [
+    ["UNREACHABLE-AFTER-RETURN", "R-UNREACHABLE-AFTER-RETURN"],
+    ["UNREACHABLE-AFTER-RAISE", "R-UNREACHABLE-AFTER-RAISE"],
+    ["UNREACHABLE-IF-FALSE", "R-UNREACHABLE-IF-FALSE"],
+    ["UNREACHABLE-AFTER-BREAK", "R-UNREACHABLE-AFTER-BREAK"],
+    ["UNREACHABLE-EXHAUSTIVE", "R-UNREACHABLE-EXHAUSTIVE"],
+    ["REACHABLE-PARTIAL-RETURN", "R-REACHABLE-PARTIAL-RETURN"],
+    ["REACHABLE-AFTER-LOOP", "R-REACHABLE-AFTER-LOOP"],
+    ["REACHABLE-CONDITIONAL-BREAK", "R-REACHABLE-CONDITIONAL-BREAK"],
+    ["REACHABLE-GUARDED-RAISE", "R-REACHABLE-GUARDED-RAISE"],
+    ["REACHABLE-CONSTANT-BINDING", "R-REACHABLE-CONSTANT-BINDING"]
+  ],
+  "negative_twins": [
+    ["UNREACHABLE-EXHAUSTIVE", "REACHABLE-PARTIAL-RETURN"],
+    ["UNREACHABLE-AFTER-BREAK", "REACHABLE-CONDITIONAL-BREAK"],
+    ["UNREACHABLE-AFTER-BREAK", "REACHABLE-AFTER-LOOP"],
+    ["UNREACHABLE-AFTER-RAISE", "REACHABLE-GUARDED-RAISE"],
+    ["R-UNREACHABLE-EXHAUSTIVE", "R-REACHABLE-PARTIAL-RETURN"],
+    ["R-UNREACHABLE-AFTER-BREAK", "R-REACHABLE-CONDITIONAL-BREAK"],
+    ["R-UNREACHABLE-AFTER-BREAK", "R-REACHABLE-AFTER-LOOP"],
+    ["R-UNREACHABLE-AFTER-RAISE", "R-REACHABLE-GUARDED-RAISE"],
+    ["UNREACHABLE-IF-FALSE", "REACHABLE-CONSTANT-BINDING"],
+    ["R-UNREACHABLE-IF-FALSE", "R-REACHABLE-CONSTANT-BINDING"]
+  ],
+  "twin_axes": {
+    "UNREACHABLE-EXHAUSTIVE|REACHABLE-PARTIAL-RETURN": "identical shape except the else branch; only the exhaustive if/else makes the trailing return unreachable",
+    "UNREACHABLE-AFTER-BREAK|REACHABLE-CONDITIONAL-BREAK": "both loops break; only the unconditional break leaves the following statement unreachable",
+    "UNREACHABLE-AFTER-BREAK|REACHABLE-AFTER-LOOP": "a loop body statement after an unconditional break vs a statement after a loop that never breaks",
+    "UNREACHABLE-AFTER-RAISE|REACHABLE-GUARDED-RAISE": "both raise; only the unconditional raise makes the following statement unreachable",
+    "R-UNREACHABLE-EXHAUSTIVE|R-REACHABLE-PARTIAL-RETURN": "renamed twin of UNREACHABLE-EXHAUSTIVE|REACHABLE-PARTIAL-RETURN",
+    "R-UNREACHABLE-AFTER-BREAK|R-REACHABLE-CONDITIONAL-BREAK": "renamed twin of UNREACHABLE-AFTER-BREAK|REACHABLE-CONDITIONAL-BREAK",
+    "R-UNREACHABLE-AFTER-BREAK|R-REACHABLE-AFTER-LOOP": "renamed twin of UNREACHABLE-AFTER-BREAK|REACHABLE-AFTER-LOOP",
+    "R-UNREACHABLE-AFTER-RAISE|R-REACHABLE-GUARDED-RAISE": "renamed twin of UNREACHABLE-AFTER-RAISE|REACHABLE-GUARDED-RAISE",
+    "UNREACHABLE-IF-FALSE|REACHABLE-CONSTANT-BINDING": "the literal-condition clause is a fact about source text, not values: `if False` is unreachable, a name bound to False is not, and only value propagation could tell them apart",
+    "R-UNREACHABLE-IF-FALSE|R-REACHABLE-CONSTANT-BINDING": "renamed twin of UNREACHABLE-IF-FALSE|REACHABLE-CONSTANT-BINDING"
+  }
+}

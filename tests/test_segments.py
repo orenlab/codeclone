@@ -8,6 +8,7 @@ import ast
 
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.blocks import extract_segments
+from tests._ast_metrics_helpers import bindings_for_function_node
 
 
 def test_extract_segments_windows() -> None:
@@ -24,6 +25,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(func),
         window_size=2,
         max_segments=10,
     )
@@ -43,6 +45,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(func),
         window_size=3,
         max_segments=10,
     )
@@ -65,6 +68,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(func),
         window_size=2,
         max_segments=1,
     )
@@ -96,6 +100,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=cfg,
+        bindings=bindings_for_function_node(func1),
         window_size=2,
         max_segments=10,
     )[0]
@@ -104,6 +109,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=cfg,
+        bindings=bindings_for_function_node(func2),
         window_size=2,
         max_segments=10,
     )[0]

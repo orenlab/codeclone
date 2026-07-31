@@ -99,6 +99,7 @@ class CLIArgsLike(Protocol):
     fail_cohesion: int
     fail_cycles: bool
     fail_dead_code: bool
+    fail_on_unresolved_dead_code: bool
     fail_health: int
     fail_on_new_metrics: bool
     fail_on_typing_regression: bool

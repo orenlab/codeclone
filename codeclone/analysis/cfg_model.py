@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import ast
 
+    from ..models import BlockOrigin
+
 
 @dataclass(eq=False, slots=True)
 class Block:
@@ -19,6 +21,13 @@ class Block:
     statements: list[ast.stmt] = field(default_factory=list)
     successors: set[Block] = field(default_factory=set)
     is_terminated: bool = False
+    #: Why the builder created this block, for explanation only (39Y Y9).
+    #: Reachability is decided solely by traversal from ``CFG.entry`` and
+    #: complexity solely by the edge/node/component counts, so nothing may read
+    #: this to decide either — it exists so a finding can say "code after a
+    #: return" instead of the bare graph fact. Same standing as an edge kind
+    #: tag: evidence, never a filter.
+    origin: BlockOrigin = "normal"
 
     def add_successor(self, block: Block) -> None:
         self.successors.add(block)
@@ -32,6 +41,16 @@ class Block:
 
 @dataclass(slots=True)
 class CFG:
+    """One function's control flow — the single truth about that function.
+
+    Every statement the function contains lives in exactly one block here,
+    including statements that cannot run: those become blocks with no incoming
+    edge rather than being dropped or held in a parallel structure. Exception
+    dispatch, ``finally`` routing and context-manager suppression are modelled
+    as ordinary edges, so reachability and complexity read the same graph and
+    can never disagree (39Y Y9).
+    """
+
     qualname: str
     blocks: list[Block] = field(default_factory=list)
 

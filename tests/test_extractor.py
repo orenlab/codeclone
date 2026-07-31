@@ -24,16 +24,18 @@ import codeclone.analysis.ast_helpers as ast_helpers_mod
 import codeclone.analysis.parser as parser_mod
 import codeclone.analysis.reachability as reachability_mod
 import codeclone.analysis.units as units_mod
-from codeclone import qualnames
+from codeclone import contracts, qualnames
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.contracts.errors import ParseError
-from codeclone.metrics.dead_code import find_unused
+from codeclone.metrics.dead_code import classify_liveness, find_unused
 from codeclone.models import (
     BlockUnit,
     ClassMetrics,
+    DeadCandidate,
     FileMetrics,
     FunctionRelationshipFacts,
     ModuleDep,
+    ModuleRegistryHandle,
     RuntimeReachabilityFact,
     SegmentUnit,
     SourceStats,
@@ -67,8 +69,43 @@ _DETECT_FUSION_CORPUS_FILES = (
     "tests/fixtures/wire_corpus/modern_syntax.py",
     "tests/fixtures/wire_corpus/pattern_syntax.py",
 )
+# Repinned under maintainer sanction for the 39Y rule-3 re-home: the payload
+# canonicalizes dataclasses.asdict over metrics.class_metrics wholesale, so the
+# three ratified ClassMetrics fields (base_names, has_unresolved_external_base,
+# decorator_evidenced_methods) are digest-visible although no detect-fusion
+# output changed — rebuilding the payload with exactly those three keys popped
+# reproduces ebfb095c… byte-exact. The canonicalization is deliberately not
+# narrowed; the guard stays whole-fact.
+#
+# Repinned again under maintainer sanction for 39Y Y6 (CBO imported-domain edge
+# lane). The delta is confined to the `cbo` / `coupled_classes` fields of
+# exactly three classes, each a genuine imported-domain edge the old rule could
+# not see: clone_metrics_cycle pkg.a:ServiceA -> ('ServiceB',),
+# pkg.b:ServiceB -> ('ServiceA',), and semantic_authority
+# dual_artifact_writers:JsonWriter -> ('Mapping', 'Path'). Proof: restoring
+# those three rows to cbo=0 / coupled_classes=() reproduces 84ce80a1… byte-exact
+# — so no other row moved and no edge was lost anywhere in the corpus.
+#
+# Repinned again for 39Y rule-3 defect 2 (self-dispatch as decision-table row-1
+# evidence), same whole-fact canonicalization as the first repin above: the new
+# ClassMetrics field `self_dispatched_methods` is digest-visible although no
+# detect-fusion output changed. Proof: rebuilding the payload with exactly that
+# one key popped reproduces 98d15d32… byte-exact, so the delta is the added key
+# and nothing else in the corpus moved.
+#
+# Repinned again for 39Y item 2 (maintainer ruling 2026-07-30: an imported
+# collaborator counts only on proven class resolution; `Call.func` syntax is
+# not evidence). Two sanctioned deltas, both confined:
+#   1. the new ClassMetrics field `instantiation_candidates` is digest-visible;
+#   2. exactly one class row loses a file-scope edge — clone_metrics_cycle
+#      pkg.a:ServiceA, whose only edge was the unresolved call `ServiceB()`.
+#      It is not a lost edge: the project fold re-earns it against the class
+#      index, which is why golden_v2/clone_metrics_cycle is unchanged.
+# Proof: popping that one key and re-applying the dead syntax rule (every
+# candidate label counted as an edge) reproduces d7498815… byte-exact, so
+# nothing else in the corpus moved. Exactly one row carries a candidate at all.
 _DETECT_FUSION_CORPUS_DIGEST = (
-    "ebfb095c72d8404b7cf61e2ed1f87624be7def247dd188971b1a8bea52c326b6"
+    "63f6d558fb022b6b922dba188a115cb5eafcae5cc4b0fff85c64f2d9cde13106"
 )
 
 
@@ -85,6 +122,7 @@ def _extract_source(
     segment_min_loc: int = 20,
     segment_min_stmt: int = 10,
     collect_structural_findings: bool = True,
+    module_registry: ModuleRegistryHandle | None = None,
 ) -> tuple[
     list[Unit],
     list[BlockUnit],
@@ -93,10 +131,14 @@ def _extract_source(
     FileMetrics,
     list[StructuralFindingGroup],
 ]:
-    identity, registry = module_registry_context(
-        filepath=filepath,
-        module_name=module_name,
-    )
+    if module_registry is None:
+        identity, registry = module_registry_context(
+            filepath=filepath,
+            module_name=module_name,
+        )
+    else:
+        registry = module_registry
+        identity = registry.entries_by_path[filepath].identity
     return units_mod.extract_units_and_stats_from_source(
         source=source,
         filepath=filepath,
@@ -198,8 +240,56 @@ def _dead_qualnames_from_source(
         referenced_names=file_metrics.referenced_names,
         referenced_qualnames=file_metrics.referenced_qualnames,
         runtime_reachability=file_metrics.runtime_reachability,
+        class_metrics=file_metrics.class_metrics,
     )
     return tuple(item.qualname for item in dead)
+
+
+def _runtime_reachability_by_target(source: str) -> dict[str, RuntimeReachabilityFact]:
+    """Runtime-reachability facts keyed by target qualname."""
+    return {
+        fact.target_qualname: fact for fact in _runtime_reachability_from_source(source)
+    }
+
+
+def _liveness_status_by_qualname(
+    source: str,
+    *,
+    filepath: str = "pkg/mod.py",
+    module_name: str = "pkg.mod",
+) -> dict[str, str]:
+    """Tri-state liveness status for every dead candidate in ``source``.
+
+    The statuses are the 39Y rule-3 contract: ``live``, ``dead``, and
+    ``unresolved_external_override`` - honest abstention on a method whose
+    owning class inherits from a base the analysis root cannot see.
+    """
+    _, _, _, _, file_metrics, _ = _extract_source(
+        source=source,
+        filepath=filepath,
+        module_name=module_name,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    result = classify_liveness(
+        definitions=file_metrics.dead_candidates,
+        referenced_names=file_metrics.referenced_names,
+        referenced_qualnames=file_metrics.referenced_qualnames,
+        runtime_reachability=file_metrics.runtime_reachability,
+        class_metrics=file_metrics.class_metrics,
+    )
+    statuses = {
+        candidate.qualname: "live" for candidate in file_metrics.dead_candidates
+    }
+    statuses.update({item.qualname: "dead" for item in result.dead_items})
+    statuses.update(
+        {
+            item.qualname: "unresolved_external_override"
+            for item in result.unresolved_overrides
+        }
+    )
+    return statuses
 
 
 def _file_metrics_from_source(
@@ -1437,7 +1527,7 @@ def demo():
     assert isinstance(bad_span_node, ast.FunctionDef)
     bad_span_node.lineno = 3
     bad_span_node.end_lineno = 2
-    assert units_mod._eligible_unit_shape(bad_span_node, min_loc=1, min_stmt=1) is None
+    assert units_mod._unit_shape(bad_span_node) is None
 
     _, missing_method_collector, missing_method_walk = _collect_module_walk(
         """
@@ -1592,6 +1682,12 @@ class Reader(Protocol):
             instance_var_count=0,
             risk_coupling="low",
             risk_cohesion="low",
+            # typing.Protocol is outside the analysis root, so the rule-3
+            # opacity flag is set. It changes no dead-code verdict here:
+            # protocol stub methods are already non-actionable by their own
+            # rule, which runs before the abstention branch.
+            base_names=("Protocol",),
+            has_unresolved_external_base=True,
         ),
     )
 
@@ -1746,6 +1842,369 @@ def test_orphan_usage():
         ),
     )
     assert dead and dead[0].qualname == "pkg.mod:orphan"
+
+
+def test_dead_code_distinguishes_test_only_reference_from_unreferenced() -> None:
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    ground_truth = json.loads((fixture_root / "ground_truth.json").read_text())
+    expected_by_symbol = {
+        case["symbol"]: case["expected"]
+        for case in ground_truth["cases"]
+        if case["path"].startswith("liveprobe/")
+    }
+    # The whole liveprobe acceptance set, not just the production module.
+    assert len(expected_by_symbol) == 7
+
+    metrics_by_module: dict[str, FileMetrics] = {}
+    for relative_path, module_name in (
+        ("liveprobe/src/liveprobe/__init__.py", "liveprobe"),
+        ("liveprobe/src/liveprobe/api.py", "liveprobe.api"),
+        ("liveprobe/src/liveprobe/framework.py", "liveprobe.framework"),
+        ("liveprobe/src/liveprobe/production.py", "liveprobe.production"),
+        ("liveprobe/src/liveprobe/main.py", "liveprobe.main"),
+        ("liveprobe/tests/test_production.py", "liveprobe.tests.test_production"),
+    ):
+        _, _, _, _, metrics, _ = _extract_source(
+            source=(fixture_root / relative_path).read_text(),
+            filepath=relative_path,
+            module_name=module_name,
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+        )
+        metrics_by_module[module_name] = metrics
+
+    test_module = metrics_by_module["liveprobe.tests.test_production"]
+    dead = find_unused(
+        definitions=tuple(
+            candidate
+            for metrics in metrics_by_module.values()
+            for candidate in metrics.dead_candidates
+        ),
+        referenced_names=frozenset().union(
+            *(metrics.referenced_names for metrics in metrics_by_module.values())
+        ),
+        referenced_qualnames=frozenset().union(
+            *(metrics.referenced_qualnames for metrics in metrics_by_module.values())
+        ),
+        function_relationship_facts=(
+            *reversed(test_module.function_relationship_facts),
+            *test_module.function_relationship_facts,
+        ),
+    )
+    dead_by_symbol = {item.qualname.rsplit(":", 1)[-1]: item for item in dead}
+
+    # All seven ground-truth symbols, live and dead alike.
+    assert {symbol: symbol not in dead_by_symbol for symbol in expected_by_symbol} == {
+        symbol: expected["live"] for symbol, expected in expected_by_symbol.items()
+    }
+
+    for symbol, expected in expected_by_symbol.items():
+        if expected["live"]:
+            continue
+        assert dead_by_symbol[symbol].reason == expected["reason"]
+
+    test_only = dead_by_symbol["test_only_helper"]
+    assert test_only.reason == "test_only_reference"
+    assert test_only.test_reference_sources == (
+        "liveprobe.tests.test_production:test_helper_for_historical_behavior",
+    )
+    assert dead_by_symbol["unused_private"].test_reference_sources == ()
+    assert dead_by_symbol["run"].test_reference_sources == ()
+    assert contracts.LIVENESS_POLICY_VERSION == "1"
+
+
+def test_extraction_uses_module_identity_for_test_named_package_trees() -> None:
+    fixture_root = Path(__file__).parent / "fixtures" / "source_kind"
+    source = """
+def helper() -> str:
+    return "ready"
+
+result = helper()
+"""
+    package_path = "src/example/testing/helpers.py"
+    package_registry = build_test_module_registry(
+        root=fixture_root / "in_package",
+        source_roots=("src",),
+    )
+    *_, package_metrics, _findings = _extract_source(
+        source=source,
+        filepath=package_path,
+        module_name="example.testing.helpers",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+        module_registry=package_registry,
+    )
+    assert "helper" in package_metrics.referenced_names
+
+    test_path = "testing/case.py"
+    test_registry = build_test_module_registry(root=fixture_root / "repo_root")
+    *_, test_metrics, _findings = _extract_source(
+        source=source,
+        filepath=test_path,
+        module_name="testing.helpers",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+        module_registry=test_registry,
+    )
+    assert test_metrics.referenced_names == frozenset()
+
+
+def test_package_export_chain_roots_only_exported_symbols() -> None:
+    """The __all__ / package re-export chain is owned by the module walk.
+
+    A symbol exported only through the package ``__init__`` chain, with no
+    other reference anywhere, must come out live; its non-exported sibling in
+    the same module must stay dead. Public methods of an exported class are
+    deliberately NOT rooted here - that extension is owned by
+    ``codeclone.core.entrypoints`` and pinned by its own contract test.
+    """
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    ground_truth = json.loads((fixture_root / "ground_truth.json").read_text())
+    registry = build_test_module_registry(root=fixture_root)
+
+    for package_module, api_path, api_module in (
+        ("distillations", "distillations/api.py", "distillations.api"),
+        (
+            "distillations_renamed",
+            "distillations_renamed/api.py",
+            "distillations_renamed.api",
+        ),
+    ):
+        expected_by_symbol = {
+            case["symbol"]: case["expected"]
+            for case in ground_truth["cases"]
+            if case["path"] == api_path
+        }
+        referenced_names: set[str] = set()
+        referenced_qualnames: set[str] = set()
+        dead_candidates: list[DeadCandidate] = []
+        for relative_path, module_name in (
+            (f"{package_module}/__init__.py", package_module),
+            (api_path, api_module),
+        ):
+            _, _, _, _, metrics, _ = _extract_source(
+                source=(fixture_root / relative_path).read_text(),
+                filepath=relative_path,
+                module_name=module_name,
+                cfg=NormalizationConfig(),
+                min_loc=1,
+                min_stmt=1,
+                module_registry=registry,
+            )
+            referenced_names |= set(metrics.referenced_names)
+            referenced_qualnames |= set(metrics.referenced_qualnames)
+            dead_candidates.extend(metrics.dead_candidates)
+
+        dead = {
+            item.qualname
+            for item in find_unused(
+                definitions=tuple(dead_candidates),
+                referenced_names=frozenset(referenced_names),
+                referenced_qualnames=frozenset(referenced_qualnames),
+            )
+        }
+
+        exported_function = next(
+            symbol
+            for symbol, expected in expected_by_symbol.items()
+            if expected["live"] and "." not in symbol
+        )
+        # Exported only through the package __init__ re-export + __all__.
+        assert f"{api_module}:{exported_function}" in referenced_qualnames
+        assert f"{api_module}:{exported_function}" not in dead
+        # The non-exported sibling in the same module stays dead.
+        non_exported = next(
+            symbol
+            for symbol, expected in expected_by_symbol.items()
+            if not expected["live"]
+        )
+        assert f"{api_module}:{non_exported}" not in referenced_qualnames
+        assert f"{api_module}:{non_exported}" in dead
+        # Methods are not rooted by the walk; core.entrypoints owns that step.
+        exported_method = next(
+            symbol
+            for symbol, expected in expected_by_symbol.items()
+            if expected["live"] and "." in symbol
+        )
+        assert f"{api_module}:{exported_method}" not in referenced_qualnames
+
+
+def test_external_decorators_define_liveness_roots() -> None:
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    ground_truth = json.loads((fixture_root / "ground_truth.json").read_text())
+    registry = build_test_module_registry(root=fixture_root)
+    for relative_path, module_name in (
+        ("distillations/roots.py", "distillations.roots"),
+        ("distillations_renamed/roots.py", "distillations_renamed.roots"),
+    ):
+        expected_by_symbol = {
+            case["symbol"]: case["expected"]
+            for case in ground_truth["cases"]
+            if case["path"] == relative_path and "live" in case["expected"]
+        }
+        source = (fixture_root / relative_path).read_text()
+        _, _, _, _, metrics, _ = _extract_source(
+            source=source,
+            filepath=relative_path,
+            module_name=module_name,
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            module_registry=registry,
+        )
+
+        dead = find_unused(
+            definitions=metrics.dead_candidates,
+            referenced_names=metrics.referenced_names,
+            referenced_qualnames=metrics.referenced_qualnames,
+            runtime_reachability=metrics.runtime_reachability,
+        )
+        dead_symbols = {item.qualname.removeprefix(f"{module_name}:") for item in dead}
+        tree, collector = _parse_tree_and_collector(source)
+        walk = module_walk_mod._collect_module_walk_data(
+            tree=tree,
+            source=registry.entries_by_path[relative_path].identity,
+            registry=registry,
+            collector=collector,
+            collect_referenced_names=True,
+        )
+        evidence_by_symbol = {
+            qualname.removeprefix(f"{module_name}:"): reason
+            for qualname, reason in walk.liveness_root_reasons
+        }
+        for symbol, expected in expected_by_symbol.items():
+            assert (symbol not in dead_symbols) is expected["live"]
+            if expected["reason"] == "external_decorator":
+                assert evidence_by_symbol[symbol] == expected["reason"]
+
+
+def test_tri_state_liveness_abstains_on_unresolved_external_bases() -> None:
+    """Rule 3: an opaque base yields abstention, never name-only revival.
+
+    The maintainer's decision table (39Y brief §6) proven on six fixtures: a
+    call naming the declaring class roots the method; an unevidenced public
+    method abstains; a name collision proven only on an unrelated local class
+    must NOT revive the external-base method; a name-mangled private stays
+    ordinary dead-eligible code; a ``self`` call inside the declaring class is
+    itself a proven receiver and roots its target; and the same bare name
+    self-called from an UNRELATED class does not.
+    """
+    fixture_root = Path(__file__).parent / "fixtures" / "liveness_policy"
+    ground_truth = json.loads((fixture_root / "ground_truth.json").read_text())
+    registry = build_test_module_registry(root=fixture_root)
+
+    for relative_path, module_name in (
+        ("distillations/roots.py", "distillations.roots"),
+        ("distillations_renamed/roots.py", "distillations_renamed.roots"),
+    ):
+        expected_by_symbol = {
+            case["symbol"]: case["expected"]["status"]
+            for case in ground_truth["cases"]
+            if case["path"] == relative_path and "status" in case["expected"]
+        }
+        assert len(expected_by_symbol) == 8
+
+        _, _, _, _, metrics, _ = _extract_source(
+            source=(fixture_root / relative_path).read_text(),
+            filepath=relative_path,
+            module_name=module_name,
+            cfg=NormalizationConfig(),
+            min_loc=1,
+            min_stmt=1,
+            module_registry=registry,
+        )
+        result = classify_liveness(
+            definitions=metrics.dead_candidates,
+            referenced_names=metrics.referenced_names,
+            referenced_qualnames=metrics.referenced_qualnames,
+            runtime_reachability=metrics.runtime_reachability,
+            class_metrics=metrics.class_metrics,
+        )
+
+        def local(qualname: str, *, prefix: str = f"{module_name}:") -> str:
+            return qualname.removeprefix(prefix)
+
+        statuses = {
+            local(candidate.qualname): "live" for candidate in metrics.dead_candidates
+        }
+        statuses.update({local(item.qualname): "dead" for item in result.dead_items})
+        statuses.update(
+            {
+                local(item.qualname): "unresolved_external_override"
+                for item in result.unresolved_overrides
+            }
+        )
+
+        assert {
+            symbol: statuses[symbol] for symbol in expected_by_symbol
+        } == expected_by_symbol
+
+        # The collision axes stated directly: exactly two abstaining methods
+        # share their bare name with a symbol proven live on an unrelated
+        # receiver, and neither shared name rescued them above. One collides
+        # through an explicit local-class call (LocalStore.get), the other
+        # through an unrelated class's self-dispatch.
+        colliding = [
+            symbol
+            for symbol, status in expected_by_symbol.items()
+            if status == "unresolved_external_override"
+            and symbol.rpartition(".")[2] in metrics.referenced_names
+        ]
+        assert len(colliding) == 2
+
+
+def test_self_dispatch_is_row_one_evidence_for_opaque_base_methods() -> None:
+    """A ``self`` call inside the declaring class proves the receiver type.
+
+    Decision-table row 1 asks for a resolved reference whose receiver type is
+    proven. ``self`` inside a class body is exactly that: it can only ever bind
+    an instance of the declaring class or a subclass, so the call is
+    method-specific evidence and never a bare-name match. Without this the
+    engine over-abstained on ordinary private helpers of any class with an
+    external base.
+
+    The negative twin holds by construction rather than by a second rule: the
+    walk records a self-call only when the called attribute is itself a method
+    of the class being walked, so ``UnrelatedDispatcher``'s self-call cannot
+    reach ``SharedNameHandler``.
+    """
+    source = """
+from external_protocol import Handler
+
+class SelfDispatchHandler(Handler):
+    def collect(self, payload):
+        return self._gather(payload)
+
+    def _gather(self, payload):
+        return payload.strip()
+
+class SharedNameHandler(Handler):
+    def _gather(self, payload):
+        return payload
+
+class UnrelatedDispatcher:
+    def drive(self, payload):
+        return self._gather(payload)
+
+    def _gather(self, payload):
+        return payload.lower()
+"""
+
+    statuses = _liveness_status_by_qualname(source)
+
+    assert statuses["pkg.mod:SelfDispatchHandler._gather"] == "live"
+    # No evidence of its own: the caller still abstains.
+    assert statuses["pkg.mod:SelfDispatchHandler.collect"] == (
+        "unresolved_external_override"
+    )
+    # Negative twin: an unrelated class's self-call shares the bare name and
+    # must not revive this method.
+    assert statuses["pkg.mod:SharedNameHandler._gather"] == (
+        "unresolved_external_override"
+    )
 
 
 @pytest.mark.parametrize(
@@ -2076,8 +2535,7 @@ def orphan():
 """
 
     assert _dead_qualnames_from_source(source) == ("pkg.mod:orphan",)
-    facts = _runtime_reachability_from_source(source)
-    by_target = {fact.target_qualname: fact for fact in facts}
+    by_target = _runtime_reachability_by_target(source)
 
     assert by_target["pkg.mod:get_system_metrics"].framework == "fastapi"
     assert by_target["pkg.mod:get_system_metrics"].evidence == (
@@ -2214,15 +2672,22 @@ def orphan():
     return 1
 """
 
+    # SUPERSEDED by the tri-state contract (EM mem-f12ffef4): this assertion
+    # used to require SecurityAuditMiddleware.helper to be dead. Its owner
+    # inherits an unresolved external base, so an unevidenced public method now
+    # abstains rather than being claimed dead. The class itself still dies, and
+    # base-less PlainMiddleware is the untouched negative control.
     assert _dead_qualnames_from_source(source) == (
         "pkg.mod:SecurityAuditMiddleware",
-        "pkg.mod:SecurityAuditMiddleware.helper",
         "pkg.mod:PlainMiddleware",
         "pkg.mod:PlainMiddleware.dispatch",
         "pkg.mod:orphan",
     )
-    facts = _runtime_reachability_from_source(source)
-    by_target = {fact.target_qualname: fact for fact in facts}
+    assert (
+        _liveness_status_by_qualname(source)["pkg.mod:SecurityAuditMiddleware.helper"]
+        == "unresolved_external_override"
+    )
+    by_target = _runtime_reachability_by_target(source)
     assert by_target["pkg.mod:SecurityAuditMiddleware.dispatch"].framework == (
         "starlette"
     )
@@ -2256,9 +2721,14 @@ class OrjsonJSON(TypeDecorator[object]):
 
     assert "pkg.mod:OrjsonJSON.process_bind_param" not in dead
     assert "pkg.mod:OrjsonJSON.process_result_value" not in dead
-    assert "pkg.mod:OrjsonJSON.helper" in dead
-    facts = _runtime_reachability_from_source(source)
-    by_target = {fact.target_qualname: fact for fact in facts}
+    # SUPERSEDED by the tri-state contract (EM mem-f12ffef4): this assertion
+    # used to require OrjsonJSON.helper to be dead. TypeDecorator is an
+    # unresolved external base, so the unevidenced helper abstains instead.
+    assert "pkg.mod:OrjsonJSON.helper" not in dead
+    assert _liveness_status_by_qualname(source)["pkg.mod:OrjsonJSON.helper"] == (
+        "unresolved_external_override"
+    )
+    by_target = _runtime_reachability_by_target(source)
     assert by_target["pkg.mod:OrjsonJSON.process_bind_param"].framework == (
         "sqlalchemy"
     )
@@ -2325,15 +2795,21 @@ def orphan():
         "pkg.mod:CustomRoute.get_response",
         "pkg.mod:CustomApp.build_middleware_stack",
     }.isdisjoint(dead)
-    assert dead >= {
-        "pkg.mod:orphan",
-        "pkg.mod:CustomJsonSchema.schema_helper",
-        "pkg.mod:CustomRoute.route_helper",
-        "pkg.mod:CustomApp.app_helper",
+    assert dead >= {"pkg.mod:orphan"}
+    # SUPERSEDED by the tri-state contract (EM mem-f12ffef4): these three
+    # helpers used to be asserted dead. Each hangs off an unresolved external
+    # framework base, so all three abstain together.
+    statuses = _liveness_status_by_qualname(source)
+    assert {
+        statuses["pkg.mod:CustomJsonSchema.schema_helper"],
+        statuses["pkg.mod:CustomRoute.route_helper"],
+        statuses["pkg.mod:CustomApp.app_helper"],
+    } == {"unresolved_external_override"}
+    by_target = _runtime_reachability_by_target(source)
+    by_evidence = {
+        (fact.target_qualname, fact.evidence_symbol): fact
+        for fact in _runtime_reachability_from_source(source)
     }
-    facts = _runtime_reachability_from_source(source)
-    by_target = {fact.target_qualname: fact for fact in facts}
-    by_evidence = {(fact.target_qualname, fact.evidence_symbol): fact for fact in facts}
     assert by_evidence[("pkg.mod:startup_event", "app.on_event")].framework == "fastapi"
     assert by_evidence[("pkg.mod:audit_middleware", "app.middleware")].confidence == (
         "high"
@@ -2618,8 +3094,7 @@ def invalid_factory_handler(request):
     return request
 """
 
-    facts = _runtime_reachability_from_source(source)
-    by_target = {fact.target_qualname: fact for fact in facts}
+    by_target = _runtime_reachability_by_target(source)
     assert "pkg.mod:invalid_direct" not in by_target
     assert "pkg.mod:short_cast_handler" not in by_target
     assert "pkg.mod:invalid_factory_handler" not in by_target
@@ -2667,8 +3142,7 @@ def not_registered_task():
     return None
 """
 
-    facts = _runtime_reachability_from_source(source)
-    by_target = {fact.target_qualname: fact for fact in facts}
+    by_target = _runtime_reachability_by_target(source)
 
     assert by_target["pkg.mod:home"].framework == "starlette"
     assert by_target["pkg.mod:home"].confidence == "high"
@@ -3610,6 +4084,11 @@ class _Impl(_Base):
     assert "pkg.mod:_Base.parse" not in qualnames
     assert "pkg.mod:_Impl" in qualnames
     assert "pkg.mod:_Impl.parse" in qualnames
+    # Explicit rule-3 boundary: _Impl's DIRECT base _Base is local, so the
+    # unresolved-external-base predicate never fires and the override stays
+    # plainly dead. Abstention must not leak through a local base whose own
+    # base happens to be external.
+    assert _liveness_status_by_qualname(source)["pkg.mod:_Impl.parse"] == "dead"
 
 
 def test_extract_syntax_error() -> None:
@@ -3638,7 +4117,9 @@ def f():
         min_loc=10,
         min_stmt=10,
     )
-    assert units == []
+    # 39Y Y5: the floors are a clone-lane predicate. The function below them
+    # keeps its metric fact and produces no clone-lane artifact.
+    assert [unit.qualname for unit in units] == ["mod:f"]
     assert blocks == []
     assert segments == []
 
@@ -3814,12 +4295,20 @@ class TestAdmissionThresholdBoundaries:
         thresholds: dict[str, int],
         expected_count: int,
     ) -> None:
-        units, _, _ = self._extract_with_thresholds(
+        # Block floors are dropped below the unit floors so that clone-lane
+        # admission is observable: an admitted unit of this size always yields
+        # blocks, a rejected one must yield none (39Y Y5).
+        units, blocks, _ = self._extract_with_thresholds(
             stmt_count=stmt_count,
             lines_per_stmt=lines_per_stmt,
+            block_min_loc=1,
+            block_min_stmt=1,
             **thresholds,
         )
-        assert len(units) == expected_count
+        # The metric fact exists at every floor; the boundary verified here is
+        # admission to the clone lane.
+        assert len(units) == 1
+        assert bool(blocks) is bool(expected_count)
 
     # -- block gate boundary --
 
@@ -3901,7 +4390,7 @@ class TestAdmissionThresholdBoundaries:
     # -- boilerplate still excluded --
 
     def test_short_boilerplate_excluded_with_new_defaults(self) -> None:
-        """3-line trivial function stays out even with lowered thresholds."""
+        """3-line trivial function stays out of the clone lane."""
         src = "def f():\n    x = 1\n    return x\n"
         units, blocks, segments = extract_units_from_source(
             source=src,
@@ -3910,8 +4399,14 @@ class TestAdmissionThresholdBoundaries:
             cfg=NormalizationConfig(),
             min_loc=10,
             min_stmt=6,
+            block_min_loc=1,
+            block_min_stmt=1,
+            segment_min_loc=1,
+            segment_min_stmt=1,
         )
-        assert units == []
+        # The unit floors dominate the block/segment floors: the metric fact
+        # exists, the clone-lane artifacts do not (39Y Y5).
+        assert len(units) == 1
         assert blocks == []
         assert segments == []
 
@@ -3941,6 +4436,7 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
         _node: ast.FunctionDef | ast.AsyncFunctionDef,
         _cfg: NormalizationConfig,
         _qualname: str,
+        _bindings: object,
         *,
         phase_ledger: object,
     ) -> tuple[object, str, int]:
@@ -3949,6 +4445,7 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
             _node,
             _cfg,
             _qualname,
+            _bindings,
         )
         return graph, "f" * 64, 1
 
@@ -3957,12 +4454,13 @@ def test_extract_handles_non_list_function_body_for_hash_reuse(
         filepath: str,
         qualname: str,
         cfg: NormalizationConfig,
+        bindings: object = None,
         window_size: int = 6,
         max_segments: int = 60,
         *,
         precomputed_hashes: list[str] | None = None,
     ) -> list[object]:
-        del filepath, qualname, cfg, window_size, max_segments
+        del filepath, qualname, cfg, bindings, window_size, max_segments
         captured_hashes["value"] = precomputed_hashes
         return []
 

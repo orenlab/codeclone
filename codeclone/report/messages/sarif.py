@@ -86,6 +86,11 @@ RULE_UNUSED_METHOD_SHORT: Final = "Unused method"
 RULE_UNUSED_METHOD_FULL: Final = "Method appears to be unused with high confidence."
 RULE_UNUSED_SYMBOL_SHORT: Final = "Unused symbol"
 RULE_UNUSED_SYMBOL_FULL: Final = "Symbol appears to be unused with reported confidence."
+RULE_UNREACHABLE_STATEMENT_SHORT: Final = "Unreachable statement"
+RULE_UNREACHABLE_STATEMENT_FULL: Final = (
+    "Statement cannot execute: its control-flow block is not reachable from "
+    "the function entry."
+)
 
 RULE_LOW_COHESION_SHORT: Final = "Low cohesion class"
 RULE_LOW_COHESION_FULL: Final = (

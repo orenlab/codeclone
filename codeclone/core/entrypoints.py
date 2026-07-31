@@ -10,9 +10,9 @@ import importlib
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from ..models import DeadCandidate
+from ..models import DeadCandidate, ModuleDep, ModuleRegistryHandle
 from ..utils.coerce import as_mapping
 
 if TYPE_CHECKING:
@@ -131,9 +131,87 @@ def collect_project_entrypoint_qualnames(
     return frozenset(sorted(resolved))
 
 
+def collect_project_export_root_qualnames(
+    *,
+    module_deps: Sequence[ModuleDep],
+    referenced_qualnames: frozenset[str],
+    dead_candidates: Sequence[DeadCandidate],
+    module_registry: ModuleRegistryHandle,
+) -> frozenset[str]:
+    """Resolve the public methods reached through a package-boundary export."""
+    return frozenset(
+        qualname
+        for qualname, _reason in collect_project_export_root_evidence(
+            module_deps=module_deps,
+            referenced_qualnames=referenced_qualnames,
+            dead_candidates=dead_candidates,
+            module_registry=module_registry,
+        )
+    )
+
+
+def collect_project_export_root_evidence(
+    *,
+    module_deps: Sequence[ModuleDep],
+    referenced_qualnames: frozenset[str],
+    dead_candidates: Sequence[DeadCandidate],
+    module_registry: ModuleRegistryHandle,
+) -> tuple[tuple[str, Literal["export_root"]], ...]:
+    """Resolve export roots that nothing upstream already holds live.
+
+    The declared Y2 export rule - ``__all__`` membership plus the package
+    ``__init__`` re-export chain - is resolved by the module walk, which binds
+    every exported function and class into ``referenced_qualnames``. Emitting
+    those qualnames again would be a provable no-op, because the result is
+    unioned back into the very set it was drawn from. This owner therefore adds
+    only the roots the chain implies but nothing records: the public methods
+    reached through a class that the export chain made live.
+    """
+    package_modules = {
+        module
+        for module, entry in module_registry.entries_by_module.rows
+        if (
+            (identity := entry.identity.python_module) is not None
+            and identity.is_package
+        )
+    }
+    # The export chain is a set of NAMES, not a set of modules: a package
+    # module re-exports the symbols it names in the import (which is also what
+    # its ``__all__`` lists). Widening this to "every symbol living in a module
+    # some package imports" would root any class the project happens to
+    # reference from anywhere - including one only a sibling module imports.
+    exported_names = {
+        f"{dependency.target}:{name}"
+        for dependency in module_deps
+        if dependency.source in package_modules and dependency.target
+        for name in dependency.requested_names
+    }
+    exported_classes = {
+        candidate.qualname
+        for candidate in dead_candidates
+        if candidate.kind == "class" and candidate.qualname in exported_names
+    }
+    roots: set[str] = set()
+    for candidate in dead_candidates:
+        if candidate.kind != "method" or candidate.local_name.startswith("_"):
+            continue
+        owner, separator, _method = candidate.qualname.rpartition(".")
+        if (
+            separator
+            and owner in exported_classes
+            and candidate.qualname not in referenced_qualnames
+        ):
+            roots.add(candidate.qualname)
+    return tuple((qualname, "export_root") for qualname in sorted(roots))
+
+
 def _matches_entrypoint_suffix(qualname: str, ref: _EntryPointRef) -> bool:
     module, separator, local = qualname.partition(":")
     return bool(separator) and local == ref.local and module.endswith(f".{ref.module}")
 
 
-__all__ = ["collect_project_entrypoint_qualnames"]
+__all__ = [
+    "collect_project_entrypoint_qualnames",
+    "collect_project_export_root_evidence",
+    "collect_project_export_root_qualnames",
+]

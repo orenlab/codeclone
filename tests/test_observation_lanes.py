@@ -595,9 +595,11 @@ def test_columnar_canonical_form_rejects_each_malformed_shape() -> None:
         DeadCodeColumnarPayload(
             prefixes=("pkg.mod",),
             kinds=("function",),
+            observation_kinds=("symbol",),
             prefix=(0, 0),
             qualname=("a", "b"),
             kind=(0, 0),
+            observation_kind=(0, 0),
             reference_count=(0, 0),
             reachable_true=(1, 0),
         )
@@ -705,18 +707,22 @@ def test_columnar_models_reject_the_remaining_malformed_shapes() -> None:
         DeadCodeColumnarPayload(
             prefixes=("pkg.mod",),
             kinds=("function",),
+            observation_kinds=("symbol",),
             prefix=(0,),
             qualname=("a",),
             kind=(0,),
+            observation_kind=(0,),
             reference_count=(-1,),
         )
     with pytest.raises(ValueError, match="must be sorted"):
         DeadCodeColumnarPayload(
             prefixes=("pkg.mod",),
             kinds=("function",),
+            observation_kinds=("symbol",),
             prefix=(0, 0),
             qualname=("b", "a"),
             kind=(0, 0),
+            observation_kind=(0, 0),
             reference_count=(0, 0),
         )
     with pytest.raises(ValueError, match="non-negative"):
@@ -800,9 +806,11 @@ def test_decoder_rejects_values_outside_a_closed_vocabulary() -> None:
             DeadCodeColumnarPayload(
                 prefixes=("pkg.mod",),
                 kinds=("mystery",),
+                observation_kinds=("symbol",),
                 prefix=(0,),
                 qualname=("run",),
                 kind=(0,),
+                observation_kind=(0,),
                 reference_count=(0,),
             )
         )

@@ -8,6 +8,10 @@ import ast
 
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.blocks import extract_blocks
+from tests._ast_metrics_helpers import (
+    bindings_for_function_node,
+    bindings_for_statements,
+)
 
 
 def test_extracts_non_overlapping_blocks() -> None:
@@ -28,6 +32,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(func),
         block_size=4,
         max_blocks=10,
     )
@@ -50,6 +55,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(short),
         block_size=4,
         max_blocks=10,
     )
@@ -61,6 +67,7 @@ def f():
         filepath="x.py",
         qualname="mod:assign",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_statements([assign]),
         block_size=1,
         max_blocks=10,
     )
@@ -84,6 +91,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(func),
         block_size=4,
         max_blocks=10,
     )
@@ -107,6 +115,7 @@ def f():
         filepath="x.py",
         qualname="mod:f",
         cfg=NormalizationConfig(),
+        bindings=bindings_for_function_node(func),
         block_size=2,
         max_blocks=1,
     )

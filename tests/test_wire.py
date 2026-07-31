@@ -19,6 +19,7 @@ from codeclone.analysis import wire as wire_module
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.wire import WireUnsupportedNode, emit_wire, emit_wire_seq
 from codeclone.contracts import WIRE_VERSION
+from tests._ast_metrics_helpers import bindings_for_tree
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FIXTURE_ROOT = _REPO_ROOT / "tests" / "fixtures" / "wire_corpus"
@@ -43,7 +44,15 @@ def _fixture_tree(name: str) -> ast.Module:
 
 
 def _source_wire(source: str) -> str:
-    return emit_wire_seq(ast.parse(source).body, _DEFAULT_CONFIG)
+    tree = ast.parse(source)
+    return emit_wire_seq(tree.body, _DEFAULT_CONFIG, bindings_for_tree(tree))
+
+
+def _function_wire(source: str) -> str:
+    """Wire of a complete function definition, read in its own scope."""
+
+    tree = ast.parse(source)
+    return emit_wire(tree.body[0], _DEFAULT_CONFIG, bindings_for_tree(tree))
 
 
 def _goldens() -> dict[str, str]:
@@ -58,7 +67,7 @@ def _goldens() -> dict[str, str]:
 
 
 def test_wire_version_is_frozen() -> None:
-    assert WIRE_VERSION == "1"
+    assert WIRE_VERSION == "2"
     assert wire_module.WIRE_VERSION == WIRE_VERSION
 
 
@@ -67,7 +76,8 @@ def test_cross_version_fixture_golden(fixture_name: str) -> None:
     if not _fixture_is_supported(fixture_name):
         pytest.skip("fixture requires Python 3.11 except-star grammar")
     expected = _goldens()[fixture_name]
-    assert emit_wire(_fixture_tree(fixture_name), _DEFAULT_CONFIG) == expected
+    tree = _fixture_tree(fixture_name)
+    assert emit_wire(tree, _DEFAULT_CONFIG, bindings_for_tree(tree)) == expected
 
 
 @pytest.mark.parametrize("fixture_name", _FIXTURE_NAMES)
@@ -76,7 +86,7 @@ def test_emitter_is_read_only(fixture_name: str) -> None:
         pytest.skip("fixture requires Python 3.11 except-star grammar")
     tree = _fixture_tree(fixture_name)
     before = ast.dump(tree, annotate_fields=True, include_attributes=True)
-    emit_wire(tree, _DEFAULT_CONFIG)
+    emit_wire(tree, _DEFAULT_CONFIG, bindings_for_tree(tree))
     after = ast.dump(tree, annotate_fields=True, include_attributes=True)
     assert after == before
 
@@ -86,8 +96,6 @@ def test_emitter_is_read_only(fixture_name: str) -> None:
     [
         ("value += 1", "value = value + 1"),
         ("result = not (item in values)", "result = item not in values"),
-        ("result = right + left", "result = left + right"),
-        ("first = source", "second = source"),
         (
             "match subject:\n    case 1:\n        pass",
             "match subject:\n    case 2:\n        pass",
@@ -100,6 +108,31 @@ def test_emitter_is_read_only(fixture_name: str) -> None:
 )
 def test_equivalent_sources_share_wire(left: str, right: str) -> None:
     assert _source_wire(left) == _source_wire(right)
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        (
+            "def f(left, right):\n    result = right + left",
+            "def f(left, right):\n    result = left + right",
+        ),
+        (
+            "def f(source):\n    first = source",
+            "def f(source):\n    second = source",
+        ),
+    ],
+    ids=["commutative_local_operands", "local_target_rename"],
+)
+def test_local_name_renames_share_wire(left: str, right: str) -> None:
+    """Locals normalize, so renaming them cannot move the wire.
+
+    These rows live inside a function on purpose. The same statements at module
+    scope bind globals, and two differently named globals are two different
+    symbols — the wire says so, and must.
+    """
+
+    assert _function_wire(left) == _function_wire(right)
 
 
 @pytest.mark.parametrize(
@@ -150,15 +183,20 @@ def test_unknown_node_and_field_fail_closed() -> None:
         _fields = ()
 
     with pytest.raises(WireUnsupportedNode, match="FutureNode"):
-        emit_wire(FutureNode(), _DEFAULT_CONFIG)
+        emit_wire(
+            FutureNode(),
+            _DEFAULT_CONFIG,
+            bindings_for_tree(ast.Module(body=[], type_ignores=[])),
+        )
 
-    statement = ast.parse("value").body[0]
+    module = ast.parse("value")
+    statement = module.body[0]
     assert isinstance(statement, ast.Expr)
     node = statement.value
     assert isinstance(node, ast.Name)
     object.__setattr__(node, "_fields", (*node._fields, "future_field"))
     with pytest.raises(WireUnsupportedNode, match="future_field"):
-        emit_wire(node, _DEFAULT_CONFIG)
+        emit_wire(node, _DEFAULT_CONFIG, bindings_for_tree(module))
 
 
 def test_every_repository_function_body_is_supported() -> None:
@@ -168,13 +206,14 @@ def test_every_repository_function_body_is_supported() -> None:
             filename=str(path.relative_to(_REPO_ROOT)),
             type_comments=True,
         )
+        bindings = bindings_for_tree(tree)
         functions = (
             node
             for node in ast.walk(tree)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         )
         for function in functions:
-            emit_wire_seq(function.body, _DEFAULT_CONFIG)
+            emit_wire_seq(function.body, _DEFAULT_CONFIG, bindings.enter(function))
 
 
 def test_subprocess_emission_is_deterministic() -> None:
@@ -182,12 +221,17 @@ def test_subprocess_emission_is_deterministic() -> None:
 import ast
 import pathlib
 import sys
+from codeclone.analysis.binding import build_module_bindings
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.wire import emit_wire
 
 path = pathlib.Path(sys.argv[1])
 tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.name)
-sys.stdout.write(emit_wire(tree, NormalizationConfig()))
+bindings = build_module_bindings(
+    tree,
+    resolve_from_import=lambda node: (node.module or "") if node.level == 0 else None,
+)
+sys.stdout.write(emit_wire(tree, NormalizationConfig(), bindings))
 """
     fixture = _FIXTURE_ROOT / "core_syntax.py"
     outputs = [

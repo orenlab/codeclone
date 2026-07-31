@@ -72,6 +72,11 @@ HELP_AUDIT_JSON = (
     "Output audit payload footprint as JSON.\n"
     "Implies --audit. Useful for cross-repository comparison."
 )
+HELP_NEAR_MISS = (
+    "Report near-miss clone pairs: functions whose normalized statement\n"
+    "sequences differ by exactly one statement.\n"
+    "Advisory only; never enters clone gates or the baseline."
+)
 HELP_CACHE_PATH = (
     "Path to the cache file.\nIf FILE is omitted, uses <root>/.codeclone/cache.json."
 )
@@ -114,6 +119,12 @@ HELP_FAIL_COHESION = (
 )
 HELP_FAIL_CYCLES = "Exit with code 3 if circular module dependencies are detected."
 HELP_FAIL_DEAD_CODE = "Exit with code 3 if high-confidence dead code is detected."
+HELP_FAIL_ON_UNRESOLVED_DEAD_CODE = (
+    "Exit with code 3 if any symbol is an unresolved external override.\n"
+    "These are abstentions, not findings: a public method whose class "
+    "inherits from a base outside the analysis root, with no evidence "
+    "either way. Off by default, and never counted as dead code."
+)
 HELP_FAIL_HEALTH = (
     "Exit with code 3 if the overall health score falls below the threshold.\n"
     "If enabled without a value, uses 60."

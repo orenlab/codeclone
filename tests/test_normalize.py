@@ -15,10 +15,14 @@ from codeclone.blocks import stmt_hashes
 from codeclone.meta_markers import CFG_META_PREFIX
 from tests._assertions import assert_contains_all
 from tests._ast_helpers import fix_missing_single_function
+from tests._ast_metrics_helpers import (
+    bindings_for_function_node,
+    bindings_for_statements,
+)
 
 
 def normalized_ast_dump(node: ast.AST, cfg: NormalizationConfig) -> str:
-    return emit_wire(node, cfg)
+    return emit_wire(node, cfg, bindings_for_statements([node]))  # type: ignore[list-item]
 
 
 def _normalized_dump(source: str, cfg: NormalizationConfig) -> str:
@@ -77,10 +81,22 @@ def test_normalization_equivalent_sources(src1: str, src2: str) -> None:
 
 
 def test_stmt_hashes_normalize_names() -> None:
+    """Local names normalize away; both reads are locals of their function.
+
+    The parameters carry the read side deliberately. A bare ``b`` and ``y``
+    would be unresolved globals, and two different globals are two different
+    symbols — merging them is what the role model exists to refuse.
+    """
+
     cfg = NormalizationConfig()
-    s1 = ast.parse("a = b + 1").body[0]
-    s2 = ast.parse("x = y + 2").body[0]
-    assert stmt_hashes([s1], cfg)[0] == stmt_hashes([s2], cfg)[0]
+    first = ast.parse("def f(b):\n    a = b + 1\n").body[0]
+    second = ast.parse("def f(y):\n    x = y + 2\n").body[0]
+    assert isinstance(first, ast.FunctionDef)
+    assert isinstance(second, ast.FunctionDef)
+    assert (
+        stmt_hashes(first.body, cfg, bindings_for_function_node(first))[0]
+        == stmt_hashes(second.body, cfg, bindings_for_function_node(second))[0]
+    )
 
 
 def test_stmt_hashes_does_not_mutate_input_ast() -> None:
@@ -88,7 +104,7 @@ def test_stmt_hashes_does_not_mutate_input_ast() -> None:
     statement = ast.parse("value = user_input + 1").body[0]
     before = ast.dump(statement, annotate_fields=True, include_attributes=False)
 
-    stmt_hashes([statement], cfg)
+    stmt_hashes([statement], cfg, bindings_for_statements([statement]))
 
     after = ast.dump(statement, annotate_fields=True, include_attributes=False)
     assert after == before
@@ -125,13 +141,19 @@ def f(x):
 """,
         ),
         (
+            # The receiver is a parameter, so it normalizes as a local. The
+            # attribute name is the same on both sides on purpose: attribute
+            # names are symbols and are always preserved, so renaming one here
+            # would pin a merge the role table forbids. Parameter names are
+            # likewise identical because `arg` nodes carry their name literally
+            # — unchanged by this contract, and pinned by M1 instead.
             """
-def f():
+def f(obj):
     obj.attr = 123
 """,
             """
-def f():
-    x.y = 999
+def f(obj):
+    obj.attr = 999
 """,
         ),
         (
@@ -147,7 +169,7 @@ def f():
     ],
     ids=[
         "type_annotations_removed",
-        "attributes_and_constants",
+        "local_receiver_and_constants",
         "augassign_equivalence",
     ],
 )
@@ -165,7 +187,7 @@ def test_normalization_augassign_target_without_ctx() -> None:
     node.lineno = 1
     node.col_offset = 0
     cfg = NormalizationConfig()
-    dump = emit_wire_seq([node], cfg)
+    dump = emit_wire_seq([node], cfg, bindings_for_statements([node]))
     assert "Assign" in dump
 
 

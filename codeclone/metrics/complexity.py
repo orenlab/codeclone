@@ -29,12 +29,45 @@ ControlNode = (
 )
 
 
+def _weakly_connected_components(cfg: CFG) -> int:
+    """Count the graph's weakly connected components — the ``P`` of McCabe.
+
+    Unreachable code forms its own component now that the norm CFG keeps it,
+    and the generalized formula is what stops such a function being scored as
+    though that code were not there.
+    """
+
+    parent = {block.id: block.id for block in cfg.blocks}
+
+    def find(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for block in cfg.blocks:
+        for successor in block.successors:
+            left, right = find(block.id), find(successor.id)
+            if left != right:
+                parent[left] = right
+    return len({find(block.id) for block in cfg.blocks})
+
+
 def cyclomatic_complexity(cfg: CFG) -> int:
-    """Compute McCabe complexity from CFG graph topology."""
+    """Full McCabe over the whole graph: ``V(G) = E - N + 2P``.
+
+    Every edge counts. Exception dispatch, ``finally`` routing and
+    context-manager suppression are real control flow, so dropping them — or
+    filtering by an edge's kind to reproduce the numbers this metric gave
+    before those edges existed — would reintroduce the second truth the norm
+    CFG removed (39Y Y9, maintainer ruling A). Values move corpus-wide as a
+    result, and the new ones are the true ones.
+    """
+
     node_count = len(cfg.blocks)
     edge_count = sum(len(block.successors) for block in cfg.blocks)
-    complexity = edge_count - node_count + 2
-    return max(1, complexity)
+    components = _weakly_connected_components(cfg)
+    return max(1, edge_count - node_count + 2 * components)
 
 
 def _iter_nested_statement_lists(node: ast.AST) -> Iterable[list[ast.stmt]]:

@@ -22,7 +22,7 @@ import codeclone.core.pipeline as core_pipeline
 import codeclone.core.worker as core_worker
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import INERT_PHASE_LEDGER, PhaseLedger
-from codeclone.cache.reuse import source_content_digest
+from codeclone.cache.reuse import binding_context_digest, source_content_digest
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.core._types import (
     DEFAULT_RUNTIME_PROCESSES,
@@ -374,17 +374,111 @@ def _dependency_lane_bytes(
     return canonical_observation_lane_bytes(dependencies)
 
 
-def test_dependency_lane_bytes_match_cold_warm_partial_and_full_hits(
+def _metrics_package(
     tmp_path: Path,
-) -> None:
+    *,
+    modules: dict[str, str],
+) -> tuple[BootstrapResult, Path]:
+    """Write a metrics-enabled package and return its boot plus cache path."""
     package = tmp_path / "pkg"
     package.mkdir()
     (package / "__init__.py").write_text("", "utf-8")
-    (package / "dep.py").write_text("VALUE = 1\n", "utf-8")
-    (package / "mod.py").write_text("from .dep import VALUE\n", "utf-8")
+    for name, source in sorted(modules.items()):
+        (package / name).write_text(source, "utf-8")
     boot = _build_boot(tmp_path, processes=1)
     boot.args.skip_metrics = False
-    cache_path = tmp_path / "cache.json"
+    return boot, tmp_path / "cache.json"
+
+
+def _dead_code_lane_bytes(
+    result: ProcessingResult,
+    discovery: DiscoveryResult,
+) -> bytes:
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=discovery.module_registry,
+        dead_candidates=result.dead_candidates,
+        referenced_names=result.referenced_names,
+        referenced_qualnames=result.referenced_qualnames,
+        collect_metrics=False,
+        collect_dependencies=False,
+        collect_api_surface=False,
+    )
+    dead_code = next(
+        lane
+        for lane in build_observation_lanes(bundle)
+        if lane.descriptor.name == "dead_code"
+    )
+    return canonical_observation_lane_bytes(dead_code)
+
+
+def test_dead_code_lane_bytes_and_live_root_reasons_match_cold_and_warm(
+    tmp_path: Path,
+) -> None:
+    """39Y cycle 2b: the liveness reason must survive a cache hit.
+
+    The reason is produced by the per-file module walk, and the walk does not
+    run for cached files. Before the reason rode the ``dc`` wire, a warm run
+    produced no reasons at all, so the lane payload diverged cold vs warm.
+    This is the guard that keeps the CACHE_VERSION 3.2 carriage honest.
+    """
+    boot, cache_path = _metrics_package(
+        tmp_path,
+        modules={
+            "mod.py": (
+                "import external_lib\n"
+                "\n"
+                "\n"
+                "@external_lib.register\n"
+                "def framework_handler(payload):\n"
+                "    return payload\n"
+                "\n"
+                "\n"
+                "def plain_unused(value):\n"
+                "    return value\n"
+            )
+        },
+    )
+
+    cold_cache = Cache(cache_path, root=tmp_path)
+    cold_discovery = core_discovery.discover(boot=boot, cache=cold_cache)
+    cold_result = process(boot=boot, discovery=cold_discovery, cache=cold_cache)
+    cold_bytes = _dead_code_lane_bytes(cold_result, cold_discovery)
+    cold_cache.save()
+
+    warm_cache = Cache(cache_path, root=tmp_path)
+    warm_cache.load()
+    warm_discovery = core_discovery.discover(boot=boot, cache=warm_cache)
+    warm_result = process(boot=boot, discovery=warm_discovery, cache=warm_cache)
+    warm_bytes = _dead_code_lane_bytes(warm_result, warm_discovery)
+
+    # The warm run must actually be warm, or this guard proves nothing.
+    assert warm_discovery.cache_hits == 2
+    reasons = tuple(
+        tuple(
+            sorted(
+                (candidate.qualname, candidate.live_root_reason)
+                for candidate in result.dead_candidates
+                if candidate.live_root_reason is not None
+            )
+        )
+        for result in (cold_result, warm_result)
+    )
+    assert reasons[0] == (("pkg.mod:framework_handler", "external_decorator"),)
+    assert reasons[0] == reasons[1]
+    assert cold_bytes == warm_bytes
+
+
+def test_dependency_lane_bytes_match_cold_warm_partial_and_full_hits(
+    tmp_path: Path,
+) -> None:
+    boot, cache_path = _metrics_package(
+        tmp_path,
+        modules={
+            "dep.py": "VALUE = 1\n",
+            "mod.py": "from .dep import VALUE\n",
+        },
+    )
 
     cold_cache = Cache(cache_path, root=tmp_path)
     cold_discovery = core_discovery.discover(boot=boot, cache=cold_cache)
@@ -894,6 +988,7 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
     )
     complete_entry = CacheEntryV3(
         cache_content_binding_version="1",
+        binding_context_digest=binding_context_digest(None),
         source_content_digest=source_content_digest(b"source"),
         git_blob_id_at_write=None,
         stat={"mtime_ns": 1, "size": 1},
@@ -931,6 +1026,7 @@ def test_usable_cached_source_stats_respects_required_sections() -> None:
     no_structural_entry = CacheEntryV3(
         cache_content_binding_version=complete_entry.cache_content_binding_version,
         source_content_digest=complete_entry.source_content_digest,
+        binding_context_digest=complete_entry.binding_context_digest,
         git_blob_id_at_write=None,
         stat=complete_entry.stat,
         module_neutral_profile=profile,

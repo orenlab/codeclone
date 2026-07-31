@@ -29,6 +29,8 @@ from ..models import (
     RuntimeReachabilityFact,
     SecuritySurface,
     SemanticAuthorityResult,
+    UnreachableStatementFinding,
+    UnresolvedOverrideItem,
 )
 from ..utils.coerce import as_int, as_mapping, as_sequence, as_str
 from .api_surface_payload import (
@@ -408,6 +410,8 @@ def build_metrics_report_payload(
             "end_line": item.end_line,
             "kind": item.kind,
             "confidence": item.confidence,
+            "reason": item.reason,
+            "test_reference_sources": list(item.test_reference_sources),
         }
         if suppressed:
             payload["suppressed_by"] = [
@@ -417,6 +421,38 @@ def build_metrics_report_payload(
                 }
             ]
         return payload
+
+    def _serialize_unresolved_override(
+        item: UnresolvedOverrideItem,
+    ) -> dict[str, object]:
+        return {
+            "qualname": item.qualname,
+            "filepath": item.filepath,
+            "start_line": item.start_line,
+            "end_line": item.end_line,
+            "kind": item.kind,
+            "class_qualname": item.class_qualname,
+            "base_names": list(item.base_names),
+            "reason": item.reason,
+        }
+
+    def _serialize_unreachable_statement(
+        item: UnreachableStatementFinding,
+    ) -> dict[str, object]:
+        return {
+            "qualname": item.qualname,
+            "filepath": item.filepath,
+            "start_line": item.start_line,
+            "end_line": item.end_line,
+            "reason": item.reason,
+            "statement_count": item.statement_count,
+            # Fixed, never computed: the finding is a graph proof over the
+            # function's own control flow, so there is no weaker case to grade.
+            "confidence": CONFIDENCE_HIGH,
+        }
+
+    unresolved_override_items = tuple(project_metrics.unresolved_overrides)
+    unreachable_statement_items = tuple(project_metrics.unreachable_statements)
 
     payload = {
         CATEGORY_COMPLEXITY: {
@@ -478,6 +514,24 @@ def build_metrics_report_payload(
                 _serialize_dead_item(item, suppressed=True)
                 for item in suppressed_dead_items
             ],
+            "unresolved_overrides": [
+                _serialize_unresolved_override(item)
+                for item in unresolved_override_items
+            ],
+            # Same family, deliberately its own list: a dead symbol and an
+            # unreachable statement inside a live symbol are different defects
+            # and are never added together (39Y Y9). No matching "summary"
+            # counter — this list is the authority and a count beside it would
+            # only be len() restated, unlike the abstention tally, which counts
+            # rows that appear in no list at all.
+            "unreachable_statements": [
+                _serialize_unreachable_statement(item)
+                for item in unreachable_statement_items
+            ],
+            "live_root_reasons": [
+                {"qualname": qualname, "reason": reason}
+                for qualname, reason in project_metrics.live_root_reasons
+            ],
             "summary": {
                 "total": len(active_dead_items),
                 "critical": sum(
@@ -491,6 +545,11 @@ def build_metrics_report_payload(
                     if item.confidence == CONFIDENCE_HIGH
                 ),
                 "suppressed": len(suppressed_dead_items),
+                # Counted separately from every dead-code number above: an
+                # abstention is neither dead nor live, so folding it into
+                # "total" would be the claim the tri-state exists to refuse.
+                "unresolved_external_override": len(unresolved_override_items),
+                "live_roots": len(project_metrics.live_root_reasons),
             },
             "runtime_reachability": {
                 "summary": runtime_reachability_summary,

@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Literal, NamedTuple, TypeGuard
 
 from .. import qualnames as _qualnames
 from ..models import (
+    METHOD_DECORATOR_EVIDENCE_MARKERS,
     DeadCandidate,
     FunctionRelationshipFacts,
     ImportObservation,
@@ -48,6 +49,7 @@ if TYPE_CHECKING:
 
 
 _NamedDeclarationNode = _qualnames.FunctionNode | ast.ClassDef
+_LocalLivenessRootReason = Literal["external_decorator"]
 _PROTOCOL_MODULE_NAMES = frozenset({"typing", "typing_extensions"})
 _NON_RUNTIME_DECORATOR_SYMBOLS = frozenset({"overload", "abstractmethod"})
 _PYDANTIC_MODULE_NAMES = frozenset(
@@ -198,10 +200,30 @@ def _import_from_observations(
 @dataclass(slots=True)
 class _ModuleWalkState:
     import_names: set[str] = field(default_factory=set)
+    # Every name an import statement BINDS in this module's namespace:
+    # `import a.b` -> "a", `import a.b as c` -> "c", `from m import x as y`
+    # -> "y". Unlike import_names (top-level module names) and
+    # imported_symbol_bindings (resolution- and lane-gated), this set is
+    # collected unconditionally, so the CBO imported-domain lane means the
+    # same thing in every file. See codeclone/metrics/coupling.py.
+    imported_binding_names: set[str] = field(default_factory=set)
+    # Binding name -> the qualname its import resolves to ("pkg.mod:Name"),
+    # and binding name -> the module a dotted access off that name reads from.
+    # Both feed the resolved-instantiation CBO lane, and both are collected
+    # unconditionally for the same reason imported_binding_names is: a metric
+    # must not depend on which lane the file belongs to.
+    # imported_symbol_bindings below is reference tracking and stays gated.
+    binding_symbol_targets: dict[str, str] = field(default_factory=dict)
+    binding_module_targets: dict[str, str] = field(default_factory=dict)
     deps: list[ModuleDep] = field(default_factory=list)
     referenced_names: set[str] = field(default_factory=set)
     imported_symbol_bindings: dict[str, set[str]] = field(default_factory=dict)
     imported_module_aliases: dict[str, str] = field(default_factory=dict)
+    external_symbol_aliases: set[str] = field(default_factory=set)
+    external_module_aliases: set[str] = field(default_factory=set)
+    liveness_root_reasons: dict[str, _LocalLivenessRootReason] = field(
+        default_factory=dict
+    )
     name_nodes: list[ast.Name] = field(default_factory=list)
     attr_nodes: list[ast.Attribute] = field(default_factory=list)
     exported_names: set[str] = field(default_factory=set)
@@ -295,6 +317,12 @@ def _collect_import_node(
     for alias in node.names:
         alias_name = alias.asname or alias.name.split(".", 1)[0]
         state.import_names.add(alias_name)
+        state.imported_binding_names.add(alias_name)
+        # `import a.b as c` binds the whole path to `c`; plain `import a.b`
+        # binds only `a`, which is then the module a dotted access reads from.
+        state.binding_module_targets[alias_name] = (
+            alias.name if alias.asname else alias.name.split(".", 1)[0]
+        )
         observation = ImportObservation(
             source=source,
             syntax_kind="import",
@@ -310,6 +338,8 @@ def _collect_import_node(
             line=line,
             state=state,
         )
+        if observation.resolution == "external":
+            state.external_module_aliases.add(alias_name)
         if collect_referenced_names:
             state.imported_module_aliases[alias_name] = alias.name
         if alias.name in _PROTOCOL_MODULE_NAMES:
@@ -542,7 +572,27 @@ def _collect_import_from_node(
     collect_referenced_names: bool,
 ) -> None:
     observations = _import_from_observations(source, node, registry)
-    primary_target = observations[0].resolved_target
+    primary_observation = observations[0]
+    primary_target = primary_observation.resolved_target
+    # Unconditional: a `from` import binds its alias names whether or not the
+    # module resolves and whichever lane the file belongs to.
+    state.imported_binding_names.update(
+        alias.asname or alias.name for alias in node.names if alias.name != "*"
+    )
+    if primary_target:
+        # One import binds one name, but that name may denote either a symbol
+        # of the target module or a submodule of it. Both readings are
+        # recorded; only the class index decides which one, if either, names a
+        # class.
+        for alias in node.names:
+            if alias.name != "*":
+                alias_name = alias.asname or alias.name
+                state.binding_symbol_targets[alias_name] = (
+                    f"{primary_target}:{alias.name}"
+                )
+                state.binding_module_targets[alias_name] = (
+                    f"{primary_target}.{alias.name}"
+                )
     for observation in observations:
         target = observation.resolved_target
         if target:
@@ -566,6 +616,11 @@ def _collect_import_from_node(
         )
         state.cohesion_ignored_decorator_aliases.update(
             _matching_import_aliases(node, _COHESION_IGNORED_PYDANTIC_HOOKS)
+        )
+
+    if primary_observation.resolution == "external":
+        state.external_symbol_aliases.update(
+            alias.asname or alias.name for alias in node.names if alias.name != "*"
         )
 
     if not collect_referenced_names or not primary_target:
@@ -1299,14 +1354,165 @@ def _resolve_referenced_qualnames(
             for module_path in state.lazy_export_bindings.get(exported_name, ()):
                 resolved.add(f"{module_path}:{exported_name}")
 
+    local_top_level_names = frozenset(
+        {
+            *top_level_function_by_name,
+            *top_level_class_by_name,
+        }
+    )
+    external_decorator_roots = _collect_external_decorator_root_reasons(
+        module_name=module_name,
+        collector=collector,
+        state=state,
+        local_top_level_names=local_top_level_names,
+    )
+    resolved.update(external_decorator_roots)
+    state.liveness_root_reasons.update(external_decorator_roots)
+
     return frozenset(resolved)
+
+
+def _collect_external_decorator_root_reasons(
+    *,
+    module_name: str,
+    collector: _qualnames.QualnameCollector,
+    state: _ModuleWalkState,
+    local_top_level_names: frozenset[str],
+) -> dict[str, _LocalLivenessRootReason]:
+    return {
+        f"{module_name}:{local_name}": "external_decorator"
+        for local_name, function_node in collector.units
+        if _has_external_decorator(
+            function_node,
+            external_symbol_aliases=state.external_symbol_aliases,
+            external_module_aliases=state.external_module_aliases,
+            local_top_level_names=local_top_level_names,
+        )
+    }
+
+
+def _class_base_expr_name(node: ast.expr) -> str | None:
+    """Dotted name of a base expression, unwrapping generic subscripts.
+
+    ``TypeDecorator[object]`` and ``Generic[T]`` name the same base as their
+    unsubscripted form, so the subscript is peeled before resolution.
+    """
+    if isinstance(node, ast.Subscript):
+        return _class_base_expr_name(node.value)
+    return _decorator_expr_name(node)
+
+
+def _collect_class_base_facts(
+    *,
+    collector: _qualnames.QualnameCollector,
+    state: _ModuleWalkState,
+    local_top_level_names: frozenset[str],
+) -> tuple[tuple[tuple[str, tuple[str, ...]], ...], frozenset[str]]:
+    """Per-class base names, plus the classes whose base escapes the root.
+
+    Keyed by the module-LOCAL class qualname; the caller owns the module
+    prefix. Returns primitives so the facts can ride on ``ClassMetrics``
+    without introducing a type edge on any of its carriers.
+
+    Classes without bases are omitted: they have nothing to resolve, and their
+    absence is not ambiguous. A base is unresolved-external when its root name
+    binds to an import the registry could not place inside the analysis root -
+    the same opacity doctrine as the external-decorator root rule.
+    """
+    base_names_by_class: list[tuple[str, tuple[str, ...]]] = []
+    unresolved_external: set[str] = set()
+    for class_qualname, class_node in collector.class_nodes:
+        base_names: set[str] = set()
+        has_unresolved_external_base = False
+        for base in class_node.bases:
+            base_name = _class_base_expr_name(base)
+            if base_name is None:
+                continue
+            base_names.add(base_name)
+            root_name = base_name.partition(".")[0]
+            if root_name in local_top_level_names:
+                continue
+            if (
+                root_name in state.external_symbol_aliases
+                or root_name in state.external_module_aliases
+            ):
+                has_unresolved_external_base = True
+        if not base_names:
+            continue
+        base_names_by_class.append((class_qualname, tuple(sorted(base_names))))
+        if has_unresolved_external_base:
+            unresolved_external.add(class_qualname)
+    return (
+        tuple(sorted(base_names_by_class, key=lambda item: item[0])),
+        frozenset(unresolved_external),
+    )
+
+
+def _collect_decorator_evidenced_methods(
+    *,
+    collector: _qualnames.QualnameCollector,
+) -> frozenset[str]:
+    """Row 2 of the rule-3 table: explicit dispatch contracts on the method.
+
+    Only membership matters downstream - the decision table asks whether an
+    explicit contract exists, never which marker spelled it - so the marker
+    names are not carried past this point. Keyed by module-LOCAL qualname.
+    """
+    return frozenset(
+        local_name
+        for local_name, function_node in collector.units
+        if "." in local_name
+        and any(
+            _decorator_evidence_marker(decorator) is not None
+            for decorator in function_node.decorator_list
+        )
+    )
+
+
+def _decorator_evidence_marker(decorator: ast.expr) -> str | None:
+    name = _decorator_expr_name(decorator)
+    if name is None:
+        return None
+    leaf_name = name.rpartition(".")[2]
+    if leaf_name in METHOD_DECORATOR_EVIDENCE_MARKERS:
+        return leaf_name
+    return None
+
+
+def _has_external_decorator(
+    node: _qualnames.FunctionNode,
+    *,
+    external_symbol_aliases: set[str],
+    external_module_aliases: set[str],
+    local_top_level_names: frozenset[str],
+) -> bool:
+    for decorator in node.decorator_list:
+        name = _decorator_expr_name(decorator)
+        if name is None:
+            continue
+        root_name = name.partition(".")[0]
+        if root_name in local_top_level_names:
+            continue
+        if root_name in external_symbol_aliases or root_name in external_module_aliases:
+            return True
+    return False
 
 
 class _ModuleWalkResult(NamedTuple):
     import_names: frozenset[str]
+    imported_binding_names: frozenset[str]
+    # Resolution inputs for the instantiation CBO lane; see the state fields.
+    binding_symbol_targets: dict[str, str]
+    binding_module_targets: dict[str, str]
     module_deps: tuple[ModuleDep, ...]
     referenced_names: frozenset[str]
     referenced_qualnames: frozenset[str]
+    liveness_root_reasons: tuple[tuple[str, _LocalLivenessRootReason], ...]
+    # Rule-3 facts, keyed by module-LOCAL qualname; units.py adds the module
+    # prefix when it attaches them to the owning ClassMetrics.
+    class_base_names: tuple[tuple[str, tuple[str, ...]], ...]
+    unresolved_external_base_classes: frozenset[str]
+    decorator_evidenced_methods: frozenset[str]
     protocol_symbol_aliases: frozenset[str]
     protocol_module_aliases: frozenset[str]
     non_runtime_decorator_aliases: frozenset[str]
@@ -1502,11 +1708,31 @@ def _collect_module_walk_data(
         else frozenset()
     )
 
+    class_base_names, unresolved_external_base_classes = _collect_class_base_facts(
+        collector=collector,
+        state=state,
+        local_top_level_names=frozenset(
+            {
+                *(name for name, _node in collector.units if "." not in name),
+                *(name for name, _node in collector.class_nodes if "." not in name),
+            }
+        ),
+    )
+
     return _ModuleWalkResult(
         import_names=frozenset(state.import_names),
+        imported_binding_names=frozenset(state.imported_binding_names),
+        binding_symbol_targets=dict(state.binding_symbol_targets),
+        binding_module_targets=dict(state.binding_module_targets),
         module_deps=deps_sorted,
         referenced_names=frozenset(state.referenced_names),
         referenced_qualnames=resolved,
+        liveness_root_reasons=tuple(sorted(state.liveness_root_reasons.items())),
+        class_base_names=class_base_names,
+        unresolved_external_base_classes=unresolved_external_base_classes,
+        decorator_evidenced_methods=_collect_decorator_evidenced_methods(
+            collector=collector,
+        ),
         protocol_symbol_aliases=frozenset(state.protocol_symbol_aliases),
         protocol_module_aliases=frozenset(state.protocol_module_aliases),
         non_runtime_decorator_aliases=frozenset(state.non_runtime_decorator_aliases),

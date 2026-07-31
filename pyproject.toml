@@ -223,7 +223,12 @@ min_stmt = 4
 fail_on_new = true
 fail_cycles = true
 fail_dead_code = true
-fail_health = 80
+# Lowered 80 -> 73 for phase 39Y under maintainer sanction. Y5 (a metric fact
+# per defined function) and Y6 (the CBO imported-domain edge lane) each cost
+# this repository 8 honest health points by making real findings visible; the
+# findings are not suppressible, so the floor follows the measurement. Owning
+# assertion: tests/test_self_gate_thresholds.py.
+fail_health = 73
 fail_on_new_metrics = true
 semantic_authority = true
 fail_on_authority_violation = true

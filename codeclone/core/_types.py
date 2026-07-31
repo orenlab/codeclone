@@ -35,6 +35,7 @@ from ..models import (
     ModuleDocstringCoverage,
     ModuleRegistryHandle,
     ModuleTypingCoverage,
+    NearMissPair,
     ObservationBundle,
     ProjectMetrics,
     RehydratedCacheNeutral,
@@ -199,6 +200,9 @@ class AnalysisResult:
     coverage_join: CoverageJoinResult | None = None
     suppressed_dead_code_items: int = 0
     structural_findings: tuple[StructuralFindingGroup, ...] = ()
+    # Report-only advisory channel: near-miss pairs never enter func_groups,
+    # so they reach no observation lane, no baseline novelty and no gate.
+    near_miss_pairs: tuple[NearMissPair, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,6 +356,12 @@ def _unit_to_group_item(unit: Unit) -> GroupItem:
         "terminal_kind": unit.terminal_kind,
         "try_finally_profile": unit.try_finally_profile,
         "side_effect_order_profile": unit.side_effect_order_profile,
+        # Read only by the near-miss tier. Every other consumer projects unit
+        # facts by explicit key, so carrying it here reaches no lane, no
+        # baseline and no report payload (39Y Y8 confinement).
+        "statement_sequence": unit.statement_sequence,
+        # Read by the dead_code family, which projects it by explicit key.
+        "unreachable_statements": unit.unreachable_statements,
     }
 
 

@@ -1,7 +1,7 @@
 {
   "counts": {
     "model_store:base_model_definition": 20,
-    "model_store:dataclass_definition": 278,
+    "model_store:dataclass_definition": 283,
     "model_store:pydantic_dependency": 9,
     "production_import:r1->r2": 2,
     "production_import:r1->r2p": 5,
@@ -11,8 +11,8 @@
     "production_import:r2p->r4": 6,
     "production_import:r4->r2": 146,
     "production_import:r4->r2p": 116,
-    "test_import:r2p->r2": 66,
-    "test_import:r4->r2": 163,
+    "test_import:r2p->r2": 67,
+    "test_import:r4->r2": 164,
     "test_import:r4->r2p": 169
   },
   "policy": "phase39s-s0-observe-shrink-only",
@@ -43,6 +43,11 @@
     "model_store:dataclass_definition": [
       "codeclone.analysis._module_walk::_ModuleWalkState",
       "codeclone.analysis._module_walk::_RelationshipImportIndex",
+      "codeclone.analysis.binding::Binding",
+      "codeclone.analysis.binding::BindingContext",
+      "codeclone.analysis.binding::_DraftBindings",
+      "codeclone.analysis.binding::_Scope",
+      "codeclone.analysis.binding::_ScopeDraft",
       "codeclone.analysis.blast_radius::BlastRadiusResult",
       "codeclone.analysis.cfg::_LoopContext",
       "codeclone.analysis.cfg_model::Block",
@@ -712,6 +717,7 @@
       "tests.test_cache -> codeclone.cache.entries",
       "tests.test_cache -> codeclone.cache.integrity",
       "tests.test_cache -> codeclone.cache.projection",
+      "tests.test_cache -> codeclone.cache.reuse",
       "tests.test_cache -> codeclone.cache.store",
       "tests.test_cache -> codeclone.cache.versioning",
       "tests.test_cache -> codeclone.core._types",
@@ -816,6 +822,7 @@
       "tests.test_core_branch_coverage -> codeclone.cache._wire_encode",
       "tests.test_core_branch_coverage -> codeclone.cache.entries",
       "tests.test_core_branch_coverage -> codeclone.cache.projection",
+      "tests.test_core_branch_coverage -> codeclone.cache.reuse",
       "tests.test_core_branch_coverage -> codeclone.cache.store",
       "tests.test_core_branch_coverage -> codeclone.core._types",
       "tests.test_core_branch_coverage -> codeclone.core.discovery",
@@ -1106,5 +1113,9 @@
       "tests.test_workspace_intent_gate -> codeclone.workspace_intent",
       "tests.test_workspace_intent_gate -> codeclone.workspace_intent.gate"
     ]
+  },
+  "notes": {
+    "codeclone.analysis.binding": "39Y-FP: analysis-local frozen structures for the lexical scope graph. 16 exact precedents already in this family (cfg_model::Block, cfg_model::CFG, _module_walk::_ModuleWalkState, _module_walk::_RelationshipImportIndex, ...); the 39S sweep owns all 20 together. _DraftBindings is the 5th entry: it exists because the sanctioned cohesion fix split the binding accumulator out of _ScopeDraft.",
+    "tests -> codeclone.cache.reuse": "39Y-FP section 3a: both test modules already reach cache internals (_validators, _wire_decode, _wire_encode, entries, ...); the sanctioned binding-context cache key added reuse to that established set."
   }
 }

@@ -2253,6 +2253,18 @@ def test_sarif_private_helper_branches() -> None:
     assert dead_method.rule_id == "CDEAD003"
     assert dead_other.rule_id == "CDEAD004"
 
+    # The family's second kind owns its own rule. Reachability is decided by
+    # the CFG rather than estimated from references, so it is high precision;
+    # falling through to the CDEAD004 catch-all published a proven finding as
+    # a medium-confidence "Unused symbol".
+    dead_statement = _sarif_rule_spec(
+        {"family": "dead_code", "category": "unreachable_statement"}
+    )
+    assert dead_statement.rule_id == "CDEAD005"
+    assert dead_statement.kind == "unreachable_statement"
+    assert dead_statement.precision == "high"
+    assert "unused" not in dead_statement.short_description.lower()
+
     dep_message = _sarif_result_message(
         {
             "family": "design",

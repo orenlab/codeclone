@@ -41,6 +41,10 @@ CATEGORY_DESIGN: Final = "design"
 
 FINDING_KIND_CLONE_GROUP: Final = "clone_group"
 FINDING_KIND_UNUSED_SYMBOL: Final = "unused_symbol"
+# The dead_code family's second kind. Unlike a dead symbol - which subdivides
+# into function/class/method - an unreachable statement has no sub-kind, so
+# this one name serves as both the finding kind and the dispatch category.
+FINDING_KIND_UNREACHABLE_STATEMENT: Final = "unreachable_statement"
 FINDING_KIND_CLASS_HOTSPOT: Final = "class_hotspot"
 FINDING_KIND_FUNCTION_HOTSPOT: Final = "function_hotspot"
 FINDING_KIND_CYCLE: Final = "cycle"
@@ -97,6 +101,7 @@ __all__ = [
     "FINDING_KIND_COVERAGE_SCOPE_GAP",
     "FINDING_KIND_CYCLE",
     "FINDING_KIND_FUNCTION_HOTSPOT",
+    "FINDING_KIND_UNREACHABLE_STATEMENT",
     "FINDING_KIND_UNTESTED_HOTSPOT",
     "FINDING_KIND_UNUSED_SYMBOL",
     "IIM_CLASSIFICATION_CANDIDATE",

@@ -379,6 +379,9 @@ def _main_impl() -> None:
         arg == "--baseline" or arg.startswith("--baseline=") for arg in sys.argv
     )
     args = ap.parse_args()
+    args._full_metrics_explicit = (
+        "skip_metrics" in explicit_cli_dests and not bool_attr(args, "skip_metrics")
+    )
 
     root_path = _resolve_existing_root_path(args=args, printer=_console())
     # Freeze the env-resolved observability decision for this CLI process (default

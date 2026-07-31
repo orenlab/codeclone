@@ -1,0 +1,293 @@
+{
+  "schema_version": 1,
+  "domain": "design_metrics",
+  "golden": true,
+  "cases": [
+    {
+      "id": "CC-SIMPLE",
+      "path": "original/acme/complexity_cases.py",
+      "symbol": "simple",
+      "expected": {
+        "complexity": 1
+      }
+    },
+    {
+      "id": "CC-BRANCHY",
+      "path": "original/acme/complexity_cases.py",
+      "symbol": "branchy",
+      "expected": {
+        "complexity": 8
+      }
+    },
+    {
+      "id": "CBO-COORDINATOR",
+      "path": "original/acme/design_metrics.py",
+      "symbol": "CoupledCoordinator",
+      "expected": {
+        "coupling": 3
+      }
+    },
+    {
+      "id": "CBO-ORDER",
+      "path": "original/acme/domain/order.py",
+      "symbol": "Order",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "CBO-PAYMENT",
+      "path": "original/acme/domain/payment.py",
+      "symbol": "Payment",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "LCOM-COHESIVE",
+      "path": "original/acme/design_metrics.py",
+      "symbol": "CohesiveLedger",
+      "expected": {
+        "cohesion_components": 1
+      }
+    },
+    {
+      "id": "LCOM-DISCONNECTED",
+      "path": "original/acme/design_metrics.py",
+      "symbol": "DisconnectedUtility",
+      "expected": {
+        "cohesion_components": 3
+      }
+    },
+    {
+      "id": "CYCLE-DOMAIN",
+      "path": "original/acme/domain/order.py",
+      "symbol": "Order",
+      "expected": {
+        "dependency_cycle": true
+      }
+    },
+    {
+      "id": "R-CC-SIMPLE",
+      "path": "renamed/acme_renamed/complexity_cases.py",
+      "symbol": "direct_scale",
+      "expected": {
+        "complexity": 1
+      }
+    },
+    {
+      "id": "R-CC-BRANCHY",
+      "path": "renamed/acme_renamed/complexity_cases.py",
+      "symbol": "decision_scale",
+      "expected": {
+        "complexity": 8
+      }
+    },
+    {
+      "id": "R-CBO-COORDINATOR",
+      "path": "renamed/acme_renamed/design_metrics.py",
+      "symbol": "WorkflowDirector",
+      "expected": {
+        "coupling": 3
+      }
+    },
+    {
+      "id": "R-CBO-ORDER",
+      "path": "renamed/acme_renamed/domain/purchase.py",
+      "symbol": "Purchase",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "R-CBO-PAYMENT",
+      "path": "renamed/acme_renamed/domain/settlement.py",
+      "symbol": "Settlement",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "R-LCOM-COHESIVE",
+      "path": "renamed/acme_renamed/design_metrics.py",
+      "symbol": "UnifiedRegister",
+      "expected": {
+        "cohesion_components": 1
+      }
+    },
+    {
+      "id": "R-LCOM-DISCONNECTED",
+      "path": "renamed/acme_renamed/design_metrics.py",
+      "symbol": "ScatteredState",
+      "expected": {
+        "cohesion_components": 3
+      }
+    },
+    {
+      "id": "R-CYCLE-DOMAIN",
+      "path": "renamed/acme_renamed/domain/purchase.py",
+      "symbol": "Purchase",
+      "expected": {
+        "dependency_cycle": true
+      }
+    },
+    {
+      "id": "CBO-CALL-RESOLVED",
+      "path": "original/acme/instantiation.py",
+      "symbol": "ResolvedConstructorCall",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "CBO-CALL-DOTTED",
+      "path": "original/acme/instantiation.py",
+      "symbol": "DottedConstructorCall",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "CBO-CALL-ALIAS",
+      "path": "original/acme/instantiation.py",
+      "symbol": "AliasedConstructorCall",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "CBO-CALL-OPAQUE",
+      "path": "original/acme/instantiation.py",
+      "symbol": "OpaqueCallTargets",
+      "expected": {
+        "coupling": 0
+      }
+    },
+    {
+      "id": "R-CBO-CALL-RESOLVED",
+      "path": "renamed/acme_renamed/instantiation.py",
+      "symbol": "DirectFactoryUse",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "R-CBO-CALL-DOTTED",
+      "path": "renamed/acme_renamed/instantiation.py",
+      "symbol": "QualifiedFactoryUse",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "R-CBO-CALL-ALIAS",
+      "path": "renamed/acme_renamed/instantiation.py",
+      "symbol": "RenamedFactoryUse",
+      "expected": {
+        "coupling": 1
+      }
+    },
+    {
+      "id": "R-CBO-CALL-OPAQUE",
+      "path": "renamed/acme_renamed/instantiation.py",
+      "symbol": "UnprovenCallTargets",
+      "expected": {
+        "coupling": 0
+      }
+    }
+  ],
+  "rename_twins": [
+    [
+      "CC-SIMPLE",
+      "R-CC-SIMPLE"
+    ],
+    [
+      "CC-BRANCHY",
+      "R-CC-BRANCHY"
+    ],
+    [
+      "CBO-COORDINATOR",
+      "R-CBO-COORDINATOR"
+    ],
+    [
+      "CBO-ORDER",
+      "R-CBO-ORDER"
+    ],
+    [
+      "CBO-PAYMENT",
+      "R-CBO-PAYMENT"
+    ],
+    [
+      "LCOM-COHESIVE",
+      "R-LCOM-COHESIVE"
+    ],
+    [
+      "LCOM-DISCONNECTED",
+      "R-LCOM-DISCONNECTED"
+    ],
+    [
+      "CYCLE-DOMAIN",
+      "R-CYCLE-DOMAIN"
+    ],
+    [
+      "CBO-CALL-RESOLVED",
+      "R-CBO-CALL-RESOLVED"
+    ],
+    [
+      "CBO-CALL-DOTTED",
+      "R-CBO-CALL-DOTTED"
+    ],
+    [
+      "CBO-CALL-ALIAS",
+      "R-CBO-CALL-ALIAS"
+    ],
+    [
+      "CBO-CALL-OPAQUE",
+      "R-CBO-CALL-OPAQUE"
+    ]
+  ],
+  "negative_twins": [
+    [
+      "CC-BRANCHY",
+      "CC-SIMPLE"
+    ],
+    [
+      "CBO-COORDINATOR",
+      "CBO-ORDER"
+    ],
+    [
+      "LCOM-DISCONNECTED",
+      "LCOM-COHESIVE"
+    ],
+    [
+      "R-CC-BRANCHY",
+      "R-CC-SIMPLE"
+    ],
+    [
+      "R-CBO-COORDINATOR",
+      "R-CBO-ORDER"
+    ],
+    [
+      "R-LCOM-DISCONNECTED",
+      "R-LCOM-COHESIVE"
+    ],
+    [
+      "CBO-CALL-RESOLVED",
+      "CBO-CALL-OPAQUE"
+    ],
+    [
+      "R-CBO-CALL-RESOLVED",
+      "R-CBO-CALL-OPAQUE"
+    ]
+  ],
+  "twin_axes": {
+    "CC-BRANCHY|CC-SIMPLE": "same module, complexity 8 vs 1; a detector reporting one constant complexity fails this pair. The 8 is the case's own expected value under Y9 ruling A (full McCabe over the extended norm graph); this text said 7, the pre-norm number, describing a case that no longer exists",
+    "CBO-COORDINATOR|CBO-ORDER": "coupling 3 (three local typed collaborators) vs 1 (one imported-domain edge); counting only one edge kind fails this pair",
+    "LCOM-DISCONNECTED|LCOM-COHESIVE": "cohesion components 3 vs 1; a detector always reporting one component fails this pair",
+    "R-CC-BRANCHY|R-CC-SIMPLE": "renamed twin of CC-BRANCHY|CC-SIMPLE",
+    "R-CBO-COORDINATOR|R-CBO-ORDER": "renamed twin of CBO-COORDINATOR|CBO-ORDER",
+    "R-LCOM-DISCONNECTED|R-LCOM-COHESIVE": "renamed twin of LCOM-DISCONNECTED|LCOM-COHESIVE",
+    "CBO-CALL-RESOLVED|CBO-CALL-OPAQUE": "identical call syntax, coupling 1 vs 0; the callee resolves to a class in one case and to a function, a decorator factory and an unresolvable import in the other, so a detector counting call syntax fails this pair",
+    "R-CBO-CALL-RESOLVED|R-CBO-CALL-OPAQUE": "renamed twin of CBO-CALL-RESOLVED|CBO-CALL-OPAQUE"
+  }
+}

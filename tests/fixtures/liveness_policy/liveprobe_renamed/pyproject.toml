@@ -1,0 +1,13 @@
+[project]
+name = "renamed-runtime-policy-probe"
+version = "7.4.2"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.codeclone]
+block_min_loc = 100000000
+block_min_stmt = 100000000
+segment_min_loc = 100000000
+segment_min_stmt = 100000000

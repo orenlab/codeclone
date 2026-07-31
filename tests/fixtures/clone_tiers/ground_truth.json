@@ -1,0 +1,295 @@
+{
+  "schema_version": 1,
+  "domain": "clone_tiers",
+  "golden": true,
+  "cases": [
+    {
+      "id": "PAIR-INT-01",
+      "path": "pairs.py",
+      "members": [
+        "authorize_refund",
+        "authorize_refund_twin"
+      ],
+      "expected": {
+        "tier": "exact"
+      },
+      "rationale": "Exact means distance zero after normalization. The twin differs only in string constants, which normalize, so every surviving token - including every attribute identity - is shared."
+    },
+    {
+      "id": "PAIR-T3-01",
+      "path": "pairs.py",
+      "members": [
+        "active_customer_value",
+        "active_customer_value_clamped"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_statements": 1
+      },
+      "rationale": "Near-miss means one statement of genuine edit distance. Both members read the same attributes of the same symbol, so the only difference is the clamp statement - which is what the tier exists to detect."
+    },
+    {
+      "id": "PAIR-T3-NEG",
+      "path": "pairs.py",
+      "members": [
+        "active_customer_value",
+        "active_partner_value"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      }
+    },
+    {
+      "id": "PAIR-T4-01",
+      "path": "pairs.py",
+      "members": [
+        "positive_sum_loop",
+        "positive_sum_comprehension"
+      ],
+      "expected": {
+        "tier": "unmatched"
+      }
+    },
+    {
+      "id": "PAIR-T4-02",
+      "path": "pairs.py",
+      "members": [
+        "bounded_score_explicit",
+        "bounded_score_builtin"
+      ],
+      "expected": {
+        "tier": "unmatched"
+      }
+    },
+    {
+      "id": "R-PAIR-INT-01",
+      "path": "pairs_renamed.py",
+      "members": [
+        "permit_credit",
+        "permit_credit_twin"
+      ],
+      "expected": {
+        "tier": "exact"
+      },
+      "rationale": "Exact means distance zero after normalization. The twin differs only in string constants, which normalize, so every surviving token - including every attribute identity - is shared."
+    },
+    {
+      "id": "R-PAIR-T3-01",
+      "path": "pairs_renamed.py",
+      "members": [
+        "enabled_member_score",
+        "enabled_member_score_clamped"
+      ],
+      "expected": {
+        "tier": "near_miss",
+        "edit_statements": 1
+      },
+      "rationale": "Near-miss means one statement of genuine edit distance. Both members read the same attributes of the same symbol, so the only difference is the clamp statement - which is what the tier exists to detect."
+    },
+    {
+      "id": "R-PAIR-T3-NEG",
+      "path": "pairs_renamed.py",
+      "members": [
+        "enabled_member_score",
+        "enabled_channel_score"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      }
+    },
+    {
+      "id": "R-PAIR-T4-01",
+      "path": "pairs_renamed.py",
+      "members": [
+        "accepted_total_loop",
+        "accepted_total_expression"
+      ],
+      "expected": {
+        "tier": "unmatched"
+      }
+    },
+    {
+      "id": "R-PAIR-T4-02",
+      "path": "pairs_renamed.py",
+      "members": [
+        "limited_rank_branches",
+        "limited_rank_builtins"
+      ],
+      "expected": {
+        "tier": "unmatched"
+      }
+    },
+    {
+      "id": "PAIR-T3-IDENTITY-NEG",
+      "path": "pairs.py",
+      "members": [
+        "active_customer_value",
+        "active_supplier_value"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      },
+      "rationale": "39Y-FP row 7: attribute names are symbols and are preserved, so an identity difference now costs an edit. Erasing it (the pre-fingerprint-3 wire) made this pair a 1-edit near-miss; it is a 2-edit pair now, and the identity difference is exactly what carries it out of the tier."
+    },
+    {
+      "id": "R-PAIR-T3-IDENTITY-NEG",
+      "path": "pairs_renamed.py",
+      "members": [
+        "enabled_member_score",
+        "enabled_vendor_score"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      },
+      "rationale": "39Y-FP row 7: attribute names are symbols and are preserved, so an identity difference now costs an edit. Erasing it (the pre-fingerprint-3 wire) made this pair a 1-edit near-miss; it is a 2-edit pair now, and the identity difference is exactly what carries it out of the tier."
+    },
+    {
+      "id": "PAIR-INT-IDENTITY-NEG",
+      "path": "pairs.py",
+      "members": [
+        "authorize_refund",
+        "authorize_export"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      },
+      "rationale": "39Y-FP row 7: the two authorizations read different attributes (can_refund vs can_export, amount vs row_count). Those are different symbols, so the pair is no longer exact - it is two edits apart. The pre-fingerprint-3 wire erased attribute names and called them identical."
+    },
+    {
+      "id": "R-PAIR-INT-IDENTITY-NEG",
+      "path": "pairs_renamed.py",
+      "members": [
+        "permit_credit",
+        "permit_archive"
+      ],
+      "expected": {
+        "tier": "unmatched",
+        "minimum_edit_statements": 2
+      },
+      "rationale": "39Y-FP row 7: the two authorizations read different attributes (can_refund vs can_export, amount vs row_count). Those are different symbols, so the pair is no longer exact - it is two edits apart. The pre-fingerprint-3 wire erased attribute names and called them identical."
+    }
+  ],
+  "rename_twins": [
+    [
+      "PAIR-INT-01",
+      "R-PAIR-INT-01"
+    ],
+    [
+      "PAIR-T3-01",
+      "R-PAIR-T3-01"
+    ],
+    [
+      "PAIR-T3-NEG",
+      "R-PAIR-T3-NEG"
+    ],
+    [
+      "PAIR-T4-01",
+      "R-PAIR-T4-01"
+    ],
+    [
+      "PAIR-T4-02",
+      "R-PAIR-T4-02"
+    ],
+    [
+      "PAIR-T3-IDENTITY-NEG",
+      "R-PAIR-T3-IDENTITY-NEG"
+    ],
+    [
+      "PAIR-INT-IDENTITY-NEG",
+      "R-PAIR-INT-IDENTITY-NEG"
+    ]
+  ],
+  "negative_twins": [
+    [
+      "PAIR-T3-01",
+      "PAIR-T3-NEG"
+    ],
+    [
+      "R-PAIR-T3-01",
+      "R-PAIR-T3-NEG"
+    ],
+    [
+      "PAIR-T3-01",
+      "PAIR-T3-IDENTITY-NEG"
+    ],
+    [
+      "R-PAIR-T3-01",
+      "R-PAIR-T3-IDENTITY-NEG"
+    ],
+    [
+      "PAIR-INT-01",
+      "PAIR-INT-IDENTITY-NEG"
+    ],
+    [
+      "R-PAIR-INT-01",
+      "R-PAIR-INT-IDENTITY-NEG"
+    ]
+  ],
+  "parked_cases": {
+    "rationale": "Y7 eligibility boundary - deferred by maintainer to landing-time min_stmt labeled-corpus review. Both members of each pair are a single multi-line dict-return statement (stmt=1), so the pair never clears the clone lane's min_stmt=4 eligibility floor and no tier can claim it today. The golden previously asserted tier 'exact' for them with nothing reading the claim; the claim was false. Kept verbatim - file, functions and members all still present - so the Y7 cycle can reinstate them unchanged.  Second park class (39Y-FP): Type-4 candidates. The customer/supplier aggregation shape is one computation parametrizable by a single extracted helper, but that claim is provable only over the 39D contract-IR canonicalization in the post-39R Type-4 phase. Asserting it today would require erasing symbol identity, which is pattern-matching and is refused - so the case is promoted into that phase's acceptance corpus instead of being lost. Asserted unmatched today, exactly like the PAIR-T4 seeds.",
+    "cases": [
+      {
+        "id": "PAIR-INT-02",
+        "path": "pairs.py",
+        "members": [
+          "serialize_customer",
+          "serialize_supplier"
+        ],
+        "expected": {
+          "tier": "exact"
+        }
+      },
+      {
+        "id": "R-PAIR-INT-02",
+        "path": "pairs_renamed.py",
+        "members": [
+          "encode_member",
+          "encode_vendor"
+        ],
+        "expected": {
+          "tier": "exact"
+        }
+      },
+      {
+        "id": "PAIR-T4-AGG-01",
+        "path": "pairs.py",
+        "members": [
+          "active_customer_value",
+          "active_supplier_value"
+        ],
+        "expected": {
+          "tier": "type4_candidate"
+        },
+        "rationale": "Type-4 candidate: same aggregation over a different entity, parametrizable by one extracted helper. Provable only over the 39D IR canonicalization; not claimable by any structural tier today."
+      },
+      {
+        "id": "R-PAIR-T4-AGG-01",
+        "path": "pairs_renamed.py",
+        "members": [
+          "enabled_member_score",
+          "enabled_vendor_score"
+        ],
+        "expected": {
+          "tier": "type4_candidate"
+        },
+        "rationale": "Type-4 candidate: same aggregation over a different entity, parametrizable by one extracted helper. Provable only over the 39D IR canonicalization; not claimable by any structural tier today."
+      }
+    ],
+    "rename_twins": [
+      [
+        "PAIR-INT-02",
+        "R-PAIR-INT-02"
+      ],
+      [
+        "PAIR-T4-AGG-01",
+        "R-PAIR-T4-AGG-01"
+      ]
+    ],
+    "negative_twins": []
+  }
+}

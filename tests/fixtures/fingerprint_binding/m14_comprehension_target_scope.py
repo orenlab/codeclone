@@ -1,0 +1,11 @@
+# mypy: ignore-errors
+# ruff: noqa
+# Wire fixture: the shapes below are deliberate. Undefined names, shadowed
+# imports and unused bindings are what the rows pin, so they are not linted.
+
+import json
+
+
+def f(items, x):
+    values = [json for json in items]
+    return json.dumps(x)

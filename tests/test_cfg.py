@@ -16,6 +16,7 @@ from codeclone.analysis.fingerprint import _cfg_fingerprint_and_complexity
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.meta_markers import CFG_META_PREFIX
 from tests._ast_helpers import fix_missing_single_function
+from tests._ast_metrics_helpers import bindings_for_function_node
 
 
 def build_cfg_from_source(source: str) -> CFG:
@@ -25,7 +26,12 @@ def build_cfg_from_source(source: str) -> CFG:
         "Expected first top-level statement to be a function"
     )
 
-    return CFGBuilder().build(func_node.name, func_node, NormalizationConfig())
+    return CFGBuilder().build(
+        func_node.name,
+        func_node,
+        NormalizationConfig(),
+        bindings_for_function_node(func_node),
+    )
 
 
 def cfg_to_str(cfg: CFG) -> str:
@@ -72,7 +78,9 @@ def _cfg_fingerprint(
 ) -> str:
     func = _parse_function(source, skip_reason=skip_reason)
     cfg = NormalizationConfig()
-    return _cfg_fingerprint_and_complexity(func, cfg, qualname)[1]
+    return _cfg_fingerprint_and_complexity(
+        func, cfg, qualname, bindings_for_function_node(func)
+    )[1]
 
 
 def _assert_fingerprint_diff(
@@ -194,10 +202,14 @@ Block 5 -> [3, 4]
         while True:
             a = 1
     """,
+            # 39Y Y9 norm: a literal loop guard emits only the edge it admits,
+            # so ``while True`` no longer pretends the loop can fall through.
+            # Block 4 is the exit path the loop never takes and is now
+            # unreachable by structure, which is the true shape.
             """
 Block 0 -> [2]
 Block 1 -> []
-Block 2 -> [3, 4]
+Block 2 -> [3]
   Expr(value=Constant(value=True))
 Block 3 -> [2]
   Assign(targets=[Name(id='a', ctx=Store())], value=Constant(value=1))
@@ -473,7 +485,9 @@ def test_cfg_try_handler_linking() -> None:
     func = ast.parse(dedent(code)).body[0]
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
     builder = CFGBuilder()
-    cfg = builder.build("f", func, NormalizationConfig())
+    cfg = builder.build(
+        "f", func, NormalizationConfig(), bindings_for_function_node(func)
+    )
 
     handler_blocks = [
         b
@@ -504,7 +518,20 @@ def test_cfg_try_handler_linking() -> None:
     assert has_call, "Handler should be reachable from potentially raising block"
 
 
-def test_cfg_try_handler_linking_skips_safe_statements() -> None:
+# ``test_cfg_try_handler_linking_skips_safe_statements`` stood here. It pinned
+# the ``_stmt_can_raise`` guess — "safe assignments should not link to
+# handlers" — which is precisely the behaviour ruled a defect in 39Y Y9: the
+# predicate also judged ``import`` safe, leaving plainly-reachable handler
+# bodies with no predecessor and producing false unreachable findings. The norm
+# dispatches from the region entry instead, so the refusal this test encoded no
+# longer describes correct behaviour. Its coverage moves, strictly stronger, to
+# ``test_norm_d1_one_dispatch_edge_per_handler`` (every handler reachable) and
+# ``test_norm_d2_unmatched_exception_leaves_the_region``.
+
+
+def test_cfg_try_handler_is_reachable_from_the_region_entry() -> None:
+    """The replacement predicate: dispatch does not depend on the statement."""
+
     code = """
     def f():
         try:
@@ -514,13 +541,7 @@ def test_cfg_try_handler_linking_skips_safe_statements() -> None:
             pass
     """
     predecessors = _handler_predecessors_from_source(code)
-
-    has_assign_only = any(
-        any(isinstance(stmt, ast.Assign) for stmt in pred.statements)
-        for pred in predecessors
-    )
-
-    assert not has_assign_only, "Safe assignments should not link to handlers"
+    assert predecessors, "a handler must be reachable regardless of the body"
 
 
 def test_cfg_try_body_breaks_after_termination() -> None:
@@ -534,7 +555,9 @@ def test_cfg_try_body_breaks_after_termination() -> None:
     """
     func = ast.parse(dedent(code)).body[0]
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = CFGBuilder().build("f", func, NormalizationConfig())
+    cfg = CFGBuilder().build(
+        "f", func, NormalizationConfig(), bindings_for_function_node(func)
+    )
     assert any(
         any(isinstance(stmt, ast.Return) for stmt in block.statements)
         for block in cfg.blocks
@@ -570,7 +593,9 @@ def test_cfg_try_star() -> None:
         pytest.skip("TryStar not supported")
 
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
-    cfg = CFGBuilder().build("f", func, NormalizationConfig())
+    cfg = CFGBuilder().build(
+        "f", func, NormalizationConfig(), bindings_for_function_node(func)
+    )
     assert len(cfg.blocks) >= 3
 
 
@@ -614,7 +639,9 @@ def test_cfg_match_pattern() -> None:
 
     assert isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef))
     builder = CFGBuilder()
-    cfg = builder.build("f", func, NormalizationConfig())
+    cfg = builder.build(
+        "f", func, NormalizationConfig(), bindings_for_function_node(func)
+    )
 
     patterns_found = []
     for block in cfg.blocks:
@@ -850,5 +877,413 @@ def test_cfg_match_with_empty_cases_ast() -> None:
         decorator_list=[],
     )
     func = fix_missing_single_function(fn)
-    cfg = CFGBuilder().build("f", func, NormalizationConfig())
+    cfg = CFGBuilder().build(
+        "f", func, NormalizationConfig(), bindings_for_function_node(func)
+    )
     assert len(cfg.blocks) >= 3
+
+
+# ===========================================================================
+# 39Y Y9 norm CFG — one graph, one truth
+# ===========================================================================
+#
+# The condemned first implementation kept unreachable statements in a side
+# channel beside ``cfg.blocks`` and answered three false-positive classes with
+# abstention flags. Both were ruled crutches. Under the norm the graph itself
+# carries the truth: post-terminator statements are real blocks with no
+# incoming edges, and exception/suppression flow is modelled by conservative
+# edges instead of being excluded from judgement.
+#
+# Reachability over-approximation is the honest direction for a dead-code
+# detector: it under-approximates findings.
+
+
+def _reachable_ids(cfg: CFG) -> set[int]:
+    seen = {cfg.entry.id}
+    queue = [cfg.entry]
+    while queue:
+        block = queue.pop()
+        for successor in block.successors:
+            if successor.id not in seen:
+                seen.add(successor.id)
+                queue.append(successor)
+    return seen
+
+
+def _block_holding(cfg: CFG, text: str) -> Block:
+    """The block whose statements contain ``text`` when unparsed."""
+
+    matches = [
+        block
+        for block in cfg.blocks
+        if any(text in ast.unparse(stmt) for stmt in block.statements)
+    ]
+    assert len(matches) == 1, f"expected exactly one block holding {text!r}"
+    return matches[0]
+
+
+def _weakly_connected_components(cfg: CFG) -> int:
+    parent = {block.id: block.id for block in cfg.blocks}
+
+    def find(node: int) -> int:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    for block in cfg.blocks:
+        for successor in block.successors:
+            left, right = find(block.id), find(successor.id)
+            if left != right:
+                parent[left] = right
+    return len({find(block.id) for block in cfg.blocks})
+
+
+def _mccabe(cfg: CFG) -> int:
+    edges = sum(len(block.successors) for block in cfg.blocks)
+    nodes = len(cfg.blocks)
+    return edges - nodes + 2 * _weakly_connected_components(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Post-terminator statements are real blocks (replaces the side channel)
+# ---------------------------------------------------------------------------
+
+
+def test_norm_dead_tail_is_a_real_unreachable_block() -> None:
+    """Strictly stronger than the old "stays out of the graph" assertion.
+
+    The old implementation asserted the dead tail was ABSENT from every block
+    and kept it in ``unreachable_regions``. The norm asserts the opposite and
+    more: the statement is a real block, it carries no incoming edge, and plain
+    reachability finds it without consulting any second structure.
+    """
+
+    cfg = build_cfg_from_source(
+        """
+        def after_return(value):
+            return value
+            value += 1
+        """
+    )
+    dead = _block_holding(cfg, "value += 1")
+    assert dead.id not in _reachable_ids(cfg)
+    assert not any(dead in block.successors for block in cfg.blocks), (
+        "an unreachable block must have no fabricated incoming edge"
+    )
+
+
+def test_norm_dead_tail_keeps_its_own_structure() -> None:
+    """Unreachable code is analysed, not discarded: its branches are blocks."""
+
+    cfg = build_cfg_from_source(
+        """
+        def dead_branching(value, flag):
+            return value
+            if flag:
+                value += 1
+            else:
+                value -= 1
+        """
+    )
+    reachable = _reachable_ids(cfg)
+    assert _block_holding(cfg, "value += 1").id not in reachable
+    assert _block_holding(cfg, "value -= 1").id not in reachable
+
+
+# ---------------------------------------------------------------------------
+# Norm edge decision table
+# ---------------------------------------------------------------------------
+
+
+def test_norm_d1_one_dispatch_edge_per_handler() -> None:
+    """D1: the region entry reaches every handler, replacing _stmt_can_raise.
+
+    The old predicate guessed which statements could raise and missed
+    ``import``, which is how a plainly-reachable handler body ended up with no
+    predecessor at all.
+    """
+
+    cfg = build_cfg_from_source(
+        """
+        def two_handlers():
+            try:
+                import psutil
+            except ImportError:
+                return None
+            except ValueError:
+                return 0
+            return psutil
+        """
+    )
+    reachable = _reachable_ids(cfg)
+    assert _block_holding(cfg, "return None").id in reachable
+    assert _block_holding(cfg, "return 0").id in reachable
+
+
+def test_norm_d2_unmatched_exception_leaves_the_region() -> None:
+    """D2: an exception matching no handler propagates out of the function."""
+
+    cfg = build_cfg_from_source(
+        """
+        def only_value_error():
+            try:
+                risky()
+            except ValueError:
+                return 1
+            return 2
+        """
+    )
+    entry_of_region = _block_holding(cfg, "TRY_KIND")
+    assert cfg.exit in entry_of_region.successors, (
+        "an unmatched exception must be able to leave the function"
+    )
+
+
+def test_norm_f1_finally_runs_after_a_returning_body() -> None:
+    """F1/F4: a ``finally`` is reachable even when the body always returns."""
+
+    cfg = build_cfg_from_source(
+        """
+        def guarded(value):
+            try:
+                return value
+            finally:
+                cleanup()
+        """
+    )
+    assert _block_holding(cfg, "cleanup()").id in _reachable_ids(cfg)
+
+
+def test_norm_f4_return_inside_try_routes_through_finally() -> None:
+    """F4: the return does not jump straight to the exit past the finally."""
+
+    cfg = build_cfg_from_source(
+        """
+        def guarded(value):
+            try:
+                return value
+            finally:
+                cleanup()
+        """
+    )
+    returning = _block_holding(cfg, "return value")
+    finally_block = _block_holding(cfg, "cleanup()")
+    assert finally_block in returning.successors
+    assert cfg.exit not in returning.successors, (
+        "a return inside a protected region must not bypass its finally"
+    )
+
+
+def test_norm_f5_break_inside_try_routes_through_finally() -> None:
+    """F5: ``break`` leaves the protected region and must run the finally."""
+
+    cfg = build_cfg_from_source(
+        """
+        def looping(items):
+            for item in items:
+                try:
+                    break
+                finally:
+                    cleanup()
+            return items
+        """
+    )
+    breaking = _block_holding(cfg, "break")
+    finally_block = _block_holding(cfg, "cleanup()")
+    assert finally_block in breaking.successors
+
+
+def test_norm_f5_break_outside_any_finally_is_unaffected() -> None:
+    """The mirror of F5: no finally in between means no routing at all."""
+
+    cfg = build_cfg_from_source(
+        """
+        def looping(items):
+            for item in items:
+                break
+            return items
+        """
+    )
+    breaking = _block_holding(cfg, "break")
+    assert not any(
+        "cleanup" in ast.unparse(stmt)
+        for block in breaking.successors
+        for stmt in block.statements
+    )
+
+
+def test_norm_f6_finally_reaches_both_the_join_and_the_exit() -> None:
+    """F6: a finally continues normally AND propagates the abrupt path."""
+
+    cfg = build_cfg_from_source(
+        """
+        def guarded(value):
+            try:
+                risky()
+            finally:
+                cleanup()
+            return value
+        """
+    )
+    finally_block = _block_holding(cfg, "cleanup()")
+    assert cfg.exit in finally_block.successors
+    assert _block_holding(cfg, "return value") in finally_block.successors
+
+
+def test_norm_w1_post_with_is_reachable_through_a_raising_body() -> None:
+    """W1: ``__exit__`` may suppress, so the join is never provably dead."""
+
+    cfg = build_cfg_from_source(
+        """
+        def expects_failure():
+            with raises(ValueError):
+                raise ValueError('nope')
+            return 1
+        """
+    )
+    assert _block_holding(cfg, "return 1").id in _reachable_ids(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Literal conditions are graph facts, not a side channel
+# ---------------------------------------------------------------------------
+
+
+def test_norm_literal_false_branch_has_no_incoming_edge() -> None:
+    cfg = build_cfg_from_source(
+        """
+        def disabled():
+            if False:
+                return 'never'
+            return 'always'
+        """
+    )
+    assert _block_holding(cfg, "return 'never'").id not in _reachable_ids(cfg)
+
+
+def test_norm_name_bound_to_false_stays_reachable() -> None:
+    """The restraint, now as a graph property: no value inference."""
+
+    cfg = build_cfg_from_source(
+        """
+        def constant_binding(value):
+            flag = False
+            if flag:
+                return value + 1
+            return value
+        """
+    )
+    assert _block_holding(cfg, "return value + 1").id in _reachable_ids(cfg)
+
+
+def test_norm_while_true_leaves_the_following_statement_unreachable() -> None:
+    """A literal loop guard is a source fact, and the graph now shows it."""
+
+    cfg = build_cfg_from_source(
+        """
+        def forever():
+            while True:
+                work()
+            return 1
+        """
+    )
+    assert _block_holding(cfg, "return 1").id not in _reachable_ids(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Complexity — ruling A, full McCabe over the extended graph
+# ---------------------------------------------------------------------------
+
+
+def _complexity_of(source: str) -> tuple[int, int]:
+    """Return (reported complexity, independently recomputed E-N+2P)."""
+
+    func_node = ast.parse(dedent(source)).body[0]
+    assert isinstance(func_node, ast.FunctionDef)
+    graph, _fingerprint, complexity = _cfg_fingerprint_and_complexity(
+        func_node,
+        NormalizationConfig(),
+        func_node.name,
+        bindings_for_function_node(func_node),
+    )
+    return complexity, _mccabe(graph)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "def straight(value):\n    return value\n",
+        "def branchy(value):\n    if value:\n        return 1\n    return 2\n",
+        (
+            "def guarded(value):\n"
+            "    try:\n"
+            "        return value\n"
+            "    except ValueError:\n"
+            "        return 0\n"
+            "    finally:\n"
+            "        cleanup()\n"
+        ),
+        "def dead(value):\n    return value\n    value += 1\n",
+        (
+            "def suppressing():\n"
+            "    with raises(ValueError):\n"
+            "        raise ValueError('x')\n"
+            "    return 1\n"
+        ),
+    ],
+)
+def test_complexity_is_full_mccabe_over_the_extended_graph(source: str) -> None:
+    """Ruling A: V(G) = E - N + 2P over the whole graph, every edge counted.
+
+    No edge kind is excluded and no component is skipped; the reported value
+    must equal the formula applied to the graph the fingerprint also sees.
+    """
+
+    reported, recomputed = _complexity_of(source)
+    assert reported == recomputed
+
+
+def test_each_handler_adds_one_path() -> None:
+    """The textbook consequence of the dispatch edges, stated as a delta."""
+
+    one, _ = _complexity_of(
+        "def one_handler():\n"
+        "    try:\n"
+        "        risky()\n"
+        "    except ValueError:\n"
+        "        return 0\n"
+        "    return 1\n"
+    )
+    two, _ = _complexity_of(
+        "def two_handlers():\n"
+        "    try:\n"
+        "        risky()\n"
+        "    except ValueError:\n"
+        "        return 0\n"
+        "    except TypeError:\n"
+        "        return 2\n"
+        "    return 1\n"
+    )
+    assert two == one + 1
+
+
+def test_complexity_never_filters_by_edge_kind() -> None:
+    """The back-door guard: dispatch/finally/suppress edges must all count.
+
+    Reproducing pre-norm numbers by ignoring norm edges would recreate the
+    second truth the redesign exists to remove, so a function whose only
+    control flow is a handler must not report the complexity of a straight
+    line.
+    """
+
+    guarded, _ = _complexity_of(
+        "def guarded():\n"
+        "    try:\n"
+        "        risky()\n"
+        "    except ValueError:\n"
+        "        return 0\n"
+        "    return 1\n"
+    )
+    straight, _ = _complexity_of("def straight():\n    return 1\n")
+    assert guarded > straight

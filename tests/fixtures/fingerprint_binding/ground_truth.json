@@ -1,0 +1,233 @@
+{
+  "contract": "39Y-FP binding-aware fingerprint wire",
+  "note": "Ground truth is authored by hand from the role table in specs phase-39y-fingerprint-binding-policy section 2, never generated from emitter output.",
+  "fingerprint_pairs": [
+    {
+      "row": "M1",
+      "relation": "equal",
+      "left": "m01_receiver_rename_a.py",
+      "right": "m01_receiver_rename_b.py",
+      "function": "f",
+      "pins": "local receiver rename invariance (defect 1)"
+    },
+    {
+      "row": "M2",
+      "relation": "equal",
+      "left": "m02_import_alias_a.py",
+      "right": "m02_import_alias_b.py",
+      "function": "f",
+      "pins": "import alias erased, canonical identity kept (row 4)"
+    },
+    {
+      "row": "M3",
+      "relation": "equal",
+      "left": "m03_from_import_shape_a.py",
+      "right": "m03_from_import_shape_b.py",
+      "function": "f",
+      "pins": "canonical collapse across syntactic shapes (rows 4/5)"
+    },
+    {
+      "row": "M4",
+      "relation": "equal",
+      "left": "m04_docstring_annotation_a.py",
+      "right": "m04_docstring_annotation_b.py",
+      "function": "f",
+      "pins": "docstring and annotation edits stay invariant"
+    },
+    {
+      "row": "M5",
+      "relation": "equal",
+      "left": "m05_local_rename_a.py",
+      "right": "m05_local_rename_b.py",
+      "function": "f",
+      "pins": "local rename outside callee position stays invariant"
+    },
+    {
+      "row": "M6",
+      "relation": "different",
+      "left": "m06_non_callee_identity_a.py",
+      "right": "m06_non_callee_identity_b.py",
+      "function": "f",
+      "pins": "identity survives outside callee position (defect 2)"
+    },
+    {
+      "row": "M7",
+      "relation": "different",
+      "left": "m07_callee_identity_a.py",
+      "right": "m07_callee_identity_b.py",
+      "function": "f",
+      "pins": "distinct identities survive canonicalization"
+    },
+    {
+      "row": "M8",
+      "relation": "different",
+      "left": "m08_self_receiver_a.py",
+      "right": "m08_self_receiver_b.py",
+      "function": "C.f",
+      "pins": "_SELF_ is not _VAR_ (row 1)"
+    },
+    {
+      "row": "M9",
+      "relation": "different",
+      "left": "m09_attribute_name_a.py",
+      "right": "m09_attribute_name_b.py",
+      "function": "f",
+      "pins": "every attribute in a chain is preserved (row 7)"
+    },
+    {
+      "row": "M10",
+      "relation": "different",
+      "left": "m10_unknown_global_a.py",
+      "right": "m10_unknown_global_b.py",
+      "function": "f",
+      "pins": "unknown globals are preserved literally (row 6)"
+    },
+    {
+      "row": "M11",
+      "relation": "different",
+      "left": "m11_shadowed_import_a.py",
+      "right": "m11_shadowed_import_b.py",
+      "function": "g",
+      "pins": "module-level shadowing invalidates import identity"
+    }
+  ],
+  "cross_version": {
+    "pins": "M21 - same corpus, identical wire bytes and fingerprints on every supported interpreter",
+    "corpus": [
+      "fingerprint_binding/m01_receiver_rename_a.py",
+      "fingerprint_binding/m02_import_alias_a.py",
+      "fingerprint_binding/m03_from_import_shape_a.py",
+      "fingerprint_binding/m08_self_receiver_a.py",
+      "fingerprint_binding/m11_shadowed_import_a.py",
+      "wire_corpus/core_syntax.py",
+      "wire_corpus/pattern_syntax.py"
+    ],
+    "corpus_digest": "37b5b51ad9fc2ce92d77de2fbd1072728da82e522c22527f2d800fce2e7f7570",
+    "row_count": 18,
+    "interpreters_proven": [
+      "3.10",
+      "3.11",
+      "3.12",
+      "3.13",
+      "3.14"
+    ]
+  },
+  "scope_graph_rows": [
+    {
+      "row": "M12",
+      "fixture": "m12_local_import_alias.py",
+      "function": "f",
+      "pins": "a local import carries canonical identity in its own scope",
+      "statements": [
+        {
+          "index": 1,
+          "wire": "Return(value=Call(func=Name(id=json.dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M13",
+      "fixture": "m13_local_import_shadowed.py",
+      "function": "f",
+      "pins": "a competing binding degrades the alias to LOCAL for the whole scope",
+      "statements": [
+        {
+          "index": 2,
+          "wire": "Return(value=Call(func=Attribute(value=Name(id=_VAR_),attr=dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M14",
+      "fixture": "m14_comprehension_target_scope.py",
+      "function": "f",
+      "pins": "a comprehension target binds in the comprehension, not the function",
+      "statements": [
+        {
+          "index": 0,
+          "wire": "Assign(targets=[Name(id=_VAR_)],value=ListComp(elt=Name(id=_VAR_),generators=[comprehension(target=Name(id=_VAR_),iter=Name(id=_VAR_),ifs=[],is_async=0)]))"
+        },
+        {
+          "index": 1,
+          "wire": "Return(value=Call(func=Name(id=json.dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M15",
+      "fixture": "m15_comprehension_walrus_scope.py",
+      "function": "f",
+      "pins": "a walrus inside a comprehension binds the enclosing function scope",
+      "statements": [
+        {
+          "index": 1,
+          "wire": "Return(value=Call(func=Attribute(value=Name(id=_VAR_),attr=dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M16",
+      "fixture": "m16_nonlocal_inherits_import.py",
+      "function": "inner",
+      "pins": "a nonlocal name inherits the enclosing scope's import identity",
+      "statements": [
+        {
+          "index": 1,
+          "wire": "Return(value=Call(func=Name(id=json.dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M17",
+      "fixture": "m17_closure_keeps_self.py",
+      "function": "inner",
+      "pins": "a captured receiver keeps its _SELF_ role inside the closure",
+      "statements": [
+        {
+          "index": 0,
+          "wire": "Return(value=Call(func=Attribute(value=Name(id=_SELF_),attr=handle),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M18",
+      "fixture": "m11_shadowed_import_a.py",
+      "function": "g",
+      "pins": "a module-level write invalidates import identity to GLOBAL_LITERAL",
+      "statements": [
+        {
+          "index": 0,
+          "wire": "Return(value=Call(func=Attribute(value=Name(id=json),attr=dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    },
+    {
+      "row": "M19",
+      "fixture": "m19_del_creates_local_binding.py",
+      "function": "f",
+      "pins": "a del target is a binding form and creates a local",
+      "statements": [
+        {
+          "index": 0,
+          "wire": "Delete(targets=[Name(id=_VAR_)])"
+        },
+        {
+          "index": 1,
+          "wire": "Return(value=Name(id=_VAR_))"
+        }
+      ]
+    },
+    {
+      "row": "M20",
+      "fixture": "m20_nested_scope_does_not_leak.py",
+      "function": "outer",
+      "pins": "a nested scope's bindings never reach the enclosing collector",
+      "statements": [
+        {
+          "index": 1,
+          "wire": "Return(value=Call(func=Name(id=json.dumps),args=[Name(id=_VAR_)],keywords=[]))"
+        }
+      ]
+    }
+  ]
+}

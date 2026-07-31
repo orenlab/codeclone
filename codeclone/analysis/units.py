@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from functools import partial
 from hashlib import sha256 as _sha256
 from typing import TypeVar
@@ -21,6 +22,7 @@ from ..contracts import (
     DEFAULT_SEGMENT_MIN_STMT,
 )
 from ..contracts.errors import ParseError
+from ..findings.clones.grouping import is_clone_eligible
 from ..findings.structural.detectors import scan_function_structure
 from ..metrics.adoption import collect_module_adoption
 from ..metrics.api_surface import collect_module_api_surface
@@ -28,8 +30,10 @@ from ..metrics.complexity import risk_level
 from ..models import (
     BlockUnit,
     ClassMetrics,
+    DeadCandidate,
     FileMetrics,
     FunctionContractSummary,
+    LiveRootReason,
     ModuleRegistryHandle,
     RehydratedCacheNeutral,
     ResolvedSourceIdentity,
@@ -48,9 +52,15 @@ from ._module_walk import (
     _collect_function_relationship_facts,
     _collect_module_walk_data,
     _is_typing_overload_stub,
+    resolve_import_observation,
 )
+from .binding import BindingContext, build_module_bindings
 from .class_metrics import _class_metrics_for_node, _node_line_span
-from .fingerprint import _cfg_fingerprint_and_complexity, bucket_loc
+from .fingerprint import (
+    _cfg_fingerprint_and_complexity,
+    bucket_loc,
+    near_miss_statement_sequence,
+)
 from .normalizer import NormalizationConfig
 from .parser import PARSE_TIMEOUT_SECONDS, _parse_with_limits
 from .phase_ledger import (
@@ -63,6 +73,7 @@ from .phase_ledger import (
 )
 from .reachability import collect_runtime_reachability
 from .security_surfaces import project_security_surfaces
+from .statement_reachability import unreachable_statements
 
 __all__ = ["extract_units_and_stats_from_source"]
 
@@ -72,6 +83,25 @@ _TCloneUnit = TypeVar("_TCloneUnit", BlockUnit, SegmentUnit)
 def _stmt_count(node: ast.AST) -> int:
     body = getattr(node, "body", None)
     return len(body) if isinstance(body, list) else 0
+
+
+def _module_bindings(
+    tree: ast.Module,
+    identity: ResolvedSourceIdentity,
+    registry: ModuleRegistryHandle,
+) -> BindingContext:
+    """Build the module's lexical scope graph for wire emission.
+
+    The only context the scope graph cannot read off the tree is where a
+    relative import points, which depends on this module's package position.
+    That is resolved through the same rules the module walk already uses, so
+    both agree on what `from . import x` names.
+    """
+
+    def resolve(node: ast.ImportFrom) -> str | None:
+        return resolve_import_observation(identity, node, registry).resolved_target
+
+    return build_module_bindings(tree, resolve_from_import=resolve)
 
 
 _STMT_COUNT_IMPL = _stmt_count
@@ -87,23 +117,81 @@ def _raw_source_hash_for_range(
     return _sha256(b"ccfp2:raw\x00" + no_space.encode("utf-8")).hexdigest()
 
 
-def _eligible_unit_shape(
-    node: _qualnames.FunctionNode,
-    *,
-    min_loc: int,
-    min_stmt: int,
-) -> tuple[int, int, int, int] | None:
+def _unit_shape(node: _qualnames.FunctionNode) -> tuple[int, int, int, int] | None:
+    """Return ``(start, end, loc, stmt_count)`` for a locatable function.
+
+    Deliberately independent of the clone floors: a function's shape is a fact
+    about the source, not a clone-lane decision. Only a function the parser
+    cannot place in the file has no shape (39Y Y5).
+    """
+
     span = _node_line_span(node)
     if span is None:
         return None
     start, end = span
     if end < start:
         return None
-    loc = end - start + 1
-    stmt_count = _stmt_count(node)
-    if loc < min_loc or stmt_count < min_stmt:
-        return None
-    return start, end, loc, stmt_count
+    return start, end, end - start + 1, _stmt_count(node)
+
+
+def _shape_is_clone_eligible(
+    unit_shape: tuple[int, int, int, int] | None,
+    *,
+    min_loc: int,
+    min_stmt: int,
+) -> bool:
+    """Apply the clone lane's floors to an already-computed unit shape."""
+
+    if unit_shape is None:
+        return False
+    _start, _end, loc, stmt_count = unit_shape
+    return is_clone_eligible(
+        loc=loc,
+        stmt_count=stmt_count,
+        min_loc=min_loc,
+        min_stmt=min_stmt,
+    )
+
+
+def _record_unit_volumes(
+    phase_ledger: PhaseLedger,
+    *,
+    clone_eligible: bool,
+) -> None:
+    """Record the per-unit volumes; eligibility counts the clone lane only."""
+
+    if clone_eligible:
+        phase_ledger.add_volume(AnalysisVolumeKey.UNITS_ELIGIBLE)
+    phase_ledger.add_volume(AnalysisVolumeKey.UNITS_FINGERPRINTED)
+
+
+def _clone_artifact_needs(
+    *,
+    clone_eligible: bool,
+    local_name: str,
+    loc: int,
+    stmt_count: int,
+    block_min_loc: int,
+    block_min_stmt: int,
+    segment_min_loc: int,
+    segment_min_stmt: int,
+) -> tuple[bool, bool]:
+    """Return whether a unit needs blocks and/or segments.
+
+    The unit floors come first: blocks and segments are artifacts of a
+    clone-eligible unit, so a configuration whose block/segment floors sit
+    below the unit floors must not resurrect them (39Y Y5).
+    """
+
+    if not clone_eligible:
+        return False, False
+    needs_blocks = (
+        not local_name.endswith("__init__")
+        and loc >= block_min_loc
+        and stmt_count >= block_min_stmt
+    )
+    needs_segments = loc >= segment_min_loc and stmt_count >= segment_min_stmt
+    return needs_blocks, needs_segments
 
 
 def _collect_timed_clone_units(
@@ -141,6 +229,30 @@ def _uniquely_named_summaries(
         summary
         for function, summary in sorted(seen.items())
         if function not in ambiguous
+    )
+
+
+def _with_walk_live_root_reasons(
+    candidates: tuple[DeadCandidate, ...],
+    *,
+    reasons: Sequence[tuple[str, LiveRootReason]],
+) -> tuple[DeadCandidate, ...]:
+    """Attach walk-resolved liveness reasons to the per-symbol candidates.
+
+    The walk resolves external-decorator roots only after every candidate
+    exists, so the reason is folded in here rather than at construction. The
+    candidate is the carrier because it already rides the cache wire, which is
+    what keeps the reason available on a warm run where the walk never runs.
+    """
+
+    reason_by_qualname = dict(reasons)
+    if not reason_by_qualname:
+        return candidates
+    return tuple(
+        replace(candidate, live_root_reason=reason)
+        if (reason := reason_by_qualname.get(candidate.qualname)) is not None
+        else candidate
+        for candidate in candidates
     )
 
 
@@ -188,7 +300,7 @@ def extract_units_and_stats_from_source(
     source_lines = source.splitlines()
     source_line_count = len(source_lines)
 
-    is_test_file = is_test_filepath(filepath)
+    is_test_file = is_test_filepath(filepath, module_registry=registry)
 
     # Single-pass AST walk replaces 3 separate functions / 4 walks.
     with phase_ledger.phase(AnalysisPhaseKey.MODULE_WALK):
@@ -225,9 +337,10 @@ def extract_units_and_stats_from_source(
             module_name=module_name,
             collector=collector,
         )
+    module_bindings = _module_bindings(tree, identity, registry)
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
-    module_import_names = set(import_names)
     module_class_names = set(class_names)
+    imported_binding_names = set(_walk.imported_binding_names)
     class_metrics: list[ClassMetrics] = []
 
     units: list[Unit] = list(neutral_reuse.units) if neutral_reuse is not None else []
@@ -247,13 +360,14 @@ def extract_units_and_stats_from_source(
     for local_name, node in collector.units:
         phase_ledger.add_volume(AnalysisVolumeKey.UNITS_SEEN)
         qualname = f"{module_name}:{local_name}"
-        unit_shape = _eligible_unit_shape(
-            node,
+        unit_shape = _unit_shape(node)
+        clone_eligible = _shape_is_clone_eligible(
+            unit_shape,
             min_loc=min_loc,
             min_stmt=min_stmt,
         )
         if neutral_reuse is not None:
-            if unit_shape is not None and collect_structural_findings:
+            if clone_eligible and collect_structural_findings:
                 with phase_ledger.phase(AnalysisPhaseKey.UNIT_STRUCTURAL):
                     structure_facts = scan_function_structure(
                         node,
@@ -263,10 +377,12 @@ def extract_units_and_stats_from_source(
                     )
                 structural_findings.extend(structure_facts.structural_findings)
             continue
+        unit_bindings = module_bindings.enter(node)
         graph, fingerprint, complexity = _cfg_fingerprint_and_complexity(
             node,
             cfg,
             qualname,
+            unit_bindings,
             phase_ledger=phase_ledger,
         )
         if not _is_typing_overload_stub(
@@ -283,20 +399,33 @@ def extract_units_and_stats_from_source(
             )
         if unit_shape is None:
             continue
-        phase_ledger.add_volume(AnalysisVolumeKey.UNITS_ELIGIBLE)
         start, end, loc, stmt_count = unit_shape
-
-        phase_ledger.add_volume(AnalysisVolumeKey.UNITS_FINGERPRINTED)
+        _record_unit_volumes(phase_ledger, clone_eligible=clone_eligible)
         with phase_ledger.phase(AnalysisPhaseKey.UNIT_STRUCTURAL):
             structure_facts = scan_function_structure(
                 node,
                 filepath,
                 qualname,
-                collect_findings=collect_structural_findings,
+                # Structural findings stay a clone-lane artifact: only the
+                # metric facts are decoupled from the floors (39Y Y5).
+                collect_findings=collect_structural_findings and clone_eligible,
             )
         depth = structure_facts.nesting_depth
         risk = risk_level(complexity)
         raw_hash = _raw_source_hash_for_range(source_lines, start, end)
+        # The near-miss tier is a clone lane, so only the clone lane's own
+        # population pays for the sequence. The floors are part of the cache
+        # neutral profile, so a floor change re-analyses rather than serving a
+        # sequence computed under different eligibility (39Y Y8).
+        statement_sequence = (
+            near_miss_statement_sequence(graph, cfg, unit_bindings)
+            if clone_eligible
+            else ()
+        )
+        # Unconditional, unlike the sequence above: a statement that cannot run
+        # is a defect whether or not its function is large enough to be a clone
+        # candidate, so no floor is consulted here (39Y Y5, Y9).
+        unreachable = unreachable_statements(graph)
 
         units.append(
             Unit(
@@ -322,22 +451,28 @@ def extract_units_and_stats_from_source(
                 terminal_kind=structure_facts.terminal_kind,
                 try_finally_profile=structure_facts.try_finally_profile,
                 side_effect_order_profile=structure_facts.side_effect_order_profile,
+                statement_sequence=statement_sequence,
+                unreachable_statements=unreachable,
             )
         )
 
-        needs_blocks = (
-            not local_name.endswith("__init__")
-            and loc >= block_min_loc
-            and stmt_count >= block_min_stmt
+        needs_blocks, needs_segments = _clone_artifact_needs(
+            clone_eligible=clone_eligible,
+            local_name=local_name,
+            loc=loc,
+            stmt_count=stmt_count,
+            block_min_loc=block_min_loc,
+            block_min_stmt=block_min_stmt,
+            segment_min_loc=segment_min_loc,
+            segment_min_stmt=segment_min_stmt,
         )
-        needs_segments = loc >= segment_min_loc and stmt_count >= segment_min_stmt
 
         if needs_blocks or needs_segments:
             body = getattr(node, "body", None)
             hashes: list[str] | None = None
             if isinstance(body, list):
                 with phase_ledger.phase(AnalysisPhaseKey.UNIT_NORMALIZE_STMT):
-                    hashes = stmt_hashes(body, cfg)
+                    hashes = stmt_hashes(body, cfg, unit_bindings)
 
             if needs_blocks:
                 blocks = _collect_timed_clone_units(
@@ -350,6 +485,7 @@ def extract_units_and_stats_from_source(
                         filepath=filepath,
                         qualname=qualname,
                         cfg=cfg,
+                        bindings=unit_bindings,
                         block_size=4,
                         max_blocks=15,
                         precomputed_hashes=hashes,
@@ -368,6 +504,7 @@ def extract_units_and_stats_from_source(
                         filepath=filepath,
                         qualname=qualname,
                         cfg=cfg,
+                        bindings=unit_bindings,
                         window_size=6,
                         max_segments=60,
                         precomputed_hashes=hashes,
@@ -379,6 +516,18 @@ def extract_units_and_stats_from_source(
             structural_findings.extend(structure_facts.structural_findings)
 
     with phase_ledger.phase(AnalysisPhaseKey.CLASS_METRICS):
+        # Rule-3 facts are module-walk products, but the class is their
+        # subject, so they are attached to the owning ClassMetrics here - the
+        # one place where both the walk result and the per-class metric are in
+        # hand. The walk keys them locally; the module prefix is added now so
+        # that decorator_evidenced_methods matches DeadCandidate.qualname.
+        base_names_by_class = dict(_walk.class_base_names)
+        evidenced_methods_by_class: dict[str, list[str]] = {}
+        for method_local_name in sorted(_walk.decorator_evidenced_methods):
+            owner_qualname = method_local_name.rpartition(".")[0]
+            evidenced_methods_by_class.setdefault(owner_qualname, []).append(
+                f"{module_name}:{method_local_name}"
+            )
         for class_qualname, class_node in collector.class_nodes:
             cohesion_ignored_methods = _cohesion_ignored_method_names(
                 class_node,
@@ -392,12 +541,25 @@ def extract_units_and_stats_from_source(
                 class_qualname=class_qualname,
                 class_node=class_node,
                 filepath=filepath,
-                module_import_names=module_import_names,
+                imported_binding_names=imported_binding_names,
+                imported_symbol_targets=_walk.binding_symbol_targets,
+                imported_module_targets=_walk.binding_module_targets,
                 module_class_names=module_class_names,
                 cohesion_ignored_methods=cohesion_ignored_methods,
             )
             if class_metric is not None:
-                class_metrics.append(class_metric)
+                class_metrics.append(
+                    replace(
+                        class_metric,
+                        base_names=base_names_by_class.get(class_qualname, ()),
+                        has_unresolved_external_base=(
+                            class_qualname in _walk.unresolved_external_base_classes
+                        ),
+                        decorator_evidenced_methods=tuple(
+                            evidenced_methods_by_class.get(class_qualname, ())
+                        ),
+                    )
+                )
 
     with phase_ledger.phase(AnalysisPhaseKey.DEAD_CODE):
         dead_candidates = _collect_dead_candidates(
@@ -409,6 +571,10 @@ def extract_units_and_stats_from_source(
             non_runtime_decorator_aliases=non_runtime_decorator_aliases,
             pydantic_module_aliases=pydantic_module_aliases,
             suppression_rules_by_target=suppression_index,
+        )
+        dead_candidates = _with_walk_live_root_reasons(
+            dead_candidates,
+            reasons=_walk.liveness_root_reasons,
         )
 
     sorted_class_metrics = tuple(

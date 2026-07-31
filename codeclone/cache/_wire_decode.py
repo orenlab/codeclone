@@ -6,7 +6,8 @@
 
 from __future__ import annotations
 
-from typing import Literal, TypeGuard
+from collections.abc import Callable
+from typing import Final, Literal, TypeGuard, cast
 
 from ..models import (
     ApiParamSpecDict,
@@ -35,6 +36,7 @@ from ..models import (
     ModuleDepDict,
     ModuleDocstringCoverageDict,
     ModuleTypingCoverageDict,
+    NearMissElement,
     PublicSymbolDict,
     RelationshipRecordDict,
     RuntimeReachabilityFactDict,
@@ -46,6 +48,8 @@ from ..models import (
     SourceStatsDict,
     StructuralFindingGroupDict,
     StructuralFindingOccurrenceDict,
+    UnreachableReason,
+    UnreachableStatementItem,
 )
 from ._wire_helpers import (
     _decode_optional_wire_coupled_classes,
@@ -63,6 +67,8 @@ from ._wire_helpers import (
     _decode_wire_str_fields,
     _decode_wire_unit_core_fields,
     _decode_wire_unit_flow_profiles,
+    _decode_wire_unit_sequence_row,
+    decode_wire_unit_fact_row,
 )
 from .entries import (
     BlockDict,
@@ -345,6 +351,29 @@ def _decode_profile_digest(
         return None
 
 
+def _decode_binding_context_digest(value: object) -> DigestObject | None:
+    """Decode the per-entry binding context; absence rejects the entry.
+
+    An entry written before this key existed cannot prove which mount produced
+    its fingerprints, so it is not reusable — the same fail-closed rule the
+    other digests on this wire already follow.
+    """
+
+    digest_value = _decode_sha256_value(
+        value, expected_domain="codeclone.cache.binding-context.v1"
+    )
+    if digest_value is None:
+        return None
+    try:
+        return DigestObject(
+            domain="codeclone.cache.binding-context.v1",
+            algorithm="sha256",
+            value=digest_value,
+        )
+    except ValueError:
+        return None
+
+
 def _decode_content_binding(
     obj: dict[str, object],
 ) -> tuple[DigestObject, GitBlobIdentity | None] | None:
@@ -433,6 +462,8 @@ def _neutral_unit_from_wire(unit: UnitDict) -> CacheNeutralUnit:
         terminal_kind=unit.get("terminal_kind", "fallthrough"),
         try_finally_profile=unit.get("try_finally_profile", "none"),
         side_effect_order_profile=unit.get("side_effect_order_profile", "none"),
+        statement_sequence=unit.get("statement_sequence", ()),
+        unreachable_statements=unit.get("unreachable_statements", ()),
     )
 
 
@@ -464,6 +495,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
 
     stat = _decode_wire_stat(obj)
     content_binding = _decode_content_binding(obj)
+    binding_context = _decode_binding_context_digest(obj.get("bc"))
     neutral_profile = _decode_profile_digest(
         obj.get("np"), expected_domain="codeclone.cache.profile.neutral.v1"
     )
@@ -475,6 +507,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
     if (
         stat is None
         or content_binding is None
+        or binding_context is None
         or neutral_profile is None
         or dependent_profile is None
         or neutral_obj is None
@@ -530,10 +563,10 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
         obj=dependent_obj,
         filepath=filepath,
     )
-    coupled_classes_map = _decode_optional_wire_coupled_classes(
-        obj=dependent_obj, key="cc"
-    )
-    if coupled_classes_map is None:
+    if not _apply_wire_class_metrics_sidecars(
+        obj=dependent_obj,
+        class_metrics=class_metrics,
+    ):
         return None
     if (
         runtime_reachability is None
@@ -541,11 +574,6 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
         or function_relationship_facts is None
     ):
         return None
-
-    for metric in class_metrics:
-        names = coupled_classes_map.get(metric["qualname"], [])
-        if names:
-            metric["coupled_classes"] = names
 
     has_structural_findings = "sf" in dependent_obj
     structural_findings = _decode_wire_structural_findings_optional(dependent_obj)
@@ -555,6 +583,7 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
     return CacheEntryV3(
         cache_content_binding_version="1",
         source_content_digest=source_content_digest,
+        binding_context_digest=binding_context,
         git_blob_id_at_write=git_blob_id_at_write,
         stat=stat,
         module_neutral_profile=neutral_profile,
@@ -593,6 +622,140 @@ def _decode_wire_file_entry(value: object, filepath: str) -> CacheEntryV3 | None
     )
 
 
+def _apply_wire_unit_facts(
+    *,
+    obj: dict[str, object],
+    units: list[UnitDict],
+    key: str,
+    decode_row: Callable[
+        [object],
+        tuple[tuple[str, int], tuple[object, ...]] | None,
+    ],
+    assign: Callable[[UnitDict, tuple[object, ...]], None],
+) -> bool:
+    """Attach one cached per-unit fact family to its units, or reject the entry.
+
+    Fail-closed by design (39Y Y8/Y9), and the reason is the same for every
+    family: a warm run serves units straight off the wire without re-parsing,
+    so an entry written before a fact existed must not decode into units that
+    merely look like they have none. "No statements" would read as "no
+    near-miss pairs" and "no regions" as "nothing unreachable", when the truth
+    is "unknown". Absence of the key while units exist rejects the entry, and
+    rejection only means the file is analysed again.
+    """
+
+    raw = obj.get(key)
+    if raw is None:
+        return not units
+    wire_rows = _as_list(raw)
+    if wire_rows is None:
+        return False
+    facts_by_unit: dict[tuple[str, int], tuple[object, ...]] = {}
+    for wire_row in wire_rows:
+        decoded = decode_row(wire_row)
+        if decoded is None:
+            return False
+        unit_key, facts = decoded
+        facts_by_unit[unit_key] = facts
+    for unit in units:
+        unit_key = (unit["qualname"], unit["start_line"])
+        if unit_key not in facts_by_unit:
+            return False
+        assign(unit, facts_by_unit[unit_key])
+    return True
+
+
+def _assign_statement_sequence(unit: UnitDict, facts: tuple[object, ...]) -> None:
+    unit["statement_sequence"] = cast("tuple[NearMissElement, ...]", facts)
+
+
+def _assign_unreachable_statements(unit: UnitDict, facts: tuple[object, ...]) -> None:
+    unit["unreachable_statements"] = cast("tuple[UnreachableStatementItem, ...]", facts)
+
+
+def _as_unreachable_reason(value: object) -> UnreachableReason | None:
+    """Narrow a wire value to a policy clause, closed-list."""
+
+    match value:
+        case "after_terminator":
+            return "after_terminator"
+        case "literal_condition":
+            return "literal_condition"
+        case "unreachable_block":
+            return "unreachable_block"
+        case _:
+            return None
+
+
+def _build_unreachable_statement_item(
+    fields: list[object],
+) -> UnreachableStatementItem | None:
+    """Turn one flattened ``reason, start, end, count`` group into a region."""
+
+    reason = _as_unreachable_reason(fields[0])
+    start = _as_int(fields[1])
+    end = _as_int(fields[2])
+    count = _as_int(fields[3])
+    if reason is None or start is None or end is None or count is None:
+        return None
+    if start < 1 or end < start or count < 1:
+        return None
+    return UnreachableStatementItem(
+        reason=reason,
+        start_line=start,
+        end_line=end,
+        statement_count=count,
+    )
+
+
+def _decode_wire_unit_unreachable_row(
+    value: object,
+) -> tuple[tuple[str, int], tuple[UnreachableStatementItem, ...]] | None:
+    """Decode one ``[qualname, start_line, [reason, start, end, count, ...]]`` row."""
+
+    return decode_wire_unit_fact_row(
+        value,
+        stride=4,
+        build=_build_unreachable_statement_item,
+    )
+
+
+def _decode_wire_units_with_sequences(
+    *,
+    obj: dict[str, object],
+    filepath: str,
+) -> list[UnitDict] | None:
+    """Decode unit facts together with the per-unit facts that belong to them.
+
+    One step, because a unit whose sequence or reachability facts could not be
+    attached is not a usable unit: keeping them apart would let a caller forget
+    the second half and silently get units missing a fact.
+    """
+
+    units = _decode_optional_wire_items_for_filepath(
+        obj=obj,
+        key="u",
+        filepath=filepath,
+        decode_item=_decode_wire_unit,
+    )
+    if units is None:
+        return None
+    families = (
+        ("us", _decode_wire_unit_sequence_row, _assign_statement_sequence),
+        ("ur", _decode_wire_unit_unreachable_row, _assign_unreachable_statements),
+    )
+    for key, decode_row, assign in families:
+        if not _apply_wire_unit_facts(
+            obj=obj,
+            units=units,
+            key=key,
+            decode_row=decode_row,
+            assign=assign,
+        ):
+            return None
+    return units
+
+
 def _decode_wire_file_sections(
     *,
     obj: dict[str, object],
@@ -608,12 +771,7 @@ def _decode_wire_file_sections(
     ]
     | None
 ):
-    units = _decode_optional_wire_items_for_filepath(
-        obj=obj,
-        key="u",
-        filepath=filepath,
-        decode_item=_decode_wire_unit,
-    )
+    units = _decode_wire_units_with_sequences(obj=obj, filepath=filepath)
     blocks = _decode_optional_wire_items_for_filepath(
         obj=obj,
         key="b",
@@ -796,6 +954,94 @@ def _decode_optional_wire_runtime_reachability(
     )
 
 
+def _apply_wire_class_metrics_sidecars(
+    *,
+    obj: dict[str, object],
+    class_metrics: list[ClassMetricsDict],
+) -> bool:
+    """Attach every class-metrics sidecar to its row; False when malformed.
+
+    All five sidecars key off the class qualname and are optional, so they
+    are decoded and applied together rather than adding one decode-and-guard
+    pair per family to the entry decoder. "de", "sd" and "ic" are shaped
+    exactly like "cc" (qualname -> names); "bs" carries the extra rule-3
+    opacity flag.
+    """
+    coupled_classes_map = _decode_optional_wire_coupled_classes(obj=obj, key="cc")
+    decorator_evidence_map = _decode_optional_wire_coupled_classes(obj=obj, key="de")
+    self_dispatch_map = _decode_optional_wire_coupled_classes(obj=obj, key="sd")
+    instantiation_candidate_map = _decode_optional_wire_coupled_classes(
+        obj=obj,
+        key="ic",
+    )
+    class_base_map = _decode_optional_wire_class_bases(obj=obj)
+    if (
+        coupled_classes_map is None
+        or decorator_evidence_map is None
+        or self_dispatch_map is None
+        or instantiation_candidate_map is None
+        or class_base_map is None
+    ):
+        return False
+    for metric in class_metrics:
+        qualname = metric["qualname"]
+        names = coupled_classes_map.get(qualname, [])
+        if names:
+            metric["coupled_classes"] = names
+        class_base_row = class_base_map.get(qualname)
+        if class_base_row is not None:
+            base_names, has_unresolved_external_base = class_base_row
+            metric["base_names"] = base_names
+            metric["has_unresolved_external_base"] = has_unresolved_external_base
+        evidenced_methods = decorator_evidence_map.get(qualname, [])
+        if evidenced_methods:
+            metric["decorator_evidenced_methods"] = evidenced_methods
+        dispatched_methods = self_dispatch_map.get(qualname, [])
+        if dispatched_methods:
+            metric["self_dispatched_methods"] = dispatched_methods
+        candidates = instantiation_candidate_map.get(qualname, [])
+        if candidates:
+            metric["instantiation_candidates"] = candidates
+    return True
+
+
+def _decode_optional_wire_class_bases(
+    *,
+    obj: dict[str, object],
+) -> dict[str, tuple[list[str], bool]] | None:
+    """Decode the "bs" sidecar: class qualname -> (base names, opacity flag).
+
+    Shaped like "cc" plus the rule-3 flag, so it cannot reuse the shared
+    two-column helper. An absent key is an empty map, not a failure: a 3.1
+    entry simply recorded no bases.
+    """
+    raw = obj.get("bs")
+    if raw is None:
+        return {}
+    rows = _as_list(raw)
+    if rows is None:
+        return None
+    decoded: dict[str, tuple[list[str], bool]] = {}
+    for wire_row in rows:
+        row = _decode_wire_row(wire_row, valid_lengths={3})
+        if row is None:
+            return None
+        qualname = _as_str(row[0])
+        base_names = _as_wire_str_tuple(row[1])
+        has_unresolved_external_base = row[2]
+        if (
+            qualname is None
+            or base_names is None
+            or not isinstance(has_unresolved_external_base, bool)
+        ):
+            return None
+        decoded[qualname] = (
+            sorted({name for name in base_names if name}),
+            has_unresolved_external_base,
+        )
+    return decoded
+
+
 def _decode_optional_wire_function_relationship_facts(
     *,
     obj: dict[str, object],
@@ -877,6 +1123,20 @@ def _decode_wire_relationship_record(
         expression=expression,
         resolution_rule=resolution_rule,
     )
+
+
+def _as_wire_str_tuple(value: object) -> tuple[str, ...] | None:
+    """Every element must be a string, or the whole row is rejected."""
+    rows = _as_list(value)
+    if rows is None:
+        return None
+    decoded: list[str] = []
+    for item in rows:
+        text = _as_str(item)
+        if text is None:
+            return None
+        decoded.append(text)
+    return tuple(decoded)
 
 
 def _decode_wire_runtime_reachability(
@@ -1295,21 +1555,33 @@ def _decode_wire_module_dep(value: object) -> ModuleDepDict | None:
     )
 
 
+_LIVE_ROOT_REASONS: Final = frozenset({"external_decorator", "export_root"})
+
+
 def _decode_wire_dead_candidate(
     value: object,
     filepath: str,
 ) -> DeadCandidateDict | None:
-    row = _decode_wire_row(value, valid_lengths={5, 6})
+    row = _decode_wire_row(value, valid_lengths={5, 6, 7})
     if row is None:
         return None
     str_fields = _decode_wire_str_fields(row, 0, 1, 4)
     int_fields = _decode_wire_int_fields(row, 2, 3)
     suppressed_rules: list[str] | None = []
-    if len(row) == 6:
+    if len(row) >= 6:
         raw_rules = _as_list(row[5])
         if raw_rules is None or not all(isinstance(rule, str) for rule in raw_rules):
             return None
         suppressed_rules = sorted({str(rule) for rule in raw_rules if str(rule)})
+    # CACHE_VERSION 3.2 liveness reason. A closed set: an unknown value is a
+    # wire the writer and reader disagree about, so the entry is rejected
+    # rather than silently decoded as "no reason".
+    live_root_reason = ""
+    if len(row) == 7:
+        raw_reason = row[6]
+        if not isinstance(raw_reason, str) or raw_reason not in _LIVE_ROOT_REASONS:
+            return None
+        live_root_reason = raw_reason
     if str_fields is None or int_fields is None:
         return None
     qualname, local_name, kind = str_fields
@@ -1324,6 +1596,8 @@ def _decode_wire_dead_candidate(
     )
     if suppressed_rules:
         decoded["suppressed_rules"] = suppressed_rules
+    if live_root_reason:
+        decoded["live_root_reason"] = live_root_reason
     return decoded
 
 

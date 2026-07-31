@@ -2224,6 +2224,19 @@ def test_configure_metrics_mode_rejects_skip_metrics_with_metrics_flags(
     assert exc.value.code == 2
 
 
+def test_configure_metrics_mode_preserves_explicit_full_metrics_request() -> None:
+    args = Namespace(
+        skip_metrics=False,
+        _full_metrics_explicit=True,
+        skip_dead_code=False,
+        skip_dependencies=False,
+    )
+
+    cli_runtime._configure_metrics_mode(args=args, metrics_baseline_exists=False)
+
+    assert args.skip_metrics is False
+
+
 def test_configure_metrics_mode_forces_dependency_and_dead_code_when_gated() -> None:
     args = Namespace(
         skip_metrics=False,
@@ -2991,3 +3004,29 @@ def test_resolve_memory_state_path_maps_repo_path_error(
             value=".codeclone/memory/semantic_index.lance",
             root_path=root,
         )
+
+
+def test_fail_on_unresolved_dead_code_flag_is_declared_and_defaults_off() -> None:
+    """The abstention gate is opt-in at the CLI surface.
+
+    39Y brief section 6: unresolved_external_override is neither dead nor
+    live and is excluded from default dead-code gates, so the flag must parse
+    as a bool_optional pair and default to False. The gate-reason behaviour
+    itself is asserted in tests/test_gating.py, which is the ring that may
+    reach report.gates.evaluator; the Phase 39S boundary ratchet forbids this
+    file from importing it.
+    """
+    parser = build_parser(__version__)
+
+    defaults = parser.parse_args([])
+    assert defaults.fail_on_unresolved_dead_code is False
+
+    enabled = parser.parse_args(["--fail-on-unresolved-dead-code"])
+    assert enabled.fail_on_unresolved_dead_code is True
+
+    disabled = parser.parse_args(["--no-fail-on-unresolved-dead-code"])
+    assert disabled.fail_on_unresolved_dead_code is False
+
+    # Independent of the ordinary dead-code gate in both directions.
+    assert defaults.fail_dead_code is False
+    assert enabled.fail_dead_code is False

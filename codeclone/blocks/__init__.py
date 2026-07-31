@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     import ast
     from collections.abc import Sequence
 
+    from ..analysis.binding import BindingContext
     from ..analysis.normalizer import NormalizationConfig
 
 __all__ = ["BlockUnit", "SegmentUnit", "extract_blocks", "extract_segments"]
@@ -25,10 +26,14 @@ _SEG_DOMAIN: Final = b"ccfp2:seg\x00"
 _SEGSIG_DOMAIN: Final = b"ccfp2:segsig\x00"
 
 
-def stmt_hashes(statements: Sequence[ast.stmt], cfg: NormalizationConfig) -> list[str]:
+def stmt_hashes(
+    statements: Sequence[ast.stmt],
+    cfg: NormalizationConfig,
+    bindings: BindingContext,
+) -> list[str]:
     return [
         hashlib.sha256(
-            _STMT_DOMAIN + emit_wire(statement, cfg).encode("utf-8")
+            _STMT_DOMAIN + emit_wire(statement, cfg, bindings).encode("utf-8")
         ).hexdigest()
         for statement in statements
     ]
@@ -40,6 +45,7 @@ def extract_blocks(
     filepath: str,
     qualname: str,
     cfg: NormalizationConfig,
+    bindings: BindingContext,
     block_size: int,
     max_blocks: int,
     precomputed_hashes: Sequence[str] | None = None,
@@ -55,7 +61,7 @@ def extract_blocks(
         )
         stmt_hash_rows = precomputed_hashes
     else:
-        stmt_hash_rows = stmt_hashes(body, cfg)
+        stmt_hash_rows = stmt_hashes(body, cfg, bindings)
 
     blocks: list[BlockUnit] = []
     last_start: int | None = None
@@ -98,6 +104,7 @@ def extract_segments(
     filepath: str,
     qualname: str,
     cfg: NormalizationConfig,
+    bindings: BindingContext,
     window_size: int,
     max_segments: int,
     precomputed_hashes: Sequence[str] | None = None,
@@ -113,7 +120,7 @@ def extract_segments(
         )
         stmt_hash_rows = precomputed_hashes
     else:
-        stmt_hash_rows = stmt_hashes(body, cfg)
+        stmt_hash_rows = stmt_hashes(body, cfg, bindings)
 
     segments: list[SegmentUnit] = []
 

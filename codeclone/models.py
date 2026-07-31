@@ -49,6 +49,15 @@ ApiSymbolKind = Literal["function", "class", "method", "constant"]
 ApiVisibility = Literal["all", "name"]
 ImportSyntaxKind = Literal["import", "from_import"]
 DeadCodeCandidateKind = Literal["function", "class", "method", "import"]
+# The dead-code lane's extensibility axis, orthogonal to DeadCodeCandidateKind:
+# "symbol" asks whether a definition is referenced, "unreachable_statement"
+# whether a statement inside a live definition can run (39Y Y9). Extending this
+# literal is what the lane's payload_schema "3" already bought — the kind is the
+# whole extension point, so a new row type costs no further bump.
+DeadCodeObservationKind = Literal["symbol", "unreachable_statement"]
+# Why a symbol is held live by a root rule rather than by a plain reference.
+# Evidence, not a verdict: it explains an already-live outcome.
+LiveRootReason = Literal["external_decorator", "export_root"]
 DependencyResolution = Literal[
     "analyzed",
     "known_internal_not_analyzed",
@@ -91,6 +100,7 @@ DigestDomain = Literal[
     "codeclone.baseline.lane.v1",
     "codeclone.baseline.legacy-evidence.v1",
     "codeclone.baseline.root.v1",
+    "codeclone.cache.binding-context.v1",
     "codeclone.cache.profile.dependent.v1",
     "codeclone.cache.profile.neutral.v1",
     "codeclone.module-registry.v1",
@@ -471,35 +481,64 @@ class DeadCodeMarkerException:
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
+class DeadCodeLiveRootException:
+    """One dead-code row held live by a root rule, carrying the reason why.
+
+    Sparse by construction: only a minority of candidates are roots, so the
+    reason rides an exception list rather than a mostly-empty column.
+    """
+
+    row: int
+    reason: LiveRootReason
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
 class DeadCodeColumnarPayload:
-    """Wire form of the dead-code lane (payload schema 2)."""
+    """Wire form of the dead-code lane (payload schema 3)."""
 
     prefixes: tuple[str, ...]
     kinds: tuple[str, ...]
+    observation_kinds: tuple[str, ...]
     prefix: tuple[int, ...]
     qualname: tuple[str, ...]
     kind: tuple[int, ...]
+    observation_kind: tuple[int, ...]
     reference_count: tuple[int, ...]
     reachable_true: tuple[int, ...] = ()
+    abstained: tuple[int, ...] = ()
+    live_roots: tuple[DeadCodeLiveRootException, ...] = ()
     markers: tuple[DeadCodeMarkerException, ...] = ()
 
     def __post_init__(self) -> None:
         rows = _validate_columnar_frame(
-            tables={"prefixes": self.prefixes, "kinds": self.kinds},
+            tables={
+                "prefixes": self.prefixes,
+                "kinds": self.kinds,
+                "observation_kinds": self.observation_kinds,
+            },
             columns={
                 "prefix": len(self.prefix),
                 "qualname": len(self.qualname),
                 "kind": len(self.kind),
+                "observation_kind": len(self.observation_kind),
                 "reference_count": len(self.reference_count),
             },
             references={
                 "prefix": (self.prefix, len(self.prefixes)),
                 "kind": (self.kind, len(self.kinds)),
+                "observation_kind": (
+                    self.observation_kind,
+                    len(self.observation_kinds),
+                ),
             },
         )
         if any(value < 0 for value in self.reference_count):
             raise ValueError("dead-code observation counts must be non-negative")
         _validate_ascending_indices(self.reachable_true, rows, "reachable_true")
+        _validate_ascending_indices(self.abstained, rows, "abstained")
+        _validate_ascending_indices(
+            tuple(item.row for item in self.live_roots), rows, "live_roots"
+        )
         _validate_ascending_indices(
             tuple(item.row for item in self.markers), rows, "markers"
         )
@@ -954,6 +993,15 @@ class ClassMetricsDictBase(TypedDict):
 
 class ClassMetricsDict(ClassMetricsDictBase, total=False):
     coupled_classes: list[str]
+    # CACHE_VERSION 3.2 imported-domain call candidates, each packed as
+    # `label|module:symbol`. Optional for the same reason as the rows below.
+    instantiation_candidates: list[str]
+    # CACHE_VERSION 3.2 rule-3 facts. Optional: a 3.1 row decodes to the
+    # dataclass defaults, which is exactly "no evidence recorded".
+    base_names: list[str]
+    has_unresolved_external_base: bool
+    decorator_evidenced_methods: list[str]
+    self_dispatched_methods: list[str]
 
 
 class ModuleDepDictBase(TypedDict):
@@ -984,6 +1032,9 @@ class DeadCandidateDictBase(TypedDict):
 
 class DeadCandidateDict(DeadCandidateDictBase, total=False):
     suppressed_rules: list[str]
+    # CACHE_VERSION 3.2 liveness-reason fact. Optional: a row written without
+    # it decodes to None, which is exactly "no root rule fired".
+    live_root_reason: str
 
 
 class SecuritySurfaceDict(TypedDict):
@@ -1070,6 +1121,7 @@ class StructuralFindingGroupDict(TypedDict):
 
 
 CacheLaneReuseReason = Literal[
+    "binding_context_mismatch",
     "content_miss",
     "dependent_profile_mismatch",
     "hit",
@@ -1097,6 +1149,8 @@ class CacheNeutralUnit:
     terminal_kind: str
     try_finally_profile: str
     side_effect_order_profile: str
+    statement_sequence: tuple[NearMissElement, ...] = ()
+    unreachable_statements: tuple[UnreachableStatementItem, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -1159,6 +1213,10 @@ class CacheEntryV3:
     cache_content_binding_version: Literal["1"]
     stat: FileStat
     source_content_digest: DigestObject
+    # The one fingerprint input that does NOT live in this file's bytes: where
+    # its relative imports point, which follows the module's package position.
+    # Content identity cannot see that move, so it rides the key on its own.
+    binding_context_digest: DigestObject
     git_blob_id_at_write: GitBlobIdentity | None
     module_neutral_profile: DigestObject
     module_dependent_profile: DigestObject
@@ -1369,6 +1427,62 @@ class ObserverCounterSemantics:
     mixed_semantics: bool
 
 
+# One element of a unit's normalized statement sequence: an equality token
+# plus the source span it came from. Control-flow anchors carry lines 0, 0.
+# Produced by ``analysis.fingerprint.near_miss_statement_sequence``; consumed
+# only by the near-miss clone tier (39Y Y8).
+NearMissElement = tuple[str, int, int]
+
+
+# Which clause of STATEMENT_REACHABILITY_POLICY_VERSION proved the region dead
+# (39Y Y9). The reason is the CFG proof, not a label: a consumer can say why a
+# statement cannot run without re-deriving anything.
+UnreachableReason = Literal[
+    "after_terminator",
+    "literal_condition",
+    "unreachable_block",
+]
+
+# Why the CFG builder created a block, carried for explanation only (39Y Y9).
+# Reachability comes from traversal and complexity from the edge/node/component
+# counts; neither may branch on this. It exists so a finding can name a cause a
+# reader recognises instead of restating the bare graph fact, and it has exactly
+# the standing of an edge kind tag: evidence, never a filter.
+BlockOrigin = Literal[
+    "normal",
+    "after_terminator",
+    "literal_condition",
+]
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class UnreachableStatementItem:
+    """One maximal region of statements that cannot execute.
+
+    A region, not a statement: reporting every statement of a long dead tail
+    would multiply one defect into many findings. ``statement_count`` keeps the
+    size honest without spending a finding per line.
+
+    Spans are always real source positions. The CFG synthesizes ``ast.Expr``
+    wrappers that carry no ``lineno``, so a region with no positioned statement
+    is dropped rather than reported at line 0 (the Y8 precedent) — nothing here
+    ever invents a position.
+    """
+
+    reason: UnreachableReason
+    start_line: int
+    end_line: int
+    statement_count: int
+
+    def __post_init__(self) -> None:
+        if self.start_line < 1 or self.end_line < self.start_line:
+            raise ValueError(
+                "unreachable regions carry a real source span, never a fabricated one"
+            )
+        if self.statement_count < 1:
+            raise ValueError("an unreachable region covers at least one statement")
+
+
 @dataclass(frozen=True, slots=True)
 class Unit:
     qualname: str
@@ -1389,6 +1503,53 @@ class Unit:
     terminal_kind: str = "fallthrough"
     try_finally_profile: str = "none"
     side_effect_order_profile: str = "none"
+    # Empty for units the clone floors reject: the near-miss tier is a clone
+    # lane, so ineligible units neither carry nor cache a sequence.
+    statement_sequence: tuple[NearMissElement, ...] = ()
+    # Populated for EVERY unit, eligible or not: reachability is a fact about
+    # the function, and letting a clone floor decide what it sees would repeat
+    # the eligibility leak Y5 removed.
+    unreachable_statements: tuple[UnreachableStatementItem, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class NearMissMember:
+    """One side of a near-miss pair, with its own differing-statement span.
+
+    A span of ``0, 0`` means "no source position", which arises two ways and is
+    disambiguated by the pair's ``edit_kind``:
+
+    - ``insert`` / ``delete``: this side has no differing statement at all —
+      the counterpart carries a statement this side simply does not have;
+    - ``replace``: the differing element is a control-flow condition the CFG
+      builder synthesizes, and a synthesized node carries no ``lineno``. The
+      difference is real and drives the match; only its position is unknown,
+      and inventing one from a neighbouring line would be a fabricated
+      location.
+    """
+
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    differing_start_line: int = 0
+    differing_end_line: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class NearMissPair:
+    """Two units within ``NEAR_MISS_MAX_EDIT_STATEMENTS`` of each other.
+
+    Pairwise by construction, never a connected component: the tier's evidence
+    is the statement that differs between exactly two functions, and edit
+    distance is not transitive. Three functions each one statement apart from
+    the next produce two pairs, not one group of three.
+    """
+
+    pair_key: str
+    members: tuple[NearMissMember, NearMissMember]
+    edit_statements: int
+    edit_kind: Literal["insert", "delete", "replace"]
 
 
 RelationshipKind = Literal["call", "reference"]
@@ -1449,6 +1610,15 @@ class SourceStats:
 @dataclass(frozen=True, slots=True)
 class ClassWalkFacts:
     couplings: frozenset[str]
+    # Names referenced in a type-collaboration position (annotation). The
+    # imported-domain CBO lane counts only these; see the edge contract in
+    # codeclone/metrics/coupling.py.
+    typed_couplings: frozenset[str]
+    # Imported call targets, each packed as `label|module:symbol`. A call
+    # position does not entail a type, so these are candidates rather than
+    # edges: only the project-level fold can tell whether the target is a
+    # class.
+    instantiation_candidates: frozenset[str]
     method_to_attrs: dict[str, set[str]]
     method_calls: dict[str, set[str]]
     all_method_count: int
@@ -1467,6 +1637,31 @@ class ClassMetrics:
     risk_coupling: Literal["low", "medium", "high"]
     risk_cohesion: Literal["low", "medium", "high"]
     coupled_classes: tuple[str, ...] = ()
+    # Imported call targets seen in this class body, packed as
+    # `label|module:symbol`. They are inputs to the project-level coupling
+    # fold, never edges on their own: nothing at file scope can prove that an
+    # imported callable is a class.
+    instantiation_candidates: tuple[str, ...] = ()
+    # Rule-3 liveness facts. They live here rather than in dedicated fact
+    # types because the class is already the natural subject of both, and
+    # ClassMetrics already travels every road they need (walk -> cache wire
+    # -> MetricProjectContext). Primitive fields add no type edge, so the
+    # carriers that hold ClassMetrics keep their coupling budget.
+    base_names: tuple[str, ...] = ()
+    # True when a declared base escapes the analysis root. The set of methods
+    # such a base may dispatch to is unknowable, so an unevidenced public
+    # method abstains (unresolved_external_override) instead of being claimed
+    # dead.
+    has_unresolved_external_base: bool = False
+    # Fully-qualified methods of THIS class carrying an explicit dispatch
+    # contract (@override, framework hooks) - row 2 of the decision table.
+    decorator_evidenced_methods: tuple[str, ...] = ()
+    # Fully-qualified methods of THIS class invoked as `self.<name>()` from
+    # inside the class body - row 1 of the decision table. `self` can only
+    # bind an instance of the declaring class or a subclass, so the receiver
+    # type is proven and the call is method-specific evidence, never a
+    # bare-name match.
+    self_dispatched_methods: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -1532,6 +1727,22 @@ class DeadItem:
     end_line: int
     kind: Literal["function", "class", "method", "import"]
     confidence: Literal["high", "medium"]
+    reason: Literal["unreferenced", "test_only_reference"] = "unreferenced"
+    test_reference_sources: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.test_reference_sources != tuple(
+            sorted(set(self.test_reference_sources))
+        ):
+            raise ValueError(
+                "dead-code test reference sources must be sorted and unique"
+            )
+        if self.reason == "test_only_reference" and not self.test_reference_sources:
+            raise ValueError("test-only dead code requires test reference sources")
+        if self.reason == "unreferenced" and self.test_reference_sources:
+            raise ValueError(
+                "unreferenced dead code cannot have test reference sources"
+            )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1543,6 +1754,61 @@ class DeadCandidate:
     end_line: int
     kind: Literal["function", "class", "method", "import"]
     suppressed_rules: tuple[str, ...] = field(default_factory=tuple)
+    # Set when a root rule proved this symbol live during the module walk.
+    # The candidate is the carrier because it is the one per-symbol fact that
+    # already rides the cache wire, which keeps the reason warm-safe.
+    live_root_reason: LiveRootReason | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class UnresolvedOverrideItem:
+    """A method the analysis refuses to call dead OR live.
+
+    Its owning class inherits a base outside the analysis root, and no
+    receiver-type-proven reference, decorator contract, or runtime edge names
+    this method. Absence of evidence is not evidence of absence, so the
+    verdict abstains. Excluded from default dead-code gates by contract.
+    """
+
+    qualname: str
+    filepath: str
+    start_line: int
+    end_line: int
+    kind: Literal["function", "class", "method", "import"]
+    class_qualname: str
+    base_names: tuple[str, ...]
+    reason: Literal["unresolved_external_base"] = "unresolved_external_base"
+
+
+@dataclass(frozen=True, slots=True)
+class UnreachableStatementFinding:
+    """One unreachable region, located in the repository (39Y Y9).
+
+    The per-unit ``UnreachableStatementItem`` says what the CFG proved; this
+    says where. Confidence is always high and never downgraded: the proof is
+    graph reachability over the function's own control flow, so there is no
+    uncertain case to express — a region either cannot be entered or is not
+    reported at all.
+    """
+
+    qualname: str
+    filepath: str
+    reason: UnreachableReason
+    start_line: int
+    end_line: int
+    statement_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class LivenessClassification:
+    """Both lanes of the rule-3 tri-state verdict.
+
+    ``dead_items`` keeps exactly the pre-rule-3 meaning so every existing gate
+    and report consumer is unaffected; abstentions live in their own lane.
+    """
+
+    dead_items: tuple[DeadItem, ...]
+    unresolved_overrides: tuple[UnresolvedOverrideItem, ...] = ()
 
 
 RuntimeReachabilityFramework = Literal[
@@ -1584,6 +1850,24 @@ class RuntimeReachabilityFact:
     evidence: str
     evidence_symbol: str
     source_qualname: str = ""
+
+
+LivenessStatus = Literal["live", "dead", "unresolved_external_override"]
+
+# Decorator markers that count as an explicit callback contract under the
+# rule-3 decision table. Name-only call matching is forbidden as evidence;
+# these are declarations on the method itself, not references to it.
+#
+# `abstractmethod` is deliberately absent: an abstract method never reaches
+# rule 3, because the module walk already drops it as a non-runtime candidate
+# (_NON_RUNTIME_DECORATOR_SYMBOLS). Listing it here was unreachable weight that
+# made the row-2 branch read as if it were exercised.
+METHOD_DECORATOR_EVIDENCE_MARKERS: Final = frozenset(
+    {
+        "override",
+        "overrides",
+    }
+)
 
 
 SecuritySurfaceCategory = Literal[
@@ -2042,6 +2326,14 @@ class ProjectMetrics:
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
     docstring_modules: tuple[ModuleDocstringCoverage, ...] = ()
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
+    # Rule-3 abstentions. A separate lane from dead_code by contract: they are
+    # neither dead nor live, and default gates must never count them.
+    unresolved_overrides: tuple[UnresolvedOverrideItem, ...] = ()
+    # Statement-level unreachability (39Y Y9). Same family, different question:
+    # dead_code asks whether a symbol is called, this asks whether a statement
+    # inside a live symbol can run, so the two are never summed.
+    unreachable_statements: tuple[UnreachableStatementFinding, ...] = ()
+    live_root_reasons: tuple[tuple[str, LiveRootReason], ...] = ()
     api_surface: ApiSurfaceSnapshot | None = None
     semantic_authority: SemanticAuthorityResult | None = None
 
@@ -2230,12 +2522,22 @@ class DeadCodeObservation:
     reachable: bool
     runtime_marker_count: int
     source_markers: tuple[tuple[str, str], ...] = ()
+    observation_kind: DeadCodeObservationKind = "symbol"
+    live_root_reason: LiveRootReason | None = None
+    # Rule-3 tri-state: the owning class inherits an unresolved external base
+    # and nothing proves this method is called, so the lane records the
+    # abstention rather than claiming either verdict.
+    abstained: bool = False
 
     def __post_init__(self) -> None:
         if self.reference_count < 0 or self.runtime_marker_count < 0:
             raise ValueError("dead-code observation counts must be non-negative")
         if self.source_markers != tuple(sorted(set(self.source_markers))):
             raise ValueError("dead-code source markers must be sorted and unique")
+        if self.abstained and self.live_root_reason is not None:
+            raise ValueError(
+                "an abstained dead-code observation cannot also carry a live root"
+            )
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)
@@ -3017,6 +3319,7 @@ class MetricProjectContext:
     referenced_names: frozenset[str]
     referenced_qualnames: frozenset[str]
     module_registry: ModuleRegistryHandle
+    test_reference_sources: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     runtime_reachability: tuple[RuntimeReachabilityFact, ...] = ()
     security_surfaces: tuple[SecuritySurface, ...] = ()
     typing_modules: tuple[ModuleTypingCoverage, ...] = ()
@@ -3058,6 +3361,8 @@ class FunctionGroupItem(FunctionGroupItemBase, total=False):
     terminal_kind: str
     try_finally_profile: str
     side_effect_order_profile: str
+    statement_sequence: tuple[NearMissElement, ...]
+    unreachable_statements: tuple[UnreachableStatementItem, ...]
 
 
 class BlockGroupItem(TypedDict):

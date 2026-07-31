@@ -29,6 +29,10 @@ def _list_at(payload: Mapping[str, object], *path: str) -> list[dict[str, object
     return rows
 
 
+def report_meta(payload: dict[str, object]) -> dict[str, object]:
+    return _dict_at(payload, "meta")
+
+
 def report_meta_baseline(payload: dict[str, object]) -> dict[str, object]:
     return _dict_at(payload, "meta", "baseline")
 

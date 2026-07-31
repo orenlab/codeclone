@@ -13,11 +13,13 @@ from uuid import UUID
 
 import codeclone.baseline as baseline
 from codeclone.analysis import _module_walk as module_walk_mod
+from codeclone.analysis.binding import BindingContext, build_module_bindings
 from codeclone.contracts import MODULE_IDENTITY_VERSION
 from codeclone.models import (
     AnalysisMount,
     DigestObject,
     FileIdentity,
+    FileMetrics,
     ImportMount,
     ModuleIdentityManifest,
     ModuleInventoryEntry,
@@ -29,6 +31,45 @@ from codeclone.models import (
 )
 from codeclone.observations.projection import build_observation_bundle
 from codeclone.qualnames import QualnameCollector
+
+
+def bindings_for_tree(tree: ast.Module) -> BindingContext:
+    """Module-scope bindings for a tree parsed outside any package context.
+
+    A relative import cannot be resolved without knowing the module's package
+    position, so here its alias binds without a proven identity — the same
+    answer production gives for a module whose position is unknown.
+    """
+
+    return build_module_bindings(
+        tree,
+        resolve_from_import=lambda node: (
+            (node.module or "") if node.level == 0 else None
+        ),
+    )
+
+
+def bindings_for_function_node(node: ast.AST) -> BindingContext:
+    """Bindings for a standalone function parsed on its own."""
+
+    module = ast.Module(body=[node], type_ignores=[])  # type: ignore[list-item]
+    return bindings_for_tree(module).enter(node)
+
+
+def bindings_for_statements(statements: list[ast.stmt]) -> BindingContext:
+    """Function-scope bindings for statements tested outside any function.
+
+    Production only ever wires a statement inside the function that owns it. A
+    bare statement is therefore read here under a synthetic function scope, not
+    at module scope where every assignment target would be a global and nothing
+    would normalize.
+    """
+
+    module = ast.parse("def _scope():\n    pass\n")
+    function = module.body[0]
+    assert isinstance(function, ast.FunctionDef)
+    function.body = statements
+    return bindings_for_tree(module).enter(function)
 
 
 def module_registry_context(
@@ -141,6 +182,36 @@ def build_test_module_registry(
     from codeclone.paths.module_identity.inventory import build_module_registry
 
     return build_module_registry(root=root.resolve(), source_roots=source_roots)
+
+
+def extract_file_metrics(
+    *,
+    source: str,
+    filepath: str,
+    module_registry: ModuleRegistryHandle,
+    min_loc: int = 1,
+    min_stmt: int = 1,
+) -> FileMetrics:
+    """Per-file metrics for one already-registered fixture file.
+
+    Extraction lives in a ring the analysis-facing test modules may import,
+    but the liveness owners do not. Keeping the plumbing in this shared helper
+    lets a test assert an owner's behavior over REAL fixture facts without the
+    test module itself reaching across an architectural ring boundary.
+    """
+    from codeclone.analysis.normalizer import NormalizationConfig
+    from codeclone.analysis.units import extract_units_and_stats_from_source
+
+    *_, metrics, _findings = extract_units_and_stats_from_source(
+        source=source,
+        filepath=filepath,
+        identity=module_registry.entries_by_path[filepath].identity,
+        registry=module_registry,
+        cfg=NormalizationConfig(),
+        min_loc=min_loc,
+        min_stmt=min_stmt,
+    )
+    return metrics
 
 
 def write_native_v3_baseline_fixture(

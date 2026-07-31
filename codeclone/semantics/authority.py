@@ -13,6 +13,7 @@ import hashlib
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Final
 
+from ..analysis.binding import EMPTY_BINDINGS
 from ..analysis.normalizer import NormalizationConfig
 from ..analysis.suppressions import DUPLICATE_RESPONSIBILITY_RULE_ID
 from ..analysis.wire import emit_wire
@@ -139,7 +140,9 @@ def _authority_effect_signature(contract: FunctionContractIR) -> str:
         ],
         ctx=ast.Load(),
     )
-    wire = emit_wire(projection, _AUTHORITY_EFFECT_WIRE_CONFIG)
+    # The projection is synthesized from contract facts and holds constants
+    # only, so it carries no names for a scope to resolve.
+    wire = emit_wire(projection, _AUTHORITY_EFFECT_WIRE_CONFIG, EMPTY_BINDINGS)
     return hashlib.sha256(_AUTHORITY_EFFECT_DOMAIN + wire.encode("utf-8")).hexdigest()
 
 

@@ -21,6 +21,10 @@ from codeclone.analysis.fingerprint import (
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import PhaseLedger
 from codeclone.blocks import stmt_hashes
+from tests._ast_metrics_helpers import (
+    bindings_for_function_node,
+    bindings_for_statements,
+)
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _FP_RE = re.compile(r"[0-9a-f]{64}\Z")
@@ -39,6 +43,7 @@ def _fingerprint(source: str, *, active_ledger: bool = False) -> str:
         node,
         _CFG,
         f"test:{node.name}",
+        bindings_for_function_node(node),
         phase_ledger=PhaseLedger(active=active_ledger),
     )
     return fingerprint
@@ -137,7 +142,7 @@ def test_phase_ledger_does_not_change_fingerprint_bytes() -> None:
 def test_statement_hashes_are_hex64_and_read_only() -> None:
     statement = ast.parse("value = source + 1").body[0]
     before = ast.dump(statement, annotate_fields=True, include_attributes=True)
-    hashes = stmt_hashes([statement], _CFG)
+    hashes = stmt_hashes([statement], _CFG, bindings_for_statements([statement]))
     after = ast.dump(statement, annotate_fields=True, include_attributes=True)
     assert len(hashes) == 1
     assert _FP_RE.fullmatch(hashes[0])
@@ -150,6 +155,7 @@ import ast
 import json
 import pathlib
 import sys
+from codeclone.analysis.binding import build_module_bindings
 from codeclone.analysis.fingerprint import _cfg_fingerprint_and_complexity
 from codeclone.analysis.normalizer import NormalizationConfig
 
@@ -158,10 +164,16 @@ rows = []
 for raw_path in sys.argv[1:]:
     path = pathlib.Path(raw_path)
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=path.name)
+    bindings = build_module_bindings(
+        tree,
+        resolve_from_import=lambda node: (
+            (node.module or "") if node.level == 0 else None
+        ),
+    )
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _graph, fingerprint, _ = _cfg_fingerprint_and_complexity(
-                node, config, f"fixture:{node.name}"
+                node, config, f"fixture:{node.name}", bindings.enter(node)
             )
             rows.append((path.name, node.name, node.lineno, fingerprint))
 sys.stdout.write(json.dumps(sorted(rows), separators=(",", ":")))
@@ -181,5 +193,5 @@ sys.stdout.write(json.dumps(sorted(rows), separators=(",", ":")))
     assert outputs[0] == outputs[1] == outputs[2]
     assert (
         hashlib.sha256(outputs[0].encode("utf-8")).hexdigest()
-        == "c561edaebf3b9b75a5caa9770e6494003dc6ab716b3d50064eeef215ccb426fb"
+        == "29f115d02f7abda9cc420c45e6ae56041441c31ba4660fda4975398d357ce56e"
     )

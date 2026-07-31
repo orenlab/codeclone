@@ -231,6 +231,16 @@ def _normalize_metrics_families(
                 "end_line": _as_int(item_map.get("end_line")),
                 "kind": str(item_map.get("kind", "")),
                 "confidence": str(item_map.get("confidence", CONFIDENCE_MEDIUM)),
+                "reason": str(item_map.get("reason", "unreferenced")),
+                "test_reference_sources": sorted(
+                    {
+                        str(source)
+                        for source in _as_sequence(
+                            item_map.get("test_reference_sources")
+                        )
+                        if str(source)
+                    }
+                ),
             }
             for item in _as_sequence(dead_code.get("items"))
             for item_map in (_as_mapping(item),)
@@ -256,6 +266,16 @@ def _normalize_metrics_families(
                 "end_line": _as_int(item_map.get("end_line")),
                 "kind": str(item_map.get("kind", "")),
                 "confidence": str(item_map.get("confidence", CONFIDENCE_MEDIUM)),
+                "reason": str(item_map.get("reason", "unreferenced")),
+                "test_reference_sources": sorted(
+                    {
+                        str(source)
+                        for source in _as_sequence(
+                            item_map.get("test_reference_sources")
+                        )
+                        if str(source)
+                    }
+                ),
                 "suppressed_by": _normalize_suppressed_by(
                     item_map.get("suppressed_by")
                 ),
@@ -284,6 +304,77 @@ def _normalize_metrics_families(
         first_binding = _as_mapping(suppressed_by[0]) if suppressed_by else {}
         item["suppression_rule"] = str(first_binding.get("rule", ""))
         item["suppression_source"] = str(first_binding.get("source", ""))
+
+    dead_unreachable_statements = sorted(
+        (
+            {
+                "qualname": str(item_map.get("qualname", "")),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "reason": str(item_map.get("reason", "unreachable_block")),
+                "statement_count": _as_int(item_map.get("statement_count")),
+                "confidence": str(item_map.get("confidence", CONFIDENCE_HIGH)),
+            }
+            for item in _as_sequence(dead_code.get("unreachable_statements"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+            item["reason"],
+        ),
+    )
+
+    dead_unresolved_overrides = sorted(
+        (
+            {
+                "qualname": str(item_map.get("qualname", "")),
+                "relative_path": _contract_path(
+                    item_map.get("filepath", ""),
+                    scan_root=scan_root,
+                )[0]
+                or "",
+                "start_line": _as_int(item_map.get("start_line")),
+                "end_line": _as_int(item_map.get("end_line")),
+                "kind": str(item_map.get("kind", "")),
+                "class_qualname": str(item_map.get("class_qualname", "")),
+                "base_names": sorted(
+                    {
+                        str(base)
+                        for base in _as_sequence(item_map.get("base_names"))
+                        if str(base)
+                    }
+                ),
+                "reason": str(item_map.get("reason", "unresolved_external_base")),
+            }
+            for item in _as_sequence(dead_code.get("unresolved_overrides"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (
+            item["relative_path"],
+            item["start_line"],
+            item["end_line"],
+            item["qualname"],
+        ),
+    )
+    dead_live_root_reasons = sorted(
+        (
+            {
+                "qualname": str(item_map.get("qualname", "")),
+                "reason": str(item_map.get("reason", "")),
+            }
+            for item in _as_sequence(dead_code.get("live_root_reasons"))
+            for item_map in (_as_mapping(item),)
+        ),
+        key=lambda item: (item["qualname"], item["reason"]),
+    )
 
     health = _as_mapping(metrics_map.get("health"))
     health_comparison = _as_mapping(health.get("summary"))
@@ -693,9 +784,24 @@ def _normalize_metrics_families(
                     dead_code_summary.get("baseline_diff_available")
                 ),
                 "new_items": _as_int(dead_code_summary.get("new_items")),
+                # Carried verbatim: the report document is the evidence the
+                # MCP gate path reads, so dropping the abstention count here
+                # would make --fail-on-unresolved-dead-code inert on that
+                # surface exactly as it was on the CLI one.
+                "unresolved_external_override": _as_int(
+                    dead_code_summary.get("unresolved_external_override")
+                ),
+                "live_roots": _as_int(dead_code_summary.get("live_roots")),
             },
             "items": dead_items,
             "suppressed_items": dead_suppressed_items,
+            "unresolved_overrides": dead_unresolved_overrides,
+            # Projected, not merely computed: the findings builder reads this
+            # document rather than the raw metrics payload, so a list left out
+            # here is dropped before any finding is built and the detector goes
+            # silent while its own unit tests still pass (39Y Y9).
+            "unreachable_statements": dead_unreachable_statements,
+            "live_root_reasons": dead_live_root_reasons,
             "items_truncated": False,
         },
         "health": {

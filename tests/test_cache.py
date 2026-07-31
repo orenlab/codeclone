@@ -21,6 +21,7 @@ import codeclone.cache._wire_decode as cache_wire_decode
 import codeclone.cache._wire_helpers as cache_wire_helpers
 import codeclone.cache.entries as cache_entries
 import codeclone.cache.store as cache_store
+import codeclone.core.discovery as core_discovery
 from codeclone.cache._validators import (
     _is_class_metrics_dict,
     _is_dead_candidate_dict,
@@ -68,6 +69,7 @@ from codeclone.cache.projection import (
     runtime_filepath_from_wire,
     wire_filepath_from_runtime,
 )
+from codeclone.cache.reuse import binding_context_digest
 from codeclone.cache.store import Cache, file_stat_signature
 from codeclone.cache.versioning import CacheStatus, _resolve_root
 from codeclone.contracts import CACHE_VERSION
@@ -84,6 +86,7 @@ from codeclone.models import (
     CacheNeutralSegment,
     CacheNeutralUnit,
     CacheReuseDecision,
+    ClassMetrics,
     ContentIdentityVerdict,
     DigestObject,
     FileMetrics,
@@ -92,6 +95,7 @@ from codeclone.models import (
     ModuleDep,
     ObservabilityConfig,
     PublicSymbol,
+    PythonModuleIdentity,
     RelationshipRecord,
     RuntimeReachabilityFact,
     SecuritySurface,
@@ -105,7 +109,10 @@ from codeclone.observability.store.schema import (
     open_observability_store,
 )
 from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
-from tests._ast_metrics_helpers import module_registry_context
+from tests._ast_metrics_helpers import (
+    build_test_module_registry,
+    module_registry_context,
+)
 
 _SOURCE_CONTENT_DIGEST = DigestObject(
     domain="codeclone.source-content.v1",
@@ -128,6 +135,7 @@ _DEPENDENT_PROFILE = DigestObject(
 def _empty_v3_entry() -> CacheEntryV3:
     return CacheEntryV3(
         cache_content_binding_version="1",
+        binding_context_digest=binding_context_digest(None),
         stat={"mtime_ns": 1, "size": 2},
         source_content_digest=_SOURCE_CONTENT_DIGEST,
         git_blob_id_at_write=None,
@@ -194,8 +202,14 @@ def _store_empty_profile_entry(cache: Cache) -> None:
     cache.save()
 
 
-def _content_hit_decision(cache: Cache, entry: CacheEntryV3) -> CacheReuseDecision:
+def _content_hit_decision(
+    cache: Cache, entry: CacheEntryV3, filepath: str = "x.py"
+) -> CacheReuseDecision:
+    # The store keys the per-entry binding context by the same absolute runtime
+    # path it normalizes writes to, so the read side has to ask with that path.
+    assert cache.root is not None
     return cache.reuse_decision(
+        runtime_path=str((cache.root / filepath).resolve()),
         content=ContentIdentityVerdict(
             hit=True,
             reason="digest_hit",
@@ -303,6 +317,39 @@ def _roundtrip_cache_entry_with_metrics(
 
     _, entry = _load_cache_entry(cache_path, "x.py")
     return entry
+
+
+def test_cached_references_use_module_identity_for_test_named_package_trees() -> None:
+    fixture_root = Path(__file__).parent / "fixtures" / "source_kind"
+    dependent = replace(
+        _empty_v3_entry().module_dependent,
+        referenced_names=("helper",),
+        referenced_qualnames=("example.testing.helpers:helper",),
+    )
+    entry = replace(_empty_v3_entry(), module_dependent=dependent)
+
+    package_path = "src/example/testing/helpers.py"
+    package_registry = build_test_module_registry(
+        root=fixture_root / "in_package",
+        source_roots=("src",),
+    )
+    package_metrics = core_discovery.load_cached_metrics_extended(
+        entry,
+        filepath=package_path,
+        module_registry=package_registry,
+    )
+    assert package_metrics[3] == frozenset({"helper"})
+    assert package_metrics[4] == frozenset({"example.testing.helpers:helper"})
+
+    test_path = "testing/case.py"
+    test_registry = build_test_module_registry(root=fixture_root / "repo_root")
+    test_metrics = core_discovery.load_cached_metrics_extended(
+        entry,
+        filepath=test_path,
+        module_registry=test_registry,
+    )
+    assert test_metrics[3] == frozenset()
+    assert test_metrics[4] == frozenset()
 
 
 def test_cache_roundtrip(tmp_path: Path) -> None:
@@ -730,6 +777,14 @@ def test_unit_group_projection_is_unchanged_by_relationship_model() -> None:
         "terminal_kind": "fallthrough",
         "try_finally_profile": "none",
         "side_effect_order_profile": "none",
+        # 39Y Y8: the near-miss tier reads its statement sequence off the unit
+        # fact. Empty for this unit because the tier is a clone lane and never
+        # pays for units the clone floors reject.
+        "statement_sequence": (),
+        # 39Y Y9: reachability, unlike the sequence above, is computed for every
+        # unit regardless of the clone floors. Empty here because this unit has
+        # no unreachable statement, not because it was skipped.
+        "unreachable_statements": (),
     }
 
 
@@ -881,6 +936,177 @@ def test_cache_roundtrip_preserves_security_surfaces(tmp_path: Path) -> None:
             "evidence_kind": "call",
             "evidence_symbol": "subprocess.run",
         },
+    )
+
+
+def test_cache_wire_preserves_rule_three_fact_families(tmp_path: Path) -> None:
+    """39J guard, cache half: the 3.2 wire must not drop the gating input.
+
+    The tri-state decision table turns on "this class carries an unresolved
+    external base" - a fact only visible while parsing. If the wire lost it, a
+    cache-hit file would silently fall back to binary liveness and the verdict
+    would depend on cache state rather than on code. The behavioural half of
+    this guard (equal facts produce equal statuses, and the bypass stays
+    narrow) lives in tests/test_metrics_modules.py, which owns the metrics
+    ring; together the two halves compose to cold == warm.
+    """
+    cold_class_metrics = (
+        ClassMetrics(
+            qualname="x:Adapter",
+            filepath="x.py",
+            start_line=1,
+            end_line=4,
+            cbo=1,
+            lcom4=1,
+            method_count=1,
+            instance_var_count=0,
+            risk_coupling="low",
+            risk_cohesion="low",
+            base_names=("Base",),
+            has_unresolved_external_base=True,
+            decorator_evidenced_methods=("x:Adapter.handle",),
+            self_dispatched_methods=("x:Adapter.helper",),
+        ),
+        ClassMetrics(
+            qualname="x:LocalOnly",
+            filepath="x.py",
+            start_line=7,
+            end_line=9,
+            cbo=0,
+            lcom4=1,
+            method_count=1,
+            instance_var_count=0,
+            risk_coupling="low",
+            risk_cohesion="low",
+            base_names=("object",),
+            has_unresolved_external_base=False,
+        ),
+    )
+    entry = _roundtrip_cache_entry_with_metrics(
+        tmp_path,
+        file_metrics=FileMetrics(
+            class_metrics=cold_class_metrics,
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset({"Adapter", "LocalOnly"}),
+        ),
+    )
+
+    resolved_path = str((tmp_path / "x.py").resolve())
+    rows_by_qualname = {
+        row["qualname"]: row for row in entry.module_dependent.class_metrics
+    }
+    assert rows_by_qualname["x:Adapter"]["base_names"] == ["Base"]
+    assert rows_by_qualname["x:Adapter"]["has_unresolved_external_base"] is True
+    assert rows_by_qualname["x:Adapter"]["decorator_evidenced_methods"] == [
+        "x:Adapter.handle"
+    ]
+    assert rows_by_qualname["x:Adapter"]["self_dispatched_methods"] == [
+        "x:Adapter.helper"
+    ]
+    assert rows_by_qualname["x:LocalOnly"]["base_names"] == ["object"]
+    assert rows_by_qualname["x:LocalOnly"]["has_unresolved_external_base"] is False
+    # A class with nothing to declare emits no sidecar row at all, so a
+    # 3.1-shaped tree keeps encoding byte-identically.
+    assert "decorator_evidenced_methods" not in rows_by_qualname["x:LocalOnly"]
+    assert "self_dispatched_methods" not in rows_by_qualname["x:LocalOnly"]
+
+    # Rehydrating through the production read-site returns the cold models
+    # unchanged apart from the resolved filepath, so a warm run sees exactly
+    # the facts a cold run computed.
+    cached_class_metrics = core_discovery.load_cached_metrics_extended(
+        entry,
+        filepath=resolved_path,
+    )[0]
+    assert cached_class_metrics == tuple(
+        replace(metric, filepath=resolved_path) for metric in cold_class_metrics
+    )
+
+
+def test_cache_wire_preserves_instantiation_candidates(tmp_path: Path) -> None:
+    """The resolved-instantiation CBO lane must survive a cache hit.
+
+    Candidates are produced while parsing, and the parse does not run for a
+    cached file. If the wire dropped them the project fold would see fewer
+    candidates on a warm run, and CBO would depend on cache state rather than
+    on code.
+
+    This is the cache half of the guard: the facts survive the round trip
+    unchanged. The behavioural half — those facts decide the edges, and
+    losing them changes the answer — lives in tests/test_metrics_modules.py,
+    which owns the metrics ring. Together the two halves compose to
+    cold == warm.
+    """
+    cold_class_metrics = (
+        ClassMetrics(
+            qualname="x:Caller",
+            filepath="x.py",
+            start_line=1,
+            end_line=4,
+            cbo=0,
+            lcom4=1,
+            method_count=1,
+            instance_var_count=0,
+            risk_coupling="low",
+            risk_cohesion="low",
+            # The already-resolved edge travels beside the unresolved
+            # candidates: both sidecars must survive the same round trip.
+            coupled_classes=("Peer",),
+            instantiation_candidates=(
+                "Widget|vendor.widgets:Widget",
+                "render|vendor.widgets:render",
+            ),
+        ),
+        ClassMetrics(
+            qualname="vendor.widgets:Widget",
+            filepath="x.py",
+            start_line=7,
+            end_line=9,
+            cbo=0,
+            lcom4=1,
+            method_count=1,
+            instance_var_count=0,
+            risk_coupling="low",
+            risk_cohesion="low",
+        ),
+    )
+    entry = _roundtrip_cache_entry_with_metrics(
+        tmp_path,
+        file_metrics=FileMetrics(
+            class_metrics=cold_class_metrics,
+            module_deps=(),
+            dead_candidates=(),
+            referenced_names=frozenset(),
+            import_names=frozenset(),
+            class_names=frozenset({"Caller", "Widget"}),
+        ),
+    )
+
+    resolved_path = str((tmp_path / "x.py").resolve())
+    rows_by_qualname = {
+        row["qualname"]: row for row in entry.module_dependent.class_metrics
+    }
+    assert rows_by_qualname["x:Caller"]["instantiation_candidates"] == [
+        "Widget|vendor.widgets:Widget",
+        "render|vendor.widgets:render",
+    ]
+    assert rows_by_qualname["x:Caller"]["coupled_classes"] == ["Peer"]
+    # A class with neither an edge nor a candidate emits no sidecar row at all.
+    assert "instantiation_candidates" not in rows_by_qualname["vendor.widgets:Widget"]
+    assert "coupled_classes" not in rows_by_qualname["vendor.widgets:Widget"]
+
+    warm_class_metrics = core_discovery.load_cached_metrics_extended(
+        entry,
+        filepath=resolved_path,
+    )[0]
+    assert warm_class_metrics == tuple(
+        replace(metric, filepath=resolved_path) for metric in cold_class_metrics
+    )
+    assert warm_class_metrics[0].instantiation_candidates == (
+        "Widget|vendor.widgets:Widget",
+        "render|vendor.widgets:render",
     )
 
 
@@ -1314,7 +1540,7 @@ def test_cache_version_mismatch_warns(tmp_path: Path) -> None:
 def test_cache_v210_entries_are_rejected_without_partial_reuse(
     tmp_path: Path,
 ) -> None:
-    assert Cache._CACHE_VERSION == "3.1"
+    assert Cache._CACHE_VERSION == "3.2"
 
     cache_path = tmp_path / "cache.json"
     old_cache = Cache(cache_path, root=tmp_path)
@@ -1330,7 +1556,7 @@ def test_cache_v210_entries_are_rejected_without_partial_reuse(
     old_cache.save()
 
     old_document = json.loads(cache_path.read_text("utf-8"))
-    assert old_document["v"] == "3.1"
+    assert old_document["v"] == "3.2"
     old_document["v"] = "2.10"
     cache_path.write_text(json.dumps(old_document), "utf-8")
 
@@ -2538,6 +2764,7 @@ def test_cache_v3_entry_projection_and_content_miss_are_typed() -> None:
         module_registry_context(filepath="x.py", module_name="x")[1]
     )
     decision = cache.reuse_decision(
+        runtime_path="x.py",
         content=ContentIdentityVerdict(
             hit=False,
             reason="digest_miss",
@@ -2662,6 +2889,45 @@ def test_cache_v3_wire_matches_golden_without_neutral_module_authority() -> None
     assert "filepath" not in neutral_json
 
 
+def test_neutral_lane_refuses_a_moved_binding_context_by_name(tmp_path: Path) -> None:
+    """The refusal has its own reason, not a generic profile mismatch.
+
+    A moved mount and a changed floor are different failures with different
+    fixes, so the lane says which one happened. Pinning the reason keeps the
+    binding-context gate from being silently folded into the profile digest
+    later, where it would stop being visible at all (39Y-FP section 3a).
+    """
+
+    cache_path = tmp_path / "cache.json"
+    cache = Cache(cache_path, root=tmp_path)
+    _store_empty_profile_entry(cache)
+    loaded = Cache(cache_path, root=tmp_path)
+    loaded.load()
+    _bind_module_paths(loaded, "x.py")
+    entry = loaded.get_file_entry("x.py")
+    assert entry is not None
+
+    same_mount = _content_hit_decision(loaded, entry)
+    assert same_mount.neutral.reason == "hit"
+
+    moved = replace(
+        entry,
+        binding_context_digest=binding_context_digest(
+            PythonModuleIdentity(
+                module="elsewhere.x",
+                package="elsewhere",
+                is_package=False,
+                mount_path="src",
+                origin="import_mount",
+                node_kind="module_file",
+            )
+        ),
+    )
+    decision = _content_hit_decision(loaded, moved)
+    assert decision.neutral.hit is False
+    assert decision.neutral.reason == "binding_context_mismatch"
+
+
 def test_cache_manifest_change_preserves_neutral_lane_only(tmp_path: Path) -> None:
     source = tmp_path / "a.py"
     source.write_text("def f():\n    return 1\n", "utf-8")
@@ -2696,6 +2962,9 @@ def test_cache_manifest_change_preserves_neutral_lane_only(tmp_path: Path) -> No
     )
     cache.bind_module_registry(changed_registry)
     decision = cache.reuse_decision(
+        # a.py's own identity is unchanged by adding b to the inventory, so the
+        # neutral lane must still hit; only the manifest-keyed lane moves.
+        runtime_path=str(source),
         content=ContentIdentityVerdict(
             hit=True,
             reason="digest_hit",
@@ -3068,7 +3337,7 @@ def test_api_signature_revision_invalidates_only_dependent_profile() -> None:
     source = (root / "codeclone/cache/reuse.py").read_text(encoding="utf-8")
 
     assert '"api_surface_signature_version": API_SURFACE_SIGNATURE_VERSION' in source
-    assert CACHE_VERSION == "3.1"
+    assert CACHE_VERSION == "3.2"
 
 
 def test_wire_module_dep_row_requires_a_known_mechanism() -> None:

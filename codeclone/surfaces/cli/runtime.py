@@ -54,7 +54,8 @@ def validate_numeric_args(args: object) -> bool:
 
 def _metrics_flags_requested(args: object) -> bool:
     return bool(
-        int_attr(args, "fail_complexity", -1) >= 0
+        bool_attr(args, "_full_metrics_explicit")
+        or int_attr(args, "fail_complexity", -1) >= 0
         or int_attr(args, "fail_coupling", -1) >= 0
         or int_attr(args, "fail_cohesion", -1) >= 0
         or bool_attr(args, "fail_cycles")

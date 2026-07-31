@@ -8,9 +8,9 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--diff-against GIT_REF] [--paths-from-git-diff GIT_REF]
                  [--blast-radius FILE [FILE ...]] [--patch-verify]
                  [--strictness LEVEL] [--session-stats] [--audit]
-                 [--audit-json] [--cache-path [FILE]] [--cache-dir [FILE]]
-                 [--max-cache-size-mb MB] [--baseline [FILE]]
-                 [--max-baseline-size-mb MB]
+                 [--audit-json] [--near-miss] [--cache-path [FILE]]
+                 [--cache-dir [FILE]] [--max-cache-size-mb MB]
+                 [--baseline [FILE]] [--max-baseline-size-mb MB]
                  [--update-baseline | --no-update-baseline]
                  [--semantic-authority | --no-semantic-authority]
                  [--ci | --no-ci] [--api-surface | --no-api-surface]
@@ -20,6 +20,7 @@ usage: codeclone [--min-loc MIN_LOC] [--min-stmt MIN_STMT]
                  [--fail-coupling [CBO_MAX]] [--fail-cohesion [LCOM4_MAX]]
                  [--fail-cycles | --no-fail-cycles]
                  [--fail-dead-code | --no-fail-dead-code]
+                 [--fail-on-unresolved-dead-code | --no-fail-on-unresolved-dead-code]
                  [--fail-health [SCORE_MIN]]
                  [--fail-on-typing-regression | --no-fail-on-typing-regression]
                  [--fail-on-docstring-regression | --no-fail-on-docstring-regression]
@@ -77,6 +78,9 @@ Analysis:
                         Read-only, does not run analysis.
   --audit-json          Output audit payload footprint as JSON.
                         Implies --audit. Useful for cross-repository comparison.
+  --near-miss           Report near-miss clone pairs: functions whose normalized statement
+                        sequences differ by exactly one statement.
+                        Advisory only; never enters clone gates or the baseline.
   --cache-path [FILE]   Path to the cache file.
                         If FILE is omitted, uses <root>/.codeclone/cache.json.
   --cache-dir [FILE]    Legacy alias for --cache-path.
@@ -132,6 +136,9 @@ Quality gates:
                         Exit with code 3 if circular module dependencies are detected.
   --fail-dead-code, --no-fail-dead-code
                         Exit with code 3 if high-confidence dead code is detected.
+  --fail-on-unresolved-dead-code, --no-fail-on-unresolved-dead-code
+                        Exit with code 3 if any symbol is an unresolved external override.
+                        These are abstentions, not findings: a public method whose class inherits from a base outside the analysis root, with no evidence either way. Off by default, and never counted as dead code.
   --fail-health [SCORE_MIN]
                         Exit with code 3 if the overall health score falls below the threshold.
                         If enabled without a value, uses 60.

@@ -30,13 +30,18 @@ _as_sequence = _coerce.as_sequence
 
 def _dead_row(
     item: Mapping[str, object], ctx: ReportContext
-) -> tuple[str, str, str, str, str]:
+) -> tuple[str, str, str, str, str, str, str]:
+    test_reference_sources = ", ".join(
+        str(source) for source in _as_sequence(item.get("test_reference_sources"))
+    )
     return (
         str(item.get("qualname", "")),
         str(item.get("relative_path", "")),
         str(item.get("start_line", "")),
         str(item.get("kind", "")),
         str(item.get("confidence", "")),
+        str(item.get("reason", "unreferenced")),
+        test_reference_sources,
     )
 
 
@@ -45,6 +50,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
     dead_total = _as_int(summary.get("total"))
     dead_high_conf = _as_int(summary.get("high_confidence", summary.get("critical")))
     dead_suppressed_total = _as_int(summary.get("suppressed", 0))
+    dead_unresolved_total = _as_int(summary.get("unresolved_external_override", 0))
 
     # Count high confidence from items if summary is 0 but items have them
     items_data = _as_sequence(ctx.dead_code_map.get("items"))
@@ -61,7 +67,7 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
 
     # Rows
     active_rows = [_dead_row(_as_mapping(it), ctx) for it in items_data[:200]]
-    suppressed_rows: list[tuple[str, str, str, str, str, str, str]] = []
+    suppressed_rows: list[tuple[str, str, str, str, str, str, str, str, str]] = []
     for it in suppressed_data[:200]:
         im = _as_mapping(it)
         suppressed_by = _as_sequence(im.get("suppressed_by"))
@@ -85,6 +91,11 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
             f"{dead_high_conf} high-confidence items; "
             f"{dead_suppressed_total} suppressed."
         )
+        if dead_unresolved_total:
+            answer += (
+                f" {dead_unresolved_total} unresolved override(s) abstained:"
+                " neither dead nor live."
+            )
         if dead_high_conf > 0:
             tone = "risk"
         elif dead_total > 0:
@@ -93,13 +104,31 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
             tone = "ok"
 
     active_panel = render_rows_table(
-        headers=("Name", "File", "Line", "Kind", "Confidence"),
+        headers=(
+            "Name",
+            "File",
+            "Line",
+            "Kind",
+            "Confidence",
+            "Reason",
+            "Held by tests",
+        ),
         rows=active_rows,
         empty_message="No dead code detected.",
         ctx=ctx,
     )
     suppressed_panel = render_rows_table(
-        headers=("Name", "File", "Line", "Kind", "Confidence", "Rule", "Source"),
+        headers=(
+            "Name",
+            "File",
+            "Line",
+            "Kind",
+            "Confidence",
+            "Reason",
+            "Held by tests",
+            "Rule",
+            "Source",
+        ),
         rows=suppressed_rows,
         empty_message="No suppressed dead-code candidates.",
         column_types={"Source": "source_kind"},
@@ -126,6 +155,15 @@ def render_dead_code_panel(ctx: ReportContext) -> str:
         _stat_card(
             "Suppressed",
             dead_suppressed_total,
+            value_tone="muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+        # Deliberately "muted", never "bad": an abstention is not a finding
+        # the reader should act on, it is the analysis declining to claim one.
+        _stat_card(
+            "Unresolved overrides",
+            dead_unresolved_total,
+            detail=_micro_badges(("abstained", dead_unresolved_total)),
             value_tone="muted",
             glossary_tip_fn=glossary_tip,
         ),
