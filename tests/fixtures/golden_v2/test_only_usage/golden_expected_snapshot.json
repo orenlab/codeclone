@@ -35,7 +35,7 @@
     "dependency_max_depth": 3,
     "health": {
       "grade": "A",
-      "total": 98
+      "total": 99
     },
     "high_risk_classes": [],
     "high_risk_functions": [],

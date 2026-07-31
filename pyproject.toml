@@ -223,12 +223,16 @@ min_stmt = 4
 fail_on_new = true
 fail_cycles = true
 fail_dead_code = true
-# Lowered 80 -> 73 for phase 39Y under maintainer sanction. Y5 (a metric fact
-# per defined function) and Y6 (the CBO imported-domain edge lane) each cost
-# this repository 8 honest health points by making real findings visible; the
-# findings are not suppressible, so the floor follows the measurement. Owning
-# assertion: tests/test_self_gate_thresholds.py.
-fail_health = 73
+# The floor equals the health this repository measures, ratified at the last
+# landing. It moves only with a maintainer ratification that follows a fresh
+# measurement, never ahead of one, and a semantic recalibration supersedes the
+# older measurement rather than being weighed against it -- which is why
+# 80 -> 73 (honest findings made visible) and 73 -> 91 (a stale record
+# corrected and the complexity dimension recalibrated) are both the same rule
+# applied twice, not the gate opening backwards. The ratchet is on the honesty
+# of the measure, not on the number. Owning assertion:
+# tests/test_self_gate_thresholds.py.
+fail_health = 91
 fail_on_new_metrics = true
 semantic_authority = true
 fail_on_authority_violation = true

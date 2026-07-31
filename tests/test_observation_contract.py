@@ -57,11 +57,24 @@ TEST_OBSERVATION_BUNDLE = build_observation_bundle(
     scan_root=Path("."), module_registry=_registry()
 )
 
-# The two clone lanes still on the record wire — byte-identical since 39U.
+# RE-FROZEN AT THE 39Y LANDING, all ten descriptors below.
+#
+# Every descriptor carries ``canonicalization_version``, and that field IS
+# WIRE_VERSION, so the sanctioned "1" -> "2" wire cutover moves all ten digests
+# at once regardless of what each lane did on its own axis. The move is
+# therefore mechanical and total: a re-freeze that left ANY descriptor at its
+# old value would mean the wire did not reach that lane. Determinism was proven
+# before repinning -- two processes and two hash seeds produce these bytes.
+#
+# The per-lane notes below still record each lane's own reason, because those
+# reasons outlive this landing and the wire cutover does not explain them.
+
+# The two clone lanes still on the record wire (payload_schema "1"); their
+# algorithm_revision is BASELINE_FINGERPRINT_VERSION, now "3".
 _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
-    "clones.blocks": "1d178dfa537ab09521500e1170b954c058e3de3564597d30911c561d89282cf1",
+    "clones.blocks": "ec977f5c4661c774439dac49a3561691870b72fc2f9043ee6892bc150d7620ed",
     "clones.functions": (
-        "7f87a5ec435e59c109da4cdf8eaf57441795e48a3d6431dfae3abb874c9f9c23"
+        "5e9a994eac0df70a5d28c053855bc0560f2468595b11e313427451f0f0abf2c6"
     ),
 }
 # 39W moved exactly these seven lanes to a columnar payload.
@@ -74,9 +87,9 @@ _ACCEPTED_V1_DESCRIPTOR_DIGESTS = {
 # MODULE_IDENTITY_VERSION did not.
 _BUMPED_DESCRIPTOR_DIGESTS = {
     "adoption_counts": (
-        "b6822dde2c2e756cbe9bf3feae7952e8df00e06b70b366df1dac789455ad281c"
+        "cd311dcc7e9739a99c41b8a5a6e3728c305b5ab50586581e7b95cb5b44ec37bc"
     ),
-    "api_surface": ("6984b79d4ec54f79f8225e05a32263eadbf18a9d13b751b289446c11edfdb0c6"),
+    "api_surface": ("b51e5ccbe85a2e79aacb8ddc924452569c64ba966d2547033a87fdfec9addea1"),
     # SANCTIONED golden change, 39Y item 3. The two design-metric lanes moved
     # to DESIGN_METRICS_ALGORITHM_REVISION "2": their metric VALUES changed
     # meaning (metric facts are no longer gated by clone floors, CBO counts the
@@ -89,13 +102,10 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # Re-pinned at the 39Y landing merge: these two lanes also embed the
     # identity table, so they carry the mount-dimension payload_schema bump
     # from the other parent ("3" -> "4"). Neither parent's digest survives a
-    # change on the other axis; the value below is the merged descriptor's.
-    # Pre-merge digests were
-    # de3044bcd67ad05e1b8041e396b9e1301481d85bd5210e1071542800d159e96c (39Y)
-    # and 816c2065a00abc0f2baccb24976883522dbe69c42ca8218f704ed19ca454a713
-    # (mount dimension).
+    # change on the other axis; the value below is the merged descriptor's,
+    # under the wire cutover recorded at the top of this block.
     "coupling_cohesion_observations": (
-        "de3044bcd67ad05e1b8041e396b9e1301481d85bd5210e1071542800d159e96c"
+        "f156c753bbfcb390cca1e97766a347a5a7b60441e9f7ede6f306482415e5e618"
     ),
     # SANCTIONED golden change, 39Y cycle 2b. Brief section 6, P1-7
     # consolidation ruling: rule-3 abstentions, live-root reasons and the Y9
@@ -103,18 +113,18 @@ _BUMPED_DESCRIPTOR_DIGESTS = {
     # under ONE coordinated payload_schema bump ("2" -> "3") rather than three.
     # Pre-bump digest was
     # 4cfcfa0b0c02d3b12d890b8a12e4b4dc0673bc50f4574ff05060629765d462f9.
-    "dead_code": ("2fb31219707ab065986286f091ff3e90696d4186e8a5614bfcd6a620400b00ec"),
+    "dead_code": ("2cce4c84f810d1268df814702938b38c9652a27a2f72c15cf164b1e83be8a0cf"),
     "dependencies": (
-        "0dab4d2031e715d4cda07f98ec1ab0c89b400a480dd023587a2ef0cbc171f561"
+        "9487ff03b6974056e1857cfe32e4860ea0fb3596bbe3290560671b03d32b4ef8"
     ),
     "module_identity": (
-        "5f9bd18f992e823d0419c6f40e6a1fccef722170062a2906d6eeede524e77fbb"
+        "6550f3624d9644ab0626b26928a6d1f5fbbaf7c672e04a7128dc6706798206c7"
     ),
     # SANCTIONED golden change, 39Y item 3 — the second half of the same
     # design-metric revision bump. Pre-bump digest was
     # 536593990a541fda3126bfb8a44863e9fb7b586a63d996a3ea2eb7032c62f992.
     "risk_observations": (
-        "87ad484a34465ba557a01ba4c594e738226ffe5cae469456efe5a0b5fbe33ddb"
+        "7c5d29aa39c03fb2c3b7d18b0b48dfff387f36f349224d7ea734d0689d6553c6"
     ),
 }
 
@@ -173,10 +183,21 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
         if descriptor.payload_schema == "1"
     } == {"clones.blocks", "clones.functions"}
 
-    # module_identity carries only a new schema: normalised back, its descriptor
-    # digest is the frozen pre-39U value.
+    # module_identity carries only declared moves: normalised back, its
+    # descriptor digest is still the frozen pre-39U value. The 39Y landing
+    # added the second axis -- canonicalization_version follows WIRE_VERSION --
+    # so undoing both is what isolates the question this guard asks, and the
+    # expected digest below is deliberately NOT re-frozen: it still proves that
+    # MODULE_IDENTITY_VERSION and everything else in the descriptor held still
+    # while the two sanctioned fields moved.
     assert (
-        _descriptor_digest(replace(descriptors["module_identity"], payload_schema="1"))
+        _descriptor_digest(
+            replace(
+                descriptors["module_identity"],
+                payload_schema="1",
+                canonicalization_version="1",
+            )
+        )
         == "85ccbadac461be9e606b4d76c3e1ec52a56adf1cbaaa61d4ade0deee1659c3b6"
     )
     bumped = {
@@ -196,7 +217,7 @@ def test_only_semantic_authority_advances_beyond_the_39w_lane_schemas() -> None:
     assert semantic.payload_schema == "2"
     assert (
         _descriptor_digest(semantic)
-        == "3401d89134a48d3a39fb02d96b8910eab6ff752891e9ad0a2ce98451d5fb60f5"
+        == "2682e13bb88a8ee24250c9c933a6de552f93149eebf0388af0abd4e73869cf1f"
     )
     assert {descriptor.payload_schema for descriptor in descriptors.values()} == {"1"}
     assert {
@@ -281,7 +302,7 @@ def test_dead_code_bump_leaves_every_other_lane_descriptor_byte_identical() -> N
             if name != "dead_code"
         },
         "semantic_authority": (
-            "3401d89134a48d3a39fb02d96b8910eab6ff752891e9ad0a2ce98451d5fb60f5"
+            "2682e13bb88a8ee24250c9c933a6de552f93149eebf0388af0abd4e73869cf1f"
         ),
     }
     assert digests["dead_code"] == _BUMPED_DESCRIPTOR_DIGESTS["dead_code"]
@@ -684,3 +705,47 @@ def test_observation_sources_must_exist_in_the_module_registry() -> None:
                 },
             ),
         )
+
+
+def test_near_miss_tokens_never_reach_an_observation_lane() -> None:
+    """The near-miss statement domain is exempt from the fingerprint cutover.
+
+    Every other identity domain moved to ccfp3 at the 39Y landing, because a
+    digest whose meaning changed must not be able to equal one an older
+    generation minted. ``ccnm:stmt`` stayed put on one premise: its tokens are
+    compared for equality inside a run and never become published identity.
+
+    That premise had no test. This is it. A unit carrying a statement sequence
+    goes through the projection, and no lane payload may contain the tokens --
+    if the near-miss sequence ever starts riding a lane, the exemption is void
+    and that domain has to move with the rest.
+    """
+
+    token = "deadbeefdeadbeef"
+    bundle = build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=_registry(),
+        units=(
+            {
+                "qualname": "pkg.mod:hot",
+                "filepath": "pkg/mod.py",
+                "cyclomatic_complexity": 3,
+                "nesting_depth": 1,
+                "statement_sequence": ((token, 1, 2),),
+            },
+        ),
+    )
+
+    encoded = orjson.dumps(
+        [
+            (lane.descriptor.name, lane.payload)
+            for lane in build_observation_lanes(bundle)
+        ],
+        default=str,
+    )
+
+    assert token.encode() not in encoded, (
+        "a near-miss statement token reached an observation lane; the "
+        "ccnm:stmt domain is published identity and must move with "
+        "BASELINE_FINGERPRINT_VERSION"
+    )

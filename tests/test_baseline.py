@@ -88,7 +88,10 @@ def test_baseline_loads_native_clone_lanes_and_verifies_contracts(
     assert baseline.functions == {_FUNCTION_ID}
     assert baseline.blocks == {_BLOCK_ID}
     assert baseline.schema_version == "3.0"
-    assert baseline.fingerprint_version == "2"
+    # Re-frozen at the 39Y landing: the sanctioned fingerprint cutover moved
+    # this contract "2" -> "3". Pinned as a literal on purpose, so the next
+    # cutover has to come here and be seen.
+    assert baseline.fingerprint_version == "3"
     assert baseline.python_tag == "cp314"
     baseline.verify_compatibility(
         current_python_tag="cp314",

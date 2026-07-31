@@ -1,49 +1,49 @@
 {
-  "meta": {
-    "python_tag": "cp314"
-  },
-  "report_schema_version": "3.0",
-  "project_name": "pyproject_defaults",
-  "scan_root": ".",
-  "baseline_status": "missing",
   "baseline_loaded": false,
+  "baseline_status": "missing",
+  "block_group_ids": [],
   "cache_used": false,
   "findings_summary": {
-    "total": 1,
+    "clones": {
+      "blocks": 0,
+      "functions": 1,
+      "instances": 2,
+      "known": 0,
+      "new": 0,
+      "segments": 0,
+      "unavailable": 1
+    },
     "families": {
+      "authority": 0,
       "clones": 1,
-      "structural": 0,
       "dead_code": 0,
       "design": 0,
-      "authority": 0
+      "structural": 0
+    },
+    "impact_scope": {
+      "mixed": 0,
+      "non_runtime": 0,
+      "runtime": 1
     },
     "severity": {
       "critical": 0,
-      "warning": 1,
-      "info": 0
-    },
-    "impact_scope": {
-      "runtime": 1,
-      "non_runtime": 0,
-      "mixed": 0
-    },
-    "clones": {
-      "functions": 1,
-      "blocks": 0,
-      "segments": 0,
-      "instances": 2,
-      "new": 0,
-      "known": 0,
-      "unavailable": 1
+      "info": 0,
+      "warning": 1
     },
     "suppressed": {
       "dead_code": 0
-    }
+    },
+    "total": 1
   },
   "function_group_ids": [
-    "clone:function:c8aad1ce3e5794fd98b838838187c7ddb3d1820e953997687a30df6d0e3c4978|0-19"
+    "clone:function:8310cfef5347ef871805c990688052b046af8c8f78e7f0cc83ba4eb9c62361eb|0-19"
   ],
-  "block_group_ids": [],
+  "meta": {
+    "python_tag": "cp314"
+  },
+  "project_name": "pyproject_defaults",
+  "report_schema_version": "3.0",
+  "scan_root": ".",
   "segment_group_ids": [],
   "structural_group_ids": [],
   "structural_group_kinds": []
