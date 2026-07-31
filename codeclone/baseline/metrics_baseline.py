@@ -57,6 +57,7 @@ from ..models import (
     ProjectMetrics,
     PublicSymbol,
 )
+from ..observations.projection import glued_observation_identity
 from ._metrics_baseline_contract import (
     MAX_METRICS_BASELINE_SIZE_BYTES,
     MetricsBaselineStatus,
@@ -317,6 +318,35 @@ def _integer_lane(
     return rows, payload.entity_population
 
 
+def _entity_identity_rows(
+    container: BaselineContainerV3,
+    name: ObservationLaneName,
+) -> tuple[tuple[str, str, int], ...]:
+    """Return lane rows named the way a run names its entities.
+
+    ``_integer_lane`` above yields the stored halves: the lane keeps the source
+    identity apart from the bare qualname, and nothing the container hands out
+    may glue them. Comparing rows against a run is a different question and
+    needs the producer's identity back, so the join lives here -- the one place
+    where lane rows meet run identities -- and nowhere in the decode path.
+
+    Without it the comparison silently reads two different things and reports
+    every entity the baseline already knows as new.
+    """
+
+    payload = _lane_payload(container, name)
+    if not isinstance(payload, IntegerObservationPayload):
+        return ()
+    return tuple(
+        (
+            glued_observation_identity(item.source, item.qualname),
+            item.dimension,
+            item.numerator,
+        )
+        for item in payload.observations
+    )
+
+
 def _average(values: tuple[int, ...], population: int) -> float:
     """Average over the observed population: absence is zero, so sums are complete."""
 
@@ -334,6 +364,13 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
     class_rows, class_population = _integer_lane(
         container, "coupling_cohesion_observations"
     )
+    # Values are read from the stored rows; the three sets below name entities
+    # that a run's own sets are differenced against, so they read the rejoined
+    # identity instead.
+    risk_identity_rows = _entity_identity_rows(container, "risk_observations")
+    class_identity_rows = _entity_identity_rows(
+        container, "coupling_cohesion_observations"
+    )
     complexities = tuple(
         value for _qualname, dim, value in risk_rows if dim == "cyclomatic_complexity"
     )
@@ -341,22 +378,22 @@ def _snapshot(container: BaselineContainerV3) -> MetricsSnapshot:
     cohesion = tuple(value for _qualname, dim, value in class_rows if dim == "lcom4")
     high_risk = tuple(
         sorted(
-            qualname
-            for qualname, dim, value in risk_rows
+            identity
+            for identity, dim, value in risk_identity_rows
             if dim == "cyclomatic_complexity" and value > COMPLEXITY_RISK_MEDIUM_MAX
         )
     )
     high_coupling = tuple(
         sorted(
-            qualname
-            for qualname, dim, value in class_rows
+            identity
+            for identity, dim, value in class_identity_rows
             if dim == "cbo" and value > COUPLING_RISK_MEDIUM_MAX
         )
     )
     low_cohesion = tuple(
         sorted(
-            qualname
-            for qualname, dim, value in class_rows
+            identity
+            for identity, dim, value in class_identity_rows
             if dim == "lcom4" and value > COHESION_RISK_MEDIUM_MAX
         )
     )

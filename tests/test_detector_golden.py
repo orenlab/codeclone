@@ -72,3 +72,45 @@ def test_detector_output_matches_golden_fixture() -> None:
         expected_python_tag=expected_python_tag,
         smoke_keys=("function_group_keys", "block_group_keys"),
     )
+
+
+# Block identities produced by the ccfp2 generation of this fixture, recorded
+# before the fp3 cutover. Four of these survived the fp2 -> fp3 boundary
+# byte-identically while the function identity moved, because only the function
+# domain had been re-versioned.
+_FP2_GENERATION_BLOCK_KEYS = frozenset(
+    {
+        "01ccd1c66f4c8f5e876fea2a8bc3fc82a8aa51233b43b8c3624bfc9465dc3b5e|5304b1e710742f760c178ef516aa82bc1bf547d49e7a152ade989df87e378843|dc8207e7a15319362749b5a7de4443c123ee69409ec5b1121d3baa8940f38ace|69b8754ff188260dc540b1b099833916dcb31593308f59fa38afb7eb7b5c1a5a",
+        "5304b1e710742f760c178ef516aa82bc1bf547d49e7a152ade989df87e378843|dc8207e7a15319362749b5a7de4443c123ee69409ec5b1121d3baa8940f38ace|69b8754ff188260dc540b1b099833916dcb31593308f59fa38afb7eb7b5c1a5a|69b8754ff188260dc540b1b099833916dcb31593308f59fa38afb7eb7b5c1a5a",
+        "69b8754ff188260dc540b1b099833916dcb31593308f59fa38afb7eb7b5c1a5a|d9c14d6771d6cdac8bfbc8028ca2654f9bf521a821d9d6991028a07b44c656b2|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7",
+        "8b40de5d6bdb615fbd2056321dbf218a25778479d6aa291ae9d50eb5567b5a3b|9ba1f215b1cc70e1e44775ffa9b63a323472fb200c49bc06e36d3196bab89b10|42a00f2bba529ae118f6ff9e5356ed707085d43847f99a55f4ee2876d2fca059|42a00f2bba529ae118f6ff9e5356ed707085d43847f99a55f4ee2876d2fca059",
+        "9ba1f215b1cc70e1e44775ffa9b63a323472fb200c49bc06e36d3196bab89b10|42a00f2bba529ae118f6ff9e5356ed707085d43847f99a55f4ee2876d2fca059|42a00f2bba529ae118f6ff9e5356ed707085d43847f99a55f4ee2876d2fca059|01ccd1c66f4c8f5e876fea2a8bc3fc82a8aa51233b43b8c3624bfc9465dc3b5e",
+        "fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|ba26c2268997cfb0152884e5fc1e1cff216fcc0138fd3487c80573b64dcd0823",
+        "fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7|fd791573aff114d8bedaefc33ee95898c2dc5c5e39feeab7a1255f059a241cc7",
+    }
+)
+
+
+def test_block_identities_do_not_survive_a_fingerprint_generation() -> None:
+    """No block identity may be reused across a fingerprint generation.
+
+    A block key is published identity: it names a clone group in the
+    ``clones.blocks`` lane of every baseline. The fingerprint contract requires
+    the digest itself to be domain-separated rather than only metadata-gated,
+    precisely so that content the new normalization did not move cannot produce
+    a digest an older generation already used to mean something else.
+
+    This is the guard the fn-only cutover lacked. It is recorded as concrete
+    historical values rather than a recomputation, because the point is that
+    THESE bytes, which a real fp2 baseline can contain, must never be minted
+    again by this generation.
+    """
+
+    _, block_keys = _detect_group_keys(Path("tests/fixtures/golden_project").resolve())
+
+    collisions = _FP2_GENERATION_BLOCK_KEYS.intersection(block_keys)
+    assert not collisions, (
+        f"{len(collisions)} block identities are byte-identical to the ccfp2 "
+        f"generation; the block statement domain did not move with the "
+        f"fingerprint version"
+    )

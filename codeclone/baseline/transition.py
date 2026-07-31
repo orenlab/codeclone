@@ -15,7 +15,6 @@ import re
 from collections.abc import Sequence
 from pathlib import Path
 
-from ..contracts import BASELINE_FINGERPRINT_VERSION
 from ..contracts.errors import BaselineValidationError
 from ..models import (
     DigestObject,
@@ -69,11 +68,18 @@ def read_legacy_transition(
             "Legacy transition requires authenticated schema 2.1.",
             status="mismatch_schema_version",
         )
-    if meta.fingerprint_version != BASELINE_FINGERPRINT_VERSION:
-        raise BaselineValidationError(
-            "Legacy transition fingerprint contract mismatch.",
-            status="mismatch_fingerprint_version",
-        )
+    # No fingerprint equality check here, deliberately. A schema-2.1 artifact
+    # carries the generation that wrote it, so requiring it to equal the
+    # runtime constant made the upgrade path impossible the moment that
+    # constant moved, and would do so again at every future cutover. It also
+    # proved nothing: this function imports no lane. It authenticates bytes,
+    # records the prior fingerprint as provenance and hands back evidence; the
+    # caller regenerates every lane from the current run, which is the
+    # mandatory-regeneration behaviour a generation change is supposed to have.
+    #
+    # Refusing a legacy artifact as comparison TRUTH is the other question and
+    # keeps its own owner: Baseline.verify_compatibility raises
+    # MISMATCH_FINGERPRINT_VERSION before any stored identity is believed.
     if clones.functions != tuple(sorted(set(clones.functions))) or any(
         _FUNCTION_ID_RE.fullmatch(value) is None for value in clones.functions
     ):

@@ -114,7 +114,13 @@ def _raw_source_hash_for_range(
 ) -> str:
     window = "".join(source_lines[start_line - 1 : end_line]).strip()
     no_space = "".join(window.split())
-    return _sha256(b"ccfp2:raw\x00" + no_space.encode("utf-8")).hexdigest()
+    # Moves with the fingerprint version like the other identity domains. This
+    # one hashes raw source text rather than the normalized wire, so its
+    # meaning does not change between generations -- but it is persisted as
+    # ``Unit.raw_hash`` in the cache, which puts it outside the equality-only,
+    # never-stored exemption that lets ``ccnm:stmt`` stay put, and a stored
+    # digest must not claim a generation it no longer belongs to.
+    return _sha256(b"ccfp3:raw\x00" + no_space.encode("utf-8")).hexdigest()
 
 
 def _unit_shape(node: _qualnames.FunctionNode) -> tuple[int, int, int, int] | None:

@@ -12,6 +12,7 @@ from uuid import UUID
 
 import pytest
 
+import codeclone.baseline.container as container_mod
 import codeclone.baseline.container_trust as container_trust_mod
 import codeclone.baseline.metrics_baseline as metrics_mod
 from codeclone.baseline.container import build_container, read_container_v3
@@ -22,7 +23,11 @@ from codeclone.baseline.metrics_baseline import (
     probe_metrics_baseline_section,
 )
 from codeclone.baseline.trust import current_python_tag
-from codeclone.contracts import METRICS_BASELINE_SCHEMA_VERSION
+from codeclone.contracts import (
+    COMPLEXITY_RISK_MEDIUM_MAX,
+    COUPLING_RISK_MEDIUM_MAX,
+    METRICS_BASELINE_SCHEMA_VERSION,
+)
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     ApiSurfaceObservationPayload,
@@ -756,3 +761,75 @@ def test_metrics_baseline_schema_version_is_provenance_not_authority(
 
     # The constant reaches exactly one surface, and it is a report line.
     assert METRICS_BASELINE_SCHEMA_VERSION == "1.3"
+
+
+def _high_risk_bundle() -> ObservationBundle:
+    """A bundle whose design-metric lanes actually carry high-risk entities.
+
+    Every other bundle in this module leaves those lanes empty, which is the
+    reason the round trip below went unguarded for so long: an empty baseline
+    set matches an empty current set no matter how the two are spelled.
+    """
+
+    registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )[1]
+    return build_observation_bundle(
+        scan_root=Path("."),
+        module_registry=registry,
+        units=(
+            {
+                "qualname": "pkg.mod:hot",
+                "filepath": "pkg/mod.py",
+                "cyclomatic_complexity": COMPLEXITY_RISK_MEDIUM_MAX + 5,
+                "nesting_depth": 3,
+            },
+        ),
+        class_metrics=(
+            _class_metric(
+                "pkg.mod:Service",
+                cbo=COUPLING_RISK_MEDIUM_MAX + 3,
+                lcom4=1,
+                methods=2,
+            ),
+        ),
+    )
+
+
+def test_published_high_risk_entities_read_as_known_on_the_next_run(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An entity that is in the baseline must not be reported as new.
+
+    The lane splits the producer-glued ``module:qualname`` into a source
+    identity and a bare qualname, so a reader that compares only the bare half
+    can never match the glued identity a run carries. Every known high-risk
+    entity would then be reported as new on every run, for as long as the sets
+    stay non-empty -- the novelty signal inverted into noise.
+
+    The second entity in each set is genuinely absent from the baseline and
+    pins the other direction: reconciling the two spellings must not collapse
+    into matching everything.
+    """
+
+    monkeypatch.setattr(container_mod, "current_python_tag", lambda: "cp314")
+    monkeypatch.setattr(container_mod, "_utc_now_z", lambda: "2026-07-20T00:00:00Z")
+    path = tmp_path / "baseline.json"
+    path.write_bytes(
+        canonical_container_bytes(build_container(_high_risk_bundle(), _SCOPE_ID))
+    )
+    baseline = MetricsBaseline(path)
+    baseline.load()
+
+    diff = baseline.diff(
+        replace(
+            _project_metrics(),
+            high_risk_functions=("pkg.mod:hot", "pkg.mod:fresh"),
+            high_risk_classes=("pkg.mod:Service", "pkg.mod:Fresh"),
+        )
+    )
+
+    assert diff.new_high_risk_functions == ("pkg.mod:fresh",)
+    assert diff.new_high_coupling_classes == ("pkg.mod:Fresh",)

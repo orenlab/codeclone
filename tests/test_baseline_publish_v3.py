@@ -32,6 +32,7 @@ from codeclone.baseline.transition import (
     read_legacy_transition,
 )
 from codeclone.baseline.trust import _compute_payload_sha256
+from codeclone.contracts import BASELINE_FINGERPRINT_VERSION
 from codeclone.contracts.errors import BaselineValidationError
 from codeclone.models import (
     BaselineContainerV3,
@@ -556,7 +557,12 @@ def test_legacy_transition_rejects_each_untrusted_evidence_class(
     for field, value, expected_status in (
         ("generator", {"name": "other", "version": "2.1.0a2"}, "generator_mismatch"),
         ("schema_version", "2.0", "mismatch_schema_version"),
-        ("fingerprint_version", "1", "mismatch_fingerprint_version"),
+        # The declared generation is no longer refused for differing from the
+        # runtime -- it is provenance, and any prior generation is legitimate.
+        # Rewriting it is still refused, and by the stronger check: the field
+        # is covered by payload_sha256, so tampering fails authentication
+        # instead of a contract comparison.
+        ("fingerprint_version", "1", "integrity_failed"),
     ):
         document = orjson.loads(_legacy_bytes())
         assert isinstance(document, dict)
@@ -805,3 +811,49 @@ def test_recovery_missing_lock_and_changed_lock_are_typed(
         recover_publish_lock(target=target, expected_token="expected")
     assert changed.value.reason == "cas_conflict"
     assert not target.with_name(f"{target.name}.publish.lock.recovery").exists()
+
+
+def test_legacy_transition_accepts_a_prior_fingerprint_generation(
+    tmp_path: Path,
+) -> None:
+    """A legacy artifact from an older fingerprint generation still transitions.
+
+    The legacy fixture declares fingerprint "2" because a schema-2.1 artifact
+    can only ever carry the generation that wrote it. Requiring it to equal the
+    runtime constant made the upgrade path impossible the moment that constant
+    moved -- and would do so again at every future cutover -- while proving
+    nothing, because the transition imports no lane: it records the prior
+    fingerprint as provenance and regenerates every lane from the current run.
+
+    Refusing a legacy artifact as comparison TRUTH is a different question with
+    its own owner, ``Baseline.verify_compatibility``, which still raises
+    MISMATCH_FINGERPRINT_VERSION. This test pins the split.
+    """
+
+    raw = _legacy_bytes()
+    legacy_meta = orjson.loads(raw)["meta"]
+    # The premise: the fixture really is from an older generation. Read from
+    # the fixture bytes rather than compared against a literal, so this stays a
+    # runtime check that keeps its meaning at the next cutover instead of a
+    # comparison the type checker can settle statically.
+    assert legacy_meta["fingerprint_version"] != BASELINE_FINGERPRINT_VERSION, (
+        "this test is only meaningful while the runtime generation differs "
+        "from the one the legacy fixture declares"
+    )
+    target = tmp_path / "baseline.json"
+    target.write_bytes(raw)
+
+    receipt = publish_baseline(
+        target=target,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+    )
+
+    assert receipt.backup_created is True
+    transition = _read_published(target).container.transition
+    assert transition is not None
+    # Provenance, not truth: the prior generation is recorded and nothing from
+    # the legacy artifact is imported.
+    assert transition.from_fingerprint == "2"
+    assert transition.imported_lanes == ()

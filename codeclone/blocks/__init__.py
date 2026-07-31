@@ -21,9 +21,18 @@ if TYPE_CHECKING:
 
 __all__ = ["BlockUnit", "SegmentUnit", "extract_blocks", "extract_segments"]
 
-_STMT_DOMAIN: Final = b"ccfp2:stmt\x00"
-_SEG_DOMAIN: Final = b"ccfp2:seg\x00"
-_SEGSIG_DOMAIN: Final = b"ccfp2:segsig\x00"
+# These three domains move with BASELINE_FINGERPRINT_VERSION, exactly as the
+# function domain does, because all three name published identity: a block key
+# is a clone group in the ``clones.blocks`` lane and a segment signature groups
+# reported findings. They are derived from ``emit_wire``, so their meaning
+# changes whenever the normalization does, and a digest whose meaning changed
+# must not be able to equal one an older generation minted. Metadata gating on
+# the lane is not sufficient on its own -- the digest itself is domain
+# separated. Owning guard: tests/test_detector_golden.py, which pins that no
+# identity of the previous generation can be minted again.
+_STMT_DOMAIN: Final = b"ccfp3:stmt\x00"
+_SEG_DOMAIN: Final = b"ccfp3:seg\x00"
+_SEGSIG_DOMAIN: Final = b"ccfp3:segsig\x00"
 
 
 def stmt_hashes(

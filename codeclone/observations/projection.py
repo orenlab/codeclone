@@ -66,6 +66,27 @@ def _bare_qualname(qualname: str) -> str:
     return qualname.rsplit(":", 1)[-1]
 
 
+def glued_observation_identity(source: ResolvedSourceIdentity, qualname: str) -> str:
+    """Rejoin a lane row into the producer's identity — the sole join site.
+
+    The declared inverse of the split above, and the reason it has to exist: a
+    row keeps the source identity and the bare qualname in two columns because
+    ``IntegerObservation`` forbids storing them glued, so a reader comparing
+    rows against a run must put the identity back together. Reading only the
+    bare half compares two different things, and every entity the baseline
+    already knows then reads as new for as long as the sets are non-empty.
+
+    Producers name a unit by its module where the file is importable and by its
+    repository-relative path where it is not, which is the distinction
+    ``python_module`` already records, so the identity is reconstructed from
+    the lane rather than guessed from the path.
+    """
+
+    module = source.python_module
+    prefix = source.file.path if module is None else module.module
+    return f"{prefix}:{qualname}"
+
+
 def _integer_observation_sort_key(row: IntegerObservation) -> tuple[str, str, str]:
     return (row.source.file.path, row.qualname, row.dimension)
 
