@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 from codeclone.utils import coerce as _coerce
 
+from ...messages.clone_health import clone_health_summary_sentence
 from ...messages.overview import (
     ADOPTION_ADDED_SYMBOLS,
     ADOPTION_API_DISABLED,
@@ -1105,9 +1106,16 @@ def _analytics_section(ctx: ReportContext) -> str:
         return ""
 
     radar_html = _health_radar_svg(dimensions)
+    # The radar shows the clones dimension without saying what it costs; the
+    # weighted arithmetic is stated here in the same words the clones panel uses.
+    clone_contribution = clone_health_summary_sentence(ctx.report_document)
+    clone_contribution_html = (
+        f" {_escape_html(clone_contribution)}" if clone_contribution else ""
+    )
     radar_legend = (
         '<div class="health-radar-legend">'
         f"{CLUSTER_RADAR_CAPTION}{CLUSTER_RADAR_CAPTION_SUFFIX}"
+        f"{clone_contribution_html}"
         "</div>"
     )
 

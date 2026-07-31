@@ -21,6 +21,11 @@ from ...derived import (
     report_location_from_group_item,
 )
 from ...explain_contract import format_group_instance_compare_meta
+from ...messages.clone_health import (
+    clone_health_note_sentences,
+    clone_health_points,
+    clone_health_score,
+)
 from ...suggestions import classify_clone_type
 from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html
@@ -672,6 +677,32 @@ def _render_section(
     return "\n".join(out)
 
 
+def _clone_health_card(ctx: ReportContext) -> str:
+    """Render the health-point contribution of the clones dimension."""
+
+    score = clone_health_score(ctx.report_document)
+    points, max_points = clone_health_points(ctx.report_document)
+    if score is None:
+        return ""
+    return _stat_card(
+        "Health points",
+        points,
+        secondary=f"of {max_points}",
+        detail=_micro_badges(("clones score", f"{score}/100")),
+        glossary_tip_fn=glossary_tip,
+    )
+
+
+def _clone_health_note_html(ctx: ReportContext) -> str:
+    """Render the arithmetic that turns these groups into a health score."""
+
+    sentences = clone_health_note_sentences(ctx.report_document)
+    if not sentences:
+        return ""
+    body = " ".join(_escape_html(sentence) for sentence in sentences)
+    return f'<p class="muted clones-health-note">{body}</p>'
+
+
 def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
     """Build the Clones tab panel HTML.
 
@@ -838,6 +869,19 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
             glossary_tip_fn=glossary_tip,
         ),
     )
+    clone_health_card = _clone_health_card(ctx)
+    if clone_health_card:
+        clone_cards.append(clone_health_card)
+    if suppressed_total > 0:
+        clone_cards.append(
+            _stat_card(
+                "Excluded groups",
+                suppressed_total,
+                subtext="accepted, not scored",
+                value_tone="muted",
+                glossary_tip_fn=glossary_tip,
+            ),
+        )
     clone_cards_html = f'<div class="stat-cards">{"".join(clone_cards)}</div>'
 
     panel = (
@@ -847,6 +891,7 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
             tone=clones_tone,
         )
         + clone_cards_html
+        + _clone_health_note_html(ctx)
         + panel
     )
 

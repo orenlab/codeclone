@@ -19,6 +19,7 @@ from codeclone.baseline.trust import current_python_tag
 from codeclone.contracts import (
     CACHE_VERSION,
     DOCS_URL,
+    HEALTH_WEIGHTS,
     ISSUES_URL,
     REPORT_SCHEMA_VERSION,
     REPOSITORY_URL,
@@ -4612,3 +4613,262 @@ def test_render_rows_table_code_column_renders_code_chip() -> None:
     assert '<code class="code-chip">golden_fixture@project_config</code>' in html
     # the placeholder dash stays plain, not chipped
     assert '<code class="code-chip">-</code>' not in html
+
+
+def _clone_health_metrics_payload(*, clones_score: object) -> dict[str, object]:
+    payload = _metrics_payload(
+        health_score=88,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    health = payload["health"]
+    assert isinstance(health, dict)
+    health["dimensions"] = {"clones": clones_score, "coverage": 99}
+    return payload
+
+
+def _clone_health_item(
+    tmp_path: Path,
+    *,
+    module: str,
+    qualname: str,
+    fingerprint: str,
+) -> dict[str, Any]:
+    path = tmp_path / f"{module}.py"
+    if not path.exists():
+        path.write_text("def f():\n    return 1\n", "utf-8")
+    return {
+        "qualname": qualname,
+        "filepath": str(path),
+        "start_line": 1,
+        "end_line": 2,
+        "loc": 2,
+        "stmt_count": 1,
+        "size": 2,
+        "fingerprint": fingerprint,
+        "loc_bucket": "0-19",
+    }
+
+
+def _clone_health_report_html(tmp_path: Path, *, clones_score: int = 97) -> str:
+    """Render a report whose clone health arithmetic is fully determined.
+
+    Two function groups plus one block group are the scored population; the
+    segment group is reported but never scored, and ``pkg.a:f1`` participates in
+    two groups so a naive participant count (8) differs from the deduplicated
+    one (7).
+    """
+
+    item = _clone_health_item
+    func_groups = {
+        "g1": [
+            item(tmp_path, module="a", qualname="pkg.a:f1", fingerprint="fp1"),
+            item(tmp_path, module="b", qualname="pkg.b:f1", fingerprint="fp1"),
+        ],
+        "g2": [
+            item(tmp_path, module="a", qualname="pkg.a:f2", fingerprint="fp2"),
+            item(tmp_path, module="c", qualname="pkg.c:f2", fingerprint="fp2"),
+        ],
+    }
+    block_groups = {
+        "bk1|pkg.a:f1": [
+            item(tmp_path, module="a", qualname="pkg.a:f1", fingerprint="fp3"),
+            item(tmp_path, module="d", qualname="pkg.d:f3", fingerprint="fp3"),
+        ]
+    }
+    segment_groups = {
+        "sk1|pkg.e:f4": [
+            item(tmp_path, module="e", qualname="pkg.e:f4", fingerprint="fp4"),
+            item(tmp_path, module="f", qualname="pkg.f:f5", fingerprint="fp4"),
+        ]
+    }
+    suppressed_group = SuppressedCloneGroup(
+        kind="function",
+        group_key="pkg.golden:run",
+        items=(
+            item(
+                tmp_path,
+                module="golden_a",
+                qualname="pkg.golden_a:run",
+                fingerprint="fp5",
+            ),
+            item(
+                tmp_path,
+                module="golden_b",
+                qualname="pkg.golden_b:run",
+                fingerprint="fp5",
+            ),
+        ),
+        matched_patterns=("tests/fixtures/golden_*",),
+        suppression_rule="golden_fixture",
+        suppression_source="project_config",
+    )
+    report_document = build_report_document(
+        func_groups=func_groups,
+        block_groups=block_groups,
+        segment_groups=segment_groups,
+        meta={"scan_root": str(tmp_path)},
+        inventory={
+            "files": {
+                "total_found": 12,
+                "analyzed": 8,
+                "cached": 2,
+                "skipped": 2,
+                "source_io_skipped": 0,
+            }
+        },
+        metrics=_clone_health_metrics_payload(clones_score=clones_score),
+        suppressed_clone_groups=(suppressed_group,),
+    )
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": str(tmp_path)},
+        report_document=report_document,
+    )
+
+
+def _clone_contribution_text(score: int) -> str:
+    """Build the expected contribution phrase from the contract weight itself."""
+
+    weight = HEALTH_WEIGHTS["clones"]
+    return (
+        f"Clones health {score}/100: {score} \u00d7 {weight * 100:g}% = "
+        f"{score * weight:g} of {100 * weight:g} health points."
+    )
+
+
+def test_html_report_clones_panel_explains_health_arithmetic(tmp_path: Path) -> None:
+    html = _clone_health_report_html(tmp_path)
+
+    assert_contains_all(
+        html,
+        # score -> health points, derived from HEALTH_WEIGHTS, not hardcoded
+        _clone_contribution_text(97),
+        # density: scored groups are function + block groups only
+        (
+            "Density: 3 active groups (functions and blocks) across 10 analyzed "
+            "files — a density, not a share of files."
+        ),
+        # participants are deduplicated: 8 fragments, 7 distinct callables
+        "Instances: 8 duplicated fragments; 7 unique callables participate.",
+        # segments are reported but do not feed the dimension
+        "Segment groups reported but not scored: 1.",
+        # the suppressed golden-fixture channel is stated, not hidden
+        "Accepted groups excluded by suppression policy before scoring: 1.",
+    )
+    # statistical honesty: duplication is never presented as a share of files
+    assert "% of files" not in html
+    assert "% of callables" not in html
+
+
+def test_html_report_clones_health_card_shows_contribution(tmp_path: Path) -> None:
+    weight = HEALTH_WEIGHTS["clones"]
+    html = _clone_health_report_html(tmp_path)
+
+    assert_contains_all(
+        html,
+        "Health points",
+        f'<div class="meta-value">{97 * weight:g}'
+        f'<span class="meta-value-sec">of {100 * weight:g}</span></div>',
+        "Excluded groups",
+    )
+
+
+def test_html_report_clone_health_contribution_follows_contract_weight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The rendered contribution must move with HEALTH_WEIGHTS, not a literal."""
+
+    from codeclone.report.messages import clone_health
+
+    monkeypatch.setattr(
+        clone_health,
+        "HEALTH_WEIGHTS",
+        {**HEALTH_WEIGHTS, "clones": 0.5},
+    )
+    html = _clone_health_report_html(tmp_path)
+
+    assert "Clones health 97/100: 97 \u00d7 50% = 48.5 of 50 health points." in html
+
+
+def test_html_report_health_profile_repeats_clone_contribution(tmp_path: Path) -> None:
+    html = _clone_health_report_html(tmp_path)
+
+    legend = re.search(r'<div class="health-radar-legend">(.*?)</div>', html, re.S)
+    assert legend is not None
+    assert _clone_contribution_text(97) in legend.group(1)
+    assert "3 active groups (functions and blocks) across 10 analyzed files" in (
+        legend.group(1)
+    )
+
+
+def test_html_report_clone_health_note_absent_without_metrics(tmp_path: Path) -> None:
+    """No health dimension means no arithmetic to explain, and none is invented."""
+
+    html = build_html_report(
+        func_groups={
+            "g1": [
+                _clone_health_item(
+                    tmp_path, module="a", qualname="pkg.a:f1", fingerprint="fp1"
+                ),
+                _clone_health_item(
+                    tmp_path, module="b", qualname="pkg.b:f1", fingerprint="fp1"
+                ),
+            ]
+        },
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": str(tmp_path)},
+    )
+
+    assert "Clone groups" in html
+    assert "health points." not in html
+
+
+def test_clone_health_sentences_absent_without_clones_dimension() -> None:
+    from codeclone.report.messages.clone_health import (
+        clone_health_note_sentences,
+        clone_health_summary_sentence,
+    )
+
+    document = {
+        "metrics": {"families": {"health": {"summary": {"dimensions": {}}}}},
+        "findings": {"summary": {"clones": {}}, "groups": {"clones": {}}},
+        "inventory": {"files": {"analyzed": 4}},
+    }
+
+    assert clone_health_note_sentences(document) == ()
+    assert clone_health_summary_sentence(document) == ""
+
+
+def test_clone_health_note_sentences_omit_unavailable_facts() -> None:
+    from codeclone.report.messages.clone_health import clone_health_note_sentences
+
+    sentences = clone_health_note_sentences(
+        {
+            "metrics": {
+                "families": {"health": {"summary": {"dimensions": {"clones": 40}}}}
+            },
+            "findings": {
+                "summary": {"clones": {"functions": 1, "blocks": 0, "instances": 2}},
+                "groups": {"clones": {"functions": [{"items": [{"qualname": ""}]}]}},
+            },
+            "inventory": {"files": {}},
+        }
+    )
+
+    assert sentences[0].startswith("Clones health 40/100:")
+    # no analyzed files -> no density claim, no unique-callable claim
+    assert not any(sentence.startswith("Density:") for sentence in sentences)
+    assert sentences[1] == "Instances: 2 duplicated fragments."
+    assert not any("Segment groups" in sentence for sentence in sentences)
+    assert not any("Accepted groups" in sentence for sentence in sentences)

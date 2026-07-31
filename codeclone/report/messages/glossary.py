@@ -89,6 +89,13 @@ GLOSSARY: dict[str, str] = {
     "instances": "Total duplicated code fragments across all groups",
     "new groups": "Clone groups not present in the previous baseline",
     "high spread": "Clone groups spanning multiple files",
+    "health points": (
+        "Health-score points this dimension contributes: dimension score "
+        "multiplied by its contract weight"
+    ),
+    "excluded groups": (
+        "Accepted clone groups excluded by suppression policy before scoring"
+    ),
     # Suggestion stat cards
     "total suggestions": "Total actionable improvement suggestions generated",
     "warning": "Suggestions with warning severity worth reviewing",
