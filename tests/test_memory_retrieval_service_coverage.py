@@ -352,6 +352,9 @@ def test_record_relations_filters_external_endpoints_and_trajectory_not_found() 
     store = SimpleNamespace(
         list_links_for_records=lambda **_kwargs: links,
         find_trajectory=lambda _trajectory_id: None,
+        # Read when the lane handler builds its resolver call, even though a
+        # full id takes the exact path and never invokes it.
+        resolve_trajectory_id_prefix=lambda **_kwargs: ([], 0),
     )
     relations = retrieval_service._record_relations(
         cast("SqliteEngineeringMemoryStore", store),
@@ -363,11 +366,11 @@ def test_record_relations_filters_external_endpoints_and_trajectory_not_found() 
         cast("SqliteEngineeringMemoryStore", store),
         mode="trajectory_get",
         project_id="proj",
-        record_id="missing",
+        record_id=f"traj-{0:032x}",
     ) == {
         "mode": "trajectory_get",
         "status": "not_found",
-        "payload": {"trajectory_id": "missing"},
+        "payload": {"trajectory_id": f"traj-{0:032x}"},
     }
 
 
@@ -604,7 +607,7 @@ def test_query_engineering_memory_experience_get_wrong_project_returns_not_found
     with memory_store(tmp_path) as (_root, project, store, _db_path):
         now = current_report_timestamp_utc()
         experience = Experience(
-            id="exp-wrong-project",
+            id=f"exp-{9:032x}",
             project_id=project.id,
             repo_root_digest="digest",
             subject_family="pkg",

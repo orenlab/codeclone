@@ -13,6 +13,7 @@ import shlex
 import sys
 import textwrap
 import traceback
+from collections.abc import Iterable
 from pathlib import Path
 
 from .. import __version__
@@ -47,6 +48,7 @@ from .runtime import (
     SUCCESS_BASELINE_LOCK_RECOVERED,
     TIP_GITIGNORE_CODECLONE_CACHE,
     TIP_VSCODE_EXTENSION,
+    WARN_BASELINE_LANES_OPAQUE,
     WARN_BATCH_ITEM_FAILED,
     WARN_CACHE_SAVE_FAILED,
     WARN_COVERAGE_JOIN_IGNORED,
@@ -180,6 +182,16 @@ def fmt_legacy_repo_workspace_warning(*, legacy_dir: Path, new_dir: Path) -> str
 
 def fmt_invalid_baseline(error: object) -> str:
     return ERR_INVALID_BASELINE.format(error=error)
+
+
+def fmt_baseline_lanes_opaque(lanes: Iterable[object]) -> str:
+    """Name the opaque lanes deterministically, with their trust reasons."""
+
+    rows = sorted(
+        f"{getattr(item, 'name', item)}:{getattr(item, 'reason', 'unavailable')}"
+        for item in lanes
+    )
+    return WARN_BASELINE_LANES_OPAQUE.format(lanes=", ".join(rows))
 
 
 def fmt_baseline_gating_requires_trusted(*, ci: bool) -> str:

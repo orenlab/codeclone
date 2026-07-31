@@ -50,17 +50,25 @@ _DESIGN_METRIC_LANES: frozenset[ObservationLaneName] = frozenset(
     {"coupling_cohesion_observations", "risk_observations"}
 )
 # The seven columnar lanes; anything absent stays on the record wire ("1").
+# The identity table gained the mount dimension (mount_exc exception rows) so
+# modules named relative to a non-root import mount became encodable. Every
+# lane that embeds that table declares the new shape, because the payload
+# canonicalizer serializes the field even when it is empty. Schema change under
+# controller authorization + the maintainer's standing schema-bump
+# ratification; not test-greening. MODULE_IDENTITY_VERSION stays "2": every
+# previously encodable identity still derives byte-identically.
 _PAYLOAD_SCHEMAS: Final[Mapping[ObservationLaneName, str]] = {
     "adoption_counts": "2",
-    "api_surface": "2",
-    "coupling_cohesion_observations": "3",
+    "api_surface": "3",
+    "coupling_cohesion_observations": "4",
     # 39Y cycle 2b: one coordinated bump per the P1-7 consolidation ruling,
     # carrying rule-3 abstentions, live-root reasons, and the observation-kind
-    # discriminator Y9 extends.
+    # discriminator Y9 extends. Independent of the mount-dimension bump above,
+    # which this lane does not embed.
     "dead_code": "3",
-    "dependencies": "4",
-    "module_identity": "3",
-    "risk_observations": "3",
+    "dependencies": "5",
+    "module_identity": "4",
+    "risk_observations": "4",
     "semantic_authority": "2",
 }
 

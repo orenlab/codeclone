@@ -121,18 +121,17 @@ def _canonical_fact(
 
 
 def _guard_tokens(events: Sequence[SemanticEvent]) -> dict[str, str]:
-    bases = sorted(
-        {
-            guard.rpartition(":")[0]
-            for event in sorted(events, key=_event_sort_key)
-            for guard in event.guards
-        },
-        key=lambda base: next(
-            index
-            for index, event in enumerate(sorted(events, key=_event_sort_key))
-            if any(guard.rpartition(":")[0] == base for guard in event.guards)
-        ),
-    )
+    ordered_events = sorted(events, key=_event_sort_key)
+    first_appearance: dict[str, int] = {}
+    for index, event in enumerate(ordered_events):
+        for guard in event.guards:
+            first_appearance.setdefault(guard.rpartition(":")[0], index)
+    # First appearance alone is a partial key: several bases routinely first
+    # appear in the same event, and those ties used to fall through to set
+    # iteration order, which varies with string hash randomization per
+    # process. The base itself breaks ties, so the ordinals are a function of
+    # content only.
+    bases = sorted(first_appearance, key=lambda base: (first_appearance[base], base))
     return {base: f"guard:{index}" for index, base in enumerate(bases)}
 
 

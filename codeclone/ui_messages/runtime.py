@@ -96,6 +96,13 @@ WARN_BASELINE_IGNORED = (
     "[dim]Baseline-relative novelty is unavailable for this run.[/dim]\n"
     f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
 )
+WARN_BASELINE_LANES_OPAQUE = (
+    "[warning]Baseline lanes are opaque for this run: [bold]{lanes}[/bold][/warning]\n"
+    "[dim]No active gate reads them, so the run continues. "
+    "Their baseline-relative novelty is reported as unavailable, "
+    "not as zero.[/dim]\n"
+    f"[dim]{ACTION_UPDATE_BASELINE}[/dim]"
+)
 ERR_BASELINE_CI_REQUIRES_TRUSTED = (
     f"[error]CI requires a trusted baseline.[/error]\n{ACTION_UPDATE_BASELINE}"
 )

@@ -141,12 +141,24 @@ def receipt_verdict(
     gate_relevant_count: int,
     patch_status: str,
     human_decision_count: int,
+    verification_accepted: bool | None = None,
 ) -> str:
-    if patch_status == ReceiptPatchStatus.VIOLATED.value:
+    """Derive the receipt verdict from reviewed evidence and the patch contract.
+
+    ``verification_accepted`` carries the attested outcome of the finish that
+    requested this receipt (gh #57 family B).  When the controller accepted a
+    controlled change, its verification — not the receipt's own re-derivation
+    from stored session state — is authoritative on the patch contract, so a
+    contract-derived downgrade cannot contradict it.  Review completeness and
+    human decision points stay live signals in every case, and standalone
+    receipts (``None``) keep deriving the verdict from the contract alone.
+    """
+    contract_authoritative = verification_accepted is not True
+    if contract_authoritative and patch_status == ReceiptPatchStatus.VIOLATED.value:
         return ReceiptVerdict.NEEDS_ATTENTION.value
     if human_decision_count > 0:
         return ReceiptVerdict.NEEDS_ATTENTION.value
-    if patch_status == ReceiptPatchStatus.NOT_CHECKED.value:
+    if contract_authoritative and patch_status == ReceiptPatchStatus.NOT_CHECKED.value:
         return ReceiptVerdict.INCOMPLETE.value
     if gate_relevant_count > 0 and reviewed_count < gate_relevant_count:
         return ReceiptVerdict.INCOMPLETE.value

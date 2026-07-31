@@ -34,6 +34,7 @@ from ...core.reporting import (
     GatingResult,
     build_report_body_for_analysis,
     gate,
+    gate_required_lanes,
     gate_with_config,
     report,
     resolve_report_baseline_trust,
@@ -515,17 +516,23 @@ def _main_impl() -> None:
             and gating_mode_enabled(args)
             and not args.update_baseline
         )
+        baseline_required_lanes = gate_required_lanes(
+            args=args,
+            enabled_lanes=analysis_result.observation_bundle.contract.enabled_lanes,
+        )
         baseline_state = _resolve_clone_baseline_state(
             args=args,
             baseline_path=baseline_inputs.baseline_path,
             baseline_exists=baseline_inputs.baseline_exists,
             analysis=analysis_result,
+            required_lanes=baseline_required_lanes,
         )
         metrics_baseline_state = _resolve_metrics_baseline_state(
             args=args,
             metrics_baseline_path=baseline_inputs.metrics_baseline_path,
             metrics_baseline_exists=baseline_inputs.metrics_baseline_exists,
             clone_baseline_state=baseline_state,
+            required_lanes=baseline_required_lanes,
         )
         baseline_container = baseline_state.baseline.container
         baseline_trust = resolve_report_baseline_trust(

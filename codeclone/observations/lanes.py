@@ -36,12 +36,14 @@ from ..models import (
     ObservationBundle,
     ObservationLane,
     ObservationLaneDescriptor,
+    PythonModuleNodeKind,
     ResolvedSourceIdentity,
     SemanticAuthorityObservation,
     SemanticAuthorityObservationPayload,
     ThinIdentityTable,
     _null_first,
     derive_python_module_identity,
+    python_module_mount_row,
 )
 from .contracts import ObservationContractError, validate_emitted_lanes
 
@@ -60,17 +62,27 @@ def _identity_table(
             )
     paths = tuple(sorted(by_path))
     index = {path: position for position, path in enumerate(paths)}
+    mount_rows: list[tuple[int, str, str]] = []
+    node_kind_rows: list[tuple[int, PythonModuleNodeKind]] = []
+    for path in paths:
+        module = by_path[path].python_module
+        if module is None:
+            continue
+        row = python_module_mount_row(path, module)
+        mount_path, module_prefix = (".", "") if row is None else row
+        if row is not None:
+            mount_rows.append((index[path], mount_path, module_prefix))
+        if module != derive_python_module_identity(
+            path, mount_path=mount_path, module_prefix=module_prefix
+        ):
+            node_kind_rows.append((index[path], module.node_kind))
     table = ThinIdentityTable(
         paths=paths,
         module_null=tuple(
             index[path] for path in paths if by_path[path].python_module is None
         ),
-        node_kind_exc=tuple(
-            (index[path], module.node_kind)
-            for path in paths
-            if (module := by_path[path].python_module) is not None
-            and module != derive_python_module_identity(path)
-        ),
+        node_kind_exc=tuple(node_kind_rows),
+        mount_exc=tuple(mount_rows),
     )
     for path in paths:
         if table.identity(index[path]) != by_path[path]:

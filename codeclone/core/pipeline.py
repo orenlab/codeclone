@@ -334,11 +334,12 @@ def analyze(
     func_clones_count = len(func_groups)
     block_clones_count = len(block_groups)
     segment_clones_count = len(segment_groups)
-    files_analyzed_or_cached = processing.files_analyzed + (
-        0
-        if bool(getattr(boot.args, "semantic_authority", False))
-        else discovery.cache_hits
-    )
+    # Cache hits are analyzed files whose facts came off the cache wire —
+    # semantic events and contract summaries included — so they belong in the
+    # health denominators exactly like freshly walked files. Excluding them
+    # under semantic authority made a warm run score itself as if almost
+    # nothing had been analyzed.
+    files_analyzed_or_cached = processing.files_analyzed + discovery.cache_hits
 
     project_metrics: ProjectMetrics | None = None
     metrics_payload: dict[str, object] | None = None
