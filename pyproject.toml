@@ -237,7 +237,23 @@ fail_on_new_metrics = true
 semantic_authority = true
 fail_on_authority_violation = true
 api_surface = true
-golden_fixture_paths = ["tests/fixtures/golden_*"]
+# Fixture corpora whose clone groups are corpus construction rather than
+# findings about this project: each tree states its ground truth by pairing an
+# original with a renamed copy, so the twins are the point of the fixture. They
+# go through the golden_fixture channel, which keeps a visible counter and can
+# never silence production code, instead of sitting in the baseline as noise.
+# Named one by one on purpose - this list is a declaration, and a wider glob
+# would silently adopt future fixture trees nobody reviewed. Owning assertion:
+# tests/test_golden_fixtures.py.
+golden_fixture_paths = [
+    "tests/fixtures/golden_*",
+    "tests/fixtures/clone_tiers",
+    "tests/fixtures/design_metrics",
+    "tests/fixtures/fingerprint_binding",
+    "tests/fixtures/liveness_policy",
+    "tests/fixtures/source_kind",
+    "tests/fixtures/statement_reachability",
+]
 min_typing_coverage = 99
 intent_registry_backend = "sqlite"
 intent_registry_path = ".codeclone/db/intents.sqlite3"
