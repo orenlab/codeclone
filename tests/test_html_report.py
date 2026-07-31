@@ -5126,3 +5126,180 @@ def test_html_quality_table_renders_document_order_as_is() -> None:
     body = table[table.index("<tbody>") : table.index("</tbody>")]
     rendered = re.findall(r'<td class="col-name">([^<]+)</td>', body)
     assert rendered == expected
+
+
+def _authority_report_html(
+    tmp_path: Path,
+    *,
+    governed: list[dict[str, object]],
+    active_violations: int = 0,
+) -> str:
+    payload = _metrics_payload(
+        health_score=88,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    violations = [
+        {
+            "item_kind": "violation",
+            "violation_id": f"v{index}",
+            "contract_id": "baseline.publication/v1",
+            "kind": "duplicate_responsibility",
+            "sink_identity": f"pkg.mod:rogue{index}",
+            "canonical_owner": "pkg.mod:publish",
+            "suppressed": False,
+        }
+        for index in range(active_violations)
+    ]
+    payload["semantic_authority"] = {
+        "summary": {
+            "enabled": True,
+            "report_only": False,
+            "enforcement_enabled": True,
+            "registry_version": "1",
+            "registry_contracts": len(governed),
+            "governed_sinks": len(governed),
+            "violations": active_violations,
+            "active_violations": active_violations,
+            "suppressed_violations": 0,
+        },
+        "items": [*governed, *violations],
+    }
+    report_document = build_report_document(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        meta={
+            "scan_root": str(tmp_path),
+            "metrics_computed": sorted(payload),
+        },
+        metrics=payload,
+    )
+    return build_html_report(
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        report_meta={"scan_root": str(tmp_path)},
+        report_document=report_document,
+    )
+
+
+def _governed_sink(
+    *,
+    contract: str,
+    sink: str,
+    status: str,
+    resolution: str,
+    unresolved_reasons: list[str] | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "item_kind": "governed_sink",
+        "contract_id": contract,
+        "sink_identity": sink,
+        "authority_status": status,
+        "resolution_state": resolution,
+        "relative_path": "pkg/mod.py",
+    }
+    if unresolved_reasons is not None:
+        item["unresolved_reasons"] = unresolved_reasons
+    return item
+
+
+def test_html_authority_row_states_why_it_abstained(tmp_path: Path) -> None:
+    """An abstaining row must carry its reason, not just the word unavailable."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[
+            _governed_sink(
+                contract="baseline.publication/v1",
+                sink="pkg.mod:publish",
+                status="unavailable",
+                resolution="unavailable",
+                unresolved_reasons=["unresolved_call", "unresolved_flow"],
+            )
+        ],
+    )
+
+    assert "unresolved call" in html
+    assert "unresolved flow" in html
+
+
+def test_html_authority_insight_states_abstention_not_zero_violations(
+    tmp_path: Path,
+) -> None:
+    """Zero violations over an unresolved population is not a clean result.
+
+    Counting violations that could never have been found reads as green; the
+    panel must say it cannot see instead of reporting an empty set.
+    """
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[
+            _governed_sink(
+                contract=f"contract.{index}/v1",
+                sink=f"pkg.mod:owner{index}",
+                status="unavailable",
+                resolution="unavailable",
+                unresolved_reasons=["unresolved_flow"],
+            )
+            for index in range(5)
+        ],
+    )
+
+    assert (
+        "Authority cannot be asserted: 5 of 5 governed owners are unresolved." in html
+    )
+    assert "0 active violations across 5 governed contracts" not in html
+    # the abstention must not be dressed as a clean result in its own block
+    question = "Is each governed semantic contract owned by one authority?"
+    block_start = html.rindex('<div class="insight-banner', 0, html.index(question))
+    assert "insight-ok" not in html[block_start : block_start + 200]
+
+
+def test_html_authority_insight_reports_violations_before_abstention(
+    tmp_path: Path,
+) -> None:
+    html = _authority_report_html(
+        tmp_path,
+        governed=[
+            _governed_sink(
+                contract="baseline.publication/v1",
+                sink="pkg.mod:owner",
+                status="unavailable",
+                resolution="unavailable",
+                unresolved_reasons=["unresolved_flow"],
+            )
+        ],
+        active_violations=1,
+    )
+
+    assert "1 active violations across 1 governed contracts" in html
+    assert "Authority cannot be asserted" not in html
+
+
+def test_html_authority_insight_stays_clean_when_everything_resolved(
+    tmp_path: Path,
+) -> None:
+    html = _authority_report_html(
+        tmp_path,
+        governed=[
+            _governed_sink(
+                contract="baseline.publication/v1",
+                sink="pkg.mod:owner",
+                status="authoritative",
+                resolution="resolved",
+            )
+        ],
+    )
+
+    assert "0 active violations across 1 governed contracts" in html
+    assert "Authority cannot be asserted" not in html

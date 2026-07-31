@@ -96,6 +96,7 @@ def _semantic_authority_payload(
             "producer_root_ids": list(sink.producer_root_ids),
             "effect_signature": sink.effect_signature,
             "resolution_state": sink.resolution_state,
+            "unresolved_reasons": list(sink.unresolved_reasons),
             "algorithm_revision": result.algorithm_revision,
         }
         for sink in result.governed_sinks

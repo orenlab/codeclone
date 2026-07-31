@@ -478,6 +478,9 @@ def _enforcement(
                     resolution_state=(
                         "unavailable" if contract.document.unresolved else "resolved"
                     ),
+                    unresolved_reasons=tuple(
+                        state.kind for state in contract.document.failure_states
+                    ),
                 )
             )
             if function == entry.canonical_owner or status in (

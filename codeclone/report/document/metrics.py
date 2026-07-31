@@ -610,6 +610,13 @@ def _normalize_metrics_families(
                 ),
                 "effect_signature": str(item_map.get("effect_signature", "")).strip(),
                 "resolution_state": str(item_map.get("resolution_state", "")).strip(),
+                # An abstaining row carries why it abstained: a status without
+                # its reason is the difference between "clean" and "cannot see".
+                "unresolved_reasons": [
+                    str(value).strip()
+                    for value in _as_sequence(item_map.get("unresolved_reasons"))
+                    if str(value).strip()
+                ],
                 "candidate_id": str(item_map.get("candidate_id", "")).strip(),
                 "level": str(item_map.get("level", "")).strip(),
                 "score": _as_int(item_map.get("score")),

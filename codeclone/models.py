@@ -2223,6 +2223,10 @@ class AuthorityGovernedSink:
     producer_root_ids: tuple[str, ...]
     effect_signature: str
     resolution_state: AuthorityResolutionState
+    #: Why this sink abstained, copied from the contract IR failure states.
+    #: Report-only: the semantic_authority observation lane names its fields
+    #: explicitly, so this never reaches a lane payload or a baseline identity.
+    unresolved_reasons: tuple[ContractIRFailureKind, ...] = ()
 
 
 @dataclass(frozen=True, slots=True, kw_only=True)

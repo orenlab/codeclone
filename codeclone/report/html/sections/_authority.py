@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from codeclone.utils.coerce import as_int as _as_int
@@ -20,6 +21,65 @@ from ..widgets.tabs import render_split_tabs
 
 if TYPE_CHECKING:
     from .._context import ReportContext
+
+
+#: Contract IR failure kinds, in the words a reader can act on.
+_UNRESOLVED_REASON_LABELS = {
+    "unresolved_call": "unresolved call",
+    "unresolved_flow": "unresolved flow",
+}
+
+
+def _unresolved_reason_text(item: Mapping[str, object]) -> str:
+    """Say why a sink abstained; an abstention without a reason is not a fact."""
+
+    reasons = [
+        _UNRESOLVED_REASON_LABELS.get(text, text)
+        for value in _as_sequence(item.get("unresolved_reasons"))
+        for text in (str(value).strip(),)
+        if text
+    ]
+    return ", ".join(reasons) if reasons else "-"
+
+
+def _authority_answer(
+    *,
+    enabled: bool,
+    active: int,
+    suppressed: int,
+    registry_contracts: int,
+    governed_total: int,
+    unresolved_total: int,
+) -> tuple[str, Tone]:
+    """Decide what the panel claims, worst-known first.
+
+    An empty violation list over an unresolved population is not a clean
+    result: nothing could have been found there. Abstention is reported as
+    abstention rather than counted as zero.
+    """
+
+    if not enabled:
+        return (
+            "Semantic-authority discovery is report-only; no registry is configured.",
+            "info",
+        )
+    if active:
+        return (
+            f"{active} active violations across {registry_contracts} governed "
+            f"contracts; {suppressed} findings suppressed.",
+            "risk",
+        )
+    if unresolved_total:
+        return (
+            f"Authority cannot be asserted: {unresolved_total} of {governed_total} "
+            "governed owners are unresolved.",
+            "info",
+        )
+    return (
+        f"{active} active violations across {registry_contracts} governed "
+        f"contracts; {suppressed} findings suppressed.",
+        "ok",
+    )
 
 
 def render_authority_panel(ctx: ReportContext) -> str:
@@ -41,6 +101,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
             str(item.get("sink_identity", "")),
             str(item.get("authority_status", "")),
             str(item.get("resolution_state", "")),
+            _unresolved_reason_text(item),
         )
         for item in governed
     ]
@@ -64,16 +125,21 @@ def render_authority_panel(ctx: ReportContext) -> str:
     ]
 
     enabled = bool(summary.get("enforcement_enabled"))
-    answer = (
-        f"{len(active)} active violations across "
-        f"{_as_int(summary.get('registry_contracts'))} governed contracts; "
-        f"{len(suppressed)} findings suppressed."
-        if enabled
-        else "Semantic-authority discovery is report-only; no registry is configured."
+    unresolved_governed = sum(
+        1
+        for item in governed
+        if str(item.get("authority_status", "")).strip() == "unavailable"
     )
-    tone: Tone = "risk" if active else "ok" if enabled else "info"
+    answer, tone = _authority_answer(
+        enabled=enabled,
+        active=len(active),
+        suppressed=len(suppressed),
+        registry_contracts=_as_int(summary.get("registry_contracts")),
+        governed_total=len(governed),
+        unresolved_total=unresolved_governed,
+    )
     governed_panel = render_rows_table(
-        headers=("Contract", "Sink", "Status", "Resolution"),
+        headers=("Contract", "Sink", "Status", "Resolution", "Why"),
         rows=governed_rows,
         empty_message="No governed semantic sinks.",
         column_types={"Status": "status"},
