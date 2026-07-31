@@ -4762,9 +4762,12 @@ def test_html_report_clones_panel_explains_health_arithmetic(tmp_path: Path) -> 
         "Instances: 8 duplicated fragments; 7 unique callables participate.",
         # segments are reported but do not feed the dimension
         "Segment groups reported but not scored: 1.",
-        # the suppressed golden-fixture channel is stated, not hidden
-        "Accepted groups excluded by suppression policy before scoring: 1.",
+        # the suppressed channel is stated once, in the insight line, and
+        # counted on its own card -- not repeated a third time in the note
+        "1 suppressed golden-fixture group is excluded from active review.",
     )
+    assert "Accepted groups excluded by suppression policy" not in html
+    assert "golden-fixture groups are excluded" not in html
     # statistical honesty: duplication is never presented as a share of files
     assert "% of files" not in html
     assert "% of callables" not in html

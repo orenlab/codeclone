@@ -26,6 +26,7 @@ from ...messages.clone_health import (
     clone_health_points,
     clone_health_score,
 )
+from ...messages.explain import plural_word
 from ...suggestions import classify_clone_type
 from ..primitives.data_attrs import _build_data_attrs
 from ..primitives.escape import _escape_html
@@ -813,8 +814,9 @@ def render_clones_panel(ctx: ReportContext) -> tuple[str, bool, int, int]:
     else:
         clones_answer = f"{ctx.clone_groups_total} groups and {ctx.clone_instances_total} instances."
     if suppressed_total > 0:
+        group_word = plural_word(suppressed_total, "group is", "groups are")
         clones_answer += (
-            f" {suppressed_total} suppressed golden-fixture groups are excluded "
+            f" {suppressed_total} suppressed golden-fixture {group_word} excluded "
             "from active review."
         )
     clones_tone: Tone = "warn" if ctx.clone_groups_total > 0 else "ok"

@@ -112,6 +112,10 @@ def clone_health_note_sentences(document: Mapping[str, object]) -> tuple[str, ..
 
     Returns an empty tuple when the clones dimension was not computed: an
     unavailable score is stated by absence, never by a placeholder number.
+
+    The suppressed accepted groups are deliberately absent: the panel states
+    that channel in its insight line and counts it on its own card, and a third
+    statement of one fact reads as three facts.
     """
 
     score = clone_health_score(document)
@@ -125,7 +129,6 @@ def clone_health_note_sentences(document: Mapping[str, object]) -> tuple[str, ..
     )
     scored_groups = _as_int(summary.get("functions")) + _as_int(summary.get("blocks"))
     segment_groups = _as_int(summary.get("segments"))
-    suppressed_groups = _as_int(summary.get("suppressed"))
     instances = _as_int(summary.get("instances"))
     analyzed_files = _analyzed_files(document)
     unique_callables = _unique_callables(document)
@@ -146,11 +149,6 @@ def clone_health_note_sentences(document: Mapping[str, object]) -> tuple[str, ..
     sentences.append(f"{instance_sentence}.")
     if segment_groups > 0:
         sentences.append(f"Segment groups reported but not scored: {segment_groups}.")
-    if suppressed_groups > 0:
-        sentences.append(
-            "Accepted groups excluded by suppression policy before scoring: "
-            f"{suppressed_groups}."
-        )
     return tuple(sentences)
 
 
