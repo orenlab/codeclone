@@ -86,7 +86,7 @@ def test_benchmark_neutral_args_disable_repo_quality_gates() -> None:
     assert "--no-fail-cycles" in BENCHMARK_NEUTRAL_ARGS
     assert "--no-fail-dead-code" in BENCHMARK_NEUTRAL_ARGS
     assert "--no-api-surface" in BENCHMARK_NEUTRAL_ARGS
-    assert "--no-update-metrics-baseline" in BENCHMARK_NEUTRAL_ARGS
+    assert "--no-update-baseline" in BENCHMARK_NEUTRAL_ARGS
     assert "--fail-health" in BENCHMARK_NEUTRAL_ARGS
     assert "--min-typing-coverage" in BENCHMARK_NEUTRAL_ARGS
     assert "--min-docstring-coverage" in BENCHMARK_NEUTRAL_ARGS
@@ -370,3 +370,23 @@ def test_benchmark_timing_regressions_report_excess_slowdown() -> None:
         ),
         "warm_full: median 0.3200s exceeds baseline 0.3000s by 6.67% (allowed 5.00%)",
     ]
+
+
+def test_benchmark_neutral_args_are_a_valid_cli_contract() -> None:
+    """Every neutral argument must still exist in the CLI it drives.
+
+    The benchmark harness speaks to CodeClone through argparse, so a flag that
+    is renamed or removed turns every scenario into exit code 2 before any work
+    happens -- which is exactly how this drifted: the harness kept passing
+    ``--no-update-metrics-baseline`` long after the option was gone, and only
+    CI noticed. Asserting the flags one by one could not catch that, because
+    such an assertion only proves the harness is self-consistent.
+
+    This parses the real argument list with the real parser, so the harness can
+    never again disagree with the contract it calls.
+    """
+
+    from codeclone.config.argparse_builder import build_parser
+
+    parser = build_parser("test")
+    parser.parse_args([".", *BENCHMARK_NEUTRAL_ARGS])

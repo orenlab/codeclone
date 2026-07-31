@@ -59,7 +59,8 @@ BENCHMARK_NEUTRAL_ARGS: tuple[str, ...] = (
     "--min-docstring-coverage",
     "-1",
     "--no-api-surface",
-    "--no-update-metrics-baseline",
+    # Baseline writing stays off: a benchmark measures, it never publishes.
+    "--no-update-baseline",
 )
 
 

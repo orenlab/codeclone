@@ -12,6 +12,7 @@ Publication and runtime cutover remain owned by Phase 39N.
 from __future__ import annotations
 
 import json
+import stat
 from dataclasses import replace
 from datetime import datetime, timezone
 from importlib.metadata import PackageNotFoundError, version
@@ -324,10 +325,19 @@ def _read_bytes(path: Path, *, limit_bytes: int) -> bytes | ContainerReadFailure
     if limit_bytes <= 0:
         return _read_failure("too_large", "container size limit must be positive")
     try:
-        size = path.stat().st_size
+        status = path.stat()
     except OSError as exc:
         return _read_failure("unreadable", str(exc))
-    if size > limit_bytes:
+    # What a path IS decides before how large it claims to be. ``st_size`` on a
+    # directory is filesystem bookkeeping rather than a container size -- 4096
+    # on Linux against a few dozen bytes on macOS -- so comparing it with the
+    # limit made the verdict depend on the filesystem, and "too_large" was the
+    # wrong answer either way for a path that is not a container at all.
+    if not stat.S_ISREG(status.st_mode):
+        return _read_failure(
+            "unreadable", f"container path is not a regular file: {path}"
+        )
+    if status.st_size > limit_bytes:
         return _read_failure("too_large", "container exceeds configured size limit")
     try:
         with path.open("rb") as handle:

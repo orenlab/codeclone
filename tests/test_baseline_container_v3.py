@@ -262,6 +262,17 @@ def _remove_lane(document: dict[str, object], name: str) -> None:
     document["lanes"] = lanes
 
 
+def _stat_with_size(result: os.stat_result, size: int) -> os.stat_result:
+    """Return ``result`` with only its size replaced.
+
+    Simulations here change what a stat REPORTS, never what the path is, so
+    every other field - the mode above all - is carried through unchanged.
+    """
+
+    fields = tuple(result)
+    return os.stat_result((*fields[:6], size, *fields[7:10]))
+
+
 def _assert_read_failure(value: object, reason: str) -> ContainerReadFailure:
     assert isinstance(value, ContainerReadFailure)
     assert value.reason == reason
@@ -689,9 +700,15 @@ def test_reader_unreadable_unicode_and_authentication_taxonomy(
         *,
         follow_symlinks: bool = True,
     ) -> os.stat_result:
+        result = original_stat(path, follow_symlinks=follow_symlinks)
         if path == growth_path:
-            return os.stat_result((0, 0, 0, 0, 0, 0, 0, 0, 0, 0))
-        return original_stat(path, follow_symlinks=follow_symlinks)
+            # Only the SIZE goes stale. The mode still describes a regular
+            # file, because that is what a stale stat of a growing file looks
+            # like; zeroing the whole record would simulate something that
+            # cannot happen and would exercise the not-a-regular-file branch
+            # instead of the growth guard this pins.
+            return _stat_with_size(result, 0)
+        return result
 
     monkeypatch.setattr(Path, "stat", stale_stat)
     growth = read_container_v3(growth_path, limit_bytes=1)
@@ -1593,3 +1610,37 @@ def test_outdated_lane_payload_must_still_be_a_json_object(
             "module_identity",
             BaselineLaneInput.model_validate_json(orjson.dumps(lane)),
         )
+
+
+def test_a_directory_is_unreadable_whatever_its_stat_size_reports(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A path that is not a regular file is unreadable, never too_large.
+
+    ``st_size`` on a directory is filesystem bookkeeping, not a container size:
+    Linux reports 4096 where macOS reports a few dozen bytes. Comparing it
+    against the limit made the verdict depend on the filesystem -- the same
+    directory read as ``unreadable`` locally and ``too_large`` on CI -- and the
+    ``too_large`` answer was the wrong one either way, because it tells an
+    operator their baseline is oversized when the path is not a baseline at
+    all.
+
+    The precedence is therefore pinned here: what a path IS decides before how
+    large it claims to be. The monkeypatch reproduces the Linux number so the
+    contract is asserted on every platform rather than only where the number
+    happens to be small.
+    """
+
+    real_stat = Path.stat
+
+    def linux_sized_directory(path: Path, **kwargs: object) -> os.stat_result:
+        result = real_stat(path, **kwargs)  # type: ignore[arg-type]
+        if path == tmp_path:
+            return _stat_with_size(result, 4096)
+        return result
+
+    monkeypatch.setattr(Path, "stat", linux_sized_directory)
+
+    assert Path(tmp_path).stat().st_size == 4096
+    _assert_read_failure(read_container_v3(tmp_path, limit_bytes=1024), "unreadable")

@@ -157,6 +157,10 @@
       "description": "Return dead-code findings from a compatible stored run."
     },
     {
+      "name": "check_authority",
+      "description": "Return active canonical semantic-authority violation findings for one run, with deterministic ordering and bounded detail."
+    },
+    {
       "name": "compare_runs",
       "description": "Run-to-run delta: regressions, improvements, health change."
     },
