@@ -68,6 +68,7 @@ from ...utils.json_io import (
     write_json_text_atomically,
 )
 from ...utils.repo_paths import RepoPathPolicy, resolve_under_repo_root
+from .subcommand_parsers import SubparserRegistry, add_root_command
 
 
 def _representation_kind(raw: str) -> str:
@@ -89,12 +90,55 @@ def _require_capability(capability: AnalyticsCapability) -> None:
         )
 
 
-def _add_root(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--root",
-        default=".",
-        help="Repository root (default: .)",
+_ANALYTICS_ROOT_HELP = "Repository root (default: .)"
+
+
+def _command(
+    registry: SubparserRegistry,
+    name: str,
+    *,
+    help_text: str,
+) -> argparse.ArgumentParser:
+    """Open one `codeclone analytics` subcommand with its repository root option."""
+
+    return add_root_command(
+        registry,
+        name,
+        help_text=help_text,
+        root_help=_ANALYTICS_ROOT_HELP,
     )
+
+
+def _add_snapshot_id_option(
+    parser: argparse.ArgumentParser,
+    *,
+    required: bool,
+) -> None:
+    """Attach the snapshot selector, required for snapshot-scoped commands."""
+
+    parser.add_argument("--snapshot-id", required=required)
+
+
+def _add_run_id_option(parser: argparse.ArgumentParser) -> None:
+    """Attach the required clustering-run selector."""
+
+    parser.add_argument("--run-id", required=True)
+
+
+def _add_representation_option(parser: argparse.ArgumentParser) -> None:
+    """Attach the shared intent-representation selector."""
+
+    parser.add_argument(
+        "--representation",
+        choices=("description", "description_with_frame"),
+        default="description",
+    )
+
+
+def _add_output_path_option(parser: argparse.ArgumentParser, flag: str) -> None:
+    """Attach an optional filesystem output path option."""
+
+    parser.add_argument(flag, type=Path, default=None)
 
 
 def _add_clustering_controls(parser: argparse.ArgumentParser) -> None:
@@ -118,22 +162,19 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="codeclone analytics")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    snapshot = sub.add_parser("snapshot", help="Build immutable intent corpus snapshot")
-    _add_root(snapshot)
-    snapshot.add_argument(
-        "--representation",
-        choices=("description", "description_with_frame"),
-        default="description",
+    snapshot = _command(
+        sub, "snapshot", help_text="Build immutable intent corpus snapshot"
     )
-    snapshot.add_argument("--output-json", type=Path, default=None)
+    _add_representation_option(snapshot)
+    _add_output_path_option(snapshot, "--output-json")
 
-    embed = sub.add_parser("embed", help="Generate analytics embeddings for snapshot")
-    _add_root(embed)
-    embed.add_argument("--snapshot-id", required=True)
+    embed = _command(
+        sub, "embed", help_text="Generate analytics embeddings for snapshot"
+    )
+    _add_snapshot_id_option(embed, required=True)
 
-    cluster = sub.add_parser("cluster", help="Cluster embedded snapshot")
-    _add_root(cluster)
-    cluster.add_argument("--snapshot-id")
+    cluster = _command(sub, "cluster", help_text="Cluster embedded snapshot")
+    _add_snapshot_id_option(cluster, required=False)
     cluster.add_argument("--embedding-generation-id")
     _add_clustering_controls(cluster)
     cluster.add_argument("--select-run", dest="select_run", default=None)
@@ -148,51 +189,45 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Profile batch id, profile id, or none for global selection",
     )
 
-    build = sub.add_parser("build", help="Snapshot, embed, and cluster end-to-end")
-    _add_root(build)
+    build = _command(sub, "build", help_text="Snapshot, embed, and cluster end-to-end")
     build.add_argument(
         "--lane",
         choices=("intent",),
         default="intent",
     )
-    build.add_argument(
-        "--representation",
-        choices=("description", "description_with_frame"),
-        default="description",
-    )
+    _add_representation_option(build)
     _add_clustering_controls(build)
     build.add_argument("--use-recommended", action="store_true")
-    build.add_argument("--html-out", type=Path, default=None)
-    build.add_argument("--json-out", type=Path, default=None)
+    _add_output_path_option(build, "--html-out")
+    _add_output_path_option(build, "--json-out")
 
-    clusters = sub.add_parser("clusters", help="List clustering runs for snapshot")
-    _add_root(clusters)
-    clusters.add_argument("--snapshot-id", required=True)
+    clusters = _command(sub, "clusters", help_text="List clustering runs for snapshot")
+    _add_snapshot_id_option(clusters, required=True)
 
-    cluster_show = sub.add_parser("cluster-show", help="Export one clustering run JSON")
-    _add_root(cluster_show)
-    cluster_show.add_argument("--snapshot-id", required=True)
-    cluster_show.add_argument("--run-id", required=True)
-    cluster_show.add_argument("--output", type=Path, default=None)
+    cluster_show = _command(
+        sub, "cluster-show", help_text="Export one clustering run JSON"
+    )
+    _add_snapshot_id_option(cluster_show, required=True)
+    _add_run_id_option(cluster_show)
+    _add_output_path_option(cluster_show, "--output")
 
-    outliers = sub.add_parser("outliers", help="Show noise cluster assignments")
-    _add_root(outliers)
-    outliers.add_argument("--snapshot-id", required=True)
-    outliers.add_argument("--run-id", required=True)
+    outliers = _command(sub, "outliers", help_text="Show noise cluster assignments")
+    _add_snapshot_id_option(outliers, required=True)
+    _add_run_id_option(outliers)
 
     profiles = sub.add_parser("profiles", help="Inspect analytics profile registry")
     profile_sub = profiles.add_subparsers(dest="profile_command", required=True)
-    profile_list = profile_sub.add_parser("list", help="List registered profiles")
-    _add_root(profile_list)
-    profile_show = profile_sub.add_parser("show", help="Show one profile manifest")
-    _add_root(profile_show)
+    _command(profile_sub, "list", help_text="List registered profiles")
+
+    profile_show = _command(profile_sub, "show", help_text="Show one profile manifest")
     profile_show.add_argument("--profile-id", required=True)
-    profile_validate = profile_sub.add_parser(
+
+    profile_validate = _command(
+        profile_sub,
         "validate",
-        help="Validate one manifest or the resolved registry",
+        help_text="Validate one manifest or the resolved registry",
     )
-    _add_root(profile_validate)
-    profile_validate.add_argument("--path", type=Path, default=None)
+    _add_output_path_option(profile_validate, "--path")
 
     return parser
 

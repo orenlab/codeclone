@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
+from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import markdown as md_msgs
 from ..messages.projections import PROJECTION_NONE
@@ -235,31 +236,51 @@ def _append_metric_items(
 
 
 def render_markdown_report_document(payload: Mapping[str, object]) -> str:
-    meta = _as_mapping(payload.get("meta"))
-    inventory = _as_mapping(payload.get("inventory"))
-    findings = _as_mapping(payload.get("findings"))
-    metrics = _as_mapping(payload.get("metrics"))
-    derived = _as_mapping(payload.get("derived"))
-    integrity = _as_mapping(payload.get("integrity"))
-    runtime = _as_mapping(meta.get("runtime"))
-    findings_summary = _as_mapping(findings.get("summary"))
-    findings_groups = _as_mapping(findings.get("groups"))
-    clone_groups = _as_mapping(findings_groups.get("clones"))
-    suppressed_clone_groups = _as_mapping(clone_groups.get("suppressed"))
-    overview = _as_mapping(derived.get("overview"))
-    hotlists = _as_mapping(derived.get("hotlists"))
+    (
+        meta,
+        derived,
+        baseline,
+        runtime,
+        findings_summary,
+        findings_groups,
+        clone_groups,
+        suppressed_clone_groups,
+        overview,
+        hotlists,
+        metrics_families,
+        health_snapshot,
+        inventory_files,
+        inventory_code,
+        digest,
+        canonicalization,
+        family_summary,
+        severity_summary,
+        impact_summary,
+        source_breakdown,
+    ) = sections(
+        payload,
+        "meta",
+        "derived",
+        "baseline",
+        "meta.runtime",
+        "findings.summary",
+        "findings.groups",
+        "findings.groups.clones",
+        "findings.groups.clones.suppressed",
+        "derived.overview",
+        "derived.hotlists",
+        "metrics.families",
+        "derived.overview.health_snapshot",
+        "inventory.files",
+        "inventory.code",
+        "integrity.digests.envelope",
+        "integrity.canonicalization",
+        "findings.summary.families",
+        "findings.summary.severity",
+        "findings.summary.impact_scope",
+        "derived.overview.source_scope_breakdown",
+    )
     suggestions = _as_sequence(derived.get("suggestions"))
-    metrics_families = _as_mapping(metrics.get("families"))
-    health_snapshot = _as_mapping(overview.get("health_snapshot"))
-    inventory_files = _as_mapping(inventory.get("files"))
-    inventory_code = _as_mapping(inventory.get("code"))
-    digest = _as_mapping(_as_mapping(integrity.get("digests")).get("envelope"))
-    canonicalization = _as_mapping(integrity.get("canonicalization"))
-    family_summary = _as_mapping(findings_summary.get("families"))
-    severity_summary = _as_mapping(findings_summary.get("severity"))
-    impact_summary = _as_mapping(findings_summary.get("impact_scope"))
-    source_breakdown = _as_mapping(overview.get("source_scope_breakdown"))
-    baseline = _as_mapping(payload.get("baseline"))
     lane_trust = _as_sequence(baseline.get("sorted_lane_trust"))
 
     lines = [

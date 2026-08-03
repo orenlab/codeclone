@@ -15,6 +15,7 @@ from ...analysis.blast_radius import BlastRadiusResult, compute_blast_radius
 from ...contracts import ExitCode
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.mapping_paths import section
 from .types import PrinterLike
 
 _RISK_STYLES = {
@@ -27,11 +28,8 @@ _MAX_RENDERED_ITEMS = 20
 
 
 def _report_run_id(report_document: Mapping[str, object]) -> str:
-    integrity = _as_mapping(report_document.get("integrity"))
-    digests = _as_mapping(integrity.get("digests"))
-    envelope = _as_mapping(digests.get("envelope"))
-    value = str(envelope.get("value", "")).strip()
-    return value or "cli-blast-radius"
+    envelope = section(report_document, "integrity.digests.envelope")
+    return str(envelope.get("value", "")).strip() or "cli-blast-radius"
 
 
 def _inventory_paths(report_document: Mapping[str, object]) -> frozenset[str]:

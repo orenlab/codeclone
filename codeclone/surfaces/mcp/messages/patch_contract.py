@@ -28,6 +28,11 @@ NEXT_STEP_HINTS: Final[dict[str, str]] = {
         "Governance config changes require a post-edit analysis."
         " Run analyze_repository and pass after_run_id."
     ),
+    "before_run_root_mismatch": (
+        "The before-run belongs to a different repository root than the"
+        " intent. Run analyze_repository on the intent's own root and pass"
+        " that run_id as before_run_id."
+    ),
     "incomparable_runs": (
         "Before and after runs are not comparable."
         " Re-run analyze_repository with the same settings."

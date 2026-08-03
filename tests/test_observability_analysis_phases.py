@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
+
 from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import (
     PHASE_US_COUNTER_SUFFIXES,
@@ -172,14 +174,27 @@ def test_phase39l_pipeline_owns_each_observation_span_once() -> None:
     assert source.count('span(name="observations.lanes.build")') == 1
 
 
-def test_phase39m_container_owns_each_stage_span_once() -> None:
-    root = Path(__file__).resolve().parents[1]
-    container = (root / "codeclone/baseline/container.py").read_text(encoding="utf-8")
-    trust = (root / "codeclone/baseline/container_trust.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize(
+    ("module_path", "span_name"),
+    [
+        ("codeclone/baseline/container.py", "baseline.container.build"),
+        ("codeclone/baseline/container.py", "baseline.container.read"),
+        ("codeclone/baseline/container_trust.py", "baseline.container.trust"),
+        ("codeclone/core/reporting.py", "report.build"),
+        ("codeclone/report/gates/evaluator.py", "report.evaluate"),
+        ("codeclone/core/reporting.py", "report.render"),
+    ],
+)
+def test_each_instrumented_span_has_exactly_one_owner(
+    module_path: str,
+    span_name: str,
+) -> None:
+    """One module opens each span once; a second opener would double-count."""
 
-    assert container.count('span(name="baseline.container.build")') == 1
-    assert container.count('span(name="baseline.container.read")') == 1
-    assert trust.count('span(name="baseline.container.trust")') == 1
+    source = (Path(__file__).resolve().parents[1] / module_path).read_text(
+        encoding="utf-8"
+    )
+    assert source.count(f'span(name="{span_name}")') == 1
 
 
 def test_phase39n_publisher_owns_publication_span_once() -> None:
@@ -187,15 +202,3 @@ def test_phase39n_publisher_owns_publication_span_once() -> None:
     source = (root / "codeclone/baseline/publish.py").read_text(encoding="utf-8")
 
     assert source.count('span(name="baseline.container.publish")') == 1
-
-
-def test_phase39o_report_owns_each_inner_span_once() -> None:
-    root = Path(__file__).resolve().parents[1]
-    reporting = (root / "codeclone/core/reporting.py").read_text(encoding="utf-8")
-    evaluator = (root / "codeclone/report/gates/evaluator.py").read_text(
-        encoding="utf-8"
-    )
-
-    assert reporting.count('span(name="report.build")') == 1
-    assert evaluator.count('span(name="report.evaluate")') == 1
-    assert reporting.count('span(name="report.render")') == 1

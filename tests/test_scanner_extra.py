@@ -18,6 +18,7 @@ from codeclone.scanner import (
     discover_python_files,
     iter_py_files,
 )
+from tests._tmp_tree import make_dir, write_file
 
 
 def _symlink_or_skip(
@@ -214,33 +215,29 @@ def test_scanner_internal_path_guards_and_symlink_resolve_error(
     )
 
 
-def test_is_included_python_file_non_py_rejected(tmp_path: Path) -> None:
-    root = tmp_path / "root"
-    root.mkdir()
-    txt = root / "a.txt"
-    txt.write_text("x", "utf-8")
+@pytest.mark.parametrize(
+    ("filename", "source", "included"),
+    [
+        ("a.txt", "x", False),
+        ("a.py", "x = 1\n", True),
+    ],
+    ids=["non_py_rejected", "regular_py_accepted"],
+)
+def test_is_included_python_file_honours_suffix(
+    tmp_path: Path,
+    filename: str,
+    source: str,
+    included: bool,
+) -> None:
+    root = make_dir(tmp_path, "root")
+    candidate = write_file(root, filename, source)
     assert (
         scanner._is_included_python_file(
-            file_path=txt,
+            file_path=candidate,
             excludes_set=set(),
             rootp=root,
         )
-        is False
-    )
-
-
-def test_is_included_python_file_regular_py_accepted(tmp_path: Path) -> None:
-    root = tmp_path / "root"
-    root.mkdir()
-    pyf = root / "a.py"
-    pyf.write_text("x = 1\n", "utf-8")
-    assert (
-        scanner._is_included_python_file(
-            file_path=pyf,
-            excludes_set=set(),
-            rootp=root,
-        )
-        is True
+        is included
     )
 
 

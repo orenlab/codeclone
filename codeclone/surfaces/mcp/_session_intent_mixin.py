@@ -48,6 +48,7 @@ from ._session_shared import (
     CodeCloneMCPRunStore,
     MCPRunNotFoundError,
     MCPRunRecord,
+    MCPRunRootMismatchError,
     MCPServiceContractError,
 )
 from ._workspace_intents import (
@@ -130,7 +131,7 @@ class _MCPSessionIntentMixin:
         depth: str = "direct",
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         blast_radius_session = cast(_MCPSessionBlastRadiusMixin, super())
         payload = blast_radius_session.get_blast_radius(
             files=files,
@@ -173,6 +174,7 @@ class _MCPSessionIntentMixin:
             case "declare":
                 return self._declare_change_intent(
                     run_id=run_id,
+                    root=root,
                     scope=scope,
                     intent=intent,
                     expected_effects=expected_effects,
@@ -228,10 +230,28 @@ class _MCPSessionIntentMixin:
                     "renew, reset_workspace."
                 )
 
+    def _run_for_declared_root(
+        self,
+        *,
+        run_id: str | None,
+        root: str | None,
+    ) -> MCPRunRecord:
+        """Resolve the run an intent will be declared against.
+
+        With an explicit root the lookup is bound to that checkout. Without
+        one it fails closed if the id is held under several roots, rather than
+        guessing which worktree the agent meant.
+        """
+
+        if root is not None:
+            return self._runs.get_for_root(run_id, root=_helpers._resolve_root(root))
+        return self._runs.resolve_any_root(run_id)
+
     def _declare_change_intent(
         self,
         *,
         run_id: str | None,
+        root: str | None = None,
         scope: dict[str, object] | None,
         intent: str | None,
         expected_effects: Sequence[str] | None,
@@ -239,7 +259,7 @@ class _MCPSessionIntentMixin:
         on_conflict: str | None = None,
         dirty_snapshot: DirtySnapshot | None = None,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._run_for_declared_root(run_id=run_id, root=root)
         try:
             normalized_scope = normalize_intent_scope(scope)
             normalized_expected_effects = normalize_expected_effects(expected_effects)
@@ -267,7 +287,10 @@ class _MCPSessionIntentMixin:
         replaced_intents: list[IntentRecord] = []
         with self._state_lock:
             for existing_id, existing in tuple(self._active_intents.items()):
-                if existing.run_id == record.run_id:
+                # Replacement is per (root, run_id). Same-commit worktrees
+                # share a run id, and evicting on the id alone orphaned the
+                # other checkout's live intent.
+                if existing.run_id == record.run_id and existing.root == record.root:
                     self._active_intents.pop(existing_id, None)
                     replaced_intents.append(existing)
             self._intent_sequence += 1
@@ -279,6 +302,7 @@ class _MCPSessionIntentMixin:
             record_payload = IntentRecord(
                 intent_id=intent_id,
                 run_id=record.run_id,
+                root=record.root,
                 report_digest=self._report_digest_value(record),
                 status=IntentStatus.ACTIVE,
                 declared_at_utc=declared_at,
@@ -289,7 +313,7 @@ class _MCPSessionIntentMixin:
                 blast_radius_summary=blast_summary,
             )
             self._active_intents[intent_id] = record_payload
-            self._runs.pin(record.run_id)
+            self._runs.pin(record.run_id, root=record.root)
         workspace_record = self._workspace_record_from_intent(
             record=record,
             intent=record_payload,
@@ -402,7 +426,7 @@ class _MCPSessionIntentMixin:
         queued_intent = replace(intent, status=IntentStatus.QUEUED)
         with self._state_lock:
             self._active_intents[intent.intent_id] = queued_intent
-            self._runs.unpin(record.run_id)
+            self._runs.unpin(record.run_id, root=record.root)
         update_workspace_intent_status(
             root=record.root,
             pid=self._agent_pid,
@@ -472,8 +496,11 @@ class _MCPSessionIntentMixin:
             )
         # Resolve the before-run — may have been evicted (not pinned).
         try:
-            record = self._runs.get(queued_intent.run_id)
-        except MCPRunNotFoundError:
+            record = self._runs.get_for_root(
+                queued_intent.run_id,
+                root=queued_intent.root,
+            )
+        except (MCPRunNotFoundError, MCPRunRootMismatchError):
             return {
                 "intent_id": intent_id,
                 "status": "unverified",
@@ -525,7 +552,7 @@ class _MCPSessionIntentMixin:
         promoted = replace(queued_intent, status=IntentStatus.ACTIVE)
         with self._state_lock:
             self._active_intents[intent_id] = promoted
-            self._runs.pin(record.run_id)
+            self._runs.pin(record.run_id, root=record.root)
         update_workspace_intent_status(
             root=record.root,
             pid=self._agent_pid,
@@ -698,14 +725,27 @@ class _MCPSessionIntentMixin:
                 removed_ids = tuple(self._active_intents)
                 removed_intents = tuple(self._active_intents.values())
                 self._active_intents.clear()
+            # The registry row to remove belongs to the *intent's* root. Reading
+            # it back off a resolved run record made clear follow whichever
+            # checkout happened to own that run id last.
             workspace_targets: tuple[tuple[Path, IntentRecord, str], ...] = tuple(
-                (record.root, removed_intent, self._report_digest_value(record))
+                (
+                    removed_intent.root,
+                    removed_intent,
+                    self._report_digest_value(record)
+                    if record is not None
+                    else removed_intent.report_digest,
+                )
                 for removed_intent in removed_intents
-                for record in (self._optional_run_record(removed_intent.run_id),)
-                if record is not None
+                for record in (
+                    self._optional_run_record(
+                        removed_intent.run_id,
+                        root=removed_intent.root,
+                    ),
+                )
             )
             for removed_intent in removed_intents:
-                self._runs.unpin(removed_intent.run_id)
+                self._runs.unpin(removed_intent.run_id, root=removed_intent.root)
         workspace_cleared = True
         for root_path, removed_intent, _report_digest in workspace_targets:
             workspace_cleared = (
@@ -746,8 +786,14 @@ class _MCPSessionIntentMixin:
                 active_intent = self._active_intents.get(intent_id)
             if active_intent is None:
                 raise MCPServiceContractError(f"Unknown change intent id: {intent_id}")
-            return self._runs.get(active_intent.run_id), active_intent
-        record = self._runs.get(run_id)
+            return (
+                self._runs.get_for_root(
+                    active_intent.run_id,
+                    root=active_intent.root,
+                ),
+                active_intent,
+            )
+        record = self._runs.resolve_any_root(run_id)
         with self._state_lock:
             matching = [
                 intent
@@ -936,6 +982,7 @@ class _MCPSessionIntentMixin:
         records = list_workspace_intents(root=root_path, exclude_stale=False)
         recovery_available = self._recovery_available_payload(
             records=recovery_records,
+            root_path=root_path,
             now=now,
         )
         payload: dict[str, object] = {
@@ -1099,8 +1146,8 @@ class _MCPSessionIntentMixin:
     ) -> _RecoveryRun | dict[str, object]:
         workspace_record = target.workspace_record
         try:
-            record = self._runs.get(run_id)
-        except MCPRunNotFoundError:
+            record = self._runs.get_for_root(run_id, root=target.root_path)
+        except (MCPRunNotFoundError, MCPRunRootMismatchError):
             return self._recovery_rejected(
                 intent_id=workspace_record.intent_id,
                 reason="run_not_available",
@@ -1162,6 +1209,7 @@ class _MCPSessionIntentMixin:
             recovered = IntentRecord(
                 intent_id=workspace_record.intent_id,
                 run_id=recovery_run.record.run_id,
+                root=recovery_run.record.root,
                 report_digest=recovery_run.report_digest,
                 status=IntentStatus.ACTIVE,
                 declared_at_utc=workspace_record.declared_at_utc,
@@ -1172,7 +1220,10 @@ class _MCPSessionIntentMixin:
                 blast_radius_summary=dict(workspace_record.blast_radius_summary),
             )
             self._active_intents[workspace_record.intent_id] = recovered
-            self._runs.pin(recovery_run.record.run_id)
+            self._runs.pin(
+                recovery_run.record.run_id,
+                root=recovery_run.record.root,
+            )
         return recovered
 
     def _rewrite_recovered_workspace_record(
@@ -1217,7 +1268,7 @@ class _MCPSessionIntentMixin:
     def _rollback_recovered_intent(self, recovered: IntentRecord) -> None:
         with self._state_lock:
             self._active_intents.pop(recovered.intent_id, None)
-            self._runs.unpin(recovered.run_id)
+            self._runs.unpin(recovered.run_id, root=recovered.root)
 
     def _recovered_payload(
         self,
@@ -1265,7 +1316,9 @@ class _MCPSessionIntentMixin:
             raise MCPServiceContractError(
                 "action='reset_workspace' requires intent_id."
             )
-        root_path = self._resolve_workspace_root(root)
+        with self._state_lock:
+            known_intent = self._active_intents.get(intent_id)
+        root_path = self._resolve_workspace_root(root, intent=known_intent)
         found = find_workspace_intent(
             root=root_path,
             intent_id=intent_id,
@@ -1343,6 +1396,7 @@ class _MCPSessionIntentMixin:
         self,
         *,
         records: Sequence[WorkspaceIntentRecord],
+        root_path: Path,
         now: datetime,
     ) -> list[dict[str, object]]:
         available: list[dict[str, object]] = []
@@ -1355,7 +1409,9 @@ class _MCPSessionIntentMixin:
             )
             if ownership != IntentOwnership.RECOVERABLE:
                 continue
-            run_available = self._optional_run_record(record.run_id) is not None
+            run_available = (
+                self._optional_run_record(record.run_id, root=root_path) is not None
+            )
             available.append(
                 {
                     "intent_id": record.intent_id,
@@ -1412,20 +1468,36 @@ class _MCPSessionIntentMixin:
             return "Intent is already actively owned by this session."
         return "Intent is not recoverable."
 
-    def _resolve_workspace_root(self, root: str | None) -> Path:
+    def _resolve_workspace_root(
+        self,
+        root: str | None,
+        *,
+        intent: IntentRecord | None = None,
+    ) -> Path:
+        """Resolve the checkout a workspace action addresses.
+
+        Never inferred from whatever was analyzed last: that silently pointed
+        workspace mutations at a sibling worktree. Either the caller names the
+        root, or it comes from the intent being acted on.
+        """
+
         if root is not None:
             return _helpers._resolve_root(root)
-        try:
-            return self._runs.get(None).root
-        except MCPRunNotFoundError as exc:
-            raise MCPServiceContractError(
-                "Workspace intent actions require root or a latest MCP run."
-            ) from exc
+        if intent is not None:
+            return intent.root
+        raise MCPServiceContractError(
+            "Workspace intent actions require an explicit root."
+        )
 
-    def _optional_run_record(self, run_id: str) -> MCPRunRecord | None:
+    def _optional_run_record(
+        self,
+        run_id: str,
+        *,
+        root: Path,
+    ) -> MCPRunRecord | None:
         try:
-            return self._runs.get(run_id)
-        except MCPRunNotFoundError:
+            return self._runs.get_for_root(run_id, root=root)
+        except (MCPRunNotFoundError, MCPRunRootMismatchError):
             return None
 
     def _blast_radius_summary(

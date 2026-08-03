@@ -92,6 +92,17 @@ from .memory_render import (
     render_status_report,
     render_vacuum_report,
 )
+from .subcommand_parsers import (
+    CommandDeclaration,
+    OptionApplier,
+    add_command_group,
+    build_root_commands,
+    flag_option,
+    json_option,
+    limit_option,
+    positional_option,
+    value_option,
+)
 from .types import PrinterLike
 
 _CLI_GOVERNANCE_BREAK_GLASS_FLAG = "--i-know-what-im-doing"
@@ -199,297 +210,316 @@ def _dispatch_memory_command(
     return int(ExitCode.CONTRACT_ERROR)
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="codeclone memory")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+_MEMORY_ROOT_HELP = "Repository root path."
 
-    def _add_root(sub: argparse.ArgumentParser) -> None:
-        sub.add_argument("--root", default=".", help="Repository root path.")
 
-    init_parser = subparsers.add_parser("init", help="Initialize engineering memory.")
-    _add_root(init_parser)
-    init_parser.add_argument("--dry-run", action="store_true")
-    init_parser.add_argument("--refresh", action="store_true")
-    init_parser.add_argument("--from-report", metavar="PATH")
-    init_parser.add_argument("--no-docs", action="store_true")
-    init_parser.add_argument("--no-tests", action="store_true")
+def _match_option(parser: argparse.ArgumentParser) -> None:
+    """Attach the shared keyword match-mode option."""
 
-    status_parser = subparsers.add_parser(
-        "status",
-        help="Show engineering memory status.",
-    )
-    _add_root(status_parser)
-
-    for_path = subparsers.add_parser(
-        "for-path", help="List memory records linked to a source path."
-    )
-    _add_root(for_path)
-    for_path.add_argument("path", help="Repo-relative source file path.")
-    for_path.add_argument("--limit", type=int, default=20)
-
-    search_parser = subparsers.add_parser(
-        "search",
-        help="Search engineering memory records by keyword.",
-    )
-    _add_root(search_parser)
-    search_parser.add_argument("query", help="Keyword query.")
-    search_parser.add_argument("--limit", type=int, default=20)
-    search_parser.add_argument(
+    parser.add_argument(
         "--match",
         choices=("any", "all"),
         default="any",
         help="Match any token (default) or require all tokens.",
     )
-    search_parser.add_argument(
-        "--active-only",
+
+
+def _include_routine_option(parser: argparse.ArgumentParser) -> None:
+    """Attach the shared routine-trajectory inclusion flag."""
+
+    parser.add_argument(
+        "--include-routine",
         action="store_true",
-        help="Exclude stale records from search results.",
-    )
-    search_parser.add_argument(
-        "--semantic",
-        action="store_true",
-        help="Blend semantic proximity into ranking (requires the index).",
+        help="Include routine analysis-only trajectories.",
     )
 
-    stale_parser = subparsers.add_parser(
-        "stale",
-        help="List stale engineering memory records.",
-    )
-    _add_root(stale_parser)
-    stale_parser.add_argument("--limit", type=int, default=50)
 
-    vacuum_parser = subparsers.add_parser(
-        "vacuum",
-        help="Purge expired stale/draft/rejected/archived records.",
-    )
-    _add_root(vacuum_parser)
+def _by_option(parser: argparse.ArgumentParser) -> None:
+    """Attach the actor attribution option for governance transitions."""
 
-    coverage_parser = subparsers.add_parser(
-        "coverage",
-        help="Show memory coverage for repo-relative paths.",
+    parser.add_argument("--by", default="human")
+
+
+def _governance_options(*, with_reason: bool) -> tuple[OptionApplier, ...]:
+    """Return the break-glass option sequence shared by governance commands.
+
+    approve/reject/archive differ only in name, help text, and whether they
+    carry ``--reason``; the rest of the break-glass contract is fixed here so
+    the three commands cannot drift apart.
+    """
+
+    reason: tuple[OptionApplier, ...] = (
+        (value_option("--reason"),) if with_reason else ()
     )
-    _add_root(coverage_parser)
-    coverage_parser.add_argument(
-        "paths",
-        nargs="+",
-        help="Repo-relative paths to inspect.",
+    return (
+        positional_option("record_id"),
+        _by_option,
+        *reason,
+        flag_option(_CLI_GOVERNANCE_BREAK_GLASS_FLAG),
     )
 
-    review_parser = subparsers.add_parser(
-        "review-candidates",
-        help="List draft memory candidates awaiting review.",
-    )
-    _add_root(review_parser)
-    review_parser.add_argument("--limit", type=int, default=50)
 
-    approve_parser = subparsers.add_parser(
-        "approve",
-        help="Approve a draft memory record.",
-    )
-    _add_root(approve_parser)
-    approve_parser.add_argument("record_id")
-    approve_parser.add_argument("--by", default="human")
-    approve_parser.add_argument(_CLI_GOVERNANCE_BREAK_GLASS_FLAG, action="store_true")
-
-    reject_parser = subparsers.add_parser(
-        "reject",
-        help="Reject a draft memory record.",
-    )
-    _add_root(reject_parser)
-    reject_parser.add_argument("record_id")
-    reject_parser.add_argument("--by", default="human")
-    reject_parser.add_argument("--reason")
-    reject_parser.add_argument(_CLI_GOVERNANCE_BREAK_GLASS_FLAG, action="store_true")
-
-    archive_parser = subparsers.add_parser(
-        "archive",
-        help="Archive an active memory record.",
-    )
-    _add_root(archive_parser)
-    archive_parser.add_argument("record_id")
-    archive_parser.add_argument("--by", default="human")
-    archive_parser.add_argument(_CLI_GOVERNANCE_BREAK_GLASS_FLAG, action="store_true")
-
-    semantic_parser = subparsers.add_parser(
-        "semantic",
-        help="Semantic retrieval index (status / rebuild / search).",
-    )
-    semantic_sub = semantic_parser.add_subparsers(dest="semantic_action", required=True)
-    sem_status = semantic_sub.add_parser("status", help="Show semantic index status.")
-    _add_root(sem_status)
-    sem_rebuild = semantic_sub.add_parser("rebuild", help="Rebuild the semantic index.")
-    _add_root(sem_rebuild)
-    sem_search = semantic_sub.add_parser(
-        "search", help="Semantic free-text search over memory."
-    )
-    _add_root(sem_search)
-    sem_search.add_argument("query", help="Free-text query.")
-    sem_search.add_argument("--limit", type=int, default=10)
-    sem_search.add_argument("--json", action="store_true", help="Emit results as JSON.")
-    sem_probe = semantic_sub.add_parser(
-        "probe",
-        help="Measure semantic projection length distribution per lane.",
-    )
-    _add_root(sem_probe)
-    sem_probe.add_argument(
-        "--json", action="store_true", help="Emit probe payload as JSON."
-    )
-    sem_probe.add_argument(
-        "--exact-tokens",
-        action="store_true",
-        help=(
-            "Measure raw/effective token counts via the embedding model tokenizer "
-            "(loads FastEmbed when configured)."
+_MEMORY_COMMANDS: tuple[CommandDeclaration, ...] = (
+    (
+        "init",
+        "Initialize engineering memory.",
+        (
+            flag_option("--dry-run"),
+            flag_option("--refresh"),
+            value_option("--from-report", metavar="PATH"),
+            flag_option("--no-docs"),
+            flag_option("--no-tests"),
         ),
-    )
+    ),
+    ("status", "Show engineering memory status.", ()),
+    (
+        "for-path",
+        "List memory records linked to a source path.",
+        (
+            positional_option("path", help_text="Repo-relative source file path."),
+            limit_option(default=20),
+        ),
+    ),
+    (
+        "search",
+        "Search engineering memory records by keyword.",
+        (
+            positional_option("query", help_text="Keyword query."),
+            limit_option(default=20),
+            _match_option,
+            flag_option(
+                "--active-only",
+                help_text="Exclude stale records from search results.",
+            ),
+            flag_option(
+                "--semantic",
+                help_text=(
+                    "Blend semantic proximity into ranking (requires the index)."
+                ),
+            ),
+        ),
+    ),
+    (
+        "stale",
+        "List stale engineering memory records.",
+        (limit_option(default=50),),
+    ),
+    ("vacuum", "Purge expired stale/draft/rejected/archived records.", ()),
+    (
+        "coverage",
+        "Show memory coverage for repo-relative paths.",
+        (
+            positional_option(
+                "paths",
+                help_text="Repo-relative paths to inspect.",
+                nargs="+",
+            ),
+        ),
+    ),
+    (
+        "review-candidates",
+        "List draft memory candidates awaiting review.",
+        (limit_option(default=50),),
+    ),
+    (
+        "approve",
+        "Approve a draft memory record.",
+        _governance_options(with_reason=False),
+    ),
+    (
+        "reject",
+        "Reject a draft memory record.",
+        _governance_options(with_reason=True),
+    ),
+    (
+        "archive",
+        "Archive an active memory record.",
+        _governance_options(with_reason=False),
+    ),
+)
 
-    trajectory_parser = subparsers.add_parser(
+
+_SEMANTIC_COMMANDS: tuple[CommandDeclaration, ...] = (
+    ("status", "Show semantic index status.", ()),
+    ("rebuild", "Rebuild the semantic index.", ()),
+    (
+        "search",
+        "Semantic free-text search over memory.",
+        (
+            positional_option("query", help_text="Free-text query."),
+            limit_option(default=10),
+            json_option(help_text="Emit results as JSON."),
+        ),
+    ),
+    (
+        "probe",
+        "Measure semantic projection length distribution per lane.",
+        (
+            json_option(help_text="Emit probe payload as JSON."),
+            flag_option(
+                "--exact-tokens",
+                help_text=(
+                    "Measure raw/effective token counts via the embedding model "
+                    "tokenizer (loads FastEmbed when configured)."
+                ),
+            ),
+        ),
+    ),
+)
+
+
+_TRAJECTORY_COMMANDS: tuple[CommandDeclaration, ...] = (
+    ("status", "Show trajectory projection status.", ()),
+    ("rebuild", "Rebuild trajectory projections from audit event core.", ()),
+    ("list", "List stored trajectories.", (limit_option(default=20),)),
+    (
+        "search",
+        "Search stored trajectories by keyword.",
+        (
+            positional_option("query", help_text="Keyword query."),
+            limit_option(default=10),
+            _match_option,
+        ),
+    ),
+    (
+        "show",
+        "Show one stored trajectory.",
+        (positional_option("trajectory_id"),),
+    ),
+    (
+        "agents",
+        "Aggregate trajectories by agent label.",
+        (_include_routine_option, json_option()),
+    ),
+    (
+        "anomalies",
+        "List trajectories with detected anomalies.",
+        (limit_option(default=25), _include_routine_option, json_option()),
+    ),
+    (
+        "dashboard",
+        "Combined trajectory status, agents, and anomalies summary.",
+        (limit_option(default=25), _include_routine_option, json_option()),
+    ),
+    (
+        "export",
+        "Export trajectories to local JSONL (disabled by default).",
+        (
+            value_option(
+                "--profile",
+                required=True,
+                help_text=(
+                    "Export profile name (for example agent-change-control-v1)."
+                ),
+            ),
+            value_option(
+                "--out",
+                required=True,
+                help_text=(
+                    "Output JSONL path (repo-relative or absolute with "
+                    "--allow-external-out)."
+                ),
+            ),
+            flag_option(
+                "--allow-external-out",
+                help_text="Allow writing outside the repository root.",
+            ),
+            flag_option(
+                "--force",
+                help_text="Run export even when trajectory_export_enabled=false.",
+            ),
+            json_option(help_text="Emit manifest JSON."),
+        ),
+    ),
+)
+
+
+_JOBS_COMMANDS: tuple[CommandDeclaration, ...] = (
+    ("status", "Show projection rebuild job status.", ()),
+    (
+        "enqueue",
+        "Enqueue a projection rebuild bundle job.",
+        (
+            flag_option(
+                "--force",
+                help_text="Enqueue even when policy is off or stimulus unchanged.",
+            ),
+            flag_option(
+                "--no-spawn",
+                help_text="Do not spawn a background worker process.",
+            ),
+        ),
+    ),
+    (
+        "run-once",
+        "Claim and run one pending projection rebuild job.",
+        (
+            value_option(
+                "--not-before",
+                dest="not_before",
+                help_text=(
+                    "ISO-8601 UTC deadline to defer the run until before loading "
+                    "the embedding model (coalesced trailing-edge flush)."
+                ),
+            ),
+        ),
+    ),
+    (
+        "list",
+        "List recent projection jobs.",
+        (limit_option(default=20), json_option()),
+    ),
+)
+
+
+_MEMORY_COMMAND_GROUPS: tuple[
+    tuple[str, str, str, tuple[CommandDeclaration, ...]], ...
+] = (
+    (
+        "semantic",
+        "Semantic retrieval index (status / rebuild / search).",
+        "semantic_action",
+        _SEMANTIC_COMMANDS,
+    ),
+    (
         "trajectory",
-        help=(
+        (
             "Trajectory projections and analytics "
             "(status / rebuild / list / search / show / agents / "
             "anomalies / dashboard / export)."
         ),
-    )
-    trajectory_sub = trajectory_parser.add_subparsers(
-        dest="trajectory_action",
-        required=True,
-    )
-    traj_status = trajectory_sub.add_parser(
-        "status",
-        help="Show trajectory projection status.",
-    )
-    _add_root(traj_status)
-    traj_rebuild = trajectory_sub.add_parser(
-        "rebuild",
-        help="Rebuild trajectory projections from audit event core.",
-    )
-    _add_root(traj_rebuild)
-    traj_list = trajectory_sub.add_parser("list", help="List stored trajectories.")
-    _add_root(traj_list)
-    traj_list.add_argument("--limit", type=int, default=20)
-    traj_search = trajectory_sub.add_parser(
-        "search",
-        help="Search stored trajectories by keyword.",
-    )
-    _add_root(traj_search)
-    traj_search.add_argument("query", help="Keyword query.")
-    traj_search.add_argument("--limit", type=int, default=10)
-    traj_search.add_argument(
-        "--match",
-        choices=("any", "all"),
-        default="any",
-        help="Match any token (default) or require all tokens.",
-    )
-    traj_show = trajectory_sub.add_parser("show", help="Show one stored trajectory.")
-    _add_root(traj_show)
-    traj_show.add_argument("trajectory_id")
-    traj_agents = trajectory_sub.add_parser(
-        "agents",
-        help="Aggregate trajectories by agent label.",
-    )
-    _add_root(traj_agents)
-    traj_agents.add_argument(
-        "--include-routine",
-        action="store_true",
-        help="Include routine analysis-only trajectories.",
-    )
-    traj_agents.add_argument("--json", action="store_true")
-    traj_anomalies = trajectory_sub.add_parser(
-        "anomalies",
-        help="List trajectories with detected anomalies.",
-    )
-    _add_root(traj_anomalies)
-    traj_anomalies.add_argument("--limit", type=int, default=25)
-    traj_anomalies.add_argument(
-        "--include-routine",
-        action="store_true",
-        help="Include routine analysis-only trajectories.",
-    )
-    traj_anomalies.add_argument("--json", action="store_true")
-    traj_dashboard = trajectory_sub.add_parser(
-        "dashboard",
-        help="Combined trajectory status, agents, and anomalies summary.",
-    )
-    _add_root(traj_dashboard)
-    traj_dashboard.add_argument("--limit", type=int, default=25)
-    traj_dashboard.add_argument(
-        "--include-routine",
-        action="store_true",
-        help="Include routine analysis-only trajectories.",
-    )
-    traj_dashboard.add_argument("--json", action="store_true")
-    traj_export = trajectory_sub.add_parser(
-        "export",
-        help="Export trajectories to local JSONL (disabled by default).",
-    )
-    _add_root(traj_export)
-    traj_export.add_argument(
-        "--profile",
-        required=True,
-        help="Export profile name (for example agent-change-control-v1).",
-    )
-    traj_export.add_argument(
-        "--out",
-        required=True,
-        help="Output JSONL path (repo-relative or absolute with --allow-external-out).",
-    )
-    traj_export.add_argument(
-        "--allow-external-out",
-        action="store_true",
-        help="Allow writing outside the repository root.",
-    )
-    traj_export.add_argument(
-        "--force",
-        action="store_true",
-        help="Run export even when trajectory_export_enabled=false.",
-    )
-    traj_export.add_argument("--json", action="store_true", help="Emit manifest JSON.")
-
-    jobs_parser = subparsers.add_parser(
+        "trajectory_action",
+        _TRAJECTORY_COMMANDS,
+    ),
+    (
         "jobs",
-        help="Projection rebuild jobs (status / enqueue / run-once / list).",
-    )
-    jobs_sub = jobs_parser.add_subparsers(dest="jobs_action", required=True)
-    jobs_status = jobs_sub.add_parser(
-        "status",
-        help="Show projection rebuild job status.",
-    )
-    _add_root(jobs_status)
-    jobs_enqueue = jobs_sub.add_parser(
-        "enqueue",
-        help="Enqueue a projection rebuild bundle job.",
-    )
-    _add_root(jobs_enqueue)
-    jobs_enqueue.add_argument(
-        "--force",
-        action="store_true",
-        help="Enqueue even when policy is off or stimulus unchanged.",
-    )
-    jobs_enqueue.add_argument(
-        "--no-spawn",
-        action="store_true",
-        help="Do not spawn a background worker process.",
-    )
-    jobs_run = jobs_sub.add_parser(
-        "run-once",
-        help="Claim and run one pending projection rebuild job.",
-    )
-    _add_root(jobs_run)
-    jobs_run.add_argument(
-        "--not-before",
-        dest="not_before",
-        default=None,
-        help=(
-            "ISO-8601 UTC deadline to defer the run until before loading the "
-            "embedding model (coalesced trailing-edge flush)."
-        ),
-    )
-    jobs_list = jobs_sub.add_parser("list", help="List recent projection jobs.")
-    _add_root(jobs_list)
-    jobs_list.add_argument("--limit", type=int, default=20)
-    jobs_list.add_argument("--json", action="store_true")
+        "Projection rebuild jobs (status / enqueue / run-once / list).",
+        "jobs_action",
+        _JOBS_COMMANDS,
+    ),
+)
 
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="codeclone memory")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    build_root_commands(
+        subparsers,
+        root_help=_MEMORY_ROOT_HELP,
+        commands=_MEMORY_COMMANDS,
+    )
+    for name, help_text, dest, commands in _MEMORY_COMMAND_GROUPS:
+        group = add_command_group(
+            subparsers,
+            name,
+            help_text=help_text,
+            dest=dest,
+        )
+        build_root_commands(
+            group,
+            root_help=_MEMORY_ROOT_HELP,
+            commands=commands,
+        )
     return parser
 
 

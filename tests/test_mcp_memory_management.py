@@ -278,7 +278,7 @@ def test_mcp_memory_run_record_rejects_foreign_root(
 
         monkeypatch.setattr(
             service._runs,
-            "get",
+            "resolve_any_root",
             _fake_get,
         )
         with pytest.raises(
@@ -426,21 +426,21 @@ def test_mcp_resolve_memory_scope_paths_and_blast_dependents_edges(
 
         monkeypatch.setattr(
             service._runs,
-            "get",
+            "resolve_any_root",
             lambda _run_id=None: (_ for _ in ()).throw(MCPRunNotFoundError("missing")),
         )
         assert service._memory_blast_dependents(root, ("pkg/mod.py",)) == frozenset()
 
         monkeypatch.setattr(
             service._runs,
-            "get",
+            "resolve_any_root",
             lambda _run_id=None: SimpleNamespace(root=tmp_path / "foreign"),
         )
         assert service._memory_blast_dependents(root, ("pkg/mod.py",)) == frozenset()
 
         monkeypatch.setattr(
             service._runs,
-            "get",
+            "resolve_any_root",
             lambda _run_id=None: SimpleNamespace(root=root),
         )
         monkeypatch.setattr(

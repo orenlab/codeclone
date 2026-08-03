@@ -588,7 +588,7 @@ class _MCPSessionContextMixin:
             )
         if run_id is not None:
             try:
-                requested_run_id = self._runs.get(run_id).run_id
+                requested_run_id = self._runs.resolve_any_root(run_id).run_id
             except MCPRunNotFoundError:
                 return _implementation_context_page_response(
                     {
@@ -639,7 +639,7 @@ class _MCPSessionContextMixin:
                     "Selected run_id does not match the active intent run."
                 )
             try:
-                record = self._runs.get(intent.run_id)
+                record = self._runs.get_for_root(intent.run_id, root=intent.root)
             except MCPRunNotFoundError as exc:
                 raise MCPServiceContractError(
                     "The active intent's analysis run is no longer available. "
@@ -653,7 +653,7 @@ class _MCPSessionContextMixin:
         if run_id is None:
             session = cast("_ContextSessionDependencies", self)
             return session._latest_run_for_root(root_path)
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         if record.root.resolve() != root_path.resolve():
             raise MCPServiceContractError(
                 "Selected MCP run does not belong to the supplied root. "

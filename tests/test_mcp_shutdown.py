@@ -343,10 +343,13 @@ def test_shutdown_cleanup_is_idempotent(tmp_path: Path) -> None:
     svc.shutdown_cleanup()  # second call — no error
 
 
-def test_shutdown_cleanup_skips_on_run_error(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_shutdown_cleanup_survives_an_unavailable_run(tmp_path: Path) -> None:
+    """Cleanup follows the intent's own root, not a run lookup.
+
+    An intent whose run has aged out of session history still owns the
+    registry file this process wrote, so cleanup must still reach it.
+    """
+
     svc = _svc()
     run_id = str(svc.analyze_repository(_analysis_request(str(tmp_path)))["run_id"])
     svc.manage_change_intent(
@@ -356,11 +359,7 @@ def test_shutdown_cleanup_skips_on_run_error(
         scope={"allowed_files": ["pkg/c.py"], "allowed_related": [], "forbidden": []},
         intent="error test",
     )
-    monkeypatch.setattr(
-        svc._runs,
-        "get",
-        lambda *_a, **_kw: (_ for _ in ()).throw(RuntimeError("boom")),
-    )
+    svc._runs.clear()
     svc.shutdown_cleanup()  # must not raise
 
 

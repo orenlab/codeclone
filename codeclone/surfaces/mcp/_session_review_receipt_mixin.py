@@ -87,7 +87,7 @@ class _MCPSessionReviewReceiptMixin:
         verification_accepted: bool | None = None,
     ) -> dict[str, object]:
         output_format = self._validated_receipt_format(format)
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         intent = self._receipt_intent(record=record, intent_id=intent_id)
         changed_paths = self._receipt_changed_paths(record=record, intent=intent)
         changed_findings = self._receipt_changed_findings(
@@ -238,7 +238,9 @@ class _MCPSessionReviewReceiptMixin:
                 intent_id=None,
             )
         if intent is not None and intent.run_id != record.run_id:
-            intent_record = intent_record or self._runs.get(intent.run_id)
+            intent_record = intent_record or self._runs.get_for_root(
+                intent.run_id, root=intent.root
+            )
             if intent_record.root != record.root:
                 raise MCPServiceContractError(
                     "Receipt intent must belong to the selected run or the same root."
@@ -412,7 +414,7 @@ class _MCPSessionReviewReceiptMixin:
         """
         if intent is None or intent.run_id == record.run_id:
             return None
-        return self._runs.get(intent.run_id)
+        return self._runs.get_for_root(intent.run_id, root=intent.root)
 
     def _receipt_structural_delta(
         self,

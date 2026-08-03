@@ -62,7 +62,6 @@ from ._session_shared import (
     Mapping,
     MCPAnalysisRequest,
     MCPGateRequest,
-    MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
     MetricGateConfig,
@@ -816,7 +815,7 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
     _spread_max_cache: dict[str, int]
 
     def get_run_summary(self, run_id: str | None = None) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         return self._summary_payload(record.summary, record=record)
 
     def compare_runs(
@@ -831,8 +830,8 @@ class _MCPSessionReportMixin(_MCPSessionSummaryMixin):
             focus,
             _VALID_COMPARISON_FOCUS,
         )
-        before = self._runs.get(before_run_id)
-        after = self._runs.get(after_run_id)
+        before = self._runs.resolve_any_root(before_run_id)
+        after = self._runs.resolve_any_root(after_run_id)
         before_findings = self._comparison_index(before, focus=validated_focus)
         after_findings = self._comparison_index(after, focus=validated_focus)
         before_ids = set(before_findings)
@@ -924,7 +923,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
     _intent_sequence: int
 
     def evaluate_gates(self, request: MCPGateRequest) -> dict[str, object]:
-        record = self._runs.get(request.run_id)
+        record = self._runs.resolve_any_root(request.run_id)
         gate_result = self._evaluate_gate_snapshot(record=record, request=request)
         result = {
             "run_id": _helpers._short_run_id(record.run_id),
@@ -1011,7 +1010,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             section,
             _VALID_REPORT_SECTIONS,
         )
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         report_document = record.report_document
         if validated_section == "all":
             return attach_passive_context_governance(
@@ -1094,7 +1093,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         max_hotspots: int = 3,
         max_suggestions: int = 3,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         summary = self._summary_payload(record.summary, record=record)
         findings = self._base_findings(record)
         findings_breakdown = _helpers._source_kind_breakdown(
@@ -1264,7 +1263,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
             format,
             _VALID_PR_SUMMARY_FORMATS,
         )
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         paths_filter = self._resolve_query_changed_paths(
             record=record,
             changed_paths=changed_paths,
@@ -1320,15 +1319,14 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         }
 
     def clear_session_runs(self) -> dict[str, object]:
-        workspace_targets: list[tuple[Path, str]] = []
         with self._state_lock:
             intent_snapshot = tuple(self._active_intents.values())
-        for intent in intent_snapshot:
-            try:
-                record = self._runs.get(intent.run_id)
-            except (MCPRunNotFoundError, MCPServiceContractError):
-                continue
-            workspace_targets.append((record.root, intent.intent_id))
+        # Keyed off each intent's own root: an intent whose run has already
+        # aged out still owns a registry row that must be cleaned up, and a
+        # same-id run from a sibling worktree is not its evidence.
+        workspace_targets: list[tuple[Path, str]] = [
+            (intent.root, intent.intent_id) for intent in intent_snapshot
+        ]
         removed_run_ids = self._runs.clear()
         with self._state_lock:
             cleared_review_entries = sum(
@@ -1382,12 +1380,12 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if uri == "codeclone://schema":
             return _json_text_payload(_helpers._schema_resource_payload())
         if uri == "codeclone://latest/triage":
-            latest = self._runs.get()
+            latest = self._runs.resolve_any_root()
             return _json_text_payload(self.get_production_triage(run_id=latest.run_id))
         latest_prefix = "codeclone://latest/"
         run_prefix = "codeclone://runs/"
         if uri.startswith(latest_prefix):
-            latest = self._runs.get()
+            latest = self._runs.resolve_any_root()
             suffix = _helpers._validate_resource_suffix(uri[len(latest_prefix) :])
             return self._render_resource(latest, suffix)
         if not uri.startswith(run_prefix):
@@ -1397,7 +1395,7 @@ class _MCPSessionStateMixin(_MCPSessionReportMixin):
         if not sep:
             raise MCPServiceContractError(f"Unsupported CodeClone resource URI: {uri}")
         suffix = _helpers._validate_resource_suffix(suffix)
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         return self._render_resource(record, suffix)
 
     def _render_resource(self, record: MCPRunRecord, suffix: str) -> str:

@@ -52,7 +52,7 @@ class _MCPSessionBlastRadiusMixin:
         depth: str = "direct",
         include: Sequence[str] | None = None,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         normalized_depth = self._validated_blast_radius_depth(depth)
         normalized_files = _finding_session(self)._normalize_changed_paths(
             root_path=record.root,

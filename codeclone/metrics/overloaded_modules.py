@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from bisect import bisect_left, bisect_right
 from collections import Counter, defaultdict
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from math import floor
 
 from ..domain.source_scope import (
@@ -94,16 +94,32 @@ def _score_quantile(sorted_values: Sequence[float], q: float) -> float:
     return lower_value + (upper_value - lower_value) * fraction
 
 
-def _percentile_rank(value: float, values: Sequence[float]) -> float:
-    if not values:
+def _ranking_population(values: Iterable[float]) -> tuple[float, ...]:
+    """Order one metric family once, for repeated percentile lookups.
+
+    Every module row is ranked against the same populations, so sorting inside
+    the rank call re-derived one ordering per row: 9 lookups x 833 modules on
+    this repository, each sorting 833 floats.
+    """
+
+    return tuple(sorted(float(item) for item in values))
+
+
+def _percentile_rank(value: float, population: Sequence[float]) -> float:
+    """Rank ``value`` within ``population``, which must already be sorted.
+
+    Build it with :func:`_ranking_population`. Passing an unsorted sequence
+    yields a wrong rank rather than an error, because bisect trusts its input.
+    """
+
+    if not population:
         return 0.0
-    if len(values) == 1:
+    if len(population) == 1:
         return 1.0
-    sorted_values = sorted(float(item) for item in values)
-    left = bisect_left(sorted_values, float(value))
-    right = bisect_right(sorted_values, float(value))
+    left = bisect_left(population, float(value))
+    right = bisect_right(population, float(value))
     averaged_rank = (left + right - 1) / 2.0
-    return round(averaged_rank / float(len(sorted_values) - 1), 4)
+    return round(averaged_rank / float(len(population) - 1), 4)
 
 
 def _round_score(value: float) -> float:
@@ -226,16 +242,30 @@ def build_overloaded_modules_payload(
         )
 
     rows = list(module_rows.values())
-    loc_values = [float(as_int(row.get("loc"))) for row in rows]
-    callable_values = [float(as_int(row.get("callable_count"))) for row in rows]
-    complexity_total_values = [
+    # Each population is ranked against by every row below, so order it once
+    # here rather than once per lookup.
+    loc_values = _ranking_population(float(as_int(row.get("loc"))) for row in rows)
+    callable_values = _ranking_population(
+        float(as_int(row.get("callable_count"))) for row in rows
+    )
+    complexity_total_values = _ranking_population(
         float(as_int(row.get("complexity_total"))) for row in rows
-    ]
-    fan_in_values = [float(as_int(row.get("fan_in"))) for row in rows]
-    fan_out_values = [float(as_int(row.get("fan_out"))) for row in rows]
-    total_dep_values = [float(as_int(row.get("total_deps"))) for row in rows]
-    import_edge_values = [float(as_int(row.get("import_edges"))) for row in rows]
-    reimport_ratio_values = [as_float(row.get("reimport_ratio")) for row in rows]
+    )
+    fan_in_values = _ranking_population(
+        float(as_int(row.get("fan_in"))) for row in rows
+    )
+    fan_out_values = _ranking_population(
+        float(as_int(row.get("fan_out"))) for row in rows
+    )
+    total_dep_values = _ranking_population(
+        float(as_int(row.get("total_deps"))) for row in rows
+    )
+    import_edge_values = _ranking_population(
+        float(as_int(row.get("import_edges"))) for row in rows
+    )
+    reimport_ratio_values = _ranking_population(
+        as_float(row.get("reimport_ratio")) for row in rows
+    )
 
     for row in rows:
         loc_score = _percentile_rank(float(as_int(row.get("loc"))), loc_values)

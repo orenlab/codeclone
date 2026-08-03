@@ -16,6 +16,7 @@ from typing import Final, Literal
 from ..paths.workspace import FORBIDDEN_WORKSPACE_GLOBS
 from ..utils.coerce import as_mapping as _as_mapping
 from ..utils.coerce import as_sequence as _as_sequence
+from ..utils.mapping_paths import sections
 
 BlastRadiusDepth = Literal["direct", "transitive"]
 
@@ -352,12 +353,13 @@ def _compute_risk_signals(
     report_document: Mapping[str, object],
     blast_zone_paths: set[str],
 ) -> dict[str, list[str]]:
-    metrics = _as_mapping(report_document.get("metrics"))
-    families = _as_mapping(metrics.get("families"))
-    complexity = _as_mapping(families.get("complexity"))
-    coupling = _as_mapping(families.get("coupling"))
-    coverage_join = _as_mapping(families.get("coverage_join"))
-    overloaded_modules = _as_mapping(families.get("overloaded_modules"))
+    complexity, coupling, coverage_join, overloaded_modules = sections(
+        report_document,
+        "metrics.families.complexity",
+        "metrics.families.coupling",
+        "metrics.families.coverage_join",
+        "metrics.families.overloaded_modules",
+    )
 
     high_complexity = {
         _item_path(_as_mapping(item))
