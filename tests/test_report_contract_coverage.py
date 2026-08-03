@@ -3202,3 +3202,89 @@ def test_sarif_and_serialize_helpers_cover_missing_primary_path_and_no_empty_tai
     )
     assert any("Investigate repeated flow" in line for line in suggestion_lines)
     assert not any(line.lstrip().startswith("summary:") for line in suggestion_lines)
+
+
+def test_authority_finding_card_names_contract_and_owner() -> None:
+    card = overview_mod.serialize_finding_group_card(
+        {
+            "family": "authority",
+            "category": "owner_bypass",
+            "facts": {
+                "contract_id": "authority.report_document",
+                "canonical_owner": "pkg.mod:build",
+            },
+            "items": [],
+        }
+    )
+    assert card["title"] == "Restore canonical semantic authority"
+    summary = card["summary"]
+    assert isinstance(summary, str)
+    assert "authority.report_document" in summary
+    assert "pkg.mod:build" in summary
+
+
+def test_analysis_profile_payload_rejects_incomplete_or_negative_meta() -> None:
+    common_mod = document_common_mod
+
+    complete = {
+        "min_loc": 6,
+        "min_stmt": 4,
+        "block_min_loc": 20,
+        "block_min_stmt": 8,
+        "segment_min_loc": 20,
+        "segment_min_stmt": 10,
+    }
+    assert common_mod._analysis_profile_payload(complete) == complete
+    negative = dict(complete)
+    negative["min_loc"] = -1
+    assert common_mod._analysis_profile_payload(negative) is None
+
+
+def test_dedupe_paths_by_contract_skips_unusable_spellings() -> None:
+    common_mod = document_common_mod
+
+    deduped = common_mod._dedupe_paths_by_contract(
+        ["", "pkg/a.py", "/root/pkg/a.py"],
+        scan_root="/root",
+    )
+    assert deduped == ["/root/pkg/a.py"]
+
+
+def test_source_scope_collectors_skip_items_without_filepath() -> None:
+    common_mod = document_common_mod
+
+    metrics = {
+        "security_surfaces": {
+            "items": [
+                {"capability": "exec"},
+                {"filepath": "pkg/a.py", "capability": "exec"},
+            ]
+        }
+    }
+    assert "pkg/a.py" in common_mod._collect_paths_from_metrics(metrics)
+
+
+def test_report_file_list_skips_suppressed_items_without_filepath() -> None:
+    from codeclone.models import SuppressedCloneGroup
+
+    common_mod = document_common_mod
+
+    suppressed = SuppressedCloneGroup(
+        kind="function",
+        group_key="g1",
+        items=(
+            {"qualname": "pkg.mod:f"},
+            {"qualname": "pkg.mod:g", "filepath": "pkg/mod.py"},
+        ),
+    )
+    files = common_mod._collect_report_file_list(
+        inventory=None,
+        func_groups={},
+        block_groups={},
+        segment_groups={},
+        suppressed_clone_groups=(suppressed,),
+        metrics=None,
+        structural_findings=None,
+        scan_root="",
+    )
+    assert files == ["pkg/mod.py"]

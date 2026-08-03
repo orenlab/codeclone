@@ -2378,3 +2378,32 @@ def test_an_unregistered_column_is_still_bounded() -> None:
     )
     _headers, widths, _rows = _parse_report_tables(html)[0]
     assert widths and all(widths), "an unregistered column still sizes itself"
+
+
+def test_meta_column_lift_stays_lossless_and_bounds_values() -> None:
+    from codeclone.report.html.widgets import tables as tables_mod
+
+    headers = ["name", "origin"]
+    rows = [["a", "x"], ["a", "y"]]
+    # Dropping "origin" would merge the two rows: the lift must refuse.
+    kept_headers, kept_rows, parts = tables_mod._lift_meta_columns(
+        headers, rows, {"origin"}
+    )
+    assert (kept_headers, kept_rows, parts) == (headers, rows, [])
+
+    band = tables_mod._meta_band_html([("origin", ["a", "b", "c", "d", "e", "f"])])
+    assert "+2 more" in band
+
+
+def test_pygments_highlight_refuses_unknown_languages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from codeclone.report.html.widgets import snippets as snippets_mod
+
+    if snippets_mod._load_pygments_api() is None:
+        pytest.skip("pygments is not installed")
+
+    assert snippets_mod._try_pygments("x = 1", language="yaml") is None
+
+    monkeypatch.setitem(snippets_mod._LEXERS, "python", "NotARealLexer")
+    assert snippets_mod._try_pygments("x = 1", language="python") is None

@@ -5865,3 +5865,24 @@ def test_html_report_every_main_tab_renders_an_icon() -> None:
     assert buttons, "no main tabs rendered"
     naked = [tab for tab, markup in buttons if "main-tab-icon" not in markup]
     assert not naked, f"main tabs rendered without an icon: {naked}"
+
+
+def test_location_paths_resolve_against_scan_root(tmp_path: Path) -> None:
+    root = str(tmp_path)
+    ctx = cast(
+        "Any",
+        SimpleNamespace(
+            scan_root=root,
+            relative_path=lambda filepath: filepath.removeprefix(f"{root}/"),
+        ),
+    )
+    # An item with only an absolute filepath is relativized by the context.
+    assert relative_location_path(ctx, {"filepath": f"{root}/pkg/a.py"}) == "pkg/a.py"
+    # A relative filepath resolves under the scan root.
+    assert location_file_target(
+        ctx, {"filepath": "pkg/a.py"}, relative_path="pkg/a.py"
+    ) == str((tmp_path / "pkg" / "a.py").resolve())
+    # Without a filepath, the relative path resolves under the scan root.
+    assert location_file_target(ctx, {}, relative_path="pkg/b.py") == str(
+        (tmp_path / "pkg" / "b.py").resolve()
+    )

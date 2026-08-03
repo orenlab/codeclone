@@ -373,3 +373,29 @@ def test_decorator_and_base_name_helpers_ignore_non_names() -> None:
 
     assert instance_methods_mod._simple_decorator_name(ast.Constant(value=1)) == ""
     assert instance_methods_mod._simple_base_name(ast.Constant(value=1)) == ""
+
+
+def test_class_shape_helpers_read_dotted_bases_and_keywords() -> None:
+    dotted = ast.parse("class Handler(abc.ABC):\n    pass\n").body[0]
+    assert isinstance(dotted, ast.ClassDef)
+    assert instance_methods_mod._simple_base_name(dotted.bases[0]) == "ABC"
+    assert instance_methods_mod._class_base_names(dotted) == ("ABC",)
+
+    keyworded = ast.parse(
+        "class Frozen(Base, frozen=True, metaclass=CustomMeta):\n    pass\n"
+    ).body[0]
+    assert isinstance(keyworded, ast.ClassDef)
+    # `frozen=True` is not a metaclass keyword; CustomMeta is not an
+    # interface metaclass — the class stays a plain implementation.
+    assert instance_methods_mod._class_is_interface(keyworded, ("Base",)) is False
+
+    mixed_body = ast.parse(
+        "class Mixed:\n"
+        '    """doc"""\n'
+        "    slot = 1\n"
+        "    def method(self):\n"
+        "        return self.slot\n"
+    ).body[0]
+    assert isinstance(mixed_body, ast.ClassDef)
+    methods = list(instance_methods_mod._direct_methods(mixed_body))
+    assert [item.name for item in methods] == ["method"]
