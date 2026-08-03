@@ -1431,3 +1431,41 @@ def test_overloads_and_property_pairs_do_not_break_semantic_authority(
     }
     assert "pkg.shapes:widen" in contracts
     assert "pkg.shapes:Holder.label" not in contracts
+
+
+def test_worker_identity_guards_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A worker without an installed registry, or asked about a file the
+    registry never saw, refuses instead of guessing a module identity."""
+
+    source = tmp_path / "module.py"
+    source.write_bytes(b"def example():\n    return 1\n")
+    registry = build_module_registry(root=tmp_path)
+
+    with pytest.raises(ValueError, match="absent from module registry"):
+        core_worker._source_identity_for_worker(
+            registry=registry,
+            root=str(tmp_path),
+            resolved_path=(tmp_path / "never_discovered.py").resolve(),
+        )
+
+    monkeypatch.setattr(core_worker, "_WORKER_MODULE_REGISTRY", None)
+    result = core_worker.process_file(
+        str(source),
+        str(tmp_path),
+        NormalizationConfig(),
+        1,
+        1,
+        collect_structural_findings=False,
+        collect_api_surface=False,
+        api_include_private_modules=False,
+        block_min_loc=20,
+        block_min_stmt=8,
+        segment_min_loc=20,
+        segment_min_stmt=10,
+    )
+    assert result.success is False
+    assert result.error is not None
+    assert "module registry is not installed" in result.error

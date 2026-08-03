@@ -9,7 +9,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
-from typing import TypeVar
+from types import SimpleNamespace
+from typing import Any, TypeVar, cast
 
 import orjson
 import pytest
@@ -1112,3 +1113,35 @@ def test_dynamic_load_argument_is_either_a_name_or_honestly_absent() -> None:
     # An empty string is neither: it would claim a resolved import of nothing.
     with pytest.raises(ValueError, match="cannot be empty"):
         DynamicLoadArgument(module="")
+
+
+def test_lane_payloads_fail_closed_on_missing_semantic_and_foreign_shapes() -> None:
+    """The semantic_authority lane refuses a bundle without the accepted
+    semantic result, and the row counter refuses foreign payload types."""
+
+    bundle = _bundle()
+    semantic_descriptor = replace(
+        bundle.contract.descriptors[0],
+        name="semantic_authority",
+    )
+    assert bundle.semantic is None
+    with pytest.raises(
+        ObservationContractError,
+        match="semantic_authority lane requires",
+    ):
+        lanes_mod._lane_payload(bundle, semantic_descriptor)
+
+    foreign_lane = SimpleNamespace(payload="garbage")
+    with pytest.raises(ObservationContractError, match="no row count"):
+        lanes_mod.observation_lane_item_count(cast("Any", foreign_lane))
+
+
+def test_integer_columnar_payload_rejects_negative_entity_population() -> None:
+    lanes = lanes_mod.build_observation_lanes(_bundle())
+    integer_payload = next(
+        lane.payload
+        for lane in lanes
+        if isinstance(lane.payload, IntegerColumnarPayload)
+    )
+    with pytest.raises(ValueError, match="entity population must be non-negative"):
+        replace(integer_payload, entity_population=-1)

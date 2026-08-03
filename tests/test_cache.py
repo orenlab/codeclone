@@ -3362,3 +3362,83 @@ def test_wire_module_dep_row_requires_a_known_mechanism() -> None:
     # The pre-mechanism row length no longer decodes: the version gate is what
     # invalidates old caches, not an absent-tolerant fallback here.
     assert _decode_wire_module_dep(valid[:10]) is None
+
+
+def test_canonicalize_optional_string_list_narrows_shape() -> None:
+    # _wire_encode re-exports the canonicalize helper it consumes; using it
+    # keeps this module's import surface unchanged.
+    import codeclone.cache._wire_encode as wire_encode_mod
+
+    _normalized_optional_string_list = (
+        wire_encode_mod._normalized_optional_string_list  # type: ignore[attr-defined]
+    )
+
+    assert _normalized_optional_string_list(None) is None
+    assert _normalized_optional_string_list("not-a-list") is None
+    assert _normalized_optional_string_list(["ok", 3]) is None
+    assert _normalized_optional_string_list(["b", "a", "b"]) == ["a", "b"]
+
+
+def test_cache_registry_binding_requires_root(tmp_path: Path) -> None:
+    from tests._ast_metrics_helpers import module_registry_context
+
+    rootless = Cache(tmp_path / "cache.json")
+    with pytest.raises(ValueError, match="requires a project root"):
+        rootless.bind_module_registry(
+            module_registry_context(filepath="x.py", module_name="x")[1]
+        )
+
+
+def test_cache_put_file_entry_rejects_unregistered_and_foreign_names(
+    tmp_path: Path,
+) -> None:
+    cache = Cache(tmp_path / "cache.json", root=tmp_path)
+    _bind_module_paths(cache, "x.py")
+
+    with pytest.raises(ValueError, match="absent from module registry"):
+        cache.put_file_entry(
+            "unbound.py",
+            {"mtime_ns": 1, "size": 10},
+            [],
+            [],
+            [],
+            source_content_digest=_SOURCE_CONTENT_DIGEST,
+        )
+
+    with pytest.raises(ValueError, match="outside module"):
+        cache.put_file_entry(
+            "x.py",
+            {"mtime_ns": 1, "size": 10},
+            [_make_unit("x.py", module_name="foreign")],
+            [],
+            [],
+            source_content_digest=_SOURCE_CONTENT_DIGEST,
+        )
+
+
+def test_cache_load_retries_stat_after_transient_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient stat failure inside the first probe is retried before the
+    size ceiling is enforced."""
+
+    cache_path = tmp_path / "cache.json"
+    cache_path.write_text("{}", encoding="utf-8")
+    cache = Cache(cache_path, root=tmp_path)
+
+    calls = {"count": 0}
+    real_stat = Path.stat
+
+    def flaky_stat(self: Path, *args: Any, **kwargs: Any) -> Any:
+        if self == cache_path:
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise OSError("transient stat failure")
+        return real_stat(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", flaky_stat)
+    cache.load()
+    monkeypatch.undo()
+    assert calls["count"] >= 2
+    assert cache.load_status is not None

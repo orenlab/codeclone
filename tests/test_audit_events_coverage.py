@@ -268,3 +268,34 @@ def test_normalize_audit_surface_and_scope_truncation_branches() -> None:
     )
     assert len(declared_scope_paths) == 50
     assert len(untouched_in_declared) == 49
+
+
+def test_unknown_surface_string_falls_back_to_payload_source() -> None:
+    assert normalize_audit_surface("teletype", payload={"source": "mcp"}) == "mcp"
+
+
+def test_claim_event_core_skips_malformed_citations() -> None:
+    from codeclone.audit.events import EVENT_CLAIM_COMPLETED
+
+    core = event_core_for_event(
+        _event(
+            EVENT_CLAIM_COMPLETED,
+            valid=True,
+            violations=[],
+            warnings=[],
+            citations_found=1,
+            validated_citations=["not-a-mapping", 17],
+        )
+    )
+    facts = _facts(core)
+    assert "citations" not in facts
+    assert facts["citations_found"] == 1
+
+
+def test_explicit_workflow_id_skips_blank_candidates() -> None:
+    from dataclasses import replace as dc_replace
+
+    from codeclone.audit.events import derive_workflow_id
+
+    blank = dc_replace(_event("intent.declared"), workflow_id="   ")
+    assert derive_workflow_id(blank, "evt-1") == "event:evt-1"

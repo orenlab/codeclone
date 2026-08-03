@@ -1774,3 +1774,187 @@ def test_export_root_extension_stops_at_the_package_export_chain() -> None:
             symbol: f"{api_module}:{symbol}" in rooted for symbol in method_cases
         } == {symbol: expected["live"] for symbol, expected in method_cases.items()}
         assert set(rooted.values()) == {"export_root"}
+
+
+def test_load_cached_metrics_extended_skips_unparseable_rows() -> None:
+    import codeclone.core.discovery_cache as dc
+    from codeclone.models import CacheEntryV3
+
+    dependent = SimpleNamespace(
+        class_metrics=[],
+        module_deps=[{}],
+        dead_candidates=[],
+        referenced_names=["ref"],
+        referenced_qualnames=["pkg.mod:ref"],
+        security_surfaces=[],
+        runtime_reachability=[{"target_kind": "not-a-kind"}],
+        typing_coverage=None,
+        docstring_coverage=None,
+        api_surface={
+            "module": "pkg.mod",
+            "filepath": "pkg/mod.py",
+            "all_declared": "not-a-list",
+            "symbols": [],
+        },
+        structural_findings=None,
+    )
+    entry = SimpleNamespace(module_dependent=dependent)
+    (
+        class_metrics,
+        module_deps,
+        dead_candidates,
+        referenced_names,
+        _referenced_qualnames,
+        _typing_cov,
+        _doc_cov,
+        api_surface,
+        reachability,
+        security,
+    ) = dc.load_cached_metrics_extended(
+        cast(CacheEntryV3, entry), filepath="pkg/mod.py"
+    )
+    assert class_metrics == ()
+    assert module_deps == ()
+    assert dead_candidates == ()
+    assert referenced_names == frozenset({"ref"})
+    assert api_surface is None
+    assert reachability == ()
+    assert security == ()
+
+
+def test_usable_cached_source_stats_requires_present_sections() -> None:
+    import codeclone.core.discovery_cache as dc
+    from codeclone.models import CacheEntryV3
+
+    entry_no_metrics = SimpleNamespace(module_dependent=None)
+    assert (
+        dc.usable_cached_source_stats(
+            cast(CacheEntryV3, entry_no_metrics),
+            skip_metrics=False,
+            collect_structural_findings=False,
+        )
+        is None
+    )
+
+    entry_no_structural = SimpleNamespace(
+        module_dependent=SimpleNamespace(structural_findings=None)
+    )
+    assert (
+        dc.usable_cached_source_stats(
+            cast(CacheEntryV3, entry_no_structural),
+            skip_metrics=True,
+            collect_structural_findings=True,
+        )
+        is None
+    )
+
+
+def test_live_root_reason_narrows_only_known_values() -> None:
+    import codeclone.core.discovery_cache as dc
+
+    assert dc._live_root_reason("export_root") == "export_root"
+    assert dc._live_root_reason("external_decorator") == "external_decorator"
+    assert dc._live_root_reason("invented_reason") is None
+
+
+def test_artifact_dead_items_rejects_mixed_tuples() -> None:
+    from codeclone.models import DeadItem
+
+    real = DeadItem(
+        qualname="pkg.mod:gone",
+        filepath="pkg/mod.py",
+        start_line=1,
+        end_line=2,
+        kind="function",
+        confidence="high",
+    )
+    default = (real,)
+    assert core_pipeline._artifact_dead_items((real,), ()) == (real,)
+    assert core_pipeline._artifact_dead_items((real, "poison"), default) == default
+    assert core_pipeline._artifact_dead_items("not-a-tuple", default) == default
+
+
+def _observation_failure_pipeline(
+    tmp_path: Path,
+) -> tuple[object, object, object]:
+    from tests._pipeline_fixtures import analysis_boot, discover_and_process
+
+    package = tmp_path / "pkg"
+    package.mkdir()
+    (package / "__init__.py").write_text("", "utf-8")
+    (package / "mod.py").write_text("def f():\n    return 1\n", "utf-8")
+    boot = analysis_boot(tmp_path, min_loc=1, min_stmt=1, skip_metrics=False)
+    _cache, discovery, processing = discover_and_process(
+        boot, tmp_path / "cache.json", root=tmp_path, warm=False
+    )
+    return boot, discovery, processing
+
+
+def test_pipeline_observation_bundle_contract_failure_propagates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot, discovery, processing = _observation_failure_pipeline(tmp_path)
+
+    def _raise_bundle(*args: object, **kwargs: object) -> object:
+        raise core_pipeline.ObservationContractError(  # type: ignore[attr-defined]
+            "bundle contract broke"
+        )
+
+    monkeypatch.setattr(core_pipeline, "build_observation_bundle", _raise_bundle)
+    with pytest.raises(
+        core_pipeline.ObservationContractError,  # type: ignore[attr-defined]
+        match="bundle contract broke",
+    ):
+        core_pipeline.analyze(
+            boot=boot,  # type: ignore[arg-type]
+            discovery=discovery,  # type: ignore[arg-type]
+            processing=processing,  # type: ignore[arg-type]
+        )
+
+
+def test_pipeline_observation_lanes_contract_failure_propagates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    boot, discovery, processing = _observation_failure_pipeline(tmp_path)
+
+    def _raise_lanes(*args: object, **kwargs: object) -> object:
+        raise core_pipeline.ObservationContractError(  # type: ignore[attr-defined]
+            "lanes contract broke"
+        )
+
+    monkeypatch.setattr(core_pipeline, "build_observation_lanes", _raise_lanes)
+    with pytest.raises(
+        core_pipeline.ObservationContractError,  # type: ignore[attr-defined]
+        match="lanes contract broke",
+    ):
+        core_pipeline.analyze(
+            boot=boot,  # type: ignore[arg-type]
+            discovery=discovery,  # type: ignore[arg-type]
+            processing=processing,  # type: ignore[arg-type]
+        )
+
+
+def test_cached_relationship_record_rejects_unknown_kind() -> None:
+    row = {
+        "relation_kind": "telepathy",
+        "resolution_status": "resolved",
+        "origin_lane": "production",
+        "source_qualname": "pkg.mod:caller",
+        "target_qualname": "pkg.mod:callee",
+        "path": "pkg/mod.py",
+        "line": 3,
+        "expression": None,
+        "resolution_rule": "direct",
+    }
+    assert core_discovery._decode_cached_relationship_record(row) is None
+
+
+def test_cli_metric_reason_parser_covers_authority_and_unresolved_rows() -> None:
+    assert cli_console._parse_metric_reason_entry(
+        "Semantic authority violations detected: 2."
+    ) == ("authority_violations", "2")
+    assert cli_console._parse_metric_reason_entry(
+        "Unresolved dead-code overrides (--fail-on-unresolved-dead-code): 3 item(s)."
+    ) == ("unresolved_external_override", "3")

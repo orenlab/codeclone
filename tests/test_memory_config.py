@@ -60,3 +60,12 @@ def test_ingest_config_validator_passthrough_non_dict() -> None:
     from codeclone.config.memory import IngestConfig
 
     assert IngestConfig._normalize_path_lists.__func__(IngestConfig, 42) == 42
+
+
+def test_memory_bool_rejects_non_boolean_payloads() -> None:
+    from codeclone.config.memory import _memory_bool
+
+    assert _memory_bool(True, key="enabled") is True
+    assert _memory_bool("off", key="enabled") is False
+    with pytest.raises(ValueError, match="expected boolean"):
+        _memory_bool(7, key="enabled")

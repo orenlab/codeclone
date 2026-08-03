@@ -456,3 +456,57 @@ def test_legacy_derivation_owners_are_finite_and_phase_bound() -> None:
         if any(needle in source for needle in needles) and relative not in inventory:
             ungoverned.append(relative)
     assert ungoverned == []
+
+
+def test_import_mount_normalization_rejects_escaping_and_invalid_prefixes() -> None:
+    from codeclone.paths.module_identity import resolver as resolver_mod
+
+    with pytest.raises(ValueError, match="repository-relative"):
+        resolver_mod._normalized_mount(
+            ImportMount(path="/abs/path", module_prefix="", origin="explicit")
+        )
+    with pytest.raises(ValueError, match="repository-relative"):
+        resolver_mod._normalized_mount(
+            ImportMount(path="../outside", module_prefix="", origin="explicit")
+        )
+    with pytest.raises(ValueError, match="valid identifiers"):
+        resolver_mod._normalized_mount(
+            ImportMount(
+                path="src", module_prefix="not-an-identifier", origin="explicit"
+            )
+        )
+    normalized = resolver_mod._normalized_mount(
+        ImportMount(path="./src/", module_prefix="pkg", origin="explicit")
+    )
+    assert normalized.path == "src"
+
+
+def test_repository_relative_path_rejects_outside_and_root_paths(
+    tmp_path: Path,
+) -> None:
+    from codeclone.paths.module_identity import resolver as resolver_mod
+
+    with pytest.raises(ValueError, match="inside the resolved repository root"):
+        resolver_mod.repository_relative_path(
+            root=tmp_path / "repo", path=tmp_path / "elsewhere" / "mod.py"
+        )
+    with pytest.raises(ValueError, match="must name a repository file"):
+        resolver_mod.repository_relative_path(root=tmp_path, path=tmp_path)
+
+
+def test_python_module_identity_requires_python_suffix() -> None:
+    from pathlib import PurePosixPath
+
+    from codeclone.paths.module_identity import resolver as resolver_mod
+
+    mount = ImportMount(path=".", module_prefix="", origin="root")
+    assert (
+        resolver_mod._python_module_identity(
+            mount=mount, relative=PurePosixPath("data/config.toml")
+        )
+        is None
+    )
+    identity = resolver_mod._python_module_identity(
+        mount=mount, relative=PurePosixPath("pkg/mod.py")
+    )
+    assert identity is not None and identity.module == "pkg.mod"

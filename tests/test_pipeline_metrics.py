@@ -2169,3 +2169,79 @@ def test_coverage_join_summary_rows_and_gate_reasons() -> None:
         ),
     )
     assert invalid_reasons == ()
+
+
+def test_dependency_source_identity_falls_back_to_path_then_fails() -> None:
+    from codeclone.core.metrics_payload import _dependency_source_identity
+
+    by_path = _dependency_source_identity("pkg/mod.py", _TEST_MODULE_REGISTRY)
+    assert by_path.file.path == "pkg/mod.py"
+    with pytest.raises(ValueError, match="absent from module registry"):
+        _dependency_source_identity("no.such.module", _TEST_MODULE_REGISTRY)
+
+
+def test_enrich_metrics_payload_skips_absent_summaries() -> None:
+    from codeclone.core.metrics_payload import _enrich_metrics_report_payload
+
+    enriched = _enrich_metrics_report_payload(
+        metrics_payload={
+            "coverage_adoption": {"summary": {}},
+            "api_surface": {"summary": {}, "items": []},
+            "health": {"score": 90},
+        },
+        metrics_diff=None,
+        coverage_adoption_diff_available=False,
+        api_surface_diff_available=False,
+    )
+    coverage_adoption = enriched["coverage_adoption"]
+    assert isinstance(coverage_adoption, dict)
+    assert coverage_adoption["summary"] == {}
+    api_surface = enriched["api_surface"]
+    assert isinstance(api_surface, dict)
+    assert api_surface["summary"] == {}
+    assert api_surface["items"] == []
+
+
+def test_build_metrics_report_payload_carries_coverage_join_section() -> None:
+    from codeclone.models import CoverageJoinResult
+
+    payload = build_metrics_report_payload(
+        module_registry=_TEST_MODULE_REGISTRY,
+        project_metrics=_project_metrics(dead_confidence="high"),
+        units=(),
+        class_metrics=(),
+        coverage_join=CoverageJoinResult(
+            coverage_xml="coverage.xml",
+            status="ok",
+            hotspot_threshold_percent=50,
+        ),
+    )
+    coverage_join = cast("dict[str, object]", payload["coverage_join"])
+    summary = cast("dict[str, object]", coverage_join["summary"])
+    assert (summary["status"], coverage_join["items"]) == ("ok", [])
+
+
+def test_overloaded_modules_path_helpers_respect_scan_root() -> None:
+    scoped = overloaded_modules_mod._source_kind(
+        "/scan/root/tests/test_mod.py", scan_root="/scan/root"
+    )
+    outside = overloaded_modules_mod._source_kind(
+        "/elsewhere/pkg/mod.py", scan_root="/scan/root"
+    )
+    assert scoped == "tests"
+    assert outside == "production"
+
+    assert (
+        overloaded_modules_mod._module_key_for_filepath(
+            "/scan/root/pkg/mod.py",
+            scan_root="/scan/root",
+            registry=_TEST_MODULE_REGISTRY,
+        )
+        == "pkg.mod"
+    )
+    with pytest.raises(ValueError, match="absent from module registry"):
+        overloaded_modules_mod._module_key_for_filepath(
+            "unmapped/mystery.py",
+            scan_root="",
+            registry=_TEST_MODULE_REGISTRY,
+        )
