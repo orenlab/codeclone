@@ -96,6 +96,14 @@ GLOSSARY: dict[str, str] = {
     "excluded groups": (
         "Accepted clone groups excluded by suppression policy before scoring"
     ),
+    # Semantic-authority stat cards
+    "governed contracts": (
+        "Contracts declared in [[tool.codeclone.authority]] that analysis checks"
+    ),
+    "unresolved owners": (
+        "Governed owners whose contract could not be resolved, so authority "
+        "cannot be asserted for them"
+    ),
     # Semantic-authority tabs: product labels, domain terms preserved here
     "contracts": (
         "Governed sinks: the semantic contracts declared in "

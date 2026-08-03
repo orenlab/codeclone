@@ -969,11 +969,21 @@ _DEPENDENCIES = """\
   border-radius:var(--radius-lg);
   background:linear-gradient(180deg,var(--bg-surface),var(--bg-raised));
   padding:var(--sp-5);width:fit-content;max-width:100%}
+/* One disclosure idiom for the whole report: a quiet, clickable summary that
+   brightens on hover. Components below add only what genuinely differs --
+   inline versus block flow, and the padding their container needs. */
+.authority-promotion summary,.authority-producers summary,.chain-more summary,
+.suggestion-details summary{cursor:pointer;user-select:none;font-weight:500;
+  color:var(--text-muted);transition:color var(--dur-fast) var(--ease)}
+.authority-promotion summary:hover,.authority-producers summary:hover,
+.chain-more summary:hover,.suggestion-details summary:hover{color:var(--text-primary)}
 .chain-more{display:inline}
-.chain-more summary{display:inline;cursor:pointer;font-size:var(--fs-2xs);
-  color:var(--text-muted);padding:0 var(--sp-1)}
-.chain-more summary:hover{color:var(--text-primary)}
+.chain-more summary{display:inline;font-size:var(--fs-2xs);padding:0 var(--sp-1)}
 .chain-more[open] summary{color:var(--text-secondary)}
+.authority-producers summary{font-size:var(--fs-2xs)}
+.authority-producer-list{margin:var(--sp-1) 0 0;padding-left:var(--sp-4);
+  display:flex;flex-direction:column;gap:var(--sp-1)}
+.authority-producer-list code{font-size:var(--fs-2xs);color:var(--text-secondary)}
 .dep-graph-svg{display:block;height:auto;margin:0 auto;overflow:visible}
 .dep-graph-svg text{font-family:var(--font-mono)}
 .dep-edge{transition:stroke-opacity var(--dur-fast) var(--ease),stroke-width var(--dur-fast) var(--ease)}
@@ -1168,21 +1178,18 @@ _SUGGESTIONS = """\
 .suggestion-action-icon{flex-shrink:0;color:var(--accent-primary)}
 
 /* Expandable details */
-.authority-promotion summary{font-size:var(--fs-xs);font-weight:500;color:var(--text-muted);
-  cursor:pointer;user-select:none;white-space:nowrap}
-.authority-promotion summary:hover{color:var(--text-primary)}
+.authority-promotion summary{font-size:var(--fs-xs);white-space:nowrap}
 .authority-promotion-body{position:relative;margin-top:var(--sp-2)}
 .authority-promotion-body .codebox{margin:0;font-family:var(--font-mono);font-size:var(--fs-xs);
   white-space:pre;overflow-x:auto}
 .authority-copy-btn{position:absolute;top:var(--sp-2);right:var(--sp-2);z-index:1;
-  font-size:var(--fs-2xs);padding:2px 6px}
+  font-size:var(--fs-2xs);padding:var(--sp-1) var(--sp-2)}
 .authority-copy-btn--ok{color:var(--success);border-color:var(--success)}
 .authority-candidate-note{margin:var(--sp-2) 0}
 .suggestion-details{border-top:1px solid var(--border)}
-.suggestion-details summary{padding:var(--sp-2) var(--sp-4);font-size:var(--fs-xs);font-weight:500;
-  color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:var(--sp-2);
-  background:none;user-select:none}
-.suggestion-details summary:hover{color:var(--text-primary);background:var(--bg-raised)}
+.suggestion-details summary{padding:var(--sp-2) var(--sp-4);font-size:var(--fs-xs);
+  display:flex;align-items:center;gap:var(--sp-2);background:none}
+.suggestion-details summary:hover{background:var(--bg-raised)}
 .suggestion-details[open] summary{border-bottom:1px solid var(--border)}
 .suggestion-details-body{padding:var(--sp-3) var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
 

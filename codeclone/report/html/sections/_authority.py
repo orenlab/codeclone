@@ -17,7 +17,9 @@ from codeclone.utils.coerce import as_mapping as _as_mapping
 from codeclone.utils.coerce import as_sequence as _as_sequence
 
 from ..primitives.escape import _escape_html
+from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
+from ..widgets.glossary import glossary_tip
 from ..widgets.tables import render_rows_table
 from ..widgets.tabs import render_split_tabs
 
@@ -368,18 +370,55 @@ def render_authority_panel(ctx: ReportContext) -> str:
         column_types={"Score": "meter", "Level": "chips"},
         ctx=ctx,
     )
-    return insight_block(
-        question="Is each governed semantic contract owned by one authority?",
-        answer=answer,
-        tone=tone,
-    ) + render_split_tabs(
-        group_id="semantic-authority",
-        tabs=(
-            ("violations", "Violations", len(active), active_panel),
-            ("governed", "Contracts", len(governed), governed_panel),
-            ("candidates", "Discovery", len(candidates), candidate_panel),
-            ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
+    # The narrative contract: the answer first, then the numbers a reader acts
+    # on, then the evidence. Until now this panel jumped from the answer
+    # straight into four tabs, so the counts lived only as tab badges.
+    cards = [
+        _stat_card(
+            "Violations",
+            len(active),
+            detail=_micro_badges(("suppressed", len(suppressed))),
+            value_tone="bad" if active else "good",
+            glossary_tip_fn=glossary_tip,
         ),
+        _stat_card(
+            "Governed contracts",
+            _as_int(summary.get("registry_contracts")),
+            detail=_micro_badges(("owners", len(governed))),
+            value_tone="muted" if not enabled else "",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Discovery",
+            len(candidates),
+            detail=_micro_badges(("sinks examined", sink_total or "n/a")),
+            value_tone="muted",
+            glossary_tip_fn=glossary_tip,
+        ),
+        _stat_card(
+            "Unresolved owners",
+            unresolved_governed,
+            secondary=f"of {len(governed)}" if governed else "",
+            value_tone="warn" if unresolved_governed else "good",
+            glossary_tip_fn=glossary_tip,
+        ),
+    ]
+    return (
+        insight_block(
+            question="Is each governed semantic contract owned by one authority?",
+            answer=answer,
+            tone=tone,
+        )
+        + f'<div class="stat-cards">{"".join(cards)}</div>'
+        + render_split_tabs(
+            group_id="semantic-authority",
+            tabs=(
+                ("violations", "Violations", len(active), active_panel),
+                ("governed", "Contracts", len(governed), governed_panel),
+                ("candidates", "Discovery", len(candidates), candidate_panel),
+                ("suppressed", "Suppressed", len(suppressed), suppressed_panel),
+            ),
+        )
     )
 
 

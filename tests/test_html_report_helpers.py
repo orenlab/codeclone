@@ -1112,3 +1112,87 @@ def test_dep_graph_card_shrink_wraps_its_graph() -> None:
     assert wrap is not None
     assert "width:fit-content" in wrap.group(0)
     assert "max-width:100%" in wrap.group(0)
+
+
+def _authority_panel_html() -> str:
+    """Render the authority panel from a minimal context stub."""
+
+    from codeclone.report.html.sections._authority import render_authority_panel
+
+    authority = {
+        "summary": {
+            "enabled": True,
+            "enforcement_enabled": True,
+            "registry_contracts": 2,
+            "sinks": 9,
+        },
+        "items": [
+            {
+                "item_kind": "governed_sink",
+                "contract_id": "snapshot.publication/v1",
+                "sink_identity": "pkg.store:publish",
+                "authority_status": "authoritative",
+                "resolution_state": "resolved",
+            },
+            {
+                "item_kind": "candidate",
+                "candidate_id": "cand-1",
+                "level": "exact_contract_ir",
+                "score": 5,
+                "producers": ["pkg.a:owner", "pkg.b:twin"],
+                "shared_fact": "effect:artifact_write:os.replace",
+                "source_kind": "production",
+            },
+        ],
+    }
+    ctx = cast(
+        Any,
+        SimpleNamespace(
+            metrics_map={"semantic_authority": authority},
+            relative_path=lambda value: value,
+        ),
+    )
+    return render_authority_panel(ctx)
+
+
+def test_report_css_states_one_disclosure_idiom() -> None:
+    """Every disclosure in the report behaves the same way, described once.
+
+    Three components had grown their own near-identical summary rules and a
+    fourth, the authority producer list, had none at all and rendered with
+    browser defaults beside them.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    shared = [
+        rule
+        for rule in re.findall(r"([^{}]*)\{[^}]*cursor:pointer[^}]*\}", css)
+        if "summary" in rule
+    ]
+    joined = " ".join(shared)
+    for component in (
+        ".authority-promotion",
+        ".authority-producers",
+        ".chain-more",
+        ".suggestion-details",
+    ):
+        assert f"{component} summary" in joined, f"{component} has no disclosure rule"
+
+    # one rule carries them, rather than four copies of the same intent
+    grouped = [rule for rule in shared if rule.count("summary") >= 4]
+    assert grouped, "disclosure behaviour is still restated per component"
+
+
+def test_authority_panel_leads_with_scannable_decision_numbers() -> None:
+    """The narrative contract: the answer, then the numbers a reader acts on."""
+
+    html = _authority_panel_html()
+
+    answer_at = html.index("Is each governed semantic contract owned by one authority?")
+    cards_at = html.index('class="stat-cards"')
+    tabs_at = html.index('data-subtab-group="semantic-authority"')
+    assert answer_at < cards_at < tabs_at
+    assert "Violations" in html
+    assert "Governed contracts" in html
