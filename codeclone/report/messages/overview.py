@@ -117,7 +117,9 @@ CLUSTER_RADAR_CAPTION_SUFFIX: Final = " Red labels highlight dimensions below 60
 EXECUTIVE_SCAN_SCOPE_DEFAULT: Final = (
     "Project-wide context derived from the full scanned root."
 )
-EXECUTIVE_HEALTH_SNAPSHOT_QUESTION: Final = "Current health snapshot"
+# The face of the report asks what a reader opens it to ask, in the same
+# slot every other panel uses for its question.
+EXECUTIVE_HEALTH_SNAPSHOT_QUESTION: Final = "How healthy is this repository right now?"
 EXECUTIVE_THRESHOLDS_PREFIX: Final = "Thresholds: "
 
 ADOPTION_API_DISABLED: Final = "Disabled in this run."

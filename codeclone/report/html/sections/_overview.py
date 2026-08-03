@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 from codeclone.utils import coerce as _coerce
 
 from ...messages.clone_health import clone_health_summary_sentence
+from ...messages.explain import plural_word
 from ...messages.overview import (
     ADOPTION_ADDED_SYMBOLS,
     ADOPTION_API_DISABLED,
@@ -580,6 +581,24 @@ def _adoption_and_api_section(ctx: ReportContext) -> str:
     )
 
 
+def _overview_counts_sentence(
+    *,
+    clone_groups: int,
+    dead_total: int,
+    dead_suppressed: int,
+    dependency_cycles: int,
+) -> str:
+    """State the headline counts so each one agrees with its own number."""
+
+    return (
+        f"{clone_groups} {plural_word(clone_groups, 'clone group', 'clone groups')}; "
+        f"{dead_total} {plural_word(dead_total, 'dead-code item', 'dead-code items')} "
+        f"({dead_suppressed} suppressed); "
+        f"{dependency_cycles} "
+        f"{plural_word(dependency_cycles, 'dependency cycle', 'dependency cycles')}."
+    )
+
+
 def _scan_scope_subtitle(ctx: ReportContext) -> str:
     """Build a subtitle string with scan-scope essentials for the Executive Summary header."""
     inventory = _as_mapping(getattr(ctx, "inventory_map", {}))
@@ -857,11 +876,13 @@ def render_overview_panel(ctx: ReportContext) -> str:
     # Overview answer
     def _answer_and_tone() -> tuple[str, Tone]:
         if ctx.metrics_available and health_score_known:
-            ans = (
-                f"Health {health_score:.0f}/100 ({health_grade}); "
-                f"{ctx.clone_groups_total} clone groups; "
-                f"{dead_total} dead-code items ({dead_suppressed} suppressed); "
-                f"{dependency_cycle_count} dependency cycles."
+            ans = f"Health {health_score:.0f}/100 ({health_grade}); " + (
+                _overview_counts_sentence(
+                    clone_groups=ctx.clone_groups_total,
+                    dead_total=dead_total,
+                    dead_suppressed=dead_suppressed,
+                    dependency_cycles=dependency_cycle_count,
+                )
             )
             if health_score >= 80.0:
                 return ans, "ok"
@@ -869,10 +890,11 @@ def render_overview_panel(ctx: ReportContext) -> str:
                 return ans, "warn"
             return ans, "risk"
         if ctx.metrics_available:
-            ans = (
-                f"{ctx.clone_groups_total} clone groups; "
-                f"{dead_total} dead-code items ({dead_suppressed} suppressed); "
-                f"{dependency_cycle_count} dependency cycles."
+            ans = _overview_counts_sentence(
+                clone_groups=ctx.clone_groups_total,
+                dead_total=dead_total,
+                dead_suppressed=dead_suppressed,
+                dependency_cycles=dependency_cycle_count,
             )
             return ans, "info"
         return (

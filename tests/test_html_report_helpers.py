@@ -588,8 +588,10 @@ def test_render_overview_panel_surfaces_baselined_and_partially_baselined_kpis()
 def test_render_overview_panel_summarizes_metrics_without_health_score() -> None:
     panel_html = render_overview_panel(cast(Any, _section_ctx()))
 
+    # "1 dependency cycles" now agrees with its own count; the rest of the
+    # sentence is unchanged.
     assert (
-        "4 clone groups; 4 dead-code items (0 suppressed); 1 dependency cycles."
+        "4 clone groups; 4 dead-code items (0 suppressed); 1 dependency cycle."
         in panel_html
     )
 
@@ -1196,3 +1198,45 @@ def test_authority_panel_leads_with_scannable_decision_numbers() -> None:
     assert answer_at < cards_at < tabs_at
     assert "Violations" in html
     assert "Governed contracts" in html
+
+
+def _overview_answer(html: str) -> str:
+    match = re.search(r'<div class="insight-answer">(.*?)</div>', html, re.S)
+    assert match is not None
+    return " ".join(re.sub(r"<[^>]+>", " ", match.group(1)).split())
+
+
+def test_overview_asks_its_question_like_every_other_tab() -> None:
+    """The face of the report must ask, not label.
+
+    Every other panel opens with a question a reader recognises. The overview
+    opened with the words "Current health snapshot", which names a widget
+    rather than answering anything.
+    """
+
+    from codeclone.report.messages.overview import (
+        EXECUTIVE_HEALTH_SNAPSHOT_QUESTION as question,
+    )
+
+    assert question.endswith("?"), question
+    assert "snapshot" not in question.lower()
+
+
+def test_overview_answer_agrees_with_its_own_counts() -> None:
+    """One clone group is not "1 clone groups"."""
+
+    from codeclone.report.html.sections._overview import _overview_counts_sentence
+
+    single = _overview_counts_sentence(
+        clone_groups=1, dead_total=1, dead_suppressed=0, dependency_cycles=1
+    )
+    plural = _overview_counts_sentence(
+        clone_groups=3, dead_total=0, dead_suppressed=2, dependency_cycles=0
+    )
+
+    assert "1 clone group;" in single
+    assert "1 dead-code item " in single
+    assert "1 dependency cycle." in single
+    assert "3 clone groups;" in plural
+    assert "0 dead-code items " in plural
+    assert "0 dependency cycles." in plural
