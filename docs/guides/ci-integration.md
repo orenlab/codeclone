@@ -3,7 +3,7 @@ title: "CI integration"
 audience: public
 doc_type: guide
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
 ---
 
 # CI integration
@@ -44,9 +44,11 @@ graph LR
 | Set baseline | `codeclone --update-baseline` | Run on main branch once to establish truth |
 | Check PR | `codeclone --ci --changed-only` | Compares changed files against baseline |
 | Check all files | `codeclone --ci` | Full analysis; slower but comprehensive |
-| Update metrics | `codeclone --update-metrics-baseline` | Tracks complexity, typing, docstrings |
 | Show failures | `codeclone --ci --verbose` | Lists clone IDs and file locations |
 | Skip dead code | `codeclone --ci --skip-dead-code` | Omits high-confidence dead-code checks |
+
+Clone findings and metrics share one baseline container, so `--update-baseline`
+refreshes both. There is no separate metrics-baseline flag.
 
 ## Common mistakes
 
@@ -54,7 +56,9 @@ graph LR
 
 **Not using `--changed-only`:** Analyzing the entire repo on every PR is slow. Use `--paths-from-git-diff main` (shorthand for `--changed-only --diff-against main`) to limit scope to changed files.
 
-**Ignoring metrics baselines:** Complexity and typing metrics drift over time. Use `--update-metrics-baseline` to calibrate, then `--fail-on-new-metrics` to catch regressions.
+**Ignoring metrics baselines:** Complexity and typing metrics drift over time. Refresh the baseline on main with `--update-baseline`, then use `--fail-on-new-metrics` to catch regressions.
+
+**Omitting `baseline_scope_id`:** baseline update and baseline-relative gating both require a stable canonical UUID under `[tool.codeclone]`. Without it CodeClone exits 2 before any gate runs.
 
 **Misconfiguring gates:** Default thresholds are conservative. Tune `--fail-complexity`, `--fail-coupling`, and `--fail-health` to match your team standards, but document the choices so other developers understand the intent.
 
@@ -62,6 +66,7 @@ graph LR
 
 ## Next steps
 
+- Read [Upgrading from 2.1.0a1 to 2.1.0a2](migration-a1-a2.md) if your pipeline already runs an older CodeClone
 - Run `codeclone --help` to see all options for quality gates and reporting formats
 - Set up a GitHub Actions or GitLab CI workflow to run CodeClone on every PR
 - Store baseline files in version control so all team members use the same reference

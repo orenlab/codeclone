@@ -3,7 +3,7 @@ title: "Configuration reference"
 audience: public
 doc_type: reference
 status: published
-source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
+source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
 ---
 
 # Configuration reference
@@ -17,6 +17,7 @@ Configuration is stored in `pyproject.toml`:
 ```toml
 [tool.codeclone]
 baseline = "codeclone.baseline.json"
+baseline_scope_id = "0189f1a2-3b4c-7d8e-9f01-234567890abc"  # required to update or gate on a baseline
 audit_enabled = true   # opt in; disabled by default
 fail_health = 60       # gate on health; disabled by default
 ```
@@ -46,7 +47,22 @@ failing your build until you opt in.
 | `intent_registry_path` | str | `.codeclone/db/intents.sqlite3` | Intent registry database path |
 | `intent_registry_retention_days` | int | `14` | Retain intent records (days) |
 | `api_surface` | bool | `false` | Compute API surface metrics |
-| `golden_fixture_paths` | list | `[]` | Paths to golden test fixtures |
+| `golden_fixture_paths` | list | `[]` | Repo-relative `tests/` or `tests/fixtures/` paths whose clone groups are suppressed with a visible count |
+| `baseline_scope_id` | str | unset | Stable canonical UUID naming the baseline scope. Required for baseline update and baseline-relative gating |
+| `project_label` | str | unset | Human label recorded in baseline metadata |
+| `source_roots` | list | unset | Explicit import roots for module identity |
+| `near_miss` | bool | `false` | Produce the advisory near-miss clone channel |
+| `semantic_authority` | bool | `false` | Collect report-only semantic authority candidates and provenance facts |
+| `fail_on_authority_violation` | bool | `false` | Exit nonzero on an authority violation in a governed contract |
+| `fail_on_unresolved_dead_code` | bool | `false` | Exit nonzero on unresolved external overrides |
+
+Sixty keys are accepted under `[tool.codeclone]`; the table above covers the
+ones most projects set. An unknown key is a contract error, not a warning.
+
+### Semantic authority registry
+
+`[[tool.codeclone.authority]]` is an array of tables, each declaring one
+governed contract. See [Semantic authority governance](../concepts/semantic-authority.md).
 
 ### Memory and semantic configuration
 

@@ -3,7 +3,7 @@ title: "Health score"
 audience: public
 doc_type: concept
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
 ---
 
 ## What it is
@@ -22,13 +22,17 @@ It should not be treated as an absolute target, because the weighting reflects C
 
 | Dimension | Weight | Fed by |
 |-----------|--------|--------|
-| Clones | 25% | [Structural analysis](structural-analysis.md) clone detection |
-| Complexity | 20% | Cyclomatic/cognitive complexity per function |
-| Cohesion | 15% | Method dispersion within a class |
-| Coupling | 10% | Fan-in/fan-out between modules |
-| Coverage | 10% | Untested-hotspot detection |
-| Dead code | 10% | Reachability analysis |
-| Dependencies | 10% | Dependency-cycle detection |
+| Clones | 25% | Active function and block clone groups per analyzed file |
+| Complexity | 20% | [Full-McCabe V(G)](complexity.md) per function |
+| Cohesion | 15% | LCOM4 per class |
+| Coupling | 10% | CBO per class |
+| Coverage | 10% | Analyzed files over found files — analysis coverage, not test coverage |
+| Dead code | 10% | Dead-code items, including [unreachable statements](unreachable-statements.md) |
+| Dependencies | 10% | Dependency cycles and depth |
+
+The weights above are the contract, not a suggestion; every surface that shows a
+dimension reads them from the same place that computed the score. How each
+dimension spends its points is in [Health explainability](health-explainability.md).
 
 ```mermaid
 graph LR
@@ -41,6 +45,7 @@ Health score is computed fresh on every run and stored as part of the [report](r
 
 ## Related pages
 
+- [Health explainability](health-explainability.md) — how each dimension spends its points
 - [Run the first analysis](../guides/first-analysis.md) — where the score appears in the report
 - [Structural analysis](structural-analysis.md) — the seven underlying dimensions
 - [CI integration](../guides/ci-integration.md) — gating a pipeline on health score

@@ -3,7 +3,7 @@ title: "CLI reference"
 audience: public
 doc_type: reference
 status: draft
-source_commit: "d88c17f0f19cf753b9d43870528e0747b3161b9c"
+source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
 ---
 
 ## Overview
@@ -31,19 +31,25 @@ Specialized subcommands manage setup, engineering memory, and analytics. Exit co
 | `--changed-only` | Limit findings to files in a git diff |
 | `--diff-against REF` | Use `git diff --name-only <REF>` to determine changed files |
 | `--paths-from-git-diff REF` | Shorthand for `--changed-only --diff-against REF` |
+| `--near-miss` | Report near-miss clone pairs. Advisory; never gates or enters the baseline |
 
 ### Baseline and cache
 
 | Option | Description |
 |--------|-------------|
-| `--baseline [FILE]` | Clone baseline path. Default: `codeclone.baseline.json` |
+| `--baseline [FILE]` | Baseline path. Default: `codeclone.baseline.json` |
 | `--max-baseline-size-mb MB` | Maximum baseline size. Default: 5 |
-| `--update-baseline` | Overwrite baseline with current results |
-| `--metrics-baseline [FILE]` | Metrics baseline path. Default: `codeclone.baseline.json` |
-| `--update-metrics-baseline` | Overwrite metrics baseline with current metrics |
+| `--update-baseline` | Overwrite the baseline with current results |
 | `--cache-path [FILE]` | Cache file path. Default: `.codeclone/cache.json` |
 | `--cache-dir [FILE]` | Legacy alias for `--cache-path` |
 | `--max-cache-size-mb MB` | Maximum cache size. Default: 50 |
+
+Clone findings and metrics live in one baseline container, so one
+`--baseline` / `--update-baseline` pair governs both. There is no separate
+metrics-baseline flag. See [Baseline container and lane trust](../concepts/baseline-container.md).
+
+Baseline update and baseline-relative gating both require a stable
+`baseline_scope_id` in `pyproject.toml`; without it CodeClone exits 2.
 
 ### Verification and gates
 
@@ -54,6 +60,7 @@ Specialized subcommands manage setup, engineering memory, and analytics. Exit co
 | `--strictness LEVEL` | Strictness profile: `ci`, `strict`, or `relaxed`. Default: `ci` |
 | `--ci` | Enable CI preset (`--fail-on-new --no-color --quiet`) |
 | `--api-surface` | Collect public API surface facts for compatibility review |
+| `--semantic-authority` | Collect report-only semantic authority candidates and provenance facts |
 | `--coverage FILE` | Join external Cobertura XML line coverage |
 
 ### Quality gates (fail on violation)
@@ -68,10 +75,12 @@ Specialized subcommands manage setup, engineering memory, and analytics. Exit co
 | `--fail-cohesion [LCOM4_MAX]` | Exit 3 if class cohesion exceeds threshold. Default if enabled: 4 |
 | `--fail-cycles` | Exit 3 if circular dependencies detected |
 | `--fail-dead-code` | Exit 3 if dead code detected |
+| `--fail-on-unresolved-dead-code` | Exit 3 on unresolved external overrides. These are abstentions, never counted as dead code |
 | `--fail-health [SCORE_MIN]` | Exit 3 if health score below threshold. Default if enabled: 60 |
 | `--fail-on-typing-regression` | Exit 3 if typing coverage regresses |
 | `--fail-on-docstring-regression` | Exit 3 if docstring coverage regresses |
 | `--fail-on-api-break` | Exit 3 if public API removals detected |
+| `--fail-on-authority-violation` | Exit 3 on an authority violation in a governed semantic contract. Requires a reviewed `[[tool.codeclone.authority]]` entry |
 | `--fail-on-untested-hotspots` | Exit 3 if risk-level functions have insufficient coverage. Requires `--coverage` |
 | `--min-typing-coverage PERCENT` | Exit 3 if parameter typing coverage below threshold |
 | `--min-docstring-coverage PERCENT` | Exit 3 if public docstring coverage below threshold |
@@ -168,11 +177,16 @@ Reports are written to `.codeclone/report.<ext>` by default unless FILE is speci
 - `--open-html-report`: Open HTML report in default browser (requires `--html`)
 
 **Output formatting:**
-- `--no-progress`: Disable progress output (recommended for CI)
-- `--no-color`: Disable ANSI colors
+- `--no-progress` / `--progress`: Disable or force-enable progress output (disable for CI)
+- `--no-color` / `--color`: Disable or force-enable ANSI colors
 - `--quiet`: Reduce output to warnings and errors
 - `--verbose`: Include detailed identifiers for new findings
 - `--debug`: Print debug details and traceback on error
+
+**General:**
+- `-h, --help`: Show help and exit
+- `--interactive-help`: Open the guided product tour; use with `--help`
+- `--version`: Print the CodeClone version and exit
 
 ## Exit codes
 
