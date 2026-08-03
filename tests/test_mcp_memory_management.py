@@ -652,3 +652,43 @@ def test_mcp_manage_memory_promote_experience_requires_a_full_id(
                 action="promote_experience",
                 experience_id="exp-abcd1234",
             )
+
+
+def test_mcp_manage_memory_propose_scope_check_variants(tmp_path: Path) -> None:
+    """Without an intent the proposal carries no scope-derived candidate;
+    a live intent's declared scope produces one naming the scoped file."""
+
+    from codeclone.surfaces.mcp._session_shared import MCPAnalysisRequest
+
+    with cli_memory_repo(tmp_path, with_draft=False) as (root, _project, _store):
+        service = CodeCloneMCPService(history_limit=4)
+
+        bare = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="propose_from_receipt",
+            text=None,
+        )
+        assert bare.get("memory_candidates") == []
+
+        service.analyze_repository(
+            MCPAnalysisRequest(
+                root=str(root.resolve()),
+                respect_pyproject=False,
+                cache_policy="off",
+            )
+        )
+        started = service.start_controlled_change(
+            root=str(root.resolve()),
+            scope={"allowed_files": ["pkg/mod.py"]},
+            intent="memory propose scope",
+        )
+        assert started["status"] == "active"
+        scoped = service.manage_engineering_memory(
+            root=str(root.resolve()),
+            action="propose_from_receipt",
+            text="Scoped change to pkg/mod.py.",
+            intent_id=str(started["intent_id"]),
+        )
+        candidates = cast("list[dict[str, object]]", scoped["memory_candidates"])
+        statements = [str(item["statement"]) for item in candidates]
+        assert any("scope includes pkg/mod.py" in statement for statement in statements)

@@ -295,3 +295,48 @@ def test_validate_dirty_snapshot_payload_private_edges() -> None:
                 "entries": {"pkg/a.py": "bad"},
             }
         )
+
+
+def test_dirty_snapshot_rejects_malformed_entry_digest() -> None:
+    base: dict[str, object] = {
+        "git_available": True,
+        "captured_at_utc": "2026-05-29T20:00:00Z",
+        "entries": {
+            "pkg/a.py": {
+                "status_xy": " M",
+                "digest": "zz-not-hex",
+                "digest_status": "ok",
+            }
+        },
+    }
+    with pytest.raises(ValueError, match="null or 64-char hex"):
+        workspace_intent_models._validate_dirty_snapshot_payload(base)
+
+
+def test_signed_payload_dict_refuses_unparseable_records() -> None:
+    scope: dict[str, object] = {
+        "allowed_files": ["pkg/a.py"],
+        "allowed_related": [],
+        "forbidden": [".codeclone/**"],
+    }
+    record = workspace_intents.WorkspaceIntentRecord(
+        intent_id="intent-abcdef12-001",
+        agent_pid=1000,
+        agent_start_epoch=100,
+        agent_label="agent",
+        run_id="run1234567890",
+        declared_at_utc="2026-05-29T20:00:00Z",
+        expires_at_utc="2026-05-29T21:00:00Z",
+        ttl_seconds=3600,
+        status="active",
+        intent="edit pkg",
+        scope=scope,
+        scope_digest=workspace_intents.compute_scope_digest(scope),
+        blast_radius_summary={},
+        lease_renewed_at_utc="2026-05-29T20:00:00Z",
+        lease_seconds=workspace_intents.DEFAULT_LEASE_SECONDS,
+        report_digest="digest-a",
+    )
+    broken = replace(record, status="imaginary-status")
+    with pytest.raises(ValueError, match="valid WorkspaceIntentRecord payload"):
+        signed_payload_dict_from_record(broken)

@@ -16245,3 +16245,585 @@ def test_workspace_actions_refuse_to_infer_the_last_analyzed_root(
 
     with pytest.raises(MCPServiceContractError):
         service.manage_change_intent(action="list_workspace")
+
+
+def test_mcp_run_store_registration_queries_fail_closed_on_unknown_runs(
+    tmp_path: Path,
+) -> None:
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
+    store.register(_dummy_run_record(tmp_path, "knownrun12345678"))
+
+    assert store.is_latest_registration("knownrun12345678", root=tmp_path) is True
+    assert store.is_latest_registration("absentrun1234567", root=tmp_path) is False
+    assert store.registration_ordinal("absentrun1234567", root=tmp_path) is None
+    assert store.registration_ordinal("knownrun12345678", root=tmp_path) == 1
+
+
+def test_mcp_run_store_any_root_resolution_refuses_root_collisions(
+    tmp_path: Path,
+) -> None:
+    """The same content-addressed run id under two checkouts is ambiguous and
+    must not be silently substituted."""
+
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
+    root_a = tmp_path / "checkout-a"
+    root_b = tmp_path / "checkout-b"
+    root_a.mkdir()
+    root_b.mkdir()
+    store.register(_dummy_run_record(root_a, "sharedrun1234567"))
+    store.register(_dummy_run_record(root_b, "sharedrun1234567"))
+
+    with pytest.raises(
+        mcp_shared_mod.MCPRunRootAmbiguityError, match="several repository roots"
+    ):
+        store.resolve_any_root("sharedrun1234567")
+
+
+def test_mcp_run_store_dangling_pins_self_heal(tmp_path: Path) -> None:
+    """A pin whose run vanished is dropped by the next prune sweep instead of
+    poisoning the pin budget forever."""
+
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
+    record = store.register(_dummy_run_record(tmp_path, "pinnedrun1234567"))
+    store.pin(record.run_id, root=tmp_path)
+
+    ghost_key = mcp_shared_mod.run_store_key(tmp_path / "gone", "ghostrun12345678")
+    store._pinned_run_ids[ghost_key] = 1
+
+    store.unpin(record.run_id, root=tmp_path)
+    assert ghost_key not in store._pinned_run_ids
+    assert tuple(item.run_id for item in store.records()) == ("pinnedrun1234567",)
+
+
+def test_mcp_blast_payload_summaries_tolerate_malformed_shapes() -> None:
+    assert mcp_blast_radius_mod._object_sequence("not-a-list") == ()
+    assert (
+        mcp_blast_radius_mod._structural_risk_summary({"structural_risk": "bad"}) == {}
+    )
+    assert (
+        mcp_blast_radius_mod._flatten_structural_risk({"structural_risk": None}) == ()
+    )
+
+    well_formed = {"structural_risk": {"lane": ["pkg/a.py"]}}
+    assert mcp_blast_radius_mod._flatten_structural_risk(well_formed) == ("pkg/a.py",)
+    summary = mcp_blast_radius_mod._structural_risk_summary(well_formed)
+    assert summary == {"lane": {"total": 1, "shown": 0, "truncated": True}}
+
+
+def test_blast_radius_document_parsing_filters_malformed_rows() -> None:
+    """Malformed registry rows, metric items, edges, boundaries, and cycles
+    are dropped row-by-row: garbage changes nothing."""
+
+    from codeclone.analysis.blast_radius import compute_blast_radius
+
+    clean = compute_blast_radius(
+        run_id="abcdef12",
+        report_document=_blast_radius_report_document(),
+        files=("pkg/a.py",),
+        depth="transitive",
+    )
+
+    noisy_doc = copy.deepcopy(_blast_radius_report_document())
+    inventory = cast("dict[str, object]", noisy_doc["inventory"])
+    registry = cast("dict[str, object]", inventory["file_registry"])
+    cast("list[object]", registry["items"]).append("")
+    metrics = cast("dict[str, object]", noisy_doc["metrics"])
+    families = cast("dict[str, object]", metrics["families"])
+    complexity = cast("dict[str, object]", families["complexity"])
+    cast("list[object]", complexity["items"]).append(
+        {"relative_path": "", "module": ""}
+    )
+    dependencies = cast("dict[str, object]", families["dependencies"])
+    cast("list[object]", dependencies["items"]).append(
+        {"source": "pkg.b", "target": ""}
+    )
+    cast("list[object]", dependencies["cycles"]).extend([[""], []])
+    # "." normalizes to the empty path — the row carries no usable location.
+    dependencies["dynamic_boundaries"] = [{"source": {"file": {"path": "."}}}]
+
+    noisy = compute_blast_radius(
+        run_id="abcdef12",
+        report_document=noisy_doc,
+        files=("pkg/a.py",),
+        depth="transitive",
+    )
+    assert noisy == clean
+
+
+def test_start_payload_numeric_and_omission_helpers_fail_closed() -> None:
+    assert workflow_mod._start_non_negative_int("12") == 12
+    assert workflow_mod._start_non_negative_int("  7 ") == 7
+    assert workflow_mod._start_non_negative_int("x7") == 0
+    assert workflow_mod._start_non_negative_int(None) == 0
+    assert workflow_mod._start_non_negative_int(True) == 0
+    assert workflow_mod._start_non_negative_int(-3) == 0
+
+    # A lane with nothing omitted and no truncation reports no omission row.
+    assert (
+        workflow_mod._start_blast_omission_row(
+            "direct_dependents", {"total": 2, "shown": 2, "truncated": False}
+        )
+        is None
+    )
+    row = workflow_mod._start_blast_omission_row(
+        "direct_dependents", {"total": 3, "shown": 1, "truncated": True}
+    )
+    assert row is not None
+    assert row[0] == "blast_radius.direct_dependents"
+
+
+def test_finish_governance_attachment_tolerates_malformed_governance() -> None:
+    """Retrieval blockers only land in a well-formed enforcement list; any
+    malformed governance shape is left untouched."""
+
+    blocked_payload: dict[str, object] = {
+        "receipt": {"retrieval_unavailable": "audit_write_failed"},
+    }
+    governed = workflow_mod._attach_finish_governance(
+        blocked_payload, evidence_omitted=None
+    )
+    governance = governed.get("context_governance")
+    assert isinstance(governance, dict)
+    malformed = dict(governed)
+    malformed["context_governance"] = "not-a-dict"
+    # Re-attaching over a malformed governance object must not raise.
+    reattached = workflow_mod._attach_finish_governance(
+        {**blocked_payload, "context_governance": "not-a-dict"},
+        evidence_omitted=None,
+    )
+    assert isinstance(reattached, dict)
+
+
+def test_shrink_finish_lane_ignores_unknown_lanes() -> None:
+    payload: dict[str, object] = {"receipt": {"content": "big"}, "other": 1}
+    workflow_mod._shrink_finish_lane(payload, "unknown_lane")
+    assert payload == {"receipt": {"content": "big"}, "other": 1}
+
+    workflow_mod._shrink_finish_lane(payload, "receipt_content")
+    assert payload["receipt"] == {}
+
+
+def test_compact_patch_trail_reference_without_evidence_mapping() -> None:
+    compact = workflow_mod._compact_patch_trail_reference(
+        {"patch_trail_digest": "d1", "evidence": "not-a-mapping"}
+    )
+    retrieval = compact["retrieval"]
+    assert isinstance(retrieval, dict)
+    assert "patch_trail_audit_sequence" not in retrieval
+
+    with_sequence = workflow_mod._compact_patch_trail_reference(
+        {
+            "patch_trail_digest": "d1",
+            "evidence": {"patch_trail_audit_sequence": 5},
+        }
+    )
+    seq_retrieval = with_sequence["retrieval"]
+    assert isinstance(seq_retrieval, dict)
+    assert seq_retrieval["patch_trail_audit_sequence"] == 5
+
+
+def test_receipt_digest_value_takes_first_non_blank_candidate() -> None:
+    assert (
+        workflow_mod._receipt_digest_value(
+            {
+                "receipt_digest": {"value": "  "},
+                "receipt_retrieval": {"receipt_digest": "fallback-digest"},
+            }
+        )
+        == "fallback-digest"
+    )
+    assert workflow_mod._receipt_digest_value({"receipt_digest": {}}) == ""
+
+
+def test_finish_receipt_retrieval_omits_blank_run_id() -> None:
+    without_run = workflow_mod._finish_receipt_retrieval(
+        receipt_digest="d", run_id=None, format="structured"
+    )
+    assert "run_id" not in without_run
+    with_run = workflow_mod._finish_receipt_retrieval(
+        receipt_digest="d", run_id="run1", format="structured"
+    )
+    assert with_run["run_id"] == "run1"
+
+
+def test_graph_search_skips_unresolved_targets_and_blank_queries(
+    tmp_path: Path,
+) -> None:
+    from codeclone.models import FunctionRelationshipFacts, RelationshipRecord
+    from codeclone.surfaces.mcp import _graph_search as graph_search_mod
+
+    unresolved = RelationshipRecord(
+        relation_kind="call",
+        resolution_status="unresolved",
+        origin_lane="production",
+        source_qualname="pkg.consumer:run",
+        target_qualname=None,
+        path=str(tmp_path / "pkg/consumer.py"),
+        line=4,
+        expression="dynamic()",
+        resolution_rule="unresolved",
+    )
+    resolved = replace(
+        unresolved,
+        resolution_status="resolved",
+        target_qualname="pkg.target:save",
+        expression=None,
+        resolution_rule="direct",
+    )
+    record = replace(
+        _dummy_run_record(tmp_path, "graphsearch12345"),
+        relationship_facts=(
+            FunctionRelationshipFacts(
+                source_qualname="pkg.consumer:run",
+                relationships=(unresolved, resolved),
+            ),
+        ),
+    )
+
+    blank = graph_search_mod.search_graph(record=record, root=tmp_path, query="  ")
+    assert blank["status"] == "no_matches"
+
+    found = graph_search_mod.search_graph(record=record, root=tmp_path, query="save")
+    assert found["status"] != "no_matches"
+    missing = graph_search_mod.search_graph(
+        record=record, root=tmp_path, query="dynamic"
+    )
+    assert missing["status"] == "no_matches"
+
+
+def test_claim_guard_health_regression_needs_structural_scope_words() -> None:
+    from dataclasses import replace as dc_replace
+
+    context = dc_replace(_claim_guard_context(), patch_health_delta=-3)
+    neutral = mcp_claim_guard_mod._text_violations(
+        "updated the documentation wording",
+        report_context=context,
+    )
+    assert neutral == ()
+
+    overclaim = mcp_claim_guard_mod._text_violations(
+        "no structural regressions introduced",
+        report_context=context,
+    )
+    assert [item.pattern for item in overclaim] == ["health_regression_overclaim"]
+
+
+def test_claim_guard_finding_qualnames_are_shape_checked() -> None:
+    extract = mcp_claim_guard_mod._extract_qualnames_from_finding
+
+    with_garbage_items = extract(
+        "clone:function:g1",
+        {"items": ["not-a-mapping", {"qualname": "pkg.mod:f"}]},
+    )
+    assert "pkg.mod:f" in with_garbage_items
+
+    bare_dead_code = extract("dead_code:", {"items": []})
+    assert bare_dead_code == frozenset()
+
+    named_dead_code = extract("dead_code:pkg.mod:g", {"items": []})
+    assert "pkg.mod:g" in named_dead_code
+
+
+def test_memory_governance_omitted_rows_require_positive_omission() -> None:
+    import codeclone.surfaces.mcp._session_memory_mixin as memory_mixin_mod
+
+    payload = {
+        "continuation": {
+            "lanes": {
+                "records": {"shown": 2, "total": 2, "omitted": 0},
+                "trajectories": {"shown": 1, "total": 5, "omitted": 4},
+            }
+        }
+    }
+    omitted = memory_mixin_mod._memory_governance_omitted(
+        payload, original_shown={"trajectories": 3}
+    )
+    assert omitted is not None
+    assert set(omitted) == {"trajectories"}
+
+
+def test_memory_continuation_requests_require_plain_dict_payloads() -> None:
+    from types import MappingProxyType
+
+    service = CodeCloneMCPService(history_limit=2)
+    published = service._publish_memory_continuation_request(
+        {
+            "project_id": "proj-x",
+            "_memory_projection_request": MappingProxyType({"mode": "search"}),
+        }
+    )
+    assert "_memory_projection_request" not in published
+    assert service._memory_continuation_requests == {}
+
+
+def test_run_dirty_paths_without_snapshot_is_empty(tmp_path: Path) -> None:
+    import codeclone.surfaces.mcp._session_patch_contract_mixin as pc_mod
+
+    record = _dummy_run_record(tmp_path, "dirtysnapshot123")
+    assert pc_mod._run_dirty_paths(record) == frozenset()
+
+
+def test_module_map_section_payload_skips_empty_graphs() -> None:
+    import codeclone.surfaces.mcp._session_state_mixin as state_mod
+
+    payload = state_mod._module_map_section_payload(
+        {
+            "summary": {"available": True},
+            "graph_packages": {},
+            "graph_modules": {"nodes": [{"id": "pkg"}], "edges": []},
+        },
+        offset=0,
+        limit=5,
+    )
+    assert payload["graph_packages"] == {}
+    graph_modules = payload["graph_modules"]
+    assert isinstance(graph_modules, dict)
+    assert graph_modules != {}
+
+
+def test_receipt_coerce_str_list_rejects_scalar_and_bytes() -> None:
+    import codeclone.surfaces.mcp._session_review_receipt_mixin as rr_mod
+
+    assert rr_mod._coerce_str_list("abc") == []
+    assert rr_mod._coerce_str_list(b"abc") == []
+    assert rr_mod._coerce_str_list(["a", " ", 3]) == ["a", "3"]
+
+
+def test_prune_session_state_drops_context_pages_of_evicted_runs(
+    tmp_path: Path,
+) -> None:
+    service = CodeCloneMCPService(history_limit=2)
+    live = service._runs.register(_dummy_run_record(tmp_path, "liverun123456789"))
+    service._context_projection_pages["digest-live"] = cast(
+        "Any", SimpleNamespace(run_id=live.run_id)
+    )
+    service._context_projection_pages["digest-gone"] = cast(
+        "Any", SimpleNamespace(run_id="evictedrun123456")
+    )
+    service._prune_session_state()
+    assert set(service._context_projection_pages) == {"digest-live"}
+
+
+def test_mcp_reset_workspace_defaults_root_from_known_intent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _agent_a_id = _two_agent_service(tmp_path, monkeypatch)
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id="queuetest",
+        scope={"allowed_files": ["pkg/b.py"]},
+        intent="own non-overlapping scope",
+    )
+    intent_id = str(declared["intent_id"])
+
+    reset = service.manage_change_intent(
+        action="reset_workspace",
+        intent_id=intent_id,
+    )
+    assert reset["intent_id"] == intent_id
+
+
+def test_invariance_freshness_guard_cascade(tmp_path: Path) -> None:
+    """Same-run freshness needs an intent, its registration mark, and the
+    intent's own (root, run_id); anything else answers False."""
+
+    service = CodeCloneMCPService(history_limit=4)
+    record = service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id="invariance123456",
+            digest="invariance-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        )
+    )
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id=record.run_id,
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="freshness cascade",
+        root=str(tmp_path),
+    )
+    intent = service._active_intents[str(declared["intent_id"])]
+
+    assert service._invariance_run_is_fresh(intent=None, after=record) is False
+    assert (
+        service._invariance_run_is_fresh(
+            intent=replace(intent, before_run_registration_ordinal=None),
+            after=record,
+        )
+        is False
+    )
+    assert (
+        service._invariance_run_is_fresh(
+            intent=replace(intent, run_id="otherrun12345678"),
+            after=record,
+        )
+        is False
+    )
+    foreign_root = tmp_path / "sibling"
+    foreign_root.mkdir()
+    assert (
+        service._invariance_run_is_fresh(
+            intent=replace(intent, root=foreign_root),
+            after=record,
+        )
+        is False
+    )
+    # A genuine recompute of the same run under the same root is fresh.
+    service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id=record.run_id,
+            digest="invariance-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        )
+    )
+    assert service._invariance_run_is_fresh(intent=intent, after=record) is True
+
+
+def test_matching_run_ids_outcome_skips_lightweight_profiles(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.mcp._verification_profile import (
+        ClassificationResult,
+        VerificationProfile,
+    )
+
+    service = CodeCloneMCPService(history_limit=4)
+    record = service._runs.register(_dummy_run_record(tmp_path, "samerunprofile12"))
+    classification = ClassificationResult(
+        profile=VerificationProfile.DOCUMENTATION_ONLY,
+        reason="docs only",
+        python_source_touched=False,
+        state_artifact_touched=False,
+        governance_config_touched=False,
+    )
+    outcome = service._matching_run_ids_outcome(
+        before=record,
+        after=record,
+        intent=None,
+        strictness="ci",
+        classification=classification,
+        scope_check=None,
+        scope_violated=False,
+        actual_changed_files=("docs/x.md",),
+    )
+    assert outcome is None
+
+
+def test_check_patch_contract_budget_without_intent(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    record = service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id="nointent12345678",
+            digest="no-intent-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        )
+    )
+    payload = service.check_patch_contract(run_id=record.run_id, mode="budget")
+    assert payload["intent_id"] is None
+    assert "budgets" in payload
+
+
+def test_untested_hotspot_gate_accepts_valid_coverage_join(
+    tmp_path: Path,
+) -> None:
+    from codeclone.models import CoverageJoinResult
+
+    service = CodeCloneMCPService(history_limit=4)
+    record = replace(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id="covgate123456789",
+            digest="cov-gate-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        ),
+        coverage_join=CoverageJoinResult(
+            coverage_xml="coverage.xml",
+            status="ok",
+            hotspot_threshold_percent=50,
+        ),
+    )
+    service._runs.register(record)
+    gates = service.evaluate_gates(
+        MCPGateRequest(run_id=record.run_id, fail_on_untested_hotspots=True)
+    )
+    assert "exit_code" in gates or "would_fail" in gates
+
+
+def test_same_run_scope_violation_answers_typed_verify_payload(
+    tmp_path: Path,
+) -> None:
+    from codeclone.surfaces.mcp._verification_profile import (
+        ClassificationResult,
+        VerificationProfile,
+    )
+
+    service = CodeCloneMCPService(history_limit=4)
+    record = service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id="samerunviolate12",
+            digest="violate-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        )
+    )
+    classification = ClassificationResult(
+        profile=VerificationProfile.PYTHON_STRUCTURAL,
+        reason="python touched",
+        python_source_touched=True,
+        state_artifact_touched=False,
+        governance_config_touched=False,
+    )
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id=record.run_id,
+        scope={"allowed_files": ["pkg/a.py"]},
+        intent="same-run violation",
+        root=str(tmp_path),
+    )
+    intent = service._active_intents[str(declared["intent_id"])]
+    # A fresh recompute of the same run proves analyzer invariance...
+    service._runs.register(
+        _patch_contract_run_record(
+            tmp_path,
+            run_id=record.run_id,
+            digest="violate-digest",
+            include_regression=False,
+            complexity=6,
+            health=90,
+        )
+    )
+    # ...so the scope violation is answered as a violation, not ambiguity.
+    outcome = service._matching_run_ids_outcome(
+        before=record,
+        after=record,
+        intent=intent,
+        strictness="ci",
+        classification=classification,
+        scope_check={"status": "violated", "unexpected_files": ["pkg/x.py"]},
+        scope_violated=True,
+        actual_changed_files=("pkg/x.py",),
+    )
+    assert outcome is not None
+    assert outcome.get("status") in {"violated", "unverified"}
+
+
+def test_get_run_summary_without_analysis_profile(tmp_path: Path) -> None:
+    service = CodeCloneMCPService(history_limit=4)
+    record = service._runs.register(_dummy_run_record(tmp_path, "noprofile1234567"))
+    summary = service.get_run_summary(record.run_id)
+    assert summary["run_id"] == record.run_id[:8]
+    assert "analysis_profile" not in summary

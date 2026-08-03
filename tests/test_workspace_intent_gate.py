@@ -463,3 +463,40 @@ def test_agent_pid_liveness_honors_boolean_probe(
 
     monkeypatch.setattr(pid_mod, "is_agent_pid_alive", lambda _pid: False)
     assert pid_mod.agent_pid_liveness(123) is PidLiveness.DEAD
+
+
+def test_read_only_registry_loader_dispatches_by_backend(tmp_path: Path) -> None:
+    """The shared read-only loader serves both backends and rejects an
+    unknown one instead of guessing."""
+
+    import codeclone.workspace_intent.gate as workspace_gate_mod
+    from codeclone.config.intent_registry import IntentRegistryConfig
+
+    load_registry_records_read_only = (
+        workspace_gate_mod.intent_reader.load_registry_records_read_only  # type: ignore[attr-defined]
+    )
+
+    record = _record()
+    write_workspace_record(tmp_path, record)
+    intents_dir = tmp_path / ".codeclone" / "intents"
+    (intents_dir / "intent-deadbeef-002.json").write_text("{}", encoding="utf-8")
+
+    file_config = IntentRegistryConfig(
+        backend="file",
+        storage_path=intents_dir,
+    )
+    records = load_registry_records_read_only(tmp_path, file_config)
+    assert [item.intent_id for item in records] == [record.intent_id]
+
+    sqlite_config = IntentRegistryConfig(
+        backend="sqlite",
+        storage_path=tmp_path / ".codeclone" / "intents.sqlite3",
+    )
+    assert load_registry_records_read_only(tmp_path, sqlite_config) == ()
+
+    unknown_config = IntentRegistryConfig(
+        backend="redis",  # type: ignore[arg-type]
+        storage_path=intents_dir,
+    )
+    with pytest.raises(ValueError, match="Unsupported intent registry backend"):
+        load_registry_records_read_only(tmp_path, unknown_config)

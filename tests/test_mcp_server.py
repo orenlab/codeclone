@@ -1100,3 +1100,61 @@ def test_mcp_server_lifespan_runs_shutdown_hooks(
     asyncio.run(_run_lifespan())
     assert cleanup_calls == [True]
     assert shutdown_calls == [True]
+
+
+def test_mcp_server_artifact_retrieval_tools_fail_closed_without_runs(
+    tmp_path: Path,
+) -> None:
+    """The durable-retrieval tool wrappers reach the service and answer its
+    typed refusal when no analysis run exists."""
+
+    _require_mcp_runtime()
+    server = build_mcp_server(history_limit=2)
+    abs_root = str(tmp_path.resolve())
+
+    for tool_name, args in (
+        ("get_blast_artifact", {"root": abs_root, "run_id": "missing1"}),
+        ("get_review_receipt", {"root": abs_root, "run_id": "missing1"}),
+        ("get_patch_trail", {"root": abs_root, "run_id": "missing1"}),
+    ):
+        result = asyncio.run(server.call_tool(tool_name, args))
+        rendered = str(result).lower()
+        assert "error" in rendered or "not_found" in rendered or "no " in rendered, (
+            tool_name,
+            rendered,
+        )
+
+    with pytest.raises(Exception, match="memory database not found"):
+        asyncio.run(
+            server.call_tool(
+                "get_memory_projection_page",
+                {"root": abs_root, "cursor": "not-a-valid-cursor"},
+            )
+        )
+
+    with pytest.raises(Exception, match=r"[Nn]o (matching )?MCP analysis run"):
+        asyncio.run(
+            server.call_tool(
+                "check_authority",
+                {"root": abs_root, "run_id": "missing1"},
+            )
+        )
+
+
+def test_mcp_server_observability_wrapper_without_root_or_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With observability on but payload capture off, a rootless tool call
+    still runs inside the operation span."""
+
+    _require_mcp_runtime()
+    import codeclone.surfaces.mcp.server as server_mod
+
+    monkeypatch.setattr(server_mod, "is_observability_enabled", lambda: True)
+    monkeypatch.setattr(server_mod, "payload_capture_enabled", lambda: False)
+    server = build_mcp_server(history_limit=2)
+    help_payload = _structured_tool_result(
+        asyncio.run(server.call_tool("help", {"topic": "workflow"}))
+    )
+    assert help_payload["topic"] == "workflow"
