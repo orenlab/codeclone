@@ -3,7 +3,7 @@ title: "Health score"
 audience: public
 doc_type: concept
 status: draft
-source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
+source_commit: "c302179335b082f30d58f29e4a238165c28e04bc"
 ---
 
 ## What it is
@@ -27,13 +27,14 @@ It should not be treated as an absolute target, because the weighting reflects C
 | Cohesion | 15% | LCOM4 per class |
 | Coupling | 10% | CBO per class |
 | Coverage | 10% | Analyzed files over found files — analysis coverage, not test coverage |
-| Dead code | 10% | Unreferenced symbols — functions, classes, methods, imports |
+| Dead code | 10% | Symbols with no production references — functions, classes, methods, imports |
 | Dependencies | 10% | Dependency cycles and depth |
 
 The weights above are the contract, not a suggestion. How each dimension spends
 its points is in [Health explainability](health-explainability.md).
 
-The dead-code dimension counts unreferenced *symbols* only.
+The dead-code dimension counts *symbols* with no production references —
+unreferenced, or referenced only from tests.
 [Unreachable statements](unreachable-statements.md) are reported and stored in
 the dead-code lane, but they are not a health input and not a gate input today.
 

@@ -3,7 +3,7 @@ title: "Unreachable statements"
 audience: public
 doc_type: concept
 status: draft
-source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
+source_commit: "c302179335b082f30d58f29e4a238165c28e04bc"
 ---
 
 ## What it is
@@ -50,7 +50,8 @@ one finding with a statement count, not many findings.
 Unreachable statements are reported and stored in the dead-code lane. They are
 **not** a health input and **not** a gate input today:
 
-- the dead-code health dimension counts unreferenced symbols only;
+- the dead-code health dimension counts symbols with no production references —
+  unreferenced, or referenced only from tests;
 - `--fail-dead-code` reads the high-confidence symbol count, so unreachable
   statements cannot trip it.
 

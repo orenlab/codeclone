@@ -3,7 +3,7 @@ title: "Semantic authority governance"
 audience: public
 doc_type: concept
 status: draft
-source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
+source_commit: "c302179335b082f30d58f29e4a238165c28e04bc"
 ---
 
 ## What it is
@@ -73,8 +73,8 @@ Discovery proposes on the scale of a whole tree, so the HTML table is cut twice:
 it carries only the three strongest levels (`exact_contract_ir`,
 `same_effect_signature`, `same_output_fact_and_input_family`), and at most 50
 rows of those. The caption states the cut where it happens — how many of how many
-are shown, a per-level histogram of the weaker mass, and the total raw sinks
-discovery examined.
+are shown, a per-level histogram of all candidates with the below-cut levels
+named, and the total raw sinks discovery examined.
 
 ## Reading the tail over MCP
 

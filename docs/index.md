@@ -3,7 +3,7 @@ title: "CodeClone documentation"
 audience: public
 doc_type: landing
 status: published
-source_commit: "60eac9c367d74deeba1478521461addfedd8e681"
+source_commit: "c302179335b082f30d58f29e4a238165c28e04bc"
 ---
 
 # CodeClone

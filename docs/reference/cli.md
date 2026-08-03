@@ -3,7 +3,7 @@ title: "CLI reference"
 audience: public
 doc_type: reference
 status: draft
-source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
+source_commit: "c302179335b082f30d58f29e4a238165c28e04bc"
 ---
 
 ## Overview

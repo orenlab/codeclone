@@ -3,14 +3,14 @@ title: "Upgrading from 2.1.0a1 to 2.1.0a2"
 audience: public
 doc_type: guide
 status: draft
-source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
+source_commit: "c302179335b082f30d58f29e4a238165c28e04bc"
 ---
 
 # Upgrading from 2.1.0a1 to 2.1.0a2
 
-Three things change in a way you must act on: the baseline, four config keys,
-and two removed flags. Health numbers may also move — that is expected, and the
-last section explains why.
+Three things change in a way you must act on: the baseline, seven config keys
+plus the authority table array, and two removed flags. Health numbers may also
+move — that is expected, and the last section explains why.
 
 ## Upgrade in order
 
