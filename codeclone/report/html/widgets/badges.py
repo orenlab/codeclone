@@ -208,7 +208,7 @@ _INLINE_EMPTY_ICONS: dict[str, str] = {
 }
 
 
-def _inline_empty(message: str, *, tone: str = "neutral") -> str:
+def _inline_empty(message: str, *, tone: str = "neutral", reason: str = "") -> str:
     """Compact single-row empty-state for inline/card contexts.
 
     Use for summary items, breakdown panels, and other small cards where a
@@ -217,13 +217,23 @@ def _inline_empty(message: str, *, tone: str = "neutral") -> str:
     *tone*:
       - ``"good"``  — green check (positive: "nothing to report").
       - ``"neutral"`` — muted info dot (missing or unavailable data).
+
+    *reason* — one sentence saying why the panel is empty and what would fill
+    it. An empty state that only reports absence leaves the reader unable to
+    tell a clean result from a measurement that never ran.
     """
     tone_key = tone if tone in _INLINE_EMPTY_ICONS else "neutral"
     icon = _INLINE_EMPTY_ICONS[tone_key]
+    reason_html = (
+        f'<span class="inline-empty-reason">{_escape_html(reason)}</span>'
+        if reason
+        else ""
+    )
     return (
         f'<div class="inline-empty inline-empty--{tone_key}">'
         f"{icon}"
         f'<span class="inline-empty-text">{_escape_html(message)}</span>'
+        f"{reason_html}"
         "</div>"
     )
 

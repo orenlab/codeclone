@@ -54,6 +54,7 @@ from ...messages.overview import (
     EXECUTIVE_SCAN_SCOPE_DEFAULT,
     EXECUTIVE_THRESHOLDS_PREFIX,
     ISSUE_BREAKDOWN_EMPTY,
+    ISSUE_BREAKDOWN_EMPTY_REASON,
     ISSUE_BREAKDOWN_ROW_LABELS,
     KPI_CLONE_GROUPS,
     KPI_DEAD_CODE,
@@ -351,7 +352,11 @@ def _issue_breakdown_html(
         (key, label, count, color) for key, label, count, color in raw_rows if count > 0
     ]
     if not rows:
-        return _inline_empty(ISSUE_BREAKDOWN_EMPTY, tone="good")
+        return _inline_empty(
+            ISSUE_BREAKDOWN_EMPTY,
+            tone="good",
+            reason=ISSUE_BREAKDOWN_EMPTY_REASON,
+        )
 
     max_count = max(c for _, _, c, _ in rows)
     parts: list[str] = []

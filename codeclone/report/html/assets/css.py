@@ -1185,7 +1185,12 @@ _SUGGESTIONS = """\
 .authority-copy-btn{position:absolute;top:var(--sp-2);right:var(--sp-2);z-index:1;
   font-size:var(--fs-2xs);padding:var(--sp-1) var(--sp-2)}
 .authority-copy-btn--ok{color:var(--success);border-color:var(--success)}
-.authority-candidate-note{margin:var(--sp-2) 0}
+/* Explanatory prose is read line by line, so it gets a measure. Running a
+   sentence across the full report width is the hardest length to read; these
+   two notes carry the wave's arithmetic and its governance caveat, which are
+   exactly the sentences a reader must not skip. */
+.clones-health-note,.authority-candidate-note{margin:var(--sp-2) 0;
+  max-width:78ch;line-height:1.55}
 .suggestion-details{border-top:1px solid var(--border)}
 .suggestion-details summary{padding:var(--sp-2) var(--sp-4);font-size:var(--fs-xs);
   display:flex;align-items:center;gap:var(--sp-2);background:none}
@@ -1407,6 +1412,11 @@ _EMPTY = """\
   text-align:center;letter-spacing:.005em;line-height:1.4;font-family:var(--font-sans)}
 .inline-empty-icon{flex-shrink:0;opacity:.5;color:var(--text-muted)}
 .inline-empty-text{max-width:260px}
+.inline-empty-reason{max-width:320px;font-size:var(--fs-2xs);color:var(--text-muted);
+  margin-top:var(--sp-1);line-height:1.45}
+/* An empty card states what it holds: it takes the height its content needs
+   rather than stretching to match a populated sibling. */
+.overview-summary-item:has(.inline-empty){align-self:start}
 .inline-empty--good .inline-empty-icon{color:var(--success);opacity:.7}
 .inline-empty--neutral .inline-empty-icon{color:var(--text-muted);opacity:.5}
 """

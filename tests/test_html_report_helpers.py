@@ -1240,3 +1240,66 @@ def test_overview_answer_agrees_with_its_own_counts() -> None:
     assert "3 clone groups;" in plural
     assert "0 dead-code items " in plural
     assert "0 dependency cycles." in plural
+
+
+def test_inline_empty_can_explain_the_absence() -> None:
+    """An empty state that only says "no data" tells the reader nothing."""
+
+    from codeclone.report.html.widgets.badges import _inline_empty
+
+    markup = _inline_empty(
+        "No source data available",
+        tone="neutral",
+        reason="Counts appear once the analyzed set spans more than one kind.",
+    )
+
+    assert "No source data available" in markup
+    assert "Counts appear once the analyzed set spans more than one kind." in markup
+    assert "inline-empty-reason" in markup
+
+
+def test_source_breakdown_empty_state_says_what_would_fill_it() -> None:
+    from codeclone.report.html.widgets.components import overview_source_breakdown_html
+
+    markup = overview_source_breakdown_html({})
+
+    assert "inline-empty-reason" in markup
+    text = " ".join(re.sub(r"<[^>]+>", " ", markup).split()).lower()
+    assert "production" in text and "tests" in text
+
+
+def test_empty_summary_cards_do_not_stretch_to_a_full_sibling() -> None:
+    """An empty card states what it holds; it does not match a full one."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    assert re.search(
+        r"\.overview-summary-item:has\(\.inline-empty\)\{[^}]*align-self:start",
+        css,
+    ), "empty summary cards still stretch to their sibling's height"
+
+
+def test_explanatory_prose_has_a_reading_measure() -> None:
+    """Explanations are read, so they get a line length, not the pane width.
+
+    Both notes this wave added -- the clones health arithmetic and the
+    authority candidate caption -- were prose spanning the full report width,
+    which is the hardest possible line length to read.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    for selector in (".clones-health-note", ".authority-candidate-note"):
+        # the selector may be stated on its own or in a group
+        rule = next(
+            (
+                body
+                for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+                if selector in [part.strip() for part in heads.split(",")]
+            ),
+            None,
+        )
+        assert rule is not None, f"{selector} has no styling at all"
+        assert "max-width" in rule, f"{selector} has no reading measure"

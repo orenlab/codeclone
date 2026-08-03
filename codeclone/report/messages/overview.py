@@ -66,6 +66,12 @@ RADAR_LABELS: Final[dict[str, str]] = {
 KPI_HEALTH: Final = "Health"
 KPI_HEALTH_NA: Final = "n/a"
 ISSUE_BREAKDOWN_EMPTY: Final = "No issues detected"
+# An empty result and an unmeasured one look identical unless the panel
+# says which one it is.
+ISSUE_BREAKDOWN_EMPTY_REASON: Final = (
+    "Clone, structural, dead-code and design families were all analysed and "
+    "each returned nothing."
+)
 
 ISSUE_BREAKDOWN_ROW_LABELS: Final[dict[str, str]] = {
     "clones": "Clone Groups",
