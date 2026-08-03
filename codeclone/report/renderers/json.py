@@ -11,8 +11,15 @@ from collections.abc import Mapping
 import orjson
 
 
-def render_json_report_document(payload: Mapping[str, object]) -> str:
-    return orjson.dumps(payload, option=orjson.OPT_INDENT_2).decode("utf-8")
+def render_json_report_document(payload: Mapping[str, object]) -> bytes:
+    """Render the report document as the exact bytes that reach disk.
+
+    Deliberately without `.decode()`. This is the largest artifact CodeClone
+    emits, and every string round trip holds a second full copy of it alive at
+    the process high-water mark.
+    """
+
+    return orjson.dumps(payload, option=orjson.OPT_INDENT_2)
 
 
 __all__ = ["render_json_report_document"]

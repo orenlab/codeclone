@@ -85,7 +85,7 @@ def to_json_report(
         block_groups=block_groups,
         segment_groups=segment_groups,
     )
-    return render_json_report_document(payload)
+    return render_json_report_document(payload).decode("utf-8")
 
 
 def build_html_report(

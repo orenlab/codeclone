@@ -82,13 +82,20 @@ def _render_report_projection(
     *,
     format_name: str,
     report_document: Mapping[str, object],
-    renderer: Callable[[], str],
-) -> str:
-    """Render one requested format once and attach bounded canonical counters."""
+    renderer: Callable[[], str | bytes],
+) -> bytes:
+    """Render one requested format once and attach bounded canonical counters.
+
+    Every artifact leaves here as the bytes that will be written. Text-shaped
+    renderers are encoded exactly once, here, instead of once to measure a
+    length and again at write time.
+    """
 
     counter_key = _REPORT_FORMAT_COUNTERS[format_name]
     with span(name="report.render") as render_span:
-        rendered = renderer()
+        produced = renderer()
+        rendered = produced if isinstance(produced, bytes) else produced.encode("utf-8")
+        del produced
         findings_summary = _as_mapping(
             _as_mapping(report_document.get("findings")).get("summary")
         )
@@ -103,7 +110,7 @@ def _render_report_projection(
             1 for row in lane_rows if str(row.get("status", "")) == "trusted"
         )
         render_span.set_counter(counter_key, 1)
-        render_span.set_counter("report_render_bytes", len(rendered.encode("utf-8")))
+        render_span.set_counter("report_render_bytes", len(rendered))
         render_span.set_counter(
             "report_items",
             _as_int(findings_summary.get("total")),
@@ -298,7 +305,7 @@ def report(
     gate_config: MetricGateConfig | None = None,
     gate_result: GateResult | None = None,
 ) -> ReportArtifacts:
-    contents: dict[str, str | None] = {
+    contents: dict[str, bytes | None] = {
         "html": None,
         "json": None,
         "md": None,

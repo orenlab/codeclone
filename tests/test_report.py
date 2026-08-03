@@ -11,6 +11,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import cast
 
+import orjson
 import pytest
 
 import codeclone.api.report as report_api_mod
@@ -348,7 +349,10 @@ def to_json_report(
         structural_findings=structural_findings or (),
         baseline_trust=baseline_trust,
     )
-    return render_json_report_document(payload)
+    # The renderer owns bytes; this helper serves tests that assert on report
+    # text, so decode once here. The bytes contract itself is pinned by
+    # test_json_renderer_emits_bytes_without_a_string_round_trip.
+    return render_json_report_document(payload).decode("utf-8")
 
 
 def to_text_report(
@@ -3861,3 +3865,25 @@ def test_document_carries_opaque_dynamic_sites_as_their_own_section() -> None:
     assert sites[0]["reason"] == "dynamic_load_argument_opaque"
     # Resolved edges are ordinary dependencies and never become boundaries.
     assert all(site["source"]["file"]["path"] != "pkg/module.py" for site in sites)
+
+
+def test_json_renderer_emits_bytes_without_a_string_round_trip() -> None:
+    """The JSON lane must never materialize the document as `str`.
+
+    The JSON report is by far the largest artifact CodeClone emits. Decoding
+    orjson's bytes to `str`, re-encoding them only to measure a length, and
+    encoding again at write time held the same payload three extra times, all
+    at the process high-water mark. The renderer therefore owns bytes and the
+    pipeline carries them unchanged to disk.
+    """
+
+    payload: dict[str, object] = {
+        "report_schema_version": "3.0",
+        "meta": {"codeclone_version": "1.3.0"},
+        "findings": {"groups": {}, "summary": {"total": 0}},
+    }
+
+    rendered = render_json_report_document(payload)
+
+    assert isinstance(rendered, bytes)
+    assert rendered == orjson.dumps(payload, option=orjson.OPT_INDENT_2)

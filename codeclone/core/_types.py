@@ -207,11 +207,14 @@ class AnalysisResult:
 
 @dataclass(frozen=True, slots=True)
 class ReportArtifacts:
-    html: str | None = None
-    json: str | None = None
-    text: str | None = None
-    md: str | None = None
-    sarif: str | None = None
+    # Rendered artifacts are the exact bytes destined for disk. Carrying them
+    # as `str` cost a second full copy of the JSON report -- the largest thing
+    # the process holds -- for the encode at write time.
+    html: bytes | None = None
+    json: bytes | None = None
+    text: bytes | None = None
+    md: bytes | None = None
+    sarif: bytes | None = None
     report_document: dict[str, object] | None = None
 
 

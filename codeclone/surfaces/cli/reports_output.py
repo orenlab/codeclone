@@ -35,21 +35,21 @@ def _path_attr(obj: object, name: str) -> Path | None:
     return value if isinstance(value, Path) else None
 
 
-def _text_attr(obj: object, name: str) -> str | None:
+def _rendered_attr(obj: object, name: str) -> bytes | None:
     value = getattr(obj, name, None)
-    return value if isinstance(value, str) else None
+    return value if isinstance(value, bytes) else None
 
 
 def _write_report_output(
     *,
     out: Path,
-    content: str,
+    content: bytes,
     label: str,
     console: PrinterLike,
 ) -> None:
     try:
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(content, "utf-8")
+        out.write_bytes(content)
     except OSError as exc:
         console.print(
             ui.fmt_contract_error(
@@ -79,11 +79,11 @@ def write_report_outputs(
     md_path = _path_attr(output_paths, "md")
     sarif_path = _path_attr(output_paths, "sarif")
     text_path = _path_attr(output_paths, "text")
-    html_report = _text_attr(report_artifacts, "html")
-    json_report = _text_attr(report_artifacts, "json")
-    md_report = _text_attr(report_artifacts, "md")
-    sarif_report = _text_attr(report_artifacts, "sarif")
-    text_report = _text_attr(report_artifacts, "text")
+    html_report = _rendered_attr(report_artifacts, "html")
+    json_report = _rendered_attr(report_artifacts, "json")
+    md_report = _rendered_attr(report_artifacts, "md")
+    sarif_report = _rendered_attr(report_artifacts, "sarif")
+    text_report = _rendered_attr(report_artifacts, "text")
 
     if html_path and html_report is not None:
         out = html_path

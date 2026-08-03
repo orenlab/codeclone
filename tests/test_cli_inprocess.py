@@ -2253,22 +2253,16 @@ def test_cli_report_write_error_is_contract_error(
 ) -> None:
     _write_default_source(tmp_path)
     html_out = tmp_path / "report.html"
-    original_write_text = Path.write_text
+    # Rendered artifacts reach disk as bytes, so the failure surface is
+    # write_bytes rather than write_text.
+    original_write_bytes = Path.write_bytes
 
-    def _raise_write_text(
-        self: Path,
-        data: str,
-        encoding: str | None = None,
-        errors: str | None = None,
-        newline: str | None = None,
-    ) -> int:
+    def _raise_write_bytes(self: Path, data: bytes) -> int:
         if self == html_out:
             raise OSError("disk full")
-        return original_write_text(
-            self, data, encoding=encoding, errors=errors, newline=newline
-        )
+        return original_write_bytes(self, data)
 
-    monkeypatch.setattr(Path, "write_text", _raise_write_text)
+    monkeypatch.setattr(Path, "write_bytes", _raise_write_bytes)
     _assert_parallel_cli_exit(
         monkeypatch,
         [str(tmp_path), "--html", str(html_out), "--no-progress"],
