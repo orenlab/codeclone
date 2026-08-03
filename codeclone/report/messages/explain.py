@@ -22,13 +22,26 @@ STRUCTURAL_KIND_LABELS: Final[dict[str, str]] = {
     STRUCTURAL_KIND_CLONE_COHORT_DRIFT: "Clone cohort drift",
 }
 
-STRUCTURAL_INTRO_QUESTION: Final = "What are structural findings?"
+#: A tab opens with a question about this repository, not with the meaning of
+#: its own title. The definition still exists -- it is the Findings glossary
+#: entry, reached from the tab label.
+STRUCTURAL_INTRO_QUESTION: Final = "Which functions repeat their own shape?"
+STRUCTURAL_INTRO_ANSWER_NONE: Final = (
+    "No function repeats a branch body. These are report-only refactoring "
+    "hints and never affect clone detection or CI verdicts."
+)
 STRUCTURAL_INTRO_ANSWER: Final = (
-    "Repeated non-overlapping branch-body shapes detected inside individual "
-    "functions. These are local, report-only refactoring hints and do not "
-    "affect clone detection or CI verdicts."
+    "{findings} in {functions} across {files}. These are report-only "
+    "refactoring hints and never affect clone detection or CI verdicts."
 )
 STRUCTURAL_EMPTY: Final = "No structural findings detected."
+#: An empty panel must separate a clean result from a measurement that did not
+#: run, so it says what would put rows here.
+STRUCTURAL_EMPTY_DESC: Final = (
+    "A finding appears when one function repeats the same branch-body shape "
+    "in two or more places, so this stays empty while every branch body in "
+    "the analysed set is distinct."
+)
 STRUCTURAL_WHY_BUTTON: Final = "Why?"
 STRUCTURAL_INLINE_ACTION_LABEL: Final = "Suggested action"
 STRUCTURAL_SECTION_IMPACT: Final = "Impact"

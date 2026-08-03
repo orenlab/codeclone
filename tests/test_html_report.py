@@ -3763,15 +3763,17 @@ def test_html_report_findings_empty_state_keeps_intro_banner() -> None:
         block_groups={},
         segment_groups={},
     )
+    # Moved expectation: the banner still survives an empty result, which is
+    # what this test is for. What it pinned was the definition -- the tab spent
+    # its question slot explaining its own title. It now asks about the code,
+    # answers in the clean case, and the definition lives in the glossary.
     _assert_html_contains(
         html,
-        "What are structural findings?",
-        (
-            "Repeated non-overlapping branch-body shapes detected inside "
-            "individual functions."
-        ),
+        "Which functions repeat their own shape?",
+        "No function repeats a branch body.",
         "No structural findings detected.",
     )
+    assert "insight-ok" in html, "a clean result no longer reads as clean"
 
 
 def test_html_report_dependency_hubs_deterministic_tie_order() -> None:

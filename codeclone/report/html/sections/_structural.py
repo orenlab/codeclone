@@ -33,8 +33,10 @@ from ...suggestions import (
     structural_has_separate_suggestion,
 )
 from ..primitives.escape import _escape_html
-from ..widgets.badges import _source_kind_badge_html, _tab_empty
+from ..widgets.badges import _source_kind_badge_html, _stat_card, _tab_empty
 from ..widgets.cards import finding_card, meta_badge_html
+from ..widgets.components import insight_block
+from ..widgets.glossary import glossary_tip
 from ..widgets.snippets import _FileCache, _render_code_block
 from ..widgets.tabs import render_split_tabs
 
@@ -444,6 +446,12 @@ def _render_finding_card(
     )
 
 
+def _count_text(count: int, noun: str) -> str:
+    """A count that agrees with its own number, as the clones panel does."""
+
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 def build_structural_findings_html_panel(
     groups: Sequence[Any],
     files: list[str],
@@ -453,18 +461,45 @@ def build_structural_findings_html_panel(
     context_lines: int = 3,
     max_snippet_lines: int = 220,
 ) -> str:
-    intro = (
-        '<div class="insight-banner insight-info">'
-        '<div class="insight-question">'
-        + explain_msgs.STRUCTURAL_INTRO_QUESTION
-        + "</div>"
-        '<div class="insight-answer">'
-        + _escape_html(explain_msgs.STRUCTURAL_INTRO_ANSWER)
-        + "</div>"
-        "</div>"
-    )
+    # The panel used to hand-roll this banner, so it was the one tab that could
+    # never change tone with its own result, and it spent its question slot on
+    # the meaning of its title rather than on this repository. The definition
+    # now lives in the glossary, reached from the tab label.
     if not groups:
-        return intro + _tab_empty(explain_msgs.STRUCTURAL_EMPTY)
+        return insight_block(
+            question=explain_msgs.STRUCTURAL_INTRO_QUESTION,
+            answer=explain_msgs.STRUCTURAL_INTRO_ANSWER_NONE,
+            tone="ok",
+        ) + _tab_empty(
+            explain_msgs.STRUCTURAL_EMPTY,
+            description=explain_msgs.STRUCTURAL_EMPTY_DESC,
+        )
+
+    occurrences = [item for group in groups for item in group.items]
+    function_total = len({item.qualname for item in occurrences})
+    file_total = len({item.file_path for item in occurrences})
+    kind_total = len({group.finding_kind for group in groups})
+    intro = insight_block(
+        question=explain_msgs.STRUCTURAL_INTRO_QUESTION,
+        answer=explain_msgs.STRUCTURAL_INTRO_ANSWER.format(
+            findings=_count_text(len(groups), "finding"),
+            functions=_count_text(function_total, "function"),
+            files=_count_text(file_total, "file"),
+        ),
+        tone="warn",
+    )
+    # The answer, then the numbers a reader acts on, then the evidence. Until
+    # now this panel went straight from the answer into the cards, so its
+    # counts existed only as a tab badge.
+    stat_cards_html = "".join(
+        (
+            _stat_card("Findings", len(groups), glossary_tip_fn=glossary_tip),
+            _stat_card("Functions", function_total, detail=""),
+            _stat_card("Files", file_total, detail=""),
+            _stat_card("Kinds", kind_total, value_tone="muted"),
+        )
+    )
+    intro += f'<div class="stat-cards">{stat_cards_html}</div>'
 
     resolved_file_cache = file_cache if file_cache is not None else _FileCache()
     why_templates: list[str] = []

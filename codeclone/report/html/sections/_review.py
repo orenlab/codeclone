@@ -35,6 +35,10 @@ _as_mapping = _coerce.as_mapping
 _as_sequence = _coerce.as_sequence
 
 _EMPTY_MESSAGE = "No findings to review."
+_EMPTY_DESC = (
+    "The queue fills with findings from the clone, structural and metric "
+    "families as they are detected, so it is empty when none were."
+)
 _METRICS_SKIPPED = "Metrics are skipped for this run."
 _REVIEW_INSIGHT = (
     "Findings to review, highest priority first. Mark items reviewed as you go — "
@@ -150,7 +154,7 @@ def render_review_panel(ctx: ReportContext) -> str:
         tone=tone,
     )
     if not items:
-        return insight + _tab_empty(_EMPTY_MESSAGE)
+        return insight + _tab_empty(_EMPTY_MESSAGE, description=_EMPTY_DESC)
 
     cards = "".join(_render_review_item(item) for item in items)
     return (

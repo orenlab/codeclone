@@ -239,7 +239,14 @@ def render_suggestions_panel(ctx: ReportContext) -> str:
             question="What should be prioritized next?",
             answer="No suggestions were generated for this run.",
             tone="ok",
-        ) + _tab_empty("No suggestions generated.")
+        ) + _tab_empty(
+            "No suggestions generated.",
+            description=(
+                "A suggestion appears when a finding has a mechanical, "
+                "actionable fix, so findings without one are reported "
+                "in their own tabs instead."
+            ),
+        )
 
     critical = sum(1 for s in rows if s.severity == "critical")
     warning = sum(1 for s in rows if s.severity == "warning")

@@ -114,6 +114,13 @@ GLOSSARY: dict[str, str] = {
         "configuration is a human decision"
     ),
     "violations": "Semantic-authority violations found against governed contracts",
+    # The Findings tab used to spend its question slot on this definition.
+    # A definition belongs where definitions live; the tab asks about the code.
+    "findings": (
+        "Repeated non-overlapping branch-body shapes detected inside "
+        "individual functions; local, report-only refactoring hints that do "
+        "not affect clone detection or CI verdicts"
+    ),
     "owner": "The producer proposed as the canonical owner of a shared fact",
     "producers": "Other functions sharing this candidate's fact",
     # The full governance rule. The discovery table states the short form

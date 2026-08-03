@@ -1296,6 +1296,102 @@ def test_promotion_toml_is_highlighted_at_build_time() -> None:
     assert "[[tool.codeclone.authority]]" in re.sub(r"<[^>]+>", "", block)
 
 
+def _findings_panel_html(groups: object = ()) -> str:
+    """Render the structural-findings panel from a group list."""
+
+    from codeclone.report.html.sections._structural import (
+        build_structural_findings_html_panel,
+    )
+
+    return build_structural_findings_html_panel(
+        cast(Any, groups), [], scan_root="/repo"
+    )
+
+
+def test_findings_tab_asks_about_this_repository_not_for_a_definition() -> None:
+    """Every tab opens with a real question. This one opened with a glossary.
+
+    "What are structural findings?" is what the term means, not what this
+    repository is doing. Dependencies asks whether module dependencies form
+    cycles; authority asks whether each governed contract has one owner. The
+    definition is not deleted -- it moves to where definitions live.
+    """
+
+    panel = _findings_panel_html()
+
+    assert "What are structural findings?" not in panel, "the tab still defines"
+    question = panel[panel.index("insight-question") :]
+    question = question[question.index(">") + 1 : question.index("</div>")]
+    assert question.endswith("?"), question
+    assert "structural findings" not in question.lower(), (
+        f"the question still names the widget rather than the code: {question}"
+    )
+
+    from codeclone.report.messages.glossary import GLOSSARY
+
+    assert "branch-body" in GLOSSARY.get("findings", ""), (
+        "the definition was dropped instead of re-homed"
+    )
+
+
+def test_findings_tab_states_its_counts_between_answer_and_evidence() -> None:
+    """Answer, then the numbers a reader acts on, then the evidence."""
+
+    from codeclone.models import StructuralFindingGroup, StructuralFindingOccurrence
+
+    sig = {"branches": "2", "shape": "if/else"}
+    occurrences = tuple(
+        StructuralFindingOccurrence(
+            finding_kind="duplicated_branches",
+            finding_key="a" * 40,
+            file_path=f"/repo/{name}.py",
+            qualname=f"{name}:fn",
+            start=start,
+            end=start + 2,
+            signature=sig,
+        )
+        for name, start in (("a", 10), ("b", 20))
+    )
+    panel = _findings_panel_html(
+        [
+            StructuralFindingGroup(
+                finding_kind="duplicated_branches",
+                finding_key="a" * 40,
+                signature=sig,
+                items=occurrences,
+            )
+        ]
+    )
+
+    assert "stat-cards" in panel, "the panel jumps from the answer to the cards"
+    assert (
+        panel.index("insight-banner")
+        < panel.index("stat-cards")
+        < panel.index("sf-list")
+    ), "answer, numbers and evidence are out of order"
+
+
+def test_every_empty_state_in_the_six_tabs_explains_itself() -> None:
+    """An empty panel that says only what is missing is not an answer.
+
+    The reader cannot tell a clean result from a measurement that never ran,
+    so each empty state says what would fill it.
+    """
+
+    from codeclone.report.html.sections._structural import (
+        build_structural_findings_html_panel,
+    )
+
+    panel = cast(Any, build_structural_findings_html_panel)([], [], scan_root="/repo")
+    desc = panel[panel.index("tab-empty-desc") :]
+    desc = desc[desc.index(">") + 1 : desc.index("</div>")]
+
+    assert "keep up the good work" not in desc.lower(), (
+        "the generic filler is not an explanation"
+    )
+    assert len(desc) > 40, f"the empty state explains nothing: {desc!r}"
+
+
 def test_quality_badge_carries_no_unreachable_effort_branch() -> None:
     """Dead presentation code is still dead code.
 
