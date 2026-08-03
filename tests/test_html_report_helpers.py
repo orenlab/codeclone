@@ -1060,3 +1060,55 @@ def test_report_css_names_its_on_accent_colour() -> None:
         r"@media print\s*\{.*?\n\}", "", _css_rule_bodies(css), flags=re.S
     )
     assert "#fff" not in printable
+
+
+def _collapsed_text(markup: str) -> str:
+    """Text a reader sees before opening any disclosure."""
+
+    shrunk = re.sub(
+        r"</summary>.*?</details>", "</summary></details>", markup, flags=re.S
+    )
+    return " ".join(re.sub(r"<[^>]+>", " ", shrunk).split())
+
+
+def test_chain_flow_discloses_a_long_chain_instead_of_running_off() -> None:
+    """The report's last unbounded string: a chain printed every hop inline.
+
+    On this repository the longest-chain cell reached 371 characters of chips
+    in a single table cell, which scrolls sideways instead of reading.
+    """
+
+    from codeclone.report.html.widgets.badges import _render_chain_flow
+
+    parts = [f"pkg.layer{index}.module_with_a_long_name" for index in range(12)]
+    markup = _render_chain_flow(parts, arrows=True)
+
+    assert "<details" in markup
+    # three hops stay inline, the remaining nine fold
+    assert "+9 more" in markup
+    # the first hop is still rendered, full name preserved on the chip
+    assert 'title="pkg.layer0.module_with_a_long_name"' in markup
+    # and nothing is lost: the last hop is in the disclosed tail
+    assert 'title="pkg.layer11.module_with_a_long_name"' in markup
+    assert len(_collapsed_text(markup)) < 120, _collapsed_text(markup)
+
+
+def test_chain_flow_leaves_a_short_chain_inline() -> None:
+    from codeclone.report.html.widgets.badges import _render_chain_flow
+
+    markup = _render_chain_flow(["pkg.a", "pkg.b", "pkg.c"], arrows=True)
+
+    assert "<details" not in markup
+    assert "pkg.c" in markup
+
+
+def test_dep_graph_card_shrink_wraps_its_graph() -> None:
+    """A small graph gets a small card, not a pane of empty gradient."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    wrap = re.search(r"\.dep-graph-wrap\{[^}]*\}", css, re.S)
+    assert wrap is not None
+    assert "width:fit-content" in wrap.group(0)
+    assert "max-width:100%" in wrap.group(0)

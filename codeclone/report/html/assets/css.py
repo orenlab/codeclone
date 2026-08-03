@@ -965,10 +965,15 @@ _DEPENDENCIES = """\
 .stat-cards .meta-item .meta-label,.dep-stats .meta-item .meta-label{font-size:var(--fs-xs);min-height:18px}
 .stat-cards .meta-item .meta-value,.dep-stats .meta-item .meta-value{display:flex;align-items:center}
 .stat-cards .kpi-detail,.dep-stats .kpi-detail{margin-top:0;align-self:end}
-.dep-graph-wrap{overflow:hidden;margin-bottom:var(--sp-4);border:1px solid var(--border);
+.dep-graph-wrap{overflow:hidden;margin:0 auto var(--sp-4);border:1px solid var(--border);
   border-radius:var(--radius-lg);
   background:linear-gradient(180deg,var(--bg-surface),var(--bg-raised));
-  padding:var(--sp-5)}
+  padding:var(--sp-5);width:fit-content;max-width:100%}
+.chain-more{display:inline}
+.chain-more summary{display:inline;cursor:pointer;font-size:var(--fs-2xs);
+  color:var(--text-muted);padding:0 var(--sp-1)}
+.chain-more summary:hover{color:var(--text-primary)}
+.chain-more[open] summary{color:var(--text-secondary)}
 .dep-graph-svg{display:block;height:auto;margin:0 auto;overflow:visible}
 .dep-graph-svg text{font-family:var(--font-mono)}
 .dep-edge{transition:stroke-opacity var(--dur-fast) var(--ease),stroke-width var(--dur-fast) var(--ease)}

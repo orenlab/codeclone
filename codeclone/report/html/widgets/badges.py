@@ -283,22 +283,51 @@ def _short_label(name: str, max_len: int = 18) -> str:
     return label
 
 
+#: Hops shown inline before a chain folds. A chain is read for its shape and
+#: its endpoints; printing every hop turned the cell into a sideways scroll.
+_CHAIN_INLINE_HOPS = 3
+
+
+def _chain_nodes(parts: Sequence[str], *, arrows: bool) -> list[str]:
+    nodes: list[str] = []
+    for index, module in enumerate(parts):
+        short = _short_label(str(module))
+        nodes.append(
+            f'<span class="chain-node" title="{_escape_html(str(module))}">'
+            f"{_escape_html(short)}</span>"
+        )
+        if arrows and index < len(parts) - 1:
+            nodes.append('<span class="chain-arrow">\u2192</span>')
+    return nodes
+
+
 def _render_chain_flow(
     parts: Sequence[str],
     *,
     arrows: bool = False,
 ) -> str:
-    """Render a sequence of names as chain-node spans, optionally with arrows."""
-    nodes: list[str] = []
-    for i, mod in enumerate(parts):
-        short = _short_label(str(mod))
-        nodes.append(
-            f'<span class="chain-node" title="{_escape_html(str(mod))}">'
-            f"{_escape_html(short)}</span>"
-        )
-        if arrows and i < len(parts) - 1:
-            nodes.append('<span class="chain-arrow">\u2192</span>')
-    return f'<span class="chain-flow">{"".join(nodes)}</span>'
+    """Render a sequence of names as chain-node spans, optionally with arrows.
+
+    Long chains keep their first hops inline and fold the rest behind a
+    disclosure, so the cell states where the chain starts and how long it is
+    without running off the table.
+    """
+
+    if len(parts) <= _CHAIN_INLINE_HOPS + 1:
+        inline = "".join(_chain_nodes(parts, arrows=arrows))
+        return f'<span class="chain-flow">{inline}</span>'
+
+    head_html = "".join(_chain_nodes(list(parts[:_CHAIN_INLINE_HOPS]), arrows=arrows))
+    tail = list(parts[_CHAIN_INLINE_HOPS:])
+    if arrows:
+        head_html += '<span class="chain-arrow">\u2192</span>'
+    tail_html = "".join(_chain_nodes(tail, arrows=arrows))
+    return (
+        f'<span class="chain-flow">{head_html}'
+        f'<details class="chain-more"><summary>+{len(tail)} more</summary>'
+        f'<span class="chain-flow">{tail_html}</span>'
+        "</details></span>"
+    )
 
 
 def _stat_card(
