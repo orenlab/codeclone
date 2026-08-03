@@ -281,3 +281,20 @@ def test_blast_radius_many_invalid_paths_truncated(tmp_path: Path) -> None:
 
     assert exc.value.code == int(ExitCode.CONTRACT_ERROR)
     assert "... and 2 more" in printer.text
+
+
+def test_blast_radius_entry_lists_truncate_beyond_render_cap() -> None:
+    import codeclone.surfaces.cli.blast_radius as blast_cli_mod
+
+    printer = _RecordingPrinter()
+    entries = [
+        {"path": f"pkg/f{index:03d}.py", "reason": "state", "severity": "hard"}
+        for index in range(25)
+    ]
+    blast_cli_mod._print_entries(
+        console=printer,
+        title="Do not touch",
+        entries=entries,
+    )
+    assert "... and" in printer.text
+    assert "pkg/f024.py" not in printer.text

@@ -340,3 +340,71 @@ def test_memory_operation_name_includes_subcommand_actions() -> None:
         memory_cli._memory_operation_name(Namespace(command="search"))
         == "cli.memory.search"
     )
+
+
+def test_semantic_probe_render_skips_malformed_lane_stats(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from codeclone.surfaces.cli.console import PlainConsole
+
+    payload: dict[str, object] = {
+        "action": "probe_semantic_projections",
+        "estimator": "planning",
+        "model_max_tokens": 512,
+        "lanes": {
+            "memory": "garbage",
+            "audit": {
+                "documents": 2,
+                "chars": {"p50": 1, "p95": 2, "max": 3},
+                "tokens": {
+                    "raw": {"p50": 1, "p95": 2, "max": 3},
+                    "effective": {"p50": 1, "p95": 2, "max": 3},
+                },
+                "token_overflow": {},
+                "truncation": {},
+            },
+        },
+    }
+    monkeypatch.setattr(
+        memory_cli,
+        "execute_semantic_projection_probe",
+        lambda **_kwargs: payload,
+    )
+    code = memory_cli._run_semantic_probe(
+        console=PlainConsole(),
+        root_path=tmp_path,
+        args=Namespace(json=False, exact_tokens=False),
+    )
+    out = capsys.readouterr().out
+    assert code == int(ExitCode.SUCCESS)
+    assert "audit: 2 documents" in out
+    assert "memory:" not in out
+
+
+def test_memory_observability_wrapper_reuses_live_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When observability is already live, the memory wrapper must not
+    re-bootstrap; the handler still runs inside the operation."""
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "codeclone.config.observability.resolve_observability_config",
+        lambda: SimpleNamespace(enabled=True),
+    )
+    monkeypatch.setattr(memory_cli, "is_observability_enabled", lambda: True)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("bootstrap must not run when runtime is live")
+
+    monkeypatch.setattr(memory_cli, "bootstrap", _boom)
+    code = memory_cli._run_memory_with_observability(
+        root_path=tmp_path,
+        args=Namespace(command="status"),
+        handler=lambda: 42,
+    )
+    assert code == 42

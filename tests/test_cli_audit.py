@@ -28,6 +28,7 @@ from codeclone.audit.events import (
 if TYPE_CHECKING:
     from codeclone.audit.events import AuditSeverity
 from codeclone.audit.reader import (
+    AuditSummary,
     PayloadFootprint,
     TopPayload,
     TypeTokenProfile,
@@ -1260,3 +1261,65 @@ def test_workflow_audit_emit_and_digest_helpers(
     monkeypatch.setattr(sys, "argv", ["codeclone", "memory", "--help"])
     with pytest.raises(SystemExit):
         cli_workflow.main()
+
+
+def _bare_summary(tmp_path: Path) -> AuditSummary:
+
+    return AuditSummary(
+        db_path=tmp_path / "audit.sqlite3",
+        db_size_bytes=1024,
+        retention_days=None,
+        total_events=1,
+        intent_events=1,
+        contract_events=0,
+        receipt_events=0,
+        violation_events=0,
+        oldest_event_utc=None,
+        latest_event_utc=None,
+        events=(),
+    )
+
+
+def test_audit_verbose_renders_without_retention_or_footprint(
+    tmp_path: Path,
+) -> None:
+    import codeclone.surfaces.cli.audit as cli_audit_mod
+
+    summary = _bare_summary(tmp_path)
+
+    printer = _RecordingPrinter()
+    plain_code = cli_audit_mod._render_verbose(console=printer, summary=summary)
+    assert plain_code == int(ExitCode.SUCCESS)
+    assert "days" not in printer.text
+
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=200)
+    rich_code = cli_audit_mod._render_verbose(
+        console=cast("PrinterLike", console), summary=summary
+    )
+    assert rich_code == int(ExitCode.SUCCESS)
+    assert "days" not in output.getvalue()
+
+
+def test_audit_payload_analytics_without_workflows_renders_no_panel(
+    tmp_path: Path,
+) -> None:
+    import codeclone.surfaces.cli.audit as cli_audit_mod
+    from codeclone.audit.reader import PayloadFootprint
+
+    fp = PayloadFootprint(
+        encoding="approx",
+        tool_calls=2,
+        total_tokens=100,
+        avg_tokens=50,
+        p95_tokens=90,
+        max_tokens=95,
+        by_type=(),
+        top_payloads=(),
+        top_workflows=(),
+    )
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=200)
+    cli_audit_mod._render_payload_analytics(console=cast("PrinterLike", console), fp=fp)
+    text = output.getvalue()
+    assert "MCP" in text or "Tokens" in text

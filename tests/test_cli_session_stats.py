@@ -1485,3 +1485,43 @@ def test_collect_session_snapshot_tolerates_audit_read_failure(
     )
     snapshot = collect_session_snapshot(tmp_path)
     assert snapshot.latest_run_source == "disk_report"
+
+
+def test_latest_run_text_without_health_or_findings() -> None:
+    snapshot = _snapshot(
+        latest_run_id="def67890",
+        latest_run_age_seconds=60,
+    )
+    result = session_stats_mod._latest_run_text(snapshot)
+    assert "def67890" in result
+    assert "health=" not in result
+    assert "findings=" not in result
+
+
+def test_plain_top_workflows_prints_nothing_when_empty() -> None:
+    from codeclone.surfaces.cli.console import PlainConsole
+
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=100)
+    session_stats_mod._render_plain_top_workflows(
+        cast("PrinterLike", PlainConsole()), ()
+    )
+    session_stats_mod._render_rich_top_workflows(cast("PrinterLike", console), ())
+    assert output.getvalue() == ""
+
+
+def test_verbose_rich_omits_cache_row_without_cache() -> None:
+    output = io.StringIO()
+    console = Console(file=output, force_terminal=True, color_system=None, width=120)
+    snapshot = _snapshot(
+        latest_run_id="ghi13579",
+        latest_run_age_seconds=30,
+        latest_run_files=10,
+        cache_present=False,
+        workspace_health="clean",
+    )
+    exit_code = session_stats_mod._render_verbose_rich(
+        cast("PrinterLike", console), snapshot
+    )
+    assert exit_code == 0
+    assert "ghi13579" in output.getvalue()

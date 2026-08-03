@@ -2031,3 +2031,43 @@ def test_trajectory_selection_empty_steps_terminal_sequence() -> None:
     assert _terminal_audit_sequence(empty) == -1
     result = select_trajectory_for_intent((empty,))
     assert result.selected == empty
+
+
+def test_intent_historical_registry_path_and_payload_narrowing(
+    tmp_path: Path,
+) -> None:
+    """The registry db path resolves only for a sqlite backend, and audit
+    payload parsing narrows non-dict JSON to empty."""
+
+    explicit = tmp_path / "explicit.sqlite3"
+    assert intent_historical._resolved_registry_db_path(tmp_path, explicit) == explicit
+
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.codeclone]\nintent_registry_backend = "sqlite"\n',
+        encoding="utf-8",
+    )
+    resolved = intent_historical._resolved_registry_db_path(tmp_path, None)
+    assert resolved is not None
+    assert resolved.suffix == ".sqlite3"
+
+    from codeclone.audit.reader import AuditRecord
+
+    record = AuditRecord(
+        audit_sequence=1,
+        event_id="evt-1",
+        event_type="intent.declared",
+        severity="info",
+        created_at_utc="2026-01-01T00:00:00Z",
+        run_id=None,
+        intent_id="intent-1",
+        report_digest=None,
+        workflow_id=None,
+        surface="mcp",
+        tool_name=None,
+        event_core_json="[1, 2, 3]",
+        event_core_sha256=None,
+        payload_sha256=None,
+        status="ok",
+        agent_label="agent",
+    )
+    assert intent_historical._payload_mapping(record) == {}

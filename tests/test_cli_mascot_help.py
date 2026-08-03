@@ -558,3 +558,30 @@ def test_run_interactive_help_tour_default_console_respects_no_color(
 
     assert rc == 0
     assert calls == [None]
+
+
+def test_mascot_animation_none_resolves_to_no_frames() -> None:
+    from codeclone.surfaces.cli.ui.mascot_frames import (
+        AsterAnimation,
+        AsterState,
+        animation_frames_for_kind,
+        resolve_animation,
+    )
+
+    assert animation_frames_for_kind(AsterAnimation.NONE) is None
+    assert (
+        resolve_animation(
+            AsterState.IDLE,
+            animation=AsterAnimation.NONE,
+            animate=True,
+        )
+        is None
+    )
+    assert (
+        resolve_animation(
+            AsterState.IDLE,
+            animation=AsterAnimation.SCANNING,
+            animate=True,
+        )
+        is not None
+    )

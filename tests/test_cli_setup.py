@@ -3143,3 +3143,290 @@ def test_setup_render_rich_and_plain_capability_reason_branches() -> None:
                 "results": [],
             },
         )
+
+
+def _memory_report_stub(root: Path, *, db_exists: bool, record_count: int) -> object:
+    from codeclone.memory.status_report import MemoryStatusReport
+
+    return MemoryStatusReport(
+        db_path=root / "engineering_memory.sqlite3",
+        schema_version="1",
+        project_id="proj-test",
+        project_root=str(root),
+        backend="sqlite",
+        git_available=False,
+        git_branch=None,
+        git_head=None,
+        last_analysis_fingerprint=None,
+        last_init_run_id=None,
+        record_count=record_count,
+        records_by_type={},
+        records_by_status={},
+        db_exists=db_exists,
+    )
+
+
+def test_setup_probe_engineering_memory_verified_by_records(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace as dc_replace
+
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    populated = dc_replace(
+        _empty_discover_context(tmp_path),
+        memory_report=cast(
+            "Any", _memory_report_stub(tmp_path, db_exists=True, record_count=3)
+        ),
+    )
+    axes = discover_mod._probe_engineering_memory(populated)
+    assert axes.configuration == "configured"
+    assert axes.runtime == "verified"
+    assert "probe:memory:records" in axes.evidence
+
+    empty_store = dc_replace(
+        _empty_discover_context(tmp_path),
+        memory_report=cast(
+            "Any", _memory_report_stub(tmp_path, db_exists=True, record_count=0)
+        ),
+    )
+    assert discover_mod._probe_engineering_memory(empty_store).runtime == (
+        "not_verified"
+    )
+
+
+def test_setup_probe_semantic_retrieval_with_store_present(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dataclasses import replace as dc_replace
+
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    monkeypatch.setattr(
+        "codeclone.surfaces.cli.setup.engine.discover.check_capability",
+        lambda name: type(
+            "Status", (), {"available": name == "embed", "missing_packages": []}
+        )(),
+    )
+    ctx = dc_replace(
+        _empty_discover_context(tmp_path),
+        memory_report=cast(
+            "Any", _memory_report_stub(tmp_path, db_exists=True, record_count=1)
+        ),
+    )
+    axes = discover_mod._probe_semantic_retrieval(ctx)
+    assert axes.installation == "installed"
+    # Default pyproject has no semantic block, so the store alone is not
+    # "configured"; the probe still reports the semantic evidence trail.
+    assert axes.configuration == "unconfigured"
+    assert axes.evidence[-1] == "probe:memory:semantic"
+
+
+def test_setup_probe_ci_policy_configured_when_baseline_trusted(
+    tmp_path: Path,
+) -> None:
+    from dataclasses import replace as dc_replace
+
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    ctx = dc_replace(
+        _empty_discover_context(tmp_path),
+        config={"ci": True},
+        baseline_status=BaselineStatus.OK,
+    )
+    axes = discover_mod._probe_ci_policy(ctx)
+    assert axes.configuration == "configured"
+    assert axes.evidence == ["probe:pyproject:ci_flags"]
+
+
+def test_setup_ready_capabilities_offer_no_guidance(tmp_path: Path) -> None:
+    ctx = _empty_discover_context(tmp_path)
+    configured = CapabilityAxes(
+        installation="installed",
+        configuration="configured",
+        runtime="not_required",
+        evidence=[],
+    )
+    for capability_id in ("engineering_memory", "semantic_retrieval", "ci_policy"):
+        meta = _capability_meta(capability_id)
+        assert describe_capability(meta, configured, "ready", ctx) == ("", "")
+
+
+def test_setup_discover_tomli_fallback_success_and_non_dict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the 3.10 fallback path a working tomli parses the section; a loader
+    returning a non-dict payload is rejected."""
+
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    (tmp_path / "pyproject.toml").write_text(
+        "[tool.codeclone]\nmin_loc = 3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "version_info", (3, 10, 0, "final", 0))
+
+    class _TomliStub:
+        @staticmethod
+        def load(handle: object) -> dict[str, object]:
+            del handle
+            return {"tool": {"codeclone": {"min_loc": 3}}}
+
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: _TomliStub if name == "tomli" else importlib.import_module(name),
+    )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is True
+
+    class _TomliListStub:
+        @staticmethod
+        def load(handle: object) -> list[object]:
+            del handle
+            return ["not", "a", "dict"]
+
+    monkeypatch.setattr(
+        importlib,
+        "import_module",
+        lambda name: (
+            _TomliListStub if name == "tomli" else importlib.import_module(name)
+        ),
+    )
+    assert discover_mod._tool_codeclone_section_present(tmp_path) is False
+
+
+def test_setup_probe_baseline_status_requires_scope_id(tmp_path: Path) -> None:
+    """A loadable baseline without a recorded scope id is a scope mismatch,
+    not an OK baseline."""
+
+    from codeclone.baseline.trust import BaselineStatus
+    from codeclone.surfaces.cli.setup.engine import discover as discover_mod
+
+    baseline_path = tmp_path / "codeclone.baseline.json"
+    _write_current_python_baseline(baseline_path)
+    status = discover_mod._probe_baseline_status(baseline_path, baseline_scope_id=None)
+    assert status is BaselineStatus.MISMATCH_SCOPE_ID
+
+
+def test_setup_render_optional_fields_are_skipped(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Plain and rich renderers skip absent reasons, actions, evidence,
+    malformed blockers, and empty diffs without printing placeholders."""
+
+    plain = PlainConsole()
+    snapshot: Mapping[str, object] = {
+        "runtime": {},
+        "install": {},
+        "capabilities": [
+            {
+                "id": "a",
+                "label": "A",
+                "readiness": "ready",
+                "availability": "available",
+                "reason": "",
+                "recommended_action": "run doctor",
+                "evidence": [],
+            },
+            {
+                "id": "b",
+                "label": "B",
+                "readiness": "attention",
+                "availability": "available",
+                "reason": "needs config",
+                "recommended_action": "",
+                "evidence": "not-a-list",
+            },
+        ],
+    }
+    setup_render.render_setup_status(console=plain, snapshot=snapshot)
+    setup_render.render_setup_doctor(console=plain, snapshot=snapshot)
+    joined = capsys.readouterr().out
+    assert "A: ready" in joined
+    assert "→ run doctor" in joined
+    assert "— needs config" in joined
+
+    plan: Mapping[str, object] = {
+        "root": "/tmp/x",
+        "status": "ready",
+        "plan_id": "plan-1",
+        "blockers": ["not-a-mapping", {"kind": "conflict", "reason": "dirty"}],
+        "actions": [
+            {"kind": "write", "path": "p", "status": "ready", "preview": "nope"},
+            {
+                "kind": "write",
+                "path": "q",
+                "status": "ready",
+                "preview": {"unified_diff": "   "},
+            },
+            {
+                "kind": "write",
+                "path": "r",
+                "status": "ready",
+                "preview": {"unified_diff": "+real diff"},
+            },
+        ],
+    }
+    with patch.object(setup_render, "supports_rich_console", return_value=True):
+        setup_render.render_setup_plan(console=_rich_console(), plan=plan)
+    setup_render.render_setup_plan(console=plain, plan=plan)
+
+
+def test_setup_confirm_apply_yes_returns_plan_id(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(
+        setup_main_mod, "make_query_console", lambda **_kwargs: PlainConsole()
+    )
+    monkeypatch.setattr(
+        setup_main_mod,
+        "build_setup_plan",
+        lambda _root: {"projection_kind": "setup_plan", "plan_id": "plan-42"},
+    )
+    monkeypatch.setattr(setup_main_mod, "render_setup_plan", lambda **_kwargs: None)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+
+    assert setup_main_mod._confirm_apply(tmp_path) == "plan-42"
+
+
+def test_setup_apply_json_and_explicit_plan_id(
+    tmp_path: Path,
+    base_install_find_spec: None,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    setup_main_mod = importlib.import_module("codeclone.surfaces.cli.setup.main")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "demo"\n', encoding="utf-8"
+    )
+
+    # --json on a dry-run apply prints the machine payload.
+    rc_json = setup_main_mod.setup_main(
+        ["apply", "--dry-run", "--json", "--root", str(tmp_path)]
+    )
+    assert rc_json == int(ExitCode.SUCCESS)
+    out = capsys.readouterr().out
+    assert '"status"' in out
+
+    # An explicit --plan-id wins over the confirmation gate's plan id.
+    monkeypatch.setattr(
+        setup_main_mod, "_confirmation_gate", lambda _root: ("gate-plan", None)
+    )
+    rc_explicit = setup_main_mod.setup_main(
+        [
+            "apply",
+            "--root",
+            str(tmp_path),
+            "--plan-id",
+            "explicit-but-stale",
+        ]
+    )
+    assert rc_explicit == int(ExitCode.CONTRACT_ERROR)

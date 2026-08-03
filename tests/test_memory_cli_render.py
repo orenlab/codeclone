@@ -84,3 +84,49 @@ def test_memory_render_helpers_smoke(tmp_path: Path) -> None:
         record_id="mem-1",
         detail="approved mem-1 -> active",
     )
+
+
+def test_memory_init_render_without_db_path_variants() -> None:
+    """A non-dry-run init without a db path renders stats but no db row, in
+    both plain and rich modes."""
+
+    import io
+    from typing import cast
+
+    from rich.console import Console
+
+    from codeclone.surfaces.cli.console import PlainConsole
+    from codeclone.surfaces.cli.types import PrinterLike
+
+    plain = PlainConsole()
+    render_init_result(
+        console=plain,
+        dry_run=False,
+        project_id="proj-a",
+        db_path=None,
+        analysis_fingerprint=None,
+        stats={"created": 1},
+        planned_counts={"module_role": 1},
+    )
+
+    output = io.StringIO()
+    rich_console = Console(
+        file=output, force_terminal=True, color_system=None, width=120
+    )
+    render_init_result(
+        console=cast("PrinterLike", rich_console),
+        dry_run=False,
+        project_id="proj-a",
+        db_path=None,
+        analysis_fingerprint=None,
+        stats={"created": 1},
+        planned_counts={"module_role": 1},
+    )
+    assert "db" not in output.getvalue().splitlines()[-1]
+
+
+def test_memory_draft_row_masks_non_records() -> None:
+    from codeclone.surfaces.cli.memory_render import _draft_row
+
+    row = _draft_row(1, "not-a-record", str)  # type: ignore[arg-type]
+    assert row == ("1", "?", "?", "")
