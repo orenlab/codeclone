@@ -78,6 +78,18 @@ class _PrinterLike(Protocol):
     def print(self, *objects: object, **kwargs: object) -> None: ...
 
 
+def _print_scope_id_required(console: _PrinterLike) -> None:
+    """Print the missing-scope-id contract error with its body left literal.
+
+    The message names the ``[tool.codeclone]`` config table, which every
+    console in this codebase treats as a markup tag and strips — deleting the
+    only actionable detail. The marker keeps its styling; the body is printed
+    with ``markup=False`` so the table name survives.
+    """
+    console.print(ui.MARKER_CONTRACT_ERROR)
+    console.print(ui.ERR_BASELINE_SCOPE_ID_REQUIRED, markup=False)
+
+
 def gate_blocking_lanes(
     unavailable: tuple[LaneTrust, ...],
     *,
@@ -233,7 +245,7 @@ def resolve_clone_baseline_state(
 
     if args.update_baseline:
         if scope_id is None:
-            console.print(ui.fmt_contract_error(ui.ERR_BASELINE_SCOPE_ID_REQUIRED))
+            _print_scope_id_required(console)
             sys.exit(ExitCode.CONTRACT_ERROR)
         try:
             publish_baseline(
@@ -281,7 +293,7 @@ def _required_scope_id(
     raw = args.baseline_scope_id
     if raw is None:
         if args.update_baseline or args.fail_on_new:
-            console.print(ui.fmt_contract_error(ui.ERR_BASELINE_SCOPE_ID_REQUIRED))
+            _print_scope_id_required(console)
         return None
     try:
         return UUID(str(raw))

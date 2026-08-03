@@ -91,11 +91,8 @@ Without it:
 ```text
 CONTRACT ERROR:
 baseline_scope_id is required for baseline update and gating; set a stable
-canonical UUID under .
+canonical UUID under [tool.codeclone].
 ```
-
-The message ends with a bare `.` because the console currently swallows the
-bracketed table name. The table it means is `[tool.codeclone]`.
 
 Generate it once (`python -c "import uuid; print(uuid.uuid4())"`), commit it, and
 never change it — it is what stops one project's baseline being compared against
