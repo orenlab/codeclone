@@ -31,6 +31,7 @@ from codeclone.surfaces.mcp._workspace_hygiene import (
     finish_hygiene_check,
 )
 from codeclone.surfaces.mcp._workspace_intent_store import get_workspace_intent_store
+from tests._tmp_tree import make_dirs
 
 
 def test_dirty_snapshot_to_payload_sorts_entries() -> None:
@@ -61,10 +62,7 @@ def test_dirty_snapshot_to_payload_sorts_entries() -> None:
 def test_untracked_file_digest_reads_file_and_rejects_traversal(
     tmp_path: Path,
 ) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    target = root / "pkg"
-    target.mkdir()
+    root, target = make_dirs(tmp_path, "repo", "repo/pkg")
     sample = target / "mod.py"
     sample.write_text("print('ok')\n", encoding="utf-8")
 

@@ -18,6 +18,7 @@ from codeclone.utils.repo_paths import (
     resolve_repo_relative_path,
     resolve_under_repo_root,
 )
+from tests._tmp_tree import make_dir, write_file
 
 
 def test_resolve_repo_relative_path_keeps_paths_under_root(tmp_path: Path) -> None:
@@ -132,10 +133,8 @@ def test_resolve_under_repo_root_rejects_symlink_escapes(tmp_path: Path) -> None
 
 
 def test_resolve_under_repo_root_type_policy(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    file_path = root / "state.sqlite3"
-    file_path.write_text("", encoding="utf-8")
+    root = make_dir(tmp_path, "repo")
+    file_path = write_file(root, "state.sqlite3", "")
     dir_path = root / "state"
     dir_path.mkdir()
 

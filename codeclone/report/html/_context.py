@@ -19,6 +19,7 @@ from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
+from ...utils.mapping_paths import section, sections
 
 if TYPE_CHECKING:
     from .widgets.snippets import _FileCache
@@ -296,10 +297,12 @@ def build_context(
         f"{unavailable_lanes} unavailable."
     )
 
-    findings = _as_mapping(document.get("findings"))
-    findings_summary = _as_mapping(findings.get("summary"))
-    groups = _as_mapping(findings.get("groups"))
-    clones = _as_mapping(groups.get("clones"))
+    findings_summary, groups, clones = sections(
+        document,
+        "findings.summary",
+        "findings.groups",
+        "findings.groups.clones",
+    )
     func_sorted, func_novelty, _func_facts = _clone_projection(
         clones.get("functions"),
         scan_root=scan_root,
@@ -313,8 +316,7 @@ def build_context(
         scan_root=scan_root,
     )
 
-    metrics = _as_mapping(document.get("metrics"))
-    metric_families = _as_mapping(metrics.get("families"))
+    metric_families = section(document, "metrics.families")
     computed_metric_families = frozenset(
         str(name)
         for name in _as_sequence(meta.get("computed_metric_families"))
@@ -329,10 +331,8 @@ def build_context(
         str(name): _metric_family_projection(payload, scan_root=scan_root)
         for name, payload in presentation_families.items()
     }
-    inventory = _as_mapping(document.get("inventory"))
-    inventory_files = _as_mapping(inventory.get("files"))
-    health_family = _as_mapping(presentation_families.get("health"))
-    health_summary = _as_mapping(health_family.get("summary"))
+    inventory, inventory_files = sections(document, "inventory", "inventory.files")
+    health_summary = section(presentation_families, "health.summary")
     presentation_meta = dict(meta)
     presentation_meta.update(
         {

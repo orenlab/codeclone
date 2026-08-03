@@ -2,14 +2,62 @@
 
 ## [2.1.0a2] - Unreleased
 
-Architecture-focused alpha follow-up: shared controller contracts and surface-neutral helpers between CLI and MCP, with no intended public behavior change.
+Baselines become one versioned container with per-lane trust, semantic contracts become governable, and health scoring
+gets honest about control flow. Upgrading requires action — see the "Upgrading from 2.1.0a1 to 2.1.0a2" guide.
+
+### Breaking changes
+
+- Baseline format advanced to **3.0** and older baselines are refused. Without a baseline-aware gate the run still
+  completes, but every clone group reports `unavailable` novelty; with one, it exits `2`. Regenerate once with
+  `--update-baseline`. A legacy file's exact bytes are authenticated and kept as transition evidence, so the change of
+  epoch stays auditable instead of being silently overwritten.
+- `--metrics-baseline` and `--update-metrics-baseline` are removed, together with their `pyproject.toml` keys. Clone and
+  metrics findings are now lanes of one baseline, governed by `--baseline` and `--update-baseline`.
+- `baseline_scope_id` — a stable canonical UUID under `[tool.codeclone]` — is required for baseline update and
+  baseline-relative gating. It is what stops one project's baseline being compared against another's.
+- Upgrade every machine that runs CodeClone **before** adding the new configuration keys. 2.1.0a1 treats an unknown key
+  as a contract error, so a stale CI runner exits `2` before it analyzes anything.
+- Complexity is now full McCabe over the normalized control-flow graph: exception dispatch, `finally` routing, and
+  context-manager suppression are real paths and are counted, and every function is measured rather than only
+  clone-sized ones. Values rise and health scores may fall — lower but truer. Re-tune `--fail-health` once after
+  regenerating the baseline.
+
+### Added
+
+- **Semantic authority governance** — declare reviewed contracts in `[[tool.codeclone.authority]]`, gate violations
+  with `--fail-on-authority-violation`, and triage ranked candidates in a new report tab or through `check_authority`.
+- `--near-miss` reports function pairs whose normalized statement sequences differ by exactly one statement. Advisory
+  only; it never enters clone gates or the baseline.
+- Dead-code analysis reports unreachable statements, and `--fail-on-unresolved-dead-code` gates on public methods
+  inheriting from a base outside the analysis root — abstentions that are never counted as dead code.
+- Files are classified as production, tests, fixtures, or other, so golden fixtures are suppressed on a named channel
+  with a visible count instead of disappearing.
+- Baseline trust is per lane: each lane is trusted or unavailable with a stated reason, and clone novelty is `new`,
+  `known`, or explicitly `unavailable` instead of assumed.
+- The report explains the arithmetic behind the health score instead of only publishing the number.
+- `project_label` records an operator-facing project name in published baseline metadata.
 
 ### Changed
 
-- Workspace intent read contracts, models, lifecycle, and path helpers moved from MCP internals to `codeclone/workspace_intent/*` for shared CLI and MCP use.
-- Patch budget and patch-contract logic consolidated under `codeclone/budget/*`, removing MCP-only duplication.
-- Engineering Memory application and finish-proposal workflows shared between CLI and MCP via `codeclone/memory/application.py` and `codeclone/memory/finish_workflow.py`.
-- CLI controller queries and subcommand routing isolated from `workflow.py` into dedicated modules.
+- Report tables are ordered by operational risk rather than by file path.
+- New documentation chapters cover the baseline container, full-McCabe complexity, and health explainability, alongside
+  the upgrade guide.
+
+### Performance
+
+- Published baselines are **86% smaller** (14.8 MB to 2.0 MB on this repository) after the data lanes moved to a
+  columnar encoding.
+- Report generation holds far less memory: rendered artifacts travel as bytes end to end and the document is hashed
+  once, cutting peak memory 24% on JSON runs and a further 14% on multi-artifact runs. The report document is also built
+  only when a consumer actually needs it.
+- Engineering Memory staleness checks batch their subject lookups instead of issuing one query per record.
+
+### Fixed
+
+- The report file registry is deduplicated by path, so it no longer lists more files than the run found.
+- The review queue no longer reports a finding as known without baseline evidence.
+- The error for a missing `baseline_scope_id` names the configuration table correctly.
+- Warm runs count cached files in health denominators, so a cached run no longer scores differently from a cold one.
 
 ## [2.1.0a1] - 2026-07-09
 

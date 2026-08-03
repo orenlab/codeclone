@@ -36,6 +36,7 @@ from codeclone.surfaces.mcp._session_helpers import (
 )
 from codeclone.surfaces.mcp.session import MCPServiceContractError
 from codeclone.utils.git_diff import validate_git_diff_ref
+from tests._tmp_tree import make_dir, write_file
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 _HTML_JS_PATH = _REPO_ROOT / "codeclone" / "report" / "html" / "assets" / "js.py"
@@ -147,10 +148,8 @@ def test_mcp_resolve_root_requires_absolute_existing_directory(tmp_path: Path) -
 def test_mcp_resolve_optional_path_rejects_external_absolute_by_default(
     tmp_path: Path,
 ) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    outside = tmp_path / "outside-cache.json"
-    outside.write_text("{}", encoding="utf-8")
+    workspace = make_dir(tmp_path, "workspace")
+    outside = write_file(tmp_path, "outside-cache.json", "{}")
 
     with pytest.raises(MCPServiceContractError, match="Invalid path"):
         _resolve_optional_path(str(outside.resolve()), workspace)

@@ -70,6 +70,7 @@ from tests._report_access import (
 from tests._report_access import (
     report_structural_groups as _report_structural_groups,
 )
+from tests._tmp_tree import make_dirs
 
 
 def _source_content_digest(path: Path) -> DigestObject:
@@ -894,10 +895,7 @@ def test_cli_cache_dir_override_respected(
 def test_cli_default_cache_dir_per_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root1 = tmp_path / "p1"
-    root2 = tmp_path / "p2"
-    root1.mkdir()
-    root2.mkdir()
+    root1, root2 = make_dirs(tmp_path, "p1", "p2")
     (root1 / "a.py").write_text("def f():\n    return 1\n", "utf-8")
     (root2 / "b.py").write_text("def f():\n    return 1\n", "utf-8")
     captured: list[Path] = []
