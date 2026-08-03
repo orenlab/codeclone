@@ -522,7 +522,11 @@ def _make_suggestion(**overrides: object) -> Suggestion:
 
 
 def test_html_badges_and_cards_cover_effort_and_tip_paths() -> None:
-    assert 'risk-badge risk-moderate">moderate<' in _quality_badge_html("moderate")
+    # Moved expectation: this pinned 'risk-badge risk-moderate', which was the
+    # defect written down -- effort is a cost, not a risk verdict, and
+    # .risk-moderate was a class the stylesheet never defined, so the chip
+    # carried no colour rule at all. Effort now renders as a muted level.
+    assert _quality_badge_html("moderate") == '<span class="level-chip">moderate</span>'
 
     card_html = _stat_card(
         "High Complexity",
@@ -1155,6 +1159,127 @@ def _authority_panel_html() -> str:
         ),
     )
     return render_authority_panel(ctx)
+
+
+def _css_rule(css: str, selector: str) -> str:
+    """Return the body of the rule whose selector list states *selector*.
+
+    Five tests had grown their own copy of this scan; the report's own clone
+    gate is the reason it lives here once.
+    """
+
+    stripped = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    rules: list[tuple[str, str]] = re.findall(r"([^{}]+)\{([^}]*)\}", stripped)
+    for heads, body in rules:
+        if selector in [part.strip() for part in heads.split(",")]:
+            return body
+    raise AssertionError(f"no rule states {selector!r}")
+
+
+def _demo_table(**overrides: Any) -> str:
+    """Render one table through the shared renderer, with defaults."""
+
+    from codeclone.report.html.widgets.tables import render_rows_table
+
+    kwargs: dict[str, Any] = {
+        "headers": ("Name", "Confidence", "Effort", "Severity"),
+        "rows": [("pkg.a:f", "high", "hard", "critical")],
+        "empty_message": "nothing here",
+    }
+    kwargs.update(overrides)
+    return render_rows_table(**kwargs)
+
+
+def test_table_header_is_neutral_and_carries_no_accent_tint() -> None:
+    """The header separates by typography, not by painting a coloured band.
+
+    The maintainer's verdict on the discovery table was about colour. The
+    header ran a tinted fill plus a two-pixel rule mixed from the brand accent,
+    so every table in the report opened with a lavender strip that competed
+    with the data underneath it.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    head = _css_rule(build_css(), ".table th")
+
+    assert "var(--bg-overlay)" not in head, "the header still paints a tinted band"
+    assert "accent" not in head, "the header rule still mixes in the brand accent"
+    assert "var(--table-rule-strong)" in head, "the header rule is not tokenised"
+
+
+def test_table_separates_rows_exactly_one_way() -> None:
+    """Zebra and hairline are two answers to one question; the idiom picks one."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    rules = _css_rule_bodies(css)
+
+    assert "tbody tr:nth-child(even)" not in rules, (
+        "zebra striping and per-row hairlines both separate rows"
+    )
+    assert "var(--table-rule)" in _css_rule(css, ".table td"), (
+        "the row hairline is not tokenised"
+    )
+    assert "accent" not in _css_rule(css, ".table tbody tr:hover td"), (
+        "row hover still tints with the brand accent"
+    )
+
+
+def test_confidence_and_effort_render_as_muted_levels_not_verdicts() -> None:
+    """A level is not a verdict.
+
+    Confidence is evidence strength and effort is a cost. Both ran through the
+    risk palette, so a high-confidence dead-code row rendered in error red --
+    the same magnitude-as-verdict mistake the neutral meter already fixed.
+    Effort was worse: it emitted risk-easy/moderate/hard, classes the
+    stylesheet never defined, so those chips had no colour rule at all.
+    """
+
+    table = _demo_table()
+
+    assert 'class="level-chip"' in table, "there is no muted level vocabulary"
+    assert "risk-high" not in table, "confidence still renders as a risk verdict"
+    assert "risk-hard" not in table, "effort still emits an undefined risk class"
+    # a real verdict keeps its semantic colour
+    assert "severity-critical" in table
+
+
+def test_chip_columns_reserve_a_fixed_width() -> None:
+    """A chip column that resizes with its content makes tables jump.
+
+    The width belongs to the declared column type, not to a header name, so a
+    future chip column arrives sized instead of needing its own entry.
+    """
+
+    table = _demo_table(
+        headers=("Owner", "Level"),
+        rows=[("pkg.a:f", "same effect signature")],
+        column_types={"Level": "chips"},
+    )
+    colgroup = table[table.index("<colgroup>") : table.index("</colgroup>")]
+    cols = re.findall(r"<col(?:\s[^>]*)?>", colgroup)
+
+    assert len(cols) == 2
+    assert "width:" in cols[1], f"the chip column reserves no width: {cols[1]}"
+    # a name column still sizes to its content
+    assert "width:" not in cols[0]
+
+
+def test_row_disclosure_reads_as_a_connected_detail_panel() -> None:
+    """An opened disclosure is a subordinate panel, not a monstrous row."""
+
+    from codeclone.report.html.assets.css import build_css
+
+    panel = _css_rule(build_css(), ".detail-panel")
+
+    assert "border-left" in panel, "the panel is not connected to its row"
+    assert re.search(r"\bpadding:", panel), "the panel does not inset its content"
+    assert "background" in panel, "the panel does not read as subordinate"
+    assert "detail-panel" in _authority_panel_html(), (
+        "the producers disclosure does not use the panel idiom"
+    )
 
 
 def test_report_css_states_one_disclosure_idiom() -> None:

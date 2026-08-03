@@ -96,6 +96,16 @@ _TOKENS_DARK = """\
   --badge-pad:2px var(--sp-2);
   --badge-radius:var(--radius-sm);
 
+  /* table design code — the header separates by typography, never by a band,
+     and rows are separated exactly one way. --table-rule is the single
+     row-separation decision: change it here, not at nineteen call sites. */
+  --table-surface:var(--bg-surface);
+  --table-rule:var(--border);
+  --table-rule-strong:var(--border-strong);
+  --table-row-hover:color-mix(in oklch,var(--bg-raised) 60%,transparent);
+  --table-head-size:var(--fs-3xs);
+  --table-head-tracking:.085em;
+
   /* count sort — tabular numerals shared by counts and micro-stats */
   --count-font:var(--font-numeric);
   --count-size:.64rem;
@@ -438,29 +448,35 @@ _INSIGHT = """\
 # ---------------------------------------------------------------------------
 
 _TABLES = """\
+/* The wrap states the surface it holds, and the sticky header reuses exactly
+   that surface: the header occludes scrolled rows without reading as a band. */
 .table-wrap{display:block;inline-size:100%;max-inline-size:100%;min-inline-size:0;overflow-x:auto;
   overflow-y:hidden;border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:var(--sp-4);
   background:
-    linear-gradient(to right,var(--bg-surface) 30%,transparent) left center / 40px 100% no-repeat local,
-    linear-gradient(to left,var(--bg-surface) 30%,transparent) right center / 40px 100% no-repeat local,
+    linear-gradient(to right,var(--table-surface) 30%,transparent) left center / 40px 100% no-repeat local,
+    linear-gradient(to left,var(--table-surface) 30%,transparent) right center / 40px 100% no-repeat local,
     linear-gradient(to right,rgba(0,0,0,.15),transparent) left center / 14px 100% no-repeat scroll,
-    linear-gradient(to left,rgba(0,0,0,.15),transparent) right center / 14px 100% no-repeat scroll}
+    linear-gradient(to left,rgba(0,0,0,.15),transparent) right center / 14px 100% no-repeat scroll,
+    var(--table-surface)}
 .table{inline-size:max-content;min-inline-size:100%;border-collapse:collapse;font-size:var(--fs-sm);
   font-family:var(--font-sans)}
-.table th{position:sticky;top:0;z-index:2;padding:var(--sp-2) var(--sp-3);text-align:left;font-family:var(--font-sans);
-  font-weight:600;font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.06em;
-  color:var(--text-secondary);background:var(--bg-overlay);
-  border-bottom:2px solid color-mix(in oklch,var(--accent-primary) 30%,var(--border));
+/* Hierarchy from type and space, not from fill: smaller, wider-tracked, muted,
+   with the column's air above it and a single quiet rule below. */
+.table th{position:sticky;top:0;z-index:2;padding:var(--sp-3) var(--sp-3) var(--sp-2);
+  text-align:left;font-family:var(--font-sans);
+  font-weight:600;font-size:var(--table-head-size);text-transform:uppercase;
+  letter-spacing:var(--table-head-tracking);
+  color:var(--text-muted);background:var(--table-surface);
+  border-bottom:1px solid var(--table-rule-strong);
   white-space:nowrap;cursor:default;user-select:none}
 .table th[data-sortable]{cursor:pointer}
 .table th[data-sortable]:hover{color:var(--text-primary)}
 .table th .sort-icon{display:inline-flex;margin-left:var(--sp-1);opacity:.4}
 .table th[aria-sort] .sort-icon{opacity:1;color:var(--accent-primary)}
-.table td{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--border);color:var(--text-secondary);
-  vertical-align:top}
-.table tbody tr:nth-child(even) td{background:color-mix(in oklch,var(--bg-raised) 45%,transparent)}
+.table td{padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--table-rule);
+  color:var(--text-secondary);vertical-align:top}
 .table tbody tr:last-child td{border-bottom:none}
-.table tbody tr:hover td{background:var(--accent-muted)}
+.table tbody tr:hover td{background:var(--table-row-hover)}
 .table .col-name{font-weight:500;color:var(--text-primary);max-width:360px;overflow:hidden;
   text-overflow:ellipsis;white-space:nowrap}
 .table .col-file,.table .col-path{color:var(--text-muted);max-width:240px;overflow:hidden;
@@ -501,6 +517,11 @@ _TABLES = """\
 .status-pill--neutral{background:var(--bg-overlay);color:var(--text-muted)}
 .chip{margin:1px 3px 1px 0;background:var(--bg-overlay);color:var(--text-secondary);
   border:1px solid var(--border)}
+/* A level is a position on a scale, not a judgement: confidence and effort say
+   how strong the evidence is and how much work it costs, so they carry no
+   semantic colour. Red stays reserved for risk and severity. */
+.level-chip{background:var(--bg-overlay);color:var(--text-secondary);
+  border:1px solid var(--border);text-transform:none}
 /* Code sort: identifiers / globs in mono, distinct from sans label badges */
 .code-chip{display:inline-flex;align-items:center;max-width:100%;font-family:var(--font-mono);
   font-size:var(--fs-xs);padding:2px var(--sp-2);border-radius:var(--radius-sm);
@@ -621,7 +642,7 @@ _CODE = """\
 _BADGES = """\
 /* One typographic scale for every read-only label badge; color/background and
    any per-variant tweaks (uppercase, etc.) live in the modifiers below. */
-.risk-badge,.severity-badge,.source-kind-badge,.status-pill,
+.risk-badge,.severity-badge,.source-kind-badge,.status-pill,.level-chip,
 .finding-meta-badge,.suggestion-chip,.chip,.launchpad-sev{
   display:inline-flex;align-items:center;white-space:nowrap;line-height:1.2;
   font-family:var(--badge-font);font-size:var(--badge-size);
@@ -987,8 +1008,15 @@ _DEPENDENCIES = """\
 .chain-more summary{display:inline;font-size:var(--fs-2xs);padding:0 var(--sp-1)}
 .chain-more[open] summary{color:var(--text-secondary)}
 .authority-producers summary{font-size:var(--fs-2xs)}
-.authority-producer-list{margin:var(--sp-1) 0 0;padding-left:var(--sp-4);
-  display:flex;flex-direction:column;gap:var(--sp-1)}
+/* One idiom for what an opened disclosure looks like inside a row: a panel
+   attached to the row by a rule on its leading edge, indented and set on a
+   subordinate surface, so it reads as detail about the row above rather than
+   as a second, monstrous row. */
+.detail-panel{margin:var(--sp-2) 0 var(--sp-1);padding:var(--sp-2) var(--sp-3);
+  border-left:2px solid var(--border-strong);
+  border-radius:0 var(--radius-sm) var(--radius-sm) 0;
+  background:var(--bg-raised)}
+.authority-producer-list{display:flex;flex-direction:column;gap:var(--sp-1)}
 .authority-producer-list code{font-size:var(--fs-2xs);color:var(--text-secondary)}
 .dep-graph-svg{display:block;height:auto;margin:0 auto;overflow:visible}
 .dep-graph-svg text{font-family:var(--font-mono)}
@@ -1319,8 +1347,9 @@ _META_PANEL = """\
 .prov-section-title svg{width:13px;height:13px;opacity:.7;flex-shrink:0;
   color:var(--accent-primary)}
 .prov-table{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
-.prov-table tr:not(:last-child){border-bottom:1px solid color-mix(in srgb,var(--border) 25%,transparent)}
-.prov-table tr:hover{background:color-mix(in srgb,var(--accent-primary) 3%,transparent)}
+/* The provenance list is a table too: same row rule, same neutral hover. */
+.prov-table tr:not(:last-child){border-bottom:1px solid var(--table-rule)}
+.prov-table tr:hover{background:var(--table-row-hover)}
 .prov-td-label{padding:6px 0;color:var(--text-muted);white-space:nowrap;width:40%;
   vertical-align:top;font-weight:500;font-size:var(--fs-xs);letter-spacing:.002em}
 .prov-td-value{padding:6px 0 6px var(--sp-2);color:var(--text-primary);word-break:break-all;

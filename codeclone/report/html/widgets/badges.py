@@ -38,6 +38,7 @@ __all__ = [
     "INFO_CIRCLE_SVG",
     "_chips_html",
     "_inline_empty",
+    "_level_chip_html",
     "_micro_badges",
     "_quality_badge_html",
     "_render_chain_flow",
@@ -50,11 +51,11 @@ __all__ = [
     "_tab_empty_info",
 ]
 
-_EFFORT_CSS: dict[str, str] = {
-    EFFORT_EASY: "success",
-    EFFORT_MODERATE: "warning",
-    EFFORT_HARD: "error",
-}
+#: Values that state a position on a scale rather than a judgement. Effort is a
+#: cost and confidence is evidence strength; neither earns a semantic colour.
+_LEVEL_VALUES: frozenset[str] = frozenset(
+    {EFFORT_EASY, EFFORT_MODERATE, EFFORT_HARD},
+)
 
 CHECK_CIRCLE_SVG = (
     '<svg class="tab-empty-icon" viewBox="0 0 24 24" fill="none" '
@@ -88,7 +89,13 @@ def _micro_badges(*pairs: tuple[str, object]) -> str:
 
 
 def _quality_badge_html(text: str) -> str:
-    """Render a risk / severity / effort value as a styled badge."""
+    """Render a risk or severity verdict as a semantically coloured badge.
+
+    Only verdicts reach the semantic palette. Effort used to be routed here and
+    emitted ``risk-easy`` / ``risk-moderate`` / ``risk-hard`` -- classes the
+    stylesheet never defined, so those chips carried no colour rule at all.
+    Levels now render through :func:`_level_chip_html`.
+    """
     r = text.strip().lower()
     if r in (RISK_LOW, RISK_HIGH, RISK_MEDIUM):
         return (
@@ -99,11 +106,17 @@ def _quality_badge_html(text: str) -> str:
             f'<span class="severity-badge severity-{_escape_html(r)}">'
             f"{_escape_html(r)}</span>"
         )
-    if r in _EFFORT_CSS:
-        return (
-            f'<span class="risk-badge risk-{_escape_html(r)}">{_escape_html(r)}</span>'
-        )
+    if r in _LEVEL_VALUES:
+        return _level_chip_html(r)
     return _escape_html(text)
+
+
+def _level_chip_html(text: str) -> str:
+    """Render a level -- a position on a scale -- as a muted chip."""
+    value = text.strip()
+    if not value:
+        return ""
+    return f'<span class="level-chip">{_escape_html(value)}</span>'
 
 
 def _source_kind_badge_html(source_kind: str) -> str:

@@ -119,10 +119,11 @@ def _occurrences_table_html(
         hidden_details = (
             '<details class="finding-occurrences-more">'
             f"<summary>Show {len(hidden_items)} more occurrences</summary>"
-            f'<div class="table-wrap"><table class="table sf-table">'
+            f'<div class="detail-panel"><div class="table-wrap">'
+            f'<table class="table sf-table">'
             f"{colgroup}{thead}"
             f"<tbody>{_rows_for(hidden_items)}</tbody>"
-            "</table></div></details>"
+            "</table></div></div></details>"
         )
     return (
         f'<div class="table-wrap"><table class="table sf-table">'

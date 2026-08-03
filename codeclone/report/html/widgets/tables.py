@@ -15,6 +15,7 @@ from ..primitives.escape import _escape_html
 from .badges import (
     _chips_html,
     _code_chip_html,
+    _level_chip_html,
     _metric_meter_html,
     _quality_badge_html,
     _score_bar_html,
@@ -27,7 +28,12 @@ from .glossary import glossary_tip
 if TYPE_CHECKING:
     from .._context import ReportContext
 
-_RISK_HEADERS = {"risk", "confidence", "severity", "effort"}
+#: Headers whose value is a judgement, and therefore keeps the semantic palette.
+_VERDICT_HEADERS = {"risk", "severity"}
+#: Headers whose value is a position on a scale. Confidence is how strong the
+#: evidence is and effort is what a fix costs: a high-confidence row is a
+#: reliable finding, not an error, so neither borrows the risk colours.
+_LEVEL_HEADERS = {"confidence", "effort"}
 _PATH_HEADERS = {"file", "location"}
 
 _COL_WIDTHS: dict[str, str] = {
@@ -105,6 +111,17 @@ _CELL_TYPE_CLS = {
     "code": "col-code",
 }
 
+#: Width reserved by a declared column type. A chip column sized by its content
+#: makes the whole table jump between rows, so the type carries the width and a
+#: future chip column arrives sized rather than needing its own header entry.
+#: An explicit ``_COL_WIDTHS`` entry still wins.
+_CELL_TYPE_WIDTHS = {
+    "chips": "200px",
+    "status": "124px",
+    "source_kind": "104px",
+    "code": "240px",
+}
+
 
 def render_rows_table(
     *,
@@ -138,10 +155,10 @@ def render_rows_table(
         values = [_safe_abs_float(row[col_idx]) for row in rows if col_idx < len(row)]
         meter_max[col_idx] = max([*values, 0.0])
 
-    # colgroup
+    # colgroup: an explicit header width wins, else the declared type's width
     cg = ["<colgroup>"]
     for h in lower_headers:
-        w = _COL_WIDTHS.get(h)
+        w = _COL_WIDTHS.get(h) or _CELL_TYPE_WIDTHS.get(typed_cols.get(h, ""))
         cg.append(f'<col style="width:{w}">' if w else "<col>")
     cg.append("</colgroup>")
 
@@ -170,8 +187,10 @@ def render_rows_table(
         cls_attr = f' class="{cls}"' if cls else ""
         if h in raw_html_set:
             return f"<td{cls_attr}>{cell}</td>"
-        if h in _RISK_HEADERS:
+        if h in _VERDICT_HEADERS:
             return f"<td{cls_attr}>{_quality_badge_html(cell)}</td>"
+        if h in _LEVEL_HEADERS:
+            return f"<td{cls_attr}>{_level_chip_html(cell)}</td>"
         if h in _PATH_HEADERS and ctx is not None:
             short = ctx.relative_path(cell)
             return (

@@ -131,7 +131,7 @@ def _candidate_producers_html(producers: Sequence[str]) -> str:
     return (
         '<details class="authority-producers">'
         f"<summary>+{len(rest)} more</summary>"
-        f'<ul class="authority-producer-list">{items}</ul>'
+        f'<ul class="detail-panel authority-producer-list">{items}</ul>'
         "</details>"
     )
 
