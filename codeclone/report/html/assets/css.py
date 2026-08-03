@@ -1026,7 +1026,12 @@ _DEPENDENCIES = """\
 .stat-cards .meta-item .meta-label,.dep-stats .meta-item .meta-label{font-size:var(--fs-xs);min-height:18px}
 .stat-cards .meta-item .meta-value,.dep-stats .meta-item .meta-value{display:flex;align-items:center}
 .stat-cards .kpi-detail,.dep-stats .kpi-detail{margin-top:0;align-self:end}
-.dep-graph-wrap{overflow:hidden;margin:0 auto var(--sp-4);border:1px solid var(--border);
+/* The pane hugs its graph and never exceeds the column. When a graph is too
+   large to fit at a readable scale, the pane pans it rather than shrinking it
+   below legibility -- the same honest form as the code block's internal
+   scroll, and it keeps the page itself free of horizontal scroll. */
+.dep-graph-wrap{overflow-x:auto;overflow-y:hidden;margin:0 auto var(--sp-4);
+  border:1px solid var(--border);
   border-radius:var(--radius-lg);
   background:linear-gradient(180deg,var(--bg-surface),var(--bg-raised));
   padding:var(--sp-5);width:fit-content;max-width:100%}

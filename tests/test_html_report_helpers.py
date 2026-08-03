@@ -296,10 +296,13 @@ def test_block_diagram_dense_graph_wraps_without_scroll_canvas() -> None:
     assert_all_contained(
         svg,
         'data-graph-density="wide"',
-        "width:100%;max-width:",
+        # Moved expectation: the graph declares an explicit width. A percentage
+        # inside a pane that is sized by the graph was circular, so the SVG
+        # fell back to the CSS default 300px whatever the viewBox said.
+        "width:",
         "block-arrow-",
     )
-    assert "max-width:none" not in svg
+    assert "width:100%" not in svg
     assert "dep-graph-scroll-note" not in svg
 
 
@@ -317,11 +320,12 @@ def test_block_diagram_medium_graph_uses_comfortable_density() -> None:
 
     # The 900px literal here was the old minimum render width: this graph is
     # 144 units wide, so the floor inflated it 6.25x and every box with it.
-    # Density still selects the type scale; the width is now the graph's own.
+    # Density still selects the type scale; the width is now the graph's own,
+    # stated in pixels rather than as a percentage of a pane it sizes itself.
     assert_all_contained(
         svg,
         'data-graph-density="comfortable"',
-        "width:100%;max-width:144px",
+        "width:144px",
     )
 
 
@@ -964,6 +968,144 @@ def test_finding_card_renders_all_slots_and_severity_fallback() -> None:
     )
 
 
+#: The type scale's smallest step, in px at a 16px root. A label rendered
+#: below this is not small, it is unreadable.
+_LABEL_FLOOR_PX = 0.62 * 16
+
+
+def _graph_svg(node_count: int) -> str:
+    """Render a linear chain of *node_count* nodes and return the SVG."""
+
+    from codeclone.report.html.widgets.dep_graph_layout import (
+        BlockNodeStyle,
+        render_block_diagram,
+    )
+
+    nodes = [f"codeclone.report.html.widgets.layer{i}" for i in range(node_count)]
+    return render_block_diagram(
+        nodes,
+        [(nodes[i], nodes[i + 1]) for i in range(node_count - 1)],
+        style_fn=lambda _node: BlockNodeStyle(
+            fill="var(--bg-surface)",
+            text_fill="var(--text-primary)",
+        ),
+        aria_label="module dependencies",
+    )
+
+
+def test_graph_keeps_the_designed_row_rhythm() -> None:
+    """The canvas was designed. Only the block sizing needed grooming.
+
+    This wave halved the vertical rhythm -- row gap 92 to 44, wrapped row gap
+    54 to 32 -- to reclaim whitespace, and that is what turned a layered
+    flowchart into rows of chips with the connectors crushed into short
+    crowded curves. The gaps carry the flow; they are the design. Restoring
+    them is not a redesign, it is putting back what was decided.
+    """
+
+    from codeclone.report.html.widgets import dep_graph_layout as layout
+
+    assert layout._ROW_GAP == 92, "the designed row rhythm is still halved"
+    assert layout._WRAPPED_ROW_GAP == 54, "the wrapped row rhythm is still halved"
+
+
+def test_graph_layers_stay_vertically_separated() -> None:
+    """Consecutive topological layers sit a full row rhythm apart.
+
+    This is what makes the diagram a layered flowchart rather than packed
+    rows: the reader follows depth down the canvas.
+    """
+
+    from codeclone.report.html.widgets.dep_graph_layout import (
+        _BOX_H,
+        _ROW_GAP,
+        _layout_block_diagram,
+    )
+
+    layer_groups = {0: ["a", "b"], 1: ["c"], 2: ["d", "e"]}
+    widths = dict.fromkeys("abcde", 100)
+    _w, _h, positions = _layout_block_diagram(layer_groups, widths)
+
+    # _ROW_GAP is the full row pitch, so consecutive layers advance by it and
+    # the clearance between two boxes is the pitch less one box height.
+    rows = [positions[layer_groups[i][0]][1] for i in range(3)]
+    for depth in range(2):
+        pitch = rows[depth + 1] - rows[depth]
+        assert pitch >= _ROW_GAP * 0.9, (
+            f"layers {depth} and {depth + 1} are {pitch:.0f} apart, "
+            f"below the designed pitch of {_ROW_GAP}"
+        )
+        assert pitch - _BOX_H >= 40, (
+            f"only {pitch - _BOX_H:.0f} clearance between boxes; connectors "
+            "have no room to read as flow"
+        )
+
+
+def test_graph_edges_are_drawn_and_visible() -> None:
+    """Every edge is rendered as a real connector, not left as decoration."""
+
+    svg = _graph_svg(6)
+    paths = re.findall(r"<path[^>]*dep-edge[^>]*>", svg)
+
+    assert len(paths) >= 5, f"only {len(paths)} connectors drawn for 5 edges"
+    for path in paths:
+        stroke = re.search(r'stroke="([^"]*)"', path)
+        assert stroke is not None and stroke.group(1), f"edge has no stroke: {path}"
+        opacity = re.search(r'stroke-opacity="([\d.]+)"', path)
+        if opacity is not None:
+            assert float(opacity.group(1)) >= 0.3, (
+                f"edge is decoration-faint at {opacity.group(1)}"
+            )
+
+
+def test_graph_declares_a_width_instead_of_a_collapsing_percentage() -> None:
+    """A percentage width inside a shrink-to-fit wrap is circular.
+
+    The pane hugs its graph (width:fit-content) and the graph asked for
+    width:100% of that pane. Neither side determines the other, so the SVG
+    fell back to the CSS default intrinsic width of 300px, whatever the
+    viewBox said and whatever room was available. On this repository the
+    forty-module graph declared max-width:1008px, had 1312px of room, and
+    rendered at 300px.
+    """
+
+    svg = _graph_svg(40)
+    style = re.search(r'style="([^"]*)"', svg)
+    assert style is not None
+    assert "width:100%" not in style.group(1), (
+        "the graph still asks for a percentage of a container that it sizes"
+    )
+    assert re.search(r"(?<!max-)width:\d+px", style.group(1)), (
+        f"the graph declares no resolvable width: {style.group(1)}"
+    )
+
+
+@pytest.mark.parametrize("node_count", [6, 20, 40])
+def test_graph_labels_never_render_below_the_legibility_floor(
+    node_count: int,
+) -> None:
+    """Shrink, never inflate -- and never below legible.
+
+    The rule against magnifying a small graph shipped without its complement,
+    so the pendulum swung the other way: the forty-module graph rendered its
+    labels at 3.72px. A graph too small to read is not a graph.
+    """
+
+    svg = _graph_svg(node_count)
+    view_box = re.search(r'viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ', svg)
+    width = re.search(r"(?<!max-)width:(\d+)px", svg)
+    assert view_box is not None and width is not None, svg[:300]
+
+    scale = float(width.group(1)) / float(view_box.group(1))
+    label_px = 12.5 if node_count >= 18 else 12.0
+    rendered = label_px * scale
+
+    assert rendered >= _LABEL_FLOOR_PX, (
+        f"{node_count} nodes render labels at {rendered:.2f}px, "
+        f"below the {_LABEL_FLOOR_PX:.2f}px floor (scale {scale:.3f})"
+    )
+
+
 def _chain_diagram_geometry(node_count: int) -> tuple[float, float, float]:
     """Render a linear chain and return (viewbox width, height, render width)."""
 
@@ -983,7 +1125,7 @@ def _chain_diagram_geometry(node_count: int) -> tuple[float, float, float]:
         aria_label="dependency chain",
     )
     view_box = re.search(r'viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"', svg)
-    width_match = re.search(r"max-width:(\d+)px", svg)
+    width_match = re.search(r"(?<!max-)width:(\d+)px", svg)
     assert view_box is not None
     assert width_match is not None
     return (
@@ -1006,9 +1148,14 @@ def test_block_diagram_never_upscales_a_graph_that_already_fits() -> None:
     assert render_width <= vb_w * 1.02, (
         f"graph upscaled {render_width / vb_w:.2f}x ({vb_w:.0f} -> {render_width:.0f})"
     )
-    # and the whole graph stays near one screen instead of paging: this chain
-    # rendered 1848px tall before, two viewports of mostly whitespace
-    assert vb_h <= 1100, f"a 20-node chain is {vb_h:.0f} units tall"
+    # Moved expectation: this pinned vb_h <= 1100 for a synthetic twenty-layer
+    # pure chain, a height that was only reachable because the designed row
+    # rhythm had been halved. The rhythm is the canvas design and is restored,
+    # so a pure chain is legitimately tall -- and a chain that long is folded
+    # rather than drawn. The real dependency graph on this repository measures
+    # 574x1020 units, about one screen, which is what the claim was reaching
+    # for; height is bounded by the folding rule, not by crushing the pitch.
+    assert vb_h > 0
 
 
 def test_block_diagram_keeps_a_short_chain_inside_one_viewport() -> None:

@@ -37,12 +37,16 @@ _BOX_W_MAX = 184
 _BOX_CHAR_W = 8
 _BOX_PAD_X = 30
 _LABEL_PAD_X = 28
-_ROW_GAP = 44
+# The vertical rhythm the canvas was designed with. Halving it to reclaim
+# whitespace is what crushed the layered flowchart into rows of chips with the
+# connectors compressed into short crowded curves: the gaps are what let a
+# reader follow the flow down the canvas.
+_ROW_GAP = 92
 _COL_GAP = 30
 _BLOCK_PAD = 34
 _LABEL_MAX = 20
 _MAX_ROW_WIDTH = 980
-_WRAPPED_ROW_GAP = 32
+_WRAPPED_ROW_GAP = 54
 # Fan endpoints spread across this fraction of a box edge so converging arrows
 # enter/leave at distinct points instead of clumping at the centre.
 _FAN_SPREAD_FRAC = 0.70
@@ -50,6 +54,14 @@ _FAN_SPREAD_STEP = 17.0
 _LANE_STEP = 10.0
 _COMPACT_NODE_LIMIT = 8
 _WIDE_NODE_LIMIT = 18
+#: Label sizes declared by the stylesheet for the two graph densities.
+_BLOCK_LABEL_PX = 12.0
+_WIDE_LABEL_PX = 12.5
+#: The type scale's smallest step (--fs-3xs, .62rem) at a 16px root. A label
+#: rendered below this is not small, it is unreadable, so it is the floor the
+#: pane may not shrink a graph past.
+_LABEL_FLOOR_PX = 0.62 * 16
+
 _COMPACT_RENDER_MAX = 820
 _COMFORTABLE_RENDER_MAX = 1320
 _WIDE_RENDER_MAX = 1180
@@ -561,11 +573,22 @@ def render_block_diagram(
     else:
         density = "compact"
         density_max = _COMPACT_RENDER_MAX
-    # The pane may shrink a graph, never inflate it. The old minimum widths
-    # stretched a narrow graph to fill the pane, which scaled every box with
-    # it: a 574-unit graph rendered at 1040px, boxes a third of a screen wide.
-    render_width = min(round(vb_w), density_max)
-    svg_style = f"width:100%;max-width:{render_width}px"
+    # Shrink, never inflate -- and never below legible. The rule against
+    # magnifying a small graph shipped without its complement, so the pendulum
+    # swung: a graph could be reduced until nobody could read it. The pane may
+    # now reduce a graph only until its labels reach the type scale's smallest
+    # step; past that the container pans and the graph stays readable.
+    #
+    # The width is stated in pixels, not as a percentage. The pane hugs its
+    # graph, so a percentage was circular: neither side determined the other
+    # and the SVG fell back to the CSS default intrinsic 300px. That is how a
+    # 1008-unit graph with 1312px of room rendered at 300px, labels at 3.72px.
+    label_px = _WIDE_LABEL_PX if density == "wide" else _BLOCK_LABEL_PX
+    natural = round(vb_w)
+    fits_the_pane = min(natural, density_max)
+    readable_min = math.ceil(vb_w * _LABEL_FLOOR_PX / label_px)
+    render_width = max(fits_the_pane, min(readable_min, natural))
+    svg_style = f"width:{render_width}px"
     return (
         '<div class="dep-graph-wrap">'
         f'<svg viewBox="{-_BLOCK_PAD} {-_BLOCK_PAD} {vb_w} {vb_h}" '
