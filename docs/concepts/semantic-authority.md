@@ -64,14 +64,34 @@ Candidates are ranked by evidence strength:
 | `overlapping_transform_chain` | Shared transform chain |
 | `divergent_projection` | Shared fact, divergent projection |
 
-The report renders a paste-ready registry entry for each candidate, with the
-contract id left as a placeholder — only a human can name the contract a
-producer is meant to own. Promotion is a copy-paste into `pyproject.toml`.
-CodeClone never writes your configuration.
+Each rendered row carries a paste-ready registry entry, with the contract id left
+as a placeholder — only a human can name the contract a producer is meant to own.
+Promotion is a copy-paste into `pyproject.toml`. CodeClone never writes your
+configuration.
 
-Discovery proposes on the scale of a whole tree, so the panel shows the
-strongest candidates and states how many it is not showing, along with the total
-number of semantic sinks examined.
+Discovery proposes on the scale of a whole tree, so the HTML table is cut twice:
+it carries only the three strongest levels (`exact_contract_ir`,
+`same_effect_signature`, `same_output_fact_and_input_family`), and at most 50
+rows of those. The caption states the cut where it happens — how many of how many
+are shown, a per-level histogram of the weaker mass, and the total raw sinks
+discovery examined.
+
+## Reading the tail over MCP
+
+The rows the HTML table cut are served as bounded pages:
+
+```text
+check_authority(section="candidates", cursor=..., page_size=...)
+```
+
+`section` defaults to `violations`, unchanged. `section="candidates"` is the only
+way to reach the discovery tail — candidates are served *only* as bounded pages.
+Page size defaults to 20 and is capped at 50.
+
+Pagination fails closed. Each cursor is digest-bound to the run and the
+population it was cut from, so a cursor from another projection, another
+ordering, or a changed run is refused rather than silently resumed against
+different data.
 
 ## Gating
 

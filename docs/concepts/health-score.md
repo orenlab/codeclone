@@ -27,12 +27,15 @@ It should not be treated as an absolute target, because the weighting reflects C
 | Cohesion | 15% | LCOM4 per class |
 | Coupling | 10% | CBO per class |
 | Coverage | 10% | Analyzed files over found files — analysis coverage, not test coverage |
-| Dead code | 10% | Dead-code items, including [unreachable statements](unreachable-statements.md) |
+| Dead code | 10% | Unreferenced symbols — functions, classes, methods, imports |
 | Dependencies | 10% | Dependency cycles and depth |
 
-The weights above are the contract, not a suggestion; every surface that shows a
-dimension reads them from the same place that computed the score. How each
-dimension spends its points is in [Health explainability](health-explainability.md).
+The weights above are the contract, not a suggestion. How each dimension spends
+its points is in [Health explainability](health-explainability.md).
+
+The dead-code dimension counts unreferenced *symbols* only.
+[Unreachable statements](unreachable-statements.md) are reported and stored in
+the dead-code lane, but they are not a health input and not a gate input today.
 
 ```mermaid
 graph LR

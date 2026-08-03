@@ -8,10 +8,13 @@ source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
 
 ## What it is
 
-A health score that cannot be explained cannot be acted on. Every surface that
-shows a dimension also states the arithmetic behind it, and reads the dimension
-weight from the same contract that computed the score — so a rendered
-contribution can never drift from the number it explains.
+A health score that cannot be explained cannot be acted on.
+
+One dimension has an explainer today: **clones**, and only in the HTML report.
+It states its arithmetic in the overview summary and in the clones panel, and it
+reads its weight from the same contract that computed the score — so the
+rendered contribution cannot drift from the number it explains. The other six
+dimensions render their scores without an inline derivation.
 
 ## Dimension weights
 
@@ -39,15 +42,18 @@ participants*.
 The curve is piecewise: mild at low density, steep in the structural-debt zone,
 floored when duplication is systemic.
 
-| Density | Score |
-|---------|-------|
-| 0 | 100 |
-| 5% | 90 |
-| 20% | 50 |
-| ≥ 50% | 0 |
+| Density (groups per analyzed file) | Score |
+|-----------------------------------|-------|
+| 0.00 | 100 |
+| 0.05 | 90 |
+| 0.20 | 50 |
+| ≥ 0.50 | 0 |
+
+The unit is groups per analyzed file, not a percentage of anything — writing
+`0.20` as "20% of files" would be the very restatement this dimension refuses.
 
 A long list of clone cards therefore says nothing about the score on its own,
-which is why every surface showing the cards also states the arithmetic.
+which is why the clones panel states the arithmetic beside them.
 
 ## Bounded dimensions
 

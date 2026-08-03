@@ -49,7 +49,7 @@ failing your build until you opt in.
 | `api_surface` | bool | `false` | Compute API surface metrics |
 | `golden_fixture_paths` | list | `[]` | Repo-relative `tests/` or `tests/fixtures/` paths whose clone groups are suppressed with a visible count |
 | `baseline_scope_id` | str | unset | Stable canonical UUID naming the baseline scope. Required for baseline update and baseline-relative gating |
-| `project_label` | str | unset | Human label recorded in baseline metadata |
+| `project_label` | str | unset | Accepted and validated, but **inert** — see below |
 | `source_roots` | list | unset | Explicit import roots for module identity |
 | `near_miss` | bool | `false` | Produce the advisory near-miss clone channel |
 | `semantic_authority` | bool | `false` | Collect report-only semantic authority candidates and provenance facts |
@@ -58,6 +58,13 @@ failing your build until you opt in.
 
 Sixty keys are accepted under `[tool.codeclone]`; the table above covers the
 ones most projects set. An unknown key is a contract error, not a warning.
+
+!!! warning "`project_label` is currently inert"
+
+    The key is parsed and validated, but the baseline publisher writes
+    `project_label = None` unconditionally, so a value you set never reaches the
+    published container's metadata. Setting it is harmless and changes nothing.
+    This is a known gap, not intended behavior.
 
 ### Semantic authority registry
 

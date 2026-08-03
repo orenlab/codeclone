@@ -26,9 +26,13 @@ Three are required: `clones.blocks`, `clones.functions`, `module_identity`.
 ## Per-lane trust
 
 Trust is decided per lane, not per file. A lane is `trusted` or `unavailable`,
-and an unavailable lane carries the reason it lost trust — among them
-`algorithm_revision`, `baseline_scope_id`, `descriptor_version`,
-`lane_digest_mismatch`, `payload_schema`, `python_tag`, `root_digest_mismatch`.
+and an unavailable lane carries the reason it lost trust. The vocabulary is
+closed — `compatible` plus these eleven, and nothing else:
+
+`algorithm_revision`, `baseline_scope_id`, `canonicalization_version`,
+`descriptor_version`, `lane_digest_mismatch`, `payload_schema`,
+`payload_schema_outdated`, `python_tag`, `required_contract`,
+`root_digest_mismatch`, `runtime_lane_unknown`.
 
 This is finer than failing the artifact: a stale design-metric lane names itself
 instead of condemning the lanes that are still comparable.

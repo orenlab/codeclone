@@ -11,22 +11,30 @@ source_commit: "47b7ef37dbe958c40753b933af18beb9480a8b80"
 Every analyzed file is classified by what it is for, so findings in production
 code are not averaged together with findings in test code.
 
-Kinds: `production`, `tests`, `fixtures`, `mixed`, `other`. Report breakdowns use
-four of them — `production`, `tests`, `fixtures`, `other`.
+A **file** is one of four kinds: `production`, `tests`, `fixtures`, `other`.
+
+`mixed` is not a file kind. It appears only when several locations are combined
+into one verdict — a finding spanning both production and test files reports
+`mixed`. No single file is ever classified `mixed`.
 
 Policy version: `1`.
 
 ## The rule
 
 Classification walks the repo-relative path looking for a test-named segment —
-`test`, `tests`, or `testing`:
+`test`, `tests`, or `testing`. The rows are evaluated in this order, and the
+first match wins:
 
-| Path shape | Kind |
-|------------|------|
-| No test-named segment | `production` |
-| Test-named segment, next segment is `fixtures` | `fixtures` |
-| Test-named segment otherwise | `tests` |
-| Test-named segment inside a distributed package | `production` |
+| # | Path shape | Kind |
+|---|------------|------|
+| 1 | No test-named segment | `production` |
+| 2 | Test-named segment inside a distributed package | `production` |
+| 3 | Test-named segment, next segment is `fixtures` | `fixtures` |
+| 4 | Test-named segment otherwise | `tests` |
+
+Order matters: the packaging override (row 2) is checked **before** the fixtures
+row. A `fixtures` directory inside a distributed package is production code, not
+fixtures.
 
 ## Packaging facts decide the last row
 

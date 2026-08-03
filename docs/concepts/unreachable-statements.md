@@ -45,7 +45,20 @@ simply not reported.
 Findings are emitted per maximal region, not per statement — a long dead tail is
 one finding with a statement count, not many findings.
 
+## What they do not affect
+
+Unreachable statements are reported and stored in the dead-code lane. They are
+**not** a health input and **not** a gate input today:
+
+- the dead-code health dimension counts unreferenced symbols only;
+- `--fail-dead-code` reads the high-confidence symbol count, so unreachable
+  statements cannot trip it.
+
+Measured on this repository: 11 unreachable-statement findings, 0 dead-code
+symbols, dead-code health dimension **100**. Treat them as review signal, not as
+something a pipeline currently fails on.
+
 ## Related pages
 
-- [Health score](health-score.md) — unreachable statements feed the dead-code dimension
+- [Health score](health-score.md) — what the dead-code dimension actually counts
 - [Full-McCabe complexity](complexity.md) — the same normalized CFG, counted differently

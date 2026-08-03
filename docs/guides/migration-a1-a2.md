@@ -33,22 +33,48 @@ analyzes anything.
 
 ## Baselines must be regenerated
 
-Old baselines are contract-incompatible. Reading a 2.1.0a1 baseline with the new
-version exits 2:
+Old baselines are contract-incompatible. What happens when you read one depends
+on whether you gate.
+
+**Without baseline-aware gate flags the run completes, exit 0.** The baseline is
+refused and ignored:
 
 ```text
-CONTRACT ERROR:
 Invalid baseline file.
 legacy baseline format
 Please regenerate the baseline with --update-baseline.
+Baseline is not trusted for this run and will be ignored.
+Baseline-relative novelty is unavailable for this run.
+Run: codeclone . --update-baseline
+```
+
+Analysis still runs and metrics still print — but every clone group reports
+`unavailable` novelty, so a green exit code here means nothing was compared.
+
+**With a baseline-aware gate such as `--fail-on-new`, exit 2:**
+
+```text
+Invalid baseline file.
+legacy baseline format
+Please regenerate the baseline with --update-baseline.
+...
+CONTRACT ERROR:
+Baseline-aware gates require a trusted baseline.
+Run: codeclone . --update-baseline
 ```
 
 Regeneration is mandatory, not advisory. A legacy baseline that is transitioned
 has its exact original bytes authenticated and recorded as transition evidence,
 so the epoch change stays auditable instead of being silently overwritten.
 
-The analysis cache is also superseded. It invalidates itself and reports it —
-`Cache version mismatch / found 2.10 / ignoring cache` — so no action is needed.
+The analysis cache is also superseded. It invalidates itself and reports it, so
+no action is needed:
+
+```text
+Cache version mismatch
+  found 2.10
+  ignoring cache
+```
 
 ## `baseline_scope_id` is now required
 
@@ -65,32 +91,54 @@ Without it:
 ```text
 CONTRACT ERROR:
 baseline_scope_id is required for baseline update and gating; set a stable
-canonical UUID under [tool.codeclone].
+canonical UUID under .
 ```
+
+The message ends with a bare `.` because the console currently swallows the
+bracketed table name. The table it means is `[tool.codeclone]`.
 
 Generate it once (`python -c "import uuid; print(uuid.uuid4())"`), commit it, and
 never change it — it is what stops one project's baseline being compared against
 another's.
 
-## Removed flags
+## Removed flags and keys
 
-| Removed | Use instead |
-|---------|-------------|
+| Removed CLI flag | Use instead |
+|------------------|-------------|
 | `--metrics-baseline [FILE]` | `--baseline [FILE]` |
 | `--update-metrics-baseline` | `--update-baseline` |
+
+The matching **pyproject keys were removed too**, and they fail harder than the
+flags: an obsolete key is rejected before analysis starts.
+
+```text
+CONTRACT ERROR:
+Unknown key(s) in tool.codeclone: metrics_baseline, update_metrics_baseline
+```
+
+Exit 2. Delete `metrics_baseline` and `update_metrics_baseline` from
+`[tool.codeclone]` as part of the upgrade — leaving them in place blocks every
+run, not just gated ones.
 
 Clone findings and metrics are now lanes in one baseline container, so one flag
 pair governs both. See [Baseline container and lane trust](../concepts/baseline-container.md).
 
 ## New keys and flags
 
+Seven new keys, plus the authority array of tables:
+
 | Key | Flag | Effect |
 |-----|------|--------|
 | `baseline_scope_id` | — | Required for baseline update and gating |
+| `project_label` | — | Accepted but currently inert |
+| `source_roots` | — | Explicit import roots for module identity |
 | `semantic_authority` | `--semantic-authority` | Report-only authority candidates |
 | `fail_on_authority_violation` | `--fail-on-authority-violation` | Exit 3 on a governed-contract violation |
+| `fail_on_unresolved_dead_code` | `--fail-on-unresolved-dead-code` | Exit 3 on unresolved external overrides |
 | `near_miss` | `--near-miss` | Advisory near-miss clone channel |
 | `[[tool.codeclone.authority]]` | — | The reviewed authority registry |
+
+Add these only after every runner is on 2.1.0a2 — 2.1.0a1 rejects all of them.
 
 ## Contract versions
 
