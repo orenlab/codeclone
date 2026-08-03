@@ -532,3 +532,33 @@ def test_export_scope_paths_and_precedents_from_patch_trail(tmp_path: Path) -> N
         memory_precedents = _export_context(overlap_context)["memory_precedents"]
         assert isinstance(memory_precedents, list)
         assert memory_precedents
+
+
+def test_trajectory_query_search_scores_visible_trajectories(
+    tmp_path: Path,
+) -> None:
+    """A real query token set searches the visible trajectories and ranks
+    matches; unrelated tokens match nothing."""
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    matched = filter_trajectories_for_query(
+        [trajectory],
+        query=trajectory.outcome,
+        match_mode="any",
+    )
+    assert [result.trajectory.id for result in matched] == [trajectory.id]
+
+    unmatched = filter_trajectories_for_query(
+        [trajectory],
+        query="zebra-unrelated-token",
+        match_mode="any",
+    )
+    assert unmatched == ()

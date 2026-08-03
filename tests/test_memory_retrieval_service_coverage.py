@@ -679,3 +679,10 @@ def test_handle_semantic_search_records_telemetry_when_observability_enabled(
 
     assert payload["mode"] == "search"
     assert captured["retrieval.fts_hits"] == 0
+
+
+def test_parse_filters_rejects_invalid_status_and_confidence_values() -> None:
+    with pytest.raises(MemoryContractError):
+        retrieval_service._parse_filters({"statuses": ["bogus-status"]})
+    with pytest.raises(MemoryContractError):
+        retrieval_service._parse_filters({"confidences": ["bogus-confidence"]})

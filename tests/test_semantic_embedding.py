@@ -924,3 +924,54 @@ def test_fastembed_estimate_token_counts_without_tokenize(
     provider._get_model()
     counts = provider.estimate_token_counts(["hello"])
     assert counts == (4,)
+
+
+def test_restore_tokenizer_truncation_requires_the_hook() -> None:
+    from codeclone.memory.embedding.fastembed_provider import (
+        _restore_tokenizer_truncation,
+    )
+
+    calls: list[dict[str, object]] = []
+
+    class _Tokenizer:
+        def enable_truncation(self, *, max_length: int) -> None:
+            calls.append({"max_length": max_length})
+
+    _restore_tokenizer_truncation(_Tokenizer(), max_length=128)
+    assert calls == [{"max_length": 128}]
+
+    # An object without the hook is left untouched instead of crashing.
+    _restore_tokenizer_truncation(object(), max_length=128)
+    assert len(calls) == 1
+
+
+def test_fastembed_max_sequence_tokens_prefers_tokenizer_truncation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The live tokenizer's truncation limit wins over the model-name default,
+    and every partially-shaped tokenizer falls back instead of crashing."""
+
+    from typing import cast
+
+    from codeclone.memory.embedding.fastembed_provider import (
+        known_model_max_tokens,
+    )
+
+    _install_fake_fastembed(monkeypatch)
+    config = SemanticConfig(embedding_provider="fastembed")
+    provider = cast(Any, resolve_embedding_provider(config))
+    default_tokens = known_model_max_tokens(provider.model_name)
+
+    embed_query(provider, "load the model")
+    inner = provider._inner_text_model()
+
+    for tokenizer in (
+        None,
+        SimpleNamespace(truncation=None),
+        SimpleNamespace(truncation=SimpleNamespace(max_length=0)),
+    ):
+        inner.tokenizer = tokenizer
+        assert provider.max_sequence_tokens() == default_tokens
+
+    inner.tokenizer = SimpleNamespace(truncation=SimpleNamespace(max_length=256))
+    assert provider.max_sequence_tokens() == 256

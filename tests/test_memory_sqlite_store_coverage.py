@@ -418,3 +418,74 @@ def test_open_sqlite_db_rejects_invalid_synchronous(tmp_path: Path) -> None:
             ensure_schema=_schema,
             synchronous="invalid",
         )
+
+
+def test_literal_from_row_rejects_non_string_values() -> None:
+    from codeclone.memory.sqlite_store import _literal_from_row
+
+    with pytest.raises(ValueError, match="Invalid Engineering Memory status: 7"):
+        _literal_from_row(
+            {"status": 7},  # type: ignore[arg-type]
+            "status",
+            field="status",
+            allowed={"active": "active"},
+        )
+
+
+def test_patch_trail_lookup_on_empty_store(tmp_path: Path) -> None:
+    project = resolve_project_identity(tmp_path)
+    store = SqliteEngineeringMemoryStore(tmp_path / ".codeclone" / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        payloads, malformed = store.find_trajectory_patch_trails_for_lookup(
+            project_id=project.id,
+            patch_trail_digest="d" * 64,
+        )
+        assert payloads == []
+        assert malformed == 0
+    finally:
+        store.close()
+
+
+def test_upsert_helpers_respect_commit_and_fts_flags(tmp_path: Path) -> None:
+    project = resolve_project_identity(tmp_path)
+    store = SqliteEngineeringMemoryStore(tmp_path / ".codeclone" / "memory.sqlite3")
+    try:
+        store.initialize(project)
+        human = replace(
+            _sample_record(
+                project_id=project.id,
+                statement="human approved fact",
+                updated_at_utc=current_report_timestamp_utc(),
+                discriminator="human-commit-flag",
+            ),
+            origin="human",
+            status="active",
+            approved_by="maintainer",
+        )
+        store.upsert_record(human)
+        incoming = replace(
+            human,
+            statement="agent tried again",
+            updated_at_utc=current_report_timestamp_utc(),
+            origin="system",
+        )
+        # The human-origin skip honours commit=False without touching data.
+        result = store.upsert_record(incoming, commit=False)
+        assert result.action == "skipped"
+        loaded = store.find_record(human.id)
+        assert loaded is not None
+        assert loaded.statement == "human approved fact"
+
+        # The commit helper leaves the FTS index alone when told to.
+        outcome = store._commit_upsert_result(
+            action="skipped",
+            record_id=human.id,
+            sync_fts=False,
+            revision_written=False,
+            commit=False,
+        )
+        assert outcome.action == "skipped"
+        assert outcome.record_id == human.id
+    finally:
+        store.close()

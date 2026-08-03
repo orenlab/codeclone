@@ -524,3 +524,65 @@ def test_embed_and_upsert_records_observability_counters(
     assert counters["pending"] == 1
     assert counters["embedded"] == 1
     assert counters["batches"] == 1
+
+
+def test_apply_rebuild_counters_rejects_unknown_source_lane(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from typing import Any, cast
+
+    from codeclone.memory.exceptions import MemoryContractError
+    from codeclone.memory.semantic import rebuild_workflow as wf
+
+    class _Span:
+        def set_counter(self, key: str, value: int) -> None:
+            del key, value
+
+    monkeypatch.setattr(wf, "is_observability_enabled", lambda: True)
+    report = RebuildReport(
+        indexed=1,
+        embedded=1,
+        deleted=0,
+        skipped_unchanged=0,
+        by_source={"telepathy": 1},
+    )
+    with pytest.raises(
+        MemoryContractError, match="unknown semantic source lane 'telepathy'"
+    ):
+        wf._apply_rebuild_counters(
+            cast(Any, _Span()),
+            report,
+            dimensions=384,
+            batch_size=8,
+            max_padded_tokens=4096,
+        )
+
+
+def test_projection_probe_opens_and_closes_its_own_store(tmp_path: Path) -> None:
+    """When no store is passed, the probe opens the memory db itself and
+    closes it afterwards."""
+
+    from codeclone.memory.project import resolve_project_identity
+    from codeclone.memory.semantic.rebuild_workflow import (
+        execute_semantic_projection_probe,
+    )
+    from codeclone.memory.sqlite_store import SqliteEngineeringMemoryStore
+
+    config = resolve_memory_config(
+        tmp_path,
+        pyproject_config={"memory": {"semantic": {"enabled": True}}},
+    )
+    assert config.semantic.enabled is True
+    project = resolve_project_identity(tmp_path)
+    db_path = tmp_path / ".codeclone" / "memory" / "engineering_memory.sqlite3"
+    db_path.parent.mkdir(parents=True)
+    seed = SqliteEngineeringMemoryStore(db_path)
+    seed.initialize(project)
+    seed.close()
+
+    result = execute_semantic_projection_probe(
+        root_path=tmp_path,
+        config=config,
+    )
+    assert result["action"] == "probe_semantic_projections"
+    assert result.get("reason") != "disabled"

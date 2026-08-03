@@ -513,3 +513,126 @@ def test_export_context_observability_and_audit_validation_edges(
         assert recent.waterfall
     finally:
         read_conn.close()
+
+
+def _active_note(project_id: str, index: int, *, statement: str) -> MemoryRecord:
+    return MemoryRecord(
+        id=generate_memory_id(),
+        project_id=project_id,
+        identity_key=f"risk_note:precedent-cap:{index}",
+        type="risk_note",
+        status="active",
+        confidence="supported",
+        origin="system",
+        ingest_source="analysis",
+        statement=statement,
+        summary=None,
+        payload={},
+        created_at_utc=current_report_timestamp_utc(),
+        updated_at_utc=current_report_timestamp_utc(),
+        last_verified_at_utc=current_report_timestamp_utc(),
+        expires_at_utc=None,
+        created_by="test",
+        verified_by=None,
+        approved_by=None,
+        approved_at_utc=None,
+        report_digest=None,
+        code_fingerprint=None,
+        stale_reason=None,
+        created_on_branch=None,
+        created_at_commit=None,
+        verified_on_branch=None,
+        verified_at_commit=None,
+    )
+
+
+def test_memory_precedents_cap_and_orphan_subjects(tmp_path: Path) -> None:
+    """Path-overlap precedents stop at the cap, and a subject row whose
+    record vanished is skipped instead of crashing the export."""
+
+    from codeclone.memory.models import MemorySubject
+    from codeclone.memory.trajectory import export_context
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+        for index in range(7):
+            note = _active_note(
+                project.id, index, statement=f"linked precedent {index}"
+            )
+            store.write_record(note)
+            store.write_evidence(
+                MemoryEvidence(
+                    id=generate_memory_id(prefix="evid"),
+                    memory_id=note.id,
+                    evidence_kind="trajectory",
+                    ref=trajectory.id,
+                    locator=None,
+                    quote=None,
+                    digest=trajectory.trajectory_digest,
+                    created_at_utc=current_report_timestamp_utc(),
+                )
+            )
+        path_notes = []
+        for index in range(3):
+            note = _active_note(
+                project.id, 100 + index, statement=f"path precedent {index}"
+            )
+            store.write_record(note)
+            store.write_subject(
+                MemorySubject(
+                    id=generate_memory_id(prefix="subj"),
+                    memory_id=note.id,
+                    subject_kind="path",
+                    subject_key="pkg/service.py",
+                    relation="about",
+                )
+            )
+            path_notes.append(note)
+        # Orphan one subject: its record disappears but the subject stays.
+        store._conn.execute(
+            "DELETE FROM memory_records WHERE id=?", (path_notes[0].id,)
+        )
+        store.commit()
+
+        precedents = export_context._memory_precedents(
+            store._conn,
+            project_id=project.id,
+            trajectory=trajectory,
+            scope_paths=("pkg/service.py",),
+        )
+        assert len(precedents) == 8
+        statements = {str(item.get("statement")) for item in precedents}
+        assert "path precedent 0" not in statements
+
+
+def test_trajectory_citations_skip_unparseable_step_facts(tmp_path: Path) -> None:
+    from codeclone.memory.trajectory.export_context import (
+        extract_trajectory_citations,
+    )
+
+    with memory_store(tmp_path) as (root, project, store, _db_path):
+        audit_db = tmp_path / "audit.sqlite3"
+        seed_trajectory_audit_workflow(root=root, audit_db=audit_db)
+        trajectory = store.rebuild_trajectories_from_audit(
+            project=project,
+            root_path=root,
+            audit_db_path=audit_db,
+        ).trajectories[0]
+
+    intact = extract_trajectory_citations(trajectory)
+    corrupted = replace(
+        trajectory,
+        steps=(
+            replace(trajectory.steps[0], event_core_json="{not-json"),
+            *trajectory.steps[1:],
+        ),
+    )
+    degraded = extract_trajectory_citations(corrupted)
+    assert len(degraded) <= len(intact)

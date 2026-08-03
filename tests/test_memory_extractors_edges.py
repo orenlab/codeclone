@@ -446,3 +446,115 @@ def test_extract_contradictions_records_tool_count_mismatch(tmp_path: Path) -> N
         ),
     )
     assert matching.records == []
+
+
+def test_extract_contract_notes_skips_valueless_and_dynamic_constants(
+    tmp_path: Path,
+) -> None:
+    from codeclone.memory.ingest.extractors import extract_contract_notes
+
+    project = _project(tmp_path)
+    git = GitProvenance(remote=None, branch="main", head="deadbeef", available=True)
+    contracts = tmp_path / "contracts.py"
+    contracts.write_text(
+        "SCHEMA_VERSION: str\n"
+        "DYNAMIC_VERSION: str = compute()\n"
+        'REAL_VERSION: str = "3"\n',
+        encoding="utf-8",
+    )
+
+    batch = extract_contract_notes(
+        project=project,
+        root_path=tmp_path,
+        git=git,
+        report_digest="r1",
+        analysis_fingerprint="f1",
+        ingest=IngestConfig(contract_constants_paths=("contracts.py",)),
+    )
+    names = sorted(
+        subject.subject_key
+        for subject in batch.subjects
+        if subject.subject_kind == "contract"
+    )
+    assert names == ["REAL_VERSION"]
+
+
+def test_extract_public_surfaces_tolerates_corrupt_tool_snapshot(
+    tmp_path: Path,
+) -> None:
+    project = _project(tmp_path)
+    git = GitProvenance(remote=None, branch="main", head="deadbeef", available=True)
+    snapshot = tmp_path / "snapshot.json"
+    snapshot.write_text("{not json", encoding="utf-8")
+
+    batch = extract_public_surfaces(
+        project=project,
+        root_path=tmp_path,
+        report_document={},
+        git=git,
+        report_digest="r1",
+        analysis_fingerprint="f1",
+        ingest=IngestConfig(mcp_tool_schema_snapshot_path="snapshot.json"),
+    )
+    kinds = {
+        record.payload.get("surface_kind")
+        for record in batch.records
+        if record.payload is not None
+    }
+    assert "mcp_tool" not in kinds
+
+
+def test_extract_git_hotspots_without_head_adds_no_commit_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _project(tmp_path)
+    git = GitProvenance(remote=None, branch="main", head=None, available=True)
+
+    def _run(*_args: object, **_kwargs: object) -> CompletedProcess[str]:
+        return CompletedProcess(
+            args=["git"],
+            returncode=0,
+            stdout="pkg/a.py\n" * 12,
+            stderr="",
+        )
+
+    monkeypatch.setattr(
+        "codeclone.memory.ingest.extractors.subprocess.run",
+        _run,
+    )
+    batch = extract_git_hotspots(
+        project=project,
+        root_path=tmp_path,
+        git=git,
+        report_digest="r1",
+        analysis_fingerprint="f1",
+    )
+    assert batch.records
+    assert batch.evidence == []
+
+
+def test_memory_project_fingerprints_and_subject_kinds(tmp_path: Path) -> None:
+    from codeclone.memory.models import MemorySubject
+    from codeclone.memory.project import (
+        analysis_fingerprint_from_report,
+        subject_fingerprint_for_subject,
+        subject_path_fingerprint,
+    )
+
+    assert (
+        analysis_fingerprint_from_report({"integrity": {"digest": {"value": "a" * 64}}})
+        == "a" * 16
+    )
+
+    # A path that cannot normalize under the repo yields no fingerprint.
+    assert subject_path_fingerprint(tmp_path, "../outside.py") is None
+
+    symbol_subject = MemorySubject(
+        id="subj-1",
+        memory_id="mem-1",
+        subject_kind="symbol",
+        subject_key="pkg.mod:fn",
+        relation="about",
+    )
+    assert subject_fingerprint_for_subject(tmp_path, symbol_subject) is None
