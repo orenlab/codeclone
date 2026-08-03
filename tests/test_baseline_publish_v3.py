@@ -233,6 +233,66 @@ def test_fresh_publication_has_no_fabricated_transition(tmp_path: Path) -> None:
     assert target.read_bytes() == canonical_container_bytes(published) + b"\n"
 
 
+def test_publish_carries_project_label_without_moving_the_root_digest(
+    tmp_path: Path,
+) -> None:
+    """The label is descriptive meta: it reaches the file but not the digest."""
+
+    labelled_path = tmp_path / "labelled.json"
+    plain_path = tmp_path / "plain.json"
+    publish_baseline(
+        target=labelled_path,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+        project_label="Acme Payments",
+    )
+    publish_baseline(
+        target=plain_path,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+    )
+
+    labelled = _read_published(labelled_path).container
+    plain = _read_published(plain_path).container
+
+    assert labelled.meta.project_label == "Acme Payments"
+    assert plain.meta.project_label is None
+    assert labelled.meta.root_digest.value == plain.meta.root_digest.value
+
+
+def test_relabelled_republication_is_not_a_noop(tmp_path: Path) -> None:
+    """A rename changes no digest, so the noop check must compare it directly."""
+
+    target = tmp_path / "baseline.json"
+    publish_baseline(
+        target=target,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+        project_label="Before",
+    )
+    renamed = publish_baseline(
+        target=target,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+        project_label="After",
+    )
+    unchanged = publish_baseline(
+        target=target,
+        bundle=_bundle(),
+        scope_id=_SCOPE_ID,
+        max_size_bytes=5_000_000,
+        project_label="After",
+    )
+
+    assert renamed.outcome == "published"
+    assert unchanged.outcome == "noop"
+    assert _read_published(target).container.meta.project_label == "After"
+
+
 def test_legacy_transition_preserves_exact_backup_and_clone_ids(tmp_path: Path) -> None:
     target = tmp_path / "baseline.json"
     raw = _legacy_bytes()

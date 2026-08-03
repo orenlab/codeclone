@@ -149,6 +149,7 @@ def _baseline_state_args(**overrides: object) -> SimpleNamespace:
         "max_baseline_size_mb": 10,
         "update_baseline": False,
         "baseline_scope_id": "018f4b8e-5a5f-7d35-9c21-4af5d18df420",
+        "project_label": None,
         "fail_on_new": False,
         "skip_metrics": False,
         "fail_on_new_metrics": False,
@@ -242,6 +243,40 @@ def test_missing_scope_id_error_keeps_config_table_name(
     assert "CONTRACT ERROR:" in printed
     assert "[error]" not in printed
     assert "[tool.codeclone]" in printed
+
+
+def test_baseline_update_forwards_configured_project_label(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolved config label must reach the publisher, not stop at the CLI."""
+
+    forwarded: dict[str, object] = {}
+
+    def _capture(**kwargs: object) -> None:
+        forwarded.update(kwargs)
+
+    monkeypatch.setattr(cli_baselines_mod, "publish_baseline", _capture)
+    monkeypatch.setattr(baseline_mod.Baseline, "load", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        baseline_mod.Baseline,
+        "verify_compatibility",
+        lambda *_a, **_k: None,
+    )
+
+    cli_baselines_mod.resolve_clone_baseline_state(
+        args=_baseline_state_args(
+            update_baseline=True,
+            project_label="Acme Payments",
+        ),
+        baseline_path=tmp_path / "baseline.json",
+        baseline_exists=False,
+        observation_bundle=TEST_OBSERVATION_BUNDLE,
+        console=_RecordingPrinter(),
+        required_lanes=frozenset(),
+    )
+
+    assert forwarded["project_label"] == "Acme Payments"
 
 
 @pytest.mark.parametrize("fail_on_new", [False, True])

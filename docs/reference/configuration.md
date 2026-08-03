@@ -49,7 +49,7 @@ failing your build until you opt in.
 | `api_surface` | bool | `false` | Compute API surface metrics |
 | `golden_fixture_paths` | list | `[]` | Repo-relative `tests/` or `tests/fixtures/` paths whose clone groups are suppressed with a visible count |
 | `baseline_scope_id` | str | unset | Stable canonical UUID naming the baseline scope. Required for baseline update and baseline-relative gating |
-| `project_label` | str | unset | Accepted and validated, but **inert** — see below |
+| `project_label` | str | unset | Operator-facing project name recorded in the published baseline metadata — see below |
 | `source_roots` | list | unset | Explicit import roots for module identity |
 | `near_miss` | bool | `false` | Produce the advisory near-miss clone channel |
 | `semantic_authority` | bool | `false` | Collect report-only semantic authority candidates and provenance facts |
@@ -59,12 +59,34 @@ failing your build until you opt in.
 Sixty keys are accepted under `[tool.codeclone]`; the table above covers the
 ones most projects set. An unknown key is a contract error, not a warning.
 
-!!! warning "`project_label` is currently inert"
+!!! note "`project_label` is descriptive metadata"
 
-    The key is parsed and validated, but the baseline publisher writes
-    `project_label = None` unconditionally, so a value you set never reaches the
-    published container's metadata. Setting it is harmless and changes nothing.
-    This is a known gap, not intended behavior.
+    The publisher records the configured value in the container's
+    `meta.project_label`:
+
+    ```json
+    "meta": {
+      "container_version": "3.0",
+      "created_at": "2026-08-03T12:06:42Z",
+      "generator": {
+        "name": "codeclone",
+        "version": "2.1.0a2"
+      },
+      "project_label": "Acme Payments",
+      "python_tag": "cp314",
+      "root_digest": {
+        "algorithm": "sha256",
+        "domain": "codeclone.baseline.root.v1",
+        "value": "bb382f33933c820059338ac2ec1c627f95bc7893f0fe6a5c4f0a9577f44580d2"
+      }
+    }
+    ```
+
+    The label stays out of the root digest, exactly like `created_at`, so
+    setting or changing it never invalidates an existing baseline and never
+    affects gating. `baseline_scope_id`, not the label, is what binds a
+    baseline to its project. Renaming still republishes the container, because
+    the label is compared separately from the digest.
 
 ### Semantic authority registry
 

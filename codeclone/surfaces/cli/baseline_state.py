@@ -138,6 +138,7 @@ class _BaselineArgs(Protocol):
     max_baseline_size_mb: int
     update_baseline: bool
     baseline_scope_id: str | None
+    project_label: str | None
     fail_on_new: bool
     skip_metrics: bool
     fail_on_new_metrics: bool
@@ -253,6 +254,7 @@ def resolve_clone_baseline_state(
                 bundle=observation_bundle,
                 scope_id=scope_id,
                 max_size_bytes=args.max_baseline_size_mb * 1024 * 1024,
+                project_label=args.project_label,
             )
             new_baseline = Baseline(baseline_path)
             new_baseline.load(max_size_bytes=args.max_baseline_size_mb * 1024 * 1024)

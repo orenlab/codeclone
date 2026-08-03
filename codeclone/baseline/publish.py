@@ -233,6 +233,7 @@ def publish_baseline(
     bundle: ObservationBundle,
     scope_id: UUID,
     max_size_bytes: int,
+    project_label: str | None = None,
 ) -> BaselinePublicationReceipt:
     """Build and CAS-publish one complete container under one observer span."""
 
@@ -250,7 +251,12 @@ def publish_baseline(
                     "scope_mismatch",
                     "Existing baseline_scope_id does not match configured scope.",
                 )
-            container = build_container(bundle, scope_id, transition=transition)
+            container = build_container(
+                bundle,
+                scope_id,
+                transition=transition,
+                project_label=project_label,
+            )
             # Published JSON includes the repository-canonical final newline.
             payload = canonical_container_bytes(container) + b"\n"
             if len(payload) > max_size_bytes:
@@ -258,8 +264,11 @@ def publish_baseline(
                     "oversize",
                     "Generated baseline container exceeds configured limit.",
                 )
+            # The label is outside the root digest, so it has to be compared
+            # separately — otherwise a renamed project would never be republished.
             if current is not None and (
                 current.meta.root_digest == container.meta.root_digest
+                and current.meta.project_label == container.meta.project_label
             ):
                 publish_span.set_counter("baseline_publish_noop", 1)
                 return BaselinePublicationReceipt(
