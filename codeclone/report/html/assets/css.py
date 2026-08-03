@@ -96,6 +96,17 @@ _TOKENS_DARK = """\
   --badge-pad:2px var(--sp-2);
   --badge-radius:var(--radius-sm);
 
+  /* syntax — only real code and configuration is highlighted, and its hues
+     stay clear of the semantic palette. Red, amber, green and blue already
+     mean risk, warning, ok and info in this report; a string literal is none
+     of those. Every hue below sits at least 35 degrees from all four. */
+  --syn-keyword:oklch(74% 0.15 320);
+  --syn-string:oklch(76% 0.13 120);
+  --syn-literal:oklch(78% 0.11 200);
+  --syn-name:var(--text-primary);
+  --syn-punct:var(--text-muted);
+  --syn-comment:var(--text-muted);
+
   /* table design code — the header separates by typography, never by a band,
      and rows are separated exactly one way. --table-rule is the single
      row-separation decision: change it here, not at nineteen call sites. */
@@ -144,6 +155,8 @@ _TOKENS_LIGHT = """\
     --warning:oklch(51.5% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
     --error:oklch(50.5% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
     --danger:oklch(50.5% 0.22 20);--info:oklch(48.5% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
+    --syn-keyword:oklch(46% 0.19 320);--syn-string:oklch(43% 0.15 120);
+    --syn-literal:oklch(44% 0.13 200);
     --shadow-sm:0 1px 2px rgba(17,20,38,.05);--shadow-md:0 4px 14px -3px rgba(17,20,38,.08);
     --shadow-lg:0 12px 30px -8px rgba(17,20,38,.12);--shadow-xl:0 22px 50px -14px rgba(17,20,38,.16);
     color-scheme:light;
@@ -160,6 +173,8 @@ _TOKENS_LIGHT = """\
   --warning:oklch(51.5% 0.15 65);--warning-muted:color-mix(in oklch,oklch(60% 0.15 65) 12%,transparent);
   --error:oklch(50.5% 0.22 20);--error-muted:color-mix(in oklch,oklch(55% 0.22 20) 12%,transparent);
   --danger:oklch(50.5% 0.22 20);--info:oklch(48.5% 0.18 238);--info-muted:color-mix(in oklch,oklch(52% 0.18 238) 12%,transparent);
+  --syn-keyword:oklch(46% 0.19 320);--syn-string:oklch(43% 0.15 120);
+  --syn-literal:oklch(44% 0.13 200);
   --shadow-sm:0 1px 2px rgba(17,20,38,.05);--shadow-md:0 4px 14px -3px rgba(17,20,38,.08);
   --shadow-lg:0 12px 30px -8px rgba(17,20,38,.12);--shadow-xl:0 22px 50px -14px rgba(17,20,38,.16);
   color-scheme:light;
@@ -1703,6 +1718,37 @@ _FOOTER = """\
 .report-footer-schemas{margin-top:var(--sp-1);font-size:var(--fs-xs);letter-spacing:.01em;
   font-variant-numeric:tabular-nums;opacity:.85}
 """
+
+# ---------------------------------------------------------------------------
+# Syntax token map
+# ---------------------------------------------------------------------------
+
+#: Pygments emits token classes; this maps them onto the report's own token
+#: layer, so highlighting is one design decision expressed in two themes
+#: rather than two borrowed palettes. It is emitted separately from
+#: :func:`build_css` because it has to out-specify the light-mode span reset
+#: that guards the leftover Pygments styles: a highlighted span must survive
+#: that reset by design, not by luck of source order.
+_SYNTAX = """\
+.codebox .k,.codebox .kn,.codebox .kd,.codebox .kr,.codebox .kt{color:var(--syn-keyword)}
+.codebox .s,.codebox .s1,.codebox .s2,.codebox .sb,.codebox .sd,
+.codebox .se,.codebox .si,.codebox .sr{color:var(--syn-string)}
+.codebox .m,.codebox .mi,.codebox .mf,.codebox .mh,.codebox .kc,
+.codebox .nf,.codebox .nc{color:var(--syn-literal)}
+.codebox .c,.codebox .c1,.codebox .cm,.codebox .cs,
+.codebox .cp{color:var(--syn-comment);font-style:italic}
+.codebox .o,.codebox .ow,.codebox .p{color:var(--syn-punct)}
+.codebox .n,.codebox .nn,.codebox .na,.codebox .nv,.codebox .nb,
+.codebox .nx{color:var(--syn-name)}
+.codebox .w{color:inherit}
+"""
+
+
+def build_syntax_css() -> str:
+    """Return the Pygments-token-to-design-token map, unscoped."""
+
+    return _SYNTAX
+
 
 # ---------------------------------------------------------------------------
 # Public API

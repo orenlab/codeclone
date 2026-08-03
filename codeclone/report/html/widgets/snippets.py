@@ -110,15 +110,28 @@ def _load_pygments_api() -> tuple[ModuleType, ModuleType, ModuleType] | None:
     return _PYGMENTS_API
 
 
-def _try_pygments(code: str) -> str | None:
+#: Languages the report highlights. Deliberately closed: highlighting is for
+#: real code and configuration. A qualname or a path is an identifier, not a
+#: program, and colouring its parts would tell a reader they mean something.
+_LEXERS = {"python": "PythonLexer", "toml": "TOMLLexer"}
+
+
+def _try_pygments(code: str, *, language: str = "python") -> str | None:
+    """Return *code* as highlight spans, or ``None`` if it cannot be done."""
     pygments_api = _load_pygments_api()
     if pygments_api is None:
         return None
     pygments, formatters, lexers = pygments_api
 
+    lexer_name = _LEXERS.get(language)
+    if lexer_name is None:
+        return None
+    lexer_cls = getattr(lexers, lexer_name, None)
+    if lexer_cls is None:
+        return None
+
     highlight = pygments.highlight
     formatter_cls = formatters.HtmlFormatter
-    lexer_cls = lexers.PythonLexer
     result = highlight(code, lexer_cls(), formatter_cls(nowrap=True))
     return result if isinstance(result, str) else None
 

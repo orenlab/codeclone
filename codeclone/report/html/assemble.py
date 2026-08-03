@@ -51,7 +51,7 @@ from ..messages.chrome import (
     THEME_TOGGLE_LABEL,
 )
 from ._context import _meta_pick, build_context
-from .assets.css import build_css
+from .assets.css import build_css, build_syntax_css
 from .assets.js import build_js
 from .primitives.escape import _escape_html
 from .sections._authority import render_authority_panel
@@ -534,6 +534,21 @@ def build_html_report(
             css_parts.append(
                 f"@media (prefers-color-scheme:light){{{auto_reset}\n{auto_rules}}}"
             )
+
+    # The report's own syntax map goes last, and in light mode it goes scoped.
+    # The reset above is `<theme> .codebox span`, which out-specifies a bare
+    # `.codebox .k`: without the same scoping every highlighted token would be
+    # reset to body text the moment a reader switched to light. Scoping the map
+    # the same way puts three classes against the reset's two, so a highlighted
+    # span survives by specificity rather than by source order.
+    syntax_rules = build_syntax_css()
+    css_parts.append(syntax_rules)
+    css_parts.append(_scope(syntax_rules, '[data-theme="light"]'))
+    css_parts.append(
+        "@media (prefers-color-scheme:light){"
+        f"{_scope(syntax_rules, ':root:not([data-theme])')}}}"
+    )
+
     with span(name=SPAN_HTML_STYLES) as styles_span:
         css_html = "\n".join(css_parts)
         # -- JS --

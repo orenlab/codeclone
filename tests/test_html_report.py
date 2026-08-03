@@ -8,6 +8,7 @@ import importlib
 import json
 import re
 from collections.abc import Callable, Mapping
+from html import unescape
 from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
@@ -5368,6 +5369,19 @@ def _all_level_candidates() -> list[dict[str, object]]:
     ]
 
 
+def _promotion_text(html: str) -> str:
+    """The proposal exactly as a human copies it: markup stripped, entities back.
+
+    The block is highlighted TOML, so its lines are split across token spans.
+    Highlighting is allowed to change how the proposal looks and forbidden to
+    change what it says.
+    """
+
+    block = html[html.index('<pre class="codebox">') :]
+    block = block[: block.index("</pre>")]
+    return unescape(re.sub(r"<[^>]+>", "", block))
+
+
 def _candidate_rows_html(html: str) -> str:
     """The discovery table's rows, anchored on the panel that owns them.
 
@@ -5427,8 +5441,12 @@ def test_html_authority_candidate_offers_a_paste_ready_promotion(
         enforcement_enabled=False,
     )
 
-    assert "[[tool.codeclone.authority]]" in html
-    assert "canonical_owner = &quot;pkg.alpha:publish&quot;" in html
+    # Moved expectation: the proposal is now highlighted TOML, so the line is
+    # split across token spans. What must not change is the text a human
+    # copies, so that is what this asserts -- tags stripped, the block reads
+    # exactly as before.
+    assert "[[tool.codeclone.authority]]" in _promotion_text(html)
+    assert 'canonical_owner = "pkg.alpha:publish"' in _promotion_text(html)
     assert "contract_id" in html
     # the other producer is offered as an alternative, never auto-selected
     assert "pkg.beta:publish" in html
@@ -5520,7 +5538,8 @@ def test_html_authority_promotion_handles_lone_and_absent_producers(
         enforcement_enabled=False,
     )
 
-    assert "canonical_owner = &quot;pkg.only:one&quot;" in html
+    # Moved expectation: highlighted TOML, so this asserts the copied text.
+    assert 'canonical_owner = "pkg.only:one"' in _promotion_text(html)
     assert "other producers sharing this fact" not in html
 
 

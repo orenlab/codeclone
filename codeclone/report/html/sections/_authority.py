@@ -20,6 +20,7 @@ from ..primitives.escape import _escape_html
 from ..widgets.badges import _micro_badges, _stat_card
 from ..widgets.components import Tone, insight_block
 from ..widgets.glossary import glossary_tip
+from ..widgets.highlight import highlight_block
 from ..widgets.tables import render_rows_table
 from ..widgets.tabs import render_split_tabs
 
@@ -199,7 +200,10 @@ def _candidate_promotion_html(item: Mapping[str, object]) -> str:
     ]
     if alternatives:
         lines.append("# other producers sharing this fact: " + ", ".join(alternatives))
-    snippet = _escape_html("\n".join(lines))
+    # Highlighted as TOML at build time: this is the one real configuration
+    # block in the report, and a reader must be able to tell the placeholder
+    # contract id from the key that names it. The text copied is unchanged.
+    snippet = highlight_block("\n".join(lines), language="toml")
     # Collapsed by construction: fifty open TOML blocks cannot happen, because
     # a proposal only expands when a human asks for that one.
     return (

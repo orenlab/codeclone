@@ -1272,6 +1272,51 @@ def test_discovery_counts_every_level_including_those_below_the_cut() -> None:
     assert "divergent projection" in strip
 
 
+def test_promotion_toml_is_highlighted_at_build_time() -> None:
+    """The one real config block in the report reads as config, not as text.
+
+    The proposal is TOML a human pastes into pyproject: keys, strings and a
+    comment. It rendered as one flat escaped string, so the reader could not
+    tell the contract id placeholder from the key naming it. Highlighting is
+    static spans emitted at build time -- the report ships no highlighter.
+    """
+
+    panel = _discovery_panel_html()
+    block = panel[panel.index('<pre class="codebox">') :]
+    block = block[: block.index("</pre>")]
+
+    # tokens the TOML lexer must have found
+    assert 'class="k"' in block or 'class="nn"' in block, block[:400]
+    assert 'class="s2"' in block, "the quoted values are not strings"
+    assert 'class="c1"' in block, "the co-producer comment is not a comment"
+    # and the copied text is unchanged: no highlighter markup leaks into it
+    assert "[[tool.codeclone.authority]]" in re.sub(r"<[^>]+>", "", block)
+
+
+def test_syntax_hues_never_collide_with_the_semantic_palette() -> None:
+    """Syntax colour is not a verdict either.
+
+    Red, amber, green and blue mean risk, warning, ok and info everywhere else
+    in this report. A syntax palette that reuses those hues teaches the reader
+    that a string literal is a success and a keyword is an error.
+    """
+
+    from codeclone.report.html.assets.css import build_css
+
+    css = build_css()
+    syntax = [
+        float(h) for h in re.findall(r"--syn-[a-z]+:oklch\([^)]*?\s([\d.]+)\)", css)
+    ]
+    assert syntax, "no syntax hues are declared on the token layer"
+
+    semantic = {20.0: "error", 74.0: "warning", 162.0: "success", 238.0: "info"}
+    for hue in syntax:
+        for value, name in semantic.items():
+            gap = abs(hue - value)
+            gap = min(gap, 360 - gap)
+            assert gap >= 35, f"syntax hue {hue} sits {gap:.0f}deg from {name}"
+
+
 def test_discovery_meta_band_shares_the_width_of_its_table() -> None:
     """The 'криво' was a ragged text column floating over a full-width table."""
 
