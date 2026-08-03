@@ -414,7 +414,7 @@ def test_build_derived_review_queue_projects_findings_across_families() -> None:
         ),
     )
     queue: Any = _build_derived_review_queue(findings, None)
-    assert queue["schema_version"] == "2"
+    assert queue["schema_version"] == "3"
     assert queue["scope"] == "report_only"
     assert queue["summary"] == {
         "total": 4,
@@ -440,6 +440,54 @@ def test_build_derived_review_queue_projects_findings_across_families() -> None:
     struct_item = queue["items"][-1]
     assert struct_item["novelty"] == "new"
     assert struct_item["title"] == "Duplicated branches"
+
+
+def test_review_queue_never_claims_known_without_baseline_evidence() -> None:
+    """Absent and unavailable novelty must never be reported as known.
+
+    A finding the baseline never compared is neither new nor known; claiming
+    either is a claim the baseline cannot support.
+    """
+    from codeclone.domain.findings import (
+        CLONE_KIND_FUNCTION,
+        FAMILY_CLONE,
+        FAMILY_STRUCTURAL,
+    )
+    from codeclone.report.document.derived import _build_derived_review_queue
+
+    absent = _finding_group(
+        gid="struct:no-novelty",
+        family=FAMILY_STRUCTURAL,
+        category="duplicated_branches",
+        severity="warning",
+        priority=0.5,
+    )
+    del absent["novelty"]
+
+    findings = _findings_payload(
+        clones=(
+            _finding_group(
+                gid="clone:untrusted-lane",
+                family=FAMILY_CLONE,
+                category=CLONE_KIND_FUNCTION,
+                severity="critical",
+                priority=0.9,
+                novelty="unavailable",
+            ),
+        ),
+        structural=(absent,),
+    )
+
+    queue: Any = _build_derived_review_queue(findings, None)
+    novelty_by_id = {item["finding_id"]: item["novelty"] for item in queue["items"]}
+
+    assert novelty_by_id["clone:untrusted-lane"] == "unavailable"
+    assert novelty_by_id["struct:no-novelty"] != "known"
+    assert queue["summary"]["by_novelty"] == {
+        "new": 0,
+        "known": 0,
+        "unavailable": 2,
+    }
 
 
 def test_build_derived_review_queue_enriches_with_matching_suggestion() -> None:
