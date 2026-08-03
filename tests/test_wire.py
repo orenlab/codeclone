@@ -199,6 +199,62 @@ def test_unknown_node_and_field_fail_closed() -> None:
         emit_wire(node, _DEFAULT_CONFIG, bindings_for_tree(module))
 
 
+def test_wire_field_check_is_precomputed_per_node_type() -> None:
+    """The allowed-field set is a pure function of the node type.
+
+    The field check runs on every emitted node - 1.86M times over this
+    repository - and rebuilt ``frozenset(fields) | _EXCLUDED_FIELDS`` on each
+    call: two allocations to re-derive a per-type constant. The table asserted
+    here is that constant, computed once at import.
+
+    The entry also carries the node type's own ``_fields`` tuple by identity.
+    An instance may shadow ``_fields`` (see
+    ``test_unknown_node_and_field_fail_closed``), so the precomputed answer is
+    valid only while the instance still reads the class attribute; the identity
+    check is what keeps that refusal path alive.
+    """
+
+    for node_type, expected_fields in wire_module._WIRE_FIELDS.items():
+        live_allowed = frozenset(expected_fields) | wire_module._EXCLUDED_FIELDS
+        live_unknown = tuple(
+            field for field in node_type._fields if field not in live_allowed
+        )
+        entry = wire_module._WIRE_FIELD_CHECK[node_type]
+        fields, allowed, class_fields, unknown = entry
+        assert fields == expected_fields
+        assert allowed == live_allowed
+        assert class_fields is node_type._fields
+        assert unknown == live_unknown
+
+
+def test_wire_field_check_reuses_one_entry_per_type() -> None:
+    """Two emits of the same node type must not build two allowed-sets."""
+
+    first = wire_module._WIRE_FIELD_CHECK[ast.Call]
+    second = wire_module._WIRE_FIELD_CHECK[ast.Call]
+    assert first is second
+    assert first[1] is second[1]
+
+
+def test_wire_contract_is_read_through_one_lookup() -> None:
+    """Both emit paths admit a node through the same single-lookup helper.
+
+    The type resolution, the field tuple and the whitelist refusal used to be
+    written out at both emit sites - five identical lines that CodeClone's own
+    block-clone gate flagged the moment one of them was touched. Reading them
+    from one helper keeps the two paths from drifting, and from duplicating.
+    """
+
+    call = ast.parse("f(1)").body[0]
+    assert isinstance(call, ast.Expr)
+    node_type, fields = wire_module._wire_contract(call.value)
+    assert node_type is ast.Call
+    assert fields == wire_module._WIRE_FIELDS[ast.Call]
+
+    source = inspect.getsource(wire_module)
+    assert source.count("unsupported AST node:") == 1
+
+
 def test_every_repository_function_body_is_supported() -> None:
     for path in sorted((_REPO_ROOT / "codeclone").rglob("*.py")):
         tree = ast.parse(

@@ -54,8 +54,10 @@ from codeclone.core.metrics_payload import (
 )
 from codeclone.core.parallelism import _should_use_parallel
 from codeclone.core.pipeline import _with_export_root_reasons, compute_project_metrics
+from codeclone.metrics import overloaded_modules as overloaded_modules_mod
 from codeclone.metrics.overloaded_modules import (
     _percentile_rank,
+    _ranking_population,
     _score_quantile,
     _source_kind,
     build_overloaded_modules_payload,
@@ -931,6 +933,77 @@ def test_build_overloaded_modules_payload_flags_project_relative_candidates() ->
         "dependency_pressure",
         "hub_like_shape",
     ]
+
+
+def test_overloaded_modules_orders_each_population_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Ordering is per metric family, not per module row.
+
+    Ranking sorted its argument on every call, so a repository with N modules
+    paid N sorts of N values for each of the eight families. The count asserted
+    here must stay independent of how many rows the payload covers.
+    """
+
+    sizes: list[int] = []
+    original = overloaded_modules_mod._ranking_population
+
+    def counting(values):  # type: ignore[no-untyped-def]
+        materialized = tuple(values)
+        sizes.append(len(materialized))
+        return original(materialized)
+
+    monkeypatch.setattr(overloaded_modules_mod, "_ranking_population", counting)
+
+    scan_root = "/repo"
+    module_count = 30
+    source_stats = [
+        (f"{scan_root}/pkg/mod_{idx}.py", 40 + idx, 1, 0, 0)
+        for idx in range(module_count)
+    ]
+    units = [
+        {
+            "qualname": f"pkg.mod_{idx}:fn",
+            "filepath": f"{scan_root}/pkg/mod_{idx}.py",
+            "cyclomatic_complexity": 1 + (idx % 5),
+        }
+        for idx in range(module_count)
+    ]
+    registry = module_registry_context(
+        filepath="pkg/mod_0.py",
+        module_name="pkg.mod_0",
+        inventory_modules=tuple(f"pkg.mod_{idx}" for idx in range(module_count)),
+    )[1]
+
+    build_overloaded_modules_payload(
+        registry=registry,
+        scan_root=scan_root,
+        source_stats_by_file=source_stats,
+        units=units,
+        class_metrics=(),
+        module_deps=[],
+    )
+
+    assert len(sizes) == 8, f"expected one ordering per family, got {len(sizes)}"
+    assert set(sizes) == {module_count}
+
+
+def test_percentile_rank_matches_the_counting_definition() -> None:
+    """Bisecting a sorted population agrees with counting the raw values.
+
+    The rank is the average of the strictly-less and less-or-equal positions,
+    normalized by the population size. That definition needs no ordering, so it
+    is an independent check on the ordered fast path.
+    """
+
+    values = [float((index * 37) % 101) for index in range(200)]
+    population = _ranking_population(values)
+    total = len(values)
+    for probe in (-1.0, 0.0, 37.0, 100.0, 1000.0, *values[:20]):
+        less = sum(1 for item in values if item < probe)
+        less_equal = sum(1 for item in values if item <= probe)
+        expected = round(((less + less_equal - 1) / 2.0) / float(total - 1), 4)
+        assert _percentile_rank(probe, population) == expected
 
 
 def test_overloaded_modules_helper_edge_cases() -> None:
