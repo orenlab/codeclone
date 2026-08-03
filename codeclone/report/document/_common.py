@@ -394,6 +394,39 @@ def _collect_paths_from_metrics(metrics: Mapping[str, object]) -> set[str]:
     return paths
 
 
+def _dedupe_paths_by_contract(
+    paths: Iterable[str],
+    *,
+    scan_root: str,
+) -> list[str]:
+    """Collapse every spelling of one file onto a single entry.
+
+    Producers disagree on spelling: discovery contributes absolute paths while
+    some metric families contribute repository-relative ones, and which
+    producer spells a path which way depends on cache warmth. Deduplicating the
+    raw strings would keep one entry per *spelling*, so identity here is the
+    contract path -- the identity the registry itself publishes.
+
+    The absolute spelling wins when a producer offered one, because downstream
+    line counting opens these paths and must not depend on the working
+    directory. Iteration runs over sorted input so the surviving spelling never
+    depends on set iteration order.
+    """
+
+    chosen: dict[str, str] = {}
+    for path in sorted(paths):
+        contract, _scope, absolute = _contract_path(path, scan_root=scan_root)
+        if contract is None:
+            continue
+        candidate = absolute or path
+        current = chosen.get(contract)
+        if current is None or (
+            not _is_absolute_path(current) and _is_absolute_path(candidate)
+        ):
+            chosen[contract] = candidate
+    return [chosen[contract] for contract in sorted(chosen)]
+
+
 def _collect_report_file_list(
     *,
     inventory: Mapping[str, object] | None,
@@ -403,6 +436,7 @@ def _collect_report_file_list(
     suppressed_clone_groups: Sequence[SuppressedCloneGroup] | None = None,
     metrics: Mapping[str, object] | None,
     structural_findings: Sequence[StructuralFindingGroup] | None,
+    scan_root: str,
 ) -> list[str]:
     files: set[str] = set()
     inventory_map = _as_mapping(inventory)
@@ -429,7 +463,7 @@ def _collect_report_file_list(
                 filepath = _optional_str(occurrence.file_path)
                 if filepath is not None:
                     files.add(filepath)
-    return sorted(files)
+    return _dedupe_paths_by_contract(files, scan_root=scan_root)
 
 
 def _count_file_lines(filepaths: Sequence[str]) -> int:

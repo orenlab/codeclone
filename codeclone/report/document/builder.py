@@ -95,6 +95,7 @@ def build_report_body(
         suppressed_clone_groups=suppressed_clone_groups,
         metrics=metrics,
         structural_findings=structural_findings,
+        scan_root=scan_root,
     )
     inventory_payload = _build_inventory_payload(
         inventory=inventory,

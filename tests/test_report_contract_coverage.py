@@ -2782,6 +2782,7 @@ def test_collect_report_file_list_deterministically_merges_all_sources(
             "dead_code": {"items": [], "suppressed_items": []},
         },
         structural_findings=structural_seed,
+        scan_root="/repo",
     )
 
     assert files == [
