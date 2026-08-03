@@ -170,3 +170,48 @@ def test_every_function_is_summarized_below_clone_threshold() -> None:
         summary.function
         for summary in metrics.semantic_facts.function_contract_summaries
     ) == ("pkg.mod:tiny",)
+
+
+def test_double_star_call_keywords_are_dynamic_flow() -> None:
+    summary = _summary(
+        "def apply(kw):\n    return helper.apply(**kw)\n",
+    )
+    assert summary.unresolved_flow is True
+    assert summary.returns[0].kind == "unresolved"
+
+
+def test_assign_event_without_output_marks_flow_unresolved() -> None:
+    """A synthesized assign event with no output fact cannot resolve; the
+    summary must abstain instead of inventing lineage."""
+
+    from codeclone.models import SemanticEvent
+
+    source = "def flow(value):\n    copied = value\n    return copied\n"
+    tree = ast.parse(source)
+    collector = QualnameCollector()
+    collector.visit(tree)
+    local_name, node = collector.units[0]
+    function = f"pkg.mod:{local_name}"
+    graph, _fingerprint, _complexity = _cfg_fingerprint_and_complexity(
+        node,
+        NormalizationConfig(),
+        function,
+        bindings_for_function_node(node),
+    )
+    broken = SemanticEvent(
+        event_id=f"{function}#000001",
+        kind="assign",
+        subject="copied",
+        inputs=(),
+        output=None,
+        guards=(),
+        location=("pkg/mod.py", 2),
+        resolution="resolved",
+    )
+    summary = summarize_function_contract(
+        function=function,
+        node=node,
+        graph=graph,
+        events=(broken,),
+    )
+    assert summary.unresolved_flow is True

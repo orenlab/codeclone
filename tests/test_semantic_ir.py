@@ -440,3 +440,32 @@ def test_baseline_publication_is_byte_reproducible_across_hash_seeds(
         digests.add(hashlib.sha256(baseline_path.read_bytes()).hexdigest())
 
     assert len(digests) == 1, f"baseline artifact varied across hash seeds: {digests}"
+
+
+def test_scc_walks_skip_nodes_reached_twice() -> None:
+    """A node reachable along two edges is pushed twice and must be skipped
+    on the second pop — in both the finish-order and the component walk."""
+
+    from codeclone.semantics.ir import _strongly_connected_components
+
+    graph = {
+        "a": frozenset({"b", "c"}),
+        "b": frozenset({"c"}),
+        "c": frozenset(),
+    }
+    components = _strongly_connected_components(graph)
+    assert sorted(tuple(sorted(item)) for item in components) == [
+        ("a",),
+        ("b",),
+        ("c",),
+    ]
+
+    # One cycle with two internal return paths: the reverse walk reaches a
+    # member along both and must keep the component a single set.
+    cycle = {
+        "c": frozenset({"z"}),
+        "y": frozenset({"c"}),
+        "z": frozenset({"y", "c"}),
+    }
+    (component,) = _strongly_connected_components(cycle)
+    assert sorted(component) == ["c", "y", "z"]

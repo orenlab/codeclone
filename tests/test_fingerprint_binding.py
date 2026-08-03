@@ -304,3 +304,128 @@ def test_cross_version_corpus_is_byte_identical() -> None:
         "cross-interpreter wire projection moved; a wire that depends on the "
         "running interpreter cannot back a shared baseline"
     )
+
+
+def test_binding_context_enter_is_total_for_unregistered_nodes() -> None:
+    """`enter` on a node the collector never saw answers the current context
+    itself instead of crashing; a registered node gets its own scope."""
+
+    import codeclone.analysis.binding as binding_mod
+
+    tree = ast.parse("def f():\n    return 1\n")
+    bindings = bindings_for_tree(tree)
+    foreign = ast.parse("def g():\n    return 2\n").body[0]
+    assert bindings.enter(foreign) is bindings
+    assert bindings.enter(tree.body[0]) is not bindings
+
+    # A nodeless draft resolves without registering any scope.
+    draft = binding_mod._ScopeDraft(kind="module", node=None, parent=None)
+    scopes: dict[ast.AST, object] = {}
+    binding_mod._resolve_draft(draft, parent=None, module=None, scopes=scopes)  # type: ignore[arg-type]
+    assert scopes == {}
+
+
+def test_synthesized_walrus_with_non_name_target_still_collects_value() -> None:
+    """The parser only produces Name walrus targets; a synthesized non-Name
+    target binds nothing while the value subtree is still collected."""
+
+    tree = ast.parse("def f(box):\n    return box\n")
+    fn = tree.body[0]
+    assert isinstance(fn, ast.FunctionDef)
+    from typing import cast
+
+    walrus = ast.NamedExpr(
+        target=cast(
+            "ast.Name",
+            ast.Attribute(
+                value=ast.Name(id="box", ctx=ast.Load()),
+                attr="slot",
+                ctx=ast.Store(),
+            ),
+        ),
+        value=ast.NamedExpr(
+            target=ast.Name(id="inner_bound", ctx=ast.Store()),
+            value=ast.Constant(value=1),
+        ),
+    )
+    fn.body.insert(0, ast.Expr(value=walrus))
+    ast.fix_missing_locations(tree)
+
+    inner = bindings_for_tree(tree).enter(fn)
+    assert inner.lookup("inner_bound") is not None
+    assert inner.lookup("slot") is None
+
+
+def test_synthesized_comprehension_without_generators_still_scopes() -> None:
+    tree = ast.parse("def f():\n    return 1\n")
+    fn = tree.body[0]
+    assert isinstance(fn, ast.FunctionDef)
+    genexp = ast.GeneratorExp(
+        elt=ast.Name(id="item", ctx=ast.Load()),
+        generators=[],
+    )
+    fn.body.insert(0, ast.Expr(value=genexp))
+    ast.fix_missing_locations(tree)
+
+    bindings = bindings_for_tree(tree)
+    assert bindings.enter(genexp) is not bindings
+
+
+def test_lambda_in_class_body_is_not_a_receiver_method() -> None:
+    """Receiver classification is for def/async-def only: a lambda's first
+    parameter named `self` stays a plain local."""
+
+    tree = ast.parse(
+        "class C:\n"
+        "    handler = lambda self: self\n"
+        "    def method(self):\n"
+        "        return self\n"
+    )
+    klass = tree.body[0]
+    assert isinstance(klass, ast.ClassDef)
+    lam = klass.body[0].value  # type: ignore[attr-defined]
+    method = klass.body[1]
+    context = bindings_for_tree(tree)
+
+    lambda_self = context.enter(lam).lookup("self")
+    method_self = context.enter(method).lookup("self")
+    assert lambda_self is not None and lambda_self.role == "local"
+    assert method_self is not None and method_self.role == "self"
+
+
+def test_shadowed_classmethod_decorator_is_not_the_builtin() -> None:
+    """A class-level binding named `classmethod` means the decorator is not
+    proven to be the builtin, so the receiver stays an instance receiver."""
+
+    shadowed_src = (
+        "class C:\n"
+        "    classmethod = staticmethod\n"
+        "    @classmethod\n"
+        "    def build(cls):\n"
+        "        return cls\n"
+    )
+    tree = ast.parse(shadowed_src)
+    method = tree.body[0].body[1]  # type: ignore[attr-defined]
+    shadowed = bindings_for_tree(tree).enter(method).lookup("cls")
+    assert shadowed is not None and shadowed.role == "self"
+
+    plain_src = shadowed_src.replace("    classmethod = staticmethod\n", "")
+    tree2 = ast.parse(plain_src)
+    method2 = tree2.body[0].body[0]  # type: ignore[attr-defined]
+    proven = bindings_for_tree(tree2).enter(method2).lookup("cls")
+    assert proven is not None and proven.role == "cls"
+
+
+def test_receiver_classification_refuses_non_def_nodes() -> None:
+    """Even a draft labelled `function` classifies no receiver unless its
+    node is a real def/async-def."""
+
+    import codeclone.analysis.binding as binding_mod
+
+    class_tree = ast.parse("class C:\n    pass\n")
+    class_scope = bindings_for_tree(class_tree).enter(class_tree.body[0])._scope
+    lambda_node = ast.parse("lambda self: self", mode="eval").body
+    draft = binding_mod._ScopeDraft(kind="function", node=lambda_node, parent=None)
+    binding_mod._classify_receiver(draft, class_scope=class_scope)
+    assert draft.bindings.self_name is None
+    assert draft.bindings.cls_name is None

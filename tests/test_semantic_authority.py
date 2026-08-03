@@ -516,3 +516,28 @@ def test_frozen_incident_corpus_flags_all_classes_and_fail_closed_states() -> No
     )
     assert statuses["module_identity_producers:mixed_module_name"] == "mixed"
     assert statuses["module_identity_producers:dynamic_module_name"] == ("unavailable")
+
+
+def test_authority_bucket_and_reachability_helpers() -> None:
+    from codeclone.semantics.authority import (
+        _add_bucket,
+        _candidate_for_sink,
+        _reaches_other,
+    )
+
+    buckets: dict[str, set[str]] = {}
+    _add_bucket(buckets, key="", function="pkg.mod:f")
+    assert buckets == {}
+    _add_bucket(buckets, key="fact", function="pkg.mod:f")
+    assert buckets == {"fact": {"pkg.mod:f"}}
+
+    diamond = {
+        "a": ("b", "c"),
+        "b": ("e",),
+        "c": ("e",),
+    }
+    # e is visited twice; the second visit must be skipped, not looped.
+    assert _reaches_other("a", members=frozenset({"missing"}), graph=diamond) is False
+    assert _reaches_other("a", members=frozenset({"e"}), graph=diamond) is True
+
+    assert _candidate_for_sink("pkg.mod:f", candidates=()) is None

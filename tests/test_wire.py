@@ -11,6 +11,7 @@ import inspect
 import json
 import subprocess
 import sys
+import unittest.mock
 from pathlib import Path
 
 import pytest
@@ -308,3 +309,110 @@ def test_wire_module_has_no_mutating_or_stdlib_dump_path() -> None:
     assert "ast.dump" not in source
     assert "deepcopy" not in source
     assert "NodeTransformer" not in source
+
+
+def _module_wire(source: str, cfg: NormalizationConfig | None = None) -> str:
+    tree = ast.parse(source, type_comments=True)
+    return emit_wire(tree, cfg or _DEFAULT_CONFIG, bindings_for_tree(tree))
+
+
+def test_build_wire_fields_skips_names_that_are_not_ast_types() -> None:
+    """Spec names that do not resolve to AST classes are dropped, not crashed on."""
+
+    with unittest.mock.patch.dict(
+        wire_module._WIRE_FIELD_SPECS,
+        {"NotARealAstNode": ("value",), "walk": ("target",)},
+    ):
+        rebuilt = wire_module._build_wire_fields()
+    names = {node_type.__name__ for node_type in rebuilt}
+    assert "NotARealAstNode" not in names
+    assert "walk" not in names
+    assert ast.Module in rebuilt
+
+
+def test_type_ignore_tag_text_does_not_split_module_wire() -> None:
+    """`# type: ignore[x]` and bare `# type: ignore` emit one masked tag."""
+
+    tagged = _module_wire("x = 1  # type: ignore[assignment]\n")
+    bare = _module_wire("x = 1  # type: ignore\n")
+    assert tagged == bare
+    assert "_CONST_" in tagged
+    assert "assignment" not in tagged
+
+
+def test_star_import_alias_survives_as_star_marker() -> None:
+    wire = _source_wire("from os import *")
+    assert "_STAR_" in wire
+    assert wire != _source_wire("from os import path")
+
+
+def test_emit_identifier_rejects_non_identifier_text() -> None:
+    with pytest.raises(WireUnsupportedNode, match="unsafe identifier"):
+        wire_module._emit_identifier("not an identifier!")
+
+
+def test_emit_value_rejects_unsupported_field_payload() -> None:
+    tree = ast.parse("x = 1")
+    with pytest.raises(WireUnsupportedNode, match="unsupported value for field tag"):
+        wire_module._emit_value(
+            3.5,
+            _DEFAULT_CONFIG,
+            field="tag",
+            bindings=bindings_for_tree(tree),
+        )
+
+
+def test_capture_name_is_kept_when_names_are_not_normalized() -> None:
+    cfg = NormalizationConfig(normalize_names=False)
+    source = (
+        "def f(v):\n"
+        "    match v:\n"
+        "        case captured_name:\n"
+        "            return captured_name\n"
+    )
+    tree = ast.parse(source)
+    wire = emit_wire(tree.body[0], cfg, bindings_for_tree(tree))
+    assert "captured_name" in wire
+    default_wire = _function_wire(source)
+    assert "captured_name" not in default_wire
+
+
+def test_capture_name_must_be_a_string() -> None:
+    with pytest.raises(WireUnsupportedNode, match="capture name is not a string"):
+        wire_module._emit_capture_name(17, _DEFAULT_CONFIG)
+
+
+def test_boolean_constants_survive_when_constants_are_not_normalized() -> None:
+    cfg = NormalizationConfig(normalize_constants=False)
+    true_wire = _module_wire("x = True", cfg)
+    false_wire = _module_wire("x = False", cfg)
+    none_wire = _module_wire("x = None", cfg)
+    assert "True" in true_wire
+    assert "False" in false_wire
+    assert "None" in none_wire
+    assert len({true_wire, false_wire, none_wire}) == 3
+
+
+def test_non_literal_constant_is_rejected_when_not_normalized() -> None:
+    cfg = NormalizationConfig(normalize_constants=False)
+    with pytest.raises(WireUnsupportedNode, match="unsupported constant value"):
+        wire_module._emit_constant(object(), cfg)
+
+
+def test_commutative_constant_proof_is_scoped_to_the_operator_family() -> None:
+    """Sub is filtered out before the proof; the proof itself still denies it."""
+
+    assert wire_module._is_proven_commutative_constant(1, ast.Add()) is True
+    assert wire_module._is_proven_commutative_constant(1, ast.Sub()) is False
+    # Public surface: subtraction operands are never reordered.
+    assert _source_wire("y = a - 1") != _source_wire("y = 1 - a")
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="t-strings require Python 3.14")
+def test_interpolation_source_text_is_masked_in_template_strings() -> None:
+    """Interpolation.str (the brace source text) is masked, so formatting-only
+    differences inside braces do not split the wire."""
+
+    spaced = _source_wire('x = t"{ name + tail }"')
+    tight = _source_wire('x = t"{name+tail}"')
+    assert spaced == tight

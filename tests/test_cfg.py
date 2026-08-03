@@ -1287,3 +1287,86 @@ def test_complexity_never_filters_by_edge_kind() -> None:
     )
     straight, _ = _complexity_of("def straight():\n    return 1\n")
     assert guarded > straight
+
+
+def test_cfg_try_star_rejects_malformed_field_payloads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`_try_star_parts` answers None for any field that is not the exact
+    list shape, instead of crashing mid-build."""
+
+    import codeclone.analysis.cfg as cfg_module
+
+    class _DistinctTryStar:
+        def __init__(self) -> None:
+            self.body: object = [ast.Pass()]
+            self.handlers: object = []
+            self.orelse: object = []
+            self.finalbody: object = []
+
+    monkeypatch.setattr(cfg_module, "TryStar", _DistinctTryStar)
+
+    well_formed = _DistinctTryStar()
+    parts = cfg_module._try_star_parts(well_formed)  # type: ignore[arg-type]
+    assert parts is not None
+    body, handlers, orelse, finalbody = parts
+    assert len(body) == 1 and handlers == [] and orelse == [] and finalbody == []
+
+    non_list = _DistinctTryStar()
+    non_list.body = "oops"
+    assert cfg_module._try_star_parts(non_list) is None  # type: ignore[arg-type]
+
+    wrong_item_type = _DistinctTryStar()
+    wrong_item_type.handlers = [ast.Pass()]
+    assert (
+        cfg_module._try_star_parts(wrong_item_type) is None  # type: ignore[arg-type]
+    )
+
+
+def test_cfg_finally_that_always_raises_seals_the_join() -> None:
+    """When every path through a ``finally`` terminates, the join block after
+    the try gets no incoming edge; a benign ``finally`` feeds it."""
+
+    def _reachable_ids(cfg: CFG) -> set[int]:
+        seen: set[int] = set()
+        stack = [cfg.entry]
+        while stack:
+            block = stack.pop()
+            if block.id in seen:
+                continue
+            seen.add(block.id)
+            stack.extend(block.successors)
+        return seen
+
+    def _tail_block_id(cfg: CFG) -> int:
+        for block in cfg.blocks:
+            for statement in block.statements:
+                if isinstance(statement, ast.Assign) and any(
+                    isinstance(target, ast.Name) and target.id == "tail"
+                    for target in statement.targets
+                ):
+                    return block.id
+        raise AssertionError("tail assignment block not found")
+
+    raising = build_cfg_from_source(
+        """
+        def f():
+            try:
+                x = 1
+            finally:
+                raise RuntimeError("cleanup")
+            tail = 2
+        """
+    )
+    benign = build_cfg_from_source(
+        """
+        def f():
+            try:
+                x = 1
+            finally:
+                x = 2
+            tail = 2
+        """
+    )
+    assert _tail_block_id(raising) not in _reachable_ids(raising)
+    assert _tail_block_id(benign) in _reachable_ids(benign)

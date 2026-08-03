@@ -615,3 +615,87 @@ def test_findings_survive_the_report_document_projection(tmp_path: Path) -> None
         "unused_symbol",
         "unreachable_statement",
     }
+
+
+def test_unreachable_region_requires_positioned_statements() -> None:
+    """Position-less synthesized statements carry no span: alone they fold to
+    no region, and mixed in they do not widen a real region."""
+
+    from codeclone.analysis.statement_reachability import build_unreachable_region
+
+    assert build_unreachable_region("unreachable_block", [ast.Pass()]) is None
+
+    positioned = ast.parse("x = 1").body
+    region = build_unreachable_region("unreachable_block", [*positioned, ast.Pass()])
+    assert region is not None
+    assert region.statement_count == 1
+    assert (region.start_line, region.end_line) == (1, 1)
+
+
+def test_disjoint_dead_regions_stay_separate_findings() -> None:
+    findings = _findings_for_source(
+        """
+def three_tails(flag):
+    if flag:
+        return 1
+        first_tail = 1
+    if not flag:
+        return 2
+        second_tail = 2
+    return 3
+    third_tail = 3
+""",
+        "three_tails",
+    )
+    assert len(findings) == 3
+    spans = [(item.start_line, item.end_line) for item in findings]
+    assert spans == sorted(spans)
+    assert all(item.statement_count == 1 for item in findings)
+
+
+def test_tail_after_always_raising_finally_is_unreachable() -> None:
+    """A ``finally`` that always raises seals the join: the statement after
+    the try can never run. A benign ``finally`` keeps it live."""
+
+    raising = _findings_for_source(
+        """
+def f():
+    try:
+        x = 1
+    finally:
+        raise RuntimeError("cleanup")
+    tail = 2
+""",
+        "f",
+    )
+    assert [(item.start_line, item.end_line) for item in raising] == [(7, 7)]
+
+    benign = _findings_for_source(
+        """
+def f():
+    try:
+        x = 1
+    finally:
+        x = 2
+    tail = 2
+""",
+        "f",
+    )
+    assert benign == ()
+
+
+def test_contained_dead_blocks_fold_into_one_region() -> None:
+    """A one-line dead loop is one defect: the loop-body block shares the
+    header's span and is swallowed into a single region."""
+
+    findings = _findings_for_source(
+        """
+def f():
+    return 1
+    while True: inner = 1
+""",
+        "f",
+    )
+    assert len(findings) == 1
+    (region,) = findings
+    assert (region.start_line, region.end_line) == (4, 4)

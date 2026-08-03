@@ -36,6 +36,7 @@ from codeclone.models import (
     FunctionRelationshipFacts,
     ModuleDep,
     ModuleRegistryHandle,
+    PackagePrefix,
     RuntimeReachabilityFact,
     SegmentUnit,
     SourceStats,
@@ -993,6 +994,18 @@ def test_resolve_import_observation_absolute_and_relative() -> None:
             ("pkg.sibling",),
             ("pkg.sibling",),
             ("analyzed",),
+        ),
+        (
+            # A relative star import expands only the named siblings; the
+            # `*` alias itself contributes no expansion row.
+            "pkg/__init__.py",
+            "pkg",
+            1,
+            None,
+            ("*", "x"),
+            ("pkg.x",),
+            ("pkg", "pkg.x"),
+            ("analyzed", "analyzed"),
         ),
         (
             "pkg/mod.py",
@@ -2457,6 +2470,29 @@ class Container(containers.DeclarativeContainer):
     )
 
     assert visitor.facts == []
+
+    # Non-handler statements contribute nothing when replayed.
+    visitor._apply_handler_node(ast.Pass())
+    assert visitor.facts == []
+
+    # A factory recorded with a non-route method claims nothing (fail closed).
+    corrupt = reachability_mod._RuntimeReachabilityVisitor(
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        collector=empty_collector,
+        aliases={},
+        runtime_objects={},
+        included_routers=set(),
+        route_decorator_factories={
+            "weird": reachability_mod._RouteDecoratorFactory(
+                obj_name="app",
+                obj_kind="fastapi_app",
+                method="not_a_route_method",
+            )
+        },
+    )
+    decorator = ast.parse("weird", mode="eval").body
+    assert corrupt._route_registration(decorator) is None
 
 
 def test_runtime_reachability_covers_fastapi_aliases_and_dependency_edges() -> None:
@@ -4545,3 +4581,371 @@ def test_parse_limits_triggers_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(ParseError, match="AST parsing timeout"):
         parser_mod._parse_with_limits("x = 1", 1)
+
+
+def test_runtime_reachability_cast_alias_arity_gates_factory_assignment() -> None:
+    """A one-argument ``cast`` alias cannot prove a route factory; the
+    two-argument form can."""
+
+    source = """
+from typing import cast
+from fastapi import FastAPI
+
+app = FastAPI()
+
+def broken_factory(*args, **kwargs):
+    bad = cast(app.get)
+    return bad("/broken")
+
+def good_factory(*args, **kwargs):
+    good = cast(object, app.get)
+    return good("/good")
+
+@broken_factory
+def broken_handler(request):
+    return request
+
+@good_factory
+def good_handler(request):
+    return request
+"""
+
+    by_target = _runtime_reachability_by_target(source)
+    good = by_target["pkg.mod:good_handler"]
+    assert good.framework == "fastapi"
+    assert good.evidence == "route decorator factory"
+    assert "pkg.mod:broken_handler" not in by_target
+
+
+def test_runtime_reachability_first_arg_registration_requires_a_named_object() -> None:
+    """A `register_blueprint` argument with no dotted name proves no inclusion;
+    a named blueprint argument upgrades its routes to high confidence."""
+
+    dynamic = """
+from flask import Blueprint, Flask
+
+def make_blueprint():
+    return Blueprint("dyn", __name__)
+
+app = Flask(__name__)
+bp = Blueprint("bp", __name__)
+
+@bp.route("/named")
+def named_handler():
+    return "n"
+
+app.register_blueprint(bp or make_blueprint())
+"""
+    named = dynamic.replace(
+        "app.register_blueprint(bp or make_blueprint())",
+        "app.register_blueprint(bp)",
+    )
+
+    dynamic_fact = _runtime_reachability_by_target(dynamic)["pkg.mod:named_handler"]
+    named_fact = _runtime_reachability_by_target(named)["pkg.mod:named_handler"]
+    assert dynamic_fact.confidence == "medium"
+    assert named_fact.confidence == "high"
+
+
+def test_runtime_reachability_skips_type_checking_module_blocks() -> None:
+    source = """
+from typing import TYPE_CHECKING
+from fastapi import FastAPI
+
+app = FastAPI()
+FEATURE = True
+
+if TYPE_CHECKING:
+    @app.get("/typing-only")
+    def typing_only_handler():
+        return 0
+
+if FEATURE:
+    @app.get("/gated")
+    def gated_handler():
+        return 1
+"""
+
+    by_target = _runtime_reachability_by_target(source)
+    assert "pkg.mod:typing_only_handler" not in by_target
+    assert by_target["pkg.mod:gated_handler"].framework == "fastapi"
+
+
+def test_runtime_reachability_covers_async_route_handlers() -> None:
+    source = """
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/async")
+async def async_handler():
+    return 1
+"""
+
+    fact = _runtime_reachability_by_target(source)["pkg.mod:async_handler"]
+    assert fact.framework == "fastapi"
+    assert fact.confidence == "high"
+
+
+def test_runtime_reachability_starlette_route_subclass_hooks() -> None:
+    """A plain Starlette ``Route`` subclass emits starlette hook facts for its
+    overridden hook methods only."""
+
+    source = """
+from starlette.routing import Route
+
+class TracingRoute(Route):
+    async def handle(self, scope):
+        return scope
+
+    def matches(self, scope):
+        return super().matches(scope)
+
+    def unrelated(self):
+        return None
+"""
+
+    by_target = _runtime_reachability_by_target(source)
+    fact = by_target["pkg.mod:TracingRoute.matches"]
+    assert fact.framework == "starlette"
+    assert "Route" in fact.evidence_symbol
+    assert by_target["pkg.mod:TracingRoute.handle"].framework == "starlette"
+    assert "pkg.mod:TracingRoute.unrelated" not in by_target
+
+
+def test_runtime_reachability_guarded_nested_route_classes() -> None:
+    """A Route subclass nested under `if TYPE_CHECKING:` inside a class body
+    emits no hook facts; one under a plain `if` does."""
+
+    source = """
+from typing import TYPE_CHECKING
+
+from starlette.routing import Route
+
+class Outer:
+    if TYPE_CHECKING:
+        class TypedRoute(Route):
+            def matches(self, scope):
+                return scope
+    if True:
+        class RealRoute(Route):
+            def matches(self, scope):
+                return scope
+"""
+
+    by_target = _runtime_reachability_by_target(source)
+    assert "pkg.mod:Outer.RealRoute.matches" in by_target
+    assert "pkg.mod:Outer.TypedRoute.matches" not in by_target
+
+
+def test_runtime_binding_visitor_type_checking_dispatch_is_guarded() -> None:
+    """`visit_If` itself refuses TYPE_CHECKING blocks: no runtime object is
+    recorded from a guarded body even when the method is invoked directly."""
+
+    visitor = reachability_mod._RuntimeBindingVisitor()
+    visitor.visit(ast.parse("from fastapi import FastAPI\napp = FastAPI()\n"))
+    assert visitor.objects == {"app": "fastapi_app"}
+
+    guarded = ast.parse("if TYPE_CHECKING:\n    shadow = FastAPI()\n").body[0]
+    assert isinstance(guarded, ast.If)
+    visitor.visit_If(guarded)
+    assert "shadow" not in visitor.objects
+
+    plain = ast.parse("if enabled:\n    extra = FastAPI()\n").body[0]
+    assert isinstance(plain, ast.If)
+    visitor.visit_If(plain)
+    assert visitor.objects.get("extra") == "fastapi_app"
+
+
+def test_runtime_reachability_visitor_walk_respects_type_checking_guards() -> None:
+    """The visitor's own tree walk skips TYPE_CHECKING subtrees, descends into
+    plain conditional subtrees, and dispatches async handlers."""
+
+    source = """
+if TYPE_CHECKING:
+    class TypedRoute(Route):
+        def matches(self, scope):
+            return scope
+
+if FEATURE:
+    class RealRoute(Route):
+        def matches(self, scope):
+            return scope
+
+@app.get("/async-walked")
+async def async_handler():
+    return 1
+"""
+    tree, collector = _parse_tree_and_collector(source)
+    visitor = reachability_mod._RuntimeReachabilityVisitor(
+        module_name="pkg.mod",
+        filepath="pkg/mod.py",
+        collector=collector,
+        aliases={"Route": "starlette.routing.Route"},
+        runtime_objects={"app": "fastapi_app"},
+        included_routers=set(),
+        route_decorator_factories={},
+    )
+    visitor.visit(tree)
+
+    qualnames = {fact.target_qualname for fact in visitor.facts}
+    assert "pkg.mod:RealRoute.matches" in qualnames
+    assert "pkg.mod:async_handler" in qualnames
+    assert "pkg.mod:TypedRoute.matches" not in qualnames
+
+
+def test_bare_namespace_package_import_classifies_by_prefix() -> None:
+    """A target that is only a package prefix (no entry of its own) resolves
+    through the prefix's contributing entries."""
+
+    _identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        inventory_modules=("pkg.other",),
+    )
+    prefixed = dataclasses.replace(
+        registry,
+        package_prefixes=(
+            PackagePrefix(
+                module="pkg",
+                node_kind="namespace_package",
+                mount_paths=(".",),
+                contributing_paths=("pkg/mod.py", "pkg/other.py"),
+            ),
+        ),
+    )
+    assert module_walk_mod._classify_import_target("pkg", prefixed) == "analyzed"
+    # A prefix that does not match the target must not swallow it.
+    assert module_walk_mod._classify_import_target("elsewhere", prefixed) == "external"
+
+
+def test_plain_self_package_import_resolves_as_analyzed() -> None:
+    _tree, _collector, walk = _collect_module_walk(
+        "import pkg.mod\n",
+        module_name="pkg.mod",
+    )
+    (dep,) = walk.module_deps
+    assert dep.resolution == "analyzed"
+    assert walk.import_names == frozenset({"pkg"})
+
+
+def test_extract_dynamic_getattr_binding_requires_name_targets() -> None:
+    """A getattr result assigned to an attribute (not a plain name) proves no
+    dynamic dispatch, so the probed method stays dead."""
+
+    source = """
+class Repository:
+    def load_artifact(self) -> object | None:
+        return None
+
+class Service:
+    def wire(self) -> object:
+        budget: int = 3
+        self.finder = getattr(Repository, "load_artifact", None)
+        return self.finder(budget)
+"""
+    dead = set(_dead_qualnames_from_source(source))
+    assert "pkg.mod:Repository.load_artifact" in dead
+
+
+def test_override_decorator_is_row_two_liveness_evidence() -> None:
+    """`@override` on a method of an externally based class is live evidence;
+    an undecorated sibling still abstains."""
+
+    source = """
+from typing import override
+
+from external_ui import ExternalBase
+
+class Styled(ExternalBase):
+    @override
+    def render(self):
+        return 1
+
+    def helper(self):
+        return 2
+"""
+    statuses = _liveness_status_by_qualname(source)
+    assert statuses["pkg.mod:Styled.render"] == "live"
+    assert statuses["pkg.mod:Styled.helper"] == "unresolved_external_override"
+
+
+def test_conditional_base_expression_is_not_an_external_base() -> None:
+    """A conditional base expression contributes no base name: alone it never
+    triggers external-base abstention; adding a real external base does."""
+
+    dynamic_only = """
+FLAG = True
+
+class BaseA:
+    pass
+
+class BaseB:
+    pass
+
+class Dynamic(BaseA if FLAG else BaseB):
+    def probe(self):
+        return 1
+"""
+    statuses = _liveness_status_by_qualname(dynamic_only)
+    assert statuses["pkg.mod:Dynamic.probe"] == "dead"
+
+    with_external = dynamic_only.replace(
+        "class Dynamic(BaseA if FLAG else BaseB):",
+        "class Dynamic(BaseA if FLAG else BaseB, external_ui.ExternalBase):",
+    )
+    statuses = _liveness_status_by_qualname("import external_ui\n" + with_external)
+    assert statuses["pkg.mod:Dynamic.probe"] == "unresolved_external_override"
+
+
+def test_neutral_cache_reuse_still_scans_structural_findings() -> None:
+    """Threshold-neutral cache reuse must recompute structural findings for
+    clone-eligible units instead of dropping them."""
+
+    from codeclone.models import RehydratedCacheNeutral, SemanticFileFacts
+
+    source = """
+def fn(x):
+    if x == 1:
+        y = 1
+        return y
+    elif x == 2:
+        y = 2
+        return y
+"""
+    units, blocks, segments, stats, _metrics, findings = _extract_source(
+        source=source,
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+    )
+    assert [group.finding_kind for group in findings] == ["duplicated_branches"]
+
+    neutral = RehydratedCacheNeutral(
+        source_stats=stats,
+        units=tuple(units),
+        blocks=tuple(blocks),
+        segments=tuple(segments),
+        semantic_facts=SemanticFileFacts(),
+    )
+    identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )
+    r_units, _b, _s, _stats, _m, r_findings = (
+        units_mod.extract_units_and_stats_from_source(
+            source,
+            "pkg/mod.py",
+            identity,
+            registry,
+            NormalizationConfig(),
+            1,
+            1,
+            collect_structural_findings=True,
+            neutral_reuse=neutral,
+        )
+    )
+    assert list(r_units) == list(units)
+    assert [group.finding_kind for group in r_findings] == ["duplicated_branches"]
