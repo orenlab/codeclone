@@ -11,6 +11,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .. import __version__
+from ..utils.mapping_paths import sections
 from .events import (
     ANALYSIS_SOURCE_CLI,
     ANALYSIS_SOURCE_MCP,
@@ -67,15 +68,24 @@ def analysis_completed_payload_from_report(
 ) -> dict[str, object]:
     """Build an analysis.completed payload from a canonical report document."""
 
-    meta = _mapping(report_document.get("meta"))
-    runtime = _mapping(meta.get("runtime"))
-    inventory = _mapping(report_document.get("inventory"))
-    file_registry = _mapping(inventory.get("file_registry"))
-    findings = _mapping(report_document.get("findings"))
-    findings_summary = _mapping(findings.get("summary"))
-    metrics = _mapping(report_document.get("metrics"))
-    metrics_summary = _mapping(metrics.get("summary"))
-    health = _mapping(metrics_summary.get("health"))
+    (
+        meta,
+        runtime,
+        inventory,
+        file_registry,
+        findings,
+        findings_summary,
+        health,
+    ) = sections(
+        report_document,
+        "meta",
+        "meta.runtime",
+        "inventory",
+        "inventory.file_registry",
+        "findings",
+        "findings.summary",
+        "metrics.summary.health",
+    )
     return {
         "source": source,
         "focus": "repository",

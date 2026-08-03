@@ -9,10 +9,10 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 
 from ...utils.coerce import as_float, as_int, as_mapping, as_sequence
+from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import markdown as md_msgs
 from ..messages.projections import PROJECTION_NONE
-from ._document_sections import sections
 
 MARKDOWN_SCHEMA_VERSION = "1.0"
 _MAX_FINDING_LOCATIONS = 5

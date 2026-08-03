@@ -10,10 +10,10 @@ from collections.abc import Mapping, Sequence
 
 from ...domain.source_scope import IMPACT_SCOPE_NON_RUNTIME, SOURCE_KIND_OTHER
 from ...utils.coerce import as_int, as_mapping, as_sequence
+from ...utils.mapping_paths import sections
 from .._formatting import format_spread_text
 from ..messages import explain as explain_msgs
 from ..messages import projections as proj
-from ._document_sections import sections
 
 _as_int = as_int
 _as_mapping = as_mapping
