@@ -11,8 +11,10 @@ from dataclasses import fields
 import pytest
 
 from codeclone.analysis import phase_ledger as phase_mod
+from codeclone.analysis.normalizer import NormalizationConfig
 from codeclone.analysis.phase_ledger import (
     INERT_PHASE_LEDGER,
+    MODULE_PASSES_SUBPHASE_US_COUNTER_SUFFIXES,
     PHASE_US_COUNTER_SUFFIXES,
     PHASE_VOLUME_COUNTER_SUFFIXES,
     AnalysisPhaseKey,
@@ -21,6 +23,9 @@ from codeclone.analysis.phase_ledger import (
     PhaseSnapshot,
     PhaseTotals,
 )
+from codeclone.analysis.units import extract_units_and_stats_from_source
+from codeclone.observability.vocabulary import COUNTER_KEYS
+from tests._ast_metrics_helpers import module_registry_context
 
 
 def test_phase_enum_derived_counter_suffixes() -> None:
@@ -137,3 +142,63 @@ def test_phase_ledger_rejects_raw_string_keys() -> None:
         ledger.phase("parse")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
         ledger.add_volume("files_timed")  # type: ignore[arg-type]
+
+
+def test_module_bindings_work_is_attributed_to_a_phase() -> None:
+    """Scope-graph construction belongs to the ledger, not to its blind spot.
+
+    `_module_bindings` is a full-tree recursion run once per file. While it sat
+    outside every `phase()` block it never reached the denominator, so every
+    phase share was reported against a worker time that excluded it.
+    """
+
+    source = (
+        "import os\n"
+        "import sys\n"
+        "from collections import OrderedDict\n"
+        "from . import sibling\n"
+        "\n"
+        "\n"
+        "def outer(value: int) -> int:\n"
+        "    def inner(inner_value: int) -> int:\n"
+        "        return inner_value + len(os.sep) + len(sys.platform)\n"
+        "\n"
+        "    return inner(value) + len(OrderedDict()) + len(dir(sibling))\n"
+    )
+    identity, registry = module_registry_context(
+        filepath="pkg/mod.py",
+        module_name="pkg.mod",
+    )
+    ledger = PhaseLedger(active=True)
+
+    extract_units_and_stats_from_source(
+        source=source,
+        filepath="pkg/mod.py",
+        identity=identity,
+        registry=registry,
+        cfg=NormalizationConfig(),
+        min_loc=1,
+        min_stmt=1,
+        phase_ledger=ledger,
+    )
+
+    totals = ledger.snapshot().totals
+    assert totals.module_bindings_ns > 0
+    assert "phase_module_bindings_us" in PHASE_US_COUNTER_SUFFIXES
+
+
+def test_every_phase_counter_is_in_the_reviewed_vocabulary() -> None:
+    """A new phase key is inert until the observer vocabulary admits it.
+
+    The ledger derives its counter names from `AnalysisPhaseKey`, but the
+    observer validates every key against a reviewed allowlist and raises
+    `ObservabilityVocabularyError` on an unknown one. Adding a phase without
+    registering its counter therefore passes the suite and fails only on a real
+    profiled run, which is exactly where the measurement was needed.
+    """
+
+    derived = set(PHASE_US_COUNTER_SUFFIXES) | set(
+        MODULE_PASSES_SUBPHASE_US_COUNTER_SUFFIXES
+    )
+    missing = sorted(derived - COUNTER_KEYS)
+    assert not missing, f"phase counters absent from the reviewed vocabulary: {missing}"

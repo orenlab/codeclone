@@ -343,7 +343,8 @@ def extract_units_and_stats_from_source(
             module_name=module_name,
             collector=collector,
         )
-    module_bindings = _module_bindings(tree, identity, registry)
+    with phase_ledger.phase(AnalysisPhaseKey.MODULE_BINDINGS):
+        module_bindings = _module_bindings(tree, identity, registry)
     class_names = frozenset(class_node.name for _, class_node in collector.class_nodes)
     module_class_names = set(class_names)
     imported_binding_names = set(_walk.imported_binding_names)

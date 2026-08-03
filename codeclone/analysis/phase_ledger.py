@@ -22,6 +22,7 @@ class AnalysisPhaseKey(str, Enum):
     MODULE_WALK = "module_walk"
     RELATIONSHIP = "relationship"
     SUPPRESSIONS = "suppressions"
+    MODULE_BINDINGS = "module_bindings"
     UNIT_CFG = "unit_cfg"
     UNIT_NORMALIZE_CFG = "unit_normalize_cfg"
     UNIT_STRUCTURAL = "unit_structural"
@@ -72,6 +73,7 @@ class PhaseTotals:
     module_walk_ns: int = 0
     relationship_ns: int = 0
     suppressions_ns: int = 0
+    module_bindings_ns: int = 0
     unit_cfg_ns: int = 0
     unit_normalize_cfg_ns: int = 0
     unit_structural_ns: int = 0

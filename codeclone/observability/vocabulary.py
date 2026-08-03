@@ -177,6 +177,7 @@ COUNTER_KEYS: Final[frozenset[str]] = frozenset(
         "pending",
         "phase_class_metrics_us",
         "phase_dead_code_us",
+        "phase_module_bindings_us",
         "phase_module_passes_us",
         "phase_module_walk_us",
         "phase_parse_us",
