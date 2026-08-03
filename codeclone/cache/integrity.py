@@ -48,6 +48,17 @@ def canonical_json(data: object) -> str:
     return _canonical_json_bytes(data).decode("utf-8")
 
 
+def canonical_json_bytes(data: object) -> bytes:
+    """Canonical serialization as bytes, for callers that only hash it.
+
+    Reaching a hash through `canonical_json` costs a decode to `str` and an
+    encode straight back, holding two extra full copies of the payload. That
+    is ruinous for documents the size of a report.
+    """
+
+    return _canonical_json_bytes(data)
+
+
 def sign_cache_payload(data: Mapping[str, object]) -> str:
     return hashlib.sha256(_canonical_json_bytes(data)).hexdigest()
 
@@ -79,6 +90,7 @@ __all__ = [
     "as_str_dict",
     "as_str_or_none",
     "canonical_json",
+    "canonical_json_bytes",
     "read_json_document",
     "sign_cache_payload",
     "verify_cache_payload_signature",

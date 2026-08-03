@@ -34,9 +34,14 @@ from codeclone.models import (
     SuppressedCloneGroup,
     TrustVector,
 )
+from codeclone.observability.vocabulary import COUNTER_KEYS, SPAN_NAMES
 from codeclone.report.explain import build_block_group_facts
 from codeclone.report.html import (
     build_html_report as _core_build_html_report,
+)
+from codeclone.report.html.assemble import (
+    HTML_BUILD_COUNTER_KEYS,
+    HTML_BUILD_SPAN_NAMES,
 )
 from codeclone.report.html.primitives.location import (
     location_file_target,
@@ -5669,3 +5674,20 @@ def test_html_authority_candidate_without_producers_proposes_nothing(
     body = table[table.index("<tbody>") : table.index("</tbody>")]
     assert "[[tool.codeclone.authority]]" not in body
     assert "authority-promotion" not in body
+
+
+def test_html_build_span_and_counter_names_are_reviewed() -> None:
+    """HTML build instrumentation is product telemetry, not a debug probe.
+
+    The observer validates every span name and counter key against a reviewed
+    allowlist, so instrumentation that is not registered raises at runtime on
+    exactly the profiled run it was added to explain.
+    """
+
+    assert set(HTML_BUILD_SPAN_NAMES) <= SPAN_NAMES, (
+        f"unreviewed HTML span names: {sorted(set(HTML_BUILD_SPAN_NAMES) - SPAN_NAMES)}"
+    )
+    assert set(HTML_BUILD_COUNTER_KEYS) <= COUNTER_KEYS, (
+        "unreviewed HTML counter keys: "
+        f"{sorted(set(HTML_BUILD_COUNTER_KEYS) - COUNTER_KEYS)}"
+    )

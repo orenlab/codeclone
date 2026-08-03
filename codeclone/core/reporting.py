@@ -380,16 +380,19 @@ def report(
                 metrics_diff=_coerce_metrics_diff(metrics_diff),
                 baseline_trust=resolved_baseline_trust,
             )
-        report_document = _load_report_document_finalizer()(
-            body=resolved_body,
-            observation_bundle=analysis.observation_bundle,
-            baseline_container=baseline_container,
-            baseline_trust=resolved_baseline_trust,
-            gate_config=gate_config,
-            gate_result=gate_result,
-            new_function_group_keys=new_func,
-            new_block_group_keys=new_block,
-        )
+        # Sealing hashes the whole document, so it is a heavyweight stage in
+        # its own right and needs to be visible next to build and render.
+        with span(name="report.finalize"):
+            report_document = _load_report_document_finalizer()(
+                body=resolved_body,
+                observation_bundle=analysis.observation_bundle,
+                baseline_container=baseline_container,
+                baseline_trust=resolved_baseline_trust,
+                gate_config=gate_config,
+                gate_result=gate_result,
+                new_function_group_keys=new_func,
+                new_block_group_keys=new_block,
+            )
 
     if boot.output_paths.html and html_builder is not None:
         assert report_document is not None

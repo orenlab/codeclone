@@ -13,7 +13,7 @@ from collections.abc import Mapping
 from dataclasses import asdict
 from hashlib import sha256
 
-from ...cache.integrity import canonical_json
+from ...cache.integrity import canonical_json_bytes
 from ...contracts import (
     GATE_LANE_MATRIX_VERSION,
     HEALTH_INPUT_MANIFEST_VERSION,
@@ -56,7 +56,7 @@ def _digest(
 ) -> ReportDigest:
     digest = sha256()
     digest.update(domain.encode("utf-8"))
-    digest.update(canonical_json(payload).encode("utf-8"))
+    digest.update(canonical_json_bytes(payload))
     return ReportDigest(
         kind=kind,
         algorithm="sha256",
@@ -81,9 +81,7 @@ def build_evaluation_contract(
 ) -> EvaluationContract:
     """Build the report-owned evaluation identity from normalized gate policy."""
 
-    thresholds_digest = sha256(
-        canonical_json(asdict(config)).encode("utf-8")
-    ).hexdigest()
+    thresholds_digest = sha256(canonical_json_bytes(asdict(config))).hexdigest()
     return EvaluationContract(
         health_algorithm_revision="1",
         gate_algorithm_revision="1",

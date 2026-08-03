@@ -9,10 +9,12 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from typing import Final
 
 from ... import __version__
 from ...contracts import DOCS_URL, ISSUES_URL, REPOSITORY_URL
 from ...domain.quality import CONFIDENCE_HIGH
+from ...observability import span
 from ...utils import coerce as _coerce
 from ..messages.chrome import (
     BADGE_COPY,
@@ -67,6 +69,29 @@ from .template import FONT_CSS_URL, REPORT_TEMPLATE
 from .widgets.icons import BRAND_LOGO, ICONS, section_icon_html
 from .widgets.snippets import _FileCache, _pygments_css
 
+# Durable stage instrumentation for the HTML build. The observer validates
+# every name against its reviewed vocabulary, so these constants are the one
+# place the names are written and the tests assert the vocabulary admits them.
+SPAN_HTML_CONTEXT: Final = "report.html.context"
+SPAN_HTML_SECTIONS: Final = "report.html.sections"
+SPAN_HTML_STYLES: Final = "report.html.styles"
+COUNTER_HTML_SECTIONS: Final = "html_sections_rendered"
+COUNTER_HTML_SECTION_CHARS: Final = "html_section_chars"
+COUNTER_HTML_CSS_CHARS: Final = "html_css_chars"
+COUNTER_HTML_JS_CHARS: Final = "html_js_chars"
+
+HTML_BUILD_SPAN_NAMES: Final[tuple[str, ...]] = (
+    SPAN_HTML_CONTEXT,
+    SPAN_HTML_SECTIONS,
+    SPAN_HTML_STYLES,
+)
+HTML_BUILD_COUNTER_KEYS: Final[tuple[str, ...]] = (
+    COUNTER_HTML_SECTIONS,
+    COUNTER_HTML_SECTION_CHARS,
+    COUNTER_HTML_CSS_CHARS,
+    COUNTER_HTML_JS_CHARS,
+)
+
 
 def build_html_report(
     *,
@@ -81,25 +106,47 @@ def build_html_report(
     """
     file_cache = _FileCache()
 
-    ctx = build_context(
-        report_document=report_document,
-        file_cache=file_cache,
-        context_lines=context_lines,
-        max_snippet_lines=max_snippet_lines,
-    )
+    with span(name=SPAN_HTML_CONTEXT):
+        ctx = build_context(
+            report_document=report_document,
+            file_cache=file_cache,
+            context_lines=context_lines,
+            max_snippet_lines=max_snippet_lines,
+        )
 
     # -- Render sections --
-    overview_html = render_overview_panel(ctx)
-    review_html = render_review_panel(ctx)
-    clones_html, _novelty_enabled, _total_new, _total_known = render_clones_panel(ctx)
-    quality_html = render_quality_panel(ctx)
-    module_map_html = render_module_map_panel(ctx)
-    dependencies_html = render_dependencies_panel(ctx)
-    dead_code_html = render_dead_code_panel(ctx)
-    suggestions_html = render_suggestions_panel(ctx)
-    structural_html = render_structural_panel(ctx)
-    authority_html = render_authority_panel(ctx)
-    meta_html = render_meta_panel(ctx)
+    with span(name=SPAN_HTML_SECTIONS) as sections_span:
+        overview_html = render_overview_panel(ctx)
+        review_html = render_review_panel(ctx)
+        clones_html, _novelty_enabled, _total_new, _total_known = render_clones_panel(
+            ctx
+        )
+        quality_html = render_quality_panel(ctx)
+        module_map_html = render_module_map_panel(ctx)
+        dependencies_html = render_dependencies_panel(ctx)
+        dead_code_html = render_dead_code_panel(ctx)
+        suggestions_html = render_suggestions_panel(ctx)
+        structural_html = render_structural_panel(ctx)
+        authority_html = render_authority_panel(ctx)
+        meta_html = render_meta_panel(ctx)
+        rendered_sections = (
+            overview_html,
+            review_html,
+            clones_html,
+            quality_html,
+            module_map_html,
+            dependencies_html,
+            dead_code_html,
+            suggestions_html,
+            structural_html,
+            authority_html,
+            meta_html,
+        )
+        sections_span.set_counter(COUNTER_HTML_SECTIONS, len(rendered_sections))
+        sections_span.set_counter(
+            COUNTER_HTML_SECTION_CHARS,
+            sum(len(section) for section in rendered_sections),
+        )
 
     # -- Tab counters --
     _as_mapping = _coerce.as_mapping
@@ -487,10 +534,12 @@ def build_html_report(
             css_parts.append(
                 f"@media (prefers-color-scheme:light){{{auto_reset}\n{auto_rules}}}"
             )
-    css_html = "\n".join(css_parts)
-
-    # -- JS --
-    js_html = build_js()
+    with span(name=SPAN_HTML_STYLES) as styles_span:
+        css_html = "\n".join(css_parts)
+        # -- JS --
+        js_html = build_js()
+        styles_span.set_counter(COUNTER_HTML_CSS_CHARS, len(css_html))
+        styles_span.set_counter(COUNTER_HTML_JS_CHARS, len(js_html))
 
     return REPORT_TEMPLATE.safe_substitute(
         title=_escape_html(title),
