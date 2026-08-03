@@ -100,6 +100,12 @@ class IntentRecord:
     guards: tuple[str, ...]
     blast_radius_summary: dict[str, object] | None = None
     check_result: IntentCheckResult | None = None
+    # Store ordinal of the before-run as it stood when this intent went active.
+    # Analyzer-invariance is only provable against this mark: a later ordinal on
+    # the same key means the identical run was recomputed *after* the edit
+    # window opened. ``None`` (intent rebuilt from the persisted registry, or a
+    # run the store no longer holds) fails closed — no mark, no proof.
+    before_run_registration_ordinal: int | None = None
 
     def to_payload(self, *, short_run_id: str | None = None) -> dict[str, object]:
         payload: dict[str, object] = {

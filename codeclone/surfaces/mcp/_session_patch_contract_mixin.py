@@ -33,6 +33,7 @@ from ...utils.coerce import as_int as _coerce_int
 from ...utils.coerce import as_mapping as _as_mapping
 from ...utils.coerce import as_sequence as _as_sequence
 from . import _session_helpers as _helpers
+from ._analyzer_invariance import observation_evidence
 from ._intent import IntentCheckResult, IntentRecord, IntentScope, IntentStatus
 from ._session_finding_mixin import _MCPSessionFindingMixin, _StateLock
 from ._session_intent_mixin import _MCPSessionIntentMixin
@@ -46,8 +47,12 @@ from ._session_shared import (
 )
 from ._session_state_mixin import _MCPSessionStateMixin
 from ._verification_profile import (
+    CHECK_GATE_COMPARISON,
+    CHECK_STRUCTURAL_DELTA,
+    CHECK_WORSENED_SYMBOLS,
     ClassificationResult,
     VerificationProfile,
+    check_matrix,
     classify_patch,
     profile_accepted_message,
     profile_limitations,
@@ -55,6 +60,25 @@ from ._verification_profile import (
 )
 
 MAX_WORSENED_ITEMS = 20
+
+
+def _run_dirty_paths(record: MCPRunRecord) -> frozenset[str]:
+    """Paths git reported as modified when *record* was analysed."""
+
+    snapshot = record.dirty_snapshot
+    if snapshot is None or not snapshot.git_available:
+        return frozenset()
+    return frozenset(entry.path for entry in snapshot.entries)
+
+
+# Checks whose evidence is a before/after comparison. Under analyzer
+# invariance there is no pair to compare, so these are reported as satisfied
+# by run identity — neither performed nor inapplicable.
+_COMPARATIVE_CHECKS: tuple[str, ...] = (
+    CHECK_STRUCTURAL_DELTA,
+    CHECK_GATE_COMPARISON,
+    CHECK_WORSENED_SYMBOLS,
+)
 
 
 def _intent_session(session: _MCPSessionPatchContractMixin) -> _MCPSessionIntentMixin:
@@ -287,17 +311,18 @@ class _MCPSessionPatchContractMixin:
                 before=before,
                 classification=classification,
             )
-        if before.run_id == after.run_id and classification.profile in {
-            VerificationProfile.PYTHON_STRUCTURAL,
-            VerificationProfile.GOVERNANCE_CONFIG,
-        }:
-            return self._unverified_patch_contract(
-                reason="after_run_not_new",
-                before=before,
-                after=after,
-                classification=classification,
-                scope_check=scope_check,
-            )
+        matching_ids = self._matching_run_ids_outcome(
+            before=before,
+            after=after,
+            intent=intent,
+            strictness=strictness,
+            classification=classification,
+            scope_check=scope_check,
+            scope_violated=scope_violated,
+            actual_changed_files=actual_changed_files,
+        )
+        if matching_ids is not None:
+            return matching_ids
         return self._full_structural_verify(
             before=before,
             after=after,
@@ -652,6 +677,252 @@ class _MCPSessionPatchContractMixin:
         )
         return payload
 
+    def _matching_run_ids_outcome(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        intent: IntentRecord | None,
+        strictness: StrictnessProfile,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+        scope_violated: bool,
+        actual_changed_files: Sequence[str],
+    ) -> dict[str, object] | None:
+        """Resolve a before/after pair that carries the same run id.
+
+        Identical ids are ambiguous on their own: either nothing was
+        re-analysed, or a fresh recompute landed on exactly the same facts.
+        The registration mark and the run's own record of the changed files
+        separate the two, and only the second is evidence. Returns ``None``
+        when the ids differ or the profile does not require an after-run,
+        leaving the normal paths untouched.
+        """
+
+        if before.run_id != after.run_id:
+            return None
+        if classification.profile not in {
+            VerificationProfile.PYTHON_STRUCTURAL,
+            VerificationProfile.GOVERNANCE_CONFIG,
+        }:
+            return None
+        unobserved = self._analyzer_invariance_evidence(
+            intent=intent,
+            after=after,
+            changed_files=actual_changed_files,
+        )
+        if unobserved is None:
+            return self._unverified_patch_contract(
+                reason="after_run_not_new",
+                before=before,
+                after=after,
+                classification=classification,
+                scope_check=scope_check,
+            )
+        if scope_violated and strictness != "relaxed":
+            return self._scope_violation_verify_payload(
+                before=before,
+                after=after,
+                intent=intent,
+                classification=classification,
+                scope_check=scope_check,
+            )
+        return self._analyzer_invariant_accepted(
+            before=before,
+            after=after,
+            intent=intent,
+            strictness=strictness,
+            classification=classification,
+            scope_check=scope_check,
+            unobserved=unobserved,
+        )
+
+    def _invariance_run_is_fresh(
+        self,
+        *,
+        intent: IntentRecord | None,
+        after: MCPRunRecord,
+    ) -> bool:
+        """Was this exact run recomputed after the intent went active?
+
+        Requires a declared change window. Without an intent there is no
+        "since when" to measure against, so identical ids stay ambiguous and
+        the typed dead end remains the honest answer. The mark is compared on
+        the intent's own ``(root, run_id)``: a recompute under a sibling
+        checkout, or of some other run, proves nothing about this one. A run a
+        later analysis superseded is stale however fresh it once was.
+        """
+
+        if intent is None:
+            return False
+        mark = intent.before_run_registration_ordinal
+        if mark is None:
+            return False
+        if intent.run_id != after.run_id:
+            return False
+        if intent.root.resolve() != after.root.resolve():
+            return False
+        current = self._runs.registration_ordinal(after.run_id, root=intent.root)
+        if current is None or current <= mark:
+            return False
+        return self._runs.is_latest_registration(after.run_id, root=intent.root)
+
+    def _analyzer_invariance_evidence(
+        self,
+        *,
+        intent: IntentRecord | None,
+        after: MCPRunRecord,
+        changed_files: Sequence[str],
+    ) -> tuple[str, ...] | None:
+        """Unobserved changed paths, or ``None`` when invariance is refused.
+
+        Freshness cannot see ordering, so a fresh run must also have observed
+        the edit. A recorded stat that no longer matches disk proves the run
+        predates the edit and is refused outright. An empty tuple is the
+        strongest result, not a falsy failure — test against ``None``.
+        """
+
+        if not self._invariance_run_is_fresh(intent=intent, after=after):
+            return None
+        contradicted, unobserved = observation_evidence(
+            root=after.root,
+            changed_files=changed_files,
+            manifest=after.manifest,
+            dirty_paths=_run_dirty_paths(after),
+        )
+        return None if contradicted else unobserved
+
+    def _analyzer_invariance_proven(
+        self,
+        *,
+        intent: IntentRecord | None,
+        after: MCPRunRecord,
+        changed_files: Sequence[str],
+    ) -> bool:
+        return (
+            self._analyzer_invariance_evidence(
+                intent=intent,
+                after=after,
+                changed_files=changed_files,
+            )
+            is not None
+        )
+
+    def _analyzer_invariant_accepted(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord,
+        intent: IntentRecord | None,
+        strictness: StrictnessProfile,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+        unobserved: Sequence[str],
+    ) -> dict[str, object]:
+        """Accept a patch whose analysis facts are provably unmoved."""
+
+        from .messages import patch_contract as patch_msgs
+
+        limitations = list(patch_msgs.ANALYZER_INVARIANT_LIMITATIONS)
+        if unobserved:
+            limitations.append(
+                patch_msgs.analyzer_invariant_unobserved_limitation(unobserved)
+            )
+        matrix = check_matrix(classification.profile)
+        performed = [
+            check
+            for check in matrix.checks_performed
+            if check not in _COMPARATIVE_CHECKS
+        ]
+        satisfied = [
+            check for check in matrix.checks_performed if check in _COMPARATIVE_CHECKS
+        ]
+        status = PatchContractStatus.ACCEPTED.value
+        payload: dict[str, object] = {
+            "mode": "verify",
+            "status": status,
+            "reason": patch_msgs.ANALYZER_INVARIANT_REASON,
+            "before": self._run_ref_payload(before),
+            "after": self._run_ref_payload(after),
+            "intent_id": (intent.intent_id if intent is not None else None),
+            "strictness": strictness,
+            "scope_check": scope_check,
+            "structural_delta": {
+                "verdict": patch_msgs.ANALYZER_INVARIANT_REASON,
+                "reason": patch_msgs.ANALYZER_INVARIANT_EVIDENCE,
+                "regressions": [],
+                "improvements": [],
+                "health_delta": 0,
+            },
+            "contract_violations": [],
+            "blocking_violations": [],
+            **classification.to_payload(),
+            "checks_performed": performed,
+            "checks_satisfied_by_run_identity": satisfied,
+            "observed_changed_files": not unobserved,
+            "limitations": limitations,
+            "claim_validation_recommended": self._claim_validation_recommended(
+                classification
+            ),
+            "message": patch_msgs.VERIFY_ACCEPTED_ANALYZER_INVARIANT,
+        }
+        intent_session = _intent_session(self)
+        intent_session._audit_emit(
+            root=after.root,
+            event_type=EVENT_PATCH_VERIFIED,
+            severity="info",
+            run_id=_helpers._short_run_id(after.run_id),
+            intent_id=(intent.intent_id if intent is not None else None),
+            report_digest=intent_session._report_digest_value(after),
+            status=status,
+            payload=payload,
+        )
+        return payload
+
+    def _scope_violation_verify_payload(
+        self,
+        *,
+        before: MCPRunRecord,
+        after: MCPRunRecord | None,
+        intent: IntentRecord | None,
+        classification: ClassificationResult,
+        scope_check: dict[str, object] | None,
+    ) -> dict[str, object]:
+        """Blocking scope violation, shared by every verify path."""
+
+        reason = "scope_violation"
+        violations = [reason]
+        payload: dict[str, object] = {
+            "mode": "verify",
+            "status": PatchContractStatus.VIOLATED.value,
+            "reason": reason,
+            "before": self._run_ref_payload(before),
+            "after": (self._run_ref_payload(after) if after is not None else None),
+            "intent_id": (intent.intent_id if intent is not None else None),
+            "scope_check": scope_check,
+            "contract_violations": violations,
+            "blocking_violations": violations,
+            **classification.to_payload(),
+            "next_step": self._next_step_hint(reason),
+            "claim_validation_recommended": False,
+            "message": self._verify_message(
+                status=PatchContractStatus.VIOLATED.value,
+                violations=tuple(violations),
+            ),
+        }
+        intent_session = _intent_session(self)
+        intent_session._audit_emit(
+            root=before.root,
+            event_type=EVENT_PATCH_VIOLATED,
+            severity="warn",
+            run_id=_helpers._short_run_id(before.run_id),
+            intent_id=(intent.intent_id if intent is not None else None),
+            report_digest=intent_session._report_digest_value(before),
+            status=PatchContractStatus.VIOLATED.value,
+            payload=payload,
+        )
+        return payload
+
     def _profile_fast_path(
         self,
         *,
@@ -673,38 +944,13 @@ class _MCPSessionPatchContractMixin:
 
         # Scope violation is always blocking, regardless of profile.
         if scope_violated and strictness != "relaxed":
-            reason = "scope_violation"
-            violations = [reason]
-            payload: dict[str, object] = {
-                "mode": "verify",
-                "status": PatchContractStatus.VIOLATED.value,
-                "reason": reason,
-                "before": self._run_ref_payload(before),
-                "after": None,
-                "intent_id": (intent.intent_id if intent is not None else None),
-                "scope_check": scope_check,
-                "contract_violations": violations,
-                "blocking_violations": violations,
-                **profile_payload,
-                "next_step": self._next_step_hint(reason),
-                "claim_validation_recommended": False,
-                "message": self._verify_message(
-                    status=PatchContractStatus.VIOLATED.value,
-                    violations=tuple(violations),
-                ),
-            }
-            intent_session = _intent_session(self)
-            intent_session._audit_emit(
-                root=before.root,
-                event_type=EVENT_PATCH_VIOLATED,
-                severity="warn",
-                run_id=_helpers._short_run_id(before.run_id),
-                intent_id=(intent.intent_id if intent is not None else None),
-                report_digest=intent_session._report_digest_value(before),
-                status=PatchContractStatus.VIOLATED.value,
-                payload=payload,
+            return self._scope_violation_verify_payload(
+                before=before,
+                after=None,
+                intent=intent,
+                classification=classification,
+                scope_check=scope_check,
             )
-            return payload
 
         # Profiles that require after_run return unverified.
         matrix = classification.to_payload()

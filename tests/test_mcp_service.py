@@ -15,7 +15,7 @@ import sqlite3
 import subprocess
 from argparse import Namespace
 from collections import OrderedDict, UserDict
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
@@ -41,6 +41,7 @@ import codeclone.surfaces.mcp._session_context_mixin as mcp_context_session_mod
 import codeclone.surfaces.mcp._session_finding_mixin as mcp_finding_mod
 import codeclone.surfaces.mcp._session_helpers as mcp_helpers_mod
 import codeclone.surfaces.mcp._session_intent_mixin as mcp_session_intent_mod
+import codeclone.surfaces.mcp._session_patch_contract_mixin as mcp_patch_session_mod
 import codeclone.surfaces.mcp._session_runtime as mcp_runtime_mod
 import codeclone.surfaces.mcp._session_shared as mcp_shared_mod
 import codeclone.surfaces.mcp._session_state_mixin as mcp_state_mod
@@ -12897,6 +12898,551 @@ def test_mcp_verify_rejects_identical_before_after_run(tmp_path: Path) -> None:
     assert verified["status"] == "unverified"
     assert verified["reason"] == "after_run_not_new"
     assert verified["next_step"]
+
+
+_INVARIANT_MODULE = (
+    "def widen(values):\n"
+    "    total = 0\n"
+    "    for value in values:\n"
+    "        total += value\n"
+    "    return total\n"
+)
+
+_INVARIANT_PYPROJECT = '[project]\nname = "invariant"\nversion = "0.1.0"\n'
+
+
+def _git_commit_all(root: Path, message: str) -> None:
+    """Stage and commit everything, with a deterministic identity."""
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "GIT_AUTHOR_NAME": "t",
+            "GIT_AUTHOR_EMAIL": "t@e.com",
+            "GIT_COMMITTER_NAME": "t",
+            "GIT_COMMITTER_EMAIL": "t@e.com",
+        },
+    )
+
+
+def _analyzer_invariant_repo(root: Path) -> None:
+    """A committed repo whose analysis facts are stable under blind edits."""
+    package = root / "pkg"
+    package.mkdir(parents=True, exist_ok=True)
+    package.joinpath("__init__.py").write_text("", encoding="utf-8")
+    package.joinpath("a.py").write_text(_INVARIANT_MODULE, encoding="utf-8")
+    root.joinpath("pyproject.toml").write_text(_INVARIANT_PYPROJECT, encoding="utf-8")
+    root.joinpath(".gitignore").write_text(
+        ".codeclone/\ncodeclone.baseline.json\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True)
+    _git_commit_all(root, "init")
+
+
+def _analyze_root(service: CodeCloneMCPService, root: Path) -> str:
+    payload = service.analyze_repository(MCPAnalysisRequest(root=str(root)))
+    return str(payload["run_id"])
+
+
+def _start_invariant_intent(
+    service: CodeCloneMCPService,
+    root: Path,
+    *,
+    allowed: list[str],
+) -> str:
+    started = service.start_controlled_change(
+        root=str(root),
+        scope={"allowed_files": allowed},
+        intent="analyzer-invariant edit",
+    )
+    assert started["edit_allowed"] is True
+    return str(started["intent_id"])
+
+
+def _edit_mypy_table(root: Path) -> None:
+    """Add a pyproject table that analysis does not read."""
+    root.joinpath("pyproject.toml").write_text(
+        _INVARIANT_PYPROJECT + "\n[tool.mypy]\nstrict = true\n", encoding="utf-8"
+    )
+
+
+def _edit_python_comment(root: Path) -> None:
+    """Add a comment, which normalization strips before fingerprinting."""
+    root.joinpath("pkg", "a.py").write_text(
+        _INVARIANT_MODULE.replace(
+            "    total = 0\n", "    # running accumulator\n    total = 0\n"
+        ),
+        encoding="utf-8",
+    )
+
+
+def _edit_new_function(root: Path) -> None:
+    """Add a function — a change analysis is meant to see."""
+    root.joinpath("pkg", "a.py").write_text(
+        _INVARIANT_MODULE + "\n\ndef added(flag):\n    return not flag\n",
+        encoding="utf-8",
+    )
+
+
+def _edited_invariant_intent(
+    root: Path,
+    *,
+    allowed: list[str],
+    edit: Callable[[Path], None],
+) -> tuple[CodeCloneMCPService, str, str]:
+    """Repo → analyze → active intent → edit, with no post-edit analysis.
+
+    Stops before the recompute so each caller decides whether one happens:
+    that choice is what the invariance evidence turns on.
+    """
+    _analyzer_invariant_repo(root)
+    service = CodeCloneMCPService(history_limit=6)
+    before_run = _analyze_root(service, root)
+    intent_id = _start_invariant_intent(service, root, allowed=allowed)
+    edit(root)
+    return service, intent_id, before_run
+
+
+def _accepted_invariant_cycle(
+    root: Path,
+    *,
+    allowed: list[str],
+    edit: Callable[[Path], None],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Full invariant cycle, asserting the shared accepted contract.
+
+    The premise assertion keeps the fixture honest: if the edit ever stops
+    being invisible to analysis, this fails loudly instead of silently
+    testing nothing.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        root, allowed=allowed, edit=edit
+    )
+    after_run = _analyze_root(service, root)
+    assert after_run == before_run
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=allowed,
+        after_run_id=after_run,
+    )
+    assert finished["status"] == "accepted"
+    verification = cast("dict[str, object]", finished["verification"])
+    assert verification["status"] == "accepted"
+    assert verification["reason"] == "analyzer_invariant"
+    return finished, verification
+
+
+def test_mcp_verify_accepts_analyzer_invariant_governance_config(
+    tmp_path: Path,
+) -> None:
+    """(a) A non-analysis pyproject table is provably invisible to analysis."""
+    finished, verification = _accepted_invariant_cycle(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    assert verification["verification_profile"] == "governance_config"
+    assert finished["intent_cleared"] is True
+    # pyproject.toml has no manifest stat, but the run saw it modified, so
+    # observation is proved rather than falling back to the narrowing.
+    assert verification["observed_changed_files"] is True
+
+
+def test_mcp_verify_accepts_analyzer_invariant_python_structural(
+    tmp_path: Path,
+) -> None:
+    """(b) A comment-only Python edit normalizes away to identical facts."""
+    _finished, verification = _accepted_invariant_cycle(
+        tmp_path, allowed=["pkg/a.py"], edit=_edit_python_comment
+    )
+    assert verification["verification_profile"] == "python_structural"
+    delta = cast("dict[str, object]", verification["structural_delta"])
+    assert delta["verdict"] == "analyzer_invariant"
+    assert "invisible to analysis" in str(delta["reason"])
+
+
+def test_mcp_verify_real_structural_edit_still_requires_new_after_run(
+    tmp_path: Path,
+) -> None:
+    """(c) The invariant path is unreachable when the recompute really moves."""
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pkg/a.py"], edit=_edit_new_function
+    )
+    after_run = _analyze_root(service, tmp_path)
+    # A real structural edit must move the content-addressed identity.
+    assert after_run != before_run
+
+    # Replaying the before-run as the after-run must stay the typed dead end:
+    # the before key was never re-registered by a fresh recompute.
+    replayed = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+    assert replayed["status"] == "unverified"
+    assert replayed["reason"] == "after_run_not_new"
+
+    honest = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=after_run,
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+    assert honest["reason"] != "analyzer_invariant"
+
+
+def test_mcp_verify_analyzer_invariance_requires_fresh_recompute(
+    tmp_path: Path,
+) -> None:
+    """(d) No post-start recompute means no invariance evidence."""
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    # Deliberately no analyze_repository after the edit.
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+
+
+def test_mcp_verify_analyzer_invariance_is_root_bound(tmp_path: Path) -> None:
+    """(d) A fresh recompute under a foreign root proves nothing about ours."""
+    own = tmp_path / "own"
+    foreign = tmp_path / "foreign"
+    own.mkdir()
+    foreign.mkdir()
+    _analyzer_invariant_repo(foreign)
+    service, intent_id, before_run = _edited_invariant_intent(
+        own, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    # Content-addressed ids collide across identical checkouts; only the
+    # foreign root is recomputed here.
+    foreign_run = _analyze_root(service, foreign)
+    assert foreign_run == before_run
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+
+
+def test_mcp_receipt_records_analyzer_invariant_evidence_class(
+    tmp_path: Path,
+) -> None:
+    """(e) The receipt states the evidence class, never 'checks passed'."""
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pkg/a.py"], edit=_edit_python_comment
+    )
+    after_run = _analyze_root(service, tmp_path)
+    assert after_run == before_run
+
+    # Structured receipt, taken while the intent is still active. The scope
+    # check runs first, exactly as finish sequences it, so the receipt sees a
+    # python_structural patch rather than an empty changed-file set.
+    service.manage_change_intent(
+        action="check",
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+    stored = service.create_review_receipt(
+        run_id=after_run, intent_id=intent_id, format="json"
+    )
+    delta = cast("dict[str, object]", stored["structural_delta"])
+    assert delta["verdict"] == "analyzer_invariant"
+    assert delta["available"] is False
+    assert "invisible to analysis" in str(delta["reason"])
+
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+        after_run_id=after_run,
+    )
+    assert finished["status"] == "accepted"
+
+    receipt = cast("dict[str, object]", finished["receipt"])
+    content = str(receipt["content"])
+    # The evidence class is recorded verbatim, with the reason it carries no
+    # numeric delta — never as a passed structural review.
+    assert "**Verdict:** analyzer_invariant" in content
+    assert "change proven invisible to analysis" in content
+    assert "identical content-addressed run under fresh recompute" in content
+    assert "structural checks passed" not in content.lower()
+    assert "not_available" not in content
+
+
+def test_mcp_verify_refuses_recompute_taken_before_the_edit(tmp_path: Path) -> None:
+    """A recompute that predates the edit is not invariance evidence.
+
+    Freshness alone cannot see ordering: analysing straight after start
+    re-registers the same id and advances the mark, so the run looks fresh
+    while having observed none of the edit. The after-run's own manifest
+    settles it — it records the bytes analysis actually read.
+    """
+    _analyzer_invariant_repo(tmp_path)
+    service = CodeCloneMCPService(history_limit=6)
+    before_run = _analyze_root(service, tmp_path)
+    intent_id = _start_invariant_intent(service, tmp_path, allowed=["pkg/a.py"])
+
+    # Recompute before touching anything: same id, mark advances.
+    stale = _analyze_root(service, tmp_path)
+    assert stale == before_run
+
+    # Only now make a real, analysis-visible change, and replay the stale run.
+    _edit_new_function(tmp_path)
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+
+
+def test_mcp_verify_refuses_superseded_run_as_invariance_evidence(
+    tmp_path: Path,
+) -> None:
+    """A freshly registered run that a later run superseded is not evidence.
+
+    Config files sit outside the analysis manifest, so per-file observation
+    cannot be proved for them. The narrowing is that the invariant run must
+    still be the newest registration for its own root.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    invariant_run = _analyze_root(service, tmp_path)
+    assert invariant_run == before_run
+
+    # A later analysis of the same root supersedes it.
+    _edit_new_function(tmp_path)
+    superseding = _analyze_root(service, tmp_path)
+    assert superseding != before_run
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "after_run_not_new"
+
+
+def test_mcp_verify_analyzer_invariant_names_unobserved_changed_files(
+    tmp_path: Path,
+) -> None:
+    """The stated residual: acceptance that names what it could not observe.
+
+    Committing before the recompute leaves the config edit in neither lane —
+    analysis never reads it, and it was not dirty when the run was taken.
+    That is missing evidence, not a contradiction, so it is accepted with the
+    file named rather than refused into a dead end re-analysis cannot clear.
+    """
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    _git_commit_all(tmp_path, "config")
+    after_run = _analyze_root(service, tmp_path)
+    assert after_run == before_run
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=after_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+
+    assert verified["status"] == "accepted"
+    assert verified["reason"] == "analyzer_invariant"
+    assert verified["observed_changed_files"] is False
+    limitations = " ".join(
+        str(item) for item in cast("list[object]", verified["limitations"])
+    )
+    assert "pyproject.toml" in limitations
+    assert "newest analysis of the root" in limitations
+
+
+def test_analyzer_invariance_observation_fails_closed(tmp_path: Path) -> None:
+    """Unreadable evidence is a mismatch, never a clean bill of health."""
+    from codeclone.surfaces.mcp._analyzer_invariance import observation_evidence
+
+    tracked = tmp_path / "kept.py"
+    tracked.write_text("x = 1\n", encoding="utf-8")
+    stat = tracked.stat()
+    empty: frozenset[str] = frozenset()
+
+    # A stat that still matches disk is the only clean case.
+    contradicted, unobserved = observation_evidence(
+        root=tmp_path,
+        changed_files=["./kept.py"],
+        manifest={"kept.py": {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}},
+        dirty_paths=empty,
+    )
+    assert (contradicted, unobserved) == ((), ())
+
+    # A recorded file that no longer exists cannot be re-stat'd.
+    contradicted, _unobserved = observation_evidence(
+        root=tmp_path,
+        changed_files=["gone.py"],
+        manifest={"gone.py": {"mtime_ns": stat.st_mtime_ns, "size": stat.st_size}},
+        dirty_paths=empty,
+    )
+    assert contradicted == ("gone.py",)
+
+    # Malformed manifest entries are refused rather than trusted.
+    for broken in ({"mtime_ns": "nope", "size": 1}, "not-a-mapping"):
+        contradicted, _unobserved = observation_evidence(
+            root=tmp_path,
+            changed_files=["kept.py"],
+            manifest={"kept.py": broken},
+            dirty_paths=empty,
+        )
+        assert contradicted == ("kept.py",)
+
+    # Outside the manifest, the run's dirty snapshot is the remaining lane.
+    contradicted, unobserved = observation_evidence(
+        root=tmp_path,
+        changed_files=["pyproject.toml", "docs/guide.md"],
+        manifest=None,
+        dirty_paths=frozenset({"pyproject.toml"}),
+    )
+    assert contradicted == ()
+    assert unobserved == ("docs/guide.md",)
+
+
+def test_mcp_after_run_not_new_next_step_is_executable(tmp_path: Path) -> None:
+    """Following the next_step text verbatim must clear the dead end."""
+    service, intent_id, before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pyproject.toml"], edit=_edit_mypy_table
+    )
+    blocked = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=before_run,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+    assert blocked["reason"] == "after_run_not_new"
+    next_step = str(blocked["next_step"])
+    # The instruction names the tool, its argument, and both outcomes.
+    assert "analyze_repository" in next_step
+    assert "after_run_id" in next_step
+    assert "analyzer_invariant" in next_step
+
+    # Do exactly what it says, and nothing else.
+    recomputed = _analyze_root(service, tmp_path)
+    resolved = service.check_patch_contract(
+        mode="verify",
+        before_run_id=before_run,
+        after_run_id=recomputed,
+        intent_id=intent_id,
+        changed_files=["pyproject.toml"],
+    )
+    assert resolved["status"] == "accepted"
+    assert resolved["reason"] == "analyzer_invariant"
+
+
+def test_mcp_typed_outcomes_are_documented_not_tribal_knowledge() -> None:
+    """Every typed finish/verify outcome owes the next agent an in-band procedure.
+
+    A typed outcome that exists only in the code is tribal knowledge: the agent
+    that meets it has no way to learn what clears it. Registration here is the
+    contract — a new reason must arrive with remediation and help coverage.
+    """
+    from codeclone.surfaces.mcp.messages import patch_contract as patch_msgs
+    from codeclone.surfaces.mcp.messages import workflow as workflow_msgs
+    from codeclone.surfaces.mcp.messages.help_topics import HELP_TOPIC_SPECS
+
+    help_text = " ".join(str(spec) for spec in HELP_TOPIC_SPECS.values())
+    workflow_text = " ".join(
+        str(value)
+        for name, value in vars(workflow_msgs).items()
+        if name.isupper() and isinstance(value, str)
+    )
+
+    for reason in sorted(patch_msgs.FINISH_OUTCOME_REASONS):
+        assert reason in help_text, f"{reason} has no help-topic mention"
+        if reason in patch_msgs.ACCEPTED_OUTCOME_REASONS:
+            continue
+        hint = patch_msgs.next_step_hint(reason)
+        if hint is None:
+            # Resolved by the workflow layer; it must still say something.
+            assert reason in patch_msgs.WORKFLOW_OUTCOME_REASONS
+            assert workflow_text.strip()
+            continue
+        # An executable instruction names a tool to call, not just a diagnosis.
+        assert any(
+            tool in hint
+            for tool in (
+                "analyze_repository",
+                "start_controlled_change",
+                "manage_change_intent",
+                "finish",
+            )
+        ), f"{reason} next_step names no tool to call: {hint}"
+
+    # A new typed verify outcome cannot ship without joining the vocabulary.
+    source = Path(mcp_patch_session_mod.__file__).read_text(encoding="utf-8")
+    emitted = {chunk.split('"', 1)[0] for chunk in source.split('reason="')[1:]}
+    undocumented = emitted - patch_msgs.FINISH_OUTCOME_REASONS
+    assert not undocumented, f"undocumented typed outcomes: {sorted(undocumented)}"
+
+    # An accepted outcome must publish what its evidence does NOT cover.
+    # Acceptance without a stated boundary is the failure mode this guards.
+    profiles_topic = str(HELP_TOPIC_SPECS["verification_profiles"])
+    assert "Residual limitation" in profiles_topic
+    assert "newest analysis" in profiles_topic
+    assert "manifest stat" in profiles_topic
+
+
+def test_mcp_help_documents_analyzer_invariant_outcome() -> None:
+    """The outcome, its precondition, and its honest wording are all in help."""
+    from codeclone.surfaces.mcp.messages.help_topics import HELP_TOPIC_SPECS
+
+    topic = str(HELP_TOPIC_SPECS["verification_profiles"])
+    assert "analyzer_invariant" in topic
+    assert "content-addressed" in topic
+    assert "fresh recompute" in topic
+    # What it does not prove, and the wording rule.
+    assert "invisible to analysis" in topic
+    assert "structural checks passed" in topic
+
+
+def test_mcp_verify_missing_after_run_stays_typed(tmp_path: Path) -> None:
+    """(f) A genuinely absent after-run keeps its own typed dead end."""
+    service, intent_id, _before_run = _edited_invariant_intent(
+        tmp_path, allowed=["pkg/a.py"], edit=_edit_python_comment
+    )
+    finished = service.finish_controlled_change(
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+
+    assert finished["status"] == "unverified"
+    assert finished["reason"] == "no_after_run"
 
 
 def test_mcp_start_continue_own_wip_allows_dirty_scope(
