@@ -133,7 +133,7 @@ def render_rows_table(
     # Meter columns self-scale: each bar fills relative to that column's max.
     meter_max: dict[int, float] = {}
     for col_idx, header in enumerate(lower_headers):
-        if typed_cols.get(header) != "meter":
+        if typed_cols.get(header) not in ("meter", "meter_neutral"):
             continue
         values = [_safe_abs_float(row[col_idx]) for row in rows if col_idx < len(row)]
         meter_max[col_idx] = max([*values, 0.0])
@@ -154,10 +154,14 @@ def render_rows_table(
     def _td(col_idx: int, cell: str) -> str:
         h = lower_headers[col_idx] if col_idx < len(lower_headers) else ""
         cell_type = typed_cols.get(h)
-        if cell_type == "meter":
+        if cell_type in ("meter", "meter_neutral"):
             colmax = meter_max.get(col_idx, 0.0)
             fraction = _safe_abs_float(cell) / colmax if colmax > 0 else 0.0
-            meter = _metric_meter_html(cell, fraction=fraction)
+            meter = _metric_meter_html(
+                cell,
+                fraction=fraction,
+                neutral=cell_type == "meter_neutral",
+            )
             return f'<td class="col-num">{meter}</td>'
         if cell_type in _CELL_RENDERERS:
             cls = _CELL_TYPE_CLS[cell_type]

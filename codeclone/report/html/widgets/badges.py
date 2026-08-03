@@ -148,12 +148,22 @@ def _score_bar_html(value: str) -> str:
     )
 
 
-def _metric_meter_html(value: str, *, fraction: float) -> str:
+def _metric_meter_html(
+    value: str,
+    *,
+    fraction: float,
+    neutral: bool = False,
+) -> str:
     """Render a numeric metric as its value plus a magnitude bar.
 
     *fraction* (0..1) is the value's share of the column maximum; the bar fills
     to that share and tints by band (low/mid/high) so table magnitudes read at a
     glance without altering the underlying number.
+
+    *neutral* — the column's magnitude is not a verdict, so the bar uses one
+    quiet ramp and no risk banding. Discovery score is the case that named this:
+    five is the strongest candidate, and painting the best rows red is alarm
+    noise where red is reserved for actual risk.
     """
     text = str(value).strip()
     try:
@@ -161,7 +171,9 @@ def _metric_meter_html(value: str, *, fraction: float) -> str:
     except (TypeError, ValueError):
         return _escape_html(text)
     pct = max(0, min(100, round(fraction * 100)))
-    if fraction >= 0.66:
+    if neutral:
+        band = " metric-meter--neutral"
+    elif fraction >= 0.66:
         band = " metric-meter--high"
     elif fraction >= 0.33:
         band = " metric-meter--mid"

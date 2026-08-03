@@ -367,7 +367,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
         rows=candidate_rows,
         empty_message="No semantic-authority discovery candidates.",
         raw_html_headers=("Owner", "Producers", "Propose"),
-        column_types={"Score": "meter", "Level": "chips"},
+        column_types={"Score": "meter_neutral", "Level": "chips"},
         ctx=ctx,
     )
     # The narrative contract: the answer first, then the numbers a reader acts

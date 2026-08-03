@@ -32,6 +32,10 @@ _TOKENS_DARK = """\
   /* Text colour that sits on the accent fill, in either theme. */
   --accent-on:#fff;
 
+  /* Magnitude ramp for numbers that are not verdicts: one quiet hue, so a
+     high value reads as large rather than as an alarm. */
+  --meter-neutral:color-mix(in oklch,var(--accent-primary) 42%,var(--bg-subtle));
+
   /* Surface — chromatic grays tinted toward the indigo accent (hue 275).
      Every surface shares the brand hue at tiny chroma so the UI feels like
      one palette, not gray slate + a purple sticker. */
@@ -488,6 +492,8 @@ _TABLES = """\
   font-size:var(--fs-sm);color:var(--text-primary);min-width:22px;text-align:right}
 .metric-meter--mid .metric-meter-fill{background:var(--warning)}
 .metric-meter--mid .metric-meter-val{color:var(--warning)}
+.metric-meter--neutral .metric-meter-fill{background:var(--meter-neutral)}
+.metric-meter--neutral .metric-meter-val{color:var(--text-primary)}
 .metric-meter--high .metric-meter-fill{background:var(--error)}
 .metric-meter--high .metric-meter-val{color:var(--error);font-weight:600}
 .status-pill--candidate{background:var(--accent-muted);color:var(--accent-primary)}

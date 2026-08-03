@@ -1303,3 +1303,38 @@ def test_explanatory_prose_has_a_reading_measure() -> None:
         )
         assert rule is not None, f"{selector} has no styling at all"
         assert "max-width" in rule, f"{selector} has no reading measure"
+
+
+def test_non_verdict_numbers_never_render_as_risk() -> None:
+    """Magnitude is not a verdict.
+
+    The discovery score is evidence strength: five is the strongest candidate,
+    not an error. Rendering it through the risk meter painted every best row
+    red, which is alarm noise where the token rules reserve red for real risk.
+    """
+
+    html = _authority_panel_html()
+    table = html[html.index(">Propose<") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+
+    assert "metric-meter--high" not in body
+    assert "metric-meter--mid" not in body
+    # the number still reads as a magnitude, on a neutral ramp
+    assert "metric-meter--neutral" in body
+
+
+def test_neutral_meter_is_tokenised_and_not_semantic() -> None:
+    from codeclone.report.html.assets.css import build_css
+
+    css = re.sub(r"/\*.*?\*/", "", build_css(), flags=re.S)
+    rule = next(
+        (
+            body
+            for heads, body in re.findall(r"([^{}]+)\{([^}]*)\}", css)
+            if ".metric-meter--neutral .metric-meter-fill"
+            in [part.strip() for part in heads.split(",")]
+        ),
+        None,
+    )
+    assert rule is not None, "the neutral meter has no fill rule"
+    assert "var(--error)" not in rule and "var(--warning)" not in rule
