@@ -1150,6 +1150,16 @@ _SUGGESTIONS = """\
 .suggestion-action-icon{flex-shrink:0;color:var(--accent-primary)}
 
 /* Expandable details */
+.authority-promotion summary{font-size:.75rem;font-weight:500;color:var(--text-muted);
+  cursor:pointer;user-select:none;white-space:nowrap}
+.authority-promotion summary:hover{color:var(--text-primary)}
+.authority-promotion-body{position:relative;margin-top:var(--sp-2)}
+.authority-promotion-body .codebox{margin:0;font-family:var(--font-mono);font-size:.72rem;
+  white-space:pre;overflow-x:auto}
+.authority-copy-btn{position:absolute;top:var(--sp-2);right:var(--sp-2);z-index:1;
+  font-size:.68rem;padding:2px 6px}
+.authority-copy-btn--ok{color:var(--success);border-color:var(--success)}
+.authority-candidate-note{margin:var(--sp-2) 0}
 .suggestion-details{border-top:1px solid var(--border)}
 .suggestion-details summary{padding:var(--sp-2) var(--sp-4);font-size:.75rem;font-weight:500;
   color:var(--text-muted);cursor:pointer;display:flex;align-items:center;gap:var(--sp-2);

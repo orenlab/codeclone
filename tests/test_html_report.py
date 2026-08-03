@@ -5376,11 +5376,18 @@ def test_html_authority_renders_discovery_candidates(tmp_path: Path) -> None:
     )
 
     assert "Candidates" in html
-    for level, score in _CANDIDATE_LEVELS:
+    for level, _score in _CANDIDATE_LEVELS:
+        # every level is accounted for, in the table or in the histogram
         assert level.replace("_", " ") in html
-        assert f"pkg.{level}:owner" in html
-        # the closed vocabulary keeps its integer rank in the row
-        assert f">{score}<" in html
+    table = html[html.index(">Propose<") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    for level, score in _CANDIDATE_LEVELS:
+        if level in _STRONG_LEVELS:
+            assert f"pkg.{level}:owner" in body
+            # the closed vocabulary keeps its integer rank in the row
+            assert f">{score}<" in body
+        else:
+            assert f"pkg.{level}:owner" not in body
 
 
 def test_html_authority_candidate_offers_a_paste_ready_promotion(
@@ -5487,3 +5494,178 @@ def test_html_authority_promotion_handles_lone_and_absent_producers(
 
     assert "canonical_owner = &quot;pkg.only:one&quot;" in html
     assert "other producers sharing this fact" not in html
+
+
+_STRONG_LEVELS = (
+    "exact_contract_ir",
+    "same_effect_signature",
+    "same_output_fact_and_input_family",
+)
+_WEAK_LEVELS = ("overlapping_transform_chain", "divergent_projection")
+
+
+def _ranked_candidate_payload() -> dict[str, object]:
+    payload = _metrics_payload(
+        health_score=88,
+        health_grade="B",
+        complexity_max=1,
+        complexity_high_risk=0,
+        coupling_high_risk=0,
+        cohesion_low=0,
+        dep_cycles=[],
+        dep_max_depth=1,
+        dead_total=0,
+        dead_critical=0,
+    )
+    payload["semantic_authority"] = {
+        "summary": {"enabled": True, "enforcement_enabled": False},
+        # Producer names are chosen so identifier order is the exact reverse of
+        # the required rank: passing this cannot be an alphabetical accident.
+        "items": [
+            _candidate(
+                level="same_effect_signature",
+                score=4,
+                producers=["tests.test_thing:twin_a", "tests.test_thing:twin_b"],
+            ),
+            _candidate(
+                level="same_effect_signature",
+                score=4,
+                producers=["zzz_pkg.alpha:owner", "zzz_pkg.beta:own"],
+            ),
+            _candidate(
+                level="same_effect_signature",
+                score=4,
+                producers=[
+                    "zzz_pkg.wide:one",
+                    "zzz_pkg.wide:two",
+                    "zzz_pkg.wide:three",
+                ],
+            ),
+            _candidate(
+                level="exact_contract_ir",
+                score=5,
+                producers=["tests.test_exact:twin"],
+            ),
+        ],
+    }
+    return payload
+
+
+def _ranked_document() -> Mapping[str, Any]:
+    return cast(
+        Mapping[str, Any],
+        build_report_document(
+            func_groups={},
+            block_groups={},
+            segment_groups={},
+            meta={"scan_root": "/repo", "metrics_computed": ["semantic_authority"]},
+            metrics=_ranked_candidate_payload(),
+        ),
+    )
+
+
+def test_document_ranks_candidates_by_level_then_production_then_breadth() -> None:
+    """Level stays primary; production leads its level; breadth breaks the tie."""
+
+    items = _family_items(_ranked_document(), "semantic_authority")
+    candidates = [item for item in items if item["item_kind"] == "candidate"]
+    producers = [tuple(item["producers"]) for item in candidates]
+
+    # level 5 first, even though its only producer is a test
+    assert producers[0] == ("tests.test_exact:twin",)
+    # inside level 4: production before tests, and the broader group first
+    assert producers[1] == (
+        "zzz_pkg.wide:one",
+        "zzz_pkg.wide:three",
+        "zzz_pkg.wide:two",
+    )
+    assert producers[2] == ("zzz_pkg.alpha:owner", "zzz_pkg.beta:own")
+    assert producers[3] == ("tests.test_thing:twin_a", "tests.test_thing:twin_b")
+
+
+def test_document_records_the_candidate_source_kind_it_ranked_on() -> None:
+    items = _family_items(_ranked_document(), "semantic_authority")
+    kinds = {
+        next(iter(item["producers"])): item["source_kind"]
+        for item in items
+        if item["item_kind"] == "candidate"
+    }
+    assert kinds["zzz_pkg.wide:one"] == "production"
+    assert kinds["tests.test_exact:twin"] == "tests"
+
+
+def test_html_authority_table_cuts_weak_levels_to_a_histogram(
+    tmp_path: Path,
+) -> None:
+    """The iceberg is visible as numbers, not as thousands of DOM rows."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(
+                level="exact_contract_ir",
+                score=5,
+                producers=["codeclone.strong:owner"],
+            ),
+            _candidate(
+                level="overlapping_transform_chain",
+                score=2,
+                producers=["codeclone.weak:owner"],
+            ),
+            _candidate(
+                level="divergent_projection",
+                score=1,
+                producers=["codeclone.weaker:owner"],
+            ),
+        ],
+        enforcement_enabled=False,
+    )
+
+    table = html[html.index(">Propose<") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    assert "codeclone.strong:owner" in body
+    assert "codeclone.weak:owner" not in body
+    assert "codeclone.weaker:owner" not in body
+    # the cut is stated, and the weak mass is counted rather than hidden
+    assert "overlapping transform chain 1" in html
+    assert "divergent projection 1" in html
+
+
+def test_html_authority_promotion_is_collapsed_and_copyable(tmp_path: Path) -> None:
+    """Fifty open TOML blocks must be impossible by construction."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[
+            _candidate(
+                level="exact_contract_ir", score=5, producers=["codeclone.a:owner"]
+            )
+        ],
+        enforcement_enabled=False,
+    )
+
+    assert '<details class="authority-promotion">' in html
+    assert "<summary" in html
+    assert "data-authority-copy" in html
+    # collapsed by construction: no open attribute on the proposal
+    assert '<details class="authority-promotion" open' not in html
+
+
+def test_html_authority_candidate_without_producers_proposes_nothing(
+    tmp_path: Path,
+) -> None:
+    """A candidate with no producers has no owner to propose."""
+
+    html = _authority_report_html(
+        tmp_path,
+        governed=[],
+        candidates=[_candidate(level="exact_contract_ir", score=5, producers=[])],
+        enforcement_enabled=False,
+    )
+
+    table = html[html.index(">Propose<") :]
+    body = table[table.index("<tbody>") : table.index("</tbody>")]
+    assert "[[tool.codeclone.authority]]" not in body
+    assert "authority-promotion" not in body

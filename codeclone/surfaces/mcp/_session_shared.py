@@ -260,6 +260,9 @@ _VALID_FINDING_FAMILIES = frozenset(
 _VALID_FINDING_NOVELTY = frozenset({"all", "new", "known", "unavailable"})
 _VALID_FINDING_SORT = frozenset({"default", "priority", "severity", "spread"})
 _VALID_DETAIL_LEVELS = frozenset({"summary", "normal", "full"})
+#: check_authority sections. "violations" keeps the original contract;
+#: "candidates" serves the discovery population as bounded pages only.
+_VALID_AUTHORITY_SECTIONS = frozenset({"violations", "candidates"})
 _VALID_COMPARISON_FOCUS = frozenset({"all", "clones", "structural", "metrics"})
 _VALID_PR_SUMMARY_FORMATS = frozenset({"markdown", "json"})
 _VALID_HELP_TOPICS = frozenset(
@@ -817,6 +820,7 @@ __all__ = [
     "_SHORT_RUN_ID_LENGTH",
     "_SOURCE_KIND_BREAKDOWN_ORDER",
     "_VALID_ANALYSIS_MODES",
+    "_VALID_AUTHORITY_SECTIONS",
     "_VALID_CACHE_POLICIES",
     "_VALID_COMPARISON_FOCUS",
     "_VALID_DETAIL_LEVELS",

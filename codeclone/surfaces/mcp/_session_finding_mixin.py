@@ -11,6 +11,11 @@ from typing import Protocol
 
 from ...utils.repo_paths import RepoPathError, RepoPathPolicy, resolve_under_repo_root
 from . import _session_helpers as _helpers
+from ._authority_candidates import (
+    DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE,
+    AuthorityCandidateCursorError,
+    authority_candidate_page,
+)
 from ._session_shared import (
     _CHECK_TO_DIMENSION,
     _CONFIDENCE_WEIGHT,
@@ -21,6 +26,7 @@ from ._session_shared import (
     _RUNTIME_WEIGHT,
     _SEVERITY_WEIGHT,
     _VALID_ANALYSIS_MODES,
+    _VALID_AUTHORITY_SECTIONS,
     _VALID_CACHE_POLICIES,
     _VALID_DETAIL_LEVELS,
     _VALID_FINDING_FAMILIES,
@@ -1923,17 +1929,38 @@ class _MCPSessionFindingMixin:
         path: str | None = None,
         max_results: int = 10,
         detail_level: DetailLevel = "normal",
+        section: str = "violations",
+        cursor: str | None = None,
+        page_size: int = DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE,
     ) -> dict[str, object]:
         validated_detail = _helpers._validate_choice(
             "detail_level",
             detail_level,
             _VALID_DETAIL_LEVELS,
         )
+        validated_section = _helpers._validate_choice(
+            "section",
+            section,
+            _VALID_AUTHORITY_SECTIONS,
+        )
         record = self._resolve_granular_record(
             run_id=run_id,
             root=root,
             analysis_mode="full",
         )
+        if validated_section == "candidates":
+            # Discovery is unbounded by nature, so it is never returned whole:
+            # the population is reachable only through digest-bound pages.
+            try:
+                page = authority_candidate_page(
+                    report_document=record.report_document,
+                    run_id=record.run_id,
+                    cursor=cursor,
+                    page_size=page_size,
+                )
+            except AuthorityCandidateCursorError as exc:
+                raise MCPServiceContractError(str(exc)) from exc
+            return {"check": "authority", "run_id": record.run_id, **page}
         findings = self._query_findings(
             record=record,
             family="authority",

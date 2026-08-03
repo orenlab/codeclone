@@ -610,6 +610,19 @@
   {
     "input_schema": {
       "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Digest-bound cursor from check_authority continuation.cursor; refused when the run it was cut from has moved.",
+          "title": "Cursor"
+        },
         "detail_level": {
           "default": "normal",
           "description": "summary, normal, or full detail level.",
@@ -620,6 +633,12 @@
           "default": 10,
           "description": "Pagination limit for inventory file_registry, findings groups, or metrics_detail items (max 200).",
           "title": "Max Results",
+          "type": "integer"
+        },
+        "page_size": {
+          "default": 20,
+          "description": "Candidate page size; bounded by the MCP service.",
+          "title": "Page Size",
           "type": "integer"
         },
         "path": {
@@ -660,6 +679,12 @@
           "default": null,
           "description": "8-char or full run id; latest run when omitted.",
           "title": "Run Id"
+        },
+        "section": {
+          "default": "violations",
+          "description": "check_authority section: violations (default) or candidates. Discovery candidates are served only as bounded pages.",
+          "title": "Section",
+          "type": "string"
         }
       },
       "title": "check_authorityArguments",

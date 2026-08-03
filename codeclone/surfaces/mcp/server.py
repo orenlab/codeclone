@@ -48,6 +48,9 @@ from .messages.params import (
     ApiSurfaceParam,
     AuditPathOverrideParam,
     AuditTrailLimitParam,
+    AuthorityCandidateCursorParam,
+    AuthorityCandidatePageSizeParam,
+    AuthoritySectionParam,
     AutoClearParam,
     BeforeRunIdParam,
     BlastArtifactDigestParam,
@@ -1279,6 +1282,9 @@ def build_mcp_server(
         path: PathFilterParam = None,
         max_results: LimitParam = 10,
         detail_level: DetailLevelParam = "normal",
+        section: AuthoritySectionParam = "violations",
+        cursor: AuthorityCandidateCursorParam = None,
+        page_size: AuthorityCandidatePageSizeParam = 20,
     ) -> dict[str, object]:
         return service.check_authority(
             run_id=run_id,
@@ -1286,6 +1292,9 @@ def build_mcp_server(
             path=path,
             max_results=max_results,
             detail_level=detail_level,
+            section=section,
+            cursor=cursor,
+            page_size=page_size,
         )
 
     @tool(

@@ -844,6 +844,28 @@ _IDE_LINKS = r"""
 # Tooltips (fixed-position, escapes overflow containers)
 # ---------------------------------------------------------------------------
 
+_AUTHORITY_PROMOTION = """\
+(function initAuthorityPromotionCopy(){
+  document.addEventListener('click',function(e){
+    var btn=e.target.closest('[data-authority-copy]');
+    if(!btn||!navigator.clipboard)return;
+    var body=btn.closest('.authority-promotion-body');
+    var code=body?body.querySelector('code'):null;
+    if(!code)return;
+    navigator.clipboard.writeText(code.textContent).then(function(){
+      var original=btn.textContent;
+      btn.textContent='\\u2713 Copied';
+      btn.classList.add('authority-copy-btn--ok');
+      setTimeout(function(){
+        btn.textContent=original;
+        btn.classList.remove('authority-copy-btn--ok');
+      },1500);
+    });
+  },true);
+})();
+"""
+
+
 _TOOLTIPS = """\
 (function initTooltips(){
   let tip=null;
@@ -972,6 +994,7 @@ _ALL_MODULES = (
     _LAZY_HIGHLIGHT,
     _IDE_LINKS,
     _TOOLTIPS,
+    _AUTHORITY_PROMOTION,
 )
 
 

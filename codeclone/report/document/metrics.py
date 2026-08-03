@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from ...analysis.suppressions import INLINE_CODECLONE_SUPPRESSION_SOURCE
 from ...domain.findings import (
@@ -22,11 +22,13 @@ from ...domain.quality import (
 )
 from ...domain.source_scope import (
     SOURCE_KIND_FIXTURES,
+    SOURCE_KIND_ORDER,
     SOURCE_KIND_OTHER,
     SOURCE_KIND_PRODUCTION,
     SOURCE_KIND_TESTS,
 )
 from ...metrics.registry import METRIC_FAMILIES
+from ...paths import classify_source_kind as _classify_source_kind
 from ...utils.coerce import as_float as _as_float
 from ...utils.coerce import as_int as _as_int
 from ...utils.coerce import as_mapping as _as_mapping
@@ -51,6 +53,30 @@ _COVERAGE_JOIN_FAMILY = "coverage_join"
 _SECURITY_SURFACES_FAMILY = "security_surfaces"
 
 _SEMANTIC_AUTHORITY_FAMILY = "semantic_authority"
+
+
+def _producer_source_kind(producers: Sequence[str]) -> str:
+    """Classify a candidate group by its most production-facing producer.
+
+    Producers are qualnames whose module prefix is a dotted path or a file
+    path, so the prefix classifies exactly like the file it names. A group is
+    ranked by its strongest member: a candidate that touches production code is
+    worth reading before a pair of test twins, and combining the members into
+    "mixed" instead would rank it below both.
+    """
+
+    kinds = set()
+    for producer in producers:
+        module, _separator, _local = str(producer).partition(":")
+        if not module.strip():
+            continue
+        kinds.add(_classify_source_kind(module.replace(".", "/")))
+    if not kinds:
+        return SOURCE_KIND_OTHER
+    return min(
+        kinds,
+        key=lambda kind: SOURCE_KIND_ORDER.get(kind, len(SOURCE_KIND_ORDER)),
+    )
 
 
 def _normalize_metrics_families(
@@ -624,6 +650,11 @@ def _normalize_metrics_families(
                     str(value) for value in _as_sequence(item_map.get("producers"))
                 ),
                 "shared_fact": str(item_map.get("shared_fact", "")).strip(),
+                # The kind the ranking used, recorded so the order it produces
+                # can be read back instead of inferred.
+                "source_kind": _producer_source_kind(
+                    [str(value) for value in _as_sequence(item_map.get("producers"))]
+                ),
                 "independence": bool(item_map.get("independence")),
                 "semantic_divergence": bool(item_map.get("semantic_divergence")),
                 "suppressed": bool(item_map.get("suppressed")),
@@ -656,10 +687,16 @@ def _normalize_metrics_families(
             item["contract_id"],
             item["sink_identity"],
             item["kind"],
-            # Discovery candidates rank by evidence strength, strongest first,
-            # so the report opens on the proposal worth reading. The identity
-            # tail keeps the order total.
+            # Discovery candidates rank by evidence strength first, then by the
+            # code they touch (production ahead of tests and fixtures, as an
+            # ordering term and never a filter), then by how many producers the
+            # consolidation would settle. The identity tail keeps it total.
             -_as_int(item["score"]),
+            SOURCE_KIND_ORDER.get(
+                str(item["source_kind"]),
+                len(SOURCE_KIND_ORDER),
+            ),
+            -len(_as_sequence(item["producers"])),
             item["candidate_id"],
         ),
     )

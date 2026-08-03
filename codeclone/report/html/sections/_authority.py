@@ -8,8 +8,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import TYPE_CHECKING
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Final
 
 from codeclone.utils.coerce import as_int as _as_int
 from codeclone.utils.coerce import as_mapping as _as_mapping
@@ -48,6 +49,23 @@ def _unresolved_reason_text(item: Mapping[str, object]) -> str:
 #: says how much it is not showing.
 _CANDIDATE_ROW_LIMIT = 50
 
+#: Only these levels earn a row. The weaker two are real findings but arrive in
+#: the thousands, so they are counted in the caption histogram instead of
+#: turning the panel into an unreadable wall. The cut is stated, never silent.
+_LEVEL_RANK: Final = {
+    "exact_contract_ir": 5,
+    "same_effect_signature": 4,
+    "same_output_fact_and_input_family": 3,
+    "overlapping_transform_chain": 2,
+    "divergent_projection": 1,
+}
+
+_STRONG_CANDIDATE_LEVELS: Final = (
+    "exact_contract_ir",
+    "same_effect_signature",
+    "same_output_fact_and_input_family",
+)
+
 #: Discovery proposes; a human decides. Promotion is a copy-paste into
 #: pyproject, never a write by this tool.
 _CANDIDATE_CAPTION = (
@@ -56,6 +74,33 @@ _CANDIDATE_CAPTION = (
     "[[tool.codeclone.authority]] to govern it; nothing here changes your "
     "configuration."
 )
+
+
+def _level_histogram_text(candidates: Sequence[Mapping[str, object]]) -> str:
+    """Count every level, so the levels held back from the table stay visible."""
+
+    if not candidates:
+        return ""
+    counts: Counter[str] = Counter(
+        str(item.get("level", "")).strip() for item in candidates
+    )
+    ordered = sorted(
+        counts.items(),
+        key=lambda row: (-_LEVEL_RANK.get(row[0], 0), row[0]),
+    )
+    parts = ", ".join(f"{level.replace('_', ' ')} {count}" for level, count in ordered)
+    weak = ", ".join(
+        level.replace("_", " ")
+        for level in sorted(counts)
+        if level not in _STRONG_CANDIDATE_LEVELS
+    )
+    cut = (
+        f" Levels below the cut ({weak}) are counted here only; "
+        'drill into them with check_authority(section="candidates") over MCP.'
+        if weak
+        else ""
+    )
+    return f" By level: {parts}.{cut}"
 
 
 def _sink_population_note(sink_total: int) -> str:
@@ -97,10 +142,16 @@ def _candidate_promotion_html(item: Mapping[str, object]) -> str:
     if alternatives:
         lines.append("# other producers sharing this fact: " + ", ".join(alternatives))
     snippet = _escape_html("\n".join(lines))
+    # Collapsed by construction: fifty open TOML blocks cannot happen, because
+    # a proposal only expands when a human asks for that one.
     return (
-        "<details class='authority-promotion'>"
-        "<summary>Propose</summary>"
-        f"<pre class='codebox'><code>{snippet}</code></pre>"
+        '<details class="authority-promotion">'
+        '<summary class="authority-promotion-summary">Propose</summary>'
+        '<div class="authority-promotion-body">'
+        '<button class="btn authority-copy-btn" type="button" '
+        "data-authority-copy>Copy</button>"
+        f'<pre class="codebox"><code>{snippet}</code></pre>'
+        "</div>"
         "</details>"
     )
 
@@ -167,6 +218,11 @@ def render_authority_panel(ctx: ReportContext) -> str:
     candidates = tuple(
         item for item in items if str(item.get("item_kind", "")) == "candidate"
     )
+    strong_candidates = tuple(
+        item
+        for item in candidates
+        if str(item.get("level", "")).strip() in _STRONG_CANDIDATE_LEVELS
+    )
     # The "sink" item kind is deliberately not rendered as rows: it is the raw
     # discovery population, one entry per semantic sink in the tree, and it is
     # evidence for the candidates rather than a list anybody acts on. Its size
@@ -211,7 +267,7 @@ def render_authority_panel(ctx: ReportContext) -> str:
             str(item.get("shared_fact", "")),
             _candidate_promotion_html(item),
         )
-        for item in candidates[:_CANDIDATE_ROW_LIMIT]
+        for item in strong_candidates[:_CANDIDATE_ROW_LIMIT]
     ]
 
     enabled = bool(summary.get("enforcement_enabled"))
@@ -254,11 +310,13 @@ def render_authority_panel(ctx: ReportContext) -> str:
         if len(candidates) > shown
         else ""
     )
+    histogram = _level_histogram_text(candidates)
     candidate_caption = (
         '<p class="muted authority-candidate-note">'
         f"{_escape_html(_CANDIDATE_CAPTION)}"
         f"{_escape_html(_sink_population_note(sink_total))}"
         f"{_escape_html(tail_note)}"
+        f"{_escape_html(histogram)}"
         "</p>"
     )
     candidate_panel = candidate_caption + render_rows_table(

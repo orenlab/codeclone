@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import base64
 import copy
 import importlib
 import json
@@ -15238,3 +15239,214 @@ def test_mcp_implementation_context_omits_dynamic_boundaries_of_other_modules(
     # pkg/loader.py holds the only opaque site; asking about pkg/plugin.py must
     # not inherit another module's under-approximation.
     assert structural["dynamic_boundaries"] == []
+
+
+def _authority_candidate_document(count: int) -> dict[str, object]:
+    """A run document carrying more candidates than any page may return."""
+
+    return {
+        "findings": {
+            "summary": {"total": 0},
+            "groups": {
+                "clones": {"functions": [], "blocks": [], "segments": []},
+                "structural": {"groups": []},
+                "dead_code": {"groups": []},
+                "design": {"groups": []},
+                "authority": {"groups": []},
+            },
+        },
+        "metrics": {
+            "families": {
+                "semantic_authority": {
+                    "summary": {
+                        "enabled": True,
+                        "enforcement_enabled": False,
+                        "candidates": count,
+                    },
+                    "items": [
+                        {
+                            "item_kind": "candidate",
+                            "candidate_id": f"cand-{index:04d}",
+                            "level": "exact_contract_ir",
+                            "score": 5,
+                            "producers": [f"pkg.mod{index}:owner"],
+                            "shared_fact": "effect:artifact_write:os.replace",
+                            "source_kind": "production",
+                        }
+                        for index in range(count)
+                    ],
+                }
+            }
+        },
+    }
+
+
+def _authority_candidate_service(tmp_path: Path, *, count: int) -> CodeCloneMCPService:
+    service = CodeCloneMCPService(history_limit=4)
+    record = replace(
+        _dummy_run_record(tmp_path, "authoritycandidates01"),
+        report_document=_authority_candidate_document(count),
+    )
+    service._runs.register(record)
+    return service
+
+
+def test_check_authority_candidates_are_served_in_bounded_pages(
+    tmp_path: Path,
+) -> None:
+    """The full candidate population is reachable only page by page."""
+
+    service = _authority_candidate_service(tmp_path, count=120)
+
+    first = service.check_authority(
+        run_id="authoritycandidates01", section="candidates"
+    )
+
+    assert first["section"] == "candidates"
+    assert first["total"] == 120
+    items = cast("list[dict[str, object]]", first["items"])
+    assert len(items) == 20
+    assert items[0]["candidate_id"] == "cand-0000"
+    continuation = cast("dict[str, object]", first["continuation"])
+    assert continuation["offset"] == 0
+    assert continuation["total"] == 120
+    cursor = cast("str", continuation["cursor"])
+    assert cursor
+
+    second = service.check_authority(
+        run_id="authoritycandidates01",
+        section="candidates",
+        cursor=cursor,
+    )
+    second_items = cast("list[dict[str, object]]", second["items"])
+    assert second_items[0]["candidate_id"] == "cand-0020"
+    assert cast("dict[str, object]", second["continuation"])["offset"] == 20
+
+
+def test_check_authority_candidate_page_size_is_bounded(tmp_path: Path) -> None:
+    service = _authority_candidate_service(tmp_path, count=120)
+
+    payload = service.check_authority(
+        run_id="authoritycandidates01",
+        section="candidates",
+        page_size=10_000,
+    )
+
+    assert len(cast("list[dict[str, object]]", payload["items"])) == 50
+
+
+def test_check_authority_candidate_cursor_fails_closed_on_a_changed_run(
+    tmp_path: Path,
+) -> None:
+    """A cursor is bound to the population it was cut from, or it is refused."""
+
+    service = _authority_candidate_service(tmp_path, count=120)
+    first = service.check_authority(
+        run_id="authoritycandidates01", section="candidates"
+    )
+    cursor = cast("str", cast("dict[str, object]", first["continuation"])["cursor"])
+
+    moved = replace(
+        _dummy_run_record(tmp_path, "authoritycandidates01"),
+        report_document=_authority_candidate_document(7),
+    )
+    service._runs.register(moved)
+
+    with pytest.raises(MCPServiceContractError):
+        service.check_authority(
+            run_id="authoritycandidates01",
+            section="candidates",
+            cursor=cursor,
+        )
+
+
+def test_check_authority_defaults_to_violations(tmp_path: Path) -> None:
+    """The existing contract is untouched: no section means findings."""
+
+    service = _authority_candidate_service(tmp_path, count=3)
+
+    payload = service.check_authority(run_id="authoritycandidates01")
+
+    assert payload["check"] == "authority"
+    assert "continuation" not in payload
+
+
+def test_authority_candidate_page_size_floor_and_ceiling() -> None:
+    from codeclone.surfaces.mcp._authority_candidates import (
+        DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE,
+        MAX_AUTHORITY_CANDIDATE_PAGE_SIZE,
+        bounded_authority_candidate_page_size,
+    )
+
+    assert bounded_authority_candidate_page_size(0) == (
+        DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE
+    )
+    assert bounded_authority_candidate_page_size(-5) == (
+        DEFAULT_AUTHORITY_CANDIDATE_PAGE_SIZE
+    )
+    assert bounded_authority_candidate_page_size(10**6) == (
+        MAX_AUTHORITY_CANDIDATE_PAGE_SIZE
+    )
+    assert bounded_authority_candidate_page_size(7) == 7
+
+
+@pytest.mark.parametrize(
+    "cursor",
+    [
+        "not-base64-@@@",
+        base64.urlsafe_b64encode(b'"a string, not an object"').decode("ascii"),
+        base64.urlsafe_b64encode(b'{"projection_kind":"something_else"}').decode(
+            "ascii"
+        ),
+        base64.urlsafe_b64encode(
+            json.dumps(
+                {
+                    "projection_kind": "authority_candidate_projection_v1",
+                    "ordering_version": "an_older_order",
+                }
+            ).encode("utf-8")
+        ).decode("ascii"),
+    ],
+)
+def test_authority_candidate_cursor_refuses_foreign_shapes(cursor: str) -> None:
+    """A cursor this contract did not cut is refused, never best-effort decoded."""
+
+    from codeclone.surfaces.mcp._authority_candidates import (
+        AuthorityCandidateCursorError,
+        decode_authority_candidate_cursor,
+    )
+
+    with pytest.raises(AuthorityCandidateCursorError):
+        decode_authority_candidate_cursor(cursor)
+
+
+def test_authority_candidate_cursor_refuses_another_request(tmp_path: Path) -> None:
+    """Identity matches, but the request that cut the cursor does not."""
+
+    from codeclone.surfaces.mcp._authority_candidates import (
+        AuthorityCandidateCursorError,
+        authority_candidate_page,
+    )
+
+    document = _authority_candidate_document(60)
+    first = authority_candidate_page(
+        report_document=document, run_id="run-alpha", cursor=None
+    )
+    cursor = cast("str", cast("dict[str, object]", first["continuation"])["cursor"])
+
+    with pytest.raises(AuthorityCandidateCursorError):
+        authority_candidate_page(
+            report_document=document, run_id="run-beta", cursor=cursor
+        )
+
+
+def test_authority_candidate_last_page_offers_no_cursor(tmp_path: Path) -> None:
+    from codeclone.surfaces.mcp._authority_candidates import authority_candidate_page
+
+    page = authority_candidate_page(
+        report_document=_authority_candidate_document(5), run_id="run-alpha"
+    )
+
+    continuation = cast("dict[str, object]", page["continuation"])
+    assert continuation["omitted"] == 0
+    assert "cursor" not in continuation

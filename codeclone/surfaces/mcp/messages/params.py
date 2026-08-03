@@ -666,6 +666,28 @@ MemoryContinuationPageSizeParam = Annotated[
     int,
     Field(description="Continuation page size; bounded by the MCP service."),
 ]
+AuthoritySectionParam = Annotated[
+    str,
+    Field(
+        description=(
+            "check_authority section: violations (default) or candidates. "
+            "Discovery candidates are served only as bounded pages."
+        ),
+    ),
+]
+AuthorityCandidateCursorParam = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Digest-bound cursor from check_authority continuation.cursor; "
+            "refused when the run it was cut from has moved."
+        ),
+    ),
+]
+AuthorityCandidatePageSizeParam = Annotated[
+    int,
+    Field(description="Candidate page size; bounded by the MCP service."),
+]
 AuditTrailLimitParam = Annotated[
     int,
     Field(
