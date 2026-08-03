@@ -13,6 +13,7 @@ from ...utils.coerce import as_int, as_mapping, as_sequence
 from .._formatting import format_spread_text
 from ..messages import explain as explain_msgs
 from ..messages import projections as proj
+from ._document_sections import sections
 
 _as_int = as_int
 _as_mapping = as_mapping
@@ -737,36 +738,63 @@ def _append_findings_sections(
 
 
 def render_text_report_document(payload: Mapping[str, object]) -> str:
-    meta_payload = _as_mapping(payload.get("meta"))
-    baseline = _as_mapping(meta_payload.get("baseline"))
-    comparison = _as_mapping(payload.get("baseline"))
-    cache = _as_mapping(meta_payload.get("cache"))
-    metrics_baseline = _as_mapping(meta_payload.get("metrics_baseline"))
-    inventory_payload = _as_mapping(payload.get("inventory"))
-    inventory_files = _as_mapping(inventory_payload.get("files"))
-    inventory_code = _as_mapping(inventory_payload.get("code"))
-    file_registry = _as_mapping(inventory_payload.get("file_registry"))
-    findings = _as_mapping(payload.get("findings"))
-    findings_summary = _as_mapping(findings.get("summary"))
-    findings_families = _as_mapping(findings_summary.get("families"))
-    findings_severity = _as_mapping(findings_summary.get("severity"))
-    findings_impact_scope = _as_mapping(findings_summary.get("impact_scope"))
-    findings_clones = _as_mapping(findings_summary.get("clones"))
-    findings_suppressed = _as_mapping(findings_summary.get("suppressed"))
-    metrics_payload = _as_mapping(payload.get("metrics"))
-    metrics_summary = _as_mapping(metrics_payload.get("summary"))
-    metrics_families = _as_mapping(metrics_payload.get("families"))
-    derived = _as_mapping(payload.get("derived"))
-    overview = _as_mapping(derived.get("overview"))
-    hotlists = _as_mapping(derived.get("hotlists"))
+    (
+        meta_payload,
+        baseline,
+        comparison,
+        cache,
+        metrics_baseline,
+        inventory_files,
+        inventory_code,
+        file_registry,
+        findings,
+        findings_summary,
+        findings_families,
+        findings_severity,
+        findings_impact_scope,
+        findings_clones,
+        findings_suppressed,
+        metrics_summary,
+        metrics_families,
+        derived,
+        overview,
+        hotlists,
+        canonicalization,
+        digest,
+        findings_groups,
+        clone_groups,
+        suppressed_clone_groups,
+        runtime_meta,
+    ) = sections(
+        payload,
+        "meta",
+        "meta.baseline",
+        "baseline",
+        "meta.cache",
+        "meta.metrics_baseline",
+        "inventory.files",
+        "inventory.code",
+        "inventory.file_registry",
+        "findings",
+        "findings.summary",
+        "findings.summary.families",
+        "findings.summary.severity",
+        "findings.summary.impact_scope",
+        "findings.summary.clones",
+        "findings.summary.suppressed",
+        "metrics.summary",
+        "metrics.families",
+        "derived",
+        "derived.overview",
+        "derived.hotlists",
+        "integrity.canonicalization",
+        "integrity.digests.envelope",
+        "findings.groups",
+        "findings.groups.clones",
+        "findings.groups.clones.suppressed",
+        "meta.runtime",
+    )
     suggestions_payload = _as_sequence(derived.get("suggestions"))
-    integrity = _as_mapping(payload.get("integrity"))
-    canonicalization = _as_mapping(integrity.get("canonicalization"))
-    digest = _as_mapping(_as_mapping(integrity.get("digests")).get("envelope"))
-    findings_groups = _as_mapping(findings.get("groups"))
-    clone_groups = _as_mapping(findings_groups.get("clones"))
-    suppressed_clone_groups = _as_mapping(clone_groups.get("suppressed"))
-    runtime_meta = _as_mapping(meta_payload.get("runtime"))
     clone_summary_keys: list[str] = [
         "functions",
         "blocks",
