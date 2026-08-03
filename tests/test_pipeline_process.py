@@ -61,6 +61,8 @@ from codeclone.observations.lanes import (
 )
 from codeclone.observations.projection import build_observation_bundle
 from codeclone.paths.module_identity.inventory import build_module_registry
+from tests._pipeline_fixtures import discover_and_process
+from tests._tmp_tree import write_files
 from tests.test_observation_contract import TEST_OBSERVATION_BUNDLE
 
 
@@ -440,16 +442,15 @@ def test_dead_code_lane_bytes_and_live_root_reasons_match_cold_and_warm(
         },
     )
 
-    cold_cache = Cache(cache_path, root=tmp_path)
-    cold_discovery = core_discovery.discover(boot=boot, cache=cold_cache)
-    cold_result = process(boot=boot, discovery=cold_discovery, cache=cold_cache)
+    cold_cache, cold_discovery, cold_result = discover_and_process(
+        boot, cache_path, root=tmp_path, warm=False
+    )
     cold_bytes = _dead_code_lane_bytes(cold_result, cold_discovery)
     cold_cache.save()
 
-    warm_cache = Cache(cache_path, root=tmp_path)
-    warm_cache.load()
-    warm_discovery = core_discovery.discover(boot=boot, cache=warm_cache)
-    warm_result = process(boot=boot, discovery=warm_discovery, cache=warm_cache)
+    _warm_cache, warm_discovery, warm_result = discover_and_process(
+        boot, cache_path, root=tmp_path, warm=True
+    )
     warm_bytes = _dead_code_lane_bytes(warm_result, warm_discovery)
 
     # The warm run must actually be warm, or this guard proves nothing.
@@ -535,13 +536,14 @@ def test_registry_and_relative_import_stages_are_single_and_fact_neutral(
     monkeypatch: pytest.MonkeyPatch,
     authority_enabled: bool,
 ) -> None:
-    valid = tmp_path / "valid.py"
-    broken = tmp_path / "broken.py"
-    valid.write_text(
-        "from .. import missing\ndef identity(value):\n    return value\n",
-        "utf-8",
+    valid, broken = write_files(
+        tmp_path,
+        (
+            "valid.py",
+            "from .. import missing\ndef identity(value):\n    return value\n",
+        ),
+        ("broken.py", "def broken(:\n"),
     )
-    broken.write_text("def broken(:\n", "utf-8")
     filepaths = (str(broken), str(valid))
     boot = _build_boot(tmp_path, processes=1)
     boot.args.skip_metrics = False

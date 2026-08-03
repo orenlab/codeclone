@@ -22,6 +22,7 @@ from codeclone.surfaces.mcp.session import (
     MCPServiceContractError,
 )
 from codeclone.utils.repo_paths import PathOutsideRepoError, RepoPathError
+from tests._tmp_tree import make_dirs
 
 
 def _run_record(root: Path, run_id: str = "security-run-1234") -> MCPRunRecord:
@@ -86,10 +87,7 @@ def test_mcp_resource_uri_rejects_unsafe_suffixes(
 
 
 def test_mcp_finding_location_uris_stay_under_repo_root(tmp_path: Path) -> None:
-    root = tmp_path / "repo"
-    root.mkdir()
-    package = root / "pkg"
-    package.mkdir()
+    root, package = make_dirs(tmp_path, "repo", "repo/pkg")
     (package / "safe.py").write_text("def safe():\n    return 1\n", encoding="utf-8")
     outside = tmp_path / "outside"
     outside.mkdir()

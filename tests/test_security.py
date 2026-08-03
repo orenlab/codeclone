@@ -30,6 +30,7 @@ from codeclone.surfaces.mcp.session import (
 )
 from tests._ast_metrics_helpers import worker_registry_context
 from tests._report_fixtures import build_test_report_document
+from tests._tmp_tree import make_dirs, write_files
 
 
 def process_file(
@@ -94,10 +95,7 @@ def test_process_file_size_limit() -> None:
 
 
 def test_process_file_rejects_symlink_target_outside_root(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    outside = tmp_path / "outside"
-    workspace.mkdir()
-    outside.mkdir()
+    workspace, outside = make_dirs(tmp_path, "workspace", "outside")
     cfg = NormalizationConfig()
 
     module = workspace / "module.py"
@@ -117,10 +115,11 @@ def test_process_file_rejects_symlink_target_outside_root(tmp_path: Path) -> Non
 
 
 def test_html_report_escapes_user_content(tmp_path: Path) -> None:
-    bad_path = tmp_path / 'x" onmouseover="alert(1).py'
-    good_path = tmp_path / "y.py"
-    bad_path.write_text("def f():\n    return 1\n", "utf-8")
-    good_path.write_text("def g():\n    return 2\n", "utf-8")
+    bad_path, good_path = write_files(
+        tmp_path,
+        ('x" onmouseover="alert(1).py', "def f():\n    return 1\n"),
+        ("y.py", "def g():\n    return 2\n"),
+    )
     func_groups = {
         "k": [
             {

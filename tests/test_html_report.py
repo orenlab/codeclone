@@ -76,6 +76,7 @@ from tests._report_fixtures import (
 from tests._report_fixtures import (
     build_test_report_document as build_report_document,
 )
+from tests._tmp_tree import write_files
 
 _REPEATED_BLOCK_GROUP_KEY = repeated_block_group_key()
 
@@ -663,10 +664,11 @@ def test_html_report_structural_findings_why_modal_renders_examples(
 
 
 def test_html_report_finding_cards_expose_stable_anchor_ids(tmp_path: Path) -> None:
-    f1 = tmp_path / "a.py"
-    f2 = tmp_path / "b.py"
-    f1.write_text("def alpha():\n    return 1\n", "utf-8")
-    f2.write_text("def beta():\n    return 1\n", "utf-8")
+    f1, f2 = write_files(
+        tmp_path,
+        ("a.py", "def alpha():\n    return 1\n"),
+        ("b.py", "def beta():\n    return 1\n"),
+    )
     clone_key = "pkg.mod:dup"
     finding_key = "anchor-key"
     html = build_html_report(
@@ -1132,10 +1134,11 @@ def test_html_report_escapes_script_breakout_payload(tmp_path: Path) -> None:
 
 
 def test_html_report_deterministic_group_order(tmp_path: Path) -> None:
-    a_file = tmp_path / "a.py"
-    b_file = tmp_path / "b.py"
-    a_file.write_text("def a():\n    return 1\n", "utf-8")
-    b_file.write_text("def b():\n    return 2\n", "utf-8")
+    a_file, b_file = write_files(
+        tmp_path,
+        ("a.py", "def a():\n    return 1\n"),
+        ("b.py", "def b():\n    return 2\n"),
+    )
     func_groups = {
         "b": [
             {

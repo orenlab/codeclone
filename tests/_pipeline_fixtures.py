@@ -140,6 +140,27 @@ def package_tree(root: Path, fixture_file: Path) -> Path:
     return package
 
 
+def discover_and_process(
+    boot: BootstrapResult,
+    cache_path: Path,
+    *,
+    root: Path,
+    warm: bool,
+) -> tuple[Cache, DiscoveryResult, ProcessingResult]:
+    """Discover and process once over a cold or warm cache, asserting nothing.
+
+    ``run_pipeline_once`` layers the warmth guarantee on top of this. Suites
+    that deliberately exercise cache *invalidation* need a warm pass that is
+    allowed to re-analyse, so the assertion cannot live down here.
+    """
+
+    cache = Cache(cache_path, root=root)
+    if warm:
+        cache.load()
+    discovery = core_discovery.discover(boot=boot, cache=cache)
+    return cache, discovery, process(boot=boot, discovery=discovery, cache=cache)
+
+
 @dataclass(frozen=True, slots=True)
 class PipelineRun:
     """One end-to-end run, kept together so cold and warm share one shape."""
@@ -164,11 +185,12 @@ def run_pipeline_once(
     guard prove nothing at all.
     """
 
-    cache = Cache(cache_path, root=root)
-    if warm:
-        cache.load()
-    discovery = core_discovery.discover(boot=boot, cache=cache)
-    processing = process(boot=boot, discovery=discovery, cache=cache)
+    cache, discovery, processing = discover_and_process(
+        boot,
+        cache_path,
+        root=root,
+        warm=warm,
+    )
     if warm:
         assert processing.files_analyzed == 0, "warm run re-analysed; guard is inert"
         if expect_cache_hits is not None:

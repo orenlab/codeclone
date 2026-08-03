@@ -35,7 +35,7 @@ from codeclone.cache.store import Cache
 from codeclone.core import discovery as core_discovery
 from codeclone.core.parallelism import process
 from tests._ast_metrics_helpers import bindings_for_tree, module_registry_context
-from tests._pipeline_fixtures import analysis_boot
+from tests._pipeline_fixtures import analysis_boot, discover_and_process
 
 _FIXTURE_ROOT = Path(__file__).resolve().parent / "fixtures" / "fingerprint_binding"
 _CONFIG = NormalizationConfig()
@@ -188,16 +188,16 @@ def test_cache_invalidates_when_only_the_binding_context_changes(
     cache_path = tmp_path / "cache.json"
 
     write("import json as codec")
-    cold_cache = Cache(cache_path, root=tmp_path)
-    first_discovery = core_discovery.discover(boot=boot, cache=cold_cache)
-    first = process(boot=boot, discovery=first_discovery, cache=cold_cache)
+    cold_cache, _cold_discovery, first = discover_and_process(
+        boot, cache_path, root=tmp_path, warm=False
+    )
     cold_cache.save()
     json_fingerprint = _encode_fingerprint(first.units)
 
     write("import yaml as codec")
-    fresh_cache = Cache(tmp_path / "cache-cold.json", root=tmp_path)
-    second_discovery = core_discovery.discover(boot=boot, cache=fresh_cache)
-    second = process(boot=boot, discovery=second_discovery, cache=fresh_cache)
+    _fresh_cache, _second_discovery, second = discover_and_process(
+        boot, tmp_path / "cache-cold.json", root=tmp_path, warm=False
+    )
     cold_yaml_fingerprint = _encode_fingerprint(second.units)
 
     assert cold_yaml_fingerprint != json_fingerprint, (
@@ -205,10 +205,9 @@ def test_cache_invalidates_when_only_the_binding_context_changes(
         "differently, or identity is not in the wire at all"
     )
 
-    warm_cache = Cache(cache_path, root=tmp_path)
-    warm_cache.load()
-    warm_discovery = core_discovery.discover(boot=boot, cache=warm_cache)
-    warm = process(boot=boot, discovery=warm_discovery, cache=warm_cache)
+    _warm_cache, _warm_discovery, warm = discover_and_process(
+        boot, cache_path, root=tmp_path, warm=True
+    )
     warm_fingerprint = _encode_fingerprint(warm.units)
 
     assert warm_fingerprint == cold_yaml_fingerprint, (
