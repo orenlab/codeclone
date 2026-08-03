@@ -4606,3 +4606,57 @@ def test_cli_declares_no_families_without_metrics(
     )
 
     assert cast(dict[str, object], payload["meta"])["computed_metric_families"] == []
+
+
+def _count_report_body_builds(monkeypatch: pytest.MonkeyPatch) -> Callable[[], int]:
+    """Patch the report-body builder and hand back a live call counter."""
+
+    calls = 0
+    # The binding installed in the workflow module is exactly what the run
+    # calls and what monkeypatch restores, so read it from there rather
+    # than importing across the ring boundary the ratchet guards.
+    original = cast(
+        "Callable[..., object]",
+        vars(cli)["build_report_body_for_analysis"],
+    )
+
+    def _counted(**kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return original(**kwargs)
+
+    monkeypatch.setattr(cli, "build_report_body_for_analysis", _counted)
+    return lambda: calls
+
+
+def test_gate_only_run_builds_no_report_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No consumer, no document.
+
+    The report body was built unconditionally inside `pipeline.report` and
+    then discarded by the only code that asks whether anything needs it. A run
+    that requests no artifact, no changed-clone gate and no controller query
+    has no consumer at all, so it must not pay for the build.
+    """
+
+    _write_default_source(tmp_path)
+    report_body_builds = _count_report_body_builds(monkeypatch)
+    _run_parallel_main(monkeypatch, [str(tmp_path), "--no-progress"])
+    assert report_body_builds() == 0, "gate-only run still built the report document"
+
+
+def test_artifact_run_still_builds_exactly_one_report_document(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Requesting an artifact must still build the document, and only once."""
+
+    _write_default_source(tmp_path)
+    report_body_builds = _count_report_body_builds(monkeypatch)
+    _run_parallel_main(
+        monkeypatch,
+        [str(tmp_path), "--json", str(tmp_path / "r.json"), "--no-progress"],
+    )
+    assert report_body_builds() == 1

@@ -322,6 +322,11 @@ def test_cli_main_emits_io_and_report_spans(tmp_path: Path) -> None:
             str(repo),
             "--quiet",
             "--no-progress",
+            # Request an artifact so the report document is genuinely built.
+            # A gate-only run has no consumer for it and therefore emits no
+            # report.build; tests/test_cli_inprocess.py pins that separately.
+            "--json",
+            str(repo / "report.json"),
             "--cache-path",
             str(repo / ".codeclone" / "test-cache.json"),
         ],

@@ -78,6 +78,33 @@ def _load_report_document_finalizer() -> Callable[..., dict[str, object]]:
     return finalize_report_document
 
 
+def report_document_required(
+    boot: BootstrapResult,
+    *,
+    include_report_document: bool,
+) -> bool:
+    """Answer whether anything downstream will consume the report document.
+
+    Sole owner of that question. The caller that *builds* the document and the
+    caller that *uses* it have to agree, or the build is paid for and thrown
+    away -- which is exactly what a gate-only run used to do.
+    """
+
+    return (
+        include_report_document
+        or boot.output_paths.html is not None
+        or any(
+            path is not None
+            for path in (
+                boot.output_paths.json,
+                boot.output_paths.md,
+                boot.output_paths.sarif,
+                boot.output_paths.text,
+            )
+        )
+    )
+
+
 def _render_report_projection(
     *,
     format_name: str,
@@ -313,18 +340,9 @@ def report(
         "text": None,
     }
     report_document: dict[str, object] | None = None
-    needs_report_document = (
-        include_report_document
-        or boot.output_paths.html is not None
-        or any(
-            path is not None
-            for path in (
-                boot.output_paths.json,
-                boot.output_paths.md,
-                boot.output_paths.sarif,
-                boot.output_paths.text,
-            )
-        )
+    needs_report_document = report_document_required(
+        boot,
+        include_report_document=include_report_document,
     )
     if needs_report_document:
         resolved_baseline_trust = (

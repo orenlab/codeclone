@@ -37,6 +37,7 @@ from ...core.reporting import (
     gate_required_lanes,
     gate_with_config,
     report,
+    report_document_required,
     resolve_report_baseline_trust,
 )
 from ...observability import bootstrap as start_observability
@@ -600,19 +601,36 @@ def _main_impl() -> None:
             )
 
         with span(name="pipeline.report"):
-            report_body = build_report_body_for_analysis(
-                discovery=discovery_result,
-                processing=processing_result,
-                analysis=analysis_result,
-                report_meta=report_meta,
-                new_func=diff_context.new_func,
-                new_block=diff_context.new_block,
-                metrics_diff=diff_context.metrics_diff,
-                coverage_adoption_diff_available=(
-                    diff_context.coverage_adoption_diff_available
-                ),
-                api_surface_diff_available=diff_context.api_surface_diff_available,
-                baseline_trust=baseline_trust,
+            include_report_document = bool(changed_paths) or _controller_query_mode(
+                args
+            )
+            # Build only when something consumes it. `report_document_required`
+            # owns the artifact and controller cases; the changed-clone gate is
+            # the third consumer and keys off the flag rather than the changed
+            # path set, so it has to be asked separately.
+            needs_report_body = report_document_required(
+                boot,
+                include_report_document=include_report_document,
+            ) or bool(getattr(args, "changed_only", False))
+            report_body = (
+                build_report_body_for_analysis(
+                    discovery=discovery_result,
+                    processing=processing_result,
+                    analysis=analysis_result,
+                    report_meta=report_meta,
+                    new_func=diff_context.new_func,
+                    new_block=diff_context.new_block,
+                    metrics_diff=diff_context.metrics_diff,
+                    coverage_adoption_diff_available=(
+                        diff_context.coverage_adoption_diff_available
+                    ),
+                    api_surface_diff_available=(
+                        diff_context.api_surface_diff_available
+                    ),
+                    baseline_trust=baseline_trust,
+                )
+                if needs_report_body
+                else None
             )
             changed_clone_gate = resolve_changed_clone_gate(
                 args=args,
@@ -669,9 +687,7 @@ def _main_impl() -> None:
                     diff_context.coverage_adoption_diff_available
                 ),
                 api_surface_diff_available=diff_context.api_surface_diff_available,
-                include_report_document=(
-                    bool(changed_paths) or _controller_query_mode(args)
-                ),
+                include_report_document=include_report_document,
                 report_body=report_body,
                 baseline_container=baseline_container,
                 baseline_trust=baseline_trust,
