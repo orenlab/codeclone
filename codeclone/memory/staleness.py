@@ -392,10 +392,18 @@ def apply_scope_staleness(
     )
     reason_counts: dict[str, int] = {}
     marked = 0
-    for record in store.list_records_for_project(project_id, statuses=("active",)):
-        if record.status == "stale":
-            continue
-        for subject in store.list_subjects_for_memory(record.id):
+    candidates = [
+        record
+        for record in store.list_records_for_project(project_id, statuses=("active",))
+        if record.status != "stale"
+    ]
+    # Asking per record made this scale with the accumulated store instead of
+    # with the patch, so it degraded on its own as memory grew.
+    subjects_by_record = store.list_subjects_for_memories(
+        [record.id for record in candidates]
+    )
+    for record in candidates:
+        for subject in subjects_by_record.get(record.id, ()):
             subj_path = subject.subject_key.replace("\\", "/").strip("/")
             if subj_path in normalized or any(
                 subj_path.startswith(f"{scope}/") for scope in normalized

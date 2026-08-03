@@ -295,7 +295,7 @@ def test_staleness_internal_noop_and_commit_edges(
             replace(record, status="stale"),
             record,
         ),
-        list_subjects_for_memory=lambda _record_id: (),
+        list_subjects_for_memories=lambda _record_ids: {},
         commit=lambda: commits.append(True),
     )
     result = staleness.apply_scope_staleness(
@@ -749,3 +749,91 @@ def test_read_intent_declared_records_wraps_read_failure(
     )
     with pytest.raises(AuditReadError, match="cannot read audit database"):
         read_intent_declared_records(db_path=audit_db, repo_root_digest="digest")
+
+
+def _seed_scope_records(
+    store: SqliteEngineeringMemoryStore,
+    project_id: str,
+    count: int,
+) -> list[str]:
+    """Create `count` active records, each carrying one path subject."""
+
+    ids: list[str] = []
+    for index in range(count):
+        record = make_module_record(project_id, f"pkg.mod{index:03d}")
+        store.upsert_record(record)
+        store.write_subject(
+            MemorySubject(
+                id=generate_memory_id(prefix="subj"),
+                memory_id=record.id,
+                subject_kind="path",
+                subject_key=f"pkg/mod{index:03d}.py",
+                relation="about",
+            )
+        )
+        ids.append(record.id)
+    store.commit()
+    return ids
+
+
+def _count_subject_selects(
+    store: SqliteEngineeringMemoryStore,
+) -> tuple[list[int], sqlite3.Connection]:
+    """Install a trace callback counting SELECTs against memory_subjects."""
+
+    counter = [0]
+    conn = store._conn
+
+    def _trace(sql: str) -> None:
+        stripped = sql.lstrip()
+        if stripped[:6].upper() == "SELECT" and "memory_subjects" in sql:
+            counter[0] += 1
+
+    conn.set_trace_callback(_trace)
+    return counter, conn
+
+
+def test_scope_staleness_batches_subject_lookups(tmp_path: Path) -> None:
+    """Cost must scale with the patch, not with the accumulated store.
+
+    `apply_scope_staleness` asked for subjects one record at a time, so a
+    `finish` with propose_memory issued one query per active record in the
+    whole project -- thousands on a mature store, and worse every week.
+    """
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        _seed_scope_records(store, project.id, 40)
+        counter, conn = _count_subject_selects(store)
+        try:
+            apply_scope_staleness(
+                store,
+                project_id=project.id,
+                changed_paths=["pkg/mod007.py"],
+            )
+        finally:
+            conn.set_trace_callback(None)
+
+    assert counter[0] <= 2, (
+        f"subject lookups did not batch: {counter[0]} SELECTs for 40 records"
+    )
+
+
+def test_scope_staleness_outcomes_are_unchanged_by_batching(tmp_path: Path) -> None:
+    """Batching must not move a single staleness outcome."""
+
+    with memory_store(tmp_path) as (_root, project, store, _db_path):
+        ids = _seed_scope_records(store, project.id, 12)
+        report = apply_scope_staleness(
+            store,
+            project_id=project.id,
+            changed_paths=["pkg/mod003.py", "pkg/mod011.py"],
+        )
+
+        assert report.records_marked_stale == 2
+        assert report.reasons == {"scope_files_changed": 2}
+        stale = {
+            record.id
+            for record in store.list_records_for_project(project.id)
+            if record.status == "stale"
+        }
+        assert stale == {ids[3], ids[11]}
