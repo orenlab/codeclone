@@ -1730,6 +1730,10 @@ _FOOTER = """\
 #: that guards the leftover Pygments styles: a highlighted span must survive
 #: that reset by design, not by luck of source order.
 _SYNTAX = """\
+/* The block states its own base colour. The imported dark style paints
+   .codebox a literal near-white and the whitespace token inherited it, so the
+   base colour of every code block was whichever palette happened to load. */
+.codebox{color:var(--syn-name)}
 .codebox .k,.codebox .kn,.codebox .kd,.codebox .kr,.codebox .kt{color:var(--syn-keyword)}
 .codebox .s,.codebox .s1,.codebox .s2,.codebox .sb,.codebox .sd,
 .codebox .se,.codebox .si,.codebox .sr{color:var(--syn-string)}

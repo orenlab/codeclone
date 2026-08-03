@@ -522,11 +522,14 @@ def _make_suggestion(**overrides: object) -> Suggestion:
 
 
 def test_html_badges_and_cards_cover_effort_and_tip_paths() -> None:
-    # Moved expectation: this pinned 'risk-badge risk-moderate', which was the
-    # defect written down -- effort is a cost, not a risk verdict, and
-    # .risk-moderate was a class the stylesheet never defined, so the chip
-    # carried no colour rule at all. Effort now renders as a muted level.
-    assert _quality_badge_html("moderate") == '<span class="level-chip">moderate</span>'
+    # Moved expectation, second and final step. This originally pinned
+    # 'risk-badge risk-moderate' -- effort rendered as a risk verdict through a
+    # class the stylesheet never defined. Stint 7 routed it to the muted level
+    # chip; stint 8 established no caller could reach that branch at all and
+    # deleted it, so effort is asserted on its live path.
+    from codeclone.report.html.widgets.badges import _level_chip_html
+
+    assert _level_chip_html("moderate") == '<span class="level-chip">moderate</span>'
 
     card_html = _stat_card(
         "High Complexity",
@@ -1291,6 +1294,44 @@ def test_promotion_toml_is_highlighted_at_build_time() -> None:
     assert 'class="c1"' in block, "the co-producer comment is not a comment"
     # and the copied text is unchanged: no highlighter markup leaks into it
     assert "[[tool.codeclone.authority]]" in re.sub(r"<[^>]+>", "", block)
+
+
+def test_quality_badge_carries_no_unreachable_effort_branch() -> None:
+    """Dead presentation code is still dead code.
+
+    _quality_badge_html only ever receives a verdict: finding_card normalises
+    through severity_key to critical/warning/info, and the table renderer
+    routes only risk and severity here. No caller could reach the effort
+    branch, and no table declares an Effort header. Levels reach the muted
+    chip through _level_chip_html, which is the live path and stays.
+    """
+
+    from codeclone.report.html.widgets.badges import _level_chip_html
+
+    for effort in ("easy", "moderate", "hard"):
+        assert _quality_badge_html(effort) == effort, "the dead branch survives"
+    # the level vocabulary itself is untouched and still reachable
+    assert _level_chip_html("moderate") == '<span class="level-chip">moderate</span>'
+    # a real verdict still renders as one
+    assert "severity-critical" in _quality_badge_html("critical")
+
+
+def test_codebox_base_colour_is_tokenised_not_borrowed() -> None:
+    """The code block's colour must not be whatever the import happened to set.
+
+    Pygments' dark style paints .codebox #F8F8F2, and the whitespace token
+    inherited it, so the report carried a borrowed literal as the base colour
+    of its code blocks.
+    """
+
+    from codeclone.report.html.assets.css import build_syntax_css
+
+    rules = build_syntax_css()
+
+    assert ".codebox{" in rules.replace(" ", ""), (
+        "the code block never states its own colour, so it keeps the imported one"
+    )
+    assert "#" not in rules, "the syntax map carries a raw literal colour"
 
 
 def test_syntax_hues_never_collide_with_the_semantic_palette() -> None:
