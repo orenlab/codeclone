@@ -41,6 +41,7 @@ from ._session_shared import (
     MCPGateRequest,
     MCPRunNotFoundError,
     MCPRunRecord,
+    MCPRunRootMismatchError,
     MCPServiceContractError,
 )
 from ._session_state_mixin import _MCPSessionStateMixin
@@ -109,7 +110,11 @@ class _MCPSessionPatchContractMixin:
         intent_id: str | None,
         strictness: StrictnessProfile,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        budget_intent = self._known_intent(intent_id)
+        record = self._run_bound_to_root(
+            run_id,
+            root=None if budget_intent is None else budget_intent.root,
+        )
         intent = self._optional_intent(record=record, intent_id=intent_id)
         intent_session = _intent_session(self)
         if intent is not None:
@@ -175,13 +180,23 @@ class _MCPSessionPatchContractMixin:
         #   When intent_id is provided but before_run_id is not, auto-
         #   resolve from the intent's stored run_id.  This removes one
         #   mandatory parameter the agent must track across sessions.
+        #   The intent also supplies the *root* that evidence must come from.
+        #   Run ids are content-addressed, so a same-commit sibling worktree
+        #   answers to the same id; without this binding a verify could run
+        #   entirely on a checkout that was never edited and still accept.
+        binding_intent = self._known_intent(intent_id)
         resolved_before_run_id = before_run_id
-        if resolved_before_run_id is None and intent_id is not None:
-            resolved_before_run_id = self._before_run_id_from_intent(intent_id)
+        if resolved_before_run_id is None and binding_intent is not None:
+            resolved_before_run_id = binding_intent.run_id
         if resolved_before_run_id is None:
             return self._unverified_patch_contract(reason="no_before_run")
         try:
-            before = self._runs.get(resolved_before_run_id)
+            before = self._run_bound_to_root(
+                resolved_before_run_id,
+                root=None if binding_intent is None else binding_intent.root,
+            )
+        except MCPRunRootMismatchError:
+            return self._unverified_patch_contract(reason="before_run_root_mismatch")
         except MCPRunNotFoundError:
             return self._unverified_patch_contract(reason="no_before_run")
 
@@ -230,7 +245,7 @@ class _MCPSessionPatchContractMixin:
             record=before,
             intent=intent,
         ):
-            after = self._optional_after_run(after_run_id)
+            after = self._optional_after_run(after_run_id, before=before)
             return self._expired_patch_contract(
                 before=before,
                 after=after or before,
@@ -265,7 +280,7 @@ class _MCPSessionPatchContractMixin:
 
         # ── 10. Full structural path (after_run available) ──────────
         try:
-            after = self._runs.get(after_run_id)
+            after = self._after_run_for(after_run_id, before=before)
         except MCPRunNotFoundError:
             return self._unverified_patch_contract(
                 reason="no_after_run",
@@ -319,13 +334,48 @@ class _MCPSessionPatchContractMixin:
             return "relaxed"
         return "ci"
 
-    def _before_run_id_from_intent(self, intent_id: str) -> str | None:
-        """Resolve before_run_id from an active intent's stored run_id."""
+    def _known_intent(self, intent_id: str | None) -> IntentRecord | None:
+        """Look up a session intent by id, without resolving any run."""
+
+        if intent_id is None:
+            return None
         with self._state_lock:
-            intent = self._active_intents.get(intent_id)
-        if intent is not None:
-            return intent.run_id
-        return None
+            return self._active_intents.get(intent_id)
+
+    def _run_bound_to_root(
+        self,
+        run_id: str | None,
+        *,
+        root: Path | None,
+    ) -> MCPRunRecord:
+        """Resolve a run, bound to ``root`` when one is known.
+
+        With a root, a run of the same id under any other checkout raises
+        rather than being substituted. Without one, resolution still fails
+        closed if the id is held under several roots.
+        """
+
+        if root is not None:
+            return self._runs.get_for_root(run_id, root=root)
+        return self._runs.resolve_any_root(run_id)
+
+    def _after_run_for(
+        self,
+        after_run_id: str,
+        *,
+        before: MCPRunRecord,
+    ) -> MCPRunRecord:
+        """Resolve the after-run, preferring the before-run's own checkout.
+
+        A genuinely cross-root pair still resolves, so it reaches the existing
+        comparability check and is reported as incomparable rather than as a
+        missing after-run.
+        """
+
+        try:
+            return self._runs.get_for_root(after_run_id, root=before.root)
+        except MCPRunRootMismatchError:
+            return self._runs.resolve_any_root(after_run_id)
 
     @staticmethod
     def _next_step_hint(reason: str) -> str | None:
@@ -501,7 +551,7 @@ class _MCPSessionPatchContractMixin:
         """
         if after_run_id is not None:
             try:
-                after = self._runs.get(after_run_id)
+                after = self._after_run_for(after_run_id, before=before)
                 return self._patch_changed_files(
                     after=after,
                     diff_ref=diff_ref,
@@ -540,11 +590,16 @@ class _MCPSessionPatchContractMixin:
             )
         return None
 
-    def _optional_after_run(self, after_run_id: str | None) -> MCPRunRecord | None:
+    def _optional_after_run(
+        self,
+        after_run_id: str | None,
+        *,
+        before: MCPRunRecord,
+    ) -> MCPRunRecord | None:
         if after_run_id is None:
             return None
         try:
-            return self._runs.get(after_run_id)
+            return self._after_run_for(after_run_id, before=before)
         except MCPRunNotFoundError:
             return None
 

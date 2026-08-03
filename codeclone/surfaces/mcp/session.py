@@ -613,5 +613,8 @@ class MCPSession(
                 "analyze_changed_paths requires changed_paths or git_diff_ref."
             )
         analysis_summary = self.analyze_repository(request)
-        record = self._runs.get(str(analysis_summary.get("run_id", "")) or None)
+        record = self._runs.get_for_root(
+            str(analysis_summary.get("run_id", "")) or None,
+            root=_helpers._resolve_root(request.root),
+        )
         return self._changed_analysis_payload(record)

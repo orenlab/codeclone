@@ -60,6 +60,7 @@ from ._session_patch_contract_mixin import _MCPSessionPatchContractMixin
 from ._session_review_receipt_mixin import _MCPSessionReviewReceiptMixin
 from ._session_shared import (
     CodeCloneMCPRunStore,
+    MCPRunNotFoundError,
     MCPRunRecord,
     MCPServiceContractError,
 )
@@ -880,12 +881,10 @@ class _MCPSessionWorkflowMixin:
 
     def _latest_run_for_root(self, root_path: Path) -> MCPRunRecord | None:
         """Find the latest run matching the requested root (root-safe)."""
-        resolved = root_path.resolve()
-        latest: MCPRunRecord | None = None
-        for record in self._runs.records():
-            if record.root == resolved:
-                latest = record
-        return latest
+        try:
+            return self._runs.get_for_root(None, root=root_path)
+        except MCPRunNotFoundError:
+            return None
 
     def _resolve_changed_files_once(
         self,

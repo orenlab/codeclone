@@ -26,6 +26,7 @@ from uuid import UUID
 
 import pytest
 
+import codeclone.audit.events as mcp_audit_events
 import codeclone.surfaces.mcp._blast_radius as mcp_blast_radius_mod
 import codeclone.surfaces.mcp._claim_guard as mcp_claim_guard_mod
 import codeclone.surfaces.mcp._context_governance as mcp_context_governance_mod
@@ -1063,7 +1064,7 @@ def test_mcp_service_analyze_repository_registers_latest_run(tmp_path: Path) -> 
             latest["findings"],
         )["new_by_source_kind"]
     )
-    record = service._runs.get(str(summary["run_id"]))
+    record = service._runs.resolve_any_root(str(summary["run_id"]))
     assert record.manifest is not None
     assert set(record.manifest) == {"pkg/__init__.py", "pkg/dup.py"}
     assert record.dirty_snapshot is not None
@@ -1251,7 +1252,10 @@ def test_mcp_service_get_implementation_context_projects_path_facts(
     assert subject["resolved_from"] == "explicit_paths"
     assert subject["paths"] == ["pkg/target.py"]
     analysis = cast("dict[str, object]", context["analysis"])
-    assert analysis["run_id"] == service._runs.get(str(summary["run_id"])).run_id
+    assert (
+        analysis["run_id"]
+        == service._runs.resolve_any_root(str(summary["run_id"])).run_id
+    )
     assert len(str(analysis["context_artifact_digest"])) == 64
     assert len(str(analysis["context_projection_digest"])) == 64
     page_retrieval = cast("dict[str, object]", analysis["context_page_retrieval"])
@@ -1434,7 +1438,7 @@ def test_mcp_service_get_implementation_context_resolves_symbols(
             "    return total\n"
         ),
     )
-    record = service._runs.get(str(summary["run_id"]))
+    record = service._runs.resolve_any_root(str(summary["run_id"]))
 
     assert record.unit_inventory
     assert record.unit_inventory[0].path == "pkg/internal.py"
@@ -1509,7 +1513,7 @@ def test_mcp_service_run_record_aggregates_relationship_facts(
             "    return helper(value)\n"
         ),
     )
-    record = service._runs.get(str(summary["run_id"]))
+    record = service._runs.resolve_any_root(str(summary["run_id"]))
 
     edges = {
         (
@@ -1549,7 +1553,7 @@ def test_mcp_service_run_record_exposes_module_imports(
             "    return logging.getLogger(__name__)\n"
         ),
     )
-    record = service._runs.get(str(summary["run_id"]))
+    record = service._runs.resolve_any_root(str(summary["run_id"]))
 
     targets = {dep.target for dep in record.module_imports}
     assert "logging" in targets  # external import retained off-report
@@ -2450,14 +2454,14 @@ def test_mcp_service_implementation_context_rejects_stale_intent_run(
     )
     intent_id = str(started["intent_id"])
     intent = service._active_intents[intent_id]
-    original_get = service._runs.get
+    original_get = service._runs.get_for_root
 
-    def _missing_intent_run(run_id: str) -> MCPRunRecord:
+    def _missing_intent_run(run_id: str, *, root: Path) -> MCPRunRecord:
         if run_id == intent.run_id:
             raise MCPRunNotFoundError(run_id)
-        return original_get(run_id)
+        return original_get(run_id, root=root)
 
-    monkeypatch.setattr(service._runs, "get", _missing_intent_run)
+    monkeypatch.setattr(service._runs, "get_for_root", _missing_intent_run)
     with pytest.raises(MCPServiceContractError, match="no longer available"):
         service.get_implementation_context(
             root=str(tmp_path),
@@ -3617,7 +3621,7 @@ def test_mcp_service_granular_checks_pr_summary_and_resources(
         "list[dict[str, object]]",
         cast("dict[str, object]", finding_groups["design"])["groups"],
     )
-    record = service._runs.get(run_id)
+    record = service._runs.resolve_any_root(run_id)
     canonical_design_ids = {
         service._short_finding_id(record, str(group["id"])) for group in design_groups
     }
@@ -3937,7 +3941,7 @@ def test_mcp_service_metrics_sections_split_summary_and_detail(
         limit=5,
     )
     assert security_surfaces_page["family"] == "security_surfaces"
-    report_record = service._runs.get(run_id)
+    report_record = service._runs.resolve_any_root(run_id)
     assert report_record is not None
     report_document = report_record.report_document
     metrics_map = cast("dict[str, object]", report_document["metrics"])
@@ -4555,7 +4559,7 @@ def test_mcp_service_git_diff_and_helper_branch_edges(
         _dummy_run_record(tmp_path, "latest-clones-only")
     )
     object.__setattr__(
-        service_full_fallback._runs.get("latest-clones-only"),
+        service_full_fallback._runs.resolve_any_root("latest-clones-only"),
         "request",
         MCPAnalysisRequest(
             root=str(tmp_path),
@@ -5084,21 +5088,21 @@ def test_mcp_service_low_level_runtime_helpers_and_run_store(
     first = _dummy_run_record(tmp_path, "first")
     second = _dummy_run_record(tmp_path, "second")
     assert store.register(first) is first
-    assert store.get().run_id == "first"
+    assert store.resolve_any_root().run_id == "first"
     store.register(second)
     assert tuple(record.run_id for record in store.records()) == ("second",)
     with pytest.raises(MCPRunNotFoundError):
-        store.get("first")
+        store.resolve_any_root("first")
 
     pinned_store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
     pinned_store.register(first)
-    pinned_store.pin("first")
+    pinned_store.pin("first", root=tmp_path)
     pinned_store.register(second)
     assert tuple(record.run_id for record in pinned_store.records()) == (
         "first",
         "second",
     )
-    pinned_store.unpin("first")
+    pinned_store.unpin("first", root=tmp_path)
     assert tuple(record.run_id for record in pinned_store.records()) == ("second",)
     with pytest.raises(ValueError):
         mcp_shared_mod.CodeCloneMCPRunStore(history_limit=11)
@@ -5504,6 +5508,7 @@ def test_mcp_service_wrapper_and_server_validation_edges(
     cleanup_service._active_intents["intent-missing-run"] = mcp_intent_mod.IntentRecord(
         intent_id="intent-missing-run",
         run_id="missing-run",
+        root=tmp_path,
         report_digest="digest",
         status=mcp_intent_mod.IntentStatus.ACTIVE,
         declared_at_utc="2026-01-01T00:00:00Z",
@@ -5519,6 +5524,7 @@ def test_mcp_service_wrapper_and_server_validation_edges(
     cleanup_service._active_intents["intent-cleanup"] = mcp_intent_mod.IntentRecord(
         intent_id="intent-cleanup",
         run_id=record.run_id,
+        root=tmp_path,
         report_digest="digest",
         status=mcp_intent_mod.IntentStatus.ACTIVE,
         declared_at_utc="2026-01-01T00:00:00Z",
@@ -5539,7 +5545,9 @@ def test_mcp_service_wrapper_and_server_validation_edges(
         fake_safe_remove_own_intent,
     )
     cleanup_service.shutdown_cleanup()
-    assert removed == ["intent-cleanup"]
+    # Both rows are cleaned: an intent whose run has aged out of session
+    # history still owns the registry file this process wrote.
+    assert removed == ["intent-missing-run", "intent-cleanup"]
 
     class BrokenLock:
         def __enter__(self) -> None:
@@ -5555,6 +5563,7 @@ def test_mcp_service_wrapper_and_server_validation_edges(
     clear_service._active_intents["intent-missing-run"] = mcp_intent_mod.IntentRecord(
         intent_id="intent-missing-run",
         run_id="missing-run",
+        root=tmp_path,
         report_digest="digest",
         status=mcp_intent_mod.IntentStatus.ACTIVE,
         declared_at_utc="2026-01-01T00:00:00Z",
@@ -5564,13 +5573,6 @@ def test_mcp_service_wrapper_and_server_validation_edges(
         guards=(),
     )
 
-    def raise_contract_error(
-        _store: object,
-        run_id: str | None = None,
-    ) -> MCPRunRecord:
-        raise MCPServiceContractError("missing run")
-
-    monkeypatch.setattr(type(clear_service._runs), "get", raise_contract_error)
     cleared = clear_service.clear_session_runs()
     assert cleared["cleared_intents"] == 1
 
@@ -5926,7 +5928,7 @@ def test_mcp_service_workspace_intent_recovery_request_edges(
         )["reason"]
         == "missing_root"
     )
-    with pytest.raises(MCPServiceContractError, match="require root"):
+    with pytest.raises(MCPServiceContractError, match="require an explicit root"):
         service.manage_change_intent(action="list_workspace")
 
     service._runs.register(_blast_radius_run_record(tmp_path))
@@ -6112,7 +6114,7 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
         service.manage_change_intent(action="check", intent_id=intent_id)
 
     service._runs.register(_blast_radius_run_record(tmp_path))
-    assert service._runs.get("abcdef12").run_id == "abcdef1234567890"
+    assert service._runs.resolve_any_root("abcdef12").run_id == "abcdef1234567890"
 
     service._runs.register(_blast_radius_run_record(tmp_path, digest="digest-b"))
     expired = service.manage_change_intent(action="get", intent_id=intent_id)
@@ -6123,12 +6125,12 @@ def test_mcp_service_manage_change_intent_validation_expiry_and_prune(
     )
     service._prune_session_state()
     assert intent_id in service._active_intents
-    assert service._runs.get("abcdef12").run_id == "abcdef1234567890"
+    assert service._runs.resolve_any_root("abcdef12").run_id == "abcdef1234567890"
 
     service.manage_change_intent(action="clear", intent_id=intent_id)
     service._prune_session_state()
     with pytest.raises(MCPRunNotFoundError):
-        service._runs.get("abcdef12")
+        service._runs.resolve_any_root("abcdef12")
 
 
 def test_mcp_service_manage_change_intent_additional_edges(
@@ -6225,7 +6227,7 @@ def test_mcp_service_intent_recovery_internal_edges(
 
     with pytest.raises(MCPServiceContractError, match="No active change intent"):
         service.manage_change_intent(action="get", run_id="abcdef12")
-    assert service._optional_run_record("missing") is None
+    assert service._optional_run_record("missing", root=tmp_path) is None
 
     declared = service.manage_change_intent(
         action="declare",
@@ -6304,7 +6306,11 @@ def test_mcp_service_intent_recovery_internal_edges(
     monkeypatch.setattr(_PID_ALIVE, lambda pid: pid == service._agent_pid)
     from codeclone.surfaces.mcp.messages import intent as intent_msgs
 
-    assert service._recovery_available_payload(records=(no_run_record,), now=now) == [
+    assert service._recovery_available_payload(
+        records=(no_run_record,),
+        root_path=tmp_path,
+        now=now,
+    ) == [
         {
             "intent_id": "intent-no-run",
             "run_id": "missing-",
@@ -6796,6 +6802,7 @@ def test_mcp_patch_contract_helper_edges(
         intent=mcp_intent_mod.IntentRecord(
             intent_id="intent-expired",
             run_id=record.run_id,
+            root=tmp_path,
             report_digest="old",
             status=mcp_intent_mod.IntentStatus.EXPIRED,
             declared_at_utc="2026-01-01T00:00:00Z",
@@ -6850,7 +6857,7 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
     )
     assert renew_calls == 1
 
-    assert service._before_run_id_from_intent("intent-missing") is None
+    assert service._known_intent("intent-missing") is None
     unknown_intent = service.check_patch_contract(
         mode="verify",
         intent_id="intent-missing",
@@ -6858,8 +6865,8 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
     assert unknown_intent["status"] == "unverified"
     assert unknown_intent["reason"] == "no_before_run"
 
-    assert service._optional_after_run(None) is None
-    assert service._optional_after_run("missing-after") is None
+    assert service._optional_after_run(None, before=before) is None
+    assert service._optional_after_run("missing-after", before=before) is None
 
     def fake_git_diff_paths(*, root_path: Path, git_diff_ref: str) -> tuple[str, ...]:
         return (f"{root_path.name}:{git_diff_ref}",)
@@ -7018,6 +7025,7 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
         intent=mcp_intent_mod.IntentRecord(
             intent_id="intent-partition",
             run_id=before.run_id,
+            root=tmp_path,
             report_digest="digest",
             status=mcp_intent_mod.IntentStatus.ACTIVE,
             declared_at_utc="2026-01-01T00:00:00Z",
@@ -7035,6 +7043,7 @@ def test_mcp_patch_contract_verify_profile_and_resolver_edges(
         intent=mcp_intent_mod.IntentRecord(
             intent_id="intent-partition-in",
             run_id=before.run_id,
+            root=tmp_path,
             report_digest="digest",
             status=mcp_intent_mod.IntentStatus.ACTIVE,
             declared_at_utc="2026-01-01T00:00:00Z",
@@ -7672,6 +7681,7 @@ def test_intent_record_payload_includes_check_result() -> None:
     record = mcp_intent_mod.IntentRecord(
         intent_id="test-001",
         run_id="run1234",
+        root=Path("/repo"),
         report_digest="abc123",
         status=mcp_intent_mod.IntentStatus.CLEAN,
         declared_at_utc="2026-01-01T00:00:00Z",
@@ -8524,7 +8534,7 @@ def test_mcp_service_branch_helpers_on_real_runs(
         )
     )
     run_id = str(changed["run_id"])
-    record = service._runs.get(run_id)
+    record = service._runs.resolve_any_root(run_id)
 
     assert service.get_report_section(run_id=run_id, section="inventory")
     assert service.get_report_section(run_id=run_id, section="derived")
@@ -8702,7 +8712,7 @@ def test_mcp_service_remediation_and_comparison_helper_branches(
             cache_policy="off",
         )
     )
-    before_record = service._runs.get(str(before["run_id"]))
+    before_record = service._runs.resolve_any_root(str(before["run_id"]))
 
     comparison = service.compare_runs(
         before_run_id=str(before["run_id"]),
@@ -8859,7 +8869,7 @@ def test_mcp_service_compare_runs_marks_different_roots_incomparable(
             cache_policy="off",
         )
     )
-    after_record = service._runs.get(str(after["run_id"]))
+    after_record = service._runs.resolve_any_root(str(after["run_id"]))
 
     comparison = service.compare_runs(
         before_run_id=str(before["run_id"]),
@@ -9006,7 +9016,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
     )
     run_id = str(summary["run_id"])
-    record = service._runs.get(run_id)
+    record = service._runs.resolve_any_root(run_id)
 
     assert mcp_shared_mod._suggestion_finding_id_payload(object()) == ""
     assert mcp_shared_mod._suggestion_finding_id_payload(
@@ -9038,7 +9048,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     ).startswith("design:coupling:")
 
     original_service_get = service.session._service_get_finding
-    original_runs_get = service._runs.get
+    original_runs_get = service._runs.resolve_any_root
     original_resolve = service.session._resolve_canonical_finding_id
     monkeypatch.setattr(
         service.session,
@@ -9050,7 +9060,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         "_service_get_finding",
         lambda **kwargs: {"id": "no-remediation"},
     )
-    monkeypatch.setattr(service._runs, "get", lambda run_id=None: record)
+    monkeypatch.setattr(service._runs, "resolve_any_root", lambda run_id=None: record)
     no_guidance = service.get_remediation(
         finding_id="no-remediation",
         run_id=run_id,
@@ -9061,7 +9071,7 @@ def test_mcp_service_additional_projection_and_error_branches(
     monkeypatch.setattr(
         service.session, "_resolve_canonical_finding_id", original_resolve
     )
-    monkeypatch.setattr(service._runs, "get", original_runs_get)
+    monkeypatch.setattr(service._runs, "resolve_any_root", original_runs_get)
 
     original_get_finding = service.session.get_finding
 
@@ -9137,13 +9147,13 @@ def test_mcp_service_additional_projection_and_error_branches(
     )
     assert (
         service_other._previous_run_for_root(
-            service_other._runs.get(str(second["run_id"]))
+            service_other._runs.resolve_any_root(str(second["run_id"]))
         )
         is None
     )
     assert (
         service_other._previous_run_for_root(
-            service_other._runs.get(str(first["run_id"]))
+            service_other._runs.resolve_any_root(str(first["run_id"]))
         )
         is None
     )
@@ -9169,7 +9179,7 @@ def test_mcp_service_additional_projection_and_error_branches(
         )
     )
     previous_same_root = same_root_service._previous_run_for_root(
-        same_root_service._runs.get(str(second_same_root["run_id"]))
+        same_root_service._runs.resolve_any_root(str(second_same_root["run_id"]))
     )
     assert previous_same_root is not None
     assert previous_same_root.run_id.startswith(str(first_same_root["run_id"]))
@@ -10329,7 +10339,7 @@ def test_mcp_service_payload_and_resolution_helper_fallbacks(
     service._runs.register(second_record)
 
     with pytest.raises(MCPServiceContractError, match="ambiguous"):
-        service._runs.get("shared")
+        service._runs.resolve_any_root("shared")
 
     missing_record = _dummy_run_record(tmp_path, "missing-finding")
     service._runs.register(missing_record)
@@ -11068,7 +11078,7 @@ def _docs_start_replay_context(
         scope={"allowed_files": ["README.md"]},
         intent="update readme",
     )
-    record = service._runs.get(str(first["run_id"]))
+    record = service._runs.resolve_any_root(str(first["run_id"]))
     assert record is not None
     request_key = next(iter(service._start_replay_cache))
     entry = service._start_replay_cache[request_key]
@@ -12413,7 +12423,7 @@ def test_mcp_redeclaring_same_run_replaces_previous_intent(tmp_path: Path) -> No
 def test_mcp_run_store_pin_and_pruning_edges(tmp_path: Path) -> None:
     store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
     with pytest.raises(MCPRunNotFoundError):
-        store.pin("missing")
+        store.pin("missing", root=tmp_path)
 
     records = [
         _patch_contract_run_record(
@@ -12427,9 +12437,9 @@ def test_mcp_run_store_pin_and_pruning_edges(tmp_path: Path) -> None:
     ]
     for record in records:
         store.register(record)
-    store.pin(records[0].run_id)
+    store.pin(records[0].run_id, root=tmp_path)
     store._history_limit = 1
-    store._latest_run_id = records[1].run_id
+    store._latest_run_id = (tmp_path.resolve(), records[1].run_id)
     store._prune_unpinned_locked()
     assert records[0].run_id in {item.run_id for item in store.records()}
     assert records[1].run_id not in {item.run_id for item in store.records()}
@@ -15466,7 +15476,7 @@ def test_pinned_runs_are_bounded(tmp_path: Path) -> None:
     for index in range(mcp_shared_mod.MAX_PINNED_MCP_RUNS + 3):
         run_id = f"run-{index:03d}"
         store.register(_dummy_run_record(tmp_path, run_id))
-        store.pin(run_id)
+        store.pin(run_id, root=tmp_path)
         pinned.append(run_id)
 
     retained = tuple(record.run_id for record in store.records())
@@ -15483,9 +15493,209 @@ def test_pinning_keeps_the_most_recent_pins_protected(tmp_path: Path) -> None:
 
     store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=1)
     store.register(_dummy_run_record(tmp_path, "active"))
-    store.pin("active")
+    store.pin("active", root=tmp_path)
     for index in range(6):
         store.register(_dummy_run_record(tmp_path, f"noise-{index}"))
 
     retained = tuple(record.run_id for record in store.records())
     assert "active" in retained, "an active pin was dropped by history pruning"
+
+
+# ---------------------------------------------------------------------------
+# Cross-worktree run attribution
+#
+# Two worktrees checked out at the same commit analyze to the same
+# content-addressed run_id.  Run identity is content, so that collision is
+# correct and permanent; what must not collapse is the *record*.  A stored run
+# is identified by (root, run_id), and every resolution states the root it
+# expects, so evidence from one worktree can never be presented as another's.
+# ---------------------------------------------------------------------------
+
+
+def _same_commit_record(root: Path, run_id: str) -> MCPRunRecord:
+    """A run record as produced by analyzing one of two identical worktrees."""
+
+    return _patch_contract_run_record(
+        root,
+        run_id=run_id,
+        digest="shared-digest",
+        include_regression=False,
+        complexity=6,
+    )
+
+
+def _collided_worktrees(
+    tmp_path: Path,
+    *,
+    allowed_files: list[str],
+    audit: _RecordingAuditWriter | None = None,
+) -> tuple[CodeCloneMCPService, Path, Path, str, str]:
+    """Set up the live collision: one run id, two roots, an intent on root A.
+
+    Returns the service, both roots, the intent id declared against root A,
+    and the run id both checkouts answer to.
+    """
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    if audit is not None:
+        service._audit_writer_override = audit
+    shared_run_id = "before1234567890"
+    service._runs.register(_same_commit_record(root_a, shared_run_id))
+    declared = service.manage_change_intent(
+        action="declare",
+        run_id=shared_run_id,
+        root=str(root_a),
+        scope={"allowed_files": allowed_files},
+        intent=f"edit {allowed_files[0]} inside {root_a.name}",
+    )
+    service._runs.register(_same_commit_record(root_b, shared_run_id))
+    return service, root_a, root_b, str(declared["intent_id"]), shared_run_id
+
+
+def _drop_records_for_root(service: CodeCloneMCPService, root: Path) -> None:
+    """Forget every stored record belonging to ``root``.
+
+    White-box on purpose: this reproduces the state left behind when one
+    worktree's run ages out of session history while a same-commit twin from
+    another worktree survives.
+    """
+
+    store = service._runs
+    with store._lock:
+        for key, record in tuple(store._records.items()):
+            if record.root == root:
+                store._records.pop(key, None)
+        store._latest_run_id = None
+
+
+def test_run_store_keeps_a_record_per_root_for_a_shared_run_id(
+    tmp_path: Path,
+) -> None:
+    """Same-commit worktrees share a run_id; they must not share a record."""
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    shared_run_id = "shared1234567890"
+    store = mcp_shared_mod.CodeCloneMCPRunStore(history_limit=4)
+
+    store.register(_dummy_run_record(root_a, shared_run_id))
+    store.register(_dummy_run_record(root_b, shared_run_id))
+
+    assert {record.root for record in store.records()} == {root_a, root_b}
+    assert store.get_for_root(shared_run_id, root=root_a).root == root_a
+    assert store.get_for_root(shared_run_id, root=root_b).root == root_b
+
+
+def test_verify_refuses_a_before_run_belonging_to_a_foreign_root(
+    tmp_path: Path,
+) -> None:
+    """Double poison: the intent is root A's, the only evidence is root B's.
+
+    Both runs resolving to the untouched worktree used to verify clean.  The
+    refusal must be typed and distinct from "no evidence at all" — substituting
+    a foreign root silently is the defect.
+    """
+
+    service, root_a, _root_b, intent_id, _run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["pkg/a.py"],
+    )
+    _drop_records_for_root(service, root_a)
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        intent_id=intent_id,
+        changed_files=["pkg/a.py"],
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "before_run_root_mismatch"
+
+
+def test_verify_keeps_reporting_incomparable_runs_across_roots(
+    tmp_path: Path,
+) -> None:
+    """Single-sided poisoning keeps its existing incomparable_runs verdict."""
+
+    root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_same_commit_record(root_a, "before1234567890"))
+    service._runs.register(_same_commit_record(root_b, "after12345678900"))
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        before_run_id="before1234567890",
+        after_run_id="after12345678900",
+    )
+
+    assert verified["status"] == "unverified"
+    assert verified["reason"] == "incomparable_runs"
+
+
+def test_patch_trail_records_the_intents_own_root_digest(tmp_path: Path) -> None:
+    """Durable trail evidence must never carry a foreign repo_root_digest."""
+
+    audit = _RecordingAuditWriter()
+    service, root_a, _root_b, intent_id, _run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["docs/guide.md"],
+        audit=audit,
+    )
+
+    verified = service.check_patch_contract(
+        mode="verify",
+        intent_id=intent_id,
+        changed_files=["docs/guide.md"],
+    )
+
+    trail_events = [
+        event
+        for event in audit.events
+        if event.event_type == mcp_audit_events.EVENT_PATCH_VERIFIED
+    ]
+    assert trail_events, f"verification emitted no trail evidence: {verified}"
+    assert {event.repo_root_digest for event in trail_events} == {
+        mcp_audit_events.repo_root_digest(root_a)
+    }
+
+
+def test_declaring_in_one_worktree_keeps_the_other_worktrees_intent(
+    tmp_path: Path,
+) -> None:
+    """Replacement eviction is per (root, run_id), never per run_id alone."""
+
+    service, root_a, root_b, intent_a, shared_run_id = _collided_worktrees(
+        tmp_path,
+        allowed_files=["pkg/a.py"],
+    )
+    intent_b = str(
+        service.manage_change_intent(
+            action="declare",
+            run_id=shared_run_id,
+            root=str(root_b),
+            scope={"allowed_files": ["pkg/b.py"]},
+            intent="edit pkg.b inside worktree b",
+        )["intent_id"]
+    )
+
+    assert intent_a in service._active_intents, "worktree a's intent was orphaned"
+    assert intent_b in service._active_intents
+
+    service.manage_change_intent(action="clear", intent_id=intent_b)
+
+    assert intent_a in service._active_intents
+    assert (root_a.resolve(), shared_run_id) in service._runs._pinned_run_ids
+    assert service._runs.get_for_root(shared_run_id, root=root_a).root == root_a
+
+
+def test_workspace_actions_refuse_to_infer_the_last_analyzed_root(
+    tmp_path: Path,
+) -> None:
+    """A rootless workspace action must fail typed, not target another repo."""
+
+    _root_a, root_b = _paired_repo_roots(tmp_path)
+    service = CodeCloneMCPService(history_limit=4)
+    service._runs.register(_dummy_run_record(root_b, "latest1234567890"))
+
+    with pytest.raises(MCPServiceContractError):
+        service.manage_change_intent(action="list_workspace")

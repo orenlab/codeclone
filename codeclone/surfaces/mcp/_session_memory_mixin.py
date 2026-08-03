@@ -599,7 +599,7 @@ class _MCPSessionMemoryMixin:
         run_id: str | None = None,
     ) -> MCPRunRecord:
         try:
-            record = self._runs.get(run_id)
+            record = self._runs.resolve_any_root(run_id)
         except MCPRunNotFoundError as exc:
             raise MCPServiceContractError(
                 "No MCP analysis run available for this repository. "
@@ -724,7 +724,7 @@ class _MCPSessionMemoryMixin:
         if not scope_paths:
             return frozenset()
         try:
-            record = self._runs.get()
+            record = self._runs.resolve_any_root()
         except MCPRunNotFoundError:
             return frozenset()
         if record.root.resolve() != root_path.resolve():

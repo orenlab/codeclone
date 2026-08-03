@@ -230,12 +230,11 @@ class CodeCloneMCPService(_QueryServiceMixin, MCPSession):
             with self._state_lock:
                 snapshot = dict(self._active_intents)
             for intent_id, intent in snapshot.items():
-                try:
-                    run = self._runs.get(intent.run_id)
-                except Exception:
-                    continue
+                # The intent's own root, not a run lookup: cleanup must target
+                # the checkout the intent was declared against even if its run
+                # is gone or shares an id with another worktree's.
                 safe_remove_own_intent(
-                    root=run.root,
+                    root=intent.root,
                     pid=self._agent_pid,
                     start_epoch=self._agent_start_epoch,
                     intent_id=intent_id,

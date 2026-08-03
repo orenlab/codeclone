@@ -580,6 +580,25 @@ class MCPRunNotFoundError(MCPServiceError):
     """Raised when a requested MCP run is not available in the in-memory registry."""
 
 
+class MCPRunRootMismatchError(MCPServiceError):
+    """Raised when a run exists, but under a root other than the required one.
+
+    Distinct from :class:`MCPRunNotFoundError` on purpose: "this evidence
+    belongs to another checkout" and "there is no such evidence" call for
+    different answers, and collapsing them is how foreign evidence gets
+    substituted silently.
+    """
+
+
+class MCPRunRootAmbiguityError(MCPServiceError):
+    """Raised when a run id exists under several roots and none was named.
+
+    Run ids are content-addressed, so two worktrees at the same commit share
+    one. Choosing between them without being told which root is meant is a
+    coin flip over whose evidence gets reported.
+    """
+
+
 class MCPFindingNotFoundError(MCPServiceError):
     """Raised when a requested finding id is not present in the selected run."""
 
@@ -683,40 +702,123 @@ class MCPRunRecord:
     module_imports: tuple[ModuleDep, ...] = ()
 
 
+# Store identity for one run: the checkout it describes, plus the
+# content-addressed id. Neither half identifies a record on its own.
+MCPRunKey = tuple[Path, str]
+
+
+def run_store_key(root: Path, run_id: str) -> MCPRunKey:
+    """Build the identity under which a run record is stored.
+
+    Run ids are content-addressed, so two worktrees at the same commit produce
+    the same id. Root is what tells those runs apart, and it belongs in the
+    store key — never in the id itself.
+    """
+
+    return (root.resolve(), run_id)
+
+
 class CodeCloneMCPRunStore:
+    """Session-local run records, identified by ``(root, run_id)``.
+
+    There is deliberately no ``get(run_id)``. Every resolution either names the
+    root it requires (:meth:`get_for_root`) or states that it genuinely does not
+    constrain one (:meth:`resolve_any_root`, which fails closed when the id
+    spans roots). A lookup that cannot say which checkout it means is the bug
+    this store is shaped to prevent.
+    """
+
     def __init__(self, *, history_limit: int = DEFAULT_MCP_HISTORY_LIMIT) -> None:
         self._history_limit = _validated_history_limit(history_limit)
         self._lock = RLock()
-        self._records: OrderedDict[str, MCPRunRecord] = OrderedDict()
-        self._latest_run_id: str | None = None
+        self._records: OrderedDict[MCPRunKey, MCPRunRecord] = OrderedDict()
+        self._latest_run_id: MCPRunKey | None = None
         # Insertion-ordered so the oldest pin is identifiable: the record
         # itself carries no timestamp, and pin order is the only evidence of
-        # which pin has been held longest.
-        self._pinned_run_ids: OrderedDict[str, None] = OrderedDict()
+        # which pin has been held longest. The value is a reference count —
+        # several live intents may hold the same run, and the last one to let
+        # go is the one that releases it.
+        self._pinned_run_ids: OrderedDict[MCPRunKey, int] = OrderedDict()
 
     def register(self, record: MCPRunRecord) -> MCPRunRecord:
+        key = run_store_key(record.root, record.run_id)
         with self._lock:
-            self._records.pop(record.run_id, None)
-            self._records[record.run_id] = record
-            self._records.move_to_end(record.run_id)
-            self._latest_run_id = record.run_id
+            self._records.pop(key, None)
+            self._records[key] = record
+            self._records.move_to_end(key)
+            self._latest_run_id = key
             self._prune_unpinned_locked()
         return record
 
-    def get(self, run_id: str | None = None) -> MCPRunRecord:
-        with self._lock:
-            resolved_run_id = self._resolve_run_id(run_id)
-            if resolved_run_id is None:
-                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
-            return self._records[resolved_run_id]
+    def get_for_root(
+        self,
+        run_id: str | None = None,
+        *,
+        root: Path,
+    ) -> MCPRunRecord:
+        """Resolve a run that must belong to ``root``.
 
-    def _resolve_run_id(self, run_id: str | None) -> str | None:
+        Raises :class:`MCPRunRootMismatchError` when the id is only known under
+        a different root, so callers can tell "wrong checkout" from "no run".
+        """
+
+        resolved_root = root.resolve()
+        with self._lock:
+            key = self._resolve_key_locked(run_id, root=resolved_root)
+            if key is not None:
+                return self._records[key]
+            if run_id is not None and self._roots_holding_locked(run_id):
+                raise MCPRunRootMismatchError(
+                    f"Run id '{run_id}' belongs to a different repository root "
+                    f"than {resolved_root}."
+                )
+            raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+
+    def resolve_any_root(self, run_id: str | None = None) -> MCPRunRecord:
+        """Resolve a run whose root the caller genuinely does not constrain.
+
+        Fails closed when the id is held under more than one root: picking one
+        would be exactly the silent substitution this store exists to prevent.
+        """
+
+        with self._lock:
+            if run_id is None:
+                if self._latest_run_id is None:
+                    raise MCPRunNotFoundError(
+                        "No matching MCP analysis run is available."
+                    )
+                return self._records[self._latest_run_id]
+            roots = self._roots_holding_locked(run_id)
+            if len(roots) > 1:
+                rendered = ", ".join(str(item) for item in sorted(roots))
+                raise MCPRunRootAmbiguityError(
+                    f"Run id '{run_id}' exists under several repository roots "
+                    f"({rendered}); pass root to select one."
+                )
+            if not roots:
+                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+            key = self._resolve_key_locked(run_id, root=next(iter(roots)))
+            if key is None:
+                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+            return self._records[key]
+
+    def _resolve_key_locked(
+        self,
+        run_id: str | None,
+        *,
+        root: Path,
+    ) -> MCPRunKey | None:
         if run_id is None:
-            return self._latest_run_id
-        if run_id in self._records:
-            return run_id
+            latest: MCPRunKey | None = None
+            for key in self._records:
+                if key[0] == root:
+                    latest = key
+            return latest
+        exact = (root, run_id)
+        if exact in self._records:
+            return exact
         matches = [
-            candidate for candidate in self._records if candidate.startswith(run_id)
+            key for key in self._records if key[0] == root and key[1].startswith(run_id)
         ]
         if len(matches) == 1:
             return matches[0]
@@ -726,29 +828,49 @@ class CodeCloneMCPRunStore:
             )
         return None
 
+    def _roots_holding_locked(self, run_id: str) -> set[Path]:
+        return {
+            key[0]
+            for key in self._records
+            if key[1] == run_id or key[1].startswith(run_id)
+        }
+
     def records(self) -> tuple[MCPRunRecord, ...]:
         with self._lock:
             return tuple(self._records.values())
 
-    def pin(self, run_id: str) -> str:
-        with self._lock:
-            resolved_run_id = self._resolve_run_id(run_id)
-            if resolved_run_id is None:
-                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
-            self._pinned_run_ids.pop(resolved_run_id, None)
-            self._pinned_run_ids[resolved_run_id] = None
-            self._release_pins_over_cap_locked()
-            return resolved_run_id
+    def pin(self, run_id: str, *, root: Path) -> str:
+        """Take a reference on a run so history pruning cannot drop it."""
 
-    def unpin(self, run_id: str) -> None:
+        resolved_root = root.resolve()
         with self._lock:
-            resolved_run_id = self._resolve_run_id(run_id) or run_id
-            self._pinned_run_ids.pop(resolved_run_id, None)
+            key = self._resolve_key_locked(run_id, root=resolved_root)
+            if key is None:
+                raise MCPRunNotFoundError("No matching MCP analysis run is available.")
+            held = self._pinned_run_ids.pop(key, 0)
+            self._pinned_run_ids[key] = held + 1
+            self._release_pins_over_cap_locked()
+            return key[1]
+
+    def unpin(self, run_id: str, *, root: Path) -> None:
+        """Release one reference; the run stays pinned while others hold it."""
+
+        resolved_root = root.resolve()
+        with self._lock:
+            key = self._resolve_key_locked(run_id, root=resolved_root) or (
+                resolved_root,
+                run_id,
+            )
+            held = self._pinned_run_ids.get(key, 0) - 1
+            if held > 0:
+                self._pinned_run_ids[key] = held
+            else:
+                self._pinned_run_ids.pop(key, None)
             self._prune_unpinned_locked()
 
     def clear(self) -> tuple[str, ...]:
         with self._lock:
-            removed_run_ids = tuple(self._records.keys())
+            removed_run_ids = tuple(key[1] for key in self._records)
             self._records.clear()
             self._pinned_run_ids.clear()
             self._latest_run_id = None
@@ -756,18 +878,18 @@ class CodeCloneMCPRunStore:
 
     def _prune_unpinned_locked(self) -> None:
         while self._unpinned_count_locked() > self._history_limit:
-            for run_id in tuple(self._records):
-                if run_id in self._pinned_run_ids:
+            for key in tuple(self._records):
+                if key in self._pinned_run_ids:
                     continue
-                self._records.pop(run_id, None)
-                if self._latest_run_id == run_id:
+                self._records.pop(key, None)
+                if self._latest_run_id == key:
                     self._latest_run_id = next(reversed(self._records), None)
                 break
             else:
                 break
-        for run_id in tuple(self._pinned_run_ids):
-            if run_id not in self._records:
-                self._pinned_run_ids.pop(run_id, None)
+        for key in tuple(self._pinned_run_ids):
+            if key not in self._records:
+                self._pinned_run_ids.pop(key, None)
 
     def _release_pins_over_cap_locked(self) -> None:
         """Release the longest-held pins once the ceiling is exceeded.
@@ -778,12 +900,12 @@ class CodeCloneMCPRunStore:
         """
 
         while len(self._pinned_run_ids) > MAX_PINNED_MCP_RUNS:
-            oldest_run_id, _ = self._pinned_run_ids.popitem(last=False)
-            del oldest_run_id
+            oldest_key, _ = self._pinned_run_ids.popitem(last=False)
+            del oldest_key
         self._prune_unpinned_locked()
 
     def _unpinned_count_locked(self) -> int:
-        return sum(1 for run_id in self._records if run_id not in self._pinned_run_ids)
+        return sum(1 for key in self._records if key not in self._pinned_run_ids)
 
 
 __all__ = [
@@ -882,8 +1004,11 @@ __all__ = [
     "MCPAnalysisRequest",
     "MCPFindingNotFoundError",
     "MCPGateRequest",
+    "MCPRunKey",
     "MCPRunNotFoundError",
     "MCPRunRecord",
+    "MCPRunRootAmbiguityError",
+    "MCPRunRootMismatchError",
     "MCPServiceContractError",
     "MCPServiceError",
     "Mapping",

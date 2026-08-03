@@ -53,7 +53,7 @@ class _MCPSessionClaimGuardMixin:
             validated_text = validate_text_input(text)
         except ValueError as exc:
             raise MCPServiceContractError(str(exc)) from exc
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         context = self._claim_guard_context(
             record,
             patch_health_delta=patch_health_delta,

@@ -250,7 +250,7 @@ class _MCPSessionFindingMixin:
         analysis_mode: AnalysisMode,
     ) -> MCPRunRecord:
         if run_id is not None:
-            record = self._runs.get(run_id)
+            record = self._runs.resolve_any_root(run_id)
             _validate_run_root(record, self._resolve_optional_root(root))
             if _helpers._record_supports_analysis_mode(
                 record,
@@ -1351,7 +1351,7 @@ class _MCPSessionFindingMixin:
             severity,
             _VALID_SEVERITIES,
         )
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         paths_filter = self._resolve_query_changed_paths(
             record=record,
             changed_paths=changed_paths,
@@ -1414,7 +1414,7 @@ class _MCPSessionFindingMixin:
         run_id: str | None = None,
         detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         validated_detail = _helpers._validate_choice(
             "detail_level",
             detail_level,
@@ -1441,7 +1441,7 @@ class _MCPSessionFindingMixin:
         run_id: str | None = None,
         detail_level: DetailLevel = "normal",
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         validated_detail = _helpers._validate_choice(
             "detail_level",
             detail_level,
@@ -1518,7 +1518,7 @@ class _MCPSessionFindingMixin:
             detail_level,
             _VALID_DETAIL_LEVELS,
         )
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         canonical_id = self._resolve_canonical_finding_id(record, finding_id)
         finding = self._service_get_finding(
             finding_id=canonical_id,
@@ -1563,7 +1563,7 @@ class _MCPSessionFindingMixin:
             detail_level,
             _VALID_DETAIL_LEVELS,
         )
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         paths_filter = self._resolve_query_changed_paths(
             record=record,
             changed_paths=changed_paths,
@@ -1633,7 +1633,7 @@ class _MCPSessionFindingMixin:
         run_id: str | None = None,
         note: str | None = None,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         canonical_id = self._resolve_canonical_finding_id(record, finding_id)
         self._service_get_finding(
             finding_id=canonical_id,
@@ -1659,7 +1659,7 @@ class _MCPSessionFindingMixin:
         *,
         run_id: str | None = None,
     ) -> dict[str, object]:
-        record = self._runs.get(run_id)
+        record = self._runs.resolve_any_root(run_id)
         with self._state_lock:
             review_items = tuple(
                 self._review_state.get(record.run_id, OrderedDict()).items()

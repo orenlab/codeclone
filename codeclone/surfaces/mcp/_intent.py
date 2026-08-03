@@ -87,6 +87,10 @@ class IntentCheckResult:
 class IntentRecord:
     intent_id: str
     run_id: str
+    # The checkout this intent governs. Run ids are content-addressed and so
+    # collide between same-commit worktrees; the intent's own root is what
+    # binds its evidence to the tree that was actually edited.
+    root: Path
     report_digest: str
     status: IntentStatus
     declared_at_utc: str
